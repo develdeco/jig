@@ -69,7 +69,7 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the body: %v", err)
 	}
-	for _, want := range []string{"## What changed", "## Verification", "Reviewed head:", head[:7]} {
+	for _, want := range []string{"## What\n", "## Verification", "at the reviewed head " + head[:7]} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("pr body lacks %q:\n%s", want, body)
 		}

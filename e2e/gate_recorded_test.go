@@ -521,7 +521,7 @@ func TestPublishBodyThenPR(t *testing.T) {
 	}
 	prBody := filepath.Join(b.st.TicketDir(b.fx.Ticket), "pr", "fixture-repo.md")
 	text := string(readFileOrFatal(t, prBody))
-	for _, want := range []string{"## What changed", "## Verification", "Reviewed head:", b.sha[:7]} {
+	for _, want := range []string{"## What\n", "## Verification", "at the reviewed head " + b.sha[:7]} {
 		if !strings.Contains(text, want) {
 			t.Errorf("pr/fixture-repo.md lacks %q:\n%s", want, text)
 		}

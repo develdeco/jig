@@ -44,7 +44,7 @@ func TestPublishOfAStackedTicketGoesIntoTheParentsBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "## Stacked on JIG-0\n\n" + fx.Ticket + " builds on JIG-0: this pull request goes into `jig/JIG-0`, the branch of JIG-0. Once JIG-0 merges, retarget it to `main`.\n\n## What changed"
+	want := "## Stacked on JIG-0\n\n" + fx.Ticket + " builds on JIG-0: this pull request goes into `jig/JIG-0`, the branch of JIG-0. Once JIG-0 merges, retarget it to `main`.\n\n## What\n"
 	if !strings.Contains(string(body), want) {
 		t.Errorf("pr body lacks %q:\n%s", want, body)
 	}

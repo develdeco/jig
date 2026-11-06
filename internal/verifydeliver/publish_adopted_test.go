@@ -122,25 +122,30 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 	step(t, "the pull request body and review notes of an adopted ticket", func(t *testing.T) {
 		body, notes := readPRFiles(t, d, ticket, "fixture-repo")
 
-		wantBody := fmt.Sprintf(`## What changed
+		wantBody := `## What
 
-- author a: attempt 1 (%s)
+- Add retry
 
 ## Verification
 
-Oracles:
+Oracles green:
 
 - test
 
-Revalidation tier: none
+Gate rounds:
 
-Findings: 0 fixed, 0 addressed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
-`, shortSHA(tip))
+- Round 1: clean
+- Round 2: clean
+`
 		if body != wantBody {
 			t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 		}
 
-		wantNotes := `# Review Notes
+		wantNotes := fmt.Sprintf(`# Review Notes
+
+## Slices
+
+- author a: attempt 1 (%s)
 
 ## Coverage
 
@@ -149,7 +154,7 @@ Touched files:
 - alpha/alpha.go
 - fix.txt
 
-`
+`, shortSHA(tip))
 		if notes != wantNotes {
 			t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)
 		}

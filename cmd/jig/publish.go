@@ -21,6 +21,7 @@ const (
 	publishApproveUsage = "record that you approve publishing the reviewed head of each repo, so `jig publish` pushes it without asking"
 	publishRepoUsage    = "publish only this repo, by its name in the project (default: every repo the ticket builds in; --pr needs it when there are several)"
 	publishPicksUsage   = "a picks file: the recordings to show in the pull request's demo, in the pick result's JSON shape"
+	publishWhatUsage    = "a what file: the bullets for the pull request's What, the first saying why the change exists; the ticket stores them and the next render reuses them (with --repo, for a ticket that builds in several repos)"
 	publishStoreUsage   = "explicit store path"
 	publishProjectUsage = "project name, resolved via the machine mapping"
 )
@@ -35,6 +36,7 @@ func init() {
 			{"approve", publishApproveUsage, false},
 			{"repo", publishRepoUsage, false},
 			{"picks", publishPicksUsage, false},
+			{"what", publishWhatUsage, false},
 			{"store", publishStoreUsage, false},
 			{"project", publishProjectUsage, false},
 		}, false},
@@ -47,7 +49,7 @@ func init() {
 }
 
 // cmdPublish implements `jig publish <ticket> [--body | --pr <url> | --approve]
-// [--repo <name>] [--picks <file>] [--yes]`. Bare, it pushes the head the last
+// [--repo <name>] [--picks <file>] [--what <file>] [--yes]`. Bare, it pushes the head the last
 // clean gate round reviewed, as it is, and opens or updates the pull request.
 // The three flags are the steps of the same hand-off when an agent does the
 // git and gh work: --body renders the pull request body and stops, --pr
@@ -69,6 +71,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	approve := fs.Bool("approve", false, publishApproveUsage)
 	repo := fs.String("repo", "", publishRepoUsage)
 	picks := fs.String("picks", "", publishPicksUsage)
+	what := fs.String("what", "", publishWhatUsage)
 	storeFlag := fs.String("store", "", publishStoreUsage)
 	projectFlag := fs.String("project", "", publishProjectUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -91,6 +94,9 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if *picks, err = e.abs(*picks); err != nil {
 		return renderErr(stdout, err)
 	}
+	if *what, err = e.abs(*what); err != nil {
+		return renderErr(stdout, err)
+	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
@@ -111,7 +117,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	// The confirmation reads stdin, so its terminal-ness decides whether a
 	// yes is a person's.
 	deps.StdinIsTerminal = func() bool { return e.stdinIsTerminal(stdin) }
-	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Yes: *yes, Picks: *picks}
+	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Yes: *yes, Picks: *picks, What: *what}
 
 	switch {
 	case *body:
@@ -183,7 +189,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		help = fmt.Sprintf("%s still needs its pull request: `jig publish %s --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])
 	}
 	axi.Render(stdout,
-		axi.KV("publish", append(head, picksRows(report.Picks)...)),
+		axi.KV("publish", append(append(head, picksRows(report.Picks)...), whatRows(report.What)...)),
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
@@ -238,6 +244,7 @@ func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.Bo
 			{"head", r.Head}, {"title", r.Title}, {"pr_body", path(r.PRBody)}, {"review_notes", path(r.ReviewNotes)},
 		}
 		kv = append(kv, picksRows(report.Picks)...)
+		kv = append(kv, whatRows(bodyWhat(report))...)
 		record, bare := "", fmt.Sprintf("`jig publish %s`", ticket)
 		if len(report.Covered) > 1 {
 			record, bare = " --repo "+r.Repo, fmt.Sprintf("`jig publish %s --repo %s`", ticket, r.Repo)
@@ -245,8 +252,10 @@ func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.Bo
 		axi.Render(stdout,
 			axi.KV("publish_body", kv),
 			axi.Help(
-				fmt.Sprintf("Push %s to origin, open the pull request with the title and body above (gh pr create --head %s --base %s --title <title> --body-file <pr_body>), then record it: `jig publish %s --pr <url>%s`", report.Branch, report.Branch, r.Target, ticket, record),
-				"Or have jig push and open it: "+bare,
+				append(whatHelp(ticket, report), []string{
+					fmt.Sprintf("Push %s to origin, open the pull request with the title and body above (gh pr create --head %s --base %s --title <title> --body-file <pr_body>), then record it: `jig publish %s --pr <url>%s`", report.Branch, report.Branch, r.Target, ticket, record),
+					"Or have jig push and open it: " + bare,
+				}...)...,
 			),
 		)
 		return
@@ -256,13 +265,72 @@ func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.Bo
 		rows[i] = []string{r.Repo, r.Target, r.Head, r.Title, path(r.PRBody), path(r.ReviewNotes)}
 	}
 	axi.Render(stdout,
-		axi.KV("publish_body", append([][2]string{{"ticket", ticket}, {"branch", report.Branch}}, picksRows(report.Picks)...)),
+		axi.KV("publish_body", append(append([][2]string{{"ticket", ticket}, {"branch", report.Branch}}, picksRows(report.Picks)...), whatRows(bodyWhat(report))...)),
 		axi.Table("bodies", []string{"repo", "base", "head", "title", "pr_body", "review_notes"}, rows),
 		axi.Help(
-			fmt.Sprintf("Push %s to origin in each repo, open a pull request in each with its title and body above (gh pr create --head %s --base <base> --title <title> --body-file <pr_body>), then record each: `jig publish %s --pr <url> --repo <repo>`", report.Branch, report.Branch, ticket),
-			fmt.Sprintf("Each body names the others' pull requests, \"pending\" until they are recorded: once all are, render the bodies again and update the pull requests with them. Or have jig push and open them all: `jig publish %s`", ticket),
+			append(whatHelp(ticket, report), []string{
+				fmt.Sprintf("Push %s to origin in each repo, open a pull request in each with its title and body above (gh pr create --head %s --base <base> --title <title> --body-file <pr_body>), then record each: `jig publish %s --pr <url> --repo <repo>`", report.Branch, report.Branch, ticket),
+				fmt.Sprintf("Each body names the others' pull requests, \"pending\" until they are recorded: once all are, render the bodies again and update the pull requests with them. Or have jig push and open them all: `jig publish %s`", ticket),
+			}...)...,
 		),
 	)
+}
+
+// whatHelp is the help for a What still to be written: write it to the file
+// the report names and give it back, ahead of the push steps, since the body
+// they open the pull request with is the one rendered after it.
+func whatHelp(ticket string, report verifydeliver.BodyReport) []string {
+	var help []string
+	for _, r := range report.Repos {
+		if r.What.Status != verifydeliver.WhatPending {
+			continue
+		}
+		repo := ""
+		if len(report.Covered) > 1 {
+			repo = " --repo " + r.Repo
+		}
+		if r.What.Request == "" {
+			help = append(help, fmt.Sprintf("Write the pull request's What, a few bullets with the first saying why the change exists, and give it: `jig publish %s --body --what <file>%s`", ticket, repo))
+			continue
+		}
+		help = append(help, fmt.Sprintf("Write the pull request's What, a few bullets with the first saying why the change exists, to %s and give it: `jig publish %s --body --what %s%s`", r.What.Request, ticket, r.What.Request, repo))
+	}
+	return help
+}
+
+// bodyWhat is what the render did with the What of each repo's body.
+func bodyWhat(report verifydeliver.BodyReport) map[string]verifydeliver.WhatReport {
+	out := make(map[string]verifydeliver.WhatReport, len(report.Repos))
+	for _, r := range report.Repos {
+		out[r.Repo] = r.What
+	}
+	return out
+}
+
+// whatRows are the report's rows for the What of the pull requests: whether
+// it is given, stored or pending, and for a pending one the file to write its
+// bullets to. A ticket of several repos names the repo in each row.
+func whatRows(what map[string]verifydeliver.WhatReport) [][2]string {
+	repos := make([]string, 0, len(what))
+	for repo, w := range what {
+		if w.Status != "" {
+			repos = append(repos, repo)
+		}
+	}
+	sort.Strings(repos)
+	var rows [][2]string
+	for _, repo := range repos {
+		key, request := "what", "what_request"
+		if len(repos) > 1 {
+			key, request = "what_"+repo, "what_request_"+repo
+		}
+		w := what[repo]
+		rows = append(rows, [2]string{key, w.Status})
+		if w.Status == verifydeliver.WhatPending && w.Request != "" {
+			rows = append(rows, [2]string{request, w.Request})
+		}
+	}
+	return rows
 }
 
 // approvedRows are the facts of an approval: the one repo's head, or for

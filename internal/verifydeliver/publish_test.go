@@ -248,19 +248,12 @@ func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 //   - with no open pull request the lookup answers none and publish opens one
 //     and posts the review notes as a comment on it, exactly once, with
 //     pr/review-notes.md as its --body-file;
-//   - a brief with no "## " section with text to publish as the body's ## Intent
-//     publishes a body without that section - the owner's rule, pinned by the
-//     render tests - and publish warns the operator that it did, prefixed "jig:"
-//     like every other publish warning and naming the brief, and says it before
-//     the confirmation prompt: the whole point of the warning is that the
-//     operator can still answer "n" - editing the brief and gating again is
-//     cheaper than editing a published pull request. The brief this chain is
-//     gated with is the one the omission covers whose first "## " section is
-//     empty, which firstBriefSection reads the same way as a brief with no
-//     heading at all (TestFirstBriefSectionEmptyForAnEmptyFirstSection), and the
-//     warning's wording has to fit it: "no \"## \" section with text to publish
-//     as one", since "no \"## \" section" would send its operator to add a
-//     heading the brief already has;
+//   - a What still to be written - no what file given, none stored - publishes
+//     a body whose ## What is the ticket's title as its one bullet, and publish
+//     warns the operator that it did, prefixed "jig:" like every other publish
+//     warning and naming --what, and says it before the confirmation prompt: the
+//     whole point of the warning is that the operator can still answer "n" and
+//     write the bullets, which is cheaper than editing a published pull request;
 //   - PUBLISH_NO_DIVERGENCE - a branch that changes nothing against the target
 //     (here the target fast-forwarded to the branch's own tip, then put back) -
 //     is raised before publish writes anything to the store: a refusal leaves no
@@ -291,7 +284,6 @@ func TestPublishFullChain(t *testing.T) {
 		t.Fatalf("write brief.md: %v", err)
 	}
 	branch := ticketBranch(fx.Ticket)
-	const omitted = `no "## " section with text to publish as one`
 
 	driveBuild(t, fx, "rung-a")
 	src := NewFakeGateSource(fx.ScenarioDir)
@@ -596,7 +588,7 @@ func TestPublishFullChain(t *testing.T) {
 		wantReviewNotesBodyFile(t, comments[0])
 	})
 
-	step(t, "the omitted ## Intent is warned about before the confirmation prompt", func(t *testing.T) {
+	step(t, "a What still to be written is warned about before the confirmation prompt", func(t *testing.T) {
 		dd := d
 		var warnings, warnedWhenAsked []string
 		asked := false
@@ -612,27 +604,24 @@ func TestPublishFullChain(t *testing.T) {
 		if !asked {
 			t.Fatal("confirm was never asked, so nothing here can say when the warning came")
 		}
-		if body, _ := readPRFiles(t, dd, fx.Ticket, "fixture-repo"); strings.Contains(body, "## Intent") {
-			t.Fatalf("pr/fixture-repo.md has an ## Intent section for a brief whose first section is empty:\n%s", body)
+		if body, _ := readPRFiles(t, dd, fx.Ticket, "fixture-repo"); !strings.Contains(body, "## What\n\n- Fixture ticket brief\n") {
+			t.Fatalf("pr/fixture-repo.md = %q, want the ticket's title as the one bullet of ## What", body)
 		}
 		var warning string
 		for _, w := range warnedWhenAsked {
-			if strings.Contains(w, "## Intent") {
+			if strings.Contains(w, "What of the pull request") {
 				warning = w
 				break
 			}
 		}
 		if warning == "" {
-			t.Fatalf("publish had warned %q by the confirmation prompt, want the omitted ## Intent section already warned about there, while an operator can still decline", warnedWhenAsked)
+			t.Fatalf("publish had warned %q by the confirmation prompt, want the What still to be written already warned about there, while an operator can still decline", warnedWhenAsked)
 		}
 		if !strings.HasPrefix(warning, "jig: ") {
 			t.Errorf("warning = %q, want it prefixed %q like every other publish warning", warning, "jig: ")
 		}
-		if !strings.Contains(warning, briefPath) {
-			t.Errorf("warning = %q, want it to name %s, the brief the section would have come from", warning, briefPath)
-		}
-		if !strings.Contains(warning, omitted) {
-			t.Errorf("warning = %q, want a reason that fits a brief whose first \"## \" section is merely empty: %s", warning, omitted)
+		if !strings.Contains(warning, "--what") {
+			t.Errorf("warning = %q, want it to name --what, the flag that gives the bullets", warning)
 		}
 	})
 

@@ -155,58 +155,46 @@ func TestGoldenRenderBriefSourcedTicket(t *testing.T) {
 	}
 	body, notes := readPRFiles(t, d, fx.Ticket, "fixture-repo")
 
-	wantBody := fmt.Sprintf(`## Intent
+	wantBody := fmt.Sprintf(`## What
 
-Give the fixture repo two small, real fixes so the frontier loop has
-something to chew on: a broken function to repair, a caller to add once it is
-fixed, a wording decision to make, and an environment class to smoke-test.
-
-## What changed
-
-- Fix Clamp so TestClamp passes. (%[1]s)
-- Give Clamp a percentage-range caller, once it works. (%[2]s)
-- Decide and implement the greeting's tone. (%[3]s)
-- Smoke-test the rig environment class. (%[4]s)
-
-Fixes from review:
-
-- Fix these gate findings (%[5]s)
-- Gate finding r1-f3, kept by the human (%[6]s)
-- Fix these gate findings (%[7]s)
+- Fixture ticket brief
 
 ## Verification
 
-Oracles:
+Oracles green at the reviewed head %s:
 
 - test
 
-Reviewed head:
+Gate rounds:
 
-- fixture-repo: %[7]s
-
-Revalidation tier: none
-
-Findings: 2 fixed, 0 addressed, 0 dismissed, 2 noted, 0 asked. See the pull request's first comment for detail.
-`,
-		greenShortSHA(t, d, fx.Ticket, "a"),
-		greenShortSHA(t, d, fx.Ticket, "b"),
-		greenShortSHA(t, d, fx.Ticket, "c"),
-		greenShortSHA(t, d, fx.Ticket, "d"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1-alpha-test"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1-r1-f3"),
-		greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"),
-	)
+- Round 1 (full): findings
+- Round 2 (delta): findings
+- Round 3 (delta): clean
+`, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
 
-	wantNotes := `# Review Notes
+	wantNotes := fmt.Sprintf(`# Review Notes
 
 Published without a recorded approval
 
 ## Round 3
 
 round 3: nothing new; the shared-helper note from round 1 remains on record
+
+## Slices
+
+- a (%[1]s): Fix Clamp so TestClamp passes.
+- b (%[2]s): Give Clamp a percentage-range caller, once it works.
+- c (%[3]s): Decide and implement the greeting's tone.
+- d (%[4]s): Smoke-test the rig environment class.
+- fix-1-alpha-test (%[5]s): Fix these gate findings
+  - Add's doc comment still omits overflow behavior
+- fix-1-r1-f3 (%[6]s): Gate finding r1-f3, kept by the human
+  - Greeting formality beyond casual is not decided
+- fix-2-alpha-test (%[7]s): Fix these gate findings
+  - Add's doc comment still omits overflow behavior
 
 ## Findings
 
@@ -264,7 +252,15 @@ Hunks no probe or skip covers:
 - beta/beta.go:4-6
 - beta/version.go:1-5
 
-`
+`,
+		greenShortSHA(t, d, fx.Ticket, "a"),
+		greenShortSHA(t, d, fx.Ticket, "b"),
+		greenShortSHA(t, d, fx.Ticket, "c"),
+		greenShortSHA(t, d, fx.Ticket, "d"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1-alpha-test"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1-r1-f3"),
+		greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"),
+	)
 	if notes != wantNotes {
 		t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)
 	}
@@ -319,38 +315,34 @@ func TestGoldenRenderInferredIntentTicket(t *testing.T) {
 		t.Fatalf("pr/fixture-repo.md has an ## Intent section for an inferred intent, want none at all:\n%s", body)
 	}
 
-	wantBody := fmt.Sprintf(`## What changed
+	wantBody := `## What
 
-- Fix Clamp so TestClamp passes. (%s)
-- Give Clamp a percentage-range caller, once it works. (%s)
-- Decide and implement the greeting's tone. (%s)
-- Smoke-test the rig environment class. (%s)
-
-Fixes from review:
-
-- Add a doc comment to Add explaining its behavior. (%s)
+- JIG-1
 
 ## Verification
 
-Oracles:
+Oracles green:
 
 - test
 
-Revalidation tier: none
+Gate rounds:
 
-Findings: 0 fixed, 0 addressed, 0 dismissed, 0 noted, 0 asked. See the pull request's first comment for detail.
-`,
-		greenShortSHA(t, d, fx.Ticket, "a"),
-		greenShortSHA(t, d, fx.Ticket, "b"),
-		greenShortSHA(t, d, fx.Ticket, "c"),
-		greenShortSHA(t, d, fx.Ticket, "d"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1"),
-	)
+- Round 1: findings
+- Round 2: clean
+`
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
 
-	wantNotes := `# Review Notes
+	wantNotes := fmt.Sprintf(`# Review Notes
+
+## Slices
+
+- a (%[1]s): Fix Clamp so TestClamp passes.
+- b (%[2]s): Give Clamp a percentage-range caller, once it works.
+- c (%[3]s): Decide and implement the greeting's tone.
+- d (%[4]s): Smoke-test the rig environment class.
+- fix-1 (%[5]s): Add a doc comment to Add explaining its behavior.
 
 ## Coverage
 
@@ -362,7 +354,13 @@ Touched files:
 - beta/beta.go
 - beta/version.go
 
-`
+`,
+		greenShortSHA(t, d, fx.Ticket, "a"),
+		greenShortSHA(t, d, fx.Ticket, "b"),
+		greenShortSHA(t, d, fx.Ticket, "c"),
+		greenShortSHA(t, d, fx.Ticket, "d"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1"),
+	)
 	if notes != wantNotes {
 		t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)
 	}

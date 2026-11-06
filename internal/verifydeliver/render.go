@@ -161,72 +161,6 @@ func shortSHA(sha string) string {
 	return sha[:7]
 }
 
-// firstBriefSection returns the body of briefMD's first "## " section,
-// whatever it is titled: from the line after that heading up to (but
-// excluding) the next "## " heading or EOF. CRLF is normalized first, the
-// same way store.BriefSectionHashes normalizes it before splitting on "## "
-// - this mirrors that split instead of hand-rolling its own, but keeps only
-// the first section rather than hashing every one.
-//
-// It is the whole of the ## Intent body for a brief-sourced intent, and ""
-// whenever briefMD has no first section with text under it - no "## "
-// heading at all, or one with nothing below it. renderIntentSection then
-// writes no section whatsoever, the same as for an inferred or absent
-// intent: a brief that states no section's worth of intent has none to
-// publish, and the whole brief is not it. Owner decision, DECISIONS.md.
-//
-// A "## " line inside a fenced code block is not a heading and ends nothing
-// (fenceScanner): a brief whose first section quotes markdown - one showing
-// the very sections this body is built from, say - keeps its whole example,
-// and the section it yields never stops mid-fence. A brief whose only "## "
-// lines sit inside a fence has no section of its own by the same rule. That
-// is the one way this split diverges from store.BriefSectionHashes', whose
-// hashes are a section's identity for slices.yaml rather than something
-// rendered.
-func firstBriefSection(briefMD string) string {
-	text := strings.ReplaceAll(briefMD, "\r\n", "\n")
-	lines := strings.Split(text, "\n")
-	var fence fenceScanner
-	start := -1
-	for i, line := range lines {
-		if !fence.fenced(line) && strings.HasPrefix(line, "## ") {
-			start = i + 1
-			break
-		}
-	}
-	if start == -1 {
-		return ""
-	}
-	end := start
-	for end < len(lines) {
-		if !fence.fenced(lines[end]) && strings.HasPrefix(lines[end], "## ") {
-			break
-		}
-		end++
-	}
-	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
-}
-
-// stripIntentFrontMatter strips intent.md's "---\n...\n---\n" front matter
-// block from data's raw bytes, if one is there, and returns the rest
-// trimmed: the fallback for a hand-edited intent.md store.ParseIntent could
-// not read normally still renders only the author's own text, never the
-// source/agent/session/score keys that front the file. When no front matter
-// block can be found at all, the whole text is returned trimmed, since that
-// is still more useful to a reviewer than an empty section.
-func stripIntentFrontMatter(data []byte) string {
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
-	if !strings.HasPrefix(text, "---\n") {
-		return strings.TrimSpace(text)
-	}
-	rest := text[len("---\n"):]
-	end := strings.Index(rest, "\n---\n")
-	if end == -1 {
-		return strings.TrimSpace(text)
-	}
-	return strings.TrimSpace(rest[end+len("\n---\n"):])
-}
-
 // atxHeadingLevel returns line's ATX heading level - the "#" run that opens
 // it - and 0 when line is not a heading at all. The rules are the ones
 // GitHub renders a pull request body by: at most three leading spaces, one
@@ -411,82 +345,12 @@ func demoteHeadings(text string) string {
 
 // intentFilePath returns the absolute path a binding intent source (brief
 // or explicit) is read from: brief.md or intent.md. Only meaningful for
-// those two sources - renderIntentSection and checkReviewedIntent both
-// guard on that before calling it.
+// those two sources - checkReviewedIntent guards on that before calling it.
 func intentFilePath(st *store.Store, ticket, source string) string {
 	if source == IntentSourceBrief {
 		return filepath.Join(st.TicketDir(ticket), "brief.md")
 	}
 	return st.IntentPath(ticket)
-}
-
-// renderIntentSection renders the ## Intent section when intent source is
-// brief or explicit. Returns empty string for inferred or none sources: an
-// inferred intent summarizes the author's own private agent session and
-// never reaches a pull request. Also empty when the source file yields
-// no text of its own - a brief with no first "## " section with text
-// under it, whether it has no such heading or one with nothing below it
-// (firstBriefSection), an intent.md that is front matter and nothing else:
-// a published body never opens with a bare "## Intent" heading and nothing
-// under it.
-//
-// Whatever the source yields is rendered intact but with its own headings
-// demoted below the section level (demoteHeadings) and any fenced code block
-// it leaves open closed (closeOpenFence), so the body keeps exactly its own
-// three "## " sections and they all render as sections. Those are the rules
-// an explicit intent needs - `jig gate --doc` records a whole design doc as
-// the intent text - and for a brief the demotion is a no-op in every
-// ordinary case: firstBriefSection already stops at the next "## ", so the
-// body it returns holds a heading that high only when the brief put a "# "
-// inside the section itself.
-//
-// The second return reports one of those omissions: a brief bound as the
-// intent source and had no "## " section with text to publish as one - no
-// such heading anywhere, or a first section with nothing under it, which
-// firstBriefSection reads the same way - so the body goes out with no
-// statement of why the change exists. Publish warns the operator about it
-// (the omission is the owner's rule, so it is never an error - but nothing
-// else in the run, the report or the store records it). The other sources
-// need no such signal: an inferred or absent intent has no section to lose,
-// and an explicit intent with no text of its own is refused a round earlier
-// (INTENT_EMPTY, resolveIntent) and cannot be edited into one after it
-// (PUBLISH_UNREVIEWED_INTENT, checkReviewedIntent).
-func renderIntentSection(rep reportYAML, st *store.Store, ticket string) (string, bool, error) {
-	if rep.Intent.Source != IntentSourceBrief && rep.Intent.Source != IntentSourceExplicit {
-		return "", false, nil
-	}
-
-	intentPath := intentFilePath(st, ticket, rep.Intent.Source)
-	data, err := os.ReadFile(intentPath)
-	if err != nil {
-		return "", false, fmt.Errorf("verifydeliver: render intent: read %s: %w", intentPath, err)
-	}
-
-	var content string
-	if rep.Intent.Source == IntentSourceBrief {
-		content = firstBriefSection(string(data))
-	} else {
-		// Explicit: intent.md is YAML front matter plus the intent text.
-		// in.Text is used when it parses; a hand-edited file that no longer
-		// parses, or whose text field comes back empty, still produces a
-		// section - the front matter stripped, never dumped raw - rather
-		// than silently dropping it the way an inferred or absent intent
-		// does.
-		in, perr := store.ParseIntent(data)
-		if perr == nil && in.Text != "" {
-			content = in.Text
-		} else {
-			content = stripIntentFrontMatter(data)
-		}
-	}
-	if content == "" {
-		return "", rep.Intent.Source == IntentSourceBrief, nil
-	}
-	content = closeOpenFence(demoteHeadings(content))
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "## Intent\n\n%s\n\n", content)
-	return b.String(), false, nil
 }
 
 // authorCommit is one of an adopted branch's own pre-adoption commits: its
@@ -528,10 +392,10 @@ func adoptedAuthorCommits(leaseDir, target, startSHA string) ([]authorCommit, er
 	return commits, nil
 }
 
-// bulletGoal returns the one line of a slice's goal a ## What changed
+// bulletGoal returns the one line of a slice's goal a ## Slices
 // bullet prints: the goal's first line, with a trailing ":" dropped so the
 // bullet reads as a phrase of its own rather than promising a continuation
-// the body no longer has.
+// a list item of the notes does not have.
 //
 // A goal an author wrote in slices.yaml is one line already and comes back
 // as it stands. A fix slice's goal is not a goal at all but the builder
@@ -548,125 +412,107 @@ func bulletGoal(goal string) string {
 	return strings.TrimSuffix(strings.TrimSpace(line), ":")
 }
 
-// renderWhatChangedSection renders the ## What changed section: for an
-// adopted ticket, the author's own pre-adoption commits first (subject and
-// short sha); then one bullet per green slice, in slice order, with the
-// first line of its goal (bulletGoal) and short commit sha - omitted when a
-// slice has no recorded green commit, rather than printing empty
-// parentheses - and fix slices built from gate findings (FromGate > 0)
-// grouped after the others as fixes from review.
-//
-// Each of those three is a block, and the blank lines between them are
-// separators: exactly one between consecutive blocks, and one closing the
-// last of them before the next "## " heading. A block that has nothing in
-// it contributes no separator of its own, so a ticket with only the gate's
-// fixes does not open the section with a blank line, and one with no jig
-// bullet at all - an adopted branch whose only jig work is gate fixes, or
-// none - does not end it with two.
-func renderWhatChangedSection(slices []store.Slice, commits map[string]string, authorCommits []authorCommit) string {
-	var regular, fixes []store.Slice
-	for _, s := range slices {
-		if s.FromGate > 0 {
-			fixes = append(fixes, s)
-		} else {
-			regular = append(regular, s)
-		}
-	}
+// renderWhatSection renders the ## What section: the bullets the session
+// wrote (the stored what file), or the one bullet resolveWhat falls back to.
+// Whatever it holds keeps its own headings below the section level
+// (demoteHeadings) and any fenced code block it leaves open is closed
+// (closeOpenFence), so the body keeps exactly its own "## " sections and they
+// all render as sections.
+func renderWhatSection(what string) string {
+	return fmt.Sprintf("## What\n\n%s\n\n", closeOpenFence(demoteHeadings(strings.TrimSpace(what))))
+}
 
-	sliceBullets := func(group []store.Slice) string {
-		var sb strings.Builder
-		for _, s := range group {
-			if sha, ok := commits[s.ID]; ok {
-				fmt.Fprintf(&sb, "- %s (%s)\n", bulletGoal(s.Goal), shortSHA(sha))
-			} else {
-				fmt.Fprintf(&sb, "- %s\n", bulletGoal(s.Goal))
+// renderSlicesSection renders the review notes' ## Slices section, where the
+// pull request body no longer tells them: for an adopted ticket, the author's
+// own pre-adoption commits first (subject and short sha); then one bullet per
+// slice, in slice order, with its id, its short commit sha (omitted when it
+// has no recorded green commit, rather than printing empty parentheses) and
+// the first line of its goal (bulletGoal). A fix slice (FromGate > 0) lists
+// the titles of the gate findings it fixed beneath its bullet: the findings
+// its Findings names, in outcomes. "" when there is nothing to list.
+func renderSlicesSection(slices []store.Slice, commits map[string]string, authorCommits []authorCommit, outcomes []findingOutcome) string {
+	titles := map[string]string{}
+	for _, o := range outcomes {
+		titles[o.finding.ID] = o.finding.Title
+	}
+	var b strings.Builder
+	for _, c := range authorCommits {
+		fmt.Fprintf(&b, "- %s (%s)\n", c.Subject, shortSHA(c.SHA))
+	}
+	for _, s := range slices {
+		if sha, ok := commits[s.ID]; ok {
+			fmt.Fprintf(&b, "- %s (%s): %s\n", s.ID, shortSHA(sha), bulletGoal(s.Goal))
+		} else {
+			fmt.Fprintf(&b, "- %s: %s\n", s.ID, bulletGoal(s.Goal))
+		}
+		if s.FromGate == 0 {
+			continue
+		}
+		for _, id := range s.Findings {
+			if title := titles[id]; title != "" {
+				fmt.Fprintf(&b, "  - %s\n", title)
 			}
 		}
-		return sb.String()
 	}
-
-	var blocks []string
-	if len(authorCommits) > 0 {
-		var ab strings.Builder
-		for _, c := range authorCommits {
-			fmt.Fprintf(&ab, "- %s (%s)\n", c.Subject, shortSHA(c.SHA))
-		}
-		blocks = append(blocks, ab.String())
+	if b.Len() == 0 {
+		return ""
 	}
-	if len(regular) > 0 {
-		blocks = append(blocks, sliceBullets(regular))
-	}
-	if len(fixes) > 0 {
-		blocks = append(blocks, "Fixes from review:\n\n"+sliceBullets(fixes))
-	}
-
-	var b strings.Builder
-	b.WriteString("## What changed\n\n")
-	if len(blocks) > 0 {
-		b.WriteString(strings.Join(blocks, "\n"))
-		b.WriteString("\n")
-	}
-	return b.String()
+	return "## Slices\n\n" + b.String() + "\n"
 }
 
-// countFindingOutcomes tallies outcomes by their final bucket, for the PR
-// body's one-line findings count.
-func countFindingOutcomes(outcomes []findingOutcome) (fixed, addressed, dismissed, noted, asked int) {
-	for _, o := range outcomes {
-		switch o.status {
-		case "fixed":
-			fixed++
-		case "addressed":
-			addressed++
-		case "dismissed":
-			dismissed++
-		case "noted":
-			noted++
-		case "asked":
-			asked++
-		}
-	}
-	return fixed, addressed, dismissed, noted, asked
-}
-
-// renderVerificationSection renders the ## Verification section: the
-// oracles green at the last clean gate round (oracleNames, the manifest's
-// own, sorted), the reviewed head, the revalidation tier, and one line
-// counting the review's findings by how they ended, pointing at the pull
-// request's first comment (pr/review-notes.md) for the detail - never a
-// store path nobody on GitHub can open.
-func renderVerificationSection(rep reportYAML, tier string, oracleNames []string, outcomes []findingOutcome) string {
+// renderVerificationSection renders the ## Verification section, the gates
+// and nothing of the review's findings: the oracles green at the last clean
+// gate round (oracleNames, the manifest's own, sorted) at the reviewed head,
+// and one line per gate round with its scope and verdict. The findings, who
+// reviewed and how the change was fixed are the review notes' (the pull
+// request's first comment), never the body's.
+func renderVerificationSection(rep reportYAML, oracleNames []string, rounds []RoundRecord) string {
 	var b strings.Builder
 	b.WriteString("## Verification\n\n")
 
 	if len(oracleNames) > 0 {
-		b.WriteString("Oracles:\n\n")
+		fmt.Fprintf(&b, "Oracles green%s:\n\n", reviewedHeadWords(rep.ReviewedSHA))
 		for _, name := range oracleNames {
 			fmt.Fprintf(&b, "- %s\n", name)
 		}
 		b.WriteString("\n")
 	}
 
-	// Reviewed head
-	if len(rep.ReviewedSHA) > 0 {
-		repos := make([]string, 0, len(rep.ReviewedSHA))
-		for repo := range rep.ReviewedSHA {
-			repos = append(repos, repo)
+	if len(rounds) > 0 {
+		b.WriteString("Gate rounds:\n\n")
+		for _, r := range rounds {
+			if r.Scope != "" {
+				fmt.Fprintf(&b, "- Round %d (%s): %s\n", r.Round, r.Scope, r.Verdict)
+			} else {
+				fmt.Fprintf(&b, "- Round %d: %s\n", r.Round, r.Verdict)
+			}
 		}
-		sort.Strings(repos)
-		b.WriteString("Reviewed head:\n\n")
-		for _, repo := range repos {
-			fmt.Fprintf(&b, "- %s: %s\n", repo, shortSHA(rep.ReviewedSHA[repo]))
-		}
-		b.WriteString("\n")
 	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
 
-	// Revalidation tier
-	fmt.Fprintf(&b, "Revalidation tier: %s\n\n", tier)
-
-	fixed, addressed, dismissed, noted, asked := countFindingOutcomes(outcomes)
-	fmt.Fprintf(&b, "Findings: %d fixed, %d addressed, %d dismissed, %d noted, %d asked. See the pull request's first comment for detail.\n", fixed, addressed, dismissed, noted, asked)
-	return b.String()
+// reviewedHeadWords is " at the reviewed head <sha>" for the heads the gate
+// reviewed, each named by its repo when there are several, and "" for a
+// scripted round, which recorded none.
+func reviewedHeadWords(reviewed map[string]string) string {
+	switch len(reviewed) {
+	case 0:
+		return ""
+	case 1:
+		for _, sha := range reviewed {
+			return " at the reviewed head " + shortSHA(sha)
+		}
+	}
+	repos := make([]string, 0, len(reviewed))
+	for repo := range reviewed {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	parts := make([]string, len(repos))
+	for i, repo := range repos {
+		parts[i] = repo + " " + shortSHA(reviewed[repo])
+	}
+	return " at the reviewed heads " + strings.Join(parts, ", ")
 }
 
 // DemoFile is one media file the pull request's ## Demo section shows, as
@@ -759,29 +605,22 @@ func escapeDemoHTML(text string) string {
 	return demoHTMLEscaper.Replace(text)
 }
 
-// writePRBody writes <ticket>/pr/<repoName>.md: a lean pull request body
-// with Intent, What changed, Demo (if available), and Verification sections,
-// rendered from recorded structure with no model call.
+// writePRBody writes <ticket>/pr/<repoName>.md: the pull request body, which
+// is the shape .github/CONTRIBUTING.md gives it and nothing else - What (the
+// session's bullets, what), Demo (when there is a pick) and Verification (the
+// gates) - after the Stacked on and Part of sections a stacked or multi-repo
+// ticket's pull request names its neighbours in. It is rendered from recorded
+// structure with no model call.
 //
-// Its second return is renderIntentSection's: the body has no ## Intent
-// section although a brief bound as its source, the one omission Publish
-// warns the operator about. The third return is picked itself, the section
-// publish rendered from the recordings it picked (ADR 0029), or the zero
-// value when there is no pick: a body has a ## Demo section only from a pick.
-func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
-	rep reportYAML, tier string, commits map[string]string, authorCommits []authorCommit,
-	oracleNames []string, outcomes []findingOutcome, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, bool, DemoRenderResult, error) {
+// The second return is picked itself, the section publish rendered from the
+// recordings it picked (ADR 0029), or the zero value when there is no pick: a
+// body has a ## Demo section only from a pick.
+func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
+	oracleNames []string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
 	var b strings.Builder
-
-	// Render Intent section (omitted for inferred/none sources)
-	intent, omittedBriefIntent, err := renderIntentSection(rep, st, ticket)
-	if err != nil {
-		return "", false, DemoRenderResult{}, err
-	}
-	b.WriteString(intent)
 
 	// Render the Stacked on section, which names the branch the pull request
 	// goes into while the parent the ticket is stacked on has not merged
@@ -791,8 +630,7 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	// other repos (none for a ticket that publishes one)
 	b.WriteString(renderPartOfSection(ticket, links))
 
-	// Render What changed section
-	b.WriteString(renderWhatChangedSection(slices, commits, authorCommits))
+	b.WriteString(renderWhatSection(what))
 
 	// Render Demo section (if there is a pick): the recordings publish picked.
 	var demoResult DemoRenderResult
@@ -801,16 +639,15 @@ func writePRBody(st *store.Store, ticket, repoName string, slices []store.Slice,
 	}
 	b.WriteString(demoResult.Section)
 
-	// Render Verification section
-	b.WriteString(renderVerificationSection(rep, tier, oracleNames, outcomes))
+	b.WriteString(renderVerificationSection(rep, oracleNames, rounds))
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-		return "", false, DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: create dir: %w", err)
+		return "", DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: create dir: %w", err)
 	}
 	if err := os.WriteFile(fullPath, []byte(b.String()), 0o644); err != nil {
-		return "", false, DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: write: %w", err)
+		return "", DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: write: %w", err)
 	}
-	return filepath.ToSlash(relPath), omittedBriefIntent, demoResult, nil
+	return filepath.ToSlash(relPath), demoResult, nil
 }
 
 // prLink is the pull request of another repo of the same ticket: the repo and
@@ -1112,8 +949,9 @@ func reviewNotesFile(repo string, several bool) string {
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; the one thing this function reads itself is the brief's
 // approval, for the line on who approved it; approvalLine, the line on who
-// approved the publish, comes from the caller ("" for none).
-func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+// approved the publish, comes from the caller ("" for none), and so does
+// slicesSection, the rendered ## Slices (renderSlicesSection, "" for none).
+func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1136,6 +974,10 @@ func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRo
 	if lastSummary != "" {
 		fmt.Fprintf(&b, "## Round %d\n\n%s\n\n", lastRound, lastSummary)
 	}
+
+	// The slices the change was built in, and the findings the fix slices
+	// fixed: the pull request body does not tell them.
+	b.WriteString(slicesSection)
 
 	sorted := append([]findingOutcome(nil), outcomes...)
 	sortFindingOutcomes(sorted)
