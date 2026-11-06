@@ -665,12 +665,41 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// true, so a non-local remote with no confirmation is refused by the gitx
 	// guard downstream.
 	confirmed := o.Yes || allApproved(jlines, ships)
+	answeredYes := false
 	if !confirmed {
 		branch, openPR, hasHost := confirmation(ships)
 		if !fn.confirm(branch, ticket, openPR, hasHost) {
 			return PublishReport{}, &axi.Error{Msg: "publish declined at confirmation", Code: "PUBLISH_DECLINED"}
 		}
 		confirmed = true
+		answeredYes = true
+	}
+
+	// A yes given at the terminal is a person's approval of the head each
+	// repo publishes, journaled as `jig publish --approve` would: --yes
+	// stands in for no person, and a recorded approval is journaled already.
+	// The review notes are written again after it, so the approval line and
+	// the pr line's approval are the journal's on every publish form.
+	if answeredYes {
+		for _, sh := range ships {
+			head := sh.pt.reviewedHead()
+			if head == "" {
+				continue
+			}
+			line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: sh.pt.branch, Provenance: "person", Repo: sh.pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
+			if err := journal.Append(d.Store, ticket, line); err != nil {
+				return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
+			}
+		}
+	}
+	jlines, err = journal.Read(d.Store, ticket)
+	if err != nil {
+		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	for _, sh := range ships {
+		if err := sh.pub.writeNotes(jlines); err != nil {
+			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
+		}
 	}
 
 	// The files a pick staged are attached by name from their directory, and
@@ -716,7 +745,8 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if err != nil {
 			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
-		line := journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: sh.head, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo()}
+		approval, _ := approvalOf(jlines, pt.lineRepo(), pt.reviewedHead())
+		line := journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: sh.head, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 		}
@@ -939,6 +969,9 @@ type publication struct {
 	// notesName is the name, in the ticket's pr directory, of the review notes
 	// the pull request's first comment carries.
 	notesName string
+	// writeNotes writes the review notes again, with the approval line the
+	// given journal lines speak for.
+	writeNotes func(lines []journal.Line) error
 	// rewrite writes the body again, naming links as the other repos' pull
 	// requests: the same body, with the pull requests opened since.
 	rewrite func(links []prLink) error
@@ -1071,17 +1104,24 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
-	approvalLine := ""
-	if t.reviewedHead() != "" {
-		approvalLine = publishApprovalLine(journaled, t.lineRepo(), t.reviewedHead())
+	// writeNotes writes the review notes with the approval line the given
+	// journal lines speak for: a publish writes them again once its
+	// confirmation has run.
+	writeNotes := func(lines []journal.Line) error {
+		approvalLine := ""
+		if t.reviewedHead() != "" {
+			approvalLine = publishApprovalLine(lines, t.lineRepo(), t.reviewedHead())
+		}
+		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior)
 	}
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
+	if err := writeNotes(journaled); err != nil {
 		return publication{}, err
 	}
 	return publication{
 		prPath: prPath, title: t.title, picks: picksReport, picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
-		notesName: t.notesName(),
+		notesName:  t.notesName(),
+		writeNotes: writeNotes,
 		rewrite: func(links []prLink) error {
 			_, _, _, err := write(links)
 			return err
@@ -1593,7 +1633,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	// store's are an earlier round's, or were never rendered, render them
 	// again first.
 	var notes ReviewNotesReport
-	if host != nil && !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
+	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
 		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
 			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
 			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}

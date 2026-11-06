@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 )
@@ -649,6 +650,9 @@ func TestPublishRecordPRNotesSayTheApprovalTheHeadHad(t *testing.T) {
 				if !strings.Contains(notes, "\n"+c.wantLine) || !strings.Contains(notes, " at a terminal\n") || strings.Contains(notes, "Publish approved by an agent") {
 					t.Errorf("notes lack a person's approval line:\n%s", notes)
 				}
+				if want := "\nPublish approved by " + approverName(t, d) + " at a terminal\n"; !strings.Contains(notes, want) {
+					t.Errorf("notes lack the approver's git identity, %q:\n%s", want, notes)
+				}
 			}
 			lines, err := journal.Read(d.Store, fx.Ticket)
 			if err != nil {
@@ -723,5 +727,99 @@ func TestPublishApprovalLineWordsEachApproval(t *testing.T) {
 		if got := publishApprovalLine(c.lines, "", c.head); got != c.want {
 			t.Errorf("publishApprovalLine = %q, want %q", got, c.want)
 		}
+	}
+}
+
+// approverName is the git name the store credits an approval to.
+func approverName(t *testing.T, d Deps) string {
+	t.Helper()
+	who, err := gitx.ResolveIdentity(d.Store.Root)
+	if err != nil || who.Name == "" || who.Name == who.Email {
+		t.Fatalf("the fixture store has no git identity to credit: %+v (%v)", who, err)
+	}
+	return who.Name
+}
+
+// TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody: with no
+// pull-request host the notes --pr names to post by hand say the person's
+// approval given after --body, the same the pr line journals.
+func TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "person"); err != nil {
+		t.Fatalf("PublishApprove: %v", err)
+	}
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, "https://example.test/owner/repo/pull/7", nil); err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	want := "Publish approved by " + approverName(t, d) + " at a terminal\n"
+	notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
+	if !strings.Contains(notes, want) || strings.Contains(notes, "Published without a recorded approval") {
+		t.Errorf("notes to post by hand lack %q:\n%s", want, notes)
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventPr && l.Approval != "person" {
+			t.Errorf("pr line approval = %q, want person", l.Approval)
+		}
+	}
+}
+
+// TestPublishBareFormApprovalComesFromHowItWasConfirmed: an interactive yes
+// journals a person's publish-approved line for the head, and the review notes
+// and the pr line say it; --yes stands for no person, so it journals none and
+// the notes say no recorded approval.
+func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name     string
+		yes      bool
+		approval string
+	}{
+		{"interactive yes", false, "person"},
+		{"--yes", true, "none"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, head := reviewedInTheClone(t)
+			d.Confirm = func(string, string, string, bool) bool { return true }
+			d.GuardedPush = func(string, string, string, bool) error { return nil }
+			if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: c.yes}); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
+			lines, err := journal.Read(d.Store, fx.Ticket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved := 0
+			for _, l := range lines {
+				switch l.Event {
+				case journal.EventPublishApproved:
+					approved++
+					if l.Commit != head || l.Provenance != "person" {
+						t.Errorf("publish-approved line = %+v, want a person's for %s", l, head)
+					}
+				case journal.EventPr:
+					if l.Approval != c.approval {
+						t.Errorf("pr line approval = %q, want %q", l.Approval, c.approval)
+					}
+				}
+			}
+			if c.approval == "person" {
+				want := "Publish approved by " + approverName(t, d) + " at a terminal\n"
+				if approved != 1 || !strings.Contains(notes, want) {
+					t.Errorf("%d publish-approved line(s); notes lack %q:\n%s", approved, want, notes)
+				}
+			} else if approved != 0 || !strings.Contains(notes, "Published without a recorded approval\n") {
+				t.Errorf("%d publish-approved line(s); notes lack the no-approval line:\n%s", approved, notes)
+			}
+		})
 	}
 }
