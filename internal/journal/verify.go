@@ -144,11 +144,13 @@ func Pending(lines []Line) []PendingVerification {
 // NextAttempt is the attempt number the next verification of slice takes: one
 // more than the highest attempt any line of the slice carries, the frontier's
 // dispatch lines and earlier verifications alike, so the numbering is one
-// sequence per slice and a rerun of the same commit is a new attempt.
+// sequence per slice and a rerun of the same commit is a new attempt. A
+// fix-slice line is not an attempt: older journals carry the gate round on it,
+// and a fix slice's first verification is attempt 1 all the same.
 func NextAttempt(lines []Line, slice string) int {
 	highest := 0
 	for _, l := range lines {
-		if l.Slice == slice && l.Attempt > highest {
+		if l.Slice == slice && l.Event != EventFixSlice && l.Attempt > highest {
 			highest = l.Attempt
 		}
 	}

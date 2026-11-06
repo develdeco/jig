@@ -60,8 +60,8 @@ func RenderChangelog(lines []Line, workspace string, sliceWS map[string]string) 
 // ticket, plus a summary of gate fix-slice rounds. The ticket name is taken
 // from the first line. Pure and timestamp-free.
 //
-// Fix-slice rounds are grouped by the fix-slice line's Attempt field, which
-// carries the gate round number the fix slice was appended for.
+// A fix slice's round is its line's Attempt when an older journal carries one,
+// else the gate round that had closed by then.
 func RenderConsolidated(lines []Line) string {
 	ticket := ""
 	if len(lines) > 0 {
@@ -87,11 +87,23 @@ func RenderConsolidated(lines []Line) string {
 
 	b.WriteString("\n## Fix rounds\n")
 	any = false
+	closed := 0
 	for _, l := range lines {
+		if l.Event == EventGateRound || l.Event == EventGateClean {
+			if l.Attempt > 0 {
+				closed = l.Attempt
+			} else {
+				closed++
+			}
+		}
 		if l.Event != "fix-slice" {
 			continue
 		}
-		fmt.Fprintf(&b, "- round %d: fix-slice %s\n", l.Attempt, l.Slice)
+		round := l.Attempt
+		if round == 0 {
+			round = max(closed, 1)
+		}
+		fmt.Fprintf(&b, "- round %d: fix-slice %s\n", round, l.Slice)
 		any = true
 	}
 	if !any {
