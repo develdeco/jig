@@ -297,9 +297,16 @@ func TestPublishRecordPRRecordsWhenTheReviewNotesCannotBePosted(t *testing.T) {
 	fx, d, head := reviewedInTheClone(t)
 	_, addEnv := useGithubHost(t, &d, "", "pr comment")
 	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+	rendered, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+	if err != nil {
 		t.Fatalf("PublishBody: %v", err)
 	}
+	// The pull request is the render, so its readback has nothing to warn of.
+	render, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(rendered.Repos[0].PRBody)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addEnv("GH_STUB_BODY="+string(render), "GH_STUB_TITLE="+rendered.Repos[0].Title)
 	var warnings []string
 	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
 		warnings = append(warnings, fmt.Sprintf(format, args...))

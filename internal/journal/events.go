@@ -70,3 +70,11 @@ const (
 	EventNoteDelivered = "note-delivered"
 	EventHook          = "hook"
 )
+
+// What a pr line's BodyMatch says of the pull request it recorded against the
+// render.
+const (
+	BodyMatches = "matches"
+	BodyDiffers = "differs"
+	BodyUnknown = "unknown"
+)

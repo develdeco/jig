@@ -1528,6 +1528,9 @@ type RecordReport struct {
 	// ReviewNotes is what recording did with the repo's review notes: posted
 	// on the pull request, already there, or not posted.
 	ReviewNotes ReviewNotesReport
+	// Readback is what reading the pull request's title and body back from the
+	// host found against the render.
+	Readback Readback
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
@@ -1635,8 +1638,15 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if !verified {
 		outcome = "recorded:unverified"
 	}
+	// The pull request is read back: it may have been opened with a body that
+	// is not the render (a What still to be written, say), and the person
+	// merging reads what the host has, not the store's file.
+	readback := readBack(host, d.Store, ticket, pt.repoName, pt.title, prURL, warn)
+	if readback.Match == journal.BodyDiffers {
+		warn("jig: the %s of %s differs from the render of %s: update the pull request with the title and body `jig publish %s --body` reports\n", readback.Differs, prURL, ticket, ticket)
+	}
 	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}); err != nil {
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 	// The notes posted are those rendered for the reviewed head: when the
@@ -1660,7 +1670,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback}, nil
 }
 
 // RepoHead is the head a repo's pull request ships.

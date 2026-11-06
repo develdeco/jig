@@ -64,6 +64,9 @@
 // one; else a fixed canned body that always carries one unrewritten
 // reference, "- ./demo-1.mp4: test video", when neither applies.
 //
+// `pr view ... --json title` (the adapter's ReadPRTitle) answers $GH_STUB_TITLE
+// as the title.
+//
 // `pr view ... --json headRefName,...` (the adapter's PRHead) answers the head
 // of the pull request: $GH_STUB_HEAD_REF as headRefName, $GH_STUB_HEAD_OID as
 // headRefOid, and $GH_STUB_PR_STATE as state (OPEN when not set).
@@ -119,6 +122,8 @@ func main() {
 		// pr comment succeeds silently
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "headRefName,headRefOid,state":
 		printPRHead()
+	case len(args) >= 2 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "title":
+		printPRTitle()
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "state":
 		printPRState(args[2], os.Getenv("GH_STUB_PULLS"))
 	case len(args) >= 3 && args[0] == "repo" && args[1] == "create":
@@ -202,6 +207,16 @@ func printPRBody() {
 		body = "## Intent\n\nA test intent\n\n## What changed\n\n- test change\n\n## Demo\n\n- ./demo-1.mp4: test video\n\n## Verification\n\ntest"
 	}
 	data, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
+}
+
+// printPRTitle answers `gh pr view ... --json title` from $GH_STUB_TITLE.
+func printPRTitle() {
+	data, err := json.Marshal(map[string]string{"title": os.Getenv("GH_STUB_TITLE")})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ghstub: %v\n", err)
 		os.Exit(1)

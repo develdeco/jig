@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -218,9 +219,16 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 	if report.ReviewNotes.Status != "" {
 		kv = append(kv, [2]string{"review_notes", reviewNotesWords(report.ReviewNotes)})
 	}
+	if report.Readback.Match != "" {
+		kv = append(kv, [2]string{"body_match", readbackWords(report.Readback)})
+	}
 	blocks := []string{axi.KV("publish_pr", kv)}
+	var lead []string
+	if report.Readback.Match == journal.BodyDiffers {
+		lead = append(lead, "The pull request does not carry the render: update it with the title and body `jig publish "+ticket+" --body` reports (gh pr edit <url> --title <title> --body-file <pr_body>), then record it again")
+	}
 	if len(report.Pending) > 0 {
-		return append(blocks, axi.Help(fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])))
+		return append(blocks, axi.Help(append(lead, fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0]))...))
 	}
 	var removals []nextWorktree
 	for _, r := range rows {
@@ -228,8 +236,17 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 			removals = append(removals, r)
 		}
 	}
-	help := append(worktreeHelp(ticket, removals), "Run `jig status "+ticket+"` to confirm the ticket is fully green")
+	help := append(append(lead, worktreeHelp(ticket, removals)...), "Run `jig status "+ticket+"` to confirm the ticket is fully green")
 	return append(append(blocks, worktreeBlocks(removals)...), axi.Help(help...))
+}
+
+// readbackWords is what the report says of the pull request's title and body
+// against the render: matches, unknown, or what differs.
+func readbackWords(r verifydeliver.Readback) string {
+	if r.Match == journal.BodyDiffers {
+		return r.Match + " (the " + r.Differs + ")"
+	}
+	return r.Match
 }
 
 // renderBodies prints what `jig publish --body` rendered. A body for one repo
