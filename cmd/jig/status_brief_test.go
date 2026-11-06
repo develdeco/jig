@@ -122,4 +122,7 @@ func TestStatusBriefNamesAnAgentsApprovalAsAnAgents(t *testing.T) {
 	if want := "  approved_by: an agent (as " + a.By + ")\n"; !strings.Contains(out, want) {
 		t.Errorf("status lacks %q:\n%s", want, out)
 	}
+	if want := "  identity: " + a.By + "\n"; !strings.Contains(out, want) {
+		t.Errorf("status lacks the bare identity %q:\n%s", want, out)
+	}
 }
