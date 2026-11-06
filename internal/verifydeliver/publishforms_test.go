@@ -195,6 +195,29 @@ func TestPublishRecordPR(t *testing.T) {
 	}
 }
 
+// TestPublishRecordPRPostsTheReviewNotes: a pull request recorded with --pr
+// after --body carries the ticket's review notes as a comment, the same call
+// the bare publish makes, so a session that opened the pull request itself
+// never posts them by hand.
+func TestPublishRecordPRPostsTheReviewNotes(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	comments := reviewNotesCommentCalls(loggedGh(t, logFile))
+	if len(comments) != 1 {
+		t.Fatalf("--pr posted %d comment(s), want 1: the review notes", len(comments))
+	}
+	wantReviewNotesBodyFile(t, comments[0])
+}
+
 // TestPublishRecordPRThroughMerges: a pull request whose head is past the
 // reviewed head by merges git itself would have made (the target merged into
 // the branch since the round) is recorded, though its sha is not the reviewed
