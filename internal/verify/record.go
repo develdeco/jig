@@ -90,6 +90,10 @@ type recorder struct {
 	storeID string
 	ticket  string
 	journal func(journal.Line) error
+	// changed lists the files the branch changed against its target, repo
+	// relative; nil means none are known. A run holding more recordings than
+	// the collection keeps keeps the recordings of these files first.
+	changed func() []string
 }
 
 // evidenceTop is the evidence directory of the jig home, which every record
@@ -203,6 +207,7 @@ type recordingTag struct {
 	Flow     string `json:"flow"`
 	Step     int    `json:"step"`
 	Caption  string `json:"caption"`
+	File     string `json:"file"`
 }
 
 // dirEntry is one entry of a record directory, as pickRecordings reads it.
