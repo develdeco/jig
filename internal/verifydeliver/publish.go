@@ -1639,6 +1639,19 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if !verified {
 		outcome = "recorded:unverified"
 	}
+	// The body and the notes are rendered for the reviewed head before the
+	// pull request is read back, so the comparison is always against the
+	// render of the head the review covered: a body last rendered for an
+	// earlier round, or never rendered, would otherwise read as unknown or,
+	// held against its own stale self, as matching. Nothing in that render
+	// reads this repo's own pr line, which is written below.
+	var notes ReviewNotesReport
+	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
+		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
+			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
+			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
+		}
+	}
 	// The pull request is read back: it may have been opened with a body that
 	// is not the render (a What still to be written, say), and the person
 	// merging reads what the host has, not the store's file.
@@ -1649,16 +1662,6 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
-	}
-	// The notes posted are those rendered for the reviewed head: when the
-	// store's are an earlier round's, or were never rendered, render them
-	// again first.
-	var notes ReviewNotesReport
-	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
-		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
-			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
-			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
-		}
 	}
 	if notes.Status == "" {
 		notes = postReviewNotes(d, host, ticket, prURL, pt.lineRepo(), pt.notesName(), warn)

@@ -159,3 +159,55 @@ func TestLoadWhatForNeedsOneRepo(t *testing.T) {
 		t.Fatalf("loadWhatFor for one repo = %v, %v, want the bullets", got, err)
 	}
 }
+
+// TestPublishBareWithWhatShipsTheSessionsBullets: the bare `jig publish
+// --what FILE` stores the bullets in the ticket and opens the pull request
+// with a body whose ## What is those bullets, not the title placeholder.
+func TestPublishBareWithWhatShipsTheSessionsBullets(t *testing.T) {
+	t.Parallel()
+
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	if err := d.Store.CreateTicketRecord(fx.Ticket, store.Ticket{Title: "Recorded title"}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	gateToClean(t, fx, d)
+	logFile, _ := useGithubHost(t, &d, "", "")
+
+	const bullets = "- Readers get the change, not the build.\n- A second bullet.\n"
+	file := writeWhatFile(t, filepath.Join(t.TempDir(), "what.md"), bullets)
+	report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true, What: file})
+	if err != nil {
+		t.Fatalf("Publish --what: %v", err)
+	}
+
+	if got := report.What["fixture-repo"]; got.Status != WhatGiven || got.Request != "" {
+		t.Errorf("what = %+v, want given with nothing left to ask", got)
+	}
+	stored, err := os.ReadFile(whatStorePath(d.Store, fx.Ticket, "fixture-repo"))
+	if err != nil || strings.TrimSpace(string(stored)) != strings.TrimSpace(bullets) {
+		t.Errorf("the ticket's stored what = %q, %v, want the bullets given", stored, err)
+	}
+
+	var bodyFile string
+	for _, argv := range loggedGh(t, logFile) {
+		if len(argv) >= 2 && argv[0] == "pr" && argv[1] == "create" {
+			for i, arg := range argv {
+				if arg == "--body-file" && i+1 < len(argv) {
+					bodyFile = argv[i+1]
+				}
+			}
+		}
+	}
+	if bodyFile == "" {
+		t.Fatal("the fake gh logged no pr create with a --body-file")
+	}
+	data, err := os.ReadFile(bodyFile)
+	if err != nil {
+		t.Fatalf("read the body the pull request was opened with: %v", err)
+	}
+	want := "## What\n\n" + strings.TrimSpace(bullets) + "\n\n"
+	if body := string(data); !strings.Contains(body, want) || strings.Contains(body, "Recorded title") {
+		t.Errorf("the pull request was opened with body %q, want the session's bullets under ## What and not the title placeholder", body)
+	}
+}

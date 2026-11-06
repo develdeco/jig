@@ -146,6 +146,9 @@ func TestPublishRecordPRCannotReadBackWithoutAHostOrABody(t *testing.T) {
 		}
 	})
 
+	// A session that never ran --body and opened the pull request with its own
+	// body: --pr renders the body for the reviewed head first and holds the
+	// pull request against that.
 	t.Run("no rendered body", func(t *testing.T) {
 		t.Parallel()
 		fx, d, head := reviewedInTheClone(t)
@@ -155,10 +158,59 @@ func TestPublishRecordPRCannotReadBackWithoutAHostOrABody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PublishRecordPR: %v", err)
 		}
-		if report.Readback.Match != journal.BodyUnknown {
-			t.Errorf("readback = %+v, want unknown while nothing was rendered", report.Readback)
+		if report.Readback.Match != journal.BodyDiffers {
+			t.Errorf("readback = %+v, want differs: the host's canned body is not the render --pr just made", report.Readback)
+		}
+		if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != journal.BodyDiffers {
+			t.Errorf("the pr line says body_match %q, want %q", got, journal.BodyDiffers)
 		}
 	})
+
+	// A body last rendered for an earlier head: --pr refreshes it, so a pull
+	// request opened from the old render differs, and one carrying the
+	// refreshed render matches.
+	for _, tc := range []struct {
+		name  string
+		serve func(stale, fresh string) string
+		want  string
+	}{
+		{"a pull request opened from the earlier render", func(stale, _ string) string { return stale }, journal.BodyDiffers},
+		{"a pull request carrying the render for the reviewed head", func(_, fresh string) string { return fresh }, journal.BodyMatches},
+	} {
+		t.Run("render of an earlier head, "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, head := reviewedInTheClone(t)
+			_, addEnv := useGithubHost(t, &d, "", "")
+			rendered, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+			if err != nil {
+				t.Fatalf("PublishBody: %v", err)
+			}
+			path := filepath.Join(d.Store.Root, filepath.FromSlash(rendered.Repos[0].PRBody))
+			fresh, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const stale = "## What\n\n- The body as an earlier round rendered it.\n"
+			if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventPrBody, Commit: "0000000000000000000000000000000000000000"}); err != nil {
+				t.Fatal(err)
+			}
+			addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head,
+				"GH_STUB_BODY="+tc.serve(stale, string(fresh)), "GH_STUB_TITLE="+rendered.Repos[0].Title)
+			report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(string, ...any) {})
+			if err != nil {
+				t.Fatalf("PublishRecordPR: %v", err)
+			}
+			if report.Readback.Match != tc.want {
+				t.Errorf("readback = %+v, want %s", report.Readback, tc.want)
+			}
+			if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != tc.want {
+				t.Errorf("the pr line says body_match %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestPublishRecordPRIgnoresWhatTheHostMadeOfTheDemo: the render shows a
