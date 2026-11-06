@@ -387,8 +387,9 @@ func readTag(dir, name string) (recordingTag, error) {
 	invalid := func(why string) (recordingTag, error) {
 		return recordingTag{}, fmt.Errorf("tag %q is not valid: %s", name, why)
 	}
+	// A field this jig does not know is ignored, not refused: a later tag field
+	// (the harness writes what its own jig reads) never refuses a collection.
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tag); err != nil {
 		return invalid(tagProblem(err))
 	}
@@ -411,8 +412,8 @@ func readTag(dir, name string) (recordingTag, error) {
 }
 
 // tagProblem says in jig's own words what a tag decoder's error means. It
-// echoes nothing of the error's text, which for an unknown field is the
-// field's name as written (a tag may name anything, a host path included).
+// echoes nothing of the error's text, which can carry the tag's own bytes (a
+// host path included).
 func tagProblem(err error) string {
 	var syntax *json.SyntaxError
 	var wrongType *json.UnmarshalTypeError
@@ -423,14 +424,12 @@ func tagProblem(err error) string {
 		return fmt.Sprintf("it is not JSON (byte %d)", syntax.Offset)
 	case errors.As(err, &wrongType):
 		switch wrongType.Field {
-		case "scenario", "flow", "step", "caption":
+		case "scenario", "flow", "step", "caption", "file":
 			return fmt.Sprintf("field %q has the wrong type", wrongType.Field)
 		}
-		return "it is not a JSON object of scenario, flow, step and caption"
-	case strings.HasPrefix(err.Error(), "json: unknown field"):
-		return "it has a field other than scenario, flow, step and caption"
+		return "it is not a JSON object of scenario, flow, step, caption and file"
 	}
-	return "it is not a JSON object of scenario, flow, step and caption"
+	return "it is not a JSON object of scenario, flow, step, caption and file"
 }
 
 // nameDropped lists the first few dropped entries and counts the rest.

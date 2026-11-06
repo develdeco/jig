@@ -89,7 +89,7 @@ func TestRecorderRefusesTheWholeCollection(t *testing.T) {
 		want  string
 	}{
 		{"an empty recording", map[string]string{"good.svg": loginSVG, "empty.png": ""}, `file "empty.png" is empty`},
-		{"a tag that is not valid", map[string]string{"good.svg": loginSVG, "good.svg.json": `{"scenario":"x","colour":"red"}`}, `tag "good.svg.json" is not valid: it has a field other than`},
+		{"a tag that is not valid", map[string]string{"good.svg": loginSVG, "good.svg.json": `{"scenario":5}`}, `tag "good.svg.json" is not valid: field "scenario" has the wrong type`},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -205,12 +205,12 @@ func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 func TestRecorderNeverCommitsAHostPathOrAnUnboundedReason(t *testing.T) {
 	t.Parallel()
 	for name, tag := range map[string]func(dir string) string{
-		"a field named as the directory": func(dir string) string { return `{"` + asJSON(dir) + `":1}` },
-		"a huge field name":              func(string) string { return `{"` + strings.Repeat("k", maxTagBytes/2) + `":1}` },
-		"a value of the wrong type":      func(dir string) string { return `{"step":"` + asJSON(dir) + `"}` },
-		"a long scenario":                func(string) string { return `{"scenario":"` + strings.Repeat("s", maxScenarioBytes+1) + `"}` },
-		"a long flow":                    func(string) string { return `{"flow":"` + strings.Repeat("f", maxFlowBytes+1) + `"}` },
-		"a long caption":                 func(string) string { return `{"caption":"` + strings.Repeat("c", maxCaptionBytes+1) + `"}` },
+		"a value of the wrong type": func(dir string) string { return `{"step":"` + asJSON(dir) + `"}` },
+		"a long scenario":           func(string) string { return `{"scenario":"` + strings.Repeat("s", maxScenarioBytes+1) + `"}` },
+		"a long flow":               func(string) string { return `{"flow":"` + strings.Repeat("f", maxFlowBytes+1) + `"}` },
+		"a long caption":            func(string) string { return `{"caption":"` + strings.Repeat("c", maxCaptionBytes+1) + `"}` },
+		"a long file":               func(string) string { return `{"file":"` + strings.Repeat("f", maxFileBytes+1) + `"}` },
+		"a file of the wrong type":  func(dir string) string { return `{"file":["` + asJSON(dir) + `"]}` },
 	} {
 		tag := tag
 		t.Run(name, func(t *testing.T) {
@@ -577,7 +577,7 @@ func TestCollectRecordings(t *testing.T) {
 			t.Errorf("recordings = %v, want %s", got, want)
 		}
 	})
-	t.Run("a tag may set any of its fields", func(t *testing.T) {
+	t.Run("a tag may set any of its fields, and any field jig does not know is ignored", func(t *testing.T) {
 		t.Parallel()
 		for body, want := range map[string]journal.Recording{
 			`{}`:                             {Scenario: "a"},
@@ -599,17 +599,18 @@ func TestCollectRecordings(t *testing.T) {
 	t.Run("an invalid tag refuses the collection and names its file", func(t *testing.T) {
 		t.Parallel()
 		for body, why := range map[string]string{
-			``:                                  "it is empty or ends early",
-			`not json`:                          "it is not JSON",
-			`[]`:                                "it is not a JSON object",
-			`{"scenario":5}`:                    `field "scenario" has the wrong type`,
-			`{"step":"1"}`:                      `field "step" has the wrong type`,
-			`{"step":1.5}`:                      `field "step" has the wrong type`,
-			`{"step":-1}`:                       "step is negative",
-			`{"unknown":1}`:                     "it has a field other than scenario, flow, step and caption",
-			`{"scenario":"a"} {"scenario":"b"}`: "more than one JSON value",
-			`{"scenario":"a"}}`:                 "more than one JSON value",
-			`null x`:                            "more than one JSON value",
+			``:               "it is empty or ends early",
+			`not json`:       "it is not JSON",
+			`[]`:             "it is not a JSON object",
+			`{"scenario":5}`: `field "scenario" has the wrong type`,
+			`{"step":"1"}`:   `field "step" has the wrong type`,
+			`{"step":1.5}`:   `field "step" has the wrong type`,
+			`{"step":-1}`:    "step is negative",
+			`{"file":5}`:     `field "file" has the wrong type`,
+			`{"file":"` + strings.Repeat("f", maxFileBytes+1) + `"}`: "file is longer than 500 bytes",
+			`{"scenario":"a"} {"scenario":"b"}`:                      "more than one JSON value",
+			`{"scenario":"a"}}`:                                      "more than one JSON value",
+			`null x`:                                                 "more than one JSON value",
 			`{"caption":"` + strings.Repeat("x", maxTagBytes) + `"}`: "bytes",
 		} {
 			recs, _, err := collect(t, map[string]string{"a.png": "x", "a.png.json": body, "ok.svg": "y"})
