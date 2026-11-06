@@ -33,10 +33,10 @@ func promptContext(t *testing.T, fx *fixture.Fixture, e env, prompt string) stri
 	return got.Specific.Context
 }
 
-// TestAPromptNamingATicketHearsItsPhaseAndSkill: a prompt that names a store
+// TestObservePromptNamingATicketHearsItsPhaseAndSkill: a prompt that names a store
 // ticket, from a directory working on no ticket, hears the ticket's phase and
 // the skill for it once, and not the fresh-work note.
-func TestAPromptNamingATicketHearsItsPhaseAndSkill(t *testing.T) {
+func TestObservePromptNamingATicketHearsItsPhaseAndSkill(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})
 	e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
