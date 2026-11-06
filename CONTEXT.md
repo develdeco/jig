@@ -155,7 +155,7 @@ One run of a slice's oracle on a commit, in a detached worktree of the operator'
 _Avoid_: CI run, test run
 
 **Journal**:
-The append-only record of every claim, verification, question, round and publish of a ticket, in the store. Changelogs render from it; they are never authored by hand.
+The append-only record of every claim, verification, question, round and publish of a ticket, in the store. Changelogs render from it; they are never authored by hand. Each line, and each gate round's `report.yaml`, names the jig build that wrote it in a `jig` field.
 _Avoid_: log file, history
 
 **Ledger**:

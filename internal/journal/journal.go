@@ -105,6 +105,9 @@ type Line struct {
 	// PID is the process id a ledger line records (a spawned verify
 	// worker's, say).
 	PID int `json:"pid,omitempty"`
+	// Jig is the build stamp of the jig that wrote the line (Stamp): filled
+	// by Append when empty, and absent from a line an older jig wrote.
+	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
 }
@@ -194,6 +197,9 @@ func appendWithin(st *store.Store, ticket string, l Line, wait time.Duration) er
 		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	l.Ticket = ticket
+	if l.Jig == "" {
+		l.Jig = Stamp()
+	}
 	encoded, err := json.Marshal(l)
 	if err != nil {
 		return err
