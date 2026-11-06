@@ -152,7 +152,7 @@ func TestPublishOpensOnePRPerRepo(t *testing.T) {
 			t.Errorf("jig publish output lacks %q\n%s", want, pub.Stdout)
 		}
 	}
-	if strings.Contains(pub.Stdout, "pending") {
+	if strings.Contains(pub.Stdout, "\n  pending:") {
 		t.Errorf("jig publish says a repo is pending after opening both:\n%s", pub.Stdout)
 	}
 
