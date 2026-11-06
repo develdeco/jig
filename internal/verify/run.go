@@ -592,15 +592,15 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 
 	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
 	if oerr == nil {
+		x.keepBaseline(cmd, out)
 		line.Outcome = "pass"
 		x.res.State = journal.VerifyPass
 	} else {
-		x.res.Tail = failureTail(out, oerr)
-		x.res.Summary = oneLine(x.res.Tail)
+		x.res.Tail, x.res.Summary = x.failureOf(out, oerr, cmd)
 		x.res.Signature = outcome.Signature(x.r.Slice, outcome.CodeBug, x.res.Summary)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
-		x.logf("the oracle failed after %ds (limit %s); the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
+		x.logf("the oracle failed after %ds (limit %s); the lines a passing run did not print (when it kept a baseline), then the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
 	}
 	if err := x.journal(line); err != nil {
 		return err
@@ -672,4 +672,31 @@ func (x *run) superseded() bool {
 		return false
 	}
 	return Superseded(lines, x.r.Slice, x.sha, GitAncestry(x.d.Clone))
+}
+
+// baselinePath is where the latest pass of this run's oracle command keeps
+// its output lines.
+func (x *run) baselinePath(cmd string) string {
+	return home.BaselinePath(x.d.JigHome, x.d.Repo, x.sl.Workspace, cmd)
+}
+
+// keepBaseline stores the lines of a passing run's output as the command's
+// baseline, replacing the last one. A baseline that cannot be written only
+// costs the next failure its comparison, so it is logged and no more.
+func (x *run) keepBaseline(cmd, out string) {
+	path := x.baselinePath(cmd)
+	// Atomic, so a failing worker reading it meanwhile never sees half a file.
+	if err := store.AtomicWrite(path, []byte(baselineText(out))); err != nil {
+		x.logf("could not keep the baseline of the passing run: %v", err)
+	}
+}
+
+// failureOf is the tail and summary of a failed run, compared against the
+// command's baseline when a pass left one (failureOutput).
+func (x *run) failureOf(out string, oerr error, cmd string) (tail, summary string) {
+	var base map[string]bool
+	if data, err := os.ReadFile(x.baselinePath(cmd)); err == nil {
+		base = parseBaseline(string(data))
+	}
+	return failureOutput(out, oerr, base)
 }
