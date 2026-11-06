@@ -607,3 +607,20 @@ func TestPostReviewNotesSaysWhenTheNotesAreNotRendered(t *testing.T) {
 		t.Fatalf("report = %+v, want not posted, not rendered, with no file", report)
 	}
 }
+
+// TestPublishRecordPRNotesSayTheApprovalTheHeadHad: a pull request recorded
+// with --pr on a ticket with no publish-approved line carries review notes that
+// say it was published without a recorded approval.
+func TestPublishRecordPRNotesSayTheApprovalTheHeadHad(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if got := readNotes(t, d.Store, fx.Ticket, "review-notes.md"); !strings.Contains(got, "Published without a recorded approval\n") {
+		t.Errorf("review notes lack the no-approval line:\n%s", got)
+	}
+}
