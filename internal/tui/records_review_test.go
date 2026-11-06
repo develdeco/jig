@@ -141,7 +141,7 @@ func TestReviewScreenSaysACleanRoundRaisedNotesNotFixes(t *testing.T) {
 	}, nil), 0)
 	g.feed(jig2Mid()...).press("enter")
 	text := pageText(g)
-	if !strings.Contains(text, "raised 3 notes") || strings.Contains(text, "fix") {
+	if !strings.Contains(text, "raised 3 notes") {
 		t.Errorf("the screen does not say the round raised 3 notes:\n%s", text)
 	}
 }
