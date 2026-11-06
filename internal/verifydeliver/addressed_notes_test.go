@@ -131,10 +131,10 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 		return Finding{ID: id, File: id + ".go", Title: title, Risk: risk, Status: StatusNoted, RoutedAs: ActionNote}
 	}
 	writeFindingsYAMLAt(t, ticketDir, 1, findingsYAML{Findings: []Finding{
-		note("r1-f1", "one", RiskLow), note("r1-f2", "two", RiskLow), note("r1-f3", "three", RiskLow),
+		note("r1-f1", "one", RiskLow), note("r1-f2", "two", RiskLow), note("r1-f3", "three", RiskLow), note("r1-f4", "four", RiskMedium),
 	}})
 	writeFindingsYAMLAt(t, ticketDir, 2, findingsYAML{
-		Findings: []Finding{note("r1-f2", "two", RiskLow), note("r1-f3", "three, reworded", RiskLow)},
+		Findings: []Finding{note("r1-f2", "two", RiskLow), note("r1-f3", "three, reworded", RiskLow), note("r1-f4", "four", RiskLow)},
 		Cleared:  []string{"r1-f1"},
 	})
 	slices := []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f2"}}}
@@ -155,6 +155,18 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 	}
 	if o := byID["r1-f3"]; !o.continuedWithChange() || o.first.Title != "three" || o.finding.Title != "three, reworded" {
 		t.Errorf("r1-f3 = %+v, want its first and latest title", o)
+	}
+	// A continuation that keeps its title and changes only the risk still
+	// shows its history.
+	if o := byID["r1-f4"]; !o.continuedWithChange() || o.first.Risk != RiskMedium || o.finding.Risk != RiskLow {
+		t.Errorf("r1-f4 = %+v, want its first and latest risk", o)
+	}
+	st := &store.Store{Root: t.TempDir()}
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", 2, nil, "", outcomes, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := "  - History: medium at round 1: four; continued at round 2 as low: four\n"; !strings.Contains(readNotes(t, st, "T-1", "review-notes.md"), want) {
+		t.Errorf("review notes lack the risk-only history line %q", want)
 	}
 
 	slices = []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f1"}}}

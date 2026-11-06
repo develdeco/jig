@@ -155,12 +155,17 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 	}
 
 	// The decisions come from the triage lines, which Derive reads.
-	asks, _, err := verifydeliver.OutstandingAsks(st, ticket)
+	asks, notes, _, err := verifydeliver.OutstandingFindings(st, ticket)
 	if err != nil {
 		return f, nil, err
 	}
 	for _, a := range asks {
 		f.Asks = append(f.Asks, phase.Ask{ID: a.ID})
+	}
+	// A note a person kept or dismissed waits for the next round the way a
+	// decided ask does; a note nobody decided is only a record.
+	for _, n := range notes {
+		f.Notes = append(f.Notes, phase.Ask{ID: n.ID})
 	}
 
 	for _, b := range rec.BlockedBy {
