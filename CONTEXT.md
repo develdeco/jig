@@ -283,8 +283,12 @@ In a project of several repos, how a gate round names a file: `<repo>/<path>`, t
 _Avoid_: bare path (in a project of several repos)
 
 **Triage**:
-The human seam for a gate round's `ask` findings: `jig triage <ticket> <finding> keep|dismiss` records a decision, as `person` at a terminal and `agent` otherwise, and the next round applies what was decided. A decision is *pending* from its `triage` line until the next round closes, and *spent* after; `jig status` and `jig review context` show a pending decision on its ask beforehand, and the ask stays open until the round applies it. An ask nobody decided stays undecided - it is never defaulted - unless the round was opened with `--yes`, which keeps every fix and every ask with a full build target (a workspace and an oracle). Every decision is recorded and becomes eval gold.
+The human seam for a gate round's `ask` findings, and for a note a person takes up: `jig triage <ticket> <finding> keep|dismiss` records a decision, as `person` at a terminal and `agent` otherwise, and the next round applies what was decided. A decision is *pending* from its `triage` line until the next round closes, and *spent* after; `jig status` and `jig review context` show a pending decision on its ask beforehand, and the ask stays open until the round applies it. A kept note is applied the way a kept ask is, as an open finding with a fix slice of the next round, counted in the fix budget; a dismissed one reads dismissed by a human, and no default or `--yes` decides a note. An ask nobody decided stays undecided - it is never defaulted - unless the round was opened with `--yes`, which keeps every fix and every ask with a full build target (a workspace and an oracle). Every decision is recorded and becomes eval gold.
 _Avoid_: review comment triage, auto-dismiss
+
+**Finding outcome**:
+How a finding ended, as the review notes and the pull request body's count give it: *fixed* (a round cleared it, by a fix slice or an open finding's coverage), *addressed* (a note the risk floor routed whose file a later round changed and read without reporting it again: no slice fixed it), *dismissed* (a human's decision), *noted* (a record nothing changed: a reviewer's own `note`, or a routed one nobody addressed) or *asked*. A finding a later round continued with another title or risk keeps its first version in the notes.
+_Avoid_: resolved, closed
 
 **Gold**:
 A review-eval case's seeded truth: the findings a correct review must report and the traps it must not flag, both written into the case when it is built, not read off a review after the fact. A finding beyond it is labeled from a recorded human decision instead: kept, dismissed, or, when nobody decided, pending.
