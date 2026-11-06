@@ -4108,3 +4108,9 @@ A session that drafted a brief ran `jig validate <T> --check`, saw `valid: yes` 
 Chosen (2 decisions defaulted, 2026-11-06): `--check` prints two help lines. The first says to show the person the brief and ask about its decisions, naming how many are tagged `defaulted` when any are (`defaultedDecisions` counts the bullets of the brief's Decision section that carry the word), then to run `jig validate <T>` once they confirm, and that a prompt which said to go with the recommendations confirms for them. The second says whose approval the plain validate will record: an agent's, not a person's, off a terminal; the person's at one. The skill is unchanged, since it says the same and keeps its size.
 
 Rejected: refusing an agent's validate without a recorded hand-over (jig records and shows, never refuses, so the person's choice to hand the brief over stays theirs).
+
+## An edit before a slice is claimed hears to claim one (RUN-12)
+
+A session could edit a ticket's files with nothing claimed, or before the brief was approved, and hear nothing until a commit. Chosen (defaulted 2026-11-06): a core note (`internal/observe/unclaimed_edit.go`) at a tool event whose files lie inside the checkout of the ticket the branch binds: at the brief phase it says to finish the brief with intake and `jig validate` before changing code, at the build phase with no slice claimed it says to claim one and names the ready slices. The Ref names the ticket and which of the two (`unclaimed-edit:<ticket>:brief|claim`), so each is said once; it is advice, never enforced. A needs-input or failed slice counts as claimed, and an edit outside the checkout (the store, a scratch directory) says nothing.
+
+Rejected: refusing or holding the session, since jig records and shows, never refuses (ADR 0046's rule) and a person may have chosen to edit first.
