@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -737,7 +736,7 @@ func (x *run) keepBaseline(cmd, out string) {
 // command's baseline when a pass left one (failureOutput).
 func (x *run) failureOf(out string, oerr error, cmd string) (tail, summary string) {
 	var base map[string]bool
-	if data, err := os.ReadFile(x.baselinePath(cmd)); err == nil {
+	if data, err := fileshare.ReadFile(x.baselinePath(cmd)); err == nil {
 		base = parseBaseline(string(data))
 	}
 	return failureOutput(out, oerr, base)

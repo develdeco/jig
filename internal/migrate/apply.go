@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -180,7 +181,7 @@ func rewriteStoreDocs(st *store.Store, plan Plan) error {
 // schema 2 with plan's keys (RewriteProjectYAML), and writes it back.
 func rewriteProjectYAMLFile(st *store.Store, plan Plan) error {
 	path := filepath.Join(st.Root, "project.yaml")
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return err
 	}

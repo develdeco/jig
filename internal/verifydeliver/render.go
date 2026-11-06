@@ -458,7 +458,7 @@ func renderIntentSection(rep reportYAML, st *store.Store, ticket string) (string
 	}
 
 	intentPath := intentFilePath(st, ticket, rep.Intent.Source)
-	data, err := os.ReadFile(intentPath)
+	data, err := fileshare.ReadFile(intentPath)
 	if err != nil {
 		return "", false, fmt.Errorf("verifydeliver: render intent: read %s: %w", intentPath, err)
 	}
