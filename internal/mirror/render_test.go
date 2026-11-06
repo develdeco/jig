@@ -400,4 +400,11 @@ func TestTruncateSectionCutsOnARuneBoundary(t *testing.T) {
 	if got := truncateSection(short, note); got != short {
 		t.Fatalf("a section within the cap = %q, want it unchanged", got)
 	}
+	// An invalid byte in a section over the cap comes out as U+FFFD, as it
+	// reaches GitHub, so the cut body is valid UTF-8.
+	invalid := "\xff" + strings.Repeat("a", issueBodyByteCap)
+	got := truncateSection(invalid, note)
+	if !utf8.ValidString(got) || !strings.HasPrefix(got, "�aaa") || !strings.HasSuffix(got, noteBlock) {
+		t.Fatalf("an invalid section over the cap = %q..., want U+FFFD in place of the invalid byte", got[:min(len(got), 12)])
+	}
 }

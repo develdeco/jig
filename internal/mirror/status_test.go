@@ -146,7 +146,7 @@ func TestIsOpen(t *testing.T) {
 }
 
 // prFakeClient is a github.Client stub that hands out fixed pull requests
-// per "owner/repo", for FindPullRequests's own tests.
+// per "owner/repo", for findPullRequests's own tests.
 type prFakeClient struct {
 	byRepo map[string][]github.PullRequest
 	// byID simulates PullRequestsByIDs: a node id GitHub still resolves to a
@@ -216,9 +216,9 @@ func TestFindPullRequestsOrdersByRepoThenNumber(t *testing.T) {
 		{Remote: "git@github.com:example/first.git"},
 		{Remote: "git@github.com:example/second.git"},
 	}}
-	got, _, err := FindPullRequests(context.Background(), client, cfg, "jig/DEMO-1", nil)
+	got, _, err := findOne(client, cfg, "jig/DEMO-1", nil)
 	if err != nil {
-		t.Fatalf("FindPullRequests: %v", err)
+		t.Fatalf("findPullRequests: %v", err)
 	}
 	want := []PRRef{
 		{Owner: "example", Repo: "first", Number: 2, State: "MERGED"},
@@ -226,11 +226,11 @@ func TestFindPullRequestsOrdersByRepoThenNumber(t *testing.T) {
 		{Owner: "example", Repo: "second", Number: 1, State: "CLOSED"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("FindPullRequests = %+v, want %+v", got, want)
+		t.Fatalf("findPullRequests = %+v, want %+v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("FindPullRequests[%d] = %+v, want %+v", i, got[i], want[i])
+			t.Fatalf("findPullRequests[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
 }
@@ -250,13 +250,13 @@ func TestFindPullRequestsRefetchesARecordedOneTheHeadQueryMisses(t *testing.T) {
 	cfg := project.Config{Repos: []project.Repo{{Remote: "git@github.com:example/demo.git"}}}
 	recorded := []PRRef{{Owner: "example", Repo: "demo", Number: 99, NodeID: "PR_99"}}
 
-	got, _, err := FindPullRequests(context.Background(), client, cfg, "jig/T-34", recorded)
+	got, _, err := findOne(client, cfg, "jig/T-34", recorded)
 	if err != nil {
-		t.Fatalf("FindPullRequests: %v", err)
+		t.Fatalf("findPullRequests: %v", err)
 	}
 	want := PRRef{Owner: "example", Repo: "demo", Number: 99, NodeID: "PR_99", State: "MERGED"}
 	if len(got) != 1 || got[0] != want {
-		t.Fatalf("FindPullRequests = %+v, want [%+v] with its current state", got, want)
+		t.Fatalf("findPullRequests = %+v, want [%+v] with its current state", got, want)
 	}
 }
 
@@ -271,13 +271,13 @@ func TestFindPullRequestsKeepsARecordedOneGitHubNoLongerHas(t *testing.T) {
 	cfg := project.Config{Repos: []project.Repo{{Remote: "git@github.com:example/demo.git"}}}
 	recorded := []PRRef{{Owner: "example", Repo: "demo", Number: 3, NodeID: "PR_3"}}
 
-	got, gone, err := FindPullRequests(context.Background(), client, cfg, "jig/DEMO-1", recorded)
+	got, gone, err := findOne(client, cfg, "jig/DEMO-1", recorded)
 	if err != nil {
-		t.Fatalf("FindPullRequests: %v", err)
+		t.Fatalf("findPullRequests: %v", err)
 	}
 	want := PRRef{Owner: "example", Repo: "demo", Number: 3, NodeID: "PR_3"}
 	if len(got) != 1 || got[0] != want {
-		t.Fatalf("FindPullRequests = %+v, want it kept with no State, [%+v]", got, want)
+		t.Fatalf("findPullRequests = %+v, want it kept with no State, [%+v]", got, want)
 	}
 	wantGone := GoneRecordedPR{Owner: "example", Repo: "demo", Number: 3}
 	if len(gone) != 1 || gone[0] != wantGone {
@@ -303,14 +303,14 @@ func TestFindPullRequestsKeepsARecordedOneWithNoNodeID(t *testing.T) {
 		{Owner: "example", Repo: "demo", Number: 99, NodeID: "PR_99"},
 	}
 
-	got, gone, err := FindPullRequests(context.Background(), client, cfg, "jig/DEMO-1", recorded)
+	got, gone, err := findOne(client, cfg, "jig/DEMO-1", recorded)
 	if err != nil {
-		t.Fatalf("FindPullRequests: %v", err)
+		t.Fatalf("findPullRequests: %v", err)
 	}
 	wantNoID := PRRef{Owner: "example", Repo: "demo", Number: 3}
 	wantMerged := PRRef{Owner: "example", Repo: "demo", Number: 99, NodeID: "PR_99", State: "MERGED"}
 	if len(got) != 2 || got[0] != wantNoID || got[1] != wantMerged {
-		t.Fatalf("FindPullRequests = %+v, want [%+v %+v], the no-node_id entry kept with no State", got, wantNoID, wantMerged)
+		t.Fatalf("findPullRequests = %+v, want [%+v %+v], the no-node_id entry kept with no State", got, wantNoID, wantMerged)
 	}
 	if len(gone) != 0 {
 		t.Fatalf("gone = %+v, want none: a no-node_id entry is never sent to PullRequestsByIDs", gone)
@@ -326,11 +326,74 @@ func TestFindPullRequestsDropsARecordedOneTheQueryFinds(t *testing.T) {
 	cfg := project.Config{Repos: []project.Repo{{Remote: "git@github.com:example/demo.git"}}}
 	recorded := []PRRef{{Owner: "example", Repo: "demo", Number: 3, State: "OPEN"}}
 
-	got, _, err := FindPullRequests(context.Background(), client, cfg, "jig/DEMO-1", recorded)
+	got, _, err := findOne(client, cfg, "jig/DEMO-1", recorded)
 	if err != nil {
-		t.Fatalf("FindPullRequests: %v", err)
+		t.Fatalf("findPullRequests: %v", err)
 	}
 	if len(got) != 1 || got[0].State != "MERGED" {
-		t.Fatalf("FindPullRequests = %+v, want the query's own (fresher) state, not duplicated", got)
+		t.Fatalf("findPullRequests = %+v, want the query's own (fresher) state, not duplicated", got)
 	}
+}
+
+// findOne is findPullRequests for one ticket's branch and recorded pull
+// requests, the shape the single-ticket tests above ask in.
+func findOne(client github.Client, cfg project.Config, branch string, recorded []PRRef) ([]PRRef, []GoneRecordedPR, error) {
+	found, err := findPullRequests(context.Background(), client, cfg, []prLookup{{branch: branch, recorded: recorded}})
+	if err != nil {
+		return nil, nil, err
+	}
+	return found[0].prs, found[0].gone, nil
+}
+
+// TestFindPullRequestsKeepsEachTicketsOwnInOneBatch checks a batch of
+// lookups hands each ticket its own pull requests: its own head matches,
+// then its own recorded entries re-checked by id, with a gone one reported
+// against it alone, all from one head query and one by-id query.
+func TestFindPullRequestsKeepsEachTicketsOwnInOneBatch(t *testing.T) {
+	client := &fakeClient{
+		prs: map[string][]github.PullRequest{
+			"example/demo@1-first":  {{Number: 7, NodeID: "PR_7", State: "OPEN"}},
+			"example/demo@2-second": {{Number: 8, NodeID: "PR_8", State: "CLOSED"}},
+		},
+		prsByID: map[string]github.PullRequest{
+			"PR_3": {Number: 3, NodeID: "PR_3", State: "MERGED", Owner: "example", Repo: "demo"},
+		},
+	}
+	cfg := project.Config{Repos: []project.Repo{{Remote: "https://github.com/example/demo"}}}
+	found, err := findPullRequests(context.Background(), client, cfg, []prLookup{
+		{branch: "1-first", recorded: []PRRef{{Owner: "example", Repo: "demo", Number: 4, NodeID: "PR_4"}}},
+		{branch: "2-second", recorded: []PRRef{{Owner: "example", Repo: "demo", Number: 3, NodeID: "PR_3"}}},
+	})
+	if err != nil {
+		t.Fatalf("findPullRequests: %v", err)
+	}
+	wantFirst := []PRRef{
+		{Owner: "example", Repo: "demo", Number: 7, NodeID: "PR_7", State: "OPEN"},
+		{Owner: "example", Repo: "demo", Number: 4, NodeID: "PR_4"},
+	}
+	wantSecond := []PRRef{
+		{Owner: "example", Repo: "demo", Number: 8, NodeID: "PR_8", State: "CLOSED"},
+		{Owner: "example", Repo: "demo", Number: 3, NodeID: "PR_3", State: "MERGED"},
+	}
+	if len(found) != 2 || !equalPRRefs(found[0].prs, wantFirst) || !equalPRRefs(found[1].prs, wantSecond) {
+		t.Fatalf("findPullRequests = %+v, want the first ticket %+v and the second %+v", found, wantFirst, wantSecond)
+	}
+	if len(found[0].gone) != 1 || found[0].gone[0].Number != 4 || len(found[1].gone) != 0 {
+		t.Fatalf("gone = %+v and %+v, want #4 against the first ticket only", found[0].gone, found[1].gone)
+	}
+	if client.reads["PullRequestsByHeads"] != 1 || client.reads["PullRequestsByIDs"] != 1 {
+		t.Fatalf("reads = %v, want one head query and one by-id query for both tickets", client.reads)
+	}
+}
+
+func equalPRRefs(a, b []PRRef) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

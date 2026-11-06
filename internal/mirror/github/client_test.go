@@ -533,6 +533,26 @@ func TestFetchIssuesLeavesOutAGoneIssue(t *testing.T) {
 	}
 }
 
+// TestBatchedReadsRefuseAShortAnswer checks FetchIssues and
+// ItemFieldValues refuse an answer with fewer nodes than ids asked for,
+// since each answer is matched to its id by order: a short list would hand
+// one id another's state.
+func TestBatchedReadsRefuseAShortAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"nodes":[{"title":"Only one","fieldValues":{"nodes":[]}}]}}`))
+	}))
+	defer srv.Close()
+
+	c := newFastClient(srv.URL, "test-token")
+	if _, err := c.FetchIssues(context.Background(), []string{"ISSUE_1", "ISSUE_2"}); err == nil {
+		t.Fatal("FetchIssues: want an error for one node answered for two ids, got nil")
+	}
+	if _, err := c.ItemFieldValues(context.Background(), []string{"ITEM_1", "ITEM_2"}); err == nil {
+		t.Fatal("ItemFieldValues: want an error for one node answered for two ids, got nil")
+	}
+}
+
 // TestUpdateIssueCloseReopenAndRemoveSubIssueSendTheirMutations checks each
 // mutation posts the right shape with the node ids it was given.
 func TestUpdateIssueCloseReopenAndRemoveSubIssueSendTheirMutations(t *testing.T) {

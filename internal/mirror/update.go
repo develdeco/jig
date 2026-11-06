@@ -129,12 +129,6 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		if rerr != nil {
 			return nil, nil, nil, nil, rerr
 		}
-		if rec.NodeID == "" {
-			// GitHub refuses an empty id, as it refused this record before reads
-			// were batched; a batch would read it as a gone issue and open a
-			// second one instead.
-			return nil, nil, nil, nil, fmt.Errorf("mirror: %s's record names no issue node_id", it.what())
-		}
 		p := pending{it: it, rec: rec, lookup: -1}
 		if it.kind == "ticket" {
 			branch, berr := st.TicketBranch(it.id, target)
@@ -213,6 +207,13 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 		}
 
+		if rec.NodeID == "" {
+			// FetchIssues leaves an empty id out, as it would a gone issue's, so
+			// this record would open a second issue; GitHub refused the empty id
+			// itself before reads were batched. A skipped item never got this
+			// far, then or now.
+			return nil, nil, nil, nil, fmt.Errorf("mirror: %s's record names no issue node_id", what)
+		}
 		cur, onGitHub := curByNodeID[rec.NodeID]
 		if !onGitHub {
 			owner, repo, serr := splitRepo(rec.Repo)

@@ -25,54 +25,47 @@ type PRRef struct {
 	State string
 }
 
-// FindPullRequests returns ticket's pull requests (brief.md#Status and pull
-// requests): for each of cfg.Repos whose GitHub owner and repo are known
-// (repohost.OwnerRepo), every pull request in any state whose head is
-// exactly branch, in the project's repo order and by number, then each of
-// recorded that none of those queries turned up (matched by owner, repo and
-// number), re-fetched by node id for its current state and repository
-// (PullRequestsByIDs) and dropped when GitHub no longer has it - a recorded
-// prs: entry carries no state of its own (record.go's prRecord), so a merged
-// pull request whose head branch GitHub has since deleted would otherwise
-// be listed with no state and never count toward Done. A sync never
-// deletes store data it cannot check (the human's r9-f1 decision): a
-// recorded entry with no node_id (hand-edited, or written by a bridge
-// version that omitted it; brief.md#Records says records the bridge wrote
-// are adopted as they are) stays in the result with no State, listed in
-// the body and kept in the record exactly as before this re-check existed
-// - it is only left out of the PullRequestsByIDs lookup, rather than sent
-// as an empty id. An entry PullRequestsByIDs does send but GitHub answers
-// NOT_FOUND for (r9-f2: that can mean the token lost access, not that the
-// pull request is gone) stays the same way too, with one warning returned
-// in gone so the caller can print it and the operator can remove the
-// entry by hand if it really is gone.
-func FindPullRequests(ctx context.Context, client github.Client, cfg project.Config, branch string, recorded []PRRef) ([]PRRef, []GoneRecordedPR, error) {
-	found, err := findPullRequests(ctx, client, cfg, []prLookup{{branch: branch, recorded: recorded}})
-	if err != nil {
-		return nil, nil, err
-	}
-	return found[0].prs, found[0].gone, nil
-}
-
-// prLookup is one ticket's FindPullRequests question: its branch and the
-// pull requests its record lists.
+// prLookup is one ticket's question for findPullRequests: its branch and
+// the pull requests its record lists.
 type prLookup struct {
 	branch   string
 	recorded []PRRef
 }
 
-// prsFound is one prLookup's answer: FindPullRequests' pull requests and
-// gone recorded entries for that ticket.
+// prsFound is one prLookup's answer: the ticket's pull requests, and the
+// recorded ones GitHub answered NOT_FOUND for.
 type prsFound struct {
 	prs  []PRRef
 	gone []GoneRecordedPR
 }
 
-// findPullRequests answers FindPullRequests for every one of lookups at
-// once, each answer what FindPullRequests alone would return for it, with
-// one PullRequestsByHeads per repo and one PullRequestsByIDs for every
-// lookup's unfound recorded entries: a sync's pull request reads stay a few
-// queries however many tickets it covers.
+// findPullRequests returns each lookup's ticket's pull requests
+// (brief.md#Status and pull requests): for each of cfg.Repos whose GitHub
+// owner and repo are known (repohost.OwnerRepo), every pull request in any
+// state whose head is exactly the lookup's branch, in the project's repo
+// order and by number, then each of its recorded entries that none of those
+// queries turned up (matched by owner, repo and number), re-fetched by node
+// id for its current state and repository (PullRequestsByIDs) and dropped
+// when GitHub no longer has it - a recorded prs: entry carries no state of
+// its own (record.go's prRecord), so a merged pull request whose head branch
+// GitHub has since deleted would otherwise be listed with no state and
+// never count toward Done. A sync never deletes store data it cannot check
+// (the human's r9-f1 decision): a recorded entry with no node_id
+// (hand-edited, or written by a bridge version that omitted it;
+// brief.md#Records says records the bridge wrote are adopted as they are)
+// stays in the result with no State, listed in the body and kept in the
+// record exactly as before this re-check existed - it is only left out of
+// the PullRequestsByIDs lookup, rather than sent as an empty id. An entry
+// PullRequestsByIDs does send but GitHub answers NOT_FOUND for (r9-f2: that
+// can mean the token lost access, not that the pull request is gone) stays
+// the same way too, with one warning returned in gone so the caller can
+// print it and the operator can remove the entry by hand if it really is
+// gone.
+//
+// Every lookup is answered at once, with one PullRequestsByHeads per repo
+// and one PullRequestsByIDs for every lookup's unfound recorded entries, so
+// a sync's pull request reads stay a few queries however many tickets it
+// covers.
 func findPullRequests(ctx context.Context, client github.Client, cfg project.Config, lookups []prLookup) ([]prsFound, error) {
 	type repoPRs struct {
 		owner, repo string
@@ -159,7 +152,7 @@ func findPullRequests(ctx context.Context, client github.Client, cfg project.Con
 }
 
 // GoneRecordedPR is one recorded pull request PullRequestsByIDs could not
-// find (GitHub answered NOT_FOUND for its node id). FindPullRequests keeps
+// find (GitHub answered NOT_FOUND for its node id). findPullRequests keeps
 // it listed and recorded anyway (r9-f2) and reports it here, Ticket left
 // for the caller to fill in, so the caller can print one warning naming
 // the ticket, Owner, Repo and Number, since NOT_FOUND can mean the token

@@ -208,7 +208,7 @@ func placeTicketPRs(ctx context.Context, client github.Client, proj github.Proje
 		case strings.EqualFold(pr.State, "OPEN"):
 			prStatus = "In review"
 		case pr.State == "":
-			// A recorded entry FindPullRequests could not re-check by id
+			// A recorded entry findPullRequests could not re-check by id
 			// (r9-f1/r9-f2: no node_id, or GitHub answered NOT_FOUND) carries
 			// no State at all. It is listed in the body but never placed,
 			// and is kept in the record below rather than dropped: a sync

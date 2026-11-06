@@ -521,6 +521,12 @@ func truncateSection(section, note string) string {
 	if budget < 0 {
 		budget = 0
 	}
+	if !utf8.ValidString(section) {
+		// Each invalid byte becomes U+FFFD, as encoding/json turns it on its
+		// way to GitHub, so the cut body jig hashes is the one GitHub hands
+		// back and no later sync reads the difference as an edit.
+		section = string([]rune(section))
+	}
 	// The longest prefix within budget that ends on a rune boundary: step
 	// back from the budget to the nearest rune start, rather than trimming a
 	// rune at a time and re-encoding the rest, which is quadratic in how far
