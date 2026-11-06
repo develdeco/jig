@@ -77,6 +77,9 @@ type Line struct {
 	Summary   string `json:"summary,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
+	// Approval is the publish approval a pr line's head had when the pull
+	// request was recorded: "person", "agent" or "none".
+	Approval string `json:"approval,omitempty"`
 	// Unattended is set on a claim line made without a person watching.
 	Unattended bool `json:"unattended,omitempty"`
 	// Branch and URL name a branch or a link the line is about.

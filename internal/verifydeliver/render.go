@@ -1112,8 +1112,9 @@ func reviewNotesFile(repo string, several bool) string {
 // 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
 // findings.yaml; the one thing this function reads itself is the brief's
-// approval, for the line on who approved it.
-func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
+// approval, for the line on who approved it; approvalLine, the line on who
+// approved the publish, comes from the caller ("" for none).
+func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1124,6 +1125,9 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, round
 	}
 	if line != "" {
 		b.WriteString(line + "\n\n")
+	}
+	if approvalLine != "" {
+		b.WriteString(approvalLine + "\n\n")
 	}
 
 	if lines := reviewerLines(rounds); len(lines) > 0 {
