@@ -102,7 +102,7 @@ func (h *handler) editsInCheckout() bool {
 	if top, err := gitx.TopLevel(cwd); err == nil {
 		root = top
 	}
-	root = pathKey(root)
+	root = pathKey(resolved(root))
 	for _, f := range h.ev.Files {
 		if f == "" {
 			continue
@@ -110,7 +110,7 @@ func (h *handler) editsInCheckout() bool {
 		if !filepath.IsAbs(f) && !strings.HasPrefix(f, "/") && !strings.HasPrefix(f, `\`) {
 			f = filepath.Join(cwd, f)
 		}
-		if k := pathKey(f); k == root || strings.HasPrefix(k, root+"/") {
+		if k := pathKey(resolved(f)); k == root || strings.HasPrefix(k, root+"/") {
 			return true
 		}
 	}
@@ -125,4 +125,20 @@ func pathKey(p string) string {
 		k = strings.ToLower(k)
 	}
 	return k
+}
+
+// resolved is p with symlinks resolved (macOS temp directories sit under /var,
+// a link to /private/var), so a path git reports and one a tool wrote compare
+// equal. A path that does not exist yet keeps its cleaned form, with its
+// deepest existing directory resolved.
+func resolved(p string) string {
+	p = filepath.Clean(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	dir, base := filepath.Split(p)
+	if dir == "" || dir == p {
+		return p
+	}
+	return filepath.Join(resolved(dir), base)
 }
