@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // Deps is what a verification works with.
@@ -517,9 +518,9 @@ func (x *run) checkCheckout() string {
 	return ""
 }
 
-// startSHA is the base the commit is held to descend from, and the one the
-// branch's changed files are read against: the ticket's recorded start sha, else
-// the merge base with origin's target (startSHA), "" when neither is known.
+// startSHA is the base the commit is held to descend from: the ticket's
+// recorded start sha, else the merge base with origin's target (startSHA), ""
+// when neither is known.
 func (x *run) startSHA() string {
 	d := x.d
 	var recorded string
@@ -531,11 +532,14 @@ func (x *run) startSHA() string {
 	return startSHA(d.Clone, x.sha, recorded, d.Target)
 }
 
-// changedFiles lists the files the commit changed since that base, as the
-// gate's scope diff reads them (added, modified or type-changed); nil when the
+// changedFiles lists the files the commit changed against the base the gate's
+// full scope uses (merge-base of origin/<target> and the commit, the start sha
+// only when that fails: verifydeliver.ResolveFullBase), as the scope diff reads
+// them (added, modified or type-changed). The start sha alone would list, after
+// an integration merge, every file the target changed since it too. nil when the
 // base is unknown or the diff fails, which ranks every recording alike.
 func (x *run) changedFiles() []string {
-	start := x.startSHA()
+	start := x.changedBase()
 	if start == "" {
 		return nil
 	}
@@ -544,6 +548,20 @@ func (x *run) changedFiles() []string {
 		return nil
 	}
 	return files
+}
+
+// changedBase is that base: the gate scope's when the repo and target are known,
+// else startSHA's.
+func (x *run) changedBase() string {
+	d := x.d
+	if d.Repo == "" || d.Target == "" {
+		return x.startSHA()
+	}
+	base, err := verifydeliver.ResolveFullBase(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, x.sha)
+	if err != nil {
+		return x.startSHA()
+	}
+	return base
 }
 
 // bringUpEnv brings the slice's env class up in the worktree when it names
