@@ -434,7 +434,17 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	// computes is exactly what an unattended round records - the fate a
 	// human triage step never got to change - which is what a review-
 	// quality measurement needs, not jig's own triage defaults.
-	cleared, clerr := verifydeliver.ClearingAfterTriage(fold.Known, reported, result.ReviewedPaths, existsAtHead)
+	// The scope diff of a later round is what the round's patch changed: the
+	// files a noted finding must see changed to read as addressed.
+	var changed []string
+	if prevHead != "" {
+		var cerr error
+		changed, cerr = gitx.DiffNameOnly(repoDir, prevHead, head, "AMT")
+		if cerr != nil {
+			return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: diff changed files: %w", c.Name, n, cerr)
+		}
+	}
+	cleared, clerr := verifydeliver.ClearingAfterTriage(fold.Known, reported, result.ReviewedPaths, changed, existsAtHead)
 	if clerr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: clearing: %w", c.Name, n, clerr)
 	}

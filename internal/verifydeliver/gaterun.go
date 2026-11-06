@@ -491,7 +491,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if err != nil {
 			return GateReport{}, err
 		}
-		outstanding := outstandingAsks(cum, reported)
+		outstanding := append(outstandingAsks(cum, reported), outstandingNotes(cum, reported)...)
 		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, info.Triage, files, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
 		if err != nil {
 			return GateReport{}, err
@@ -504,7 +504,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if report.BudgetParked > 0 {
 			report.BudgetUsed, report.BudgetLimit = budgetUsed, *gateCfg.FixRounds
 		}
-		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, files.atHead)
+		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, round.Review.Changed, files.atHead)
 		if err != nil {
 			return GateReport{}, err
 		}

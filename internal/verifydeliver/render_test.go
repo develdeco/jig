@@ -844,7 +844,7 @@ func TestRenderVerificationSectionNamesOraclesAndCountsFindings(t *testing.T) {
 	if strings.Contains(got, "fixture-repo") {
 		t.Fatalf("renderVerificationSection = %q, want no repo name under Oracles", got)
 	}
-	want := "Findings: 2 fixed, 1 dismissed, 1 noted, 1 asked. See the pull request's first comment for detail.\n"
+	want := "Findings: 2 fixed, 0 addressed, 1 dismissed, 1 noted, 1 asked. See the pull request's first comment for detail.\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("renderVerificationSection = %q, want it to contain %q", got, want)
 	}
