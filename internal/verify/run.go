@@ -14,6 +14,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -504,13 +505,7 @@ func (x *run) checkCheckout() string {
 	if dirty := dirtyTree(x.dir); dirty != "" {
 		return "the checkout of " + short(x.sha) + " is not clean, so an oracle run on it would say nothing of the commit: " + oneLine(dirty)
 	}
-	var recorded string
-	if d.Repo != "" {
-		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
-			recorded = string(data)
-		}
-	}
-	start := startSHA(d.Clone, x.sha, recorded, d.Target)
+	start := x.startSHA()
 	if start == "" {
 		return ""
 	}
@@ -521,6 +516,52 @@ func (x *run) checkCheckout() string {
 		return "the commit does not verify: " + reason
 	}
 	return ""
+}
+
+// startSHA is the base the commit is held to descend from: the ticket's
+// recorded start sha, else the merge base with origin's target (startSHA), ""
+// when neither is known.
+func (x *run) startSHA() string {
+	d := x.d
+	var recorded string
+	if d.Repo != "" {
+		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
+			recorded = string(data)
+		}
+	}
+	return startSHA(d.Clone, x.sha, recorded, d.Target)
+}
+
+// changedFiles lists the files the commit changed against the base the gate's
+// full scope uses (merge-base of origin/<target> and the commit, the start sha
+// only when that fails: scopebase.Resolve), as the scope diff reads
+// them (added, modified or type-changed). The start sha alone would list, after
+// an integration merge, every file the target changed since it too. nil when the
+// base is unknown or the diff fails, which ranks every recording alike.
+func (x *run) changedFiles() []string {
+	start := x.changedBase()
+	if start == "" {
+		return nil
+	}
+	files, err := gitx.DiffNameOnly(x.dir, start, x.sha, "AMT")
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
+// changedBase is that base: the gate scope's when the repo and target are known,
+// else startSHA's.
+func (x *run) changedBase() string {
+	d := x.d
+	if d.Repo == "" || d.Target == "" {
+		return x.startSHA()
+	}
+	base, err := scopebase.Resolve(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, x.sha)
+	if err != nil {
+		return x.startSHA()
+	}
+	return base
 }
 
 // bringUpEnv brings the slice's env class up in the worktree when it names
@@ -576,7 +617,7 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 // leaves the slice building.
 func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 	d := x.d
-	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal}
+	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
 
 	limit := m.OracleLimit()

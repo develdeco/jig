@@ -41,6 +41,7 @@ func (a geminiShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "BeforeAgent":
 		ev.Kind = KindPrompt
+		ev.Prompt = p.str("prompt")
 	case "AfterTool":
 		ev.Kind = KindTool
 		ev.Tool = p.str("tool_name")

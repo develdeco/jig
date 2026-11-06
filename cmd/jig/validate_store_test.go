@@ -420,3 +420,129 @@ func TestUnconnectedAdvisories(t *testing.T) {
 		})
 	}
 }
+
+// appendToBrief appends text to the fixture ticket's brief.md. A new last
+// section leaves the hashes the slices cite unchanged.
+func appendToBrief(t *testing.T, storeDir, ticket, text string) {
+	t.Helper()
+	st, err := store.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(st.TicketDir(ticket), "brief.md")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(text); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const twoDefaultedDecisions = "\n## Decision\n\n- **First** (defaulted 2026-11-06): a.\n- **Second** (defaulted 2026-11-06): b.\n- **Third** (user-confirmed 2026-11-06): c.\n"
+
+// TestValidateCheckSaysToShowTheBriefAndAsk: --check tells the session to show
+// the person the brief and ask about its decisions, naming how many are tagged
+// defaulted, and says whose approval the plain validate will record: an
+// agent's off a terminal, the person's at one. Nothing is refused or recorded.
+func TestValidateCheckSaysToShowTheBriefAndAsk(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		e    func(env) env
+		want []string
+		not  []string
+	}{
+		{"off a terminal", func(e env) env { return e },
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "go with the recommendations", "will record an agent's approval, not a person's"},
+			nil},
+		{"at a terminal", env.atTerminal,
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "the approval will be the person's"},
+			[]string{"an agent's approval"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			fx := newFixture(t, fixture.Opts{})
+			appendToBrief(t, fx.StoreDir, fx.Ticket, twoDefaultedDecisions)
+			out, code := runMain(t, c.e(testEnv(fx.Home)), "", "validate", fx.Ticket, "--check", "--store", fx.StoreDir)
+			if code != 0 || !strings.HasPrefix(out, "valid: yes\napproval:\n  result: "+approvalChecked+"\n") {
+				t.Fatalf("validate --check: exit %d, want valid with no approval recorded\n%s", code, out)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output lacks %q\n%s", w, out)
+				}
+			}
+			for _, n := range c.not {
+				if strings.Contains(out, n) {
+					t.Errorf("output has %q\n%s", n, out)
+				}
+			}
+			if !strings.Contains(out, "jig validate "+fx.Ticket) {
+				t.Errorf("output does not name `jig validate %s`\n%s", fx.Ticket, out)
+			}
+		})
+	}
+}
+
+// TestValidateCheckWithNoDefaultedTagNamesNoCount: a brief whose decisions are
+// all user-confirmed, or that has none, still says to show it and ask, with no
+// count of defaulted ones.
+func TestValidateCheckWithNoDefaultedTagNamesNoCount(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	appendToBrief(t, fx.StoreDir, fx.Ticket, "\n## Decision\n\n- **Only** (user-confirmed 2026-11-06): a.\n")
+	out, code := runMain(t, testEnv(fx.Home), "", "validate", fx.Ticket, "--check", "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "Show the person the brief and ask about its decisions") {
+		t.Fatalf("validate --check: exit %d, want the ask line\n%s", code, out)
+	}
+	if strings.Contains(out, "defaulted") {
+		t.Errorf("output names defaulted decisions though the brief has none\n%s", out)
+	}
+}
+
+// TestDefaultedDecisions counts the decisions tagged defaulted in every form
+// the store's briefs write the tag, and none of the prose that explains it.
+func TestDefaultedDecisions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		brief string
+		want  int
+	}{
+		{"bold bullets under Decision", "# T-1: x\n\n## Decision\n\n- **A** (defaulted 2026-11-06): a.\n- **B** (user-confirmed 2026-11-06): b.\n- **C** (defaulted 2026-11-06): c.\n", 2},
+		{"numbered list, tag on a wrapped line", "# T-1: x\n\n## Decisions\n\n1. The title is the name,\n   cut at a word.\n   (defaulted 2026-11-03)\n2. Another.\n   (user-confirmed)\n3. A third. (defaulted 2026-11-03\n   (owner: proceed with the plan))\n", 2},
+		{"decisions under Context and topic sections", "# T-1: x\n\n## Context\n\n- Errors carry a code. (defaulted)\n\n## Wire format\n\n- A key. (defaulted 2026-11-02 (owner: proceed with the plan))\n\nA paragraph decision. (defaulted)\n", 3},
+		{"italic tag and a bare date", "# T-1: x\n\n## Decision\n\n- It stays. _defaulted 2026-11-03 (owner: take them)_\n- It moves. Answer, defaulted 2026-11-03 (owner: x).\n", 2},
+		{"tag among other words in the parenthesis", "# T-1: x\n\n## Decision\n\n- One. (defaulted; the form defaulted 2026-10-09)\n- Two. (defaulted, as the bridge)\n- Three. (user-confirmed 2026-11-06; wording defaulted)\n", 3},
+		{"prose that explains the tag", "# T-1: x\n\nEvery open question is marked \"defaulted 2026-11-03\".\n\nThe intake skill tags every decision `user-confirmed` or `defaulted`.\n\n- A fact about defaulted words, tagged defaulted above.\n\n```\n- fenced (defaulted)\n```\n", 0},
+		{"no decisions", "# T-1: x\n\n## Goal\n\nx\n", 0},
+	}
+	for _, c := range cases {
+		if got := defaultedDecisions([]byte(c.brief)); got != c.want {
+			t.Errorf("%s: defaultedDecisions = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCheckNextDefaultedCount words the count of defaulted decisions: none
+// names none; one and many each say how many.
+func TestCheckNextDefaultedCount(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		n    int
+		want string
+	}{{0, ""}, {1, "(1 is tagged defaulted)"}, {3, "(3 are tagged defaulted)"}} {
+		ask := checkNext("T-1", c.n, true)[0]
+		if c.want == "" {
+			if strings.Contains(ask, "defaulted") {
+				t.Errorf("%d defaulted: %q names a count", c.n, ask)
+			}
+			continue
+		}
+		if !strings.Contains(ask, c.want) {
+			t.Errorf("%d defaulted: %q lacks %q", c.n, ask, c.want)
+		}
+	}
+}

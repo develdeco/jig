@@ -67,6 +67,9 @@ func (a copilotShape) Parse(data []byte) (Event, error) {
 	default:
 		return Event{}, nil
 	}
+	if ev.Kind == KindPrompt {
+		ev.Prompt = p.str("prompt")
+	}
 	if ev.Kind == KindTool {
 		ev.Tool = p.str("toolName", "tool_name")
 		args := p.object("toolArgs", "tool_input", "toolInput")

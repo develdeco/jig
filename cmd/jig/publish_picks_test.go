@@ -130,7 +130,9 @@ func TestPublishPicksTheBuildsRecordingsThroughMain(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{
-		"## Demo\n\nThe greeting reads casual.\n\n### Greeting\n\n- ![Greet reads casual](./rec-1.svg)\n\n## Verification",
+		// The fixture recorded at a commit before the head, so the caption says so.
+		"## Demo\n\nThe greeting reads casual.\n\n### Greeting\n\n- ![Greet reads casual (recorded at ",
+		")](./rec-1.svg)\n\n## Verification",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("pr body lacks %q:\n%s", want, text)

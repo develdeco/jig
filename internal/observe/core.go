@@ -9,6 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/locate"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
@@ -39,6 +40,10 @@ type Deps struct {
 	// session is given when it starts. The sections of that text are cmd/jig
 	// to know.
 	Here func(locate.Where, *store.Store) (string, error)
+	// Derive derives a ticket's phase: the phase note a prompt that names
+	// the ticket hears is built from it. The derivation is cmd/jig to know;
+	// nil means no phase notes.
+	Derive func(*store.Store, string) (phase.Ticket, error)
 	// Sources are the note sources to call; nil means the registered ones.
 	Sources []NamedSource
 	// SetEnv sets variables for the shell commands the session runs later,

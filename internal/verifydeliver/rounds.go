@@ -62,7 +62,11 @@ type RoundRecord struct {
 	// the earlier asks whose decision it recorded, which are not its findings,
 	// so a clean round that closed an ask raised none.
 	Findings []Finding
-	// Fix, Ask and Note count Findings by the reviewer's own label.
+	// Fix, Ask and Note count Findings by the status jig routed them to: Fix
+	// those left open (a fix slice's work), Ask the asked ones, Note the noted
+	// ones; a dismissed finding counts in none. A finding keeps the reviewer's
+	// own label in Action, so a clean round whose fixes the risk floor routed
+	// to notes counts notes and no fix.
 	Fix, Ask, Note int
 	// FixSlices are the fix slices the round appended.
 	FixSlices []string
@@ -150,12 +154,12 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 			}
 			sortByRiskThenID(rec.Findings)
 			for _, f := range rec.Findings {
-				switch f.Action {
-				case ActionFix:
+				switch f.Status {
+				case StatusOpen:
 					rec.Fix++
-				case ActionAsk:
+				case StatusAsked:
 					rec.Ask++
-				case ActionNote:
+				case StatusNoted:
 					rec.Note++
 				}
 			}

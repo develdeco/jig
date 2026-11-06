@@ -8,7 +8,7 @@ func TestCopilotAdapter(t *testing.T) {
 		{"session start by its fields", `{"timestamp":1,"cwd":"/r","source":"new","initialPrompt":"hi"}`,
 			Event{Harness: "copilot", Kind: KindSessionStart, Cwd: "/r"}},
 		{"prompt by its fields", `{"timestamp":1,"cwd":"/r","prompt":"do it"}`,
-			Event{Harness: "copilot", Kind: KindPrompt, Cwd: "/r"}},
+			Event{Harness: "copilot", Kind: KindPrompt, Cwd: "/r", Prompt: "do it"}},
 		{"bash tool by its fields", `{"timestamp":1,"cwd":"/r","toolName":"bash","toolArgs":"{\"command\":\"git commit -m x\"}","toolResult":{"resultType":"success","textResultForLlm":"ok"}}`,
 			Event{Harness: "copilot", Kind: KindTool, Cwd: "/r", Tool: "bash", Command: "git commit -m x"}},
 		{"edit tool with object arguments", `{"cwd":"/r","toolName":"edit","toolArgs":{"path":"/r/a.go"}}`,
