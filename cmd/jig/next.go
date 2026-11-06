@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -29,6 +30,7 @@ func init() {
 			{"project", "project name, resolved via the machine mapping", false},
 			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
 			{"for", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already", false},
+			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
 		}, false},
 		Order: 301,
@@ -63,6 +65,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	topology := fs.Bool("topology", false, "also print every slice of the ticket with its repo, wave and blockers")
 	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already")
+	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
@@ -73,6 +76,15 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	ticket, err := atMostOne(positionals, "jig next", "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	ticketsSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "tickets" {
+			ticketsSet = true
+		}
+	})
+	if ticketsSet && (ticket == "" || *forFlag != "" || *topology) {
+		return renderErr(stdout, notAChartTickets(ticket))
 	}
 	asked, err := parseAskedPhase(*forFlag, ticket)
 	if err != nil {
@@ -99,11 +111,18 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		// A chart is read for its own sake as a ticket is: what its run waits on
 		// is asked of the host now.
 		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
-		c, m, err := deriveChart(st, cfg, mp, chart, merges)
+		var named []string
+		if ticketsSet {
+			if named, err = namedTickets(st, chart, *ticketsFlag); err != nil {
+				return renderErr(stdout, err)
+			}
+		}
+		c, m, err := deriveChartNamed(st, cfg, mp, chart, merges, named)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
+		n.Named = c.Named
 		n.setWorkspaceOverlaps(st, cfg, mp)
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
@@ -114,6 +133,8 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			n.History = chartHistory(st, chart)
 		}
 		out, blocks = n, n.blocks("next")
+	} else if ticketsSet {
+		return renderErr(stdout, notAChartTickets(ticket))
 	} else if ticket != "" {
 		id, err := st.ResolveTicket(ticket)
 		if err != nil {
@@ -980,6 +1001,70 @@ func andList(words []string) string {
 		return strings.Join(words, "")
 	}
 	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// notAChartTickets is the refusal of --tickets without a chart's name: with a
+// ticket, with no argument, or beside --for or --topology.
+func notAChartTickets(word string) error {
+	if word == "" {
+		return &axi.Error{Msg: "--tickets names tickets of a chart: name the chart", Code: "VALIDATION_ERROR"}
+	}
+	return &axi.Error{Msg: fmt.Sprintf("--tickets names tickets of a chart: %s is not one", word), Code: "VALIDATION_ERROR"}
+}
+
+// namedTickets reads the comma list of --tickets for chart: each item an id or
+// an alias, a repeat counted once, every one a graduated ticket of the chart.
+// Every offender is named before anything is derived.
+func namedTickets(st *store.Store, chart, list string) ([]string, error) {
+	entries, err := st.ReadChart(chart)
+	if err != nil {
+		return nil, &axi.Error{
+			Msg:  fmt.Sprintf("failed to read chart %q: %v", chart, err),
+			Code: "VALIDATION_ERROR",
+			Help: []string{fmt.Sprintf("Check that charts/%s/tickets.yaml exists and is valid YAML", chart)},
+		}
+	}
+	var graduated []string
+	in := map[string]bool{}
+	for _, e := range entries {
+		if e.ID != "" {
+			graduated = append(graduated, e.ID)
+			in[e.ID] = true
+		}
+	}
+	var named, bad []string
+	seen := map[string]bool{}
+	for _, item := range strings.Split(list, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, &axi.Error{Msg: "--tickets has an empty item: name the tickets as a comma list, like A,B", Code: "VALIDATION_ERROR"}
+		}
+		id := item
+		if resolved, err := st.ResolveTicket(item); err == nil {
+			id = resolved
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if in[id] {
+			named = append(named, id)
+		} else {
+			bad = append(bad, id)
+		}
+	}
+	if len(bad) > 0 {
+		help := "The tickets of " + chart + " are: " + andList(graduated)
+		if len(graduated) == 0 {
+			help = "The tickets of " + chart + " are: none yet: run `jig graduate " + chart + "`"
+		}
+		msgs := make([]string, len(bad))
+		for i, b := range bad {
+			msgs[i] = fmt.Sprintf("ticket %s is not a ticket of chart %s", b, chart)
+		}
+		return nil, &axi.Error{Msg: strings.Join(msgs, "; "), Code: "VALIDATION_ERROR", Help: []string{help}}
+	}
+	return named, nil
 }
 
 // findOverlaps looks in each repo's mapped clone for local branches that bind

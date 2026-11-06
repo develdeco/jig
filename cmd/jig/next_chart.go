@@ -24,21 +24,24 @@ import (
 // spend, which are left out when there is nothing to say; history is [] when
 // the text form is read or the history cannot be.
 type nextChart struct {
-	Chart       string            `json:"chart"`
-	Title       string            `json:"title"`
-	Ready       bool              `json:"ready"`
-	Code        string            `json:"code"`
-	Reason      string            `json:"reason"`
-	Prompt      string            `json:"prompt"`
-	Started     bool              `json:"started"`
-	Ungraduated int               `json:"ungraduated"`
-	Briefs      []string          `json:"briefs"`
-	Run         [][]string        `json:"run"`
-	Tickets     []nextChartTicket `json:"tickets"`
-	Ends        []nextChartEnd    `json:"ends"`
-	History     []nextChartCommit `json:"history"`
-	Map         *nextChartMap     `json:"map,omitempty"`
-	Spend       *nextChartSpend   `json:"spend,omitempty"`
+	Chart       string `json:"chart"`
+	Title       string `json:"title"`
+	Ready       bool   `json:"ready"`
+	Code        string `json:"code"`
+	Reason      string `json:"reason"`
+	Prompt      string `json:"prompt"`
+	Started     bool   `json:"started"`
+	Ungraduated int    `json:"ungraduated"`
+	// Named echoes the tickets a run was named over (--tickets), in the order of
+	// the rows; left out for the whole chart.
+	Named   []string          `json:"named,omitempty"`
+	Briefs  []string          `json:"briefs"`
+	Run     [][]string        `json:"run"`
+	Tickets []nextChartTicket `json:"tickets"`
+	Ends    []nextChartEnd    `json:"ends"`
+	History []nextChartCommit `json:"history"`
+	Map     *nextChartMap     `json:"map,omitempty"`
+	Spend   *nextChartSpend   `json:"spend,omitempty"`
 	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
 	// of a repo, the pair in Plan order: the later one is to be stacked on the
 	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
@@ -289,6 +292,9 @@ func (n nextChart) blocks(label string) []string {
 	add("code", n.Code)
 	add("reason", n.Reason)
 	pairs = append(pairs, [2]string{"started", yesNo(n.Started)}, [2]string{"ungraduated", strconv.Itoa(n.Ungraduated)})
+	if len(n.Named) > 0 {
+		pairs = append(pairs, [2]string{"named", joinPlus(n.Named)})
+	}
 	if n.Spend != nil {
 		pairs = append(pairs, [2]string{"spend", n.Spend.line()})
 	}
@@ -405,21 +411,54 @@ func chartHelp(c phase.Chart) []string {
 		}
 		return help
 	case c.Code == phase.CodeChartWaitsMerge:
-		return []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.Ends), c.Prompt)}
+		help := []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.RootEnds()), c.Prompt)}
+		if name := notNamedHelp(c.RootEnds()); name != "" {
+			help = append(help, name)
+		}
+		return help
+	case c.Code == phase.CodeNeedNotNamed && notNamedHelp(c.RootEnds()) != "":
+		return []string{notNamedHelp(c.RootEnds())}
 	case c.Code == phase.CodeChartNotGraduated && c.Ungraduated > 0:
 		return []string{graduate}
+	case c.Code == phase.CodeChartDone && len(c.Named) > 0:
+		are := " are"
+		if len(c.Named) == 1 {
+			are = " is"
+		}
+		return []string{andList(c.Named) + are + " done: each is published or closed; run `jig next " + c.Name + "` for the whole chart"}
 	case c.Code == phase.CodeChartDone:
 		return []string{c.Name + " is done: every ticket is published or closed; run `jig next` to see what else is ready"}
 	}
 	return []string{c.Reason}
 }
 
+// notNamedHelp is the step for a named ticket that waits on a ticket the run
+// does not take: no merge frees it, so name that ticket too or take it first.
+// "" when no end is such a wait.
+func notNamedHelp(ends []phase.ChartEnd) string {
+	for _, e := range ends {
+		if e.Because.Code != phase.CodeNeedNotNamed {
+			continue
+		}
+		a := e.Because.Ticket
+		if a == "" {
+			a = fmt.Sprintf("entry #%d", e.Because.Pos)
+		}
+		return fmt.Sprintf("Name %s too, or take %s first", a, a)
+	}
+	return ""
+}
+
 // mergeTargets names what a run waits on to merge: the pull request URLs of its
-// ends, else the tickets whose work is to merge.
+// ends, else the tickets whose work is to merge. A wait on a ticket the run does
+// not take is no merge.
 func mergeTargets(ends []phase.ChartEnd) string {
 	var urls, tickets []string
 	seen := map[string]bool{}
 	for _, e := range ends {
+		if e.Because.Code == phase.CodeNeedNotNamed {
+			continue
+		}
 		for _, p := range e.Because.PRs {
 			if !seen[p.URL] {
 				seen[p.URL] = true

@@ -24,6 +24,7 @@ type chartOut struct {
 	Ungraduated int        `json:"ungraduated"`
 	Briefs      []string   `json:"briefs"`
 	Run         [][]string `json:"run"`
+	Named       []string   `json:"named"`
 	// WorkspaceOverlaps are the tickets of one wave that build in one workspace.
 	WorkspaceOverlaps []struct {
 		Repo      string   `json:"repo"`
@@ -396,5 +397,107 @@ func TestChartWorkspaceOverlapBecomesAStackedEdge(t *testing.T) {
 	}
 	if out := runJig(t, env, fx.RepoDir, "next", "c").Stdout; strings.Contains(out, "workspace_overlap") {
 		t.Errorf("jig next c after the edge still says overlap:\n%s", out)
+	}
+}
+
+// TestChartTicketsSubset: a chart of three tickets (1 and 2 independent, 3
+// stacked on 2) read with --tickets lists only the named waves, overlaps and
+// prompt; a named ticket behind the unnamed one waits on it in the ends; a name
+// outside the chart is refused with the chart's tickets listed; and the whole
+// chart's standing is as it was.
+func TestChartTicketsSubset(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chartDir := filepath.Join(fx.StoreDir, "charts", "c")
+	if err := os.MkdirAll(chartDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, filepath.Join(chartDir, "map.md"), []byte("# Three tickets\n\n## Destination\n\nTwo run apart, one rides on the second.\n"))
+	writeFileOrFatal(t, filepath.Join(chartDir, "tickets.yaml"), []byte("tickets:\n  - title: First\n  - title: Second\n  - title: Third\n    blocked_by:\n      - ref: \"#2\"\n        kind: stacked\n"))
+	if r := runJig(t, env, fx.StoreDir, "graduate", "c"); r.Code != 0 {
+		t.Fatalf("jig graduate c: exit %d\n%s", r.Code, r.Stdout)
+	}
+	id := map[int]string{}
+	for _, row := range nextJSON[chartOut](t, env, fx.RepoDir, "c").Tickets {
+		id[row.Pos] = row.ID
+	}
+	for pos := 1; pos <= 3; pos++ {
+		briefed(t, st, id[pos])
+	}
+	rowsOf := func(c chartOut) []string {
+		out := []string{}
+		for _, row := range c.Tickets {
+			out = append(out, row.ID)
+		}
+		return out
+	}
+
+	// 1 and 3: only they are rows, 3 waits for the unnamed 2.
+	c := nextJSON[chartOut](t, env, fx.RepoDir, "c", "--tickets", id[1]+","+id[3])
+	if want := []string{id[1], id[3]}; !reflect.DeepEqual(c.Named, want) || !reflect.DeepEqual(rowsOf(c), want) {
+		t.Fatalf("named %v rows %v, want %v", c.Named, rowsOf(c), want)
+	}
+	if want := [][]string{{id[1]}}; !reflect.DeepEqual(c.Run, want) {
+		t.Errorf("run = %v, want %v", c.Run, want)
+	}
+	if len(c.WorkspaceOverlaps) != 0 {
+		t.Errorf("workspace_overlaps = %+v, want none: %s is not in the run", c.WorkspaceOverlaps, id[2])
+	}
+	if len(c.Ends) != 1 || c.Ends[0].Ticket != id[3] || c.Ends[0].Blocker != id[2] || c.Ends[0].Kind != "stacked" {
+		t.Errorf("ends = %+v, want %s behind %s, stacked", c.Ends, id[3], id[2])
+	}
+	if !c.Ready || c.Code != "" || c.Prompt != "Continue "+id[1]+" and "+id[3] {
+		t.Errorf("ready %v code %q prompt %q, want ready with the tickets' prompt", c.Ready, c.Code, c.Prompt)
+	}
+	text := runJig(t, env, fx.RepoDir, "next", "c", "--tickets", id[1]+","+id[3]).Stdout
+	for _, want := range []string{"named: " + id[1] + "+" + id[3], "waits[1]", id[2]} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "title Second") || strings.Contains(text, "Second,") {
+		t.Errorf("text lists the unnamed ticket as a row:\n%s", text)
+	}
+
+	// 1 and 2: one wave, the overlap of that pair, no end.
+	c = nextJSON[chartOut](t, env, fx.RepoDir, "c", "--tickets", id[1]+","+id[2])
+	if want := [][]string{{id[1], id[2]}}; !reflect.DeepEqual(c.Run, want) || len(c.Ends) != 0 {
+		t.Errorf("run %v ends %+v, want %v and none", c.Run, c.Ends, want)
+	}
+	if len(c.WorkspaceOverlaps) != 1 || c.WorkspaceOverlaps[0].Workspace != "alpha" || !reflect.DeepEqual(c.WorkspaceOverlaps[0].Tickets, []string{id[1], id[2]}) {
+		t.Errorf("workspace_overlaps = %+v, want the pair %s+%s in alpha", c.WorkspaceOverlaps, id[1], id[2])
+	}
+
+	// 3 alone: nothing to start, the blocker is named, the prompt is the ticket's.
+	c = nextJSON[chartOut](t, env, fx.RepoDir, "c", "--tickets", id[3])
+	if c.Ready || c.Code != "CHART_BLOCKER_NOT_NAMED" || !strings.Contains(c.Reason, id[2]) {
+		t.Errorf("ready %v code %q reason %q, want CHART_BLOCKER_NOT_NAMED naming %s", c.Ready, c.Code, c.Reason, id[2])
+	}
+	if !strings.Contains(c.Prompt, id[3]) || strings.HasPrefix(c.Prompt, "Take ") {
+		t.Errorf("prompt = %q, want %s's own ticket prompt", c.Prompt, id[3])
+	}
+	if out := runJig(t, env, fx.RepoDir, "next", "c", "--tickets", id[3]).Stdout; !strings.Contains(out, "Name "+id[2]+" too, or take "+id[2]+" first") {
+		t.Errorf("text lacks the help naming %s:\n%s", id[2], out)
+	}
+
+	// A name outside the chart is refused, with the chart's tickets and no standing.
+	r := runJig(t, env, fx.RepoDir, "next", "c", "--tickets", id[1]+",ZZ-9")
+	for _, want := range []string{"VALIDATION_ERROR", "ZZ-9", id[1], id[2], id[3]} {
+		if r.Code != 2 || !strings.Contains(r.Stdout, want) {
+			t.Errorf("exit %d, output lacks %q:\n%s", r.Code, want, r.Stdout)
+		}
+	}
+	if strings.Contains(r.Stdout, "ready:") {
+		t.Errorf("a refusal printed a standing:\n%s", r.Stdout)
+	}
+
+	// The whole chart is as it was.
+	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
+	if len(c.Tickets) != 3 || c.Named != nil || c.Prompt != "Continue c" {
+		t.Errorf("whole chart: rows %d named %v prompt %q, want 3, none, Continue c", len(c.Tickets), c.Named, c.Prompt)
 	}
 }

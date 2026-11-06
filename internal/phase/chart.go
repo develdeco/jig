@@ -36,6 +36,13 @@ const (
 // (as a claim would find no ticket to read): it can never be met.
 const CodeNeedUnknown = "CHART_BLOCKER_UNKNOWN"
 
+// CodeNeedNotNamed is the code of a need of a named ticket on a ticket of the
+// chart that the run does not take (the prompt did not name it) and that is not
+// done: the run does not build it, so the need waits for the person to name it
+// or take it first. It is also the verdict's code when it is all the run waits
+// for.
+const CodeNeedNotNamed = "CHART_BLOCKER_NOT_NAMED"
+
 // claimBlockerNotPlanned is the claim's code for a blocker closed as not
 // planned (cmd/jig/claim_checks.go): the ticket needs planning again, so the
 // need can never be met.
@@ -104,6 +111,9 @@ type ChartEntry struct {
 type ChartFacts struct {
 	Name    string
 	Entries []ChartEntry
+	// Named are the ids of the tickets the person named: the run is over those
+	// only (see scopeNamed). Empty means the whole chart.
+	Named []string
 }
 
 // ChartRow is one entry in the chart's standing.
@@ -136,6 +146,9 @@ type ChartEnd struct {
 // Chart is where a chart stands.
 type Chart struct {
 	Name string
+	// Named are the ids the run was named over, in row order; nil for the whole
+	// chart as no one named it.
+	Named []string
 	// Rows are in dependency order: Wave ascending (every in-chart edge), then
 	// rank ascending (unranked last), then position; entries on a cycle last.
 	Rows []ChartRow
@@ -175,6 +188,75 @@ func TakePrompt(chart string) string { return "Take " + chart + " to PR" }
 // merge freed a ticket, or in a new session.
 func ContinuePrompt(chart string) string { return "Continue " + chart }
 
+// TakeTicketsPrompt is what to ask to take several named tickets of a chart to
+// their pull requests: the ids where TakePrompt has the chart's name.
+func TakeTicketsPrompt(ids []string) string { return "Take " + andJoin(ids) + " to PR" }
+
+// ContinueTicketsPrompt is what to ask to resume the tickets a run was named
+// over.
+func ContinueTicketsPrompt(ids []string) string { return "Continue " + andJoin(ids) }
+
+// andJoin joins words as prose: "a", "a and b", "a, b and c".
+func andJoin(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// scopeNamed narrows facts to the named tickets. An unnamed entry is no row and
+// is outside the run, as an entry outside the chart is. A need of a named entry
+// on an unnamed one that is not done (or has no ticket yet) cannot be met by
+// this run: it takes CodeNeedNotNamed. A need on an unnamed one that is done
+// reads as a need outside the chart does.
+func scopeNamed(f ChartFacts) ChartFacts {
+	named := map[string]bool{}
+	for _, id := range f.Named {
+		named[id] = true
+	}
+	doneOf := func(e ChartEntry) bool {
+		return e.Ticket != nil && (e.Ticket.Code == CodeDone || e.Ticket.Code == CodeClosed)
+	}
+	byID, byPos := map[string]ChartEntry{}, map[int]ChartEntry{}
+	for _, e := range f.Entries {
+		byPos[e.Pos] = e
+		if e.ID != "" {
+			byID[e.ID] = e
+		}
+	}
+	out := ChartFacts{Name: f.Name, Named: f.Named}
+	for _, e := range f.Entries {
+		if e.ID == "" || !named[e.ID] {
+			continue
+		}
+		needs := make([]ChartNeed, len(e.Needs))
+		copy(needs, e.Needs)
+		for i, n := range needs {
+			if n.Met || n.Code == claimBlockerNotPlanned || n.Code == CodeNeedUnknown {
+				continue
+			}
+			var target ChartEntry
+			var ok bool
+			blocker := n.Ticket
+			if n.Ticket != "" {
+				target, ok = byID[n.Ticket]
+			} else {
+				target, ok = byPos[n.Pos]
+				blocker = fmt.Sprintf("entry #%d", n.Pos)
+			}
+			if !ok || named[target.ID] || doneOf(target) {
+				continue
+			}
+			needs[i].Code = CodeNeedNotNamed
+			needs[i].Why = fmt.Sprintf("%s waits for %s, which this run does not take and is not done", e.ID, blocker)
+			needs[i].PRs = nil
+		}
+		e.Needs = needs
+		out.Entries = append(out.Entries, e)
+	}
+	return out
+}
+
 // Prompt is what to ask an agent for the entry: the prompt of the phase its
 // ticket is at, "" for an entry that is done or has no ticket. The prompt that
 // would name another ticket's phase (a build held on a blocker) is the chart's
@@ -194,15 +276,20 @@ func (r ChartRow) Prompt() string {
 // strongest of its unmet needs, blocked over after-merge over here) is
 // memoized and guards against cycles; the verdict follows from the rows.
 func DeriveChart(f ChartFacts) Chart {
+	scoped := len(f.Named) > 0
+	if scoped {
+		f = scopeNamed(f)
+	}
 	d := &chartDeriver{
-		f:     f,
-		byPos: map[int]int{},
-		byID:  map[string]int{},
-		reach: make([]string, len(f.Entries)),
-		why:   make([]string, len(f.Entries)),
-		state: make([]int, len(f.Entries)),
-		wave:  make([]int, len(f.Entries)),
-		wstat: make([]int, len(f.Entries)),
+		scoped: scoped,
+		f:      f,
+		byPos:  map[int]int{},
+		byID:   map[string]int{},
+		reach:  make([]string, len(f.Entries)),
+		why:    make([]string, len(f.Entries)),
+		state:  make([]int, len(f.Entries)),
+		wave:   make([]int, len(f.Entries)),
+		wstat:  make([]int, len(f.Entries)),
 	}
 	for i, e := range f.Entries {
 		d.byPos[e.Pos] = i
@@ -249,7 +336,7 @@ func DeriveChart(f ChartFacts) Chart {
 			continue
 		}
 		for _, n := range r.Waits {
-			if !n.stacked() {
+			if !n.stacked() || n.Code == CodeNeedNotNamed {
 				c.Ends = append(c.Ends, ChartEnd{Pos: r.Pos, ID: r.ID, Because: n})
 			}
 		}
@@ -260,6 +347,11 @@ func DeriveChart(f ChartFacts) Chart {
 		}
 	}
 	c.Ready = len(c.Briefs) > 0 || len(c.Run) > 0
+	if scoped {
+		for _, r := range c.Rows {
+			c.Named = append(c.Named, r.ID)
+		}
+	}
 	d.verdict(&c)
 	return c
 }
@@ -305,9 +397,11 @@ func rowBefore(a, b ChartRow) bool {
 
 // chartDeriver holds the memoized walks over the entries.
 type chartDeriver struct {
-	f     ChartFacts
-	byPos map[int]int
-	byID  map[string]int
+	// scoped says the facts were narrowed to the named tickets.
+	scoped bool
+	f      ChartFacts
+	byPos  map[int]int
+	byID   map[string]int
 
 	reach []string
 	why   []string
@@ -386,6 +480,10 @@ func (d *chartDeriver) reachOf(i int) string {
 // needReach is what an unmet need of entry i does to its reach, and why when it
 // blocks.
 func (d *chartDeriver) needReach(i int, n ChartNeed) (string, string) {
+	if n.Code == CodeNeedNotNamed {
+		// The run does not build the blocker, whatever the edge's kind.
+		return ReachAfterMerge, ""
+	}
 	if n.Code == claimBlockerNotPlanned || n.Code == CodeNeedUnknown {
 		return ReachBlocked, n.Why
 	}
@@ -501,10 +599,7 @@ func (d *chartDeriver) verdict(c *Chart) {
 	missing := entriesWithNoTicket(c.Ungraduated)
 	switch {
 	case c.Ready:
-		c.Prompt = TakePrompt(c.Name)
-		if c.Started {
-			c.Prompt = ContinuePrompt(c.Name)
-		}
+		c.Prompt = d.prompt(c, c.Started)
 		if c.Ungraduated > 0 {
 			c.Reason = missing
 		}
@@ -519,8 +614,23 @@ func (d *chartDeriver) verdict(c *Chart) {
 	case done == graduated && len(c.Ends) == 0:
 		c.Code = CodeChartDone
 	case len(c.Ends) > 0:
-		c.Code, c.Prompt = CodeChartWaitsMerge, ContinuePrompt(c.Name)
-		c.Reason = d.waitsReason(c.Ends[0])
+		root := c.RootEnds()
+		end, onlyNotNamed := root[0], true
+		for _, e := range root {
+			if e.Because.Code != CodeNeedNotNamed {
+				if onlyNotNamed {
+					end = e
+				}
+				onlyNotNamed = false
+			}
+		}
+		if onlyNotNamed {
+			// A is not built by this run, so no merge frees it: name it too.
+			c.Code, c.Prompt = CodeNeedNotNamed, d.prompt(c, c.Started)
+		} else {
+			c.Code, c.Prompt = CodeChartWaitsMerge, d.prompt(c, true)
+		}
+		c.Reason = d.waitsReason(end)
 	default:
 		c.Code = CodeChartBlocked
 		for _, r := range c.Rows {
@@ -530,6 +640,65 @@ func (d *chartDeriver) verdict(c *Chart) {
 			}
 		}
 	}
+}
+
+// RootEnds are the ends a run waits on first. An end whose blocker is a row of
+// this run that is itself after a merge follows from that row's own end: "C
+// waits for B to merge" is nothing to act on while B waits for a ticket the run
+// does not take, or for a merge of its own. Every end, when none is a root.
+func (c Chart) RootEnds() []ChartEnd {
+	waits := map[string]bool{}
+	for _, r := range c.Rows {
+		if !r.Done && r.Reach == ReachAfterMerge {
+			waits[endKey(r.ID, r.Pos)] = true
+		}
+	}
+	var root []ChartEnd
+	for _, e := range c.Ends {
+		if !waits[endKey(e.Because.Ticket, e.Because.Pos)] {
+			root = append(root, e)
+		}
+	}
+	if len(root) == 0 {
+		return c.Ends
+	}
+	return root
+}
+
+// endKey names a row or a need's blocker: its ticket, else its place.
+func endKey(id string, pos int) string {
+	if id != "" {
+		return id
+	}
+	return fmt.Sprintf("#%d", pos)
+}
+
+// prompt is what to ask for the run: the chart's, the tickets' it was named
+// over (two or more), or, for a single named ticket (not a chart run), that
+// ticket's own prompt.
+func (d *chartDeriver) prompt(c *Chart, resume bool) string {
+	if !d.scoped {
+		if resume {
+			return ContinuePrompt(c.Name)
+		}
+		return TakePrompt(c.Name)
+	}
+	var ids []string
+	for _, r := range c.Rows {
+		ids = append(ids, r.ID)
+	}
+	switch {
+	case len(ids) == 1:
+		if t := c.Rows[0].Ticket; t != nil {
+			return Prompt(t.Current, ids[0])
+		}
+		return ""
+	case len(ids) == 0:
+		return ""
+	case resume:
+		return ContinueTicketsPrompt(ids)
+	}
+	return TakeTicketsPrompt(ids)
 }
 
 // HasUngraduatedProblem says an entry with no ticket yet has a problem in the
@@ -566,6 +735,9 @@ func entriesWithNoTicket(n int) string {
 // the parent has merged, "SHOP-5 waits for SHOP-2 to merge (https://... OPEN),
 // then its pull request is retargeted".
 func (d *chartDeriver) waitsReason(end ChartEnd) string {
+	if end.Because.Code == CodeNeedNotNamed {
+		return end.Because.Why
+	}
 	blocker := end.Because.Ticket
 	if blocker == "" {
 		blocker = fmt.Sprintf("entry #%d", end.Because.Pos)
