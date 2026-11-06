@@ -141,23 +141,21 @@ func TestUpdateMachineNeverWritesWithoutTheLock(t *testing.T) {
 	}
 	defer release()
 
-	old := machineLockTimeout
-	machineLockTimeout = 150 * time.Millisecond
-	defer func() { machineLockTimeout = old }()
+	const wait = 150 * time.Millisecond
 
 	called := false
-	err = UpdateMachine(jigHome, func(m map[string]MachineProject) error {
+	err = updateMachine(jigHome, func(m map[string]MachineProject) error {
 		called = true
 		m["lost"] = MachineProject{Store: "/l"}
 		return nil
-	})
+	}, wait)
 	if err == nil || !strings.Contains(err.Error(), path+".lock") {
 		t.Fatalf("UpdateMachine under a held lock = %v, want an error naming %s.lock", err, path)
 	}
 	if called {
 		t.Error("UpdateMachine ran fn without the lock")
 	}
-	if err := SaveMachine(jigHome, map[string]MachineProject{"lost": {Store: "/l"}}); err == nil || !strings.Contains(err.Error(), path+".lock") {
+	if err := saveMachine(jigHome, map[string]MachineProject{"lost": {Store: "/l"}}, wait); err == nil || !strings.Contains(err.Error(), path+".lock") {
 		t.Errorf("SaveMachine under a held lock = %v, want an error naming %s.lock", err, path)
 	}
 	release()
