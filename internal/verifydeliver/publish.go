@@ -1011,7 +1011,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	commits := lastGreenCommits(lines)
 	// An adopted ticket's own commits, from the merge base with target up to
 	// the start sha recorded at adoption: the author's work, listed ahead of
-	// jig's in What changed.
+	// jig's in the review notes' Slices.
 	var authorCommits []authorCommit
 	if t.rec.Adopted() {
 		startData, err := fileshare.ReadFile(d.Store.StartSHAPath(ticket, t.repoName))
@@ -1887,9 +1887,9 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error
 // (reportIntentYAML.SHA256) for a binding source, brief or explicit.
 // Re-reading the same path now and hashing it the same way
 // (intentSHA256) catches a brief.md or intent.md edited after the round -
-// the file renderIntentSection would otherwise render as if it had been
-// reviewed. An inferred or absent intent has nothing pinned to check:
-// neither ever reaches the published body.
+// the round reviewed the change against the intent as it stood, and the
+// pull request would go out, and be merged, against a different one. An
+// inferred or absent intent has nothing pinned to check.
 func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
 	if rep.Intent.Source != IntentSourceBrief && rep.Intent.Source != IntentSourceExplicit {
 		return nil

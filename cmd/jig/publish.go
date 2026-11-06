@@ -92,6 +92,23 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			Code: "VALIDATION_ERROR",
 		})
 	}
+	// --what and --picks feed the render, which --body and the bare form run;
+	// --pr and --approve never read them, so naming one there would exit 0
+	// with the file ignored.
+	if *prURL != "" || *approve {
+		form := "--pr"
+		if *approve {
+			form = "--approve"
+		}
+		for _, given := range []struct{ flag, value string }{{"--what", *what}, {"--picks", *picks}} {
+			if given.value != "" {
+				return renderErr(stdout, &axi.Error{
+					Msg:  fmt.Sprintf("jig publish %s does not take %s; only --body and the bare `jig publish` do", form, given.flag),
+					Code: "VALIDATION_ERROR",
+				})
+			}
+		}
+	}
 	if *picks, err = e.abs(*picks); err != nil {
 		return renderErr(stdout, err)
 	}

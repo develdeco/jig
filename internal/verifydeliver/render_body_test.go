@@ -43,6 +43,12 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 			t.Errorf("renderVerificationSection = %q, want no %q", got, banned)
 		}
 	}
+
+	// A ticket reviewed clean in one round, the common case, still names it.
+	one := renderVerificationSection(reportYAML{}, []string{"test"}, []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}})
+	if want := "Gate rounds:\n\n- Round 1 (full): clean\n"; !strings.Contains(one, want) {
+		t.Errorf("renderVerificationSection with one round = %q, want it to hold %q", one, want)
+	}
 }
 
 func TestRenderVerificationSectionWithoutAReviewedHeadOrRounds(t *testing.T) {

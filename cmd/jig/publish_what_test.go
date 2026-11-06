@@ -93,3 +93,22 @@ func TestWhatRowsSayWhereTheWhatStands(t *testing.T) {
 		t.Errorf("rows = %v, want %v", several, want)
 	}
 }
+
+// TestPublishRefusesWhatAndPicksOutsideTheFormsThatTakeThem: --pr and
+// --approve never read the What or the picks, so a file named with either is
+// refused, naming the forms that take it, instead of exiting 0 with it
+// ignored.
+func TestPublishRefusesWhatAndPicksOutsideTheFormsThatTakeThem(t *testing.T) {
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	for _, form := range [][]string{{"--pr", "https://github.com/owner/repo/pull/1"}, {"--approve"}} {
+		for _, flag := range []string{"--what", "--picks"} {
+			args := append([]string{"publish", "T-1"}, form...)
+			args = append(args, flag, "file.md")
+			out, code := runMain(t, e, "", args...)
+			if code == 0 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "does not take "+flag) || !strings.Contains(out, "--body") {
+				t.Errorf("jig %s: exit = %d, want a VALIDATION_ERROR naming %s and the forms that take it\n%s", strings.Join(args, " "), code, flag, out)
+			}
+		}
+	}
+}

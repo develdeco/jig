@@ -29,6 +29,26 @@ func lastPrLine(t *testing.T, d Deps, ticket string) journal.Line {
 	return pr
 }
 
+// rawPrLine is the text of the latest pr line in the ticket's journal file,
+// as written: the keys a journal outlives its builds by.
+func rawPrLine(t *testing.T, d Deps, ticket string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "journal.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pr string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"event":"`+journal.EventPr+`"`) {
+			pr = line
+		}
+	}
+	if pr == "" {
+		t.Fatal("the journal file has no pr line")
+	}
+	return pr
+}
+
 // TestPublishRecordPRReadsTheTitleAndBodyBack: --pr reads the pull request's
 // title and body back from the host and journals on its pr line whether they
 // are the render's: matches when they are (whatever the line endings the host
@@ -79,6 +99,9 @@ func TestPublishRecordPRReadsTheTitleAndBodyBack(t *testing.T) {
 			}
 			if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != tc.want {
 				t.Errorf("the pr line says body_match %q, want %q", got, tc.want)
+			}
+			if raw := rawPrLine(t, d, fx.Ticket); !strings.Contains(raw, `"body_match":"`+tc.want+`"`) {
+				t.Errorf("the pr line's journal text = %s, want it to carry body_match %q", raw, tc.want)
 			}
 			warned := false
 			for _, w := range warnings {

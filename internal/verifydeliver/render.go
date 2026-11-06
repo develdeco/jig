@@ -217,9 +217,9 @@ func codeFenceRun(line string) (byte, int, string) {
 // fenceScanner tracks, as a markdown text's lines are walked in order,
 // whether the line in hand falls inside a fenced code block. Everything in
 // one is a code sample's own text: it renders literally, so a "## " line
-// there is neither a section of a brief nor a heading of the body, and both
-// functions that look for "## " lines - firstBriefSection and
-// demoteHeadings - ask this before believing one.
+// there is neither a section nor a heading of the body, and the functions
+// that look for "## " lines (demoteHeadings, demoSectionBounds) ask this
+// before believing one.
 //
 // The zero value starts outside any block. Every line of the text must be
 // fed, in order and none skipped, since any of them can open or close a
@@ -261,16 +261,13 @@ func (f *fenceScanner) openFence() (byte, int) {
 // fence matching the one that opened it; a text that closes every block it
 // opens comes back untouched.
 //
-// Embedded in pr/<repo>.md, an intent text is followed by the body's own
-// ## What changed and ## Verification sections, and an unclosed fence
-// swallows them: GitHub renders everything after it as the inside of a code
-// block, headings and all, which breaks the body's three-section promise
-// silently - no error and no warning. Both binding sources can hand over
-// such a text. `jig gate --doc` records a whole file, which ends mid-fence
-// whenever the file does, and a brief's first section ends where the brief's
-// next section begins, which can be inside a fence the brief itself never
-// closed. So it is closed here, where it is embedded, rather than at either
-// source.
+// Embedded in pr/<repo>.md, the session's What is followed by the body's own
+// ## Demo and ## Verification sections, and an unclosed fence swallows them:
+// GitHub renders everything after it as the inside of a code block, headings
+// and all, which breaks the body's section promise silently - no error and
+// no warning. The What is a file the session wrote, which can end mid-fence
+// like any file. So it is closed here, where it is embedded, rather than
+// where the session wrote it.
 func closeOpenFence(text string) string {
 	var fence fenceScanner
 	for _, line := range strings.Split(text, "\n") {
@@ -1108,7 +1105,7 @@ func demoSectionBounds(body string) (start, end int, ok bool) {
 // references are still literally present in the ## Demo section of body:
 // the exact references writePRBody rendered there, never a substring scan
 // for "./rec-" over the whole body (demoSectionBounds), which would also
-// match a ./rec- mention in the ## Intent section's own text, or a fenced
+// match a ./rec- mention in the ## What section's own text, or a fenced
 // snippet - and would report that prose verbatim rather than the file names
 // actually at issue.
 func checkUnrewrittenReferences(body string, mediaFiles []DemoFile) []string {
