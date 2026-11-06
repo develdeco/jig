@@ -144,6 +144,16 @@ func TestGateCleanRound2(t *testing.T) {
 				t.Fatalf("journal missing event %q", event)
 			}
 		}
+		// The round is the slice's from_gate; the line carries no attempt, so
+		// the fix slice's first verification is attempt 1.
+		for _, l := range lines {
+			if l.Event == journal.EventFixSlice && l.Attempt != 0 {
+				t.Errorf("fix-slice line for %s carries attempt %d, want none", l.Slice, l.Attempt)
+			}
+		}
+		if got := journal.NextAttempt(lines, "fix-1"); got != 1 {
+			t.Errorf("NextAttempt(fix-1) = %d, want 1", got)
+		}
 	})
 
 	// The scripted source never writes a round's own findings.yaml, so this

@@ -684,7 +684,7 @@ func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 		if err := d.Store.WriteSliceState(ticket, fs.ID, store.SliceState{State: "queued"}); err != nil {
 			return fmt.Errorf("verifydeliver: gate: init fix slice %s state: %w", fs.ID, err)
 		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice", Attempt: n}); err != nil {
+		if err := journal.Append(d.Store, ticket, journal.Line{Slice: fs.ID, Event: "fix-slice"}); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal fix-slice %s: %w", fs.ID, err)
 		}
 	}

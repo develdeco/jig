@@ -611,11 +611,13 @@ func renderWhatChangedSection(slices []store.Slice, commits map[string]string, a
 
 // countFindingOutcomes tallies outcomes by their final bucket, for the PR
 // body's one-line findings count.
-func countFindingOutcomes(outcomes []findingOutcome) (fixed, dismissed, noted, asked int) {
+func countFindingOutcomes(outcomes []findingOutcome) (fixed, addressed, dismissed, noted, asked int) {
 	for _, o := range outcomes {
 		switch o.status {
 		case "fixed":
 			fixed++
+		case "addressed":
+			addressed++
 		case "dismissed":
 			dismissed++
 		case "noted":
@@ -624,7 +626,7 @@ func countFindingOutcomes(outcomes []findingOutcome) (fixed, dismissed, noted, a
 			asked++
 		}
 	}
-	return fixed, dismissed, noted, asked
+	return fixed, addressed, dismissed, noted, asked
 }
 
 // renderVerificationSection renders the ## Verification section: the
@@ -662,8 +664,8 @@ func renderVerificationSection(rep reportYAML, tier string, oracleNames []string
 	// Revalidation tier
 	fmt.Fprintf(&b, "Revalidation tier: %s\n\n", tier)
 
-	fixed, dismissed, noted, asked := countFindingOutcomes(outcomes)
-	fmt.Fprintf(&b, "Findings: %d fixed, %d dismissed, %d noted, %d asked. See the pull request's first comment for detail.\n", fixed, dismissed, noted, asked)
+	fixed, addressed, dismissed, noted, asked := countFindingOutcomes(outcomes)
+	fmt.Fprintf(&b, "Findings: %d fixed, %d addressed, %d dismissed, %d noted, %d asked. See the pull request's first comment for detail.\n", fixed, addressed, dismissed, noted, asked)
 	return b.String()
 }
 
@@ -856,14 +858,20 @@ func renderStackedSection(ticket string, r stack.Repo) string {
 
 // findingOutcome pairs one finding with how it ended. status is the bucket
 // both the PR body's one-line count and review-notes' own sort/wording key
-// off of: "fixed", "dismissed", "noted", "asked", "decided" (a kept ask
+// off of: "fixed", "addressed" (a note the risk floor routed that a later
+// round's change fixed, with no slice to credit), "dismissed", "noted", "asked", "decided" (a kept ask
 // whose fix slice has not cleared it) or "open" (reachable only before a
 // gate round has even cleared it, never at a clean, publishable round).
 // detail is review-notes' own prose for it.
 type findingOutcome struct {
-	finding Finding
-	status  string
-	detail  string
+	// finding is the latest version of the finding. first is its first version
+	// and firstRound and lastRound the rounds of the two; they differ when a
+	// later round continued the finding (--prior, the same id).
+	finding               Finding
+	first                 Finding
+	firstRound, lastRound int
+	status                string
+	detail                string
 }
 
 // sliceForFinding maps a finding id to the id of the slice that recorded it
@@ -914,6 +922,9 @@ func riskOrder(risk string) int {
 // nobody decided that round, so the wording here never depends on it.
 func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store.Slice) (outcomes []findingOutcome, reviewedPaths []string, lastSummary string, err error) {
 	latest := make(map[string]Finding)
+	first := make(map[string]Finding)
+	firstRound := make(map[string]int)
+	lastSeen := make(map[string]int)
 	cleared := make(map[string][]string) // finding id -> "round N" strings, every round it cleared in
 	reviewed := make(map[string]bool)
 	fixedBy := sliceForFinding(slices)
@@ -934,7 +945,10 @@ func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store
 		}
 
 		for _, f := range fy.Findings {
-			latest[f.ID] = f
+			if _, seen := first[f.ID]; !seen {
+				first[f.ID], firstRound[f.ID] = f, n
+			}
+			latest[f.ID], lastSeen[f.ID] = f, n
 		}
 		for _, id := range fy.Cleared {
 			cleared[id] = append(cleared[id], fmt.Sprintf("round %d", n))
@@ -948,8 +962,14 @@ func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store
 	}
 
 	for id, f := range latest {
-		o := findingOutcome{finding: f}
+		o := findingOutcome{finding: f, first: first[id], firstRound: firstRound[id], lastRound: lastSeen[id]}
 		switch {
+		case len(cleared[id]) > 0 && fixedBy[id] == "" && f.Status == StatusNoted && f.RoutedAs == ActionNote:
+			// A note the risk floor routed, cleared because a round's change
+			// touched its file and the reviewer no longer saw it: no slice
+			// fixed it, so it reads addressed, not fixed.
+			o.status = "addressed"
+			o.detail = "addressed at " + strings.Join(cleared[id], ", ")
 		case len(cleared[id]) > 0:
 			o.status = "fixed"
 			if sliceID := fixedBy[id]; sliceID != "" {
@@ -983,6 +1003,13 @@ func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store
 	sort.Strings(reviewedPaths)
 
 	return outcomes, reviewedPaths, lastSummary, nil
+}
+
+// continuedWithChange reports whether a later round continued the finding and
+// changed its title or risk, so the notes show its first version beside the
+// latest and a finding a reviewer downgraded does not lose what it first said.
+func (o findingOutcome) continuedWithChange() bool {
+	return o.lastRound > o.firstRound && (o.first.Title != o.finding.Title || o.first.Risk != o.finding.Risk)
 }
 
 // sortFindingOutcomes sorts outcomes by risk, high first, then by finding id
@@ -1106,6 +1133,9 @@ func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, round
 			f := o.finding
 			fmt.Fprintf(&b, "- **%s** (%s): %s\n", f.Title, f.Risk, f.RiskRationale)
 			fmt.Fprintf(&b, "  - Status: %s\n", o.detail)
+			if o.continuedWithChange() {
+				fmt.Fprintf(&b, "  - History: %s at round %d: %s; continued at round %d as %s: %s\n", o.first.Risk, o.firstRound, o.first.Title, o.lastRound, f.Risk, f.Title)
+			}
 			if f.Oracle != "" {
 				fmt.Fprintf(&b, "  - Oracle: %s\n", f.Oracle)
 			}

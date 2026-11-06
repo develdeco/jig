@@ -99,3 +99,24 @@ func TestNextAttempt(t *testing.T) {
 		t.Errorf("NextAttempt on an empty journal = %d, want 1", got)
 	}
 }
+
+// TestNextAttemptIgnoresFixSliceLines keeps a fix slice's first verification
+// attempt 1: the gate's fix-slice line is not an attempt, and a journal that
+// still carries the round number on it numbers right too.
+func TestNextAttemptIgnoresFixSliceLines(t *testing.T) {
+	t.Parallel()
+	lines := []Line{
+		{Event: EventGateRound, Attempt: 2},
+		{Slice: "fix-1", Event: EventFixSlice, Attempt: 2},
+		{Slice: "fix-2", Event: EventFixSlice},
+	}
+	for _, slice := range []string{"fix-1", "fix-2"} {
+		if got := NextAttempt(lines, slice); got != 1 {
+			t.Errorf("NextAttempt(%q) = %d, want 1", slice, got)
+		}
+	}
+	lines = append(lines, Line{Slice: "fix-1", Event: EventDispatch, Attempt: 1})
+	if got := NextAttempt(lines, "fix-1"); got != 2 {
+		t.Errorf("NextAttempt after a first verification = %d, want 2", got)
+	}
+}

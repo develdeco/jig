@@ -251,7 +251,7 @@ func renderStatusWith(st *store.Store, ticket string, sections []statusSection, 
 	// show, and when the unreadable round is the only one there is nothing
 	// left in that block to hint at the gap. Hence the note line beside
 	// the table below.
-	outstanding, unreadableRounds, err := verifydeliver.OutstandingAsks(st, ticket)
+	outstanding, notedFindings, unreadableRounds, err := verifydeliver.OutstandingFindings(st, ticket)
 	if err != nil {
 		return "", err
 	}
@@ -305,6 +305,26 @@ func renderStatusWith(st *store.Store, ticket string, sections []statusSection, 
 			asks.add(f, d)
 		}
 		blocks = append(blocks, axi.Table("outstanding_asks", []string{"id", "risk", "file:line", "title", "why", "decision", "decided_by"}, askRows))
+	}
+	// A note a person took up with `jig triage` waits for the next round the
+	// way a decided ask does, so it is listed with its decision; a note nobody
+	// decided is only a record and is not.
+	if len(notedFindings) > 0 {
+		decisions, err := verifydeliver.ReadTriageDecisions(st, ticket)
+		if err != nil {
+			return "", err
+		}
+		var noteRows [][]string
+		for _, f := range notedFindings {
+			d := decisions[f.ID]
+			if !d.Decided() {
+				continue
+			}
+			noteRows = append(noteRows, []string{f.ID, f.Risk, fileLine(f), f.Title, d.Label(f), d.Provenance})
+		}
+		if len(noteRows) > 0 {
+			blocks = append(blocks, axi.Table("decided_notes", []string{"id", "risk", "file:line", "title", "decision", "decided_by"}, noteRows))
+		}
 	}
 
 	// The help names one way forward, in this order of precedence: a
