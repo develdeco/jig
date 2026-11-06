@@ -69,13 +69,13 @@ func TestObservePromptNamingATicketHearsItsPhaseAndSkill(t *testing.T) {
 func TestObservePromptHearsTheSameNotesForEitherSlashOfTheCwd(t *testing.T) {
 	t.Parallel()
 	for _, form := range []string{"slash", "backslash"} {
+		if form == "backslash" && filepath.Separator == '/' {
+			continue // a backslash is a filename character here, not a separator
+		}
 		fx := newFixture(t, fixture.Opts{})
 		e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
 		cwd := filepath.ToSlash(fx.RepoDir)
 		if form == "backslash" {
-			if filepath.Separator == '/' {
-				continue // a backslash is a filename character here, not a separator
-			}
 			cwd = strings.ReplaceAll(cwd, "/", `\`)
 		}
 		out, code := runMain(t, e, hookPayload(t, fx, "UserPromptSubmit", map[string]any{"prompt": "add a flag", "cwd": cwd}), "observe", "--harness", "claude")

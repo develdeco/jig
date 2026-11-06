@@ -96,7 +96,7 @@ func TestEveryAdapterHearsTheSameNotesForEitherSlash(t *testing.T) {
 		a, _ := AdapterFor(name)
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			forms := len(slashForms(newRig(t).fx.RepoDir))
+			forms := len(slashForms("x")) // the count depends only on the OS
 			for c := 0; c < forms; c++ {
 				r := newRig(t)
 				cwd := slashForms(r.fx.RepoDir)[c]

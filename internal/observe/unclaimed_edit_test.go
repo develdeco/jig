@@ -283,13 +283,26 @@ func TestAnEditThroughASymlinkedCheckoutIsInside(t *testing.T) {
 
 // TestAnEditThroughAJunctionedCheckoutIsInside: a Windows junction is a link
 // the checkout match follows as it follows a symlink, whichever of the cwd
-// and the edited file is named through it.
+// and the edited file is named through it, for a file at the checkout's top
+// folder and one below it, and from a cwd in a subdirectory of the checkout.
 func TestAnEditThroughAJunctionedCheckoutIsInside(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("directory junctions only exist on Windows")
 	}
-	for _, viaLink := range []bool{false, true} {
+	for _, c := range []struct {
+		name string
+		// cwdVia and fileVia name the cwd and the file through the junction
+		// rather than the checkout; cwdSub is a subdirectory of the base the
+		// cwd is in, file is relative to its base.
+		cwdVia, fileVia bool
+		cwdSub, file    string
+	}{
+		{"cwd through the junction, file below the top folder", true, false, "", "new/file.go"},
+		{"file through the junction, below the top folder", false, true, "", "new/file.go"},
+		{"file through the junction, at the top folder", false, true, "", "go.mod"},
+		{"file through the junction, cwd in a subdirectory", false, true, "pkg", "new/file.go"},
+	} {
 		r := newPhaseRig(t)
 		link := filepath.Join(t.TempDir(), "junction")
 		out, err := exec.Command("cmd", "/c", "mklink", "/J", link, r.fx.RepoDir).CombinedOutput()
@@ -302,10 +315,20 @@ func TestAnEditThroughAJunctionedCheckoutIsInside(t *testing.T) {
 		r.onTicketBranch()
 		r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
 		r.handle(r.ev(KindSessionStart))
-		cwd, file := link, filepath.Join(r.fx.RepoDir, "new", "file.go")
-		if viaLink {
-			cwd, file = r.fx.RepoDir, filepath.Join(link, "new", "file.go")
+		cwdBase, fileBase := r.fx.RepoDir, r.fx.RepoDir
+		if c.cwdVia {
+			cwdBase = link
 		}
+		if c.fileVia {
+			fileBase = link
+		}
+		cwd := filepath.Join(cwdBase, c.cwdSub)
+		if c.cwdSub != "" {
+			if err := os.MkdirAll(cwd, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file := filepath.Join(fileBase, filepath.FromSlash(c.file))
 		got := r.handle(r.ev(KindTool, func(e *Event) {
 			e.Cwd, e.Tool, e.Files = cwd, "Edit", []string{file}
 		})).Context
