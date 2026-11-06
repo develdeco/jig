@@ -132,7 +132,7 @@ func failureOutput(out string, err error, baseline map[string]bool) (tail, summa
 	if reason == "" {
 		return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
 	}
-	room := summaryBytes - len(reason) - 1
+	room := max(summaryBytes-len(reason)-1, 0)
 	return tail, joinReason(strings.Join(strings.Fields(headBytes(fresh, room)), " "), reason)
 }
 
@@ -140,14 +140,15 @@ func failureOutput(out string, err error, baseline map[string]bool) (tail, summa
 const killedMarker = "did not finish within"
 
 // killedReason is the ending of err from "did not finish within" on when the
-// wedge guard killed the run, "" otherwise. The full error embeds the oracle
+// wedge guard killed the run, "" otherwise. The guard's error always ends
+// with it, so the last one counts: the full error embeds the oracle
 // command, which can be of any length.
 func killedReason(err error) string {
 	if err == nil {
 		return ""
 	}
 	s := err.Error()
-	if i := strings.Index(s, killedMarker); i >= 0 {
+	if i := strings.LastIndex(s, killedMarker); i >= 0 {
 		return s[i:]
 	}
 	return ""

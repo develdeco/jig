@@ -132,3 +132,73 @@ func TestKilledSignatureKeepsTheTimeout(t *testing.T) {
 		t.Errorf("plain %q, killed %q", plain, k1)
 	}
 }
+
+// longOutput is forty distinct passing lines and then a failing one, well past
+// the summary bound.
+func longOutput() string {
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		b.WriteString("ok  \tpkg" + strings.Repeat("a", i%7) + string(rune('a'+i%26)) + "\t0.1s\n")
+	}
+	return b.String() + "FAIL pkg9 last line\n"
+}
+
+// TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine: round 1 r1-f1. A
+// long output and a long command, with no baseline and with a baseline that
+// has no new line, give one line within the bound that ends with the reason,
+// holds no part of the command and keeps the output's last line.
+func TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine(t *testing.T) {
+	t.Parallel()
+	out := longOutput()
+	for name, b := range map[string]map[string]bool{"no baseline": nil, "no new line": baselineOf(out)} {
+		_, s := failureOutput(out, longKill(300), b)
+		if len(s) > summaryBytes || strings.Contains(s, "\n") || !strings.HasSuffix(s, " did not finish within 30m0s") {
+			t.Errorf("%s: summary = %q (%d bytes), want one line within %d ending with the reason", name, s, len(s), summaryBytes)
+		}
+		if strings.Contains(s, "xxx") || !strings.Contains(s, "FAIL pkg9 last line") {
+			t.Errorf("%s: summary = %q, want the last line and no part of the command", name, s)
+		}
+	}
+}
+
+// phraseKill is the error of a killed run whose oracle command holds the
+// guard's own phrase, with padding after it.
+func phraseKill(pad int) error {
+	return errors.New(`shell "grep -v 'did not finish within' ` + strings.Repeat("x", pad) + `": did not finish within 30m0s`)
+}
+
+// TestKilledReasonIsTheGuardsOwnWords: round 1 r1-f2. A command that holds
+// "did not finish within" does not make the reason the rest of the command:
+// the summary stays within its bound, keeps the failing line and does not
+// panic, with or without a baseline.
+func TestKilledReasonIsTheGuardsOwnWords(t *testing.T) {
+	t.Parallel()
+	if got := killedReason(phraseKill(760)); got != "did not finish within 30m0s" {
+		t.Errorf("killedReason = %q", got)
+	}
+	base := baselineOf("ok\n")
+	for _, pad := range []int{10, 760} {
+		for name, b := range map[string]map[string]bool{"baseline": base, "no baseline": nil} {
+			_, s := failureOutput("ok\nboom: pkg9 broke\n", phraseKill(pad), b)
+			if len(s) > summaryBytes || strings.Contains(s, "\n") || !strings.HasSuffix(s, "did not finish within 30m0s") || strings.Contains(s, "xxx") {
+				t.Errorf("%s, pad %d: summary = %q (%d bytes)", name, pad, s, len(s))
+			}
+			if !strings.Contains(s, "boom: pkg9 broke") {
+				t.Errorf("%s, pad %d: summary = %q, want the failing line", name, pad, s)
+			}
+		}
+	}
+}
+
+// TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace: round 1 r1-f3.
+func TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace(t *testing.T) {
+	t.Parallel()
+	_, s := failureOutput("ok\nboom: pkg9 broke\n", longKill(50), baselineOf("ok\n"))
+	if want := "boom: pkg9 broke did not finish within 30m0s"; s != want {
+		t.Errorf("summary = %q, want %q", s, want)
+	}
+	_, s = failureOutput("", longKill(50), nil)
+	if want := "did not finish within 30m0s"; s != want {
+		t.Errorf("no output: summary = %q, want %q", s, want)
+	}
+}
