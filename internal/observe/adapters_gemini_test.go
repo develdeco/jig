@@ -8,7 +8,7 @@ func TestGeminiAdapter(t *testing.T) {
 		{"session start", `{"session_id":"g1","cwd":"/r","hook_event_name":"SessionStart","source":"startup"}`,
 			Event{Harness: "gemini", Kind: KindSessionStart, Session: "g1", Cwd: "/r"}},
 		{"prompt", `{"session_id":"g1","cwd":"/r","hook_event_name":"BeforeAgent","prompt":"go"}`,
-			Event{Harness: "gemini", Kind: KindPrompt, Session: "g1", Cwd: "/r"}},
+			Event{Harness: "gemini", Kind: KindPrompt, Prompt: "go", Session: "g1", Cwd: "/r"}},
 		{"shell tool", `{"session_id":"g1","cwd":"/r","hook_event_name":"AfterTool","tool_name":"run_shell_command","tool_input":{"command":"git commit -m x"},"tool_response":{"llmContent":"ok"}}`,
 			Event{Harness: "gemini", Kind: KindTool, Session: "g1", Cwd: "/r", Tool: "run_shell_command", Command: "git commit -m x"}},
 		{"shell tool with a description", `{"session_id":"g1","cwd":"/r","hook_event_name":"AfterTool","tool_name":"run_shell_command","tool_input":{"command":"go test","description":"Run the tests"}}`,

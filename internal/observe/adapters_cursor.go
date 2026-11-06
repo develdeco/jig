@@ -49,6 +49,7 @@ func (a cursorShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "beforeSubmitPrompt":
 		ev.Kind = KindPrompt
+		ev.Prompt = p.str("prompt")
 	case "afterShellExecution":
 		ev.Kind = KindTool
 		ev.Tool = "shell"
