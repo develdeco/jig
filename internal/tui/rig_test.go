@@ -519,3 +519,24 @@ func TestBriefScreenWordsAnAgentsApprovalOnce(t *testing.T) {
 		t.Errorf("approver = %q", got)
 	}
 }
+
+// TestBriefScreenNeverWordsAnAlreadyWordedApprovalAgain: a status with no
+// identity key (an older jig) carries only the worded approved_by; the TUI
+// takes the identity out of it and words it once, and a plain name stays as it
+// is.
+func TestBriefScreenNeverWordsAnAlreadyWordedApprovalAgain(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ by, provenance, want string }{
+		{"an agent (as Ada Lovelace)", "agent", "an agent, as Ada Lovelace"},
+		{"Ada Lovelace", "person", "Ada Lovelace"},
+	} {
+		doc := "ticket: JIG-1\nstate: parked\n" + axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", c.by}, {"provenance", c.provenance}})
+		b := parseStatus(doc).Brief
+		if b == nil {
+			t.Fatalf("%q: no brief", c.by)
+		}
+		if got := phase.Approver(b.ApprovedBy, b.Provenance); got != c.want {
+			t.Errorf("approver for %q = %q, want %q", c.by, got, c.want)
+		}
+	}
+}

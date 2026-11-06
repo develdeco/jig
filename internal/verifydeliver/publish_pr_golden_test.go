@@ -202,6 +202,8 @@ Findings: 2 fixed, 0 addressed, 0 dismissed, 2 noted, 0 asked. See the pull requ
 
 	wantNotes := `# Review Notes
 
+Published without a recorded approval
+
 ## Round 3
 
 round 3: nothing new; the shared-helper note from round 1 remains on record
