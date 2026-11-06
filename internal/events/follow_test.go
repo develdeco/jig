@@ -227,7 +227,7 @@ func TestFollowGivesUpWhenEveryPollFails(t *testing.T) {
 }
 
 // TestFollowDeliversEveryAppendOnceAndBlocksNone: a writer replaces the
-// journal forty times, as journal.Append does, while a follower polls as
+// journal forty times, as a merge or checkout does, while a follower polls as
 // fast as it can. Every replacement goes through - on Windows a rename over a
 // file the follower held open would not - and every line comes out once, in
 // order.

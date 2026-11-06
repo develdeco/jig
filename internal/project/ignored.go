@@ -7,6 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -24,7 +25,7 @@ func LoadIgnored(jigHome string) ([]string, error) {
 	if jigHome == "" {
 		return nil, fmt.Errorf("project: no jig home given")
 	}
-	data, err := os.ReadFile(home.IgnoredPath(jigHome))
+	data, err := fileshare.ReadFile(home.IgnoredPath(jigHome))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

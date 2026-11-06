@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -60,7 +61,7 @@ func resolveIntent(st *store.Store, ticket string) (Intent, string, error) {
 	}
 
 	intentPath := st.IntentPath(ticket)
-	raw, err := os.ReadFile(intentPath)
+	raw, err := fileshare.ReadFile(intentPath)
 	switch {
 	case err == nil:
 		// One read: parse the same bytes this function hashes below, never

@@ -1,6 +1,6 @@
 //go:build windows
 
-package store
+package fileshare
 
 import (
 	"errors"
@@ -10,11 +10,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// replacing reports whether err is how Windows fails an open of a file that
+// Replacing reports whether err is how Windows fails an open of a file that
 // another process is renaming into place, or a rename over a file another
 // process has open: a sharing violation, or access denied while the replaced
 // file is pending delete.
-func replacing(err error) bool {
+func Replacing(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }
 
@@ -27,12 +27,12 @@ type fileRenameInfo struct {
 	FileName       [1]uint16
 }
 
-// replaceFile renames tmp over path with POSIX semantics, so the name moves
+// Rename renames tmp over path with POSIX semantics, so the name moves
 // to the new file in one step even while another process holds the old one
-// open (with delete sharing, as fileshare.Open opens it): a reader opening
+// open (with delete sharing, as Open opens it): a reader opening
 // path sees the old file or the new one, never neither. A file system that
 // has no POSIX semantics gets os.Rename.
-func replaceFile(tmp, path string) error {
+func Rename(tmp, path string) error {
 	err := posixRename(tmp, path)
 	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) || errors.Is(err, windows.ERROR_INVALID_FUNCTION) {
 		return os.Rename(tmp, path)
@@ -40,7 +40,7 @@ func replaceFile(tmp, path string) error {
 	return err
 }
 
-// posixRename is replaceFile's FileRenameInfoEx call.
+// posixRename is Rename's FileRenameInfoEx call.
 func posixRename(tmp, path string) error {
 	from, err := windows.UTF16PtrFromString(tmp)
 	if err != nil {

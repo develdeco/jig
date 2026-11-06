@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -50,7 +51,7 @@ func Read(st *store.Store, platform string) (Material, error) {
 	if m.Docs, err = readDocs(st.Root, platform); err != nil {
 		return Material{}, err
 	}
-	data, err := os.ReadFile(filepath.Join(st.Root, "ledger.md"))
+	data, err := fileshare.ReadFile(filepath.Join(st.Root, "ledger.md"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Material{}, err
 	}

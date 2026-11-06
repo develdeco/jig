@@ -27,6 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
@@ -1013,7 +1014,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	// jig's in What changed.
 	var authorCommits []authorCommit
 	if t.rec.Adopted() {
-		startData, err := os.ReadFile(d.Store.StartSHAPath(ticket, t.repoName))
+		startData, err := fileshare.ReadFile(d.Store.StartSHAPath(ticket, t.repoName))
 		if err != nil {
 			return publication{}, fmt.Errorf("verifydeliver: publish: read start sha: %w", err)
 		}
@@ -1894,7 +1895,7 @@ func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
 		return nil
 	}
 	intentPath := intentFilePath(st, ticket, rep.Intent.Source)
-	data, err := os.ReadFile(intentPath)
+	data, err := fileshare.ReadFile(intentPath)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: read %s: %w", intentPath, err)
 	}

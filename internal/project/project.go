@@ -545,7 +545,7 @@ func (c Config) ResolvedGateConfig() GateConfig {
 // caller that has a store rather than a file reads it with LoadStoreConfig,
 // which knows which of the two the store has.
 func Load(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("project: read %s: %w", path, err)
 	}

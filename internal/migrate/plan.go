@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -281,7 +282,7 @@ func storeDocs(platform string) []storeDoc {
 // that dropped, and whether the text differs at all. A store without the file
 // has nothing to migrate.
 func (d storeDoc) migrated(st *store.Store, renameOf map[string]string) (text string, dropped int, changed bool, err error) {
-	data, err := os.ReadFile(filepath.Join(st.Root, filepath.FromSlash(d.rel)))
+	data, err := fileshare.ReadFile(filepath.Join(st.Root, filepath.FromSlash(d.rel)))
 	if os.IsNotExist(err) {
 		return "", 0, false, nil
 	}

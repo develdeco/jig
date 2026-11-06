@@ -6,11 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -307,15 +306,12 @@ func (l *lockFile) release() {
 	}
 }
 
-// renameOver renames src over dst. On Windows a rename fails while another
-// process has dst open without sharing deletion (a reader of the file, a
-// scanner), so it is retried for a moment, as Git for Windows does.
+// renameOver renames src over dst with the rule store.AtomicWrite uses
+// (fileshare.Replace): on Windows a rename with POSIX semantics, which goes
+// ahead while a reader holds dst open with delete sharing, retried for a
+// moment while a program that does not share it (a scanner) holds dst.
 func renameOver(src, dst string) error {
-	err := os.Rename(src, dst)
-	for i := 1; err != nil && runtime.GOOS == "windows" && i <= 10; i++ {
-		time.Sleep(time.Duration(i) * 5 * time.Millisecond)
-		err = os.Rename(src, dst)
-	}
+	err := fileshare.Replace(src, dst)
 	if err != nil {
 		os.Remove(src)
 	}

@@ -76,7 +76,7 @@ type fileState struct {
 	size int64
 	mod  time.Time
 	// seen counts, per line (by hash), the copies already handed back, so
-	// a file rewritten whole - by Append, or by a merge that reorders
+	// a file rewritten whole - by a merge or checkout that reorders
 	// lines - gives back only the lines that are new.
 	seen map[[16]byte]int
 }
@@ -159,8 +159,8 @@ func (r *Reader) keep(at time.Time) bool {
 // file, opened with delete sharing so a writer's rename over it is never
 // refused (a read that held it would fail the writer, and the writer's wait
 // would fail this poll in turn), closes it, and tells the new lines from the old by their hash: the
-// file is replaced on each append and may be rewritten by a merge, so an
-// offset means nothing.
+// file is appended to in place but may be replaced whole by a merge or
+// checkout, so an offset means nothing.
 func (r *Reader) readJournal(j Journal) ([]item, error) {
 	info, err := os.Stat(j.Path)
 	if err != nil {

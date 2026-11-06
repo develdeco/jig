@@ -570,7 +570,7 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	// own folder.
 	same := false
 	if s.entryIsFolder(e) {
-		have, rerr := os.ReadFile(s.TrackerRecordPath(e))
+		have, rerr := readFile(s.TrackerRecordPath(e))
 		same = rerr == nil && bytes.Equal(have, data)
 	}
 	if !same {
