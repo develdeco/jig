@@ -15,7 +15,8 @@ import (
 // intent: only for tokens shaped like one of the store's declared keys and a
 // number (JIG-12), and only the ones that name a ticket the store holds.
 
-// maxNamedTickets is how many tickets one prompt is answered for.
+// maxNamedTickets is how many tickets one prompt is answered for: how many
+// notes it hears, so a done ticket, which gets none, does not use a place.
 const maxNamedTickets = 3
 
 // phaseSkill is the skill for each phase of a ticket (`jig skill <name>`).
@@ -27,7 +28,7 @@ var phaseSkill = map[phase.Name]string{
 }
 
 // namedTickets is the tickets of the store the event's prompt names, in the
-// order named, each once, at most maxNamedTickets. A token counts when its key
+// order named, each once. A token counts when its key
 // is one the project declares (any case) and the store holds a ticket under
 // the id; an id the store does not hold names nothing.
 func (h *handler) namedTickets() []string {
@@ -45,7 +46,7 @@ func (h *handler) namedTickets() []string {
 		return nil
 	}
 	var out []string
-	seen := map[string]bool{}
+	seen, held := map[string]bool{}, map[string]bool{}
 	for _, m := range re.FindAllStringSubmatch(h.ev.Prompt, -1) {
 		id := strings.ToUpper(m[1]) + "-" + m[2]
 		if seen[id] {
@@ -55,19 +56,17 @@ func (h *handler) namedTickets() []string {
 		if resolved, err := h.st.ResolveTicket(id); err == nil {
 			id = resolved
 		}
-		if !h.st.TicketExists(id) {
+		if !h.st.TicketExists(id) || held[id] {
 			continue
 		}
+		held[id] = true
 		out = append(out, id)
-		if len(out) == maxNamedTickets {
-			break
-		}
 	}
 	return out
 }
 
-// phaseNotes is the note for each of the named tickets that is not done, once
-// for each ticket and phase (the Ref is phase:<ticket>:<phase>). A ticket
+// phaseNotes is the note for each of the named tickets that is not done, at
+// most maxNamedTickets of them, once for each ticket and phase (the Ref is phase:<ticket>:<phase>). A ticket
 // whose phase cannot be derived costs its own note.
 func (h *handler) phaseNotes(tickets []string) []Note {
 	if h.d.Derive == nil {
@@ -75,6 +74,9 @@ func (h *handler) phaseNotes(tickets []string) []Note {
 	}
 	var out []Note
 	for _, id := range tickets {
+		if len(out) == maxNamedTickets {
+			break
+		}
 		t, err := h.d.Derive(h.st, id)
 		if err != nil {
 			h.fail(fmt.Errorf("phase of %s: %w", id, err))

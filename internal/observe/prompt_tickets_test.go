@@ -115,3 +115,55 @@ func TestAPromptOnATicketsBranchHearsTheNamedTicketsToo(t *testing.T) {
 		t.Errorf("context = %s\nwant JIG-2's brief note and the intake skill", got)
 	}
 }
+
+func TestADoneTicketsNamedFirstDoNotUseThePlacesOfALiveOne(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t, "JIG-2", "JIG-3", "JIG-4")
+	for _, id := range []string{"JIG-2", "JIG-3", "JIG-4"} {
+		r.phases[id] = phase.Ticket{Current: phase.Publish, Code: phase.CodeDone}
+	}
+	r.phases["JIG-3"] = phase.Ticket{Current: phase.Publish, Code: phase.CodeClosed}
+	r.handle(r.ev(KindSessionStart))
+	got := r.prompt("like JIG-2, JIG-3 and JIG-4 did, carry on with JIG-1")
+	if !strings.Contains(got, "JIG-1 is at its build phase") || strings.Contains(got, "works on no ticket") {
+		t.Errorf("context = %s\nwant JIG-1's note though three done or closed tickets come first", got)
+	}
+}
+
+func TestATicketWhoseAliasIsNamedHearsItsNoteOnceUnderItsId(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	if err := r.st.CreateTicketRecord("JIG-2", store.Ticket{Slug: "two", Aliases: []string{"JIG-9"}}); err != nil {
+		t.Fatal(err)
+	}
+	r.phases["JIG-2"] = phase.Ticket{Current: phase.Review, Ready: true}
+	r.handle(r.ev(KindSessionStart))
+	got := r.prompt("JIG-9 and JIG-2")
+	if strings.Count(got, "JIG-2 is at its review phase") != 1 || strings.Contains(got, "works on no ticket") {
+		t.Errorf("context = %s\nwant one note for JIG-2", got)
+	}
+}
+
+func TestAClosedTicketHearsNoNote(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	r.phases["JIG-1"] = phase.Ticket{Current: phase.Build, Code: phase.CodeClosed}
+	r.handle(r.ev(KindSessionStart))
+	if got := r.prompt("what became of JIG-1"); got != "" {
+		t.Errorf("a closed ticket named in a prompt: context = %s, want none", got)
+	}
+}
+
+func TestAPublishPhaseNoteNamesTheDraftedSkillAndATicketWithoutAPhaseCostsOnlyItself(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t, "JIG-2")
+	r.phases["JIG-1"] = phase.Ticket{Current: phase.Publish, Ready: true}
+	delete(r.phases, "JIG-2") // Derive fails for JIG-2
+	r.handle(r.ev(KindSessionStart))
+	// The failure is reported, and costs JIG-2 its note alone.
+	res, _ := Handle(r.d, r.ev(KindPrompt, func(e *Event) { e.Prompt = "JIG-2 then JIG-1" }))
+	got := res.Context
+	if !strings.Contains(got, "JIG-1 is at its publish phase, ready: use the publish skill (`jig skill publish`)") || strings.Contains(got, "JIG-2 is") {
+		t.Errorf("context = %s\nwant JIG-1's publish note alone", got)
+	}
+}

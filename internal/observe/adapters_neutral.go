@@ -1,12 +1,14 @@
 package observe
 
+import "strings"
+
 // The neutral adapter, and OpenCode's, which sends the neutral shape. The
 // neutral shape is jig's own fields as one JSON object, for a script or a
 // plugin that builds the event itself, and what jig answers in the same
 // words:
 //
 //	in   {"event"|"kind", "session", "agent", "cwd", "tool", "command",
-//	      "description", "exit", "files", "model", "transcript", "stop_active",
+//	      "description", "exit", "files", "prompt", "model", "transcript", "stop_active",
 //	      "harness"}
 //	out  {"context", "message", "block"}   each only when it has something to say
 //
@@ -62,7 +64,7 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "prompt", "userpromptsubmit", "chatmessage":
 		ev.Kind = KindPrompt
-		ev.Prompt = p.str("prompt")
+		ev.Prompt = neutralPrompt(p)
 	case "tool", "posttooluse", "toolexecuteafter":
 		ev.Kind = KindTool
 	case "stop", "sessionidle":
@@ -93,6 +95,32 @@ func neutralEventName(p payload) string {
 		return p.str("type")
 	}
 	return hook
+}
+
+// neutralPrompt is the person's text of a prompt: a top-level prompt (the
+// neutral shape), else the text parts of the OpenCode plugin's chat.message
+// output, {"output":{"parts":[{"type":"text","text":...}]}}, joined by a
+// newline.
+func neutralPrompt(p payload) string {
+	if s := p.str("prompt"); s != "" {
+		return s
+	}
+	v, _ := p.at("output.parts")
+	parts, _ := v.([]any)
+	var texts []string
+	for _, e := range parts {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		if kind, _ := m["type"].(string); kind != "text" {
+			continue
+		}
+		if s, _ := m["text"].(string); s != "" {
+			texts = append(texts, s)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 // neutralOut is what jig answers a neutral call with.
