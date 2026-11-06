@@ -180,7 +180,8 @@ const appendLockTimeout = 30 * time.Second
 // file ends in a torn line (a writer that died mid-line), so that writer
 // costs its own line and not this one. The file is appended to in place and
 // never rewritten, so a reader that opened it earlier sees at most a torn
-// final line, which Read leaves out.
+// final line, which Read leaves out. Nothing here renames over the journal;
+// what replaces it whole is git (a sync's merge or checkout).
 func Append(st *store.Store, ticket string, l Line) error {
 	return appendWithin(st, ticket, l, appendLockTimeout)
 }

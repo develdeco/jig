@@ -375,7 +375,7 @@ func (s *Store) dedupeMergedLogs(id gitx.Identity) error {
 			continue
 		}
 		abs := filepath.Join(s.Root, filepath.FromSlash(path))
-		merged, err := os.ReadFile(abs)
+		merged, err := readFile(abs)
 		if err != nil {
 			return err
 		}
@@ -440,7 +440,7 @@ func dedupeLines(merged, ours, theirs string) (cut string, did bool) {
 // that is anything else is the owner own, and is left alone.
 func (s *Store) ensureWritersAttributes() error {
 	path := filepath.Join(s.Root, ".gitattributes")
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	switch {
 	case err == nil:
 		if strings.ReplaceAll(string(data), "\r\n", "\n") != gitx.StoreAttributes {
@@ -548,7 +548,7 @@ func (s *Store) PlanWriters() (WritersPlan, error) {
 		return p, err
 	}
 	p.IDs = len(ids)
-	if old, err := os.ReadFile(filepath.Join(s.Root, claimsFile)); err == nil {
+	if old, err := readFile(filepath.Join(s.Root, claimsFile)); err == nil {
 		p.Carried = len(parseClaims(string(old)))
 	}
 	return p, nil
@@ -655,7 +655,7 @@ func (s *Store) createClaimsBranch(ident gitx.Identity) (made bool, ids, carried
 	}
 
 	var lines []ClaimLine
-	if old, err := os.ReadFile(filepath.Join(s.Root, claimsFile)); err == nil {
+	if old, err := readFile(filepath.Join(s.Root, claimsFile)); err == nil {
 		lines = parseClaims(string(old))
 		carried = len(lines)
 	} else if !errors.Is(err, fs.ErrNotExist) {

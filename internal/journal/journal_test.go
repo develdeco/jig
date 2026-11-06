@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -459,5 +460,47 @@ func TestRenderConsolidatedNumbersAFixRoundWithoutAnAttempt(t *testing.T) {
 	})
 	if !strings.Contains(out, "- round 1: fix-slice fix-1\n") {
 		t.Errorf("RenderConsolidated = %q, want round 1 for fix-1", out)
+	}
+}
+
+// TestReadWhileTheJournalIsReplaced: a reader looping on Read never makes a
+// replacement of the journal (a merge or checkout swapping the file in) fail,
+// because Read opens it with delete sharing. Opened with os.ReadFile on
+// Windows, a rename (no retry here) is refused whenever it lands mid-read.
+func TestReadWhileTheJournalIsReplaced(t *testing.T) {
+	st := newTestStore(t)
+	if err := Append(st, "JIG-1", Line{Event: "dispatch"}); err != nil {
+		t.Fatal(err)
+	}
+	path := Path(st, "JIG-1")
+	body := []byte(`{"ts":"2026-10-23T09:00:01Z","ticket":"JIG-1","event":"merged"}` + "\n")
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = Read(st, "JIG-1")
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for i := 0; i < 300; i++ {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileshare.Rename(tmp, path); err != nil {
+			t.Fatalf("replacement %d while Read loops: %v", i, err)
+		}
+	}
+	lines, err := Read(st, "JIG-1")
+	if err != nil || len(lines) != 1 || lines[0].Event != "merged" {
+		t.Fatalf("Read after the replacements = %+v, %v, want the merged line", lines, err)
 	}
 }
