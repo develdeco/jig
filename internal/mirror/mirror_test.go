@@ -129,9 +129,9 @@ type fakeClient struct {
 	parentOf    map[string]string
 	// blockedByOf maps an issue's node id to the node ids it is blocked by.
 	blockedByOf map[string][]string
-	// goneNodeIDs are node ids FetchIssue reports github.ErrIssueNotFound
-	// for once (brief.md#Adoption: "a recorded issue that is gone from
-	// GitHub gets a new issue").
+	// goneNodeIDs are node ids FetchIssues leaves out of its answer once, as
+	// GitHub does for an issue it no longer has (brief.md#Adoption: "a
+	// recorded issue that is gone from GitHub gets a new issue").
 	goneNodeIDs map[string]bool
 	updates     []fakeUpdate
 	closedDone  []string // node ids CloseIssueCompleted was called on
@@ -141,6 +141,17 @@ type fakeClient struct {
 	// keyed by item id: PlaceItem writes it, ItemFieldValues reads it back,
 	// and a test can mutate it directly to simulate an edit made on GitHub.
 	itemFields map[string]fakeItemFields
+	// reads counts each read call by method name, so a test can pin how
+	// many round trips a sync makes.
+	reads map[string]int
+}
+
+// read counts one call of the read method name.
+func (c *fakeClient) read(name string) {
+	if c.reads == nil {
+		c.reads = map[string]int{}
+	}
+	c.reads[name]++
 }
 
 // fakeIssueState is one issue's simulated GitHub state.
@@ -230,11 +241,19 @@ func (c *fakeClient) AddComment(_ context.Context, subjectID, body string) error
 	return nil
 }
 
-func (c *fakeClient) PullRequestsByHead(_ context.Context, owner, repo, branch string) ([]github.PullRequest, error) {
-	return c.prs[owner+"/"+repo+"@"+branch], nil
+func (c *fakeClient) PullRequestsByHeads(_ context.Context, owner, repo string, branches []string) (map[string][]github.PullRequest, error) {
+	c.read("PullRequestsByHeads")
+	byHead := map[string][]github.PullRequest{}
+	for _, branch := range branches {
+		if prs := c.prs[owner+"/"+repo+"@"+branch]; len(prs) > 0 {
+			byHead[branch] = prs
+		}
+	}
+	return byHead, nil
 }
 
 func (c *fakeClient) PullRequestsByIDs(_ context.Context, nodeIDs []string) ([]github.PullRequest, error) {
+	c.read("PullRequestsByIDs")
 	var prs []github.PullRequest
 	for _, id := range nodeIDs {
 		if id == "" {
@@ -294,16 +313,21 @@ func (c *fakeClient) RemoveSubIssue(_ context.Context, parentID, subIssueID stri
 	return nil
 }
 
-func (c *fakeClient) FetchIssue(_ context.Context, nodeID string) (github.IssueState, error) {
-	if c.goneNodeIDs[nodeID] {
-		delete(c.goneNodeIDs, nodeID)
-		return github.IssueState{}, github.ErrIssueNotFound
+func (c *fakeClient) FetchIssues(_ context.Context, nodeIDs []string) (map[string]github.IssueState, error) {
+	c.read("FetchIssues")
+	states := map[string]github.IssueState{}
+	for _, nodeID := range nodeIDs {
+		if c.goneNodeIDs[nodeID] {
+			delete(c.goneNodeIDs, nodeID)
+			continue
+		}
+		st := c.issue(nodeID)
+		states[nodeID] = github.IssueState{
+			Title: st.Title, Body: st.Body, Open: st.Open,
+			ParentID: c.parentOf[nodeID], SubIssueIDs: c.subIssuesOf[nodeID], BlockedByIDs: c.blockedByOf[nodeID],
+		}
 	}
-	st := c.issue(nodeID)
-	return github.IssueState{
-		Title: st.Title, Body: st.Body, Open: st.Open,
-		ParentID: c.parentOf[nodeID], SubIssueIDs: c.subIssuesOf[nodeID], BlockedByIDs: c.blockedByOf[nodeID],
-	}, nil
+	return states, nil
 }
 
 func (c *fakeClient) UpdateIssue(_ context.Context, nodeID, title, body string) error {
@@ -327,9 +351,15 @@ func (c *fakeClient) ReopenIssue(_ context.Context, nodeID string) error {
 	return nil
 }
 
-func (c *fakeClient) ItemFieldValues(_ context.Context, itemID string) (status, storeID string, err error) {
-	f := c.itemFields[itemID]
-	return f.Status, f.StoreID, nil
+func (c *fakeClient) ItemFieldValues(_ context.Context, itemIDs []string) (map[string]github.ItemFields, error) {
+	c.read("ItemFieldValues")
+	fields := map[string]github.ItemFields{}
+	for _, id := range itemIDs {
+		if f, ok := c.itemFields[id]; ok {
+			fields[id] = github.ItemFields{Status: f.Status, StoreID: f.StoreID}
+		}
+	}
+	return fields, nil
 }
 
 func removeString(s []string, v string) []string {

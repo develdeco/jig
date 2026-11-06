@@ -2,6 +2,7 @@ package mirror
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -148,6 +149,55 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	}
 	if len(client.placedItems) != placedBefore {
 		t.Fatalf("second Sync called PlaceItem %d more time(s), want no mutation", len(client.placedItems)-placedBefore)
+	}
+}
+
+// TestSyncReadsGitHubOncePerKindOfRead pins what keeps a sync inside its
+// bound as a store grows: a sync over several tickets that already have
+// issues, pull requests and board items reads GitHub once for every issue,
+// once per repo for every ticket's pull requests, and once for every board
+// item - never once per ticket, which made a few dozen tickets outlast the
+// sync's two minutes.
+func TestSyncReadsGitHubOncePerKindOfRead(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	addRepoToProjectYAML(t, work)
+	for i := 1; i <= 3; i++ {
+		mintTestTicket(t, st, fmt.Sprintf("DEMO-%d", i), fmt.Sprintf("Ticket %d", i))
+	}
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{
+		prs: map[string][]github.PullRequest{
+			// Each ticket's branch is led by its issue's number, handed out in
+			// the tickets' order.
+			"example/demo@1-ticket-1": {{Number: 5, NodeID: "PR_5", State: "OPEN"}},
+			"example/demo@3-ticket-3": {{Number: 6, NodeID: "PR_6", State: "MERGED"}},
+		},
+	}
+	first, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	if len(first.PlacedPRs) != 2 {
+		t.Fatalf("first Sync PlacedPRs = %+v, want both tickets' pull requests on the board", first.PlacedPRs)
+	}
+
+	client.reads = nil
+	second, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	for _, name := range []string{"FetchIssues", "PullRequestsByHeads", "ItemFieldValues"} {
+		if client.reads[name] != 1 {
+			t.Fatalf("second Sync reads = %v, want %s called once for all three tickets", client.reads, name)
+		}
+	}
+	if client.reads["PullRequestsByIDs"] > 1 {
+		t.Fatalf("second Sync reads = %v, want PullRequestsByIDs at most once", client.reads)
+	}
+	if len(second.Placed) != 0 || len(second.PlacedPRs) != 0 || len(second.Updated) != 0 {
+		t.Fatalf("second Sync = %+v, want no write: the batched reads must still see what the first sync wrote", second)
 	}
 }
 

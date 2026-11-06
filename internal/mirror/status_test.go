@@ -160,8 +160,12 @@ func (c *prFakeClient) CreateIssue(context.Context, string, string, string, stri
 }
 func (c *prFakeClient) CloseIssueNotPlanned(context.Context, string) error { return nil }
 func (c *prFakeClient) AddComment(context.Context, string, string) error   { return nil }
-func (c *prFakeClient) PullRequestsByHead(_ context.Context, owner, repo, _ string) ([]github.PullRequest, error) {
-	return c.byRepo[owner+"/"+repo], nil
+func (c *prFakeClient) PullRequestsByHeads(_ context.Context, owner, repo string, branches []string) (map[string][]github.PullRequest, error) {
+	byHead := map[string][]github.PullRequest{}
+	for _, branch := range branches {
+		byHead[branch] = c.byRepo[owner+"/"+repo]
+	}
+	return byHead, nil
 }
 func (c *prFakeClient) PullRequestsByIDs(_ context.Context, nodeIDs []string) ([]github.PullRequest, error) {
 	var prs []github.PullRequest
@@ -190,14 +194,14 @@ func (c *prFakeClient) PlaceItem(context.Context, github.ProjectV2, string, stri
 func (c *prFakeClient) RepositoryIsPublic(context.Context, string, string) (bool, error) {
 	return true, nil
 }
-func (c *prFakeClient) FetchIssue(context.Context, string) (github.IssueState, error) {
-	return github.IssueState{}, nil
+func (c *prFakeClient) FetchIssues(context.Context, []string) (map[string]github.IssueState, error) {
+	return nil, nil
 }
 func (c *prFakeClient) UpdateIssue(context.Context, string, string, string) error { return nil }
 func (c *prFakeClient) CloseIssueCompleted(context.Context, string) error         { return nil }
 func (c *prFakeClient) ReopenIssue(context.Context, string) error                 { return nil }
-func (c *prFakeClient) ItemFieldValues(context.Context, string) (string, string, error) {
-	return "", "", nil
+func (c *prFakeClient) ItemFieldValues(context.Context, []string) (map[string]github.ItemFields, error) {
+	return nil, nil
 }
 
 // TestFindPullRequestsOrdersByRepoThenNumber checks brief.md#Status and

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -85,7 +84,7 @@ func openState(open bool) string {
 //
 // dryRun withholds every mutation (UpdateIssue, CreateIssue on a recreation,
 // ReopenIssue, CloseIssueCompleted, CloseIssueNotPlanned, the record write)
-// while still reading GitHub (FetchIssue, PullRequestsByHead) to report what
+// while still reading GitHub (FetchIssues, PullRequestsByHeads) to report what
 // would change (brief.md#jig trackers sync, brief.md#Cutover).
 //
 // An issue whose status is Done is closed as completed and one whose status is
@@ -109,6 +108,19 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		target = cfg.Repos[0].TargetBranch()
 	}
 
+	// Every record is read first, so what the loop below compares against
+	// - each ticket's pull requests and each issue's current state - comes
+	// from a few batched reads rather than a round trip per item, which is
+	// what outgrew the sync's bound once a store held a few dozen tickets.
+	type pending struct {
+		it  item
+		rec githubRecord
+		// lookup is this ticket's index in lookups; -1 for a chart.
+		lookup int
+	}
+	var todo []pending
+	var lookups []prLookup
+	var nodeIDs []string
 	for _, it := range items {
 		if !it.ref.has() {
 			continue
@@ -117,23 +129,45 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		if rerr != nil {
 			return nil, nil, nil, nil, rerr
 		}
-		what := it.what()
-
-		var title, body, status string
+		if rec.NodeID == "" {
+			// GitHub refuses an empty id, as it refused this record before reads
+			// were batched; a batch would read it as a gone issue and open a
+			// second one instead.
+			return nil, nil, nil, nil, fmt.Errorf("mirror: %s's record names no issue node_id", it.what())
+		}
+		p := pending{it: it, rec: rec, lookup: -1}
 		if it.kind == "ticket" {
 			branch, berr := st.TicketBranch(it.id, target)
 			if berr != nil {
 				return nil, nil, nil, nil, berr
 			}
 			recorded := make([]PRRef, len(rec.PRs))
-			for i, p := range rec.PRs {
-				owner, repo, _ := splitRepo(p.Repo)
-				recorded[i] = PRRef{Owner: owner, Repo: repo, Number: p.Number, NodeID: p.NodeID}
+			for i, pr := range rec.PRs {
+				owner, repo, _ := splitRepo(pr.Repo)
+				recorded[i] = PRRef{Owner: owner, Repo: repo, Number: pr.Number, NodeID: pr.NodeID}
 			}
-			prs, gone, perr := FindPullRequests(ctx, client, cfg, branch, recorded)
-			if perr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("mirror: find %s's pull requests: %w", what, perr)
-			}
+			p.lookup = len(lookups)
+			lookups = append(lookups, prLookup{branch: branch, recorded: recorded})
+		}
+		nodeIDs = append(nodeIDs, rec.NodeID)
+		todo = append(todo, p)
+	}
+	found, ferr := findPullRequests(ctx, client, cfg, lookups)
+	if ferr != nil {
+		return nil, nil, nil, nil, fmt.Errorf("mirror: find the tickets' pull requests: %w", ferr)
+	}
+	curByNodeID, ferr := client.FetchIssues(ctx, nodeIDs)
+	if ferr != nil {
+		return nil, nil, nil, nil, fmt.Errorf("mirror: fetch the issues: %w", ferr)
+	}
+
+	for _, p := range todo {
+		it, rec := p.it, p.rec
+		what := it.what()
+
+		var title, body, status string
+		if it.kind == "ticket" {
+			prs, gone := found[p.lookup].prs, found[p.lookup].gone
 			prsByTicket[it.id] = prs
 			for _, g := range gone {
 				report.GoneRecordedPRs = append(report.GoneRecordedPRs, GoneRecordedPR{Owner: g.Owner, Repo: g.Repo, Number: g.Number, Ticket: it.id})
@@ -179,8 +213,8 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 		}
 
-		cur, ferr := client.FetchIssue(ctx, rec.NodeID)
-		if errors.Is(ferr, github.ErrIssueNotFound) {
+		cur, onGitHub := curByNodeID[rec.NodeID]
+		if !onGitHub {
 			owner, repo, serr := splitRepo(rec.Repo)
 			if serr != nil {
 				return nil, nil, nil, nil, serr
@@ -197,10 +231,6 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 			report.Recreated = append(report.Recreated, CreatedIssue{What: what, Owner: owner, Repo: repo, Number: number})
 			cur = github.IssueState{Title: title, Body: body, Open: true}
-			ferr = nil
-		}
-		if ferr != nil {
-			return nil, nil, nil, nil, fmt.Errorf("mirror: fetch %s's issue: %w", what, ferr)
 		}
 		curByWhat[what] = cur
 

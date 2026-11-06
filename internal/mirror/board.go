@@ -98,6 +98,16 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 		}
 	}
 
+	// Every record is read first, so the board's current fields for all of
+	// them - each ticket's and chart's own item and each pull request item a
+	// ticket recorded - come from one batched read rather than a round trip
+	// per item.
+	type pending struct {
+		it  item
+		rec githubRecord
+	}
+	var todo []pending
+	var itemIDs []string
 	for _, it := range items {
 		if !it.ref.has() || skip[it.what()] {
 			continue
@@ -106,11 +116,24 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 		if err != nil {
 			return err
 		}
+		itemIDs = append(itemIDs, rec.Item)
+		for _, pr := range rec.PRs {
+			itemIDs = append(itemIDs, pr.Item)
+		}
+		todo = append(todo, pending{it: it, rec: rec})
+	}
+	onBoard, err := client.ItemFieldValues(ctx, itemIDs)
+	if err != nil {
+		return fmt.Errorf("read the board's items: %w", err)
+	}
+
+	for _, p := range todo {
+		it, rec := p.it, p.rec
 
 		var status string
 		if it.kind == "ticket" {
 			status = statusByTicket[it.id]
-			if err := placeTicketPRs(ctx, client, proj, it.id, prsByTicket[it.id], &rec, report, dryRun); err != nil {
+			if err := placeTicketPRs(ctx, client, proj, it.id, prsByTicket[it.id], onBoard, &rec, report, dryRun); err != nil {
 				return err
 			}
 		} else {
@@ -123,10 +146,8 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 
 		alreadyPlaced := false
 		if rec.Item != "" {
-			curStatus, curStoreID, ferr := client.ItemFieldValues(ctx, rec.Item)
-			if ferr != nil {
-				return fmt.Errorf("read %s's board item: %w", it.what(), ferr)
-			}
+			cur := onBoard[rec.Item]
+			curStatus, curStoreID := cur.Status, cur.StoreID
 			synced := rec.Synced
 			if synced != nil {
 				if synced.Status != "" && curStatus != synced.Status {
@@ -171,7 +192,7 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 // same no-mutation-when-matching rule placeBoardItems applies to a ticket's
 // or chart's own item. dryRun previews PlacedPRs without calling PlaceItem
 // or writing rec.PRs.
-func placeTicketPRs(ctx context.Context, client github.Client, proj github.ProjectV2, ticket string, prs []PRRef, rec *githubRecord, report *SyncReport, dryRun bool) error {
+func placeTicketPRs(ctx context.Context, client github.Client, proj github.ProjectV2, ticket string, prs []PRRef, onBoard map[string]github.ItemFields, rec *githubRecord, report *SyncReport, dryRun bool) error {
 	existing := make(map[string]prRecord, len(rec.PRs))
 	for _, p := range rec.PRs {
 		existing[p.NodeID] = p
@@ -204,11 +225,8 @@ func placeTicketPRs(ctx context.Context, client github.Client, proj github.Proje
 		if placeable {
 			alreadyPlaced := false
 			if itemID != "" {
-				curStatus, curStoreID, err := client.ItemFieldValues(ctx, itemID)
-				if err != nil {
-					return fmt.Errorf("read %s/%s#%d's board item: %w", pr.Owner, pr.Repo, pr.Number, err)
-				}
-				alreadyPlaced = curStatus == prStatus && curStoreID == ticket
+				cur := onBoard[itemID]
+				alreadyPlaced = cur.Status == prStatus && cur.StoreID == ticket
 			}
 			if !alreadyPlaced {
 				if !dryRun {
