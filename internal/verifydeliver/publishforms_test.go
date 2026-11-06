@@ -663,6 +663,39 @@ func TestPublishRecordPRNotesSayTheApprovalTheHeadHad(t *testing.T) {
 	}
 }
 
+// TestPublishRecordPRNotesSayAnApprovalGivenAfterTheBody: the hand-off order
+// --body, --approve, --pr posts notes that say the person's approval, the
+// same the pr line journals.
+func TestPublishRecordPRNotesSayAnApprovalGivenAfterTheBody(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "person"); err != nil {
+		t.Fatalf("PublishApprove: %v", err)
+	}
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
+	if !strings.Contains(notes, "\nPublish approved by ") || !strings.Contains(notes, " at a terminal\n") || strings.Contains(notes, "Published without a recorded approval") {
+		t.Errorf("notes do not say the person's approval:\n%s", notes)
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventPr && l.Approval != "person" {
+			t.Errorf("pr line approval = %q, want person", l.Approval)
+		}
+	}
+}
+
 // TestPublishApprovalLineWordsEachApproval: the line is worded from the last
 // publish-approved line for the head and repo, with the identity the approval
 // recorded.
@@ -671,6 +704,9 @@ func TestPublishApprovalLineWordsEachApproval(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	line := func(prov string) []journal.Line {
 		return []journal.Line{{Event: journal.EventPublishApproved, Commit: head, Provenance: prov, Summary: "Dana <d@example.test>"}}
+	}
+	noWho := func(prov string) []journal.Line {
+		return []journal.Line{{Event: journal.EventPublishApproved, Commit: head, Provenance: prov}}
 	}
 	for _, c := range []struct {
 		lines []journal.Line
@@ -681,6 +717,8 @@ func TestPublishApprovalLineWordsEachApproval(t *testing.T) {
 		{line("agent"), head, "Publish approved by an agent, as Dana, not by a person at a terminal"},
 		{line("person"), strings.Repeat("b", 40), "Published without a recorded approval"},
 		{nil, head, "Published without a recorded approval"},
+		{noWho("person"), head, "Publish approved by a person at a terminal"},
+		{noWho("agent"), head, "Publish approved by an agent, not by a person at a terminal"},
 	} {
 		if got := publishApprovalLine(c.lines, "", c.head); got != c.want {
 			t.Errorf("publishApprovalLine = %q, want %q", got, c.want)

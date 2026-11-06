@@ -1213,12 +1213,17 @@ func canonicalPRURL(ref repohost.PRRef) string {
 }
 
 // notesRenderedFor reports whether the repo's latest pr-body line is at the
-// reviewed head: the notes in the store then describe the round the pull
-// request ships, not an earlier one.
+// reviewed head and no publish approval of that head was journaled after it:
+// the notes in the store then describe the round the pull request ships, and
+// say the approval it had, not an earlier round's or none.
 func notesRenderedFor(lines []journal.Line, repo, reviewed string) bool {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if lines[i].Event == journal.EventPrBody && lines[i].Repo == repo {
-			return lines[i].Commit == reviewed
+		l := lines[i]
+		if l.Event == journal.EventPublishApproved && l.Repo == repo && l.Commit == reviewed && reviewed != "" {
+			return false
+		}
+		if l.Event == journal.EventPrBody && l.Repo == repo {
+			return l.Commit == reviewed
 		}
 	}
 	return false
