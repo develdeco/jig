@@ -4134,3 +4134,11 @@ Under load, `TestFollowDeliversEveryAppendOnceAndBlocksNone` failed with "no env
 Proven: before the fix `go test -count=20` of the events test, with other whole-suite runs on the machine, failed at least 6 of 20 runs (3 of 20 in a second run, each with the sharing violation); after it, 20 of 20 passed. The lost update shows deterministically with a held lock and a 150ms wait (`TestUpdateMachineNeverWritesWithoutTheLock`, red before the fix); `TestUpdateMachineConcurrent` did not fail in 20 runs on either side of the fix here, so the held-lock test carries the proof.
 
 Rejected: a longer test deadline, which only hides a follower that has stopped, and keeping the unlocked write as a fallback, which is the lost update.
+
+## The test writer replaced journals by a rename Windows refuses (DEV-7)
+
+STORE-9's verification still failed `TestFollowEmitsTheStreamThenWhatIsAdded` after DEV-6, at the test's own rename of `journal.ndjson.tmp` over `journal.ndjson`: access denied. The follower already opened the journal with delete sharing (`fileshare`), but `os.Rename` on Windows fails while any handle is open on the target, shared for deletion or not; only a rename with POSIX semantics (`store.AtomicWrite`, `replaceFile`) moves the name past an open handle. Chosen: the events tests write journals with `store.AtomicWrite`, as jig's own writers do, and `journal.Read` opens the journal with `fileshare.ReadFile` like the other readers of a file a writer replaces. `AtomicWrite` already retried a sharing violation to a 2s bound for readers outside jig (an editor, Defender) and failed with the path; two tests now hold the file with `os.Open` (no delete sharing): one released after 200ms, where the write lands, and one held for good, where it fails naming the path with no temp file left.
+
+Proven: `TestReplacingAJournalAReaderHoldsOpen` was red for the same error as the failing log before the fix. After it, `go test -count=20 ./internal/events` passed (20 of 20, 13.5s) while a whole `./internal/...` suite ran beside it.
+
+Rejected: retrying the test's `os.Rename`, which only hides that the writer is not the one jig ships, and a build-tagged open helper of the events package, since `fileshare.Open` already is that helper.
