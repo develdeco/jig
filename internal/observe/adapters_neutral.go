@@ -62,6 +62,7 @@ func (a neutralShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "prompt", "userpromptsubmit", "chatmessage":
 		ev.Kind = KindPrompt
+		ev.Prompt = p.str("prompt")
 	case "tool", "posttooluse", "toolexecuteafter":
 		ev.Kind = KindTool
 	case "stop", "sessionidle":

@@ -29,6 +29,8 @@ func TestOpenCodePluginHookNamesAndNestedFields(t *testing.T) {
 			Event{Harness: "opencode", Kind: KindSessionStart, Session: "oc1", Cwd: "/r"}},
 		{"chat message", `{"event":"chat.message","input":{"sessionID":"oc1"},"directory":"/r"}`,
 			Event{Harness: "opencode", Kind: KindPrompt, Session: "oc1", Cwd: "/r"}},
+		{"chat message with its text", `{"event":"chat.message","input":{"sessionID":"oc1"},"prompt":"build JIG-1","directory":"/r"}`,
+			Event{Harness: "opencode", Kind: KindPrompt, Prompt: "build JIG-1", Session: "oc1", Cwd: "/r"}},
 		{"tool executed", `{"event":"tool.execute.after","input":{"tool":"bash","sessionID":"oc1","args":{"command":"ls"}},"output":{"metadata":{"exit":2}},"directory":"/r"}`,
 			Event{Harness: "opencode", Kind: KindTool, Session: "oc1", Cwd: "/r", Tool: "bash", Command: "ls", Exit: intp(2)}},
 		{"idle", `{"event":"session.idle","properties":{"sessionID":"oc1"},"directory":"/r"}`,

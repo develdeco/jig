@@ -11,7 +11,7 @@ func TestCursorAdapter(t *testing.T) {
 		{"session start", `{` + common + `,"hook_event_name":"sessionStart","session_id":"sess1"}`,
 			with(func(e *Event) { e.Kind, e.Session = KindSessionStart, "sess1" })},
 		{"prompt", `{` + common + `,"hook_event_name":"beforeSubmitPrompt","prompt":"go"}`,
-			with(func(e *Event) { e.Kind = KindPrompt })},
+			with(func(e *Event) { e.Kind, e.Prompt = KindPrompt, "go" })},
 		{"shell", `{` + common + `,"hook_event_name":"afterShellExecution","command":"git commit -m x","output":"ok","duration":12}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "shell", "git commit -m x" })},
 		{"file edit", `{` + common + `,"hook_event_name":"afterFileEdit","file_path":"/r/a.go","edits":[]}`,

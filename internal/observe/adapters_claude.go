@@ -59,6 +59,7 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 		ev.Kind = KindSessionStart
 	case "UserPromptSubmit":
 		ev.Kind = KindPrompt
+		ev.Prompt = p.str("prompt")
 	case "PostToolUse", "PostToolUseFailure":
 		// A command that fails fires the second of these, not the first; the
 		// command may still have moved HEAD (git commit && go test).

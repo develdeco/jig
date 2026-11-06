@@ -11,7 +11,7 @@ func TestClaudeAdapterParsesEveryEvent(t *testing.T) {
 		{"session start", `{` + common + `,"hook_event_name":"SessionStart","source":"startup","model":"claude-x"}`,
 			with(func(e *Event) { e.Kind, e.Model = KindSessionStart, "claude-x" })},
 		{"prompt", `{` + common + `,"hook_event_name":"UserPromptSubmit","prompt":"do it"}`,
-			with(func(e *Event) { e.Kind = KindPrompt })},
+			with(func(e *Event) { e.Kind, e.Prompt = KindPrompt, "do it" })},
 		{"bash tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"},"tool_response":{"stdout":"ok","stderr":"","interrupted":false}}`,
 			with(func(e *Event) { e.Kind, e.Tool, e.Command = KindTool, "Bash", "git commit -m x" })},
 		{"bash tool with a description", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"go test ./...","description":"Run the tests"}}`,
