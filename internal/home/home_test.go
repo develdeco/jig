@@ -226,3 +226,20 @@ func TestUserDirFromAgreesWithTheStdlibOnTheProcess(t *testing.T) {
 		t.Errorf("UserDirFrom(os.Getenv) = %q, %v, want os.UserHomeDir's %q, %v", got, gotErr, want, wantErr)
 	}
 }
+
+func TestBaselinePathIsOneFileUnderTheHomePerRepoWorkspaceAndCommand(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	base := BaselinePath(root, "r", "w", "go test ./...")
+	if filepath.Dir(base) != filepath.Join(root, "baselines") || filepath.Ext(base) != ".txt" {
+		t.Errorf("BaselinePath = %q, want a .txt under <root>/baselines", base)
+	}
+	if again := BaselinePath(root, "r", "w", "go test ./..."); again != base {
+		t.Errorf("same key gave %q and %q", base, again)
+	}
+	for _, other := range []string{BaselinePath(root, "r2", "w", "go test ./..."), BaselinePath(root, "r", "w2", "go test ./..."), BaselinePath(root, "r", "w", "go vet ./..."), BaselinePath(root, "rw", "", "go test ./...")} {
+		if other == base {
+			t.Errorf("a different key gave the same path %q", other)
+		}
+	}
+}

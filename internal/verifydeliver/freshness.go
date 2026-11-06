@@ -102,7 +102,7 @@ func freshnessExempt(event string) bool {
 	switch event {
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean,
 		journal.EventTriage,
-		journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone, journal.EventPublishPicks,
+		journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone, journal.EventPublishPicks, journal.EventReviewNotes,
 		journal.EventChangelog, journal.EventMemorize,
 		journal.EventSpend, journal.EventRecorded:
 		return true

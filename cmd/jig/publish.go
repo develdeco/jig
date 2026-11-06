@@ -184,6 +184,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
+		reviewNotesTable(report),
 		axi.Help(help),
 	)
 	return 0
@@ -201,10 +202,14 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 	if !report.Verified {
 		verified = "no (the repo has no pull-request host to ask)"
 	}
-	blocks := []string{axi.KV("publish_pr", [][2]string{
+	kv := [][2]string{
 		{"ticket", ticket}, {"repo", report.Repo}, {"url", report.URL}, {"branch", report.Branch},
 		{"commit", report.Commit}, {"verified", verified},
-	})}
+	}
+	if report.ReviewNotes.Status != "" {
+		kv = append(kv, [2]string{"review_notes", reviewNotesWords(report.ReviewNotes)})
+	}
+	blocks := []string{axi.KV("publish_pr", kv)}
 	if len(report.Pending) > 0 {
 		return append(blocks, axi.Help(fmt.Sprintf("%s still needs its pull request: `jig publish %s --pr <url> --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])))
 	}
@@ -312,6 +317,35 @@ func pushedTable(report verifydeliver.PublishReport) string {
 		rows = append(rows, []string{repo, report.Head[repo]})
 	}
 	return axi.Table("pushed", []string{"repo", "head"}, rows)
+}
+
+// reviewNotesWords says what publish did with a pull request's review notes:
+// "posted", "already posted", or "not posted" with the reason and the file to
+// post by hand, or, for notes never rendered, the command that renders them.
+func reviewNotesWords(r verifydeliver.ReviewNotesReport) string {
+	if r.Status != verifydeliver.ReviewNotesNotPosted {
+		return r.Status
+	}
+	if r.File == "" {
+		return fmt.Sprintf("%s: %s; render them with `jig publish <ticket> --body`, then post them by hand", r.Status, r.Reason)
+	}
+	return fmt.Sprintf("%s: %s; post %s as a comment on the pull request by hand", r.Status, r.Reason, r.File)
+}
+
+// reviewNotesTable is the bare publish's account of the review notes of each
+// repo's pull request: a row for each, in the repo's name order. It is empty
+// when the report has none.
+func reviewNotesTable(report verifydeliver.PublishReport) string {
+	repos := make([]string, 0, len(report.ReviewNotes))
+	for repo := range report.ReviewNotes {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	rows := make([][]string, 0, len(repos))
+	for _, repo := range repos {
+		rows = append(rows, []string{repo, reviewNotesWords(report.ReviewNotes[repo])})
+	}
+	return axi.Table("review_notes", []string{"repo", "outcome"}, rows)
 }
 
 // prURLTable is the publish report's account of the pull request each repo's

@@ -35,6 +35,7 @@ const (
 	EventRecorded       = "recorded"
 	EventRequeue        = "requeue"
 	EventResult         = "result"
+	EventReviewNotes    = "review-notes"
 	EventRevalidate     = "revalidate"
 	EventRoute          = "route"
 	EventSquash         = "squash"

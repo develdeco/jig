@@ -215,7 +215,7 @@ What a pull request shows of the change working: its `## Demo` section, a screen
 _Avoid_: receipt (evidence that a check passed), screencast
 
 **Recording**:
-What the build's end-to-end scenarios write while they run in a verification's oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step and caption. jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every other oracle run and env command it starts), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run (`<slice>-v<attempt>`); a failing run's recordings are discarded, and the gate records nothing. The source of the demo (ADR 0029): publish picks among them (see **Pick**), and the gate's reviewer reads the ones on the reviewed head's history as evidence.
+What the build's end-to-end scenarios write while they run in a verification's oracle run: a screenshot, a video or a terminal capture, optionally tagged with its scenario, flow, step, caption and the test file that made it (unknown tag fields are ignored). jig gives that run a directory of its own under the jig home's `evidence/` (`JIG_RECORD_DIR`, which jig strips from the environment of every other oracle run and env command it starts), verifies what a passing run left there, and journals it as one `recorded` line with the commit the oracle ran at and the run (`<slice>-v<attempt>`); a failing run's recordings are discarded, and the gate records nothing. The source of the demo (ADR 0029): publish picks among them (see **Pick**), and the gate's reviewer reads the ones on the reviewed head's history as evidence.
 _Avoid_: screencast
 
 **Pick**:
@@ -303,7 +303,7 @@ The per-dispatch model ladder jig used while it chose models: the first rung fir
 _Avoid_: model tiering, escalation policy
 
 **Stall**:
-The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
+The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. When the command has passed on this machine and the failed run printed something that pass did not, the signature is built from those new lines only (otherwise from the end of the output), so the same failure matches and two different ones do not. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
 _Avoid_: retry loop, flaky failure
 
 **Chart**:

@@ -89,7 +89,7 @@ func TestRecorderRefusesTheWholeCollection(t *testing.T) {
 		want  string
 	}{
 		{"an empty recording", map[string]string{"good.svg": loginSVG, "empty.png": ""}, `file "empty.png" is empty`},
-		{"a tag that is not valid", map[string]string{"good.svg": loginSVG, "good.svg.json": `{"scenario":"x","colour":"red"}`}, `tag "good.svg.json" is not valid: it has a field other than`},
+		{"a tag that is not valid", map[string]string{"good.svg": loginSVG, "good.svg.json": `{"scenario":5}`}, `tag "good.svg.json" is not valid: field "scenario" has the wrong type`},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +138,7 @@ func sortedNames(files map[string]string) []string {
 // maxRecordings, not by the 50 files one `gh --attach` takes (media.MaxFiles),
 // which binds publish's pick. Each recording is verified on its own and all are
 // kept. Beyond maxRecordings the later ones by name are left out and counted,
-// not a reason to refuse the rest, and a tag of one left out is not read.
+// not a reason to refuse the rest, and a tag of one left out is not verified.
 func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 	t.Parallel()
 	t.Run("more than the attach limit, within the bound", func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 				break
 			}
 		}
-		mustExist(t, filepath.Join(r.recordDir(firstRun), names[len(names)-1]))
+		mustNotExist(t, filepath.Join(r.recordDir(firstRun), names[len(names)-1]))
 	})
 	t.Run("a refusal still refuses the whole collection", func(t *testing.T) {
 		t.Parallel()
@@ -205,12 +205,12 @@ func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 func TestRecorderNeverCommitsAHostPathOrAnUnboundedReason(t *testing.T) {
 	t.Parallel()
 	for name, tag := range map[string]func(dir string) string{
-		"a field named as the directory": func(dir string) string { return `{"` + asJSON(dir) + `":1}` },
-		"a huge field name":              func(string) string { return `{"` + strings.Repeat("k", maxTagBytes/2) + `":1}` },
-		"a value of the wrong type":      func(dir string) string { return `{"step":"` + asJSON(dir) + `"}` },
-		"a long scenario":                func(string) string { return `{"scenario":"` + strings.Repeat("s", maxScenarioBytes+1) + `"}` },
-		"a long flow":                    func(string) string { return `{"flow":"` + strings.Repeat("f", maxFlowBytes+1) + `"}` },
-		"a long caption":                 func(string) string { return `{"caption":"` + strings.Repeat("c", maxCaptionBytes+1) + `"}` },
+		"a value of the wrong type": func(dir string) string { return `{"step":"` + asJSON(dir) + `"}` },
+		"a long scenario":           func(string) string { return `{"scenario":"` + strings.Repeat("s", maxScenarioBytes+1) + `"}` },
+		"a long flow":               func(string) string { return `{"flow":"` + strings.Repeat("f", maxFlowBytes+1) + `"}` },
+		"a long caption":            func(string) string { return `{"caption":"` + strings.Repeat("c", maxCaptionBytes+1) + `"}` },
+		"a long file":               func(string) string { return `{"file":"` + strings.Repeat("f", maxFileBytes+1) + `"}` },
+		"a file of the wrong type":  func(dir string) string { return `{"file":["` + asJSON(dir) + `"]}` },
 	} {
 		tag := tag
 		t.Run(name, func(t *testing.T) {
@@ -559,7 +559,7 @@ func TestCollectRecordings(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		got, err := collectRecordings(top, dir)
+		got, err := collectRecordings(top, dir, nil)
 		return got.recs, got.dropped, err
 	}
 
@@ -577,7 +577,7 @@ func TestCollectRecordings(t *testing.T) {
 			t.Errorf("recordings = %v, want %s", got, want)
 		}
 	})
-	t.Run("a tag may set any of its fields", func(t *testing.T) {
+	t.Run("a tag may set any of its fields, and any field jig does not know is ignored", func(t *testing.T) {
 		t.Parallel()
 		for body, want := range map[string]journal.Recording{
 			`{}`:                             {Scenario: "a"},
@@ -585,6 +585,8 @@ func TestCollectRecordings(t *testing.T) {
 			`{"flow":"f"}`:                   {Scenario: "a", Flow: "f"},
 			`{"caption":"c","scenario":"s"}`: {Scenario: "s", Caption: "c"},
 			"  {\"flow\": \"f\"}\n\n":        {Scenario: "a", Flow: "f"},
+			`{"flow":"f","later":{"x":1}}`:   {Scenario: "a", Flow: "f"},
+			`{"path":"/home/someone/a.png","dir":"/home/someone"}`: {Scenario: "a"},
 		} {
 			recs, _, err := collect(t, map[string]string{"a.png": "x", "a.png.json": body})
 			if err != nil || len(recs) != 1 {
@@ -599,17 +601,18 @@ func TestCollectRecordings(t *testing.T) {
 	t.Run("an invalid tag refuses the collection and names its file", func(t *testing.T) {
 		t.Parallel()
 		for body, why := range map[string]string{
-			``:                                  "it is empty or ends early",
-			`not json`:                          "it is not JSON",
-			`[]`:                                "it is not a JSON object",
-			`{"scenario":5}`:                    `field "scenario" has the wrong type`,
-			`{"step":"1"}`:                      `field "step" has the wrong type`,
-			`{"step":1.5}`:                      `field "step" has the wrong type`,
-			`{"step":-1}`:                       "step is negative",
-			`{"unknown":1}`:                     "it has a field other than scenario, flow, step and caption",
-			`{"scenario":"a"} {"scenario":"b"}`: "more than one JSON value",
-			`{"scenario":"a"}}`:                 "more than one JSON value",
-			`null x`:                            "more than one JSON value",
+			``:               "it is empty or ends early",
+			`not json`:       "it is not JSON",
+			`[]`:             "it is not a JSON object",
+			`{"scenario":5}`: `field "scenario" has the wrong type`,
+			`{"step":"1"}`:   `field "step" has the wrong type`,
+			`{"step":1.5}`:   `field "step" has the wrong type`,
+			`{"step":-1}`:    "step is negative",
+			`{"file":5}`:     `field "file" has the wrong type`,
+			`{"file":"` + strings.Repeat("f", maxFileBytes+1) + `"}`: "file is longer than 500 bytes",
+			`{"scenario":"a"} {"scenario":"b"}`:                      "more than one JSON value",
+			`{"scenario":"a"}}`:                                      "more than one JSON value",
+			`null x`:                                                 "more than one JSON value",
 			`{"caption":"` + strings.Repeat("x", maxTagBytes) + `"}`: "bytes",
 		} {
 			recs, _, err := collect(t, map[string]string{"a.png": "x", "a.png.json": body, "ok.svg": "y"})
@@ -650,7 +653,7 @@ func TestCollectRecordings(t *testing.T) {
 	t.Run("a directory that is gone holds nothing", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		got, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"))
+		got, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"), nil)
 		recs, dropped := got.recs, got.dropped
 		if err != nil || len(recs) != 0 || len(dropped) != 0 {
 			t.Errorf("recs=%+v dropped=%v err=%v", recs, dropped, err)
@@ -666,14 +669,14 @@ func TestCollectRecordings(t *testing.T) {
 		if err := os.WriteFile(dir, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := collectRecordings(top, dir); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
+		if _, err := collectRecordings(top, dir, nil); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
 			t.Errorf("err = %v, want the refusal", err)
 		}
 	})
 	t.Run("a directory outside the evidence directory is refused", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		if _, err := collectRecordings(top, t.TempDir()); err == nil {
+		if _, err := collectRecordings(top, t.TempDir(), nil); err == nil {
 			t.Error("a directory that is not below the evidence directory was read")
 		}
 	})
