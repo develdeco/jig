@@ -299,7 +299,7 @@ The per-dispatch model ladder jig used while it chose models: the first rung fir
 _Avoid_: model tiering, escalation policy
 
 **Stall**:
-The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
+The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. The signature is built from the lines the failed run printed that the command's last passing run did not, so the same failure matches and two different ones do not. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
 _Avoid_: retry loop, flaky failure
 
 **Chart**:
