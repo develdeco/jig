@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -76,6 +77,9 @@ type Line struct {
 	Summary   string `json:"summary,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
+	// Approval is the publish approval a pr line's head had when the pull
+	// request was recorded: "person", "agent" or "none".
+	Approval string `json:"approval,omitempty"`
 	// Unattended is set on a claim line made without a person watching.
 	Unattended bool `json:"unattended,omitempty"`
 	// Branch and URL name a branch or a link the line is about.
@@ -102,6 +106,9 @@ type Line struct {
 	// PID is the process id a ledger line records (a spawned verify
 	// worker's, say).
 	PID int `json:"pid,omitempty"`
+	// Jig is the build stamp of the jig that wrote the line (Stamp): filled
+	// by Append when empty, and absent from a line an older jig wrote.
+	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
 }
@@ -179,7 +186,8 @@ const appendLockTimeout = 30 * time.Second
 // file ends in a torn line (a writer that died mid-line), so that writer
 // costs its own line and not this one. The file is appended to in place and
 // never rewritten, so a reader that opened it earlier sees at most a torn
-// final line, which Read leaves out.
+// final line, which Read leaves out. Nothing here renames over the journal;
+// what replaces it whole is git (a sync's merge or checkout).
 func Append(st *store.Store, ticket string, l Line) error {
 	return appendWithin(st, ticket, l, appendLockTimeout)
 }
@@ -191,6 +199,9 @@ func appendWithin(st *store.Store, ticket string, l Line, wait time.Duration) er
 		l.TS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	l.Ticket = ticket
+	if l.Jig == "" {
+		l.Jig = Stamp()
+	}
 	encoded, err := json.Marshal(l)
 	if err != nil {
 		return err
@@ -257,7 +268,7 @@ func endsMidLine(f *os.File) (bool, error) {
 // The lines of a ticket's journal are appended by several writers and merged
 // by git, so a reader must not assume they are in time order either.
 func Read(st *store.Store, ticket string) ([]Line, error) {
-	data, err := os.ReadFile(journalPath(st, ticket))
+	data, err := fileshare.ReadFile(journalPath(st, ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

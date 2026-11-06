@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/develdeco/jig/internal/filelock"
 	"github.com/develdeco/jig/internal/home"
 )
 
@@ -119,5 +121,76 @@ func TestSaveMachineIsAtomicAndKeepsRoot(t *testing.T) {
 		if n := e.Name(); n != "projects.yaml" && n != "projects.yaml.lock" {
 			t.Errorf("jig home holds %q after SaveMachine, want only projects.yaml and its lock", n)
 		}
+	}
+}
+
+// TestUpdateMachineNeverWritesWithoutTheLock: while another process holds the
+// mapping's lock past the wait, UpdateMachine and SaveMachine fail naming the
+// lock and write nothing, rather than going ahead unlocked and losing the
+// holder's update.
+func TestUpdateMachineNeverWritesWithoutTheLock(t *testing.T) {
+	jigHome := t.TempDir()
+	seed := map[string]MachineProject{"keep": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := SaveMachine(jigHome, seed); err != nil {
+		t.Fatal(err)
+	}
+	path := home.MachinePath(jigHome)
+	release, held, err := filelock.TryLock(path, time.Second)
+	if err != nil || !held {
+		t.Fatalf("holding the lock: held=%v err=%v", held, err)
+	}
+	defer release()
+
+	const wait = 150 * time.Millisecond
+
+	called := false
+	err = updateMachine(jigHome, func(m map[string]MachineProject) error {
+		called = true
+		m["lost"] = MachineProject{Store: "/l"}
+		return nil
+	}, wait)
+	if err == nil || !strings.Contains(err.Error(), path+".lock") {
+		t.Fatalf("UpdateMachine under a held lock = %v, want an error naming %s.lock", err, path)
+	}
+	if called {
+		t.Error("UpdateMachine ran fn without the lock")
+	}
+	if err := saveMachine(jigHome, map[string]MachineProject{"lost": {Store: "/l"}}, wait); err == nil || !strings.Contains(err.Error(), path+".lock") {
+		t.Errorf("SaveMachine under a held lock = %v, want an error naming %s.lock", err, path)
+	}
+	release()
+	got, err := LoadMachine(jigHome)
+	if err != nil || !reflect.DeepEqual(got, seed) {
+		t.Fatalf("mapping after refused writes = %+v, %v; want it untouched", got, err)
+	}
+}
+
+// TestReadRetryingRidesOutAFailure: a read that fails for a moment is tried
+// again and returns the data; a missing file is not retried; one that keeps
+// failing gives up after the window with its error.
+func TestReadRetryingRidesOutAFailure(t *testing.T) {
+	calls := 0
+	flaky := func(string) ([]byte, error) {
+		calls++
+		if calls < 4 {
+			return nil, errors.New("The process cannot access the file because it is being used by another process.")
+		}
+		return []byte("ok"), nil
+	}
+	data, err := readRetrying("p", flaky, 5*time.Second)
+	if err != nil || string(data) != "ok" || calls != 4 {
+		t.Fatalf("readRetrying = %q, %v after %d calls; want ok after 4", data, err, calls)
+	}
+
+	calls = 0
+	missing := func(string) ([]byte, error) { calls++; return nil, os.ErrNotExist }
+	if _, err := readRetrying("p", missing, 5*time.Second); !os.IsNotExist(err) || calls != 1 {
+		t.Fatalf("a missing file: err=%v calls=%d, want ErrNotExist after 1 call", err, calls)
+	}
+
+	stuck := errors.New("stuck")
+	calls = 0
+	if _, err := readRetrying("p", func(string) ([]byte, error) { calls++; return nil, stuck }, 50*time.Millisecond); !errors.Is(err, stuck) || calls < 2 {
+		t.Fatalf("a read that keeps failing: err=%v calls=%d, want its error after retries", err, calls)
 	}
 }

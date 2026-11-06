@@ -6,15 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 // AtomicWrite writes data to path by writing a temp file in the same
 // directory (so the final rename is atomic even across the same volume) and
-// renaming it into place (replaceFile: on Windows with POSIX semantics, so
+// renaming it into place (fileshare.Replace: on Windows with POSIX semantics, so
 // the name moves in one step even while a reader holds the old file). A
 // rename that still fails because another process has path open
-// (replacing) is retried until replaceWindow has passed; readFile rides out
+// is retried until fileshare.ReplaceWindow has passed; readFile rides out
 // the same moment from the reading side.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
@@ -28,18 +29,11 @@ func AtomicWrite(path string, data []byte) error {
 		return err
 	}
 
-	deadline := time.Now().Add(replaceWindow)
-	for {
-		err := replaceFile(tmp, path)
-		if err == nil {
-			return nil
-		}
-		if !replacing(err) || time.Now().After(deadline) {
-			_ = os.Remove(tmp)
-			return err
-		}
-		time.Sleep(replaceBackoff)
+	if err := fileshare.Replace(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
+	return nil
 }
 
 func tempName(name string) string {

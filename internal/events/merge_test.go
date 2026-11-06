@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // jline is one journal line as text: the raw bytes of a line written by some
@@ -25,22 +27,21 @@ func jline(ts, ticket, event, rest string) string {
 	return s + "}"
 }
 
-// writeFile replaces path with lines, one per line, the way journal.Append
-// replaces a journal: a temp file renamed over it.
+// writeFile replaces path with lines, one per line, the way a merge or
+// checkout replaces a journal whole (journal.Append itself appends in place):
+// a temp file renamed over it.
 func writeFile(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tmp := path + ".tmp"
 	body := strings.Join(lines, "\n")
 	if len(lines) > 0 {
 		body += "\n"
 	}
-	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	// The way jig's own writers replace a file: a rename that lands while a
+	// reader holds the old one (os.Rename fails with access denied on Windows).
+	if err := store.AtomicWrite(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -598,5 +599,34 @@ func TestPollHoldsNoFileAfterwards(t *testing.T) {
 	envs, err := rd.Poll()
 	if err != nil || !reflect.DeepEqual(summary(envs), []string{"journal:b"}) {
 		t.Fatalf("Poll after the journal was replaced = %v, %v, want b", summary(envs), err)
+	}
+}
+
+// TestReplacingAJournalAReaderHoldsOpen: the way Follow opens a journal
+// leaves it replaceable, and the writer's replacement goes ahead and lands
+// while the reader holds it. On Windows a replacement by os.Rename fails with
+// access denied while any handle is open on the target, so the writer must
+// rename with POSIX semantics (and ride out a reader jig did not open).
+func TestReplacingAJournalAReaderHoldsOpen(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	a := jline("2026-10-23T09:00:01Z", "T-1", "verify-pending", "")
+	b := jline("2026-10-23T09:00:05Z", "T-1", "oracle", "")
+	r.writeJournal("T-1", a)
+
+	held, err := fileshare.Open(r.journalPath("T-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	r.writeJournal("T-1", a, b)
+
+	envs, err := Read(r.scope(false, "T-1"), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(envs) != 2 {
+		t.Fatalf("read %d lines after the replacement, want 2", len(envs))
 	}
 }
