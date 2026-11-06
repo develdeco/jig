@@ -4141,6 +4141,12 @@ The hand-off way (`--body`, the session's push, `--pr`) asks for no approval and
 
 Rejected: asking for an approval on the hand-off way, since a run that went with the recommendations publishes without one by design (ADR 0035). Recorded and shown, never refused. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
 
+## Each record names the jig build that wrote it (STORE-9)
+
+A fix to jig itself is judged by records written by builds that may not have it, and nothing on a journal line or a round report said which build wrote it. Chosen (defaulted 2026-11-06): a build stamp (version, short vcs revision, `-dirty` when the build had uncommitted changes, `unknown` with no build info), computed once per process in `internal/journal` and shared with `jig version`, written as a `jig` field by `journal.Append` on every line jig writes and on each round's `report.yaml`; `jig status` lists the builds with the first and last line each wrote when a ticket names more than one.
+
+Rejected: refusing a command from a build other than the ticket's first (jig records and shows, never refuses, ADR 0046's rule; a fix to jig itself must be run by the build that has it).
+
 ## The test writer replaced journals by a rename Windows refuses (DEV-7)
 
 STORE-9's verification still failed `TestFollowEmitsTheStreamThenWhatIsAdded` after DEV-6, at the test's own rename of `journal.ndjson.tmp` over `journal.ndjson`: access denied. The follower already opened the journal with delete sharing (`fileshare`), but `os.Rename` on Windows fails while any handle is open on the target, shared for deletion or not; only a rename with POSIX semantics (`store.AtomicWrite`, `fileshare.Rename`) moves the name past an open handle. Chosen: the events tests write journals with `store.AtomicWrite`, the way a merge, a checkout or `AtomicWrite` replaces a file (`journal.Append` itself appends in place and renames nothing), and `journal.Read` opens the journal with `fileshare.ReadFile` like the other readers of a file a writer replaces. `AtomicWrite` already retried a sharing violation to a 2s bound for readers outside jig (an editor, Defender) and failed with the path; two tests now hold the file with `os.Open` (no delete sharing): one released after 200ms, where the write lands, and one held for good, where it fails naming the path with no temp file left.
