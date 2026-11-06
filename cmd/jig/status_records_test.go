@@ -321,7 +321,7 @@ func TestStatusPublishNamesThePullRequestAndTheFirstLinesOfItsBody(t *testing.T)
 		t.Errorf("body = %q\nwant %q", got["body"], wantBody)
 	}
 
-	pr := journal.Line{Event: journal.EventPr, Commit: head, Branch: "jig/" + fx.Ticket, Outcome: "opened", URL: "https://example.test/acme/demo/pull/7"}
+	pr := journal.Line{Event: journal.EventPr, Commit: head, Branch: "jig/" + fx.Ticket, Outcome: "opened", URL: "https://example.test/acme/demo/pull/7", Approval: "agent"}
 	if err := journal.Append(st, fx.Ticket, pr); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestStatusPublishNamesThePullRequestAndTheFirstLinesOfItsBody(t *testing.T)
 		t.Fatal(err)
 	}
 	got = pairs()
-	if got["pr"] != `"https://example.test/acme/demo/pull/7"` || got["pr_state"] != "opened" {
+	if got["pr"] != `"https://example.test/acme/demo/pull/7"` || got["pr_state"] != "opened" || got["approval"] != "agent" {
 		t.Errorf("publish after the pull request: %v", got)
 	}
 	if got["changelog_file"] != changelogRel || got["changelog"] != `"## Slices\n- a: aaaaaaa\n## Fix rounds\n- none"` {
@@ -374,9 +374,9 @@ func TestStatusPublishListsThePullRequestOfEachRepo(t *testing.T) {
 		t.Errorf("publish block = %s, want the ticket and its branch", got)
 	}
 	want := []string{
-		"publish_prs[2]{repo,pr,state,head,body_file}:",
-		`  api,"https://example.test/acme/api/pull/7",opened,` + api + ",tickets/" + fx.Ticket + "/pr/api.md",
-		"  web,-,-," + web + ",tickets/" + fx.Ticket + "/pr/web.md",
+		"publish_prs[2]{repo,pr,state,approval,head,body_file}:",
+		`  api,"https://example.test/acme/api/pull/7",opened,-,` + api + ",tickets/" + fx.Ticket + "/pr/api.md",
+		"  web,-,-,-," + web + ",tickets/" + fx.Ticket + "/pr/web.md",
 	}
 	if table := block(out, "publish_prs["); strings.Join(table, "\n") != strings.Join(want, "\n") {
 		t.Errorf("publish_prs:\n%s\nwant\n%s", strings.Join(table, "\n"), strings.Join(want, "\n"))
@@ -386,7 +386,7 @@ func TestStatusPublishListsThePullRequestOfEachRepo(t *testing.T) {
 	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventPr, Commit: web, Branch: branch, Repo: "web", Outcome: "recorded", URL: "https://example.test/acme/web/pull/3"}); err != nil {
 		t.Fatal(err)
 	}
-	if table := block(statusOf(t, fx, st), "publish_prs["); table[2] != `  web,"https://example.test/acme/web/pull/3",recorded,`+web+",tickets/"+fx.Ticket+"/pr/web.md" {
+	if table := block(statusOf(t, fx, st), "publish_prs["); table[2] != `  web,"https://example.test/acme/web/pull/3",recorded,-,`+web+",tickets/"+fx.Ticket+"/pr/web.md" {
 		t.Errorf("the web's row after its pull request was recorded = %q", table[2])
 	}
 }

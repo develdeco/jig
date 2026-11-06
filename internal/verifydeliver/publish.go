@@ -825,6 +825,63 @@ func approvedByPerson(lines []journal.Line, head string) bool {
 	return approved
 }
 
+// The publish approvals a pr line records for its head.
+const (
+	approvalPerson = "person"
+	approvalAgent  = "agent"
+	approvalNone   = "none"
+)
+
+// approvalOf is the approval repo's head had: the last publish-approved line
+// for that head, whose provenance is "person" or "agent", or "none" for a head
+// no line approves, and the identity that line names.
+func approvalOf(lines []journal.Line, repo, head string) (approval, identity string) {
+	approval = approvalNone
+	for _, l := range lines {
+		if l.Event != journal.EventPublishApproved || l.Commit != head || l.Repo != repo || head == "" {
+			continue
+		}
+		approval, identity = approvalAgent, l.Summary
+		if l.Provenance == "person" {
+			approval = approvalPerson
+		}
+	}
+	if i := strings.Index(identity, " <"); i > 0 {
+		identity = identity[:i]
+	}
+	return approval, identity
+}
+
+// approverIdentity is the name a publish approval is credited to: the git
+// identity of the store, or "" when it has none (an approval is recorded, never
+// refused, for want of a name).
+func approverIdentity(dir string) string {
+	who, err := gitx.ResolveIdentity(dir)
+	if err != nil {
+		return ""
+	}
+	return who.Name + " <" + who.Email + ">"
+}
+
+// publishApprovalLine is the review notes' line on the approval repo's head
+// had, worded so an agent's never reads as a person's at a terminal.
+func publishApprovalLine(lines []journal.Line, repo, head string) string {
+	approval, who := approvalOf(lines, repo, head)
+	switch approval {
+	case approvalPerson:
+		if who == "" {
+			return "Publish approved by a person at a terminal"
+		}
+		return "Publish approved by " + who + " at a terminal"
+	case approvalAgent:
+		if who == "" {
+			return "Publish approved by an agent, not by a person at a terminal"
+		}
+		return "Publish approved by an agent, as " + who + ", not by a person at a terminal"
+	}
+	return "Published without a recorded approval"
+}
+
 // writeStoreDocs writes what a publish leaves in the store about the ticket:
 // its changelogs, its entry in the project ledger and contract index, and the
 // evidence list. None of it touches a branch.
@@ -1010,7 +1067,15 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	if err := writeReviewNotes(d.Store, ticket, t.notesName(), t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
+	journaled, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
+	approvalLine := ""
+	if t.reviewedHead() != "" {
+		approvalLine = publishApprovalLine(journaled, t.lineRepo(), t.reviewedHead())
+	}
+	if err := writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior); err != nil {
 		return publication{}, err
 	}
 	return publication{
@@ -1515,7 +1580,8 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if !verified {
 		outcome = "recorded:unverified"
 	}
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo()}); err != nil {
+	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 	// The notes posted are those rendered for the reviewed head: when the
@@ -1580,7 +1646,7 @@ func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, er
 	report := ApproveReport{Branch: targets[0].branch, Provenance: provenance}
 	for _, pt := range targets {
 		head := pt.reviewedHead()
-		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo()}
+		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
 		if err := journal.Append(d.Store, o.Ticket, line); err != nil {
 			return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 		}

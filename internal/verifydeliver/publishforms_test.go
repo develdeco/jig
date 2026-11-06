@@ -609,18 +609,81 @@ func TestPostReviewNotesSaysWhenTheNotesAreNotRendered(t *testing.T) {
 }
 
 // TestPublishRecordPRNotesSayTheApprovalTheHeadHad: a pull request recorded
-// with --pr on a ticket with no publish-approved line carries review notes that
-// say it was published without a recorded approval.
+// with --pr carries review notes that say which approval its head had, and its
+// pr line journals the same (person, agent or none), recorded and never
+// refused. An agent's approval reads as an agent's, not a person's at a
+// terminal.
 func TestPublishRecordPRNotesSayTheApprovalTheHeadHad(t *testing.T) {
 	t.Parallel()
 	const prURL = "https://github.com/owner/fixture-repo/pull/7"
-	fx, d, head := reviewedInTheClone(t)
-	_, addEnv := useGithubHost(t, &d, "", "")
-	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
-		t.Fatalf("PublishRecordPR: %v", err)
+	cases := []struct{ name, provenance, wantLine, wantApproval string }{
+		{"none", "", "Published without a recorded approval", "none"},
+		{"agent", "agent", "Publish approved by an agent, as ", "agent"},
+		{"person", "person", "Publish approved by ", "person"},
 	}
-	if got := readNotes(t, d.Store, fx.Ticket, "review-notes.md"); !strings.Contains(got, "Published without a recorded approval\n") {
-		t.Errorf("review notes lack the no-approval line:\n%s", got)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, head := reviewedInTheClone(t)
+			_, addEnv := useGithubHost(t, &d, "", "")
+			addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+			if c.provenance != "" {
+				if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, c.provenance); err != nil {
+					t.Fatalf("PublishApprove: %v", err)
+				}
+			}
+			if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+				t.Fatalf("PublishRecordPR: %v", err)
+			}
+			notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
+			switch c.name {
+			case "none":
+				if !strings.Contains(notes, c.wantLine+"\n") {
+					t.Errorf("notes lack %q:\n%s", c.wantLine, notes)
+				}
+			case "agent":
+				if !strings.Contains(notes, "\n"+c.wantLine) || !strings.Contains(notes, ", not by a person at a terminal\n") {
+					t.Errorf("notes lack an agent's approval line:\n%s", notes)
+				}
+			case "person":
+				if !strings.Contains(notes, "\n"+c.wantLine) || !strings.Contains(notes, " at a terminal\n") || strings.Contains(notes, "Publish approved by an agent") {
+					t.Errorf("notes lack a person's approval line:\n%s", notes)
+				}
+			}
+			lines, err := journal.Read(d.Store, fx.Ticket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range lines {
+				if l.Event == journal.EventPr && l.Approval != c.wantApproval {
+					t.Errorf("pr line approval = %q, want %q", l.Approval, c.wantApproval)
+				}
+			}
+		})
+	}
+}
+
+// TestPublishApprovalLineWordsEachApproval: the line is worded from the last
+// publish-approved line for the head and repo, with the identity the approval
+// recorded.
+func TestPublishApprovalLineWordsEachApproval(t *testing.T) {
+	t.Parallel()
+	head := strings.Repeat("a", 40)
+	line := func(prov string) []journal.Line {
+		return []journal.Line{{Event: journal.EventPublishApproved, Commit: head, Provenance: prov, Summary: "Dana <d@example.test>"}}
+	}
+	for _, c := range []struct {
+		lines []journal.Line
+		head  string
+		want  string
+	}{
+		{line("person"), head, "Publish approved by Dana at a terminal"},
+		{line("agent"), head, "Publish approved by an agent, as Dana, not by a person at a terminal"},
+		{line("person"), strings.Repeat("b", 40), "Published without a recorded approval"},
+		{nil, head, "Published without a recorded approval"},
+	} {
+		if got := publishApprovalLine(c.lines, "", c.head); got != c.want {
+			t.Errorf("publishApprovalLine = %q, want %q", got, c.want)
+		}
 	}
 }
