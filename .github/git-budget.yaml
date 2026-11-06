@@ -32,5 +32,5 @@ packages:
   internal/stack: 194
   internal/store: 4000
   internal/verify: 744
-  internal/verifydeliver: 11208
+  internal/verifydeliver: 11447
   lint: 21
