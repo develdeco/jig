@@ -455,10 +455,10 @@ func TestValidateCheckSaysToShowTheBriefAndAsk(t *testing.T) {
 		not  []string
 	}{
 		{"off a terminal", func(e env) env { return e },
-			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "go with the recommendations", "will record an agent's approval, not a person's"},
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "once they confirm", "go with the recommendations", "will record an agent's approval, not a person's"},
 			nil},
 		{"at a terminal", env.atTerminal,
-			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "the approval will be the person's"},
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "once they confirm", "the approval will be the person's"},
 			[]string{"an agent's approval"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -517,6 +517,10 @@ func TestDefaultedDecisions(t *testing.T) {
 		{"italic tag and a bare date", "# T-1: x\n\n## Decision\n\n- It stays. _defaulted 2026-11-03 (owner: take them)_\n- It moves. Answer, defaulted 2026-11-03 (owner: x).\n", 2},
 		{"tag among other words in the parenthesis", "# T-1: x\n\n## Decision\n\n- One. (defaulted; the form defaulted 2026-10-09)\n- Two. (defaulted, as the bridge)\n- Three. (user-confirmed 2026-11-06; wording defaulted)\n", 3},
 		{"prose that explains the tag", "# T-1: x\n\nEvery open question is marked \"defaulted 2026-11-03\".\n\nThe intake skill tags every decision `user-confirmed` or `defaulted`.\n\n- A fact about defaulted words, tagged defaulted above.\n\n```\n- fenced (defaulted)\n```\n", 0},
+		{"tag wrapped between the word and its date", "# T-1: x\n\n## Decision\n\n- It stays. (defaulted\n  2026-11-03 (owner: take them))\n- It moves. _defaulted\n  2026-11-03_\n", 2},
+		{"decisions after a closed code fence", "# T-1: x\n\n## Decision\n\n```\n- fenced (defaulted)\n```\n\n- After the fence. (defaulted 2026-11-06)\n- And another. (defaulted 2026-11-06)\n", 2},
+		{"indented list item under a tagged parent", "# T-1: x\n\n## Decision\n\n- The parent. (defaulted 2026-11-03)\n  - The child. (defaulted 2026-11-03)\n", 2},
+		{"backticked prose with a dated tag", "# T-1: x\n\nThe tag reads `defaulted 2026-11-02 (owner: proceed with the plan)` in a brief.\n", 0},
 		{"no decisions", "# T-1: x\n\n## Goal\n\nx\n", 0},
 	}
 	for _, c := range cases {
