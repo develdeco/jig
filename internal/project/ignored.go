@@ -89,9 +89,9 @@ func updateIgnored(jigHome string, fn func([]string) ([]string, error)) error {
 		return fmt.Errorf("project: no jig home given")
 	}
 	path := home.IgnoredPath(jigHome)
-	release, _, err := store.Lock(path, machineLockTimeout)
+	release, err := lockFile(path, "ignored list", machineLockTimeout)
 	if err != nil {
-		return fmt.Errorf("project: lock ignored list: %w", err)
+		return err
 	}
 	defer release()
 	cur, err := LoadIgnored(jigHome)
