@@ -105,6 +105,12 @@ func failureOutput(out string, err error, baseline map[string]bool) (tail, summa
 	if len(fresh) == 0 {
 		return old, oneLine(old)
 	}
+	// A run the wedge guard killed says so in today's tail; the reason is
+	// not in the output, so it follows the new lines to reach the summary
+	// and the signature.
+	if strings.Contains(err.Error(), "did not finish within") {
+		fresh = append(fresh, err.Error())
+	}
 	tail = headBytes(fresh, tailBytes) + "\n" + markerOldTail + "\n" + old
 	return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
 }

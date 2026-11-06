@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -686,11 +685,8 @@ func (x *run) baselinePath(cmd string) string {
 // costs the next failure its comparison, so it is logged and no more.
 func (x *run) keepBaseline(cmd, out string) {
 	path := x.baselinePath(cmd)
-	err := os.MkdirAll(filepath.Dir(path), 0o755)
-	if err == nil {
-		err = os.WriteFile(path, []byte(baselineText(out)), 0o644)
-	}
-	if err != nil {
+	// Atomic, so a failing worker reading it meanwhile never sees half a file.
+	if err := store.AtomicWrite(path, []byte(baselineText(out))); err != nil {
 		x.logf("could not keep the baseline of the passing run: %v", err)
 	}
 }
