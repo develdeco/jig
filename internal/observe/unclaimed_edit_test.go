@@ -1,7 +1,9 @@
 package observe
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -150,5 +152,105 @@ func TestAnEditThatIsNotOnATicketOrNotAnEditHearsNothing(t *testing.T) {
 	r.onTicketBranch()
 	if got := r.handle(r.ev(KindTool, func(e *Event) { e.Tool = "Bash"; e.Command = "ls" })).Context; got != "" {
 		t.Errorf("a tool call that edited nothing: context = %s, want none", got)
+	}
+}
+
+func TestAnEditAtTheBriefPhaseWithASliceClaimedHearsNothing(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	r.onTicketBranch()
+	p := briefPhase()
+	p.Phases[1] = phase.Phase{Name: phase.Build, State: "pending", Subs: []phase.Sub{{Key: "slice:a", State: phase.SubActive}}}
+	r.phases[r.fx.Ticket] = p
+	r.handle(r.ev(KindSessionStart))
+	if got := r.edit(r.inClone("main.go")); got != "" {
+		t.Errorf("a slice is claimed on an unapproved brief: context = %s, want none", got)
+	}
+}
+
+func TestASliceParkedOnItsEnvironmentKeepsItsClaim(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	r.onTicketBranch()
+	p := buildPhase(map[string]string{"a": phase.SubWaiting, "b": phase.SubPending}, "a", "b")
+	p.Phases[1].Subs[0].Detail = phase.WaitsForEnvironment
+	r.phases[r.fx.Ticket] = p
+	r.handle(r.ev(KindSessionStart))
+	if got := r.edit(r.inClone("main.go")); got != "" {
+		t.Errorf("an env-blocked slice is claimed: context = %s, want none", got)
+	}
+	// A slice waiting on blockers holds no claim.
+	p = buildPhase(map[string]string{"a": phase.SubWaiting, "b": phase.SubPending}, "a", "b")
+	p.Phases[1].Subs[0].Detail = "waits for b"
+	r2 := newPhaseRig(t)
+	r2.onTicketBranch()
+	r2.phases[r2.fx.Ticket] = p
+	r2.handle(r2.ev(KindSessionStart))
+	if got := r2.edit(r2.inClone("main.go")); !strings.Contains(got, "jig claim") {
+		t.Errorf("a slice waiting on blockers heard no claim note:\n%s", got)
+	}
+}
+
+func TestASiblingOfTheCheckoutIsNotInsideIt(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	r.onTicketBranch()
+	r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
+	r.handle(r.ev(KindSessionStart))
+	sibling := filepath.Join(r.fx.RepoDir+"-tickets", "x.md")
+	if got := r.edit(sibling); got != "" {
+		t.Errorf("an edit of %s: context = %s, want none", sibling, got)
+	}
+}
+
+func TestAnEditFromASubdirectoryOfTheCheckoutIsInside(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t)
+	r.onTicketBranch()
+	r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
+	sub := filepath.Join(r.fx.RepoDir, "pkg")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.handle(r.ev(KindSessionStart))
+	got := r.handle(r.ev(KindTool, func(e *Event) {
+		e.Cwd, e.Tool, e.Files = sub, "Edit", []string{r.inClone("main.go")}
+	})).Context
+	if !strings.Contains(got, "jig claim") {
+		t.Errorf("an edit from a subdirectory heard no claim note:\n%s", got)
+	}
+}
+
+func TestTheCheckoutMatchFoldsCaseOnWindows(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("paths are case-sensitive here")
+	}
+	r := newPhaseRig(t)
+	r.onTicketBranch()
+	r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
+	r.handle(r.ev(KindSessionStart))
+	file := r.inClone("main.go")
+	flipped := strings.ToUpper(file[:1]) + file[1:]
+	if file[0] >= 'A' && file[0] <= 'Z' {
+		flipped = strings.ToLower(file[:1]) + file[1:]
+	}
+	if got := r.edit(flipped); !strings.Contains(got, "jig claim") {
+		t.Errorf("an edit of %s: context = %s, want the claim note", flipped, got)
+	}
+}
+
+func TestATicketDoneOrClosedHearsNothing(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{phase.CodeDone, phase.CodeClosed} {
+		r := newPhaseRig(t)
+		r.onTicketBranch()
+		p := buildPhase(map[string]string{"a": phase.SubPending}, "a")
+		p.Code = code
+		r.phases[r.fx.Ticket] = p
+		r.handle(r.ev(KindSessionStart))
+		if got := r.edit(r.inClone("main.go")); got != "" {
+			t.Errorf("a ticket with code %s: context = %s, want none", code, got)
+		}
 	}
 }

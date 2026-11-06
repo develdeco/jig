@@ -139,6 +139,10 @@ const (
 	sliceStalled    = "stalled"
 )
 
+// WaitsForEnvironment is the Detail of a slice parked on its environment: it
+// keeps its claim, unlike a queued slice waiting on blockers.
+const WaitsForEnvironment = "waits for its environment"
+
 // Sub is one sub-step of a phase.
 type Sub struct {
 	// Key is stable: "drafted", "slices", "approved", "slice:<id>",
@@ -1036,7 +1040,7 @@ func (d *digest) sliceState(s sliceView) (state, detail string) {
 	case s.State == sliceGreen:
 		return SubDone, strings.TrimSpace("verified " + short(s.verifiedCommit))
 	case s.State == sliceEnvBlocked:
-		return SubWaiting, "waits for its environment"
+		return SubWaiting, WaitsForEnvironment
 	case s.State == sliceBuilding:
 		if s.claimed && s.claimedBy != "" {
 			return SubActive, "claimed by " + d.session(s.claimedBy, "builder")

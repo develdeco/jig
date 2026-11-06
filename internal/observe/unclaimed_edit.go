@@ -39,6 +39,9 @@ func (h *handler) unclaimedEditNotes(mem sessionMemory) []Note {
 	if t.Code == phase.CodeDone || t.Code == phase.CodeClosed {
 		return nil
 	}
+	if claimedSlice(t) {
+		return nil
+	}
 	switch t.Current {
 	case phase.Brief:
 		return []Note{{
@@ -53,10 +56,7 @@ func (h *handler) unclaimedEditNotes(mem sessionMemory) []Note {
 			if !ok {
 				continue
 			}
-			switch s.State {
-			case phase.SubActive, phase.SubNeedsYou, phase.SubFailed:
-				return nil // a slice is claimed
-			case phase.SubPending:
+			if s.State == phase.SubPending {
 				ready = append(ready, id)
 			}
 		}
@@ -67,6 +67,26 @@ func (h *handler) unclaimedEditNotes(mem sessionMemory) []Note {
 		return []Note{{Ref: claimRef, Source: "unclaimed-edit", Text: text + ")."}}
 	}
 	return nil
+}
+
+// claimedSlice reports whether a slice of the ticket holds a claim: building,
+// parked for an answer or stalled, or parked on its environment. The build
+// phase's slices are listed while the brief is current too.
+func claimedSlice(t phase.Ticket) bool {
+	for _, s := range t.Of(phase.Build).Subs {
+		if !strings.HasPrefix(s.Key, "slice:") {
+			continue
+		}
+		switch s.State {
+		case phase.SubActive, phase.SubNeedsYou, phase.SubFailed:
+			return true
+		case phase.SubWaiting:
+			if s.Detail == phase.WaitsForEnvironment {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // editsInCheckout reports whether an edited file of the event lies inside the
