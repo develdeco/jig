@@ -31,6 +31,6 @@ packages:
   internal/slicectx: 61
   internal/stack: 194
   internal/store: 4000
-  internal/verify: 566
+  internal/verify: 679
   internal/verifydeliver: 10239
   lint: 21
