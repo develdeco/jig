@@ -20,7 +20,7 @@ packages:
   internal/mergefacts: 169
   internal/migrate: 295
   internal/mirror: 1536
-  internal/observe: 254
+  internal/observe: 257
   internal/pool: 1862
   internal/project: 382
   internal/ready: 22
