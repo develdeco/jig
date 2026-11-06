@@ -437,3 +437,16 @@ func TestPickRoundTripsAndOtherLinesWriteNone(t *testing.T) {
 		t.Errorf("a line with no pick writes the key: %s", written[1])
 	}
 }
+
+// TestRenderConsolidatedNumbersAFixRoundWithoutAnAttempt names the round of a
+// fix-slice line that carries no attempt by the gate round that had closed.
+func TestRenderConsolidatedNumbersAFixRoundWithoutAnAttempt(t *testing.T) {
+	t.Parallel()
+	out := RenderConsolidated([]Line{
+		{Ticket: "JIG-1", Event: "gate-round", Attempt: 1},
+		{Ticket: "JIG-1", Slice: "fix-1", Event: "fix-slice"},
+	})
+	if !strings.Contains(out, "- round 1: fix-slice fix-1\n") {
+		t.Errorf("RenderConsolidated = %q, want round 1 for fix-1", out)
+	}
+}
