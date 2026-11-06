@@ -138,7 +138,7 @@ func sortedNames(files map[string]string) []string {
 // maxRecordings, not by the 50 files one `gh --attach` takes (media.MaxFiles),
 // which binds publish's pick. Each recording is verified on its own and all are
 // kept. Beyond maxRecordings the later ones by name are left out and counted,
-// not a reason to refuse the rest, and a tag of one left out is not read.
+// not a reason to refuse the rest, and a tag of one left out is not verified.
 func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 	t.Parallel()
 	t.Run("more than the attach limit, within the bound", func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestRecorderKeepsMoreRecordingsThanOneAttachTakes(t *testing.T) {
 				break
 			}
 		}
-		mustExist(t, filepath.Join(r.recordDir(firstRun), names[len(names)-1]))
+		mustNotExist(t, filepath.Join(r.recordDir(firstRun), names[len(names)-1]))
 	})
 	t.Run("a refusal still refuses the whole collection", func(t *testing.T) {
 		t.Parallel()
@@ -559,7 +559,7 @@ func TestCollectRecordings(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		got, err := collectRecordings(top, dir)
+		got, err := collectRecordings(top, dir, nil)
 		return got.recs, got.dropped, err
 	}
 
@@ -650,7 +650,7 @@ func TestCollectRecordings(t *testing.T) {
 	t.Run("a directory that is gone holds nothing", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		got, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"))
+		got, err := collectRecordings(top, filepath.Join(top, "id", "T", "recordings", "sha", "run"), nil)
 		recs, dropped := got.recs, got.dropped
 		if err != nil || len(recs) != 0 || len(dropped) != 0 {
 			t.Errorf("recs=%+v dropped=%v err=%v", recs, dropped, err)
@@ -666,14 +666,14 @@ func TestCollectRecordings(t *testing.T) {
 		if err := os.WriteFile(dir, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := collectRecordings(top, dir); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
+		if _, err := collectRecordings(top, dir, nil); err == nil || !strings.Contains(err.Error(), "is not a plain directory") {
 			t.Errorf("err = %v, want the refusal", err)
 		}
 	})
 	t.Run("a directory outside the evidence directory is refused", func(t *testing.T) {
 		t.Parallel()
 		top := filepath.Join(t.TempDir(), "evidence")
-		if _, err := collectRecordings(top, t.TempDir()); err == nil {
+		if _, err := collectRecordings(top, t.TempDir(), nil); err == nil {
 			t.Error("a directory that is not below the evidence directory was read")
 		}
 	})

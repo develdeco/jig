@@ -22,7 +22,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -47,12 +49,14 @@ const (
 	maxScenarioBytes = 200
 	maxFlowBytes     = 200
 	maxCaptionBytes  = 1000
+	maxFileBytes     = 500
 
 	// maxRecordings bounds how many recordings one oracle run's collection
 	// keeps: jig's own end-to-end suite makes dozens, and each is verified on
 	// its own. The 50 files media.MaxFiles allows bind what one `gh --attach`
 	// takes, which is publish's pick of recordings, not their collection.
-	// Beyond it the later recordings by name are left out and counted.
+	// Beyond it the recordings of a file the branch changed are kept first, then
+	// the rest by name; the others are removed and counted.
 	maxRecordings = 200
 
 	// maxDroppedNames bounds how many dropped entries a recorded line names.
@@ -168,7 +172,7 @@ func (r recorder) finish(slice string, attempt int, commit string, t recordTarge
 		return nil
 	}
 	line := journal.Line{Slice: slice, Event: journal.EventRecorded, Commit: commit, Attempt: attempt, RecordRun: t.run}
-	got, err := collectRecordings(top, t.dir)
+	got, err := collectRecordings(top, t.dir, r.changed)
 	switch {
 	case err != nil:
 		_ = removeRecordDir(top, t.dir)
@@ -207,7 +211,10 @@ type recordingTag struct {
 	Flow     string `json:"flow"`
 	Step     int    `json:"step"`
 	Caption  string `json:"caption"`
-	File     string `json:"file"`
+	// File is the repo-relative source file of the test that made the
+	// recording; a run over the limit keeps the recordings of a changed file
+	// first (keepChangedFirst).
+	File string `json:"file"`
 }
 
 // dirEntry is one entry of a record directory, as pickRecordings reads it.
@@ -274,8 +281,9 @@ type collected struct {
 // below top (the evidence directory of the jig home), and returns the
 // recordings in it in name order and the names of the entries it left
 // unrecorded (pickRecordings). Only the files directly in dir count. At most
-// maxRecordings are kept: the first by name, the rest only counted, and not
-// read, so a tag of a recording left out cannot refuse the others.
+// maxRecordings are kept (keepChangedFirst): those of a file the branch
+// changed first, then the first by name; the rest are removed and counted, and
+// not verified, so a tag of a recording left out cannot refuse the others.
 //
 // A harness may remove and recreate the directory (Playwright clears its
 // output directory), so dir is not required to be the very directory jig
@@ -289,7 +297,7 @@ type collected struct {
 // removed and did not recreate held nothing. An unreadable or invalid tag, or
 // a recording that fails a rule, refuses the whole collection with a reason
 // naming the file.
-func collectRecordings(top, dir string) (collected, error) {
+func collectRecordings(top, dir string, changed func() []string) (collected, error) {
 	var none collected
 	if err := media.PlainParents(top, dir); err != nil {
 		return none, err
@@ -316,7 +324,7 @@ func collectRecordings(top, dir string) (collected, error) {
 	got := collected{dropped: dropped}
 	if len(picks) > maxRecordings {
 		got.over = len(picks) - maxRecordings
-		picks = picks[:maxRecordings]
+		picks = keepChangedFirst(dir, picks, changed)
 	}
 
 	got.recs = make([]journal.Recording, 0, len(picks))
@@ -396,6 +404,8 @@ func readTag(dir, name string) (recordingTag, error) {
 		return invalid(fmt.Sprintf("flow is longer than %d bytes", maxFlowBytes))
 	case len(tag.Caption) > maxCaptionBytes:
 		return invalid(fmt.Sprintf("caption is longer than %d bytes", maxCaptionBytes))
+	case len(tag.File) > maxFileBytes:
+		return invalid(fmt.Sprintf("file is longer than %d bytes", maxFileBytes))
 	}
 	return tag, nil
 }
@@ -480,4 +490,41 @@ func absPath(p string) string {
 		return abs
 	}
 	return p
+}
+
+// keepChangedFirst chooses the maxRecordings recordings of picks (in name
+// order) a collection keeps when the run made more: first those whose tag
+// names a file in changed (the files the branch changed against its target,
+// repo relative), then the rest by name, up to the limit. The kept are
+// returned in name order; the others are removed from dir, with their tags,
+// as best effort. A tag that cannot be read ranks its recording with the rest
+// and refuses nothing: the tags of the kept recordings are read strictly
+// afterwards.
+func keepChangedFirst(dir string, picks []pick, changed func() []string) []pick {
+	own := map[string]bool{}
+	if changed != nil {
+		for _, f := range changed() {
+			own[path.Clean(filepath.ToSlash(f))] = true
+		}
+	}
+	var first, rest []pick
+	for _, p := range picks {
+		if p.tag != "" && len(own) > 0 {
+			if tag, err := readTag(dir, p.tag); err == nil && tag.File != "" && own[path.Clean(filepath.ToSlash(tag.File))] {
+				first = append(first, p)
+				continue
+			}
+		}
+		rest = append(rest, p)
+	}
+	ranked := append(first, rest...)
+	for _, p := range ranked[maxRecordings:] {
+		_ = os.Remove(filepath.Join(dir, p.name))
+		if p.tag != "" {
+			_ = os.Remove(filepath.Join(dir, p.tag))
+		}
+	}
+	kept := ranked[:maxRecordings]
+	sort.Slice(kept, func(i, j int) bool { return kept[i].name < kept[j].name })
+	return kept
 }

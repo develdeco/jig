@@ -504,13 +504,7 @@ func (x *run) checkCheckout() string {
 	if dirty := dirtyTree(x.dir); dirty != "" {
 		return "the checkout of " + short(x.sha) + " is not clean, so an oracle run on it would say nothing of the commit: " + oneLine(dirty)
 	}
-	var recorded string
-	if d.Repo != "" {
-		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
-			recorded = string(data)
-		}
-	}
-	start := startSHA(d.Clone, x.sha, recorded, d.Target)
+	start := x.startSHA()
 	if start == "" {
 		return ""
 	}
@@ -521,6 +515,35 @@ func (x *run) checkCheckout() string {
 		return "the commit does not verify: " + reason
 	}
 	return ""
+}
+
+// startSHA is the base the commit is held to descend from, and the one the
+// branch's changed files are read against: the ticket's recorded start sha, else
+// the merge base with origin's target (startSHA), "" when neither is known.
+func (x *run) startSHA() string {
+	d := x.d
+	var recorded string
+	if d.Repo != "" {
+		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
+			recorded = string(data)
+		}
+	}
+	return startSHA(d.Clone, x.sha, recorded, d.Target)
+}
+
+// changedFiles lists the files the commit changed since that base, as the
+// gate's scope diff reads them (added, modified or type-changed); nil when the
+// base is unknown or the diff fails, which ranks every recording alike.
+func (x *run) changedFiles() []string {
+	start := x.startSHA()
+	if start == "" {
+		return nil
+	}
+	files, err := gitx.DiffNameOnly(x.dir, start, x.sha, "AMT")
+	if err != nil {
+		return nil
+	}
+	return files
 }
 
 // bringUpEnv brings the slice's env class up in the worktree when it names
@@ -576,7 +599,7 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 // leaves the slice building.
 func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 	d := x.d
-	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal}
+	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
 
 	limit := m.OracleLimit()
