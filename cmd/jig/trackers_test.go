@@ -243,7 +243,7 @@ func (s *stubGitHub) CreateIssue(context.Context, string, string, string, string
 }
 func (s *stubGitHub) CloseIssueNotPlanned(context.Context, string) error { return nil }
 func (s *stubGitHub) AddComment(context.Context, string, string) error   { return nil }
-func (s *stubGitHub) PullRequestsByHead(context.Context, string, string, string) ([]github.PullRequest, error) {
+func (s *stubGitHub) PullRequestsByHeads(context.Context, string, string, []string) (map[string][]github.PullRequest, error) {
 	return nil, nil
 }
 func (s *stubGitHub) PullRequestsByIDs(context.Context, []string) ([]github.PullRequest, error) {
@@ -273,14 +273,18 @@ func (s *stubGitHub) PlaceItem(context.Context, github.ProjectV2, string, string
 func (s *stubGitHub) RepositoryIsPublic(context.Context, string, string) (bool, error) {
 	return true, nil
 }
-func (s *stubGitHub) FetchIssue(context.Context, string) (github.IssueState, error) {
-	return github.IssueState{Title: s.issueTitle, Open: true}, nil
+func (s *stubGitHub) FetchIssues(_ context.Context, nodeIDs []string) (map[string]github.IssueState, error) {
+	states := map[string]github.IssueState{}
+	for _, id := range nodeIDs {
+		states[id] = github.IssueState{Title: s.issueTitle, Open: true}
+	}
+	return states, nil
 }
 func (s *stubGitHub) UpdateIssue(context.Context, string, string, string) error { return nil }
 func (s *stubGitHub) CloseIssueCompleted(context.Context, string) error         { return nil }
 func (s *stubGitHub) ReopenIssue(context.Context, string) error                 { return nil }
-func (s *stubGitHub) ItemFieldValues(context.Context, string) (string, string, error) {
-	return "", "", nil
+func (s *stubGitHub) ItemFieldValues(context.Context, []string) (map[string]github.ItemFields, error) {
+	return nil, nil
 }
 
 // TestTicketNewRunsItsOwnCheckpointSync is the gate finding's own fix

@@ -2,8 +2,11 @@ package mirror
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -13,7 +16,7 @@ import (
 )
 
 // addRepoToProjectYAML rewrites work's project.yaml to also declare a
-// product repo, so FindPullRequests has somewhere to search
+// product repo, so findPullRequests has somewhere to search
 // (brief.md#Status and pull requests).
 func addRepoToProjectYAML(t *testing.T, work string) {
 	t.Helper()
@@ -148,6 +151,107 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	}
 	if len(client.placedItems) != placedBefore {
 		t.Fatalf("second Sync called PlaceItem %d more time(s), want no mutation", len(client.placedItems)-placedBefore)
+	}
+}
+
+// TestSyncReadsGitHubInBatches pins what keeps a sync inside its bound as
+// a store grows: a sync over several tickets reads GitHub once for every
+// issue, once per repo for every ticket's pull requests, and once for every
+// board item - never once per ticket, which made a few dozen tickets
+// outlast the sync's two minutes - and the batched answers still reach the
+// right ticket. The steps share one store, each building on the last.
+func TestSyncReadsGitHubInBatches(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	addRepoToProjectYAML(t, work)
+	for i := 1; i <= 3; i++ {
+		mintTestTicket(t, st, fmt.Sprintf("DEMO-%d", i), fmt.Sprintf("Ticket %d", i))
+	}
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{
+		prs: map[string][]github.PullRequest{
+			// Each ticket's branch is led by its issue's number, handed out in
+			// the tickets' order.
+			"example/demo@1-ticket-1": {{Number: 5, NodeID: "PR_5", State: "OPEN"}},
+			"example/demo@3-ticket-3": {{Number: 6, NodeID: "PR_6", State: "MERGED"}},
+		},
+	}
+	sync := func() (SyncReport, error) {
+		client.reads = nil
+		return Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	}
+	onceEach := func(t *testing.T, step string) {
+		t.Helper()
+		for _, name := range []string{"FetchIssues", "PullRequestsByHeads", "ItemFieldValues"} {
+			if client.reads[name] != 1 {
+				t.Fatalf("%s reads = %v, want %s called once for all three tickets", step, client.reads, name)
+			}
+		}
+		if client.reads["PullRequestsByIDs"] > 1 {
+			t.Fatalf("%s reads = %v, want PullRequestsByIDs at most once", step, client.reads)
+		}
+	}
+
+	first, err := sync()
+	if err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	wantPRs := []PlacedPR{
+		{Ticket: "DEMO-1", Owner: "example", Repo: "demo", Number: 5, Status: "In review"},
+		{Ticket: "DEMO-3", Owner: "example", Repo: "demo", Number: 6, Status: "Done"},
+	}
+	if len(first.PlacedPRs) != 2 || first.PlacedPRs[0] != wantPRs[0] || first.PlacedPRs[1] != wantPRs[1] {
+		t.Fatalf("first Sync PlacedPRs = %+v, want each ticket's own pull request: %+v", first.PlacedPRs, wantPRs)
+	}
+	// The issue repo is public, so each new ticket's pull requests are found
+	// before its create, for the publish-safety scan: one head query for all
+	// three, then one more for the update.
+	if client.reads["PullRequestsByHeads"] != 2 {
+		t.Fatalf("first Sync reads = %v, want two head queries: the creates' and the update's", client.reads)
+	}
+
+	second, err := sync()
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	onceEach(t, "second Sync")
+	if len(second.Placed) != 0 || len(second.PlacedPRs) != 0 || len(second.Updated) != 0 {
+		t.Fatalf("second Sync = %+v, want no write: the batched reads must still see what the first sync wrote", second)
+	}
+
+	// A board item deleted on GitHub reads as one with no values, so it is
+	// placed again.
+	delete(client.itemFields, readTestRecord(t, treeRecordPath(t, st, "DEMO-2")).Item)
+	third, err := sync()
+	if err != nil {
+		t.Fatalf("third Sync: %v", err)
+	}
+	onceEach(t, "third Sync")
+	if len(third.Placed) != 1 || third.Placed[0] != (PlacedItem{What: "DEMO-2", Status: "Backlog"}) {
+		t.Fatalf("third Sync Placed = %+v, want DEMO-2 placed again", third.Placed)
+	}
+
+	// A record with no node_id fails the sync by name rather than reading as
+	// a gone issue and opening a second one.
+	abs := treeRecordPath(t, st, "DEMO-2")
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := regexp.MustCompile(`(?m)^node_id: .*$`).ReplaceAllString(string(raw), `node_id: ""`)
+	if edited == string(raw) {
+		t.Fatalf("could not empty DEMO-2's node_id:\n%s", raw)
+	}
+	if err := os.WriteFile(abs, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created := len(client.calls)
+	if _, err := sync(); err == nil || !strings.Contains(err.Error(), "DEMO-2's record names no issue node_id") {
+		t.Fatalf("Sync with no node_id = %v, want it refused by name", err)
+	}
+	if len(client.calls) != created {
+		t.Fatalf("Sync with no node_id opened %d issue(s), want none", len(client.calls)-created)
 	}
 }
 

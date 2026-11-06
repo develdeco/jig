@@ -199,98 +199,153 @@ func TestCreateIssueReportsGraphQLErrors(t *testing.T) {
 	}
 }
 
-// TestPullRequestsByHeadSortsByNumber checks PullRequestsByHead decodes the
-// fake server's nodes and returns them ordered by number, whatever order
-// the server listed them in.
-func TestPullRequestsByHeadSortsByNumber(t *testing.T) {
+// TestPullRequestsByHeadsSortsEachBranchByNumber checks PullRequestsByHeads
+// asks for every branch in one aliased query, one variable per branch, and
+// returns each branch's pull requests ordered by number, whatever order the
+// server listed them in; a branch with none has no entry.
+func TestPullRequestsByHeadsSortsEachBranchByNumber(t *testing.T) {
+	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Query     string         `json:"query"`
-			Variables map[string]any `json:"variables"`
+		requests++
+		query, vars := decodeGraphQLRequest(t, r)
+		if !strings.Contains(query, "b0: pullRequests(headRefName: $b0") || !strings.Contains(query, "b1: pullRequests(headRefName: $b1") {
+			t.Fatalf("unexpected query: %s", query)
 		}
-		_ = json.Unmarshal(body, &req)
-		if !strings.Contains(req.Query, "pullRequests(headRefName") {
-			t.Fatalf("unexpected query: %s", req.Query)
-		}
-		owner, _ := req.Variables["owner"].(string)
-		name, _ := req.Variables["name"].(string)
-		branch, _ := req.Variables["branch"].(string)
-		if owner != "example" || name != "demo" || branch != "jig/DEMO-7" {
-			t.Fatalf("variables = owner=%q name=%q branch=%q, want example/demo jig/DEMO-7", owner, name, branch)
+		if vars["owner"] != "example" || vars["name"] != "demo" || vars["b0"] != "jig/DEMO-7" || vars["b1"] != "jig/DEMO-8" {
+			t.Fatalf("variables = %v, want example/demo with b0 jig/DEMO-7 and b1 jig/DEMO-8", vars)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequests":{"nodes":[
-			{"number":31,"id":"PR_31","state":"MERGED"},
-			{"number":5,"id":"PR_5","state":"OPEN"}
-		]}}}}`))
+		_, _ = w.Write([]byte(`{"data":{"repository":{
+			"b0":{"nodes":[{"number":31,"id":"PR_31","state":"MERGED"},{"number":5,"id":"PR_5","state":"OPEN"}]},
+			"b1":{"nodes":[]}
+		}}}`))
 	}))
 	defer srv.Close()
 
 	c := newFastClient(srv.URL, "test-token")
-	prs, err := c.PullRequestsByHead(context.Background(), "example", "demo", "jig/DEMO-7")
+	byHead, err := c.PullRequestsByHeads(context.Background(), "example", "demo", []string{"jig/DEMO-7", "jig/DEMO-8"})
 	if err != nil {
-		t.Fatalf("PullRequestsByHead: %v", err)
+		t.Fatalf("PullRequestsByHeads: %v", err)
 	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1 for both branches", requests)
+	}
+	prs := byHead["jig/DEMO-7"]
 	if len(prs) != 2 || prs[0].Number != 5 || prs[1].Number != 31 {
-		t.Fatalf("PullRequestsByHead = %+v, want [5, 31] in number order", prs)
+		t.Fatalf("PullRequestsByHeads[jig/DEMO-7] = %+v, want [5, 31] in number order", prs)
 	}
-	if prs[0].State != "OPEN" || prs[1].State != "MERGED" {
-		t.Fatalf("PullRequestsByHead states = %+v, want OPEN then MERGED", prs)
+	if prs[0].State != "OPEN" || prs[1].State != "MERGED" || prs[1].NodeID != "PR_31" {
+		t.Fatalf("PullRequestsByHeads[jig/DEMO-7] = %+v, want OPEN PR_5 then MERGED PR_31", prs)
 	}
-	if prs[1].NodeID != "PR_31" {
-		t.Fatalf("PullRequestsByHead[1].NodeID = %q, want %q", prs[1].NodeID, "PR_31")
+	if got, ok := byHead["jig/DEMO-8"]; ok {
+		t.Fatalf("PullRequestsByHeads[jig/DEMO-8] = %+v, want no entry for a branch with none", got)
 	}
 }
 
-// TestPullRequestsByHeadMatchesExactlyNotAsAPrefix pins the bug this slice
-// fixes: GitHub's search (head: as a prefix) matched a branch like
-// "jig/T-23" when querying "jig/T-2", wrongly handing T-2 another ticket's
-// pull request. The fake server here holds one pull request whose head is
-// "jig/T-23", which merely starts with the queried branch "jig/T-2": a
-// query shaped like GitHub's search (matched here by "search(" in the
-// query text) gets it back, as a prefix search really would, while
-// Repository.pullRequests(headRefName:)'s own exact field does not. So this
-// test fails if PullRequestsByHead ever regresses to a search-shaped query,
-// and passes as long as it keeps asking headRefName for the exact branch.
-func TestPullRequestsByHeadMatchesExactlyNotAsAPrefix(t *testing.T) {
+// TestPullRequestsByHeadsMatchesExactlyNotAsAPrefix pins the bug the
+// headRefName filter fixed: GitHub's search (head: as a prefix) matched a
+// branch like "jig/T-23" when querying "jig/T-2", wrongly handing T-2
+// another ticket's pull request. The fake server here holds one pull
+// request whose head is "jig/T-23", which merely starts with the queried
+// branch "jig/T-2": a query shaped like GitHub's search (matched here by
+// "search(" in the query text) gets it back, as a prefix search really
+// would, while Repository.pullRequests(headRefName:)'s own exact field does
+// not. So this test fails if PullRequestsByHeads ever regresses to a
+// search-shaped query, and passes as long as it keeps asking headRefName
+// for the exact branch.
+func TestPullRequestsByHeadsMatchesExactlyNotAsAPrefix(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Query     string         `json:"query"`
-			Variables map[string]any `json:"variables"`
-		}
-		_ = json.Unmarshal(body, &req)
-		branch, _ := req.Variables["branch"].(string)
+		query, vars := decodeGraphQLRequest(t, r)
+		branch, _ := vars["b0"].(string)
 		w.Header().Set("Content-Type", "application/json")
 		const actualHead = "jig/T-23"
-		if strings.Contains(req.Query, "search(") {
+		found := `{"data":{"repository":{"b0":{"nodes":[{"number":102,"id":"PR_102","state":"OPEN"}]}}}}`
+		if strings.Contains(query, "search(") {
 			// GitHub's search really does match head: as a prefix.
 			if strings.HasPrefix(actualHead, branch) {
-				_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequests":{"nodes":[
-					{"number":102,"id":"PR_102","state":"OPEN"}
-				]}}}}`))
+				_, _ = w.Write([]byte(found))
 				return
 			}
 		} else if branch == actualHead {
-			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequests":{"nodes":[
-				{"number":102,"id":"PR_102","state":"OPEN"}
-			]}}}}`))
+			_, _ = w.Write([]byte(found))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequests":{"nodes":[]}}}}`))
+		_, _ = w.Write([]byte(`{"data":{"repository":{"b0":{"nodes":[]}}}}`))
 	}))
 	defer srv.Close()
 
 	c := newFastClient(srv.URL, "test-token")
-	prs, err := c.PullRequestsByHead(context.Background(), "develdeco", "jig", "jig/T-2")
+	byHead, err := c.PullRequestsByHeads(context.Background(), "develdeco", "jig", []string{"jig/T-2"})
 	if err != nil {
-		t.Fatalf("PullRequestsByHead: %v", err)
+		t.Fatalf("PullRequestsByHeads: %v", err)
 	}
-	for _, pr := range prs {
+	for _, pr := range byHead["jig/T-2"] {
 		if pr.Number == 102 {
-			t.Fatalf("PullRequestsByHead = %+v, want T-23's #102 excluded: its head merely starts with T-2's branch", prs)
+			t.Fatalf("PullRequestsByHeads = %+v, want T-23's #102 excluded: its head merely starts with T-2's branch", byHead)
 		}
+	}
+}
+
+// TestBatchedReadsSendAtMostAHundredIDsPerQuery checks every batched read
+// splits its ids into queries of at most 100 (GitHub's own nodes(ids:)
+// limit), sends each id once, and never sends an empty one: 250 distinct
+// issue ids, one repeated and one empty, take three queries of 100, 100
+// and 50, and 150 branches take two aliased queries.
+func TestBatchedReadsSendAtMostAHundredIDsPerQuery(t *testing.T) {
+	var sizes []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query, vars := decodeGraphQLRequest(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(query, "pullRequests(headRefName") {
+			n := 0
+			for k := range vars {
+				if strings.HasPrefix(k, "b") {
+					n++
+				}
+			}
+			sizes = append(sizes, n)
+			_, _ = w.Write([]byte(`{"data":{"repository":{}}}`))
+			return
+		}
+		ids, _ := vars["ids"].([]any)
+		sizes = append(sizes, len(ids))
+		nodes := make([]string, len(ids))
+		for i, id := range ids {
+			if id == "" {
+				t.Fatalf("an empty id was sent")
+			}
+			nodes[i] = fmt.Sprintf(`{"title":%q,"body":"","closed":false,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[]}}`, id)
+		}
+		_, _ = w.Write([]byte(`{"data":{"nodes":[` + strings.Join(nodes, ",") + `]}}`))
+	}))
+	defer srv.Close()
+
+	c := newFastClient(srv.URL, "test-token")
+	ids := []string{"", "ISSUE_0"}
+	for i := range 250 {
+		ids = append(ids, fmt.Sprintf("ISSUE_%d", i))
+	}
+	states, err := c.FetchIssues(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("FetchIssues: %v", err)
+	}
+	if fmt.Sprint(sizes) != "[100 100 50]" {
+		t.Fatalf("query sizes = %v, want [100 100 50]", sizes)
+	}
+	if len(states) != 250 || states["ISSUE_249"].Title != "ISSUE_249" {
+		t.Fatalf("FetchIssues returned %d states (ISSUE_249 = %+v), want 250 matched by order", len(states), states["ISSUE_249"])
+	}
+
+	sizes = nil
+	branches := make([]string, 150)
+	for i := range branches {
+		branches[i] = fmt.Sprintf("jig/T-%d", i)
+	}
+	if _, err := c.PullRequestsByHeads(context.Background(), "example", "demo", branches); err != nil {
+		t.Fatalf("PullRequestsByHeads: %v", err)
+	}
+	if fmt.Sprint(sizes) != "[100 50]" {
+		t.Fatalf("branch query sizes = %v, want [100 50]", sizes)
 	}
 }
 
@@ -401,62 +456,100 @@ func TestAddSubIssueAndBlockedBySendTheirMutations(t *testing.T) {
 	}
 }
 
-// TestFetchIssueReadsCurrentState checks FetchIssue decodes an issue's
+// TestFetchIssuesReadsCurrentState checks FetchIssues decodes each issue's
 // title, body, closed state, parent and sub-issue/blocked-by node ids off
-// the fake server's node query.
-func TestFetchIssueReadsCurrentState(t *testing.T) {
+// one nodes(ids:) query, matching each answer to its id by order.
+func TestFetchIssuesReadsCurrentState(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Query     string         `json:"query"`
-			Variables map[string]any `json:"variables"`
+		query, vars := decodeGraphQLRequest(t, r)
+		if !strings.Contains(query, "nodes(ids:") || !strings.Contains(query, "... on Issue") {
+			t.Fatalf("unexpected query: %s", query)
 		}
-		_ = json.Unmarshal(body, &req)
-		if !strings.Contains(req.Query, "... on Issue") {
-			t.Fatalf("unexpected query: %s", req.Query)
-		}
-		if req.Variables["id"] != "ISSUE_1" {
-			t.Fatalf("id = %v, want ISSUE_1", req.Variables["id"])
+		if ids, _ := vars["ids"].([]any); len(ids) != 2 || ids[0] != "ISSUE_1" || ids[1] != "ISSUE_2" {
+			t.Fatalf("ids = %v, want [ISSUE_1 ISSUE_2]", vars["ids"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"node":{
-			"title":"A title","body":"A body","closed":true,
-			"parent":{"id":"PARENT_1"},
-			"subIssues":{"nodes":[{"id":"SUB_1"}]},
-			"blockedBy":{"nodes":[{"id":"BLOCKER_1"}]}
-		}}}`))
+		_, _ = w.Write([]byte(`{"data":{"nodes":[
+			{"title":"A title","body":"A body","closed":true,
+			 "parent":{"id":"PARENT_1"},
+			 "subIssues":{"nodes":[{"id":"SUB_1"}]},
+			 "blockedBy":{"nodes":[{"id":"BLOCKER_1"}]}},
+			{"title":"Another","body":"","closed":false,"parent":null,
+			 "subIssues":{"nodes":[]},"blockedBy":{"nodes":[]}}
+		]}}`))
 	}))
 	defer srv.Close()
 
 	c := newFastClient(srv.URL, "test-token")
-	state, err := c.FetchIssue(context.Background(), "ISSUE_1")
+	states, err := c.FetchIssues(context.Background(), []string{"ISSUE_1", "ISSUE_2"})
 	if err != nil {
-		t.Fatalf("FetchIssue: %v", err)
+		t.Fatalf("FetchIssues: %v", err)
 	}
+	state := states["ISSUE_1"]
 	if state.Title != "A title" || state.Body != "A body" || state.Open {
-		t.Fatalf("state = %+v, want title/body set and Open false", state)
+		t.Fatalf("ISSUE_1 = %+v, want title/body set and Open false", state)
 	}
 	if state.ParentID != "PARENT_1" || len(state.SubIssueIDs) != 1 || state.SubIssueIDs[0] != "SUB_1" {
-		t.Fatalf("state = %+v, want parent PARENT_1 and sub-issue SUB_1", state)
+		t.Fatalf("ISSUE_1 = %+v, want parent PARENT_1 and sub-issue SUB_1", state)
 	}
 	if len(state.BlockedByIDs) != 1 || state.BlockedByIDs[0] != "BLOCKER_1" {
-		t.Fatalf("state.BlockedByIDs = %v, want [BLOCKER_1]", state.BlockedByIDs)
+		t.Fatalf("ISSUE_1.BlockedByIDs = %v, want [BLOCKER_1]", state.BlockedByIDs)
+	}
+	if other := states["ISSUE_2"]; other.Title != "Another" || !other.Open || other.ParentID != "" {
+		t.Fatalf("ISSUE_2 = %+v, want title Another, open, no parent", other)
 	}
 }
 
-// TestFetchIssueReportsNotFound checks FetchIssue reports ErrIssueNotFound
-// when node resolves to null - the issue (or its repository) is gone
-// (brief.md#Adoption).
-func TestFetchIssueReportsNotFound(t *testing.T) {
+// TestFetchIssuesLeavesOutAGoneIssue checks a gone issue - answered in the
+// real API's own shape, a null alongside a NOT_FOUND at path ["nodes", i] -
+// has no entry rather than failing the read (brief.md#Adoption: the sync
+// recreates it), while any other error still fails it.
+func TestFetchIssuesLeavesOutAGoneIssue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"node":null}}`))
+		_, _ = w.Write([]byte(`{"data":{"nodes":[
+			{"title":"Kept","body":"","closed":false,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[]}},
+			null
+		]},"errors":[{"type":"NOT_FOUND","path":["nodes",1],"message":"Could not resolve to a node with the global id of 'GONE'."}]}`))
 	}))
 	defer srv.Close()
 
 	c := newFastClient(srv.URL, "test-token")
-	if _, err := c.FetchIssue(context.Background(), "GONE"); !errors.Is(err, ErrIssueNotFound) {
-		t.Fatalf("FetchIssue err = %v, want ErrIssueNotFound", err)
+	states, err := c.FetchIssues(context.Background(), []string{"KEPT", "GONE"})
+	if err != nil {
+		t.Fatalf("FetchIssues: %v", err)
+	}
+	if _, ok := states["GONE"]; ok || states["KEPT"].Title != "Kept" {
+		t.Fatalf("FetchIssues = %+v, want KEPT only", states)
+	}
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"nodes":[null]},"errors":[{"message":"something went wrong"}]}`))
+	}))
+	defer failing.Close()
+	if _, err := newFastClient(failing.URL, "test-token").FetchIssues(context.Background(), []string{"ISSUE_1"}); err == nil {
+		t.Fatal("FetchIssues: want an error for an error that is not a gone node, got nil")
+	}
+}
+
+// TestBatchedReadsRefuseAShortAnswer checks FetchIssues and
+// ItemFieldValues refuse an answer with fewer nodes than ids asked for,
+// since each answer is matched to its id by order: a short list would hand
+// one id another's state.
+func TestBatchedReadsRefuseAShortAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"nodes":[{"title":"Only one","fieldValues":{"nodes":[]}}]}}`))
+	}))
+	defer srv.Close()
+
+	c := newFastClient(srv.URL, "test-token")
+	if _, err := c.FetchIssues(context.Background(), []string{"ISSUE_1", "ISSUE_2"}); err == nil {
+		t.Fatal("FetchIssues: want an error for one node answered for two ids, got nil")
+	}
+	if _, err := c.ItemFieldValues(context.Background(), []string{"ITEM_1", "ITEM_2"}); err == nil {
+		t.Fatal("ItemFieldValues: want an error for one node answered for two ids, got nil")
 	}
 }
 
@@ -507,27 +600,41 @@ func TestUpdateIssueCloseReopenAndRemoveSubIssueSendTheirMutations(t *testing.T)
 	}
 }
 
-// TestItemFieldValuesReadsStatusAndStoreID checks ItemFieldValues matches
-// each field value back to its own field's name, ignoring any other field
-// value the project item might carry.
+// TestItemFieldValuesReadsStatusAndStoreID checks ItemFieldValues reads
+// every item in one nodes(ids:) query and matches each field value back to
+// its own field's name, ignoring any other field value the project item
+// might carry; a gone item has no entry.
 func TestItemFieldValuesReadsStatusAndStoreID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query, vars := decodeGraphQLRequest(t, r)
+		if !strings.Contains(query, "nodes(ids:") || !strings.Contains(query, "... on ProjectV2Item") {
+			t.Fatalf("unexpected query: %s", query)
+		}
+		if ids, _ := vars["ids"].([]any); len(ids) != 2 {
+			t.Fatalf("ids = %v, want both items in one query", vars["ids"])
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"node":{"fieldValues":{"nodes":[
-			{"name":"In review","field":{"name":"Status"}},
-			{"text":"DEMO-1","field":{"name":"Store ID"}},
-			{"name":"Something","field":{"name":"Other Field"}}
-		]}}}}`))
+		_, _ = w.Write([]byte(`{"data":{"nodes":[
+			{"fieldValues":{"nodes":[
+				{"name":"In review","field":{"name":"Status"}},
+				{"text":"DEMO-1","field":{"name":"Store ID"}},
+				{"name":"Something","field":{"name":"Other Field"}}
+			]}},
+			null
+		]},"errors":[{"type":"NOT_FOUND","path":["nodes",1],"message":"Could not resolve to a node with the global id of 'ITEM_GONE'."}]}`))
 	}))
 	defer srv.Close()
 
 	c := newFastClient(srv.URL, "test-token")
-	status, storeID, err := c.ItemFieldValues(context.Background(), "ITEM_1")
+	fields, err := c.ItemFieldValues(context.Background(), []string{"ITEM_1", "ITEM_GONE"})
 	if err != nil {
 		t.Fatalf("ItemFieldValues: %v", err)
 	}
-	if status != "In review" || storeID != "DEMO-1" {
-		t.Fatalf("ItemFieldValues = (%q, %q), want (In review, DEMO-1)", status, storeID)
+	if got := fields["ITEM_1"]; got.Status != "In review" || got.StoreID != "DEMO-1" {
+		t.Fatalf("ItemFieldValues[ITEM_1] = %+v, want In review / DEMO-1", got)
+	}
+	if got, ok := fields["ITEM_GONE"]; ok {
+		t.Fatalf("ItemFieldValues[ITEM_GONE] = %+v, want no entry for a gone item", got)
 	}
 }
 

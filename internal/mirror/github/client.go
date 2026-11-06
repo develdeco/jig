@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +30,7 @@ type Issue struct {
 
 // PullRequest is one pull request: its number, node id, and GitHub's own
 // state spelling ("OPEN", "CLOSED" or "MERGED"). Owner and Repo are filled
-// in only by PullRequestsByIDs, which (unlike PullRequestsByHead, whose
+// in only by PullRequestsByIDs, which (unlike PullRequestsByHeads, whose
 // caller already knows the repo it queried) has to look them up.
 type PullRequest struct {
 	Number int
@@ -41,7 +40,7 @@ type PullRequest struct {
 	Repo   string
 }
 
-// IssueState is an issue's current state on GitHub, as FetchIssue reads it
+// IssueState is an issue's current state on GitHub, as FetchIssues reads it
 // before the "drift" slice decides whether to overwrite anything
 // (brief.md#Ownership and drift).
 type IssueState struct {
@@ -59,11 +58,41 @@ type IssueState struct {
 	BlockedByIDs []string
 }
 
-// ErrIssueNotFound is what FetchIssue returns when nodeID no longer
-// resolves to anything: the issue was deleted, or its repository was
-// (brief.md#Adoption: "a recorded issue that is gone from GitHub gets a new
-// issue").
-var ErrIssueNotFound = errors.New("github: issue not found")
+// ItemFields is a board item's current Status (the option's name) and Store
+// ID (the text), the jig-owned fields brief.md#Ownership and drift compares.
+// Either is "" when the project carries no value for that field yet.
+type ItemFields struct {
+	Status, StoreID string
+}
+
+// maxNodesPerQuery is how many ids one batched read sends in a single
+// query: GitHub's own limit for nodes(ids:), and the most pullRequests
+// fields PullRequestsByHeads aliases into one repository query. A sync's
+// reads are then a few queries whatever the store's size, rather than one
+// round trip per ticket, which is what outgrew the sync's bound.
+const maxNodesPerQuery = 100
+
+// batches splits ids into runs of at most maxNodesPerQuery, after dropping
+// every empty id and every repeat: an empty id is one GitHub would refuse
+// for the whole query, so it reads as absent instead.
+func batches(ids []string) [][]string {
+	seen := make(map[string]bool, len(ids))
+	var unique []string
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	var out [][]string
+	for len(unique) > 0 {
+		n := min(len(unique), maxNodesPerQuery)
+		out = append(out, unique[:n])
+		unique = unique[n:]
+	}
+	return out
+}
 
 // ProjectV2 is a GitHub Project's resolved identity and the field/option ids
 // PlaceItem writes items through: looked up fresh by EnsureProject at every
@@ -93,10 +122,11 @@ type Client interface {
 	// AddComment adds a comment with body to the issue (or other
 	// commentable) subjectID identifies.
 	AddComment(ctx context.Context, subjectID, body string) error
-	// PullRequestsByHead returns owner/repo's pull requests, in any state,
-	// whose head branch is exactly branch (brief.md#Status and pull
-	// requests), ordered by number.
-	PullRequestsByHead(ctx context.Context, owner, repo, branch string) ([]PullRequest, error)
+	// PullRequestsByHeads returns, for each of branches, owner/repo's pull
+	// requests, in any state, whose head branch is exactly that branch
+	// (brief.md#Status and pull requests), ordered by number. A branch with
+	// none has no entry.
+	PullRequestsByHeads(ctx context.Context, owner, repo string, branches []string) (map[string][]PullRequest, error)
 	// PullRequestsByIDs returns the current number, state and repository of
 	// each pull request nodeIDs identifies, skipping any id GitHub no
 	// longer resolves to a pull request (brief.md#Status and pull requests:
@@ -135,11 +165,14 @@ type Client interface {
 	// brief.md#Publish safety scans a title and body against before they are
 	// written ("A private issue repo is not scanned").
 	RepositoryIsPublic(ctx context.Context, owner, repo string) (bool, error)
-	// FetchIssue reads nodeID's current title, body, open/closed state,
-	// parent, sub-issues and blocked-by links, the baseline the "drift" slice
-	// compares the store's own value against (brief.md#Ownership and drift).
-	// It returns ErrIssueNotFound when nodeID no longer resolves.
-	FetchIssue(ctx context.Context, nodeID string) (IssueState, error)
+	// FetchIssues reads each of nodeIDs' current title, body, open/closed
+	// state, parent, sub-issues and blocked-by links, the baseline the
+	// "drift" slice compares the store's own value against
+	// (brief.md#Ownership and drift). An id that no longer resolves - the
+	// issue was deleted, or its repository was - has no entry
+	// (brief.md#Adoption: "a recorded issue that is gone from GitHub gets a
+	// new issue").
+	FetchIssues(ctx context.Context, nodeIDs []string) (map[string]IssueState, error)
 	// UpdateIssue sets nodeID's title and body (brief.md#Syncing at every
 	// checkpoint, step 4).
 	UpdateIssue(ctx context.Context, nodeID, title, body string) error
@@ -154,11 +187,11 @@ type Client interface {
 	// #Links's own drift rule, "a sub-issue added on GitHub to a chart's
 	// issue that is no ticket's issue is taken out again".
 	RemoveSubIssue(ctx context.Context, parentID, subIssueID string) error
-	// ItemFieldValues reads itemID's current Status (the option's name) and
-	// Store ID (the text) field values, the baseline brief.md#Ownership and
-	// drift compares a board item's owned fields against. Either return is ""
-	// when the project carries no value for that field yet.
-	ItemFieldValues(ctx context.Context, itemID string) (status, storeID string, err error)
+	// ItemFieldValues reads each of itemIDs' current Status and Store ID,
+	// the baseline brief.md#Ownership and drift compares a board item's
+	// owned fields against. An item that no longer resolves has no entry,
+	// and reads as one with no values, which places it again.
+	ItemFieldValues(ctx context.Context, itemIDs []string) (map[string]ItemFields, error)
 	// LookupProject reports whether the GitHub Project at ownerLogin/number
 	// resolves at all, with no mutation: a dry run's own read of brief.md
 	// #The board's project, which cannot call EnsureProject without risking
@@ -227,8 +260,9 @@ func New(endpoint, token string) *GraphQLClient {
 // "NOT_FOUND" with Path ["nodes", i] when a nodes(ids:) query is handed an
 // id GitHub cannot resolve: the real API reports this alongside a null in
 // data.nodes[i] rather than leaving data.nodes[i] null with no error
-// (confirmed against the live API; PullRequestsByIDs is the one caller that
-// tolerates it, via toleratingGoneNodes).
+// (confirmed against the live API; the nodes(ids:) reads - FetchIssues,
+// ItemFieldValues and PullRequestsByIDs - tolerate it, via
+// toleratingGoneNodes).
 type graphQLError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
@@ -542,55 +576,74 @@ func (c *GraphQLClient) AddComment(ctx context.Context, subjectID, body string) 
 	return nil
 }
 
-// pullRequestsByHeadQuery finds owner/repo's pull requests whose head
-// branch is exactly $branch, in any state, through Repository.pullRequests'
-// own headRefName filter. GitHub's search (used until this query replaced
-// it) matches head: as a prefix, so a search for "jig/T-2" also turns up a
-// pull request whose head is "jig/T-23" - an exact match is what
-// brief.md#Status and pull requests asks for.
-const pullRequestsByHeadQuery = `query($owner: String!, $name: String!, $branch: String!) {
-  repository(owner: $owner, name: $name) {
-    pullRequests(headRefName: $branch, states: [OPEN, CLOSED, MERGED], first: 100) {
-      nodes { number id state }
-    }
-  }
-}`
+// pullRequestsByHeadsQuery finds owner/repo's pull requests whose head
+// branch is exactly each of n branches ($b0 to $b<n-1>), in any state,
+// through Repository.pullRequests' own headRefName filter, one aliased
+// field per branch, so a sync asks once per repo rather than once per
+// ticket. GitHub's search (used until headRefName replaced it) matches head:
+// as a prefix, so a search for "jig/T-2" also turns up a pull request whose
+// head is "jig/T-23" - an exact match is what brief.md#Status and pull
+// requests asks for.
+func pullRequestsByHeadsQuery(n int) string {
+	var b strings.Builder
+	b.WriteString("query($owner: String!, $name: String!")
+	for i := range n {
+		fmt.Fprintf(&b, ", $b%d: String!", i)
+	}
+	b.WriteString(") {\n  repository(owner: $owner, name: $name) {\n")
+	for i := range n {
+		fmt.Fprintf(&b, "    b%d: pullRequests(headRefName: $b%d, states: [OPEN, CLOSED, MERGED], first: 100) { nodes { number id state } }\n", i, i)
+	}
+	b.WriteString("  }\n}")
+	return b.String()
+}
 
-// PullRequestsByHead returns owner/repo's pull requests, in any state,
-// whose head branch is exactly branch, ordered by number.
-func (c *GraphQLClient) PullRequestsByHead(ctx context.Context, owner, repo, branch string) ([]PullRequest, error) {
-	var resp struct {
-		Repository struct {
-			PullRequests struct {
+// PullRequestsByHeads returns, for each of branches, owner/repo's pull
+// requests, in any state, whose head branch is exactly that branch, ordered
+// by number.
+func (c *GraphQLClient) PullRequestsByHeads(ctx context.Context, owner, repo string, branches []string) (map[string][]PullRequest, error) {
+	byHead := map[string][]PullRequest{}
+	for _, batch := range batches(branches) {
+		var resp struct {
+			Repository map[string]struct {
 				Nodes []struct {
 					Number int    `json:"number"`
 					ID     string `json:"id"`
 					State  string `json:"state"`
 				} `json:"nodes"`
-			} `json:"pullRequests"`
-		} `json:"repository"`
+			} `json:"repository"`
+		}
+		vars := map[string]any{"owner": owner, "name": repo}
+		for i, branch := range batch {
+			vars[fmt.Sprintf("b%d", i)] = branch
+		}
+		if err := c.do(ctx, pullRequestsByHeadsQuery(len(batch)), vars, &resp); err != nil {
+			return nil, fmt.Errorf("github: find pull requests in %s/%s by head: %w", owner, repo, err)
+		}
+		for i, branch := range batch {
+			nodes := resp.Repository[fmt.Sprintf("b%d", i)].Nodes
+			if len(nodes) == 0 {
+				continue
+			}
+			prs := make([]PullRequest, len(nodes))
+			for j, n := range nodes {
+				prs[j] = PullRequest{Number: n.Number, NodeID: n.ID, State: n.State}
+			}
+			sort.Slice(prs, func(a, b int) bool { return prs[a].Number < prs[b].Number })
+			byHead[branch] = prs
+		}
 	}
-	vars := map[string]any{"owner": owner, "name": repo, "branch": branch}
-	if err := c.do(ctx, pullRequestsByHeadQuery, vars, &resp); err != nil {
-		return nil, fmt.Errorf("github: find pull requests in %s/%s with head %s: %w", owner, repo, branch, err)
-	}
-	nodes := resp.Repository.PullRequests.Nodes
-	prs := make([]PullRequest, len(nodes))
-	for i, n := range nodes {
-		prs[i] = PullRequest{Number: n.Number, NodeID: n.ID, State: n.State}
-	}
-	sort.Slice(prs, func(i, j int) bool { return prs[i].Number < prs[j].Number })
-	return prs, nil
+	return byHead, nil
 }
 
 // pullRequestsByIDsQuery fetches each node id's current number, state and
-// owning repository in one round trip, for the recorded prs: entries
-// PullRequestsByHead's exact head match no longer finds (brief.md#Status and
-// pull requests: a merged pull request's head branch is usually gone by
-// then). A null node means GitHub no longer has it: alongside that null,
-// GitHub's real nodes(ids:) resolver also reports a NOT_FOUND "errors" entry
-// at path ["nodes", i], which PullRequestsByIDs tolerates via
-// toleratingGoneNodes rather than letting do treat it as fatal.
+// owning repository, for the recorded prs: entries PullRequestsByHeads'
+// exact head match no longer finds (brief.md#Status and pull requests: a
+// merged pull request's head branch is usually gone by then). A null node
+// means GitHub no longer has it: alongside that null, GitHub's real
+// nodes(ids:) resolver also reports a NOT_FOUND "errors" entry at path
+// ["nodes", i], which PullRequestsByIDs tolerates via toleratingGoneNodes
+// rather than letting do treat it as fatal.
 const pullRequestsByIDsQuery = `query($ids: [ID!]!) {
   nodes(ids: $ids) {
     ... on PullRequest {
@@ -606,37 +659,36 @@ const pullRequestsByIDsQuery = `query($ids: [ID!]!) {
 // each pull request nodeIDs identifies, skipping any id GitHub no longer
 // resolves to a pull request.
 func (c *GraphQLClient) PullRequestsByIDs(ctx context.Context, nodeIDs []string) ([]PullRequest, error) {
-	if len(nodeIDs) == 0 {
-		return nil, nil
-	}
-	var resp struct {
-		Nodes []*struct {
-			Number     int    `json:"number"`
-			ID         string `json:"id"`
-			State      string `json:"state"`
-			Repository struct {
-				Owner struct {
-					Login string `json:"login"`
-				} `json:"owner"`
-				Name string `json:"name"`
-			} `json:"repository"`
-		} `json:"nodes"`
-	}
-	if err := c.do(ctx, pullRequestsByIDsQuery, map[string]any{"ids": nodeIDs}, &resp, toleratingGoneNodes()); err != nil {
-		return nil, fmt.Errorf("github: fetch pull requests %v: %w", nodeIDs, err)
-	}
 	var prs []PullRequest
-	for _, n := range resp.Nodes {
-		if n == nil {
-			continue
+	for _, batch := range batches(nodeIDs) {
+		var resp struct {
+			Nodes []*struct {
+				Number     int    `json:"number"`
+				ID         string `json:"id"`
+				State      string `json:"state"`
+				Repository struct {
+					Owner struct {
+						Login string `json:"login"`
+					} `json:"owner"`
+					Name string `json:"name"`
+				} `json:"repository"`
+			} `json:"nodes"`
 		}
-		prs = append(prs, PullRequest{
-			Number: n.Number,
-			NodeID: n.ID,
-			State:  n.State,
-			Owner:  n.Repository.Owner.Login,
-			Repo:   n.Repository.Name,
-		})
+		if err := c.do(ctx, pullRequestsByIDsQuery, map[string]any{"ids": batch}, &resp, toleratingGoneNodes()); err != nil {
+			return nil, fmt.Errorf("github: fetch pull requests %v: %w", batch, err)
+		}
+		for _, n := range resp.Nodes {
+			if n == nil {
+				continue
+			}
+			prs = append(prs, PullRequest{
+				Number: n.Number,
+				NodeID: n.ID,
+				State:  n.State,
+				Owner:  n.Repository.Owner.Login,
+				Repo:   n.Repository.Name,
+			})
+		}
 	}
 	return prs, nil
 }
@@ -692,11 +744,13 @@ func (c *GraphQLClient) RemoveBlockedBy(ctx context.Context, issueID, blockingID
 	return nil
 }
 
-// fetchIssueQuery reads an issue's title, body, open/closed state, parent,
-// sub-issues and blocked-by links, the "drift" slice's own read of GitHub's
-// current state (brief.md#Ownership and drift).
-const fetchIssueQuery = `query($id: ID!) {
-  node(id: $id) {
+// fetchIssuesQuery reads each issue's title, body, open/closed state,
+// parent, sub-issues and blocked-by links, the "drift" slice's own read of
+// GitHub's current state (brief.md#Ownership and drift). GitHub answers a
+// gone id with a null in data.nodes and a NOT_FOUND "errors" entry at path
+// ["nodes", i], which FetchIssues tolerates via toleratingGoneNodes.
+const fetchIssuesQuery = `query($ids: [ID!]!) {
+  nodes(ids: $ids) {
     ... on Issue {
       title
       body
@@ -708,45 +762,56 @@ const fetchIssueQuery = `query($id: ID!) {
   }
 }`
 
-// FetchIssue reads nodeID's current state.
-func (c *GraphQLClient) FetchIssue(ctx context.Context, nodeID string) (IssueState, error) {
-	var resp struct {
-		Node *struct {
-			Title  string `json:"title"`
-			Body   string `json:"body"`
-			Closed bool   `json:"closed"`
-			Parent *struct {
-				ID string `json:"id"`
-			} `json:"parent"`
-			SubIssues struct {
-				Nodes []struct {
+// FetchIssues reads each of nodeIDs' current state. GitHub lists
+// data.nodes in the order of the ids asked for, which is how each answer
+// is matched to its id.
+func (c *GraphQLClient) FetchIssues(ctx context.Context, nodeIDs []string) (map[string]IssueState, error) {
+	states := map[string]IssueState{}
+	for _, batch := range batches(nodeIDs) {
+		var resp struct {
+			Nodes []*struct {
+				Title  string `json:"title"`
+				Body   string `json:"body"`
+				Closed bool   `json:"closed"`
+				Parent *struct {
 					ID string `json:"id"`
-				} `json:"nodes"`
-			} `json:"subIssues"`
-			BlockedBy struct {
-				Nodes []struct {
-					ID string `json:"id"`
-				} `json:"nodes"`
-			} `json:"blockedBy"`
-		} `json:"node"`
+				} `json:"parent"`
+				SubIssues struct {
+					Nodes []struct {
+						ID string `json:"id"`
+					} `json:"nodes"`
+				} `json:"subIssues"`
+				BlockedBy struct {
+					Nodes []struct {
+						ID string `json:"id"`
+					} `json:"nodes"`
+				} `json:"blockedBy"`
+			} `json:"nodes"`
+		}
+		if err := c.do(ctx, fetchIssuesQuery, map[string]any{"ids": batch}, &resp, toleratingGoneNodes()); err != nil {
+			return nil, fmt.Errorf("github: fetch issues: %w", err)
+		}
+		if len(resp.Nodes) != len(batch) {
+			return nil, fmt.Errorf("github: fetch issues: asked for %d, GitHub answered %d", len(batch), len(resp.Nodes))
+		}
+		for i, n := range resp.Nodes {
+			if n == nil {
+				continue
+			}
+			state := IssueState{Title: n.Title, Body: n.Body, Open: !n.Closed}
+			if n.Parent != nil {
+				state.ParentID = n.Parent.ID
+			}
+			for _, sub := range n.SubIssues.Nodes {
+				state.SubIssueIDs = append(state.SubIssueIDs, sub.ID)
+			}
+			for _, b := range n.BlockedBy.Nodes {
+				state.BlockedByIDs = append(state.BlockedByIDs, b.ID)
+			}
+			states[batch[i]] = state
+		}
 	}
-	if err := c.do(ctx, fetchIssueQuery, map[string]any{"id": nodeID}, &resp); err != nil {
-		return IssueState{}, fmt.Errorf("github: fetch issue %s: %w", nodeID, err)
-	}
-	if resp.Node == nil {
-		return IssueState{}, fmt.Errorf("%w: %s", ErrIssueNotFound, nodeID)
-	}
-	state := IssueState{Title: resp.Node.Title, Body: resp.Node.Body, Open: !resp.Node.Closed}
-	if resp.Node.Parent != nil {
-		state.ParentID = resp.Node.Parent.ID
-	}
-	for _, n := range resp.Node.SubIssues.Nodes {
-		state.SubIssueIDs = append(state.SubIssueIDs, n.ID)
-	}
-	for _, n := range resp.Node.BlockedBy.Nodes {
-		state.BlockedByIDs = append(state.BlockedByIDs, n.ID)
-	}
-	return state, nil
+	return states, nil
 }
 
 // updateIssueMutation sets an issue's title and body.
@@ -813,11 +878,12 @@ func (c *GraphQLClient) RemoveSubIssue(ctx context.Context, parentID, subIssueID
 	return nil
 }
 
-// itemFieldValuesQuery reads a project item's current field values, naming
-// each by its field's own name so Status and Store ID need no field id to
-// read back (brief.md#Ownership and drift).
-const itemFieldValuesQuery = `query($id: ID!) {
-  node(id: $id) {
+// itemFieldValuesQuery reads each project item's current field values,
+// naming each by its field's own name so Status and Store ID need no field
+// id to read back (brief.md#Ownership and drift). A gone item comes back as
+// a null with a NOT_FOUND at path ["nodes", i], tolerated as for issues.
+const itemFieldValuesQuery = `query($ids: [ID!]!) {
+  nodes(ids: $ids) {
     ... on ProjectV2Item {
       fieldValues(first: 20) {
         nodes {
@@ -829,36 +895,47 @@ const itemFieldValuesQuery = `query($id: ID!) {
   }
 }`
 
-// ItemFieldValues reads itemID's current Status and Store ID field values.
-func (c *GraphQLClient) ItemFieldValues(ctx context.Context, itemID string) (status, storeID string, err error) {
-	var resp struct {
-		Node *struct {
-			FieldValues struct {
-				Nodes []struct {
-					Name  string `json:"name"`
-					Text  string `json:"text"`
-					Field struct {
-						Name string `json:"name"`
-					} `json:"field"`
-				} `json:"nodes"`
-			} `json:"fieldValues"`
-		} `json:"node"`
-	}
-	if err := c.do(ctx, itemFieldValuesQuery, map[string]any{"id": itemID}, &resp); err != nil {
-		return "", "", fmt.Errorf("github: read item %s field values: %w", itemID, err)
-	}
-	if resp.Node == nil {
-		return "", "", nil
-	}
-	for _, n := range resp.Node.FieldValues.Nodes {
-		switch n.Field.Name {
-		case "Status":
-			status = n.Name
-		case "Store ID":
-			storeID = n.Text
+// ItemFieldValues reads each of itemIDs' current Status and Store ID,
+// matched to its id by data.nodes' order, as FetchIssues does.
+func (c *GraphQLClient) ItemFieldValues(ctx context.Context, itemIDs []string) (map[string]ItemFields, error) {
+	fields := map[string]ItemFields{}
+	for _, batch := range batches(itemIDs) {
+		var resp struct {
+			Nodes []*struct {
+				FieldValues struct {
+					Nodes []struct {
+						Name  string `json:"name"`
+						Text  string `json:"text"`
+						Field struct {
+							Name string `json:"name"`
+						} `json:"field"`
+					} `json:"nodes"`
+				} `json:"fieldValues"`
+			} `json:"nodes"`
+		}
+		if err := c.do(ctx, itemFieldValuesQuery, map[string]any{"ids": batch}, &resp, toleratingGoneNodes()); err != nil {
+			return nil, fmt.Errorf("github: read board items' field values: %w", err)
+		}
+		if len(resp.Nodes) != len(batch) {
+			return nil, fmt.Errorf("github: read board items' field values: asked for %d, GitHub answered %d", len(batch), len(resp.Nodes))
+		}
+		for i, n := range resp.Nodes {
+			if n == nil {
+				continue
+			}
+			var f ItemFields
+			for _, v := range n.FieldValues.Nodes {
+				switch v.Field.Name {
+				case "Status":
+					f.Status = v.Name
+				case "Store ID":
+					f.StoreID = v.Text
+				}
+			}
+			fields[batch[i]] = f
 		}
 	}
-	return status, storeID, nil
+	return fields, nil
 }
 
 // statusOptionSpec is one option every mirrored project's Status field must

@@ -299,23 +299,46 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	// render and scan (brief.md#Status and pull requests; r4-f1's narrower
 	// seam: a term matching a pull request's repo must refuse the create
 	// too, not just updateIssues' later skip). A chart has no pull
-	// requests. When trackers: has no repos: entries, FindPullRequests
+	// requests. When trackers: has no repos: entries, findPullRequests
 	// queries nothing, so no client is ensured either - keeping the dry
 	// run with no new items' pull requests to find needing none (r1-f3's
-	// guarantee for a store with no repos: configured).
+	// guarantee for a store with no repos: configured). The first call finds
+	// the pull requests of every ticket with no record at once, so a store's
+	// first sync reads them in one batch rather than a query per ticket; a
+	// ticket's branch has no issue number to lead it until its own issue
+	// exists, so finding it ahead of the creates finds the same branch.
+	var newPRs map[string][]PRRef
 	newItemPRs := func(it item) ([]PRRef, error) {
 		if it.kind != "ticket" || len(d.Cfg.Repos) == 0 {
 			return nil, nil
 		}
-		if err := ensureClient(); err != nil {
-			return nil, err
+		if newPRs == nil {
+			if err := ensureClient(); err != nil {
+				return nil, err
+			}
+			var ids []string
+			var lookups []prLookup
+			for _, other := range items {
+				if other.kind != "ticket" || other.ref.has() {
+					continue
+				}
+				branch, err := d.Store.TicketBranch(other.id, target)
+				if err != nil {
+					return nil, err
+				}
+				ids = append(ids, other.id)
+				lookups = append(lookups, prLookup{branch: branch})
+			}
+			found, err := findPullRequests(ctx, client, d.Cfg, lookups)
+			if err != nil {
+				return nil, err
+			}
+			newPRs = make(map[string][]PRRef, len(ids))
+			for i, id := range ids {
+				newPRs[id] = found[i].prs
+			}
 		}
-		branch, err := d.Store.TicketBranch(it.id, target)
-		if err != nil {
-			return nil, err
-		}
-		prs, _, err := FindPullRequests(ctx, client, d.Cfg, branch, nil)
-		return prs, err
+		return newPRs[it.id], nil
 	}
 
 	anyHasRecord := false

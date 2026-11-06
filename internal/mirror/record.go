@@ -28,7 +28,7 @@ type githubRecord struct {
 	// (brief.md#The board: "the record keeps the item id in item").
 	Item string `yaml:"item,omitempty"`
 	// PRs is, for a ticket's record only, each open or merged pull request
-	// FindPullRequests last turned up, placed on the project
+	// findPullRequests last turned up, placed on the project
 	// (brief.md#The board: "the record keeps each in prs:").
 	PRs    []prRecord    `yaml:"prs,omitempty"`
 	Synced *syncedFields `yaml:"synced,omitempty"`
