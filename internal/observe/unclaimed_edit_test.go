@@ -2,6 +2,7 @@ package observe
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -122,8 +123,7 @@ func TestAnEditOutsideTheCheckoutHearsNothing(t *testing.T) {
 }
 
 // TestTheCheckoutIsMatchedInBothSlashForms: a harness on Windows may send a
-// path with either slash. The cwd stays in its native form: a backslash cwd
-// makes hooks silent today (RUN-13), so that case cannot pass before RUN-13.
+// path with either slash.
 func TestTheCheckoutIsMatchedInBothSlashForms(t *testing.T) {
 	t.Parallel()
 	for _, form := range []func(string) string{filepath.ToSlash, func(p string) string { return strings.ReplaceAll(p, "/", `\`) }} {
@@ -268,6 +268,40 @@ func TestAnEditThroughASymlinkedCheckoutIsInside(t *testing.T) {
 		r.handle(r.ev(KindSessionStart))
 		// The checkout and the edited file are named by different routes, the
 		// file one not yet created.
+		cwd, file := link, filepath.Join(r.fx.RepoDir, "new", "file.go")
+		if viaLink {
+			cwd, file = r.fx.RepoDir, filepath.Join(link, "new", "file.go")
+		}
+		got := r.handle(r.ev(KindTool, func(e *Event) {
+			e.Cwd, e.Tool, e.Files = cwd, "Edit", []string{file}
+		})).Context
+		if !strings.Contains(got, "jig claim") {
+			t.Errorf("cwd %s, file %s heard no claim note:\n%s", cwd, file, got)
+		}
+	}
+}
+
+// TestAnEditThroughAJunctionedCheckoutIsInside: a Windows junction is a link
+// the checkout match follows as it follows a symlink, whichever of the cwd
+// and the edited file is named through it.
+func TestAnEditThroughAJunctionedCheckoutIsInside(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions only exist on Windows")
+	}
+	for _, viaLink := range []bool{false, true} {
+		r := newPhaseRig(t)
+		link := filepath.Join(t.TempDir(), "junction")
+		out, err := exec.Command("cmd", "/c", "mklink", "/J", link, r.fx.RepoDir).CombinedOutput()
+		if err != nil {
+			t.Skipf("a junction cannot be made here: %v\n%s", err, out)
+		}
+		// Removed before the temp dir holding it, so the cleanup never walks
+		// through the junction into the checkout.
+		t.Cleanup(func() { os.Remove(link) })
+		r.onTicketBranch()
+		r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
+		r.handle(r.ev(KindSessionStart))
 		cwd, file := link, filepath.Join(r.fx.RepoDir, "new", "file.go")
 		if viaLink {
 			cwd, file = r.fx.RepoDir, filepath.Join(link, "new", "file.go")

@@ -38,7 +38,7 @@ func (h *handler) collect(mem sessionMemory, commit string) []Note {
 		return nil
 	}
 	tickets := h.namedTickets()
-	named := h.phaseNotes(tickets)
+	named := h.phaseNotes(mem, tickets)
 	if h.w.Ticket == "" {
 		if h.ev.Kind != KindPrompt {
 			return nil

@@ -61,3 +61,26 @@ func TestObservePromptNamingATicketHearsItsPhaseAndSkill(t *testing.T) {
 		t.Errorf("a prompt naming a ticket heard the fresh-work note:\n%s", got)
 	}
 }
+
+// TestObservePromptHearsTheSameNotesForEitherSlashOfTheCwd: a harness on
+// Windows may send the directory with backslashes or with slashes (as valid
+// JSON, a backslash is two characters on the wire); either way the prompt
+// is placed in the project and hears the fresh-work note.
+func TestObservePromptHearsTheSameNotesForEitherSlashOfTheCwd(t *testing.T) {
+	t.Parallel()
+	for _, form := range []string{"slash", "backslash"} {
+		fx := newFixture(t, fixture.Opts{})
+		e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
+		cwd := filepath.ToSlash(fx.RepoDir)
+		if form == "backslash" {
+			if filepath.Separator == '/' {
+				continue // a backslash is a filename character here, not a separator
+			}
+			cwd = strings.ReplaceAll(cwd, "/", `\`)
+		}
+		out, code := runMain(t, e, hookPayload(t, fx, "UserPromptSubmit", map[string]any{"prompt": "add a flag", "cwd": cwd}), "observe", "--harness", "claude")
+		if code != 0 || !strings.Contains(out, "works on no ticket") {
+			t.Errorf("%s cwd %s: exit %d, output %q, want the fresh-work note", form, cwd, code, out)
+		}
+	}
+}
