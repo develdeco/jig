@@ -28,16 +28,23 @@ func (h *handler) noteCtx(mem sessionMemory, commit string) NoteCtx {
 // own notes, never the others'. The notes come in source order, each Ref
 // once. Without a ticket in a store that is here there is nothing for a
 // source to look at; a prompt then hears how work comes to have one
-// (freshWorkNote).
+// (freshWorkNote), unless it names a ticket of the store, which hears that
+// ticket's phase note instead (prompt_tickets.go). A prompt that names tickets
+// hears their phase notes after the sources' own, on a ticket too.
 func (h *handler) collect(mem sessionMemory, commit string) []Note {
 	if h.st == nil {
 		return nil
 	}
+	tickets := h.namedTickets()
+	named := h.phaseNotes(tickets)
 	if h.w.Ticket == "" {
-		if h.ev.Kind == KindPrompt {
-			return []Note{freshWorkNote}
+		if h.ev.Kind != KindPrompt {
+			return nil
 		}
-		return nil
+		if len(tickets) > 0 {
+			return named
+		}
+		return []Note{freshWorkNote}
 	}
 	c := h.noteCtx(mem, commit)
 	var out []Note
@@ -54,6 +61,13 @@ func (h *handler) collect(mem sessionMemory, commit string) []Note {
 			}
 			n.Source = src.Name
 			seen[n.Ref] = true
+			out = append(out, n)
+		}
+	}
+	for _, n := range named {
+		if !seen[n.Ref] {
+			seen[n.Ref] = true
+			n.Source = "phase"
 			out = append(out, n)
 		}
 	}

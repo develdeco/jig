@@ -206,6 +206,7 @@ func TestRecordRunRecordsTheCall(t *testing.T) {
 		Flow:     "TestScenario/sub case",
 		Step:     1,
 		Caption:  "jig gate T-1 --intent 'Add retry'",
+		File:     "e2e/record_seam_test.go",
 	}
 	if tag != want {
 		t.Errorf("tag = %+v, want %+v", tag, want)
@@ -458,13 +459,10 @@ func TestRecordRunWithoutADirectoryRecordsNothing(t *testing.T) {
 }
 
 // TestRecordRunStopsAtTheLimit: the directory holds at most limit recordings
-// (200, what a collection accepts), and the run that finds it full says so
+// (a safety bound, well above the suite), and the run that finds it full says so
 // once; every run still runs and still reports to its caller.
 func TestRecordRunStopsAtTheLimit(t *testing.T) {
 	t.Parallel()
-	if maxRecordings != 200 {
-		t.Errorf("maxRecordings = %d, want the 200 a collection accepts", maxRecordings)
-	}
 	dir := t.TempDir()
 	env := jigEnv{home: t.TempDir()}
 	rs := newRecordings(dir)

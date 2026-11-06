@@ -4089,6 +4089,26 @@ A whole-suite oracle prints a line per passing package, so the end of its output
 
 Rejected: picking lines by words like FAIL or error, a rule that holds for one runner and misses another, and keeping the first bytes of the output, since a runner may print its failures last. Defaulted (owner: go by the recommendations, 2026-11-06): all three choices.
 
+## The pull request's demo keeps the change's own scenarios (GATE-10)
+
+Every whole-suite run kept exactly 200 recordings, a different 200 each time: the harness stopped recording when its directory held 200, in the order tests finished, and said so only in a log line, so the ticket's own scenario could be missing at the reviewed head and publish fell back to an older commit's recording without saying so. Chosen: the harness records every scenario (its bound is a safety limit, 2000) and tags each recording with its test's repo-relative source file; the collection, over its 200, keeps the recordings whose tag file the branch changed against its target first (the gate scope's base, the merge base with origin's target, so an integration merge does not count the target's files; the ticket's start sha only when that fails; the rule lives in `internal/scopebase`, below verify and verifydeliver), then the rest by name, removes the others and counts them on the `recorded` line. A pick candidate recorded at a commit other than the reviewed head carries that commit in the picks request (`recorded_at`) and its caption in the demo names it. A tag field jig does not know is ignored, not refused, so a later harness tag field never refuses a collection (the one-time skew of the first runs, whose jig predated the `file` field, left the reviewed head with no recording).
+
+Rejected: raising the limit, since a later suite grows past any number; recording only changed test files, since other scenarios show the change's effect too. Defaulted (owner: go by the recommendations, 2026-11-06): all three choices.
+
+## A prompt that names a ticket hears the ticket's phase and its skill (RUN-11)
+
+A session asked to "carry on with SHOP-4" from a directory on no ticket heard only the fresh-work note (plan it with intake), though the ticket was at build. Chosen (defaulted 2026-11-06): `observe.Event` carries the prompt's text (`Prompt`), filled by the claude, codex, gemini, cursor, copilot and neutral adapters from the field each harness sends; at a prompt the core finds tokens shaped like one of the store's declared keys and a number, looks each id up in the store, and gives the first three that exist (in the order named) a note `phase:<T>:<phase>`: the phase and whether it is ready, the skill for it (`jig skill intake|build|review|publish`) and `jig next <T>`. The Ref is per ticket and phase, so the note is told once and again only when the phase changes. A done ticket gets no note; a prompt that names any ticket of the store does not hear the fresh-work note. The phase derivation reaches the core as `Deps.Derive`, since only cmd/jig derives phases.
+
+Rejected: reading the prompt for intent ("build", "review"), a phrase rule when the ticket's own phase says which skill applies; a note on every prompt, which one per ticket and phase keeps from becoming noise.
+
+## `jig validate --check` says to show the brief and ask (BRIEF-6)
+
+A session that drafted a brief ran `jig validate <T> --check`, saw `valid: yes` and its help, "run `jig validate <T>` once the person has confirmed the brief", and could run the plain validate without showing the brief: off a terminal that records `provenance: agent`, so the approval named the session, not the person. The intake skill already says to show the brief and ask; the binary's own help, which a session reads at the moment it decides, did not.
+
+Chosen (2 decisions defaulted, 2026-11-06): `--check` prints two help lines. The first says to show the person the brief and ask about its decisions, naming how many are tagged `defaulted` when any are (`defaultedDecisions` counts the bullets of the brief's Decision section that carry the word), then to run `jig validate <T>` once they confirm, and that a prompt which said to go with the recommendations confirms for them. The second says whose approval the plain validate will record: an agent's, not a person's, off a terminal; the person's at one. The skill is unchanged, since it says the same and keeps its size.
+
+Rejected: refusing an agent's validate without a recorded hand-over (jig records and shows, never refuses, so the person's choice to hand the brief over stays theirs).
+
 ## A round's counts follow the status jig routed its findings to (GATE-9)
 
 `jig status`'s rounds table read round 2 of GATE-7 as "clean, fix 3": its three findings were labeled `fix` by the reviewer and routed to notes by the risk floor, so the round queued no fix. `verifydeliver.ReadRounds` counted by the reviewer's label (`Finding.Action`). Chosen: `Fix` counts the round's findings with status `open` (a fix slice's work), `Ask` the `asked` ones, `Note` the `noted` ones, and a `dismissed` finding counts in none, so a clean round never shows a fix. The findings list keeps each finding's own action and `routed_as`, so the reviewer's label stays visible where it differs. The rounds table and the TUI review screen read the same counts.

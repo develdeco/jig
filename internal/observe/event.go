@@ -54,6 +54,9 @@ type Event struct {
 	Agent   string
 	// Cwd is the directory the event happened in.
 	Cwd string
+	// Prompt is the text of the person's prompt, on a prompt event whose
+	// harness sends it.
+	Prompt string
 	// Tool is the name of the tool a tool event is about, Command the shell
 	// command it ran when it ran one, Description what the session said the
 	// call is for, and Exit that command's exit status when the harness
