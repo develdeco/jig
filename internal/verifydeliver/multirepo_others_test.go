@@ -156,3 +156,29 @@ func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
 		t.Errorf("notes =\n%q\nwant\n%q", got, want)
 	}
 }
+
+// TestWriteReviewNotesSaysWhoApprovedTheBrief: the notes carry one line on
+// who approved the brief, naming an agent's approval as an agent's and not a
+// person's at a terminal; a ticket with no approval gets no line.
+func TestWriteReviewNotesSaysWhoApprovedTheBrief(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, provenance, want string }{
+		{"person", "person", "Brief approved by Dana at a terminal"},
+		{"agent", "agent", "Brief approved by an agent, as Dana, not by a person at a terminal"},
+	}
+	for _, c := range cases {
+		st := &store.Store{Root: t.TempDir()}
+		if err := os.MkdirAll(st.TicketDir("T-1"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.WriteApproval("T-1", store.Approval{By: "Dana", At: "2026-10-23T12:00:00Z", BriefSHA256: "abc", Provenance: c.provenance}); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeReviewNotes(st, "T-1", "review-notes.md", 1, nil, "", nil, nil, nil, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := readNotes(t, st, "T-1", "review-notes.md"); !strings.Contains(got, c.want+"\n") {
+			t.Errorf("%s: notes lack %q:\n%s", c.name, c.want, got)
+		}
+	}
+}

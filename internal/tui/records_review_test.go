@@ -129,3 +129,19 @@ func TestReviewScreenListsWhatTheRoundFoundBesideTheAsks(t *testing.T) {
 		t.Errorf("the ask lacks the reason and the why under it:\n%s", text)
 	}
 }
+
+// TestReviewScreenSaysACleanRoundRaisedNotesNotFixes: the screen reads the
+// counts the status gives, which are those jig routed the findings to, so a
+// clean round whose findings became notes raised notes and no fix.
+func TestReviewScreenSaysACleanRoundRaisedNotesNotFixes(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", reviewStatus([][]string{
+		{"1", "clean", "s-reviewer", "-", "-", "true", "0", "0", "3", "full", sha('0'), sha('c'), "4"},
+	}, nil), 0)
+	g.feed(jig2Mid()...).press("enter")
+	text := pageText(g)
+	if !strings.Contains(text, "raised 3 notes") {
+		t.Errorf("the screen does not say the round raised 3 notes:\n%s", text)
+	}
+}

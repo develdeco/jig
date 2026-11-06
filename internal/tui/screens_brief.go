@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // briefPage is the brief: the record of its approval, its sections with the
@@ -93,7 +94,7 @@ func (m *Model) approvalRecord(t *ticket, b *statusBrief) []string {
 	}
 	first := "approved " + when
 	if b.ApprovedBy != "" {
-		first += " by " + b.ApprovedBy
+		first += " by " + phase.Approver(b.ApprovedBy, b.Provenance)
 	}
 	how := ""
 	switch b.Provenance {

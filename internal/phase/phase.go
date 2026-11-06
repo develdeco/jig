@@ -860,8 +860,21 @@ func (d *digest) who() string {
 	if by == "" {
 		by = "someone"
 	}
+	if how == "agent" {
+		return Approver(by, how)
+	}
 	if how != "" {
 		return by + " (" + how + ")"
+	}
+	return by
+}
+
+// Approver is who an approval is credited to: the identity for a person, "an
+// agent, as <identity>" when an agent recorded it, so an agent's approval
+// never reads as a person's.
+func Approver(by, provenance string) string {
+	if provenance == "agent" {
+		return "an agent, as " + by
 	}
 	return by
 }

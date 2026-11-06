@@ -19,6 +19,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // update rewrites the golden files: go test ./internal/tui -update.
@@ -124,7 +125,7 @@ func statusJIG1Brief() string {
 			{"d", "queued", "0", "b+c", "-", "Ship the copy", "copy", "go test ./...", "-"},
 		}),
 		axi.Table("questions", []string{"id", "slice", "status"}, [][]string{{"q-001", "c", "open"}}),
-		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "Ada Lovelace"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "agent"}}),
+		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "an agent (as Ada Lovelace)"}, {"identity", "Ada Lovelace"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "agent"}}),
 		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{
 			{"Goal", "-"}, {"Greeting", "a"}, {"Farewell", "b"}, {"Tone", "c+d"},
 		}),
@@ -502,4 +503,19 @@ func statusJIG2Repos() string {
 		}),
 		axi.Help("JIG-2 is published: run `jig next` to see the tickets that are left"),
 	}, "\n") + "\n"
+}
+
+// TestBriefScreenWordsAnAgentsApprovalOnce: the status block carries the
+// approval already worded ("an agent (as <identity>)") beside the bare
+// identity; the TUI takes the identity and words it once, never
+// "an agent, as an agent (as ...)".
+func TestBriefScreenWordsAnAgentsApprovalOnce(t *testing.T) {
+	t.Parallel()
+	b := parseStatus(statusJIG1Brief()).Brief
+	if b == nil || b.ApprovedBy != "Ada Lovelace" {
+		t.Fatalf("the TUI took %+v, want the bare identity Ada Lovelace", b)
+	}
+	if got := phase.Approver(b.ApprovedBy, b.Provenance); got != "an agent, as Ada Lovelace" {
+		t.Errorf("approver = %q", got)
+	}
 }

@@ -390,3 +390,26 @@ func TestStatusPublishListsThePullRequestOfEachRepo(t *testing.T) {
 		t.Errorf("the web's row after its pull request was recorded = %q", table[2])
 	}
 }
+
+// TestStatusRoundsCountsByTheStatusJigRoutedTo: a clean round whose findings
+// the reviewer labeled fix and the risk floor routed to notes reads as three
+// notes and no fix; an asked finding counts an ask and a dismissed one none.
+func TestStatusRoundsCountsByTheStatusJigRoutedTo(t *testing.T) {
+	t.Parallel()
+	fx := newStoreOnlyFixture(t)
+	st := openStore(t, fx)
+	writeRound(t, fx.StoreDir, fx.Ticket, 2, roundFiles{
+		report: "round: 2\nverdict: clean\nreviewed_sha:\n  fixture-repo: " + sha40("4") + "\nindependent: true\nreviewer:\n  session: s-rev\n",
+		findings: "scope: full\nreviewed_paths:\n  - a.go\nfindings:\n" +
+			finding("r2-f1", "fix", "low", "a.go", 1, "One", "noted") +
+			finding("r2-f2", "fix", "low", "a.go", 2, "Two", "noted") +
+			finding("r2-f3", "fix", "low", "a.go", 3, "Three", "noted") +
+			finding("r2-f4", "note", "low", "a.go", 4, "Four", "asked") +
+			finding("r2-f5", "fix", "low", "a.go", 5, "Five", "dismissed") + "summary: round 2\n",
+	})
+
+	got := block(statusOf(t, fx, st), "rounds[")
+	if len(got) != 2 || !strings.HasPrefix(got[1], "  2,clean,s-rev,") || !strings.Contains(got[1], ",true,0,1,3,full,") {
+		t.Errorf("rounds block:\n%s\nwant round 2 clean with 0 fix, 1 ask, 3 note", strings.Join(got, "\n"))
+	}
+}

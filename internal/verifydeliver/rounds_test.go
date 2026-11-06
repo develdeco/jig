@@ -197,3 +197,27 @@ func TestReadRoundsTakesTheBaseTheRoundRecorded(t *testing.T) {
 		t.Errorf("round 3 base = %q, want the base it recorded, %s", got[2].Base, sha40("2"))
 	}
 }
+
+// TestReadRoundsCountsByTheStatusJigRoutedTo: a clean round whose three
+// findings the reviewer labeled fix and the risk floor routed to notes queued
+// no fix, so it counts three notes and no fix; an asked finding counts an ask
+// and a dismissed one counts in none.
+func TestReadRoundsCountsByTheStatusJigRoutedTo(t *testing.T) {
+	t.Parallel()
+	st, ticket, record := roundStore(t)
+	record(2, "round: 2\nverdict: clean\nreviewed_sha: {repo: "+sha40("3")+"}\nindependent: true\nreviewer: {session: s-rev}\n",
+		"scope: full\nreviewed_paths: [a.go]\nfindings:\n"+
+			"  - {id: r2-f1, file: a.go, line: 1, title: one, action: fix, risk: low, status: noted, routed_as: note}\n"+
+			"  - {id: r2-f2, file: a.go, line: 2, title: two, action: fix, risk: low, status: noted, routed_as: note}\n"+
+			"  - {id: r2-f3, file: a.go, line: 3, title: three, action: fix, risk: low, status: noted, routed_as: note}\n"+
+			"  - {id: r2-f4, file: a.go, line: 4, title: four, action: note, risk: low, status: asked}\n"+
+			"  - {id: r2-f5, file: a.go, line: 5, title: five, action: fix, risk: low, status: dismissed}\n")
+
+	got, err := ReadRounds(st, ticket)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ReadRounds = %+v, %v, want one round", got, err)
+	}
+	if r := got[0]; r.Fix != 0 || r.Ask != 1 || r.Note != 3 {
+		t.Errorf("round 2 counts = %d fix, %d ask, %d note, want 0, 1, 3", r.Fix, r.Ask, r.Note)
+	}
+}

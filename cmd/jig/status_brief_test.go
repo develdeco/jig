@@ -95,3 +95,34 @@ func TestRecordApprovalNamesTheSession(t *testing.T) {
 	}
 	t.Fatal("no approval line")
 }
+
+// TestStatusBriefNamesAnAgentsApprovalAsAnAgents: with provenance agent the
+// approved_by line reads "an agent (as <identity>)", never the bare identity
+// a person's approval carries.
+func TestStatusBriefNamesAnAgentsApprovalAsAnAgents(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := st.BriefSHA256(fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := testEnv(fx.Home).withClock(fixedClock(time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)))
+	a, _, err := recordApproval(e, st, fx.Ticket, sum, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := RenderStatus(st, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "  approved_by: an agent (as " + a.By + ")\n"; !strings.Contains(out, want) {
+		t.Errorf("status lacks %q:\n%s", want, out)
+	}
+	if want := "  identity: " + a.By + "\n"; !strings.Contains(out, want) {
+		t.Errorf("status lacks the bare identity %q:\n%s", want, out)
+	}
+}
