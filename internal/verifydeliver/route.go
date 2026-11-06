@@ -19,14 +19,20 @@ import (
 // each list sorted by risk, high first. Fixes is every finding routed open
 // (a new or recurring fix; a fix with no build target jig can derive never
 // appears here - see Asks); Asks is every finding routed asked; Notes is
-// included for display only, since a note is never triaged. Manifest is
+// what the round reported as a note and StandingNotes the noted findings of
+// earlier rounds it did not report again: a person may keep or dismiss either
+// with `jig triage` (TriageResult.Notes), and a note nobody decided stays a
+// note, so no default decides one. Manifest is
 // offered so a hook can list workspace ids and oracle names when keeping an
 // ask needs one it lacks.
 type TriageInput struct {
-	Fixes    []Finding
-	Asks     []Finding
-	Notes    []Finding
-	Manifest manifest.Manifest
+	Fixes []Finding
+	Asks  []Finding
+	Notes []Finding
+	// StandingNotes are the earlier rounds' noted findings this round's
+	// reviewer did not report again.
+	StandingNotes []Finding
+	Manifest      manifest.Manifest
 	// Repos are the manifests of a round in a project of several repos, by repo
 	// name: a finding's file begins with its repo's name, and its workspace and
 	// oracle are those of that repo's manifest. Manifest is empty then, and
@@ -62,11 +68,16 @@ type AskOutcome struct {
 // kept. FixHuman records whether a person at a terminal decided the fix
 // batch. Asks maps a TriageInput.Asks finding's id to its outcome; an id
 // absent from Asks is left undecided (an ask missing part of its build
-// target that no human resolved stays asked).
+// target that no human resolved stays asked). Notes maps the id of a
+// TriageInput note (Notes or StandingNotes) a person decided to its outcome,
+// the same shape as an ask's: kept, the note becomes a fix slice of this round
+// and an open finding; dismissed, it reads dismissed by a human; an id absent
+// stays a note.
 type TriageResult struct {
 	DismissedFixIDs map[string]bool
 	FixHuman        bool
 	Asks            map[string]AskOutcome
+	Notes           map[string]AskOutcome
 }
 
 // Triage is the human seam for a gate round's fix batch and ask findings:
@@ -164,8 +175,11 @@ func sortByRiskThenID(fs []Finding) {
 // decided outstanding ask to the returned list (so this round's
 // findings.yaml records the decision), and returns the fix slices to
 // append. An outstanding ask left undecided is not appended: it stays
-// exactly as cum already has it, offered again next round. Notes are left
-// exactly as ApplyRound reported them: a note is never triaged. Routing
+// exactly as cum already has it, offered again next round. The same holds
+// for outstanding's noted findings (cum's notes this round's reviewer did not
+// report again): a person's keep or dismissal of one is applied like an ask's
+// (TriageResult.Notes), and a note nobody decided is left exactly as
+// ApplyRound reported it or cum has it. Routing
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
 //
@@ -201,10 +215,20 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	// Outstanding asks are not in reported (idx has no entry for their id):
 	// they are offered to triage the same as this round's own asks, but
 	// only a decided one is folded back into the returned list below.
-	asks = append(asks, outstanding...)
+	// A noted finding among them is a standing note, offered to triage as a
+	// note, never as an ask.
+	var standingNotes []Finding
+	for _, f := range outstanding {
+		if f.Status == StatusNoted {
+			standingNotes = append(standingNotes, f)
+			continue
+		}
+		asks = append(asks, f)
+	}
 	sortByRiskThenID(fixes)
 	sortByRiskThenID(asks)
 	sortByRiskThenID(notes)
+	sortByRiskThenID(standingNotes)
 
 	// GATE_NO_ORACLE is checked before triage, not after: a manifest with
 	// zero oracles can never build a fix slice for anything, so asking a
@@ -221,7 +245,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		}
 	}
 
-	in := TriageInput{Fixes: fixes, Asks: asks, Notes: notes, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit}
+	in := TriageInput{Fixes: fixes, Asks: asks, Notes: notes, StandingNotes: standingNotes, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit}
 	if files.qualified {
 		in.Repos = make(map[string]manifest.Manifest, len(files.repos))
 		for _, r := range files.repos {
@@ -262,39 +286,40 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 		if isReported {
 			wf = reported[i]
 		}
-
-		askTriage := TriageAuto
-		if decision.Human {
-			askTriage = TriageHuman
+		wf, kept, applied := decideFinding(wf, decision, files)
+		if !applied {
+			continue
 		}
-		wf.Triage = askTriage
-		if !decision.Keep {
-			wf.Status = StatusDismissed
-		} else {
-			noWorkspace, noOracle := BuildTargetGaps(wf, files.manifestOf(wf.File))
-			oracleNames := files.oracles(wf.File)
-			ws := wf.Workspace
-			if noWorkspace {
-				ws = decision.Workspace
-			}
-			oracle, ok := resolveOracle(wf.Oracle, oracleNames)
-			if noOracle {
-				oracle, ok = resolveOracle(decision.Oracle, oracleNames)
-			}
-			if ws == "" || !ok {
-				// The hook kept an ask without resolving every missing part
-				// of its build target (a workspace, an oracle, or both);
-				// defensively leave this ask undecided rather than build a
-				// slice with no build target.
-				continue
-			}
-			wf.Status = StatusOpen
-			wf.Decision = decision.Decision
-			wf.Workspace = ws
-			wf.Oracle = oracle
+		if kept {
 			keptAsks = append(keptAsks, wf)
 		}
-
+		if isReported {
+			reported[i] = wf
+		} else {
+			decidedOutstanding = append(decidedOutstanding, wf)
+		}
+	}
+	// A note a person decided is applied the way a decided ask is: kept, it
+	// is an open finding with a fix slice of this round (counted in the fix
+	// budget, like any slice a round appends); dismissed, a dismissed one. A
+	// note nobody decided is left exactly as it is.
+	for _, f := range append(append([]Finding(nil), notes...), standingNotes...) {
+		decision, decided := result.Notes[f.ID]
+		if !decided {
+			continue
+		}
+		i, isReported := idx[f.ID]
+		wf := f
+		if isReported {
+			wf = reported[i]
+		}
+		wf, kept, applied := decideFinding(wf, decision, files)
+		if !applied {
+			continue
+		}
+		if kept {
+			keptAsks = append(keptAsks, wf)
+		}
 		if isReported {
 			reported[i] = wf
 		} else {
@@ -604,4 +629,44 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 
 	disambiguateFixSliceIDs(out, existingSlices)
 	return out, nil
+}
+
+// decideFinding applies a person's decision on an ask or a note to wf: a
+// dismissal makes it dismissed; a keep makes it open, carrying the decision
+// text and the build target (the workspace and oracle it lacked, from the
+// decision). applied is false when the keep leaves part of the build target
+// unresolved: jig never builds a slice with no build target, so the finding
+// stays as it was and is offered again. kept says the finding now waits for a
+// fix slice.
+func decideFinding(wf Finding, decision AskOutcome, files roundFiles) (out Finding, kept, applied bool) {
+	triage := TriageAuto
+	if decision.Human {
+		triage = TriageHuman
+	}
+	wf.Triage = triage
+	if !decision.Keep {
+		wf.Status = StatusDismissed
+		return wf, false, true
+	}
+	noWorkspace, noOracle := BuildTargetGaps(wf, files.manifestOf(wf.File))
+	oracleNames := files.oracles(wf.File)
+	ws := wf.Workspace
+	if noWorkspace {
+		ws = decision.Workspace
+	}
+	oracle, ok := resolveOracle(wf.Oracle, oracleNames)
+	if noOracle {
+		oracle, ok = resolveOracle(decision.Oracle, oracleNames)
+	}
+	if ws == "" || !ok {
+		// The hook kept a finding without resolving every missing part of
+		// its build target (a workspace, an oracle, or both); defensively
+		// leave it undecided rather than build a slice with no build target.
+		return wf, false, false
+	}
+	wf.Status = StatusOpen
+	wf.Decision = decision.Decision
+	wf.Workspace = ws
+	wf.Oracle = oracle
+	return wf, true, true
 }

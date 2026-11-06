@@ -539,6 +539,26 @@ func outstandingAsks(cum map[string]Finding, reported []Finding) []Finding {
 	return out
 }
 
+// outstandingNotes returns cum's noted findings that this round's reviewer did not report again (by id), sorted by risk then id: the notes a person may
+// still keep or dismiss with `jig triage`. routeRound offers them to triage
+// beside the round's own notes, so a note is decidable every round it stays a
+// note, not only when the reviewer reports it again.
+func outstandingNotes(cum map[string]Finding, reported []Finding) []Finding {
+	reportedIDs := make(map[string]bool, len(reported))
+	for _, f := range reported {
+		reportedIDs[f.ID] = true
+	}
+	var out []Finding
+	for id, f := range cum {
+		if f.Status != StatusNoted || reportedIDs[id] {
+			continue
+		}
+		out = append(out, f)
+	}
+	sortByRiskThenID(out)
+	return out
+}
+
 // foldFindings applies one round's findings.yaml content onto cum in
 // place: the latest occurrence of each id wins, and cleared
 // removes an id. It is the single operation both the historical fold
@@ -640,8 +660,8 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 // toOpenFindingList projects fs (cum's open/asked/noted findings, per
 // openAndNotedFindingsList) onto review.json's open shape. Building fs from
 // the cumulative fold, and calling this before every reviewer round, is
-// what keeps review.json's open list honest. An asked finding with a pending
-// decision in decisions (ReadTriageDecisions; nil for none) carries it: the
+// what keeps review.json's open list honest. An asked or noted finding with a
+// pending decision in decisions (ReadTriageDecisions; nil for none) carries it: the
 // row stays in the list, annotated, since only the round that applies the
 // decision moves the ask out of the open set.
 func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []OpenFinding {
@@ -651,7 +671,7 @@ func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []Open
 			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
 		}
-		if d, ok := decisions[f.ID]; ok && f.Status == StatusAsked && d.Decided() {
+		if d, ok := decisions[f.ID]; ok && (f.Status == StatusAsked || f.Status == StatusNoted) && d.Decided() {
 			row.Decision, row.DecidedBy, row.DecisionReason = d.Label(f), d.Provenance, d.Reason
 		}
 		out = append(out, row)
@@ -758,9 +778,18 @@ func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 // slices because one round's file is corrupt helps nobody. Skipping is not
 // hiding: the caller is handed the rounds it skipped and says so.
 func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable []int, err error) {
+	asks, _, unreadable, err = OutstandingFindings(st, ticket)
+	return asks, unreadable, err
+}
+
+// OutstandingFindings is OutstandingAsks and, beside the asks, the ticket's
+// cumulative noted findings, sorted the same way: what a person may decide
+// with `jig triage`. A note is no outstanding work; it is listed because a
+// person can still take it up.
+func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding, unreadable []int, err error) {
 	n, err := existingGateRounds(st, ticket)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
+		return nil, nil, nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
 	}
 	cum := map[string]Finding{}
 	for r := 1; r <= n; r++ {
@@ -776,7 +805,8 @@ func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable
 	}
 	asks = askedFindingsList(cum)
 	sortByRiskThenID(asks)
-	return asks, unreadable, nil
+	notes = outstandingNotes(cum, nil)
+	return asks, notes, unreadable, nil
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil

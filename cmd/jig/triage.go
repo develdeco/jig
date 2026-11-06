@@ -14,15 +14,15 @@ import (
 // The usage lines of `jig triage`'s flags: the help row and the FlagSet carry
 // the same text, which the help parity test compares.
 const (
-	triageReasonUsage    = "why, in a sentence: carried into the fix slice's goal when the ask is kept"
-	triageWorkspaceUsage = "the workspace to build the fix in, for a kept ask whose file lies in none"
-	triageOracleUsage    = "the oracle that proves the fix, for a kept ask the reviewer named none for"
+	triageReasonUsage    = "why, in a sentence: carried into the fix slice's goal when the finding is kept"
+	triageWorkspaceUsage = "the workspace to build the fix in, for a kept finding whose file lies in none"
+	triageOracleUsage    = "the oracle that proves the fix, for a kept finding the reviewer named none for"
 )
 
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"triage", "keep or dismiss an ask a gate round left for a person to decide", []flagSpec{
+		Spec: cmdSpec{"triage", "keep or dismiss an ask or a note a gate round left for a person to decide", []flagSpec{
 			{"reason", triageReasonUsage, false},
 			{"workspace", triageWorkspaceUsage, false},
 			{"oracle", triageOracleUsage, false},
@@ -119,9 +119,10 @@ func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why s
 
 // cmdTriage implements `jig triage [T] <finding-id> keep|dismiss [--reason R]
 // [--workspace W] [--oracle O]`: a person's decision on an ask a gate round
-// left undecided, journaled as a triage line. Nothing is prompted and no round
-// is opened: the next round applies the decision, turning a kept ask into a
-// fix slice and a dismissed one into a dismissed finding. Who decided is
+// left undecided, or on a note (a finding below the risk floor, or a reviewer's
+// own note) a person takes up, journaled as a triage line. Nothing is prompted
+// and no round is opened: the next round applies the decision, turning a kept
+// ask or note into a fix slice and a dismissed one into a dismissed finding. Who decided is
 // recorded: a person at a terminal, or an agent.
 func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "triage")
@@ -180,25 +181,34 @@ func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	asks, _, err := verifydeliver.OutstandingAsks(st, ticket)
+	asks, notes, _, err := verifydeliver.OutstandingFindings(st, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	var ids []string
+	var askIDs, noteIDs []string
 	found := false
 	for _, f := range asks {
-		ids = append(ids, f.ID)
+		askIDs = append(askIDs, f.ID)
+		found = found || f.ID == id
+	}
+	for _, f := range notes {
+		noteIDs = append(noteIDs, f.ID)
 		found = found || f.ID == id
 	}
 	if !found {
-		listed := "it has none"
-		if len(ids) > 0 {
-			listed = "its asks are " + strings.Join(ids, ", ")
+		listed := "it has no asks or notes"
+		switch {
+		case len(askIDs) > 0 && len(noteIDs) > 0:
+			listed = "its asks are " + strings.Join(askIDs, ", ") + " and its notes " + strings.Join(noteIDs, ", ")
+		case len(askIDs) > 0:
+			listed = "its asks are " + strings.Join(askIDs, ", ") + "; it has no notes"
+		case len(noteIDs) > 0:
+			listed = "it has no asks; its notes are " + strings.Join(noteIDs, ", ")
 		}
 		return renderErr(stdout, &axi.Error{
-			Msg:  fmt.Sprintf("%s is not an outstanding ask of %s (%s)", id, ticket, listed),
+			Msg:  fmt.Sprintf("%s is not an outstanding ask or a note of %s (%s)", id, ticket, listed),
 			Code: "TRIAGE_NOT_AN_ASK",
-			Help: []string{fmt.Sprintf("`jig status %s` lists the asks a person has to decide", ticket)},
+			Help: []string{fmt.Sprintf("`jig status %s` lists the asks a person has to decide and the notes they may take up", ticket)},
 		})
 	}
 

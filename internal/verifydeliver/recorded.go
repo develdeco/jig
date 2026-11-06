@@ -888,7 +888,8 @@ func (p Prepared) reposByName() map[string]PreparedRepo {
 // decided by what a person recorded with `jig triage` (a journal triage line
 // for its finding id, the last one standing, TriageDecisions), else, when the
 // round was opened with --yes, by DefaultTriage's rule, else left undecided
-// for a person. A decision recorded after the round that raised the ask applies
+// for a person. A note (a finding the round noted, or an earlier round's still
+// noted) is decided only by a decision recorded since the last round closed. A decision recorded after the round that raised the ask applies
 // to the next round, whose fold offers the ask again.
 //
 // The line is taken whatever round it was recorded before: a triage line is
@@ -911,6 +912,20 @@ func recordedTriage(d Deps, ticket string, yes bool) Triage {
 			if yes {
 				if out, ok := fallback.Asks[f.ID]; ok {
 					res.Asks[f.ID] = out
+				}
+			}
+		}
+		// A note is decided only by a pending decision of a person: a note
+		// is a record, so not even --yes keeps one, and a line an earlier round
+		// already applied is spent.
+		for _, f := range append(append([]Finding(nil), in.Notes...), in.StandingNotes...) {
+			if l, ok := decisions[f.ID]; ok && l.Pending && (l.Outcome == TriageKeep || l.Outcome == TriageDismiss) {
+				if res.Notes == nil {
+					res.Notes = map[string]AskOutcome{}
+				}
+				res.Notes[f.ID] = AskOutcome{
+					Keep: l.Outcome == TriageKeep, Decision: l.Reason,
+					Workspace: l.Workspace, Oracle: l.Oracle, Human: l.Human(),
 				}
 			}
 		}
