@@ -506,27 +506,49 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 	return found
 }
 
-// defaultedDecisions counts the decisions of brief's Decision section tagged
-// defaulted: the lines there that begin a bullet (a decision) and carry the
-// word, as the intake skill writes the tag. A continuation line or another
-// section's prose is not a decision.
+// defaultedDecisions counts the decisions of brief tagged defaulted, as the
+// intake skill and the store's briefs write the tag: "defaulted", then a date
+// or a closing parenthesis, in a decision wherever the brief puts it (a bullet,
+// a numbered item or a paragraph, under any heading, bold or not, the tag on
+// the first line or a wrapped one). A block counts once however many tags it
+// holds. Prose that explains the tag (it is quoted or backticked) is not one.
 func defaultedDecisions(brief []byte) int {
 	n := 0
-	inDecision := false
-	for _, line := range strings.Split(string(brief), "\n") {
-		if strings.HasPrefix(line, "## ") {
-			inDecision = strings.TrimSpace(strings.TrimPrefix(line, "## ")) == "Decision"
-			continue
-		}
-		if inDecision && strings.HasPrefix(line, "- ") && defaultedTag.MatchString(line) {
+	var block []string
+	inFence := false
+	flush := func() {
+		if defaultedTag.MatchString(strings.Join(block, " ")) {
 			n++
 		}
+		block = block[:0]
 	}
+	for _, line := range strings.Split(string(brief), "\n") {
+		trim := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trim, "```"):
+			flush()
+			inFence = !inFence
+		case inFence:
+		case trim == "" || strings.HasPrefix(line, "#"):
+			flush()
+		case listItem.MatchString(line):
+			flush()
+			block = append(block, trim)
+		default:
+			block = append(block, trim)
+		}
+	}
+	flush()
 	return n
 }
 
-// defaultedTag matches the word defaulted as a tag, not as part of a longer word.
-var defaultedTag = regexp.MustCompile(`\bdefaulted\b`)
+// listItem matches the line that starts a bullet or a numbered item.
+var listItem = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s`)
+
+// defaultedTag matches the tag: defaulted, then a date or a closing
+// parenthesis (or "(defaulted;" and "(defaulted,"), not preceded by a quote or
+// backtick (prose about the tag).
+var defaultedTag = regexp.MustCompile(`\(defaulted[;,]|(?:^|[^"` + "`" + `A-Za-z0-9])defaulted(?:\s+\d{4}-\d{2}-\d{2}|\s*\))`)
 
 // checkNext is the help --check prints: show the person the brief and ask
 // about its decisions, then validate. defaulted is the number of decisions

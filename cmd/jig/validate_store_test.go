@@ -502,15 +502,47 @@ func TestValidateCheckWithNoDefaultedTagNamesNoCount(t *testing.T) {
 	}
 }
 
-// TestDefaultedDecisions counts the decisions tagged defaulted, in the
-// Decision section alone.
+// TestDefaultedDecisions counts the decisions tagged defaulted in every form
+// the store's briefs write the tag, and none of the prose that explains it.
 func TestDefaultedDecisions(t *testing.T) {
 	t.Parallel()
-	brief := "# T-1: x\n\n## Context\n\n- a fact (defaulted in prose)\n\n## Decision\n\n- **A** (defaulted 2026-11-06): a.\n  more defaulted words on a continuation line.\n- **B** (user-confirmed 2026-11-06): b.\n- **C** (defaulted 2026-11-06): c.\n\n## Seams\n\n- defaulted\n"
-	if got := defaultedDecisions([]byte(brief)); got != 2 {
-		t.Errorf("defaultedDecisions = %d, want 2", got)
+	cases := []struct {
+		name  string
+		brief string
+		want  int
+	}{
+		{"bold bullets under Decision", "# T-1: x\n\n## Decision\n\n- **A** (defaulted 2026-11-06): a.\n- **B** (user-confirmed 2026-11-06): b.\n- **C** (defaulted 2026-11-06): c.\n", 2},
+		{"numbered list, tag on a wrapped line", "# T-1: x\n\n## Decisions\n\n1. The title is the name,\n   cut at a word.\n   (defaulted 2026-11-03)\n2. Another.\n   (user-confirmed)\n3. A third. (defaulted 2026-11-03\n   (owner: proceed with the plan))\n", 2},
+		{"decisions under Context and topic sections", "# T-1: x\n\n## Context\n\n- Errors carry a code. (defaulted)\n\n## Wire format\n\n- A key. (defaulted 2026-11-02 (owner: proceed with the plan))\n\nA paragraph decision. (defaulted)\n", 3},
+		{"italic tag and a bare date", "# T-1: x\n\n## Decision\n\n- It stays. _defaulted 2026-11-03 (owner: take them)_\n- It moves. Answer, defaulted 2026-11-03 (owner: x).\n", 2},
+		{"tag among other words in the parenthesis", "# T-1: x\n\n## Decision\n\n- One. (defaulted; the form defaulted 2026-10-09)\n- Two. (defaulted, as the bridge)\n- Three. (user-confirmed 2026-11-06; wording defaulted)\n", 3},
+		{"prose that explains the tag", "# T-1: x\n\nEvery open question is marked \"defaulted 2026-11-03\".\n\nThe intake skill tags every decision `user-confirmed` or `defaulted`.\n\n- A fact about defaulted words, tagged defaulted above.\n\n```\n- fenced (defaulted)\n```\n", 0},
+		{"no decisions", "# T-1: x\n\n## Goal\n\nx\n", 0},
 	}
-	if got := defaultedDecisions([]byte("# T-1: x\n\n## Goal\n\nx\n")); got != 0 {
-		t.Errorf("defaultedDecisions of a brief with no Decision section = %d, want 0", got)
+	for _, c := range cases {
+		if got := defaultedDecisions([]byte(c.brief)); got != c.want {
+			t.Errorf("%s: defaultedDecisions = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCheckNextDefaultedCount words the count of defaulted decisions: none
+// names none; one and many each say how many.
+func TestCheckNextDefaultedCount(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		n    int
+		want string
+	}{{0, ""}, {1, "(1 is tagged defaulted)"}, {3, "(3 are tagged defaulted)"}} {
+		ask := checkNext("T-1", c.n, true)[0]
+		if c.want == "" {
+			if strings.Contains(ask, "defaulted") {
+				t.Errorf("%d defaulted: %q names a count", c.n, ask)
+			}
+			continue
+		}
+		if !strings.Contains(ask, c.want) {
+			t.Errorf("%d defaulted: %q lacks %q", c.n, ask, c.want)
+		}
 	}
 }
