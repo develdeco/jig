@@ -4120,3 +4120,9 @@ Rejected: a column per label and per status, since the table answers what the ro
 `approval.yaml` records `by` (the git identity the command ran as) and `provenance`, and every surface showed the identity first, so an approval an agent recorded read as a person's. Chosen: with `provenance: agent`, `jig status` prints `approved_by: an agent (as <identity>)`, the TUI writes "approved <when> by an agent, as <identity>", and `phase.Approver` (used by `who()`) gives "an agent, as <identity>"; a person's approval reads as before. The review notes carry one line before the reviewers, "Brief approved by <identity> at a terminal" or "Brief approved by an agent, as <identity>, not by a person at a terminal", and none for a ticket with no approval. `approval.yaml` is unchanged.
 
 Rejected: renaming `by` in `approval.yaml`, a record format change for a wording problem. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
+
+## Each record names the jig build that wrote it (STORE-9)
+
+A fix to jig itself is judged by records written by builds that may not have it, and nothing on a journal line or a round report said which build wrote it. Chosen (defaulted 2026-11-06): a build stamp (version, short vcs revision, `-dirty` when the build had uncommitted changes, `unknown` with no build info), computed once per process in `internal/journal` and shared with `jig version`, written as a `jig` field by `journal.Append` on every line jig writes and on each round's `report.yaml`; `jig status` lists the builds with the first and last line each wrote when a ticket names more than one.
+
+Rejected: refusing a command from a build other than the ticket's first (jig records and shows, never refuses, ADR 0046's rule; a fix to jig itself must be run by the build that has it).
