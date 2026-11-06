@@ -431,7 +431,14 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // a file gone before this round's base, or never in a full-scope diff
 // after a rebase, clears a finding on it just the same). An asked finding
 // never clears here: only a person keeping or dismissing it moves it out
-// of the open set. Called only after
+// of the open set. A noted finding clears too when the risk floor routed it
+// there (routed_as: note, the reviewer asked for a fix and the floor made it a
+// note), this round's scope diff changed its file (changedPaths, named as
+// reviewedPaths is), the reviewer read the file and did not report the finding
+// again: the change touched what it named and the reviewer, looking at it, no
+// longer sees it. A reviewer's own note (no routed_as) asks nothing to change
+// and never clears, and a round that never touched the file proves nothing.
+// Called only after
 // routing and triage (route.go) have set reported's final status: the
 // blocking set - a file this round ends up routing a finding into, open or
 // asked - must reflect what a human actually kept, not merely what the
@@ -441,7 +448,7 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // this with reported straight from ApplyRound, no routing or triage in
 // between, on purpose - that package never runs the triage hook at all -
 // so that caller is not a bug to fix either.
-func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
+func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths, changedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
 	reviewedSet := map[string]bool{}
 	for _, p := range reviewedPaths {
 		norm, err := normalizeRepoRelPath(p)
@@ -449,6 +456,15 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 			continue
 		}
 		reviewedSet[norm] = true
+	}
+
+	changedSet := map[string]bool{}
+	for _, p := range changedPaths {
+		norm, err := normalizeRepoRelPath(p)
+		if err != nil {
+			continue
+		}
+		changedSet[norm] = true
 	}
 
 	reportedIDs := map[string]bool{}
@@ -469,6 +485,12 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 		// made. An ask leaves the outstanding set exactly two ways - a
 		// human keeps it, or a human dismisses it - and until then the
 		// round is not clean and `jig gate` exits 2.
+		if f.Status == StatusNoted && f.RoutedAs == ActionNote {
+			if !reportedIDs[id] && !blocking[f.File] && changedSet[f.File] && reviewedSet[f.File] {
+				cleared = append(cleared, id)
+			}
+			continue
+		}
 		if f.Status != StatusOpen {
 			continue
 		}
@@ -509,6 +531,26 @@ func outstandingAsks(cum map[string]Finding, reported []Finding) []Finding {
 	var out []Finding
 	for id, f := range cum {
 		if f.Status != StatusAsked || reportedIDs[id] {
+			continue
+		}
+		out = append(out, f)
+	}
+	sortByRiskThenID(out)
+	return out
+}
+
+// outstandingNotes returns cum's noted findings that this round's reviewer did not report again (by id), sorted by risk then id: the notes a person may
+// still keep or dismiss with `jig triage`. routeRound offers them to triage
+// beside the round's own notes, so a note is decidable every round it stays a
+// note, not only when the reviewer reports it again.
+func outstandingNotes(cum map[string]Finding, reported []Finding) []Finding {
+	reportedIDs := make(map[string]bool, len(reported))
+	for _, f := range reported {
+		reportedIDs[f.ID] = true
+	}
+	var out []Finding
+	for id, f := range cum {
+		if f.Status != StatusNoted || reportedIDs[id] {
 			continue
 		}
 		out = append(out, f)
@@ -618,8 +660,8 @@ func askedFindingsList(cum map[string]Finding) []Finding {
 // toOpenFindingList projects fs (cum's open/asked/noted findings, per
 // openAndNotedFindingsList) onto review.json's open shape. Building fs from
 // the cumulative fold, and calling this before every reviewer round, is
-// what keeps review.json's open list honest. An asked finding with a pending
-// decision in decisions (ReadTriageDecisions; nil for none) carries it: the
+// what keeps review.json's open list honest. An asked or noted finding with a
+// pending decision in decisions (ReadTriageDecisions; nil for none) carries it: the
 // row stays in the list, annotated, since only the round that applies the
 // decision moves the ask out of the open set.
 func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []OpenFinding {
@@ -629,7 +671,7 @@ func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []Open
 			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
 		}
-		if d, ok := decisions[f.ID]; ok && f.Status == StatusAsked && d.Decided() {
+		if d, ok := decisions[f.ID]; ok && (f.Status == StatusAsked || f.Status == StatusNoted) && d.Decided() {
 			row.Decision, row.DecidedBy, row.DecisionReason = d.Label(f), d.Provenance, d.Reason
 		}
 		out = append(out, row)
@@ -736,9 +778,18 @@ func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 // slices because one round's file is corrupt helps nobody. Skipping is not
 // hiding: the caller is handed the rounds it skipped and says so.
 func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable []int, err error) {
+	asks, _, unreadable, err = OutstandingFindings(st, ticket)
+	return asks, unreadable, err
+}
+
+// OutstandingFindings is OutstandingAsks and, beside the asks, the ticket's
+// cumulative noted findings, sorted the same way: what a person may decide
+// with `jig triage`. A note is no outstanding work; it is listed because a
+// person can still take it up.
+func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding, unreadable []int, err error) {
 	n, err := existingGateRounds(st, ticket)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
+		return nil, nil, nil, fmt.Errorf("verifydeliver: findings: count rounds: %w", err)
 	}
 	cum := map[string]Finding{}
 	for r := 1; r <= n; r++ {
@@ -754,7 +805,8 @@ func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable
 	}
 	asks = askedFindingsList(cum)
 	sortByRiskThenID(asks)
-	return asks, unreadable, nil
+	notes = outstandingNotes(cum, nil)
+	return asks, notes, unreadable, nil
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil

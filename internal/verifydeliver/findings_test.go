@@ -591,7 +591,7 @@ func TestClearingAfterTriageClearsUnreportedFindingWhenFileReviewed(t *testing.T
 	}
 	// a.go was reviewed this round and no finding was reported in it: rule
 	// 3 clears r1-f1.
-	cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, nil, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -622,7 +622,7 @@ func TestClearingAfterTriageKeepsAnUndecidedAsk(t *testing.T) {
 			known := map[string]Finding{
 				"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusAsked},
 			}
-			cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, tc.exists)
+			cleared, err := ClearingAfterTriage(known, nil, []string{"a.go"}, nil, tc.exists)
 			if err != nil {
 				t.Fatalf("ClearingAfterTriage: %v", err)
 			}
@@ -639,7 +639,7 @@ func TestClearingAfterTriageClearsFindingWhoseFileIsGoneAtHead(t *testing.T) {
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
-	cleared, err := ClearingAfterTriage(known, nil, nil, existsExcept("a.go"))
+	cleared, err := ClearingAfterTriage(known, nil, nil, nil, existsExcept("a.go"))
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestClearingAfterTriageStaysOpenWhenNotReviewed(t *testing.T) {
 	}
 	// a.go is neither reviewed nor gone at head this round, and not
 	// reported again: it cannot clear (rule 3, "otherwise it stays open").
-	cleared, err := ClearingAfterTriage(known, nil, []string{"other.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, nil, []string{"other.go"}, nil, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestClearingAfterTriageDismissedRepeatDoesNotBlockOpenFinding(t *testing.T)
 	// Only the dismissed finding was reported this round (r1-f2, now still
 	// dismissed); r1-f1 was not reported again at all.
 	reported := []Finding{{ID: "r1-f2", File: "a.go", Status: StatusDismissed}}
-	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, nil, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -698,7 +698,7 @@ func TestClearingAfterTriageRoutedFindingBlocksClearing(t *testing.T) {
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen},
 	}
 	reported := []Finding{{ID: "r2-f1", File: "a.go", Status: StatusOpen}}
-	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, nil, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -720,7 +720,7 @@ func TestClearingAfterTriageDismissedAtTriageDoesNotBlock(t *testing.T) {
 	// r2-f1 was reported open this round, but triage (route.go) already
 	// dismissed it by the time ClearingAfterTriage runs.
 	reported := []Finding{{ID: "r2-f1", File: "a.go", Status: StatusDismissed}}
-	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, reported, []string{"a.go"}, nil, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}

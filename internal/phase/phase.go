@@ -279,8 +279,12 @@ type Facts struct {
 	// Rounds are the closed gate rounds the store records. They are the word on
 	// a round's verdict where the journal's gate-round and gate-clean lines are
 	// missing or disagree: publish reads the store's, so the advice does.
-	Rounds   []Round
-	Asks     []Ask
+	Rounds []Round
+	Asks   []Ask
+	// Notes are the noted findings a person decided (kept or dismissed) that
+	// no round has applied yet: they wait for the next round the way a decided
+	// ask does, so a clean round does not finish the review while any waits.
+	Notes    []Ask
 	Blockers []Blocker
 	// Open is the round open now, nil when none is. The journal's gate-open
 	// line is not enough: a gate that failed on its oracles wrote it and
@@ -500,6 +504,7 @@ type digest struct {
 	closedAt   map[int]int
 	approval   int
 	asks       []Ask
+	notes      []Ask
 	slices     []sliceView
 	pub        publishView
 }
@@ -696,17 +701,27 @@ func (d *digest) readRounds() {
 // last round closed is its decision, and an older one is spent.
 func (d *digest) readAsks() {
 	for _, a := range d.f.Asks {
-		if a.Decision == "" {
-			for i := len(d.lines) - 1; i > d.lastClosed; i-- {
-				l := d.lines[i]
-				if l.Event == journal.EventTriage && l.Ref == a.ID && (l.Outcome == "keep" || l.Outcome == "dismiss") {
-					a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, true
-					break
-				}
+		d.asks = append(d.asks, d.decisionOf(a))
+	}
+	for _, a := range d.f.Notes {
+		if a = d.decisionOf(a); a.Decision != "" {
+			d.notes = append(d.notes, a)
+		}
+	}
+}
+
+// decisionOf is a with its pending decision laid over it.
+func (d *digest) decisionOf(a Ask) Ask {
+	if a.Decision == "" {
+		for i := len(d.lines) - 1; i > d.lastClosed; i-- {
+			l := d.lines[i]
+			if l.Event == journal.EventTriage && l.Ref == a.ID && (l.Outcome == "keep" || l.Outcome == "dismiss") {
+				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, true
+				break
 			}
 		}
-		d.asks = append(d.asks, a)
 	}
+	return a
 }
 
 // readSlices lays the journal over each slice: whether a worker is verifying
@@ -1120,7 +1135,10 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		p.Subs = append(p.Subs, Sub{Key: "fixes", Label: "fixes", State: SubActive,
 			Detail: fmt.Sprintf("%d of %d green", fixesTotal-fixesOpen, fixesTotal)})
 	}
-	clean := hasRound && last.Clean && !d.builtSince && open == nil
+	if len(d.notes) > 0 {
+		p.Subs = append(p.Subs, Sub{Key: "notes", Label: "notes", State: SubWaiting, Detail: fmt.Sprintf("%d decided, applied at the next round", len(d.notes))})
+	}
+	clean := hasRound && last.Clean && !d.builtSince && open == nil && len(d.notes) == 0
 	if open == nil && !clean {
 		next := last.N + 1
 		sub := Sub{Key: fmt.Sprintf("round:%d", next), Label: fmt.Sprintf("round %d", next), State: SubPending}
@@ -1142,6 +1160,8 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		p.Text = "after the build"
 	case !hasRound:
 		p.Text = "ready for a fresh session to review the change"
+	case last.Clean && len(d.notes) > 0:
+		p.Text = fmt.Sprintf("round %d was clean · %s decided, round %d applies them", last.N, count(len(d.notes), "note"), last.N+1)
 	case last.Clean && d.builtSince:
 		p.Text = fmt.Sprintf("round %d was clean, but the build changed since: review again", last.N)
 	case last.Clean:
