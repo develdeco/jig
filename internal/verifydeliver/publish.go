@@ -15,6 +15,7 @@ package verifydeliver
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,6 +71,10 @@ type PublishReport struct {
 	// reports why, rather than a silent, unexplained gap where its row would
 	// otherwise be.
 	PRNote map[string]string
+	// ReviewNotes is repo -> what publish did with the repo's review notes
+	// once its pull request existed: posted them, found them already posted,
+	// or did not post them.
+	ReviewNotes map[string]ReviewNotesReport
 	// Picks is what publish did with the build's recordings: the zero value
 	// when the build recorded nothing that could be offered.
 	Picks PicksReport
@@ -78,6 +83,27 @@ type PublishReport struct {
 	// publish narrowed with --repo left alone. The ticket is published when
 	// there are none.
 	Pending []string
+}
+
+// What a publish did with a pull request's review notes (ReviewNotesReport.Status).
+const (
+	ReviewNotesPosted        = "posted"
+	ReviewNotesAlreadyPosted = "already posted"
+	ReviewNotesNotPosted     = "not posted"
+)
+
+// ReviewNotesReport is what publish did with one pull request's review notes:
+// the comment that carries them.
+type ReviewNotesReport struct {
+	// Status is ReviewNotesPosted, ReviewNotesAlreadyPosted or
+	// ReviewNotesNotPosted.
+	Status string
+	// File is the notes file in the store, which a person posts by hand when
+	// the status is not posted.
+	File string
+	// Reason is why they were not posted: the repo has no pull-request host,
+	// or the host's error.
+	Reason string
 }
 
 // publishTarget is what every form of publish settles before it does
@@ -669,6 +695,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	report = PublishReport{
 		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, PRURL: map[string]string{},
 		PRUpdated: map[string]bool{}, PRRetargeted: map[string]string{}, PRNote: map[string]string{},
+		ReviewNotes: map[string]ReviewNotesReport{},
 	}
 	for _, sh := range ships {
 		pt := sh.pt
@@ -691,7 +718,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 		}
-		postPublishChecks(d, sh.host, ticket, prURL, sh.pub, fn.warn)
+		report.ReviewNotes[pt.repoName] = postPublishChecks(d, sh.host, ticket, prURL, pt.lineRepo(), sh.pub, fn.warn)
 
 		known[pt.repoName] = prURL
 		report.Head[pt.repoName] = sh.head
@@ -1045,21 +1072,56 @@ func openOrUpdatePR(d Deps, host repohost.Host, t *publishTarget, r publication,
 
 // postPublishChecks does what follows a pull request that now exists: reads
 // its body back to check the media references were rewritten, and posts the
-// review notes as its first comment. Both are soft: a failure is a warning,
-// and the pull request stands.
-func postPublishChecks(d Deps, host repohost.Host, ticket, prURL string, r publication, warn func(format string, args ...any)) {
-	if prURL == "" || host == nil {
-		return
+// review notes as a comment (postReviewNotes). Both are soft: a failure is a
+// warning, and the pull request stands.
+func postPublishChecks(d Deps, host repohost.Host, ticket, prURL, repo string, r publication, warn func(format string, args ...any)) ReviewNotesReport {
+	if prURL != "" && host != nil {
+		checkMediaReferences(d, host, ticket, prURL, r, warn)
 	}
-	checkMediaReferences(d, host, ticket, prURL, r, warn)
+	return postReviewNotes(d, host, ticket, prURL, repo, r.notesName, warn)
+}
 
-	// Post the review notes as a comment on the pull request. A failed post is
-	// a soft failure, not a publish failure: the pull request stands, and the
-	// file is kept in the store for a manual post.
-	reviewNotesPath := filepath.Join(d.Store.TicketDir(ticket), "pr", r.notesName)
-	if err := host.CommentPR(prURL, reviewNotesPath); err != nil {
-		warn("jig: post %s as a comment on %s: %v\n", reviewNotesPath, prURL, err)
+// postReviewNotes posts the repo's review notes (pr/<notesName> in the
+// ticket's store directory) as a comment on the pull request at prURL, and
+// journals a review-notes line with the pull request's url and the notes'
+// sha256 in its summary. Notes whose sha256 a review-notes line for the same
+// url already has are not posted again: a re-publish of the same head, or a
+// second --pr, adds no duplicate, while notes that changed post anew. A failed
+// post is a soft failure, not a publish failure: a warning, the pull request
+// stands, and the report names the file, kept in the store for a manual post.
+func postReviewNotes(d Deps, host repohost.Host, ticket, prURL, repo, notesName string, warn func(format string, args ...any)) ReviewNotesReport {
+	path := filepath.Join(d.Store.TicketDir(ticket), "pr", notesName)
+	notPosted := func(reason string) ReviewNotesReport {
+		return ReviewNotesReport{Status: ReviewNotesNotPosted, File: path, Reason: reason}
 	}
+	if prURL == "" || host == nil {
+		return notPosted("no pull-request host")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		warn("jig: read %s to post it as a comment on %s: %v\n", path, prURL, err)
+		return notPosted(err.Error())
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256(data))
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		warn("jig: read the journal of %s to see whether %s was posted on %s: %v\n", ticket, path, prURL, err)
+		return notPosted(err.Error())
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventReviewNotes && l.URL == prURL && l.Summary == sum {
+			return ReviewNotesReport{Status: ReviewNotesAlreadyPosted, File: path}
+		}
+	}
+	if err := host.CommentPR(prURL, path); err != nil {
+		warn("jig: post %s as a comment on %s: %v\n", path, prURL, err)
+		return notPosted(err.Error())
+	}
+	line := journal.Line{Event: journal.EventReviewNotes, URL: prURL, Summary: sum, Repo: repo}
+	if err := journal.Append(d.Store, ticket, line); err != nil {
+		warn("jig: journal the review notes posted on %s: %v\n", prURL, err)
+	}
+	return ReviewNotesReport{Status: ReviewNotesPosted, File: path}
 }
 
 // checkMediaReferences reads the body of the pull request at prURL back and
@@ -1308,6 +1370,9 @@ type RecordReport struct {
 	// recorded, in the project's order. The ticket is published once there
 	// are none.
 	Pending []string
+	// ReviewNotes is what recording did with the repo's review notes: posted
+	// on the pull request, already there, or not posted.
+	ReviewNotes ReviewNotesReport
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
@@ -1318,8 +1383,10 @@ type RecordReport struct {
 // takes one pull request for each repo, and says which with o.Repo; the last
 // to be recorded finishes the publish, which writes what a publish leaves in
 // the store (changelogs, ledger entry, evidence) and journals publish-done.
-// It pushes the store, changes no lease and no branch and pushes nothing of the
-// repo.
+// Once the pull request checks out it posts the repo's review notes on it
+// (postReviewNotes): a failed post is a warning, and the pull request stays
+// recorded. It pushes the store, changes no lease and no branch and pushes
+// nothing of the repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket
 	if warn == nil {
@@ -1416,6 +1483,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo()}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
+	notes := postReviewNotes(d, host, ticket, prURL, pt.lineRepo(), pt.notesName(), warn)
 	if len(pending) == 0 {
 		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
 			return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
@@ -1424,7 +1492,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes}, nil
 }
 
 // RepoHead is the head a repo's pull request ships.

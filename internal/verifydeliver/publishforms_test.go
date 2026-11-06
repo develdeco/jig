@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -216,6 +217,131 @@ func TestPublishRecordPRPostsTheReviewNotes(t *testing.T) {
 		t.Fatalf("--pr posted %d comment(s), want 1: the review notes", len(comments))
 	}
 	wantReviewNotesBodyFile(t, comments[0])
+}
+
+// reviewNotesLines are the journal's review-notes lines of ticket.
+func reviewNotesLines(t *testing.T, d Deps, ticket string) []journal.Line {
+	t.Helper()
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []journal.Line
+	for _, l := range lines {
+		if l.Event == journal.EventReviewNotes {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestPublishRecordPRPostsReviewNotesOncePerContent: a posted comment is
+// journaled as a review-notes line with the pull request's url and the notes'
+// sha256, and a second --pr with the same notes posts nothing, while notes
+// that changed post again.
+func TestPublishRecordPRPostsReviewNotesOncePerContent(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	notesFile := filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "review-notes.md")
+	notes, err := os.ReadFile(notesFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.ReviewNotes.Status != ReviewNotesPosted || report.ReviewNotes.File != notesFile {
+		t.Fatalf("report.ReviewNotes = %+v, want posted from %s", report.ReviewNotes, notesFile)
+	}
+	posted := reviewNotesLines(t, d, fx.Ticket)
+	if len(posted) != 1 || posted[0].URL != prURL || posted[0].Summary != fmt.Sprintf("%x", sha256.Sum256(notes)) {
+		t.Fatalf("review-notes lines = %+v, want one for %s carrying the notes' sha256", posted, prURL)
+	}
+
+	report, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR again: %v", err)
+	}
+	if report.ReviewNotes.Status != ReviewNotesAlreadyPosted || len(reviewNotesCommentCalls(loggedGh(t, logFile))) != 1 {
+		t.Fatalf("second --pr: %+v, %d comment(s), want already posted and still one comment", report.ReviewNotes, len(reviewNotesCommentCalls(loggedGh(t, logFile))))
+	}
+
+	if err := os.WriteFile(notesFile, append(notes, []byte("\nA new round.\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR with changed notes: %v", err)
+	}
+	if report.ReviewNotes.Status != ReviewNotesPosted || len(reviewNotesCommentCalls(loggedGh(t, logFile))) != 2 || len(reviewNotesLines(t, d, fx.Ticket)) != 2 {
+		t.Fatalf("changed notes: %+v, %d comment(s), want posted again as a second comment", report.ReviewNotes, len(reviewNotesCommentCalls(loggedGh(t, logFile))))
+	}
+}
+
+// TestPublishRecordPRRecordsWhenTheReviewNotesCannotBePosted: a host that
+// refuses the comment makes a warning and a report that names the file to
+// post by hand; the pull request is recorded and nothing says the notes were
+// posted.
+func TestPublishRecordPRRecordsWhenTheReviewNotesCannotBePosted(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "pr comment")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if !report.Verified || report.ReviewNotes.Status != ReviewNotesNotPosted || !strings.Contains(report.ReviewNotes.Reason, "pr comment") || report.ReviewNotes.File == "" {
+		t.Fatalf("report = %+v, want a recorded pull request and review notes not posted for the host's error", report)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], report.ReviewNotes.File) {
+		t.Errorf("warnings = %q, want one naming the notes file", warnings)
+	}
+	lines, _ := journal.Read(d.Store, fx.Ticket)
+	if !hasEvent(lines, journal.EventPr) || !hasEvent(lines, journal.EventPublishDone) || len(reviewNotesLines(t, d, fx.Ticket)) != 0 {
+		t.Errorf("journal = %+v, want the pr and publish-done lines and no review-notes line", lines)
+	}
+}
+
+// TestPublishOfAnOpenPullRequestPostsTheSameReviewNotesOnce: a bare publish
+// that updates the pull request again for the same head posts the review notes
+// once, not on every run.
+func TestPublishOfAnOpenPullRequestPostsTheSameReviewNotesOnce(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	logFile, _ := useGithubHost(t, &d, openPullOf(t, ticketBranch(fx.Ticket)), "")
+	d.GuardedPush = func(string, string, string, bool) error { return nil }
+	for i := 0; i < 2; i++ {
+		report, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
+		if err != nil {
+			t.Fatalf("Publish %d: %v", i+1, err)
+		}
+		want := ReviewNotesPosted
+		if i == 1 {
+			want = ReviewNotesAlreadyPosted
+		}
+		if got := report.ReviewNotes["fixture-repo"].Status; got != want {
+			t.Errorf("publish %d: review notes %q, want %q", i+1, got, want)
+		}
+	}
+	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
+		t.Errorf("two publishes of the same head posted %d comment(s), want 1", n)
+	}
 }
 
 // TestPublishRecordPRThroughMerges: a pull request whose head is past the
