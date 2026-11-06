@@ -153,7 +153,7 @@ func parseStatus(out string) *statusInfo {
 		info.Stalled = append(info.Stalled, statusStalled{Slice: r["slice"], Reason: r["reason"], Summary: dash(r["summary"])})
 	}
 	if kv, ok := doc.KV["brief"]; ok {
-		b := &statusBrief{Approval: kv["approval"], ApprovedBy: kv["approved_by"], ApprovedAt: kv["approved_at"], Provenance: kv["provenance"]}
+		b := &statusBrief{Approval: kv["approval"], ApprovedBy: firstOf(kv["identity"], kv["approved_by"]), ApprovedAt: kv["approved_at"], Provenance: kv["provenance"]}
 		for _, r := range doc.Tables["brief_sections"].Maps() {
 			var cited []string
 			if c := dash(r["slices"]); c != "" {

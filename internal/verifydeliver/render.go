@@ -1110,11 +1110,20 @@ func reviewNotesFile(repo string, several bool) string {
 // round for whoever merges to weigh, not a condition publish checks (ADR
 // 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
 // collectFindingsWithOutcomes already makes over every round's
-// findings.yaml; this function reads nothing on its own.
+// findings.yaml; the one thing this function reads itself is the brief's
+// approval, for the line on who approved it.
 func writeReviewNotes(st *store.Store, ticket, name string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
+
+	line, err := briefApprovalLine(st, ticket)
+	if err != nil {
+		return err
+	}
+	if line != "" {
+		b.WriteString(line + "\n\n")
+	}
 
 	if lines := reviewerLines(rounds); len(lines) > 0 {
 		b.WriteString("## Reviewers\n\n" + strings.Join(lines, "\n") + "\n\n")
@@ -1394,4 +1403,18 @@ func rewriteUnrewrittenReferences(body string, unrewritten []string) (patched st
 		patched = strings.TrimRight(patched, "\r\n") + eol
 	}
 	return patched, changed, stillUnrewritten
+}
+
+// briefApprovalLine is the review notes' line on who approved the brief: a
+// person at a terminal, or an agent that was not one. "" for a ticket with no
+// approval (a branch built outside jig).
+func briefApprovalLine(st *store.Store, ticket string) (string, error) {
+	a, ok, err := st.ReadApproval(ticket)
+	if err != nil || !ok {
+		return "", err
+	}
+	if a.Provenance == "agent" {
+		return "Brief approved by an agent, as " + a.By + ", not by a person at a terminal", nil
+	}
+	return "Brief approved by " + a.By + " at a terminal", nil
 }

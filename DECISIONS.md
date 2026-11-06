@@ -4114,3 +4114,9 @@ Rejected: refusing an agent's validate without a recorded hand-over (jig records
 `jig status`'s rounds table read round 2 of GATE-7 as "clean, fix 3": its three findings were labeled `fix` by the reviewer and routed to notes by the risk floor, so the round queued no fix. `verifydeliver.ReadRounds` counted by the reviewer's label (`Finding.Action`). Chosen: `Fix` counts the round's findings with status `open` (a fix slice's work), `Ask` the `asked` ones, `Note` the `noted` ones, and a `dismissed` finding counts in none, so a clean round never shows a fix. The findings list keeps each finding's own action and `routed_as`, so the reviewer's label stays visible where it differs. The rounds table and the TUI review screen read the same counts.
 
 Rejected: a column per label and per status, since the table answers what the round left to do. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
+
+## An agent's brief approval reads as an agent's (GRAPH-21)
+
+`approval.yaml` records `by` (the git identity the command ran as) and `provenance`, and every surface showed the identity first, so an approval an agent recorded read as a person's. Chosen: with `provenance: agent`, `jig status` prints `approved_by: an agent (as <identity>)`, the TUI writes "approved <when> by an agent, as <identity>", and `phase.Approver` (used by `who()`) gives "an agent, as <identity>"; a person's approval reads as before. The review notes carry one line before the reviewers, "Brief approved by <identity> at a terminal" or "Brief approved by an agent, as <identity>, not by a person at a terminal", and none for a ticket with no approval. `approval.yaml` is unchanged.
+
+Rejected: renaming `by` in `approval.yaml`, a record format change for a wording problem. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.

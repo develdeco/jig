@@ -139,7 +139,7 @@ func TestDetailScreensBeginAtTheirTop(t *testing.T) {
 	g.r.answer("brief show JIG-1 --text --store /s", briefTextJIG1(), 0)
 	g.feed(jig1Records()...).press("up", "enter")
 	lines := strings.Split(g.view(), "\n")
-	if len(lines) != 24 || !strings.Contains(lines[2], "approved by Ada Lovelace") {
+	if len(lines) != 24 || !strings.Contains(lines[2], "approved by an agent, as Ada Lovelace") {
 		t.Fatalf("the brief screen does not begin with its step:\n%s", g.view())
 	}
 	// Down through the sections to the slices: the window leaves the top, and
