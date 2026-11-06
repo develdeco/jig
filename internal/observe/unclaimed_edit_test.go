@@ -16,7 +16,7 @@ func buildPhase(slices map[string]string, order ...string) phase.Ticket {
 		subs = append(subs, phase.Sub{Key: "slice:" + id, State: slices[id]})
 	}
 	t := phase.Ticket{Current: phase.Build, Ready: true}
-	t.Phases[2] = phase.Phase{Name: phase.Build, State: "current", Subs: subs}
+	t.Phases[1] = phase.Phase{Name: phase.Build, State: "current", Subs: subs}
 	return t
 }
 
