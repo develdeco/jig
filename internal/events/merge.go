@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 )
@@ -155,7 +156,9 @@ func (r *Reader) keep(at time.Time) bool {
 }
 
 // readJournal returns the lines of j not returned before. It reads the whole
-// file, closes it, and tells the new lines from the old by their hash: the
+// file, opened with delete sharing so a writer's rename over it is never
+// refused (a read that held it would fail the writer, and the writer's wait
+// would fail this poll in turn), closes it, and tells the new lines from the old by their hash: the
 // file is replaced on each append and may be rewritten by a merge, so an
 // offset means nothing.
 func (r *Reader) readJournal(j Journal) ([]item, error) {
@@ -173,7 +176,7 @@ func (r *Reader) readJournal(j Journal) ([]item, error) {
 	} else if info.Size() == fs.size && info.ModTime().Equal(fs.mod) {
 		return nil, nil
 	}
-	data, err := os.ReadFile(j.Path)
+	data, err := fileshare.ReadFile(j.Path)
 	if err != nil {
 		return nil, fmt.Errorf("events: read %s: %w", j.Path, err)
 	}
