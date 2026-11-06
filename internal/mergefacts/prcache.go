@@ -2,9 +2,9 @@ package mergefacts
 
 import (
 	"encoding/json"
-	"os"
 	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -122,7 +122,7 @@ func (c *PRCache) load() map[string]prRecord {
 	if c.Path == "" {
 		return nil
 	}
-	data, err := os.ReadFile(c.Path)
+	data, err := fileshare.ReadFile(c.Path)
 	if err != nil {
 		return nil
 	}

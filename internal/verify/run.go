@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -525,7 +526,7 @@ func (x *run) startSHA() string {
 	d := x.d
 	var recorded string
 	if d.Repo != "" {
-		if data, err := os.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
+		if data, err := fileshare.ReadFile(d.Store.StartSHAPath(x.r.Ticket, d.Repo)); err == nil {
 			recorded = string(data)
 		}
 	}

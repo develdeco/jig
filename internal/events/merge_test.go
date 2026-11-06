@@ -27,9 +27,9 @@ func jline(ts, ticket, event, rest string) string {
 	return s + "}"
 }
 
-// writeFile replaces path with lines, one per line, the way journal.Append
-// replaces a journal whole, the way a merge or checkout would (journal.Append
-// itself appends in place): a temp file renamed over it.
+// writeFile replaces path with lines, one per line, the way a merge or
+// checkout replaces a journal whole (journal.Append itself appends in place):
+// a temp file renamed over it.
 func writeFile(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

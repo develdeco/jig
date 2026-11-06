@@ -76,7 +76,7 @@ type fileState struct {
 	size int64
 	mod  time.Time
 	// seen counts, per line (by hash), the copies already handed back, so
-	// a file rewritten whole - by Append, or by a merge that reorders
+	// a file rewritten whole - by a merge or checkout that reorders
 	// lines - gives back only the lines that are new.
 	seen map[[16]byte]int
 }
