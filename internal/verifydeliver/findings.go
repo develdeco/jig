@@ -431,7 +431,14 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // a file gone before this round's base, or never in a full-scope diff
 // after a rebase, clears a finding on it just the same). An asked finding
 // never clears here: only a person keeping or dismissing it moves it out
-// of the open set. Called only after
+// of the open set. A noted finding clears too when the risk floor routed it
+// there (routed_as: note, the reviewer asked for a fix and the floor made it a
+// note), this round's scope diff changed its file (changedPaths, named as
+// reviewedPaths is), the reviewer read the file and did not report the finding
+// again: the change touched what it named and the reviewer, looking at it, no
+// longer sees it. A reviewer's own note (no routed_as) asks nothing to change
+// and never clears, and a round that never touched the file proves nothing.
+// Called only after
 // routing and triage (route.go) have set reported's final status: the
 // blocking set - a file this round ends up routing a finding into, open or
 // asked - must reflect what a human actually kept, not merely what the
@@ -441,7 +448,7 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // this with reported straight from ApplyRound, no routing or triage in
 // between, on purpose - that package never runs the triage hook at all -
 // so that caller is not a bug to fix either.
-func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
+func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths, changedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
 	reviewedSet := map[string]bool{}
 	for _, p := range reviewedPaths {
 		norm, err := normalizeRepoRelPath(p)
@@ -449,6 +456,15 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 			continue
 		}
 		reviewedSet[norm] = true
+	}
+
+	changedSet := map[string]bool{}
+	for _, p := range changedPaths {
+		norm, err := normalizeRepoRelPath(p)
+		if err != nil {
+			continue
+		}
+		changedSet[norm] = true
 	}
 
 	reportedIDs := map[string]bool{}
@@ -469,6 +485,12 @@ func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedP
 		// made. An ask leaves the outstanding set exactly two ways - a
 		// human keeps it, or a human dismisses it - and until then the
 		// round is not clean and `jig gate` exits 2.
+		if f.Status == StatusNoted && f.RoutedAs == ActionNote {
+			if !reportedIDs[id] && !blocking[f.File] && changedSet[f.File] && reviewedSet[f.File] {
+				cleared = append(cleared, id)
+			}
+			continue
+		}
 		if f.Status != StatusOpen {
 			continue
 		}

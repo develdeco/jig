@@ -504,7 +504,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if report.BudgetParked > 0 {
 			report.BudgetUsed, report.BudgetLimit = budgetUsed, *gateCfg.FixRounds
 		}
-		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, files.atHead)
+		cleared, err := ClearingAfterTriage(cum, routed, round.Review.Result.ReviewedPaths, round.Review.Changed, files.atHead)
 		if err != nil {
 			return GateReport{}, err
 		}

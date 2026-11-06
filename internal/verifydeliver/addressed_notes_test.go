@@ -32,7 +32,7 @@ func gate7Rounds(t *testing.T) (*store.Store, string) {
 
 	r2f1 := Finding{ID: "r1-f1", File: "publish.go", Title: "Publish's every-round list is unproven", Action: ActionFix, Risk: RiskLow, RiskRationale: "only a gap", Status: StatusNoted, RoutedAs: ActionNote, Recurrences: 1}
 	known := map[string]Finding{"r1-f1": r1f1, "r1-f3": r1f3, "r1-f5": r1f5}
-	cleared, err := ClearingAfterTriage(known, []Finding{r2f1}, []string{"publish.go", "render.go"}, alwaysExists)
+	cleared, err := ClearingAfterTriage(known, []Finding{r2f1}, []string{"publish.go", "render.go"}, []string{"publish.go", "render.go"}, alwaysExists)
 	if err != nil {
 		t.Fatalf("ClearingAfterTriage: %v", err)
 	}
@@ -77,5 +77,94 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 	body := renderVerificationSection(reportYAML{}, "oracles-only", nil, outcomes)
 	if want := "Findings: 0 fixed, 1 addressed, 0 dismissed, 2 noted, 0 asked."; !strings.Contains(body, want) {
 		t.Errorf("verification section = %q, want %q", body, want)
+	}
+}
+
+// TestClearingAfterTriageClearsARoutedNoteWhoseFileChanged pins the rule for
+// a note the risk floor routed (routed_as: note): it clears only when this
+// round's change touched its file, the reviewer read it and did not report it
+// again. A reviewer's own note, a file the round did not change, a file the
+// reviewer did not read, a finding reported again and a file an open finding
+// still blocks each leave it noted.
+func TestClearingAfterTriageClearsARoutedNoteWhoseFileChanged(t *testing.T) {
+	t.Parallel()
+
+	routed := Finding{ID: "r1-f1", File: "a.go", Status: StatusNoted, RoutedAs: ActionNote}
+	own := Finding{ID: "r1-f2", File: "a.go", Status: StatusNoted}
+	for _, tc := range []struct {
+		name     string
+		known    map[string]Finding
+		reported []Finding
+		reviewed []string
+		changed  []string
+		want     []string
+	}{
+		{"changed, read and not reported", map[string]Finding{"r1-f1": routed}, nil, []string{"a.go"}, []string{"a.go"}, []string{"r1-f1"}},
+		{"a reviewer's own note never clears", map[string]Finding{"r1-f2": own}, nil, []string{"a.go"}, []string{"a.go"}, nil},
+		{"file read but not changed", map[string]Finding{"r1-f1": routed}, nil, []string{"a.go"}, []string{"b.go"}, nil},
+		{"file changed but not read", map[string]Finding{"r1-f1": routed}, nil, []string{"b.go"}, []string{"a.go"}, nil},
+		{"reported again by id", map[string]Finding{"r1-f1": routed}, []Finding{{ID: "r1-f1", File: "a.go", Status: StatusNoted, RoutedAs: ActionNote}}, []string{"a.go"}, []string{"a.go"}, nil},
+		{"an open finding in the file blocks it", map[string]Finding{"r1-f1": routed}, []Finding{{ID: "r2-f1", File: "a.go", Status: StatusOpen}}, []string{"a.go"}, []string{"a.go"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cleared, err := ClearingAfterTriage(tc.known, tc.reported, tc.reviewed, tc.changed, alwaysExists)
+			if err != nil {
+				t.Fatalf("ClearingAfterTriage: %v", err)
+			}
+			if !equalStrings(cleared, tc.want) {
+				t.Fatalf("cleared = %v, want %v", cleared, tc.want)
+			}
+		})
+	}
+}
+
+// TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion pins the
+// outcome wording: a cleared routed note a slice fixed still reads fixed by
+// that slice, one nothing credited reads addressed; a finding continued with
+// the same title and risk shows no history, one continued with another
+// shows both versions.
+func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
+	t.Parallel()
+
+	ticketDir := t.TempDir()
+	note := func(id, title, risk string) Finding {
+		return Finding{ID: id, File: id + ".go", Title: title, Risk: risk, Status: StatusNoted, RoutedAs: ActionNote}
+	}
+	writeFindingsYAMLAt(t, ticketDir, 1, findingsYAML{Findings: []Finding{
+		note("r1-f1", "one", RiskLow), note("r1-f2", "two", RiskLow), note("r1-f3", "three", RiskLow),
+	}})
+	writeFindingsYAMLAt(t, ticketDir, 2, findingsYAML{
+		Findings: []Finding{note("r1-f2", "two", RiskLow), note("r1-f3", "three, reworded", RiskLow)},
+		Cleared:  []string{"r1-f1"},
+	})
+	slices := []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f2"}}}
+
+	outcomes, _, _, err := collectFindingsWithOutcomes(ticketDir, 2, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]findingOutcome{}
+	for _, o := range outcomes {
+		byID[o.finding.ID] = o
+	}
+	if o := byID["r1-f1"]; o.status != "addressed" || o.detail != "addressed at round 2" {
+		t.Errorf("r1-f1 = %+v, want addressed at round 2", o)
+	}
+	if o := byID["r1-f2"]; o.status != "noted" || o.continuedWithChange() {
+		t.Errorf("r1-f2 = %+v, want noted with no history: nothing changed when it was continued", o)
+	}
+	if o := byID["r1-f3"]; !o.continuedWithChange() || o.first.Title != "three" || o.finding.Title != "three, reworded" {
+		t.Errorf("r1-f3 = %+v, want its first and latest title", o)
+	}
+
+	slices = []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f1"}}}
+	outcomes, _, _, err = collectFindingsWithOutcomes(ticketDir, 2, slices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range outcomes {
+		if o.finding.ID == "r1-f1" && (o.status != "fixed" || o.detail != "fixed by slice fix-1 and cleared at round 2") {
+			t.Errorf("r1-f1 = %+v, want fixed by slice fix-1: a slice credited it", o)
+		}
 	}
 }
