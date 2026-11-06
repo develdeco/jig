@@ -51,3 +51,84 @@ func TestKilledRunWithALongCommandKeepsItsBounds(t *testing.T) {
 		t.Errorf("a kill and a plain failure share the signature %q", res.Signature)
 	}
 }
+
+// longKill is the error of a killed run whose oracle command is n bytes.
+func longKill(n int) error {
+	return errors.New(`shell "` + strings.Repeat("x", n) + `": did not finish within 30m0s`)
+}
+
+// manyNewLines is twelve distinct failing lines of about 70 bytes each.
+func manyNewLines() string {
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		b.WriteString("=== RUN   TestSlowThing/case_" + string(rune('a'+i)) + "  waiting for the server to come up\n")
+	}
+	return b.String()
+}
+
+// TestSeveralNewLinesMakeOneLineSummary: round 3 note 1, on the plain and the
+// killed branch.
+func TestSeveralNewLinesMakeOneLineSummary(t *testing.T) {
+	t.Parallel()
+	base := baselineOf("ok\n")
+	for name, err := range map[string]error{"plain": errors.New("exit status 1"), "killed": longKill(10)} {
+		_, s := failureOutput("ok\n"+manyNewLines(), err, base)
+		if strings.ContainsAny(s, "\n\r") || !strings.HasPrefix(s, "=== RUN TestSlowThing/case_a waiting") || !strings.Contains(s, "case_b") {
+			t.Errorf("%s: summary = %q, want the new lines on one line", name, s)
+		}
+	}
+}
+
+// TestKilledTailHoldsItsNewLinesTo4000Bytes: round 3 note 2.
+func TestKilledTailHoldsItsNewLinesTo4000Bytes(t *testing.T) {
+	t.Parallel()
+	base := baselineOf("ok\n")
+	var b strings.Builder
+	for i := 0; i < 400; i++ {
+		b.WriteString("failure line " + strings.Repeat("x", 40) + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) + "\n")
+	}
+	kill := longKill(10)
+	tail, _ := failureOutput(b.String(), kill, base)
+	head := tail[:strings.Index(tail, "\n"+kill.Error()+"\n"+markerOldTail)]
+	if len(head) > tailBytes || len(head) < tailBytes-60 {
+		t.Errorf("new lines in the killed tail are %d bytes, want just under %d", len(head), tailBytes)
+	}
+}
+
+// TestKilledSummaryWithALongCommandKeepsAFailingLine: round 3 note 3, with and
+// without a baseline, however long the command.
+func TestKilledSummaryWithALongCommandKeepsAFailingLine(t *testing.T) {
+	t.Parallel()
+	base := baselineOf("ok\n")
+	for _, n := range []int{50, summaryBytes - 40, summaryBytes, 5 * summaryBytes} {
+		for _, b := range []map[string]bool{base, nil} {
+			_, s := failureOutput("ok\nboom: pkg9 broke\n", longKill(n), b)
+			if len(s) > summaryBytes || strings.Contains(s, "\n") || !strings.HasSuffix(s, "did not finish within 30m0s") {
+				t.Errorf("command of %d bytes: summary = %q (%d bytes)", n, s, len(s))
+			}
+			if n <= summaryBytes-60 && !strings.Contains(s, "boom: pkg9 broke") {
+				t.Errorf("command of %d bytes: summary = %q, want the failing line", n, s)
+			}
+		}
+	}
+}
+
+// TestKilledSignatureKeepsTheTimeout: round 3 note 4. However many new lines
+// precede it the signature carries the timeout without its limit, two kills
+// match and a kill does not match a plain failure.
+func TestKilledSignatureKeepsTheTimeout(t *testing.T) {
+	t.Parallel()
+	base := baselineOf("ok\n")
+	sig := func(out string, err error) string {
+		_, s := failureOutput(out, err, base)
+		return failureSignature("s", s, err)
+	}
+	out := "ok\n" + manyNewLines()
+	k1, k2 := sig(out, longKill(10)), sig(out, longKill(700))
+	if !strings.HasSuffix(k1, "did not finish within ms") || k1 != k2 {
+		t.Errorf("signatures %q and %q, want one ending with the timeout", k1, k2)
+	}
+	if plain := sig(out, errors.New("exit status 1")); plain == k1 || strings.Contains(plain, "did not finish") {
+		t.Errorf("plain %q, killed %q", plain, k1)
+	}
+}

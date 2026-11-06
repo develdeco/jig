@@ -48,7 +48,7 @@ func TestKilledRunSummaryCarriesTheTimeout(t *testing.T) {
 }
 
 // TestKilledRunSummaryKeepsTheTimeoutWhenNewLinesFillIt: new lines past the
-// summary's bound do not push the timeout out of summary or signature.
+// summary's bound do not push the timeout out of the summary.
 func TestKilledRunSummaryKeepsTheTimeoutWhenNewLinesFillIt(t *testing.T) {
 	t.Parallel()
 	killed := errors.New("the oracle did not finish within 30m0s")
