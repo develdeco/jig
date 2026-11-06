@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/develdeco/jig/internal/store"
 )
@@ -368,5 +369,35 @@ func TestResolveTicketTitleBodyFallsBackToID(t *testing.T) {
 	}
 	if title != "DEMO-9" || body != "" {
 		t.Fatalf("ResolveTicketTitleBody = (%q, %q), want (%q, \"\")", title, body, "DEMO-9")
+	}
+}
+
+// TestTruncateSectionCutsOnARuneBoundary checks a section over the cap is
+// cut to the longest prefix that fits with the note and ends on a whole
+// rune, whatever byte the budget lands on, and that one within the cap is
+// left as it is.
+func TestTruncateSectionCutsOnARuneBoundary(t *testing.T) {
+	const note = "the full map is in the store."
+	noteBlock := "\n\n*(Truncated: " + note + ")*"
+	budget := issueBodyByteCap - len(noteBlock)
+	for _, lead := range []string{"", "a", "ab"} {
+		// "€" is three bytes, so the three leads put the budget on each of
+		// a rune's bytes in turn.
+		section := lead + strings.Repeat("€", issueBodyByteCap)
+		got := truncateSection(section, note)
+		prefix, ok := strings.CutSuffix(got, noteBlock)
+		if !ok {
+			t.Fatalf("lead %q: result does not end with the note", lead)
+		}
+		if !strings.HasPrefix(section, prefix) || !utf8.ValidString(prefix) {
+			t.Fatalf("lead %q: kept text is not a whole-rune prefix of the section", lead)
+		}
+		if len(prefix) > budget || len(prefix)+len("€") <= budget {
+			t.Fatalf("lead %q: kept %d bytes, want the longest whole-rune prefix within %d", lead, len(prefix), budget)
+		}
+	}
+	short := strings.Repeat("€", 10)
+	if got := truncateSection(short, note); got != short {
+		t.Fatalf("a section within the cap = %q, want it unchanged", got)
 	}
 }
