@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 )
@@ -598,5 +599,34 @@ func TestPollHoldsNoFileAfterwards(t *testing.T) {
 	envs, err := rd.Poll()
 	if err != nil || !reflect.DeepEqual(summary(envs), []string{"journal:b"}) {
 		t.Fatalf("Poll after the journal was replaced = %v, %v, want b", summary(envs), err)
+	}
+}
+
+// TestReplacingAJournalAReaderHoldsOpen: the way Follow opens a journal
+// leaves it replaceable, and the writer's replacement goes ahead and lands
+// while the reader holds it. On Windows a replacement by os.Rename fails with
+// access denied while any handle is open on the target, so the writer must
+// rename with POSIX semantics (and ride out a reader jig did not open).
+func TestReplacingAJournalAReaderHoldsOpen(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	a := jline("2026-10-23T09:00:01Z", "T-1", "verify-pending", "")
+	b := jline("2026-10-23T09:00:05Z", "T-1", "oracle", "")
+	r.writeJournal("T-1", a)
+
+	held, err := fileshare.Open(r.journalPath("T-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	r.writeJournal("T-1", a, b)
+
+	envs, err := Read(r.scope(false, "T-1"), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(envs) != 2 {
+		t.Fatalf("read %d lines after the replacement, want 2", len(envs))
 	}
 }
