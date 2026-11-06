@@ -440,3 +440,11 @@ func VerifiedSlices(lines []Line, skip string) []VerifiedSlice {
 	}
 	return out
 }
+
+// What a pr line's BodyMatch says of the pull request it recorded against the
+// render.
+const (
+	BodyMatches = "matches"
+	BodyDiffers = "differs"
+	BodyUnknown = "unknown"
+)
