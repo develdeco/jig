@@ -4108,3 +4108,9 @@ A session that drafted a brief ran `jig validate <T> --check`, saw `valid: yes` 
 Chosen (2 decisions defaulted, 2026-11-06): `--check` prints two help lines. The first says to show the person the brief and ask about its decisions, naming how many are tagged `defaulted` when any are (`defaultedDecisions` counts the bullets of the brief's Decision section that carry the word), then to run `jig validate <T>` once they confirm, and that a prompt which said to go with the recommendations confirms for them. The second says whose approval the plain validate will record: an agent's, not a person's, off a terminal; the person's at one. The skill is unchanged, since it says the same and keeps its size.
 
 Rejected: refusing an agent's validate without a recorded hand-over (jig records and shows, never refuses, so the person's choice to hand the brief over stays theirs).
+
+## A round's counts follow the status jig routed its findings to (GATE-9)
+
+`jig status`'s rounds table read round 2 of GATE-7 as "clean, fix 3": its three findings were labeled `fix` by the reviewer and routed to notes by the risk floor, so the round queued no fix. `verifydeliver.ReadRounds` counted by the reviewer's label (`Finding.Action`). Chosen: `Fix` counts the round's findings with status `open` (a fix slice's work), `Ask` the `asked` ones, `Note` the `noted` ones, and a `dismissed` finding counts in none, so a clean round never shows a fix. The findings list keeps each finding's own action and `routed_as`, so the reviewer's label stays visible where it differs. The rounds table and the TUI review screen read the same counts.
+
+Rejected: a column per label and per status, since the table answers what the round left to do. Defaulted (owner: take the recommended answer, 2026-11-06): both choices.
