@@ -641,7 +641,7 @@ func LoadMachine(jigHome string) (map[string]MachineProject, error) {
 
 // machineLockTimeout is how long a write of the machine mapping waits for
 // another jig process to finish its own.
-const machineLockTimeout = 10 * time.Second
+var machineLockTimeout = 10 * time.Second
 
 // SaveMachine writes the per-machine project mapping under the jig home root
 // jigHome, creating its parent directory if needed. It replaces the whole

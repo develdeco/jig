@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/develdeco/jig/internal/filelock"
 	"github.com/develdeco/jig/internal/home"
 )
 
@@ -119,5 +121,48 @@ func TestSaveMachineIsAtomicAndKeepsRoot(t *testing.T) {
 		if n := e.Name(); n != "projects.yaml" && n != "projects.yaml.lock" {
 			t.Errorf("jig home holds %q after SaveMachine, want only projects.yaml and its lock", n)
 		}
+	}
+}
+
+// TestUpdateMachineNeverWritesWithoutTheLock: while another process holds the
+// mapping's lock past the wait, UpdateMachine and SaveMachine fail naming the
+// lock and write nothing, rather than going ahead unlocked and losing the
+// holder's update.
+func TestUpdateMachineNeverWritesWithoutTheLock(t *testing.T) {
+	jigHome := t.TempDir()
+	seed := map[string]MachineProject{"keep": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := SaveMachine(jigHome, seed); err != nil {
+		t.Fatal(err)
+	}
+	path := home.MachinePath(jigHome)
+	release, held, err := filelock.TryLock(path, time.Second)
+	if err != nil || !held {
+		t.Fatalf("holding the lock: held=%v err=%v", held, err)
+	}
+	defer release()
+
+	old := machineLockTimeout
+	machineLockTimeout = 150 * time.Millisecond
+	defer func() { machineLockTimeout = old }()
+
+	called := false
+	err = UpdateMachine(jigHome, func(m map[string]MachineProject) error {
+		called = true
+		m["lost"] = MachineProject{Store: "/l"}
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), path+".lock") {
+		t.Fatalf("UpdateMachine under a held lock = %v, want an error naming %s.lock", err, path)
+	}
+	if called {
+		t.Error("UpdateMachine ran fn without the lock")
+	}
+	if err := SaveMachine(jigHome, map[string]MachineProject{"lost": {Store: "/l"}}); err == nil || !strings.Contains(err.Error(), path+".lock") {
+		t.Errorf("SaveMachine under a held lock = %v, want an error naming %s.lock", err, path)
+	}
+	release()
+	got, err := LoadMachine(jigHome)
+	if err != nil || !reflect.DeepEqual(got, seed) {
+		t.Fatalf("mapping after refused writes = %+v, %v; want it untouched", got, err)
 	}
 }
