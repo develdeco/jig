@@ -363,7 +363,7 @@ func failureTail(out string, err error) string {
 	switch {
 	case tail == "":
 		return err.Error()
-	case strings.Contains(err.Error(), "did not finish within"):
+	case errors.Is(err, envrun.ErrTimedOut):
 		return outputTail(tail + "\n" + err.Error())
 	}
 	return tail

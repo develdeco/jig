@@ -18,7 +18,7 @@ func baselineOf(out string) map[string]bool { return parseBaseline(baselineText(
 // run the wedge guard killed still says it did not finish.
 func TestKilledRunSummaryCarriesTheTimeout(t *testing.T) {
 	t.Parallel()
-	killed := errors.New("the oracle did not finish within 30m0s")
+	killed := timedOut("the oracle")
 	base := baselineOf("ok  pkg/a 0.3s\n")
 	out := "ok  pkg/a 0.4s\n=== slow test started in pkg/b\n"
 	tail, summary := failureOutput(out, killed, base)
@@ -51,7 +51,7 @@ func TestKilledRunSummaryCarriesTheTimeout(t *testing.T) {
 // summary's bound do not push the timeout out of the summary.
 func TestKilledRunSummaryKeepsTheTimeoutWhenNewLinesFillIt(t *testing.T) {
 	t.Parallel()
-	killed := errors.New("the oracle did not finish within 30m0s")
+	killed := timedOut("the oracle")
 	base := baselineOf("ok  pkg/a 0.3s\n")
 	out := "ok  pkg/a 0.4s\n" + strings.Repeat("=== RUN   TestSlowThing/case_x  waiting for the server to come up\n", 12)
 	_, summary := failureOutput(out, killed, base)

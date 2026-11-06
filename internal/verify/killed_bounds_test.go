@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -19,7 +21,7 @@ func killedRun(t *testing.T, r *rig, pass, out string, cmdLen int) Result {
 		t.Fatalf("passing Run = %+v, %v", res, err)
 	}
 	r.oracle.out = out
-	r.oracle.err = errors.New(`shell "` + strings.Repeat("go test -run X ./... && ", cmdLen/24) + `": did not finish within 30m0s`)
+	r.oracle.err = timedOut(strings.Repeat("go test -run X ./... && ", cmdLen/24))
 	sha = r.commit("b", "b: two", map[string]string{"x.txt": "2"})
 	res, err := Run(r.deps, r.request("b", sha))
 	if err != nil || res.State != journal.VerifyFail {
@@ -52,10 +54,13 @@ func TestKilledRunWithALongCommandKeepsItsBounds(t *testing.T) {
 	}
 }
 
-// longKill is the error of a killed run whose oracle command is n bytes.
-func longKill(n int) error {
-	return errors.New(`shell "` + strings.Repeat("x", n) + `": did not finish within 30m0s`)
+// timedOut is the error the wedge guard gives a run of cmd it killed at 30m.
+func timedOut(cmd string) error {
+	return &envrun.TimedOutError{Cmd: cmd, Limit: 30 * time.Minute}
 }
+
+// longKill is the error of a killed run whose oracle command is n bytes.
+func longKill(n int) error { return timedOut(strings.Repeat("x", n)) }
 
 // manyNewLines is twelve distinct failing lines of about 70 bytes each.
 func manyNewLines() string {
@@ -133,12 +138,14 @@ func TestKilledSignatureKeepsTheTimeout(t *testing.T) {
 	}
 }
 
-// longOutput is forty distinct passing lines and then a failing one, well past
-// the summary bound.
+// longOutput is ninety distinct short lines with no runs of whitespace, then a
+// failing one: flattened they are about 800 bytes, well past the summary bound,
+// and a short line keeps the part a cut drops small, so a room or a cut larger
+// than the right one puts the summary over its bound.
 func longOutput() string {
 	var b strings.Builder
-	for i := 0; i < 40; i++ {
-		b.WriteString("ok  \tpkg" + strings.Repeat("a", i%7) + string(rune('a'+i%26)) + "\t0.1s\n")
+	for i := 0; i < 90; i++ {
+		b.WriteString("FAIL:" + string(rune('a'+i%26)) + string(rune('a'+i/26)) + "q\n")
 	}
 	return b.String() + "FAIL pkg9 last line\n"
 }
@@ -155,8 +162,8 @@ func TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine(t *testing.T) {
 		if len(s) > summaryBytes || strings.Contains(s, "\n") || !strings.HasSuffix(s, " did not finish within 30m0s") {
 			t.Errorf("%s: summary = %q (%d bytes), want one line within %d ending with the reason", name, s, len(s), summaryBytes)
 		}
-		if strings.Contains(s, "xxx") || !strings.Contains(s, "FAIL pkg9 last line") {
-			t.Errorf("%s: summary = %q, want the last line and no part of the command", name, s)
+		if strings.Contains(s, "xxx") || !strings.Contains(s, "FAIL pkg9 last line") || len(s) < summaryBytes-30 {
+			t.Errorf("%s: summary = %q, want the last line, most of the room used and no part of the command", name, s)
 		}
 	}
 }
@@ -164,7 +171,7 @@ func TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine(t *testing.T) {
 // phraseKill is the error of a killed run whose oracle command holds the
 // guard's own phrase, with padding after it.
 func phraseKill(pad int) error {
-	return errors.New(`shell "grep -v 'did not finish within' ` + strings.Repeat("x", pad) + `": did not finish within 30m0s`)
+	return timedOut("grep -v 'did not finish within' " + strings.Repeat("x", pad))
 }
 
 // TestKilledReasonIsTheGuardsOwnWords: round 1 r1-f2. A command that holds
@@ -186,6 +193,56 @@ func TestKilledReasonIsTheGuardsOwnWords(t *testing.T) {
 			if !strings.Contains(s, "boom: pkg9 broke") {
 				t.Errorf("%s, pad %d: summary = %q, want the failing line", name, pad, s)
 			}
+		}
+	}
+}
+
+// TestKilledSummaryRoomIsExact: round 2 r1-f1. The end of the output is cut to
+// exactly the room the reason leaves, one byte for the space before it: here
+// the output is laid so that a room one byte larger would keep the line "Z".
+func TestKilledSummaryRoomIsExact(t *testing.T) {
+	t.Parallel()
+	reason := "did not finish within 30m0s"
+	room := summaryBytes - len(reason) - 1
+	tail := strings.Repeat("y", room-2)
+	out := "pad\nZ\n" + tail
+	for name, b := range map[string]map[string]bool{"no baseline": nil, "no new line": baselineOf(out)} {
+		_, s := failureOutput(out, longKill(300), b)
+		if want := tail + " " + reason; s != want {
+			t.Errorf("%s: summary = %q (%d bytes), want %q", name, s, len(s), want)
+		}
+	}
+}
+
+// plainPhraseFail is the error of a plain failure (exit status 1) of a command
+// that holds the guard's phrase, with padding after it.
+func plainPhraseFail(pad int) error {
+	return errors.New(`shell "grep -v 'did not finish within' ` + strings.Repeat("x", pad) + `": exit status 1`)
+}
+
+// TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill: round 2 r1-f2.
+// A command that holds "did not finish within" does not make its plain failure
+// a kill: the summary keeps its bound and its failing line, ends with no
+// timeout, and the signature has none.
+func TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill(t *testing.T) {
+	t.Parallel()
+	base := baselineOf("ok\n")
+	for _, pad := range []int{10, 760} {
+		err := plainPhraseFail(pad)
+		if got := killedReason(err); got != "" {
+			t.Errorf("pad %d: killedReason = %q, want none", pad, got)
+		}
+		for name, b := range map[string]map[string]bool{"baseline": base, "no baseline": nil} {
+			_, s := failureOutput("ok\nboom: pkg9 broke\n", err, b)
+			if len(s) > summaryBytes || strings.Contains(s, "\n") || !strings.Contains(s, "boom: pkg9 broke") {
+				t.Errorf("%s, pad %d: summary = %q (%d bytes), want one line within the bound with the failing line", name, pad, s, len(s))
+			}
+			if sig := failureSignature("s", s, err); strings.Contains(sig, "did not finish") {
+				t.Errorf("%s, pad %d: signature %q holds a timeout", name, pad, sig)
+			}
+		}
+		if got := failureTail("boom: pkg9 broke\n", err); got != "boom: pkg9 broke" {
+			t.Errorf("pad %d: failureTail = %q, want only the output", pad, got)
 		}
 	}
 }

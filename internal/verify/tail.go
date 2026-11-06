@@ -1,8 +1,10 @@
 package verify
 
 import (
+	"errors"
 	"strings"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/outcome"
 )
 
@@ -30,12 +32,8 @@ func outputTail(out string) string {
 // them. (Copied from the frontier.)
 func oneLine(s string) string { return oneLineMax(s, summaryBytes) }
 
-// oneLineMax is oneLine with a bound of max bytes; nothing when max is not
-// positive.
+// oneLineMax is oneLine with a bound of max bytes.
 func oneLineMax(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
 	if len(s) > max {
 		s = s[len(s)-max:]
 		if i := strings.IndexByte(s, '\n'); i >= 0 {
@@ -132,24 +130,18 @@ func failureOutput(out string, err error, baseline map[string]bool) (tail, summa
 	if reason == "" {
 		return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
 	}
-	room := max(summaryBytes-len(reason)-1, 0)
+	room := summaryBytes - len(reason) - 1
 	return tail, joinReason(strings.Join(strings.Fields(headBytes(fresh, room)), " "), reason)
 }
 
-// killedMarker is the wedge guard's reason for killing a run.
-const killedMarker = "did not finish within"
-
-// killedReason is the ending of err from "did not finish within" on when the
-// wedge guard killed the run, "" otherwise. The guard's error always ends
-// with it, so the last one counts: the full error embeds the oracle
-// command, which can be of any length.
+// killedReason is the wedge guard's own words, "did not finish within
+// <limit>", when err is its kill of the run, "" otherwise. A kill is read
+// from the error (envrun.ErrTimedOut), never from its text: the text embeds
+// the oracle command, which can hold any words.
 func killedReason(err error) string {
-	if err == nil {
-		return ""
-	}
-	s := err.Error()
-	if i := strings.LastIndex(s, killedMarker); i >= 0 {
-		return s[i:]
+	var t *envrun.TimedOutError
+	if errors.As(err, &t) {
+		return t.Reason()
 	}
 	return ""
 }
