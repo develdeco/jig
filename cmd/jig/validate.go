@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,10 +99,14 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	advisories := validateAdvisories(st, ticket, slices, ready.ProjectRepos(cfg, mp.Clones))
 	blocks := []string{"valid: yes"}
-	next := fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)
+	nextLines := []string{fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)}
 	if *check {
 		blocks = append(blocks, axi.KV("approval", [][2]string{{"result", approvalChecked}}))
-		next = fmt.Sprintf("Run `jig validate %s` once the person has confirmed the brief, to record its approval", ticket)
+		var brief []byte
+		if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
+			brief = data
+		}
+		nextLines = checkNext(ticket, defaultedDecisions(brief), e.stdinIsTerminal(stdin))
 	} else {
 		approval, result, err := recordApproval(e, st, ticket, sum, defaultProvenance(e, stdin))
 		if err != nil {
@@ -128,7 +133,7 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if table := advisoryTable(advisories); table != "" {
 		blocks = append(blocks, table)
 	}
-	blocks = append(blocks, axi.Help(next))
+	blocks = append(blocks, axi.Help(nextLines...))
 	axi.Render(stdout, blocks...)
 	return 0
 }
@@ -502,7 +507,44 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 }
 
 // defaultedDecisions counts the decisions of brief's Decision section tagged
-// defaulted.
+// defaulted: the lines there that begin a bullet (a decision) and carry the
+// word, as the intake skill writes the tag. A continuation line or another
+// section's prose is not a decision.
 func defaultedDecisions(brief []byte) int {
-	return 0
+	n := 0
+	inDecision := false
+	for _, line := range strings.Split(string(brief), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			inDecision = strings.TrimSpace(strings.TrimPrefix(line, "## ")) == "Decision"
+			continue
+		}
+		if inDecision && strings.HasPrefix(line, "- ") && defaultedTag.MatchString(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// defaultedTag matches the word defaulted as a tag, not as part of a longer word.
+var defaultedTag = regexp.MustCompile(`\bdefaulted\b`)
+
+// checkNext is the help --check prints: show the person the brief and ask
+// about its decisions, then validate. defaulted is the number of decisions
+// tagged defaulted (0 names none). Off a terminal the validate that follows
+// records an agent's approval, which the line says; at one, the person's.
+func checkNext(ticket string, defaulted int, atTerminal bool) []string {
+	ask := "Show the person the brief and ask about its decisions"
+	switch {
+	case defaulted == 1:
+		ask += " (1 is tagged defaulted)"
+	case defaulted > 1:
+		ask += fmt.Sprintf(" (%d are tagged defaulted)", defaulted)
+	}
+	lines := []string{
+		ask + fmt.Sprintf(", then run `jig validate %s` once they confirm; a prompt that said to go with the recommendations confirms for them", ticket),
+	}
+	if atTerminal {
+		return append(lines, "At this terminal the approval will be the person's")
+	}
+	return append(lines, fmt.Sprintf("Off a terminal `jig validate %s` will record an agent's approval, not a person's", ticket))
 }

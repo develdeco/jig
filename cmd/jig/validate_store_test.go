@@ -455,10 +455,10 @@ func TestValidateCheckSaysToShowTheBriefAndAsk(t *testing.T) {
 		not  []string
 	}{
 		{"off a terminal", func(e env) env { return e },
-			[]string{"show the person the brief and ask about its decisions", "2 are tagged defaulted", "go with the recommendations", "will record an agent's approval, not a person's"},
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "go with the recommendations", "will record an agent's approval, not a person's"},
 			nil},
 		{"at a terminal", env.atTerminal,
-			[]string{"show the person the brief and ask about its decisions", "2 are tagged defaulted", "the approval will be the person's"},
+			[]string{"Show the person the brief and ask about its decisions", "2 are tagged defaulted", "the approval will be the person's"},
 			[]string{"an agent's approval"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -494,7 +494,7 @@ func TestValidateCheckWithNoDefaultedTagNamesNoCount(t *testing.T) {
 	fx := newFixture(t, fixture.Opts{})
 	appendToBrief(t, fx.StoreDir, fx.Ticket, "\n## Decision\n\n- **Only** (user-confirmed 2026-11-06): a.\n")
 	out, code := runMain(t, testEnv(fx.Home), "", "validate", fx.Ticket, "--check", "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "show the person the brief and ask about its decisions") {
+	if code != 0 || !strings.Contains(out, "Show the person the brief and ask about its decisions") {
 		t.Fatalf("validate --check: exit %d, want the ask line\n%s", code, out)
 	}
 	if strings.Contains(out, "defaulted") {
