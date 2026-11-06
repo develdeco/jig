@@ -54,8 +54,13 @@ type PicksCandidate struct {
 	Step     int    `json:"step,omitempty"`
 	Caption  string `json:"caption,omitempty"`
 	Commit   string `json:"commit"`
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
+	// RecordedAt is the commit (its first 7 characters) the recording was made
+	// at when that is not the reviewed head: the scenario did not record at the
+	// head, so this is an older build's recording of it. Empty for a recording
+	// of the head.
+	RecordedAt string `json:"recorded_at,omitempty"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
 }
 
 // PicksRequest is picks.json's exact wire shape, the input jig writes for one
@@ -198,6 +203,18 @@ func (c pickCandidate) label() string {
 	return c.Scenario
 }
 
+// olderMark is what marks a candidate recorded at commit when the reviewed head
+// is another: the commit's first 7 characters, "" for a recording of the head.
+func olderMark(commit, head string) string {
+	if commit == head || strings.HasPrefix(head, commit) || strings.HasPrefix(commit, head) {
+		return ""
+	}
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+	return commit
+}
+
 var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
 // pickCandidates returns the recordings a publish of head offers its pick:
@@ -281,7 +298,7 @@ func recordedCandidates(d Deps, lines []journal.Line, leaseDir, head string) ([]
 				continue
 			}
 			all = append(all, pickCandidate{
-				PicksCandidate: PicksCandidate{Scenario: r.Scenario, Flow: r.Flow, Step: r.Step, Caption: r.Caption, Commit: l.Commit, Name: r.File},
+				PicksCandidate: PicksCandidate{Scenario: r.Scenario, Flow: r.Flow, Step: r.Step, Caption: r.Caption, Commit: l.Commit, Name: r.File, RecordedAt: olderMark(l.Commit, head)},
 				run:            l.RecordRun,
 				rec:            r,
 			})
@@ -543,7 +560,9 @@ func pickLabel(s string) string {
 // staged as files (in the order p.items() gives), with care for what a
 // published, public pull request body carries. Host paths are left out whole,
 // by exact match, from the summary, every title and every caption
-// (knownHostDirs), and named in the result for publish's output. Each item takes the one reference
+// (knownHostDirs), and named in the result for publish's output.
+// An item recorded at a commit other than the reviewed head says so in its
+// caption, naming the commit. Each item takes the one reference
 // form gh rewrites for its kind: an image `![caption](./name)`, a video
 // `./name: caption`, as bullets under its flow's ### heading, so the
 // read-back that patches an unrewritten video reference finds them.
@@ -579,6 +598,13 @@ func renderPicksSection(p pick, dir string, files []DemoFile, knownHostDirs []ho
 				caption = ""
 			}
 			caption = pickLabel(caption)
+			if at := it.cand.RecordedAt; at != "" {
+				if caption == "" {
+					caption = "recorded at " + at
+				} else {
+					caption += " (recorded at " + at + ")"
+				}
+			}
 			switch {
 			case media.Kind(it.cand.ext()) == "image":
 				fmt.Fprintf(&b, "- ![%s](./%s)\n", caption, name)

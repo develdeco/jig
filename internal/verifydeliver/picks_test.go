@@ -760,3 +760,54 @@ func TestSessionPromptsDescribeTheIntentSourcesInOnePlace(t *testing.T) {
 		}
 	}
 }
+
+// TestOlderMarkNamesACommitOtherThanTheHead: a candidate recorded at the
+// reviewed head is unmarked; one recorded at another commit carries that
+// commit's first 7 characters.
+func TestOlderMarkNamesACommitOtherThanTheHead(t *testing.T) {
+	t.Parallel()
+	head := strings.Repeat("a", 40)
+	older := "0123456789abcdef0123456789abcdef01234567"
+	for _, c := range []struct{ commit, want string }{
+		{head, ""},
+		{head[:12], ""},
+		{older, "0123456"},
+		{"0123456", "0123456"},
+	} {
+		if got := olderMark(c.commit, head); got != c.want {
+			t.Errorf("olderMark(%q) = %q, want %q", c.commit, got, c.want)
+		}
+	}
+}
+
+// TestRenderPicksSectionSaysWhichCommitAnOlderRecordingWasMadeAt: an item
+// whose candidate was recorded at a commit other than the head names that
+// commit in its caption, whatever form the caption takes (the session's own,
+// the recording's, or none), and one recorded at the head is shown as it was.
+func TestRenderPicksSectionSaysWhichCommitAnOlderRecordingWasMadeAt(t *testing.T) {
+	t.Parallel()
+	cands := pickTestCands()
+	cands[0].RecordedAt = "0123456" // home, no caption of its own: a note alone
+	cands[1].RecordedAt = "0123456" // login, "signs in"
+	cands[2].RecordedAt = "89abcde" // profile, a video
+	res := PicksResult{
+		Summary: "s",
+		Flows: []PicksFlow{
+			{Title: "F", Items: []PicksItem{{ID: "r1"}, {ID: "r2"}, {ID: "r3", Caption: "mine"}, {ID: "r4"}}},
+		},
+	}
+	p, err := resolvePicks(res, cands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []DemoFile{{Name: "a.svg"}, {Name: "b.svg"}, {Name: "c.mp4"}, {Name: "d.png"}}
+	got := renderPicksSection(p, "/stage", files, nil).Section
+	want := "## Demo\n\ns\n\n### F\n\n" +
+		"- ![home (recorded at 0123456)](./a.svg)\n" +
+		"- ![signs in (recorded at 0123456)](./b.svg)\n" +
+		"- ./c.mp4: mine (recorded at 89abcde)\n" +
+		"- ![saves](./d.png)\n\n"
+	if got != want {
+		t.Errorf("section:\n%s\nwant:\n%s", got, want)
+	}
+}
