@@ -1,10 +1,10 @@
 package slicectx
 
 import (
-	"os"
 	"regexp"
 	"strings"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -98,7 +98,7 @@ func startSHA(in Input) string {
 	if in.Repo == "" {
 		return ""
 	}
-	data, err := os.ReadFile(in.Store.StartSHAPath(in.Ticket, in.Repo))
+	data, err := fileshare.ReadFile(in.Store.StartSHAPath(in.Ticket, in.Repo))
 	if err != nil {
 		return ""
 	}

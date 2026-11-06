@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -125,7 +126,7 @@ func FindMarker(start string) (dir string, m Marker, ok bool, err error) {
 // LoadMarker reads the marker file at path (the file itself, not its
 // directory). Unknown keys are ignored; an empty file is an empty Marker.
 func LoadMarker(path string) (Marker, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileshare.ReadFile(path)
 	if err != nil {
 		return Marker{}, fmt.Errorf("project: read marker: %w", err)
 	}

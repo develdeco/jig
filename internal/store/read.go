@@ -11,21 +11,17 @@ import (
 	"github.com/develdeco/jig/internal/fileshare"
 )
 
-// replaceWindow is how long a read, and AtomicWrite's rename, ride out
-// another process replacing the same file. On Windows a replacement is not
-// atomic for a process opening the file: while the rename lands, the open
-// fails with a sharing violation, access denied (the old file is pending
-// delete) or not found, and the rename itself fails while a reader holds
-// the file. A busy machine, or a virus scanner opening each new file as it
-// lands, stretches that moment well past a few tries.
-const replaceWindow = 2 * time.Second
-
-// replaceBackoff is the pause between tries within replaceWindow.
-const replaceBackoff = 20 * time.Millisecond
+// replaceWindow and replaceBackoff are how long a read, and AtomicWrite's
+// rename, ride out another process replacing the same file, and the pause
+// between tries (fileshare.Replace has the reasons).
+const (
+	replaceWindow  = fileshare.ReplaceWindow
+	replaceBackoff = fileshare.ReplaceBackoff
+)
 
 // readFile is os.ReadFile that rides out the moment AtomicWrite replaces the
 // file. On Windows it opens the file with delete sharing and AtomicWrite
-// renames with POSIX semantics (replaceFile), which together make the
+// renames with POSIX semantics (fileshare.Rename), which together make the
 // replacement atomic for readers; a failure that can still be that moment
 // (transientRead: a file system without POSIX renames, another program
 // holding the file) is retried until replaceWindow has passed. Elsewhere the
@@ -48,7 +44,7 @@ func readFile(path string) ([]byte, error) {
 // between the read and the look for its temp file). A file that is simply
 // missing fails at once.
 func transientRead(path string, err error) bool {
-	if replacing(err) {
+	if fileshare.Replacing(err) {
 		return true
 	}
 	if !errors.Is(err, fs.ErrNotExist) {

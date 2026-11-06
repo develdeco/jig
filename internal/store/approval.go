@@ -39,7 +39,7 @@ func (s *Store) approvalFile(ticket string) string {
 // ReadApproval reads ticket's approval record. ok is false, with no error,
 // when the ticket has none.
 func (s *Store) ReadApproval(ticket string) (a Approval, ok bool, err error) {
-	data, err := os.ReadFile(s.approvalFile(ticket))
+	data, err := readFile(s.approvalFile(ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Approval{}, false, nil
@@ -84,12 +84,12 @@ const IllustrationFile = "illustration.html"
 // does. A ticket with no brief is an error, since there is nothing to approve.
 func (s *Store) BriefSHA256(ticket string) (string, error) {
 	dir := s.TicketDir(ticket)
-	brief, err := os.ReadFile(filepath.Join(dir, "brief.md"))
+	brief, err := readFile(filepath.Join(dir, "brief.md"))
 	if err != nil {
 		return "", err
 	}
 	briefSum := sha256Hex(brief)
-	illustration, err := os.ReadFile(filepath.Join(dir, IllustrationFile))
+	illustration, err := readFile(filepath.Join(dir, IllustrationFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return briefSum, nil
 	}

@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/stack"
@@ -87,7 +88,7 @@ func editStoreDoc(path, what string, edit func(text string) string) error {
 	}
 	defer release()
 
-	existing, err := os.ReadFile(path)
+	existing, err := fileshare.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("verifydeliver: %s: read: %w", what, err)
 	}
@@ -457,7 +458,7 @@ func renderIntentSection(rep reportYAML, st *store.Store, ticket string) (string
 	}
 
 	intentPath := intentFilePath(st, ticket, rep.Intent.Source)
-	data, err := os.ReadFile(intentPath)
+	data, err := fileshare.ReadFile(intentPath)
 	if err != nil {
 		return "", false, fmt.Errorf("verifydeliver: render intent: read %s: %w", intentPath, err)
 	}
