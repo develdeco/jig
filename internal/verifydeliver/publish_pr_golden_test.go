@@ -9,7 +9,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -172,7 +171,6 @@ Gate rounds:
 - Round 2 (delta): findings
 - Round 3 (delta): clean
 `, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
-	wantBody = strings.Replace(wantBody, "- test\n", "- "+fixtureOracleLine(t, fx)+"\n", 1)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
@@ -332,7 +330,6 @@ Gate rounds:
 - Round 1: findings
 - Round 2: clean
 `
-	wantBody = strings.Replace(wantBody, "- test\n", "- "+fixtureOracleLine(t, fx)+"\n", 1)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
@@ -367,19 +364,4 @@ Touched files:
 	if notes != wantNotes {
 		t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)
 	}
-}
-
-// fixtureOracleLine is how the pull request body lists the fixture's test
-// oracle: its name and the command its manifest gives, which names the go
-// binary of the machine the suite runs on.
-func fixtureOracleLine(t *testing.T, fx *fixture.Fixture) string {
-	t.Helper()
-	man, err := manifest.Resolve(fx.RepoDir)
-	if err != nil {
-		t.Fatalf("manifest.Resolve: %v", err)
-	}
-	if man.Oracles["test"] == "" {
-		t.Fatal("the fixture's manifest has no test oracle")
-	}
-	return oracleLine("test", man.Oracles["test"])
 }

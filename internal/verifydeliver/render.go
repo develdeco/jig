@@ -460,8 +460,8 @@ func renderSlicesSection(slices []store.Slice, commits map[string]string, author
 
 // renderVerificationSection renders the ## Verification section, the gates
 // and nothing of the review's findings: the oracles green at the last clean
-// gate round (oracleNames, the manifest's own, sorted, each with its command
-// from commands) at the reviewed head,
+// gate round (oracleNames, the manifest's own, sorted, each with the command
+// that ran, from commands) at the reviewed head,
 // and one line per gate round with its scope and verdict. The findings, who
 // reviewed and how the change was fixed are the review notes' (the pull
 // request's first comment), never the body's.
@@ -491,7 +491,7 @@ func renderVerificationSection(rep reportYAML, oracleNames []string, commands ma
 }
 
 // oracleLine is an oracle as the Verification section lists it: its name and,
-// when the manifest gives one, the command it runs (on one line, in code), so
+// when the journal gives one, the command that ran (on one line, in code), so
 // a reader of the body sees what ran. A command that cannot sit in a code span
 // is left out and the name stands alone.
 func oracleLine(name, command string) string {

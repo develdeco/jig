@@ -137,7 +137,6 @@ Gate rounds:
 - Round 1: clean
 - Round 2: clean
 `
-		wantBody = strings.Replace(wantBody, "- test\n", "- "+fixtureOracleLine(t, fx)+"\n", 1)
 		if body != wantBody {
 			t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 		}

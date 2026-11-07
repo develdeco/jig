@@ -1070,13 +1070,15 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	// The commands the oracles run, from the manifest at the head the gate
-	// reviewed, so the body says what ran and not only the names. A manifest
-	// that cannot be read leaves the names alone.
-	var commands map[string]string
-	if man, err := manifest.Resolve(in.dir); err == nil {
-		commands = man.Oracles
+	// The commands the oracles ran, from the journal's oracle lines for the
+	// reviewed head (the exact command that ran), never from a working tree,
+	// which may be another branch or a later head when the gate lease is gone.
+	// An oracle no line carries a command for is listed by its name alone.
+	reviewed := t.reviewedHead()
+	if reviewed == "" {
+		reviewed = in.head
 	}
+	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
 		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack)
 	}
@@ -2015,4 +2017,37 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 			next,
 		},
 	}
+}
+
+// oracleCommandsRan is, for each oracle name, the command of the latest
+// passing oracle line of a slice that names it, recorded at the reviewed head
+// or at a commit with the same tree (the rule the gate reuses a pass by). The
+// line carries the exact command that ran, so nothing here reads a manifest.
+func oracleCommandsRan(lines []journal.Line, slices []store.Slice, dir, reviewed string) map[string]string {
+	if reviewed == "" {
+		return nil
+	}
+	oracleOf := map[string]string{}
+	for _, s := range slices {
+		oracleOf[s.ID] = s.Oracle
+	}
+	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
+	commands := map[string]string{}
+	for _, l := range lines {
+		if l.Event != journal.EventOracle || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
+			continue
+		}
+		name := oracleOf[l.Slice]
+		if name == "" {
+			continue
+		}
+		if l.Commit != reviewed {
+			other, found, _ := gitx.Resolve(dir, l.Commit+"^{tree}")
+			if !haveTree || !found || other != tree {
+				continue
+			}
+		}
+		commands[name] = l.Command
+	}
+	return commands
 }

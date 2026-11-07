@@ -11,6 +11,7 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/repohost"
 )
@@ -1021,5 +1022,89 @@ func TestPublishRecordPRJournalsAFailedReadBackAsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(warnings, ""), "read the body") {
 		t.Errorf("warnings = %q, want one for the failed read", warnings)
+	}
+}
+
+// TestPublishBodyNamesTheCommandThatRanNotTheWorkingTrees: the body's
+// Verification gives an oracle's command from the journal's oracle line for the
+// reviewed head, never from a manifest on disk, so a working tree whose manifest
+// names another command cannot put one in the body that did not run.
+func TestPublishBodyNamesTheCommandThatRanNotTheWorkingTrees(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil || len(slices) == 0 {
+		t.Fatalf("ReadSlices: %v (%d slices)", err, len(slices))
+	}
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil {
+		t.Fatalf("manifest.Resolve: %v", err)
+	}
+	onDisk := man.Oracles[slices[0].Oracle]
+	if onDisk == "" || onDisk == "the-command-that-ran" {
+		t.Fatalf("the working tree's manifest gives %q for oracle %q, want another command", onDisk, slices[0].Oracle)
+	}
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{
+		Event: journal.EventOracle, Slice: slices[0].ID, Outcome: "pass", Commit: head, Command: "the-command-that-ran",
+	}); err != nil {
+		t.Fatalf("journal.Append: %v", err)
+	}
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	if want := "- " + slices[0].Oracle + ": `the-command-that-ran`\n"; !strings.Contains(string(body), want) {
+		t.Errorf("the body lacks %q:\n%s", want, body)
+	}
+	if strings.Contains(string(body), onDisk) {
+		t.Errorf("the body names the working tree's command %q, which did not run:\n%s", onDisk, body)
+	}
+}
+
+// failingTitleHost is a host whose body reads as the render and whose title
+// read fails.
+type failingTitleHost struct {
+	repohost.Host
+	body string
+}
+
+func (h failingTitleHost) ReadPRBody(string) (string, error) { return h.body, nil }
+func (failingTitleHost) ReadPRTitle(string) (string, error)  { return "", fmt.Errorf("title refused") }
+
+// TestPublishRecordPRJournalsAFailedTitleReadAsUnknown: a body that reads as
+// the render with a title that cannot be read is unknown, never matches, the
+// read is warned of, and the pull request is recorded.
+func TestPublishRecordPRJournalsAFailedTitleReadAsUnknown(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	rendered, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the render: %v", err)
+	}
+	d.Host = failingTitleHost{Host: d.Host, body: string(rendered)}
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.Readback.Match != journal.BodyUnknown || !report.Verified {
+		t.Errorf("report = %+v, want the pull request recorded verified with the readback unknown", report)
+	}
+	if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != journal.BodyUnknown {
+		t.Errorf("the pr line says body_match %q, want %q", got, journal.BodyUnknown)
+	}
+	if !strings.Contains(strings.Join(warnings, ""), "read the title") {
+		t.Errorf("warnings = %q, want one for the failed title read", warnings)
 	}
 }
