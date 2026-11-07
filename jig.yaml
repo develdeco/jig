@@ -1,3 +1,5 @@
 jig: "1"
 project: jig
 kind: project
+publish:
+  trailer: "🤖 Generated with [Claude Code](https://claude.com/claude-code)"

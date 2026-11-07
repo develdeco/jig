@@ -156,6 +156,33 @@ func (db *objectDB) load(hex string) (storedObject, objState) {
 	return storedObject{kind: obj.Type(), body: body}, objFound
 }
 
+// loadBlob reads the content of the blob. An object that is missing, or of
+// another kind (go-git reports both as not found), is objAbsent; a blob over
+// maxObjectBytes and one that cannot be read whole are objUnsure. The caller
+// leaves both to the git program.
+func (db *objectDB) loadBlob(hex string) ([]byte, objState) {
+	obj, err := db.st.EncodedObject(plumbing.BlobObject, plumbing.NewHash(hex))
+	if err != nil {
+		if errors.Is(err, plumbing.ErrObjectNotFound) {
+			return nil, objAbsent
+		}
+		return nil, objUnsure
+	}
+	if obj.Size() > maxObjectBytes {
+		return nil, objUnsure
+	}
+	r, err := obj.Reader()
+	if err != nil {
+		return nil, objUnsure
+	}
+	defer r.Close()
+	body, err := io.ReadAll(r)
+	if err != nil || int64(len(body)) != obj.Size() {
+		return nil, objUnsure
+	}
+	return body, objFound
+}
+
 // headerValue returns the value of the first header line "<key> <value>" of
 // a commit or tag body.
 func headerValue(body []byte, key string) (string, bool) {

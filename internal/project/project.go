@@ -199,6 +199,13 @@ type Config struct {
 	// mirrored ticket's branch. A v2 store has no marker, so it is always
 	// empty there. It is not read from the store's own config.
 	BranchesFrom string
+	// PublishTrailer is the text every rendered pull request body ends with:
+	// the jig.yaml marker's publish: trailer:, empty when the marker (or no
+	// marker) sets none. Like BranchesFrom it describes the project, so a v2
+	// store, which has no marker, always has it empty. It is the fallback: a
+	// render reads the reviewed head's own jig.yaml first and uses this only
+	// when the head has none, or a member marker.
+	PublishTrailer string
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo

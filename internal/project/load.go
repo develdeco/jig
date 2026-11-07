@@ -93,11 +93,7 @@ func LoadConfig(jigHome, storeRoot, name string, roots ...string) (Config, error
 			return cfg, false
 		}
 		m, err := LoadMarker(filepath.Join(dir, MarkerFile))
-		if err != nil || m.Kind == KindMember {
-			return cfg, false
-		}
-		if m.Project != "" && len(cfg.Projects) > 0 && !contains(cfg.Projects, m.Project) {
-			// A marker of some other project that the store does not serve.
+		if err != nil || !cfg.TakesMarker(m) {
 			return cfg, false
 		}
 		return WithMarkerRepos(cfg, dir, m), true
@@ -121,6 +117,21 @@ func LoadConfig(jigHome, storeRoot, name string, roots ...string) (Config, error
 		}
 	}
 	return cfg, nil
+}
+
+// TakesMarker reports whether the store cfg describes takes the marker m as
+// its project's: a v3 store (a v2 store carries its repos itself and reads no
+// marker), a marker that is not a member's (that one points up at the
+// project, it does not describe it) and a project the store serves (a marker
+// of some other project would lend that project's repos, and its trailer, to
+// this one). LoadConfig decides every marker it finds with it, and so does
+// anything else that reads a marker from somewhere LoadConfig does not look,
+// such as a commit, so that both take the same markers.
+func (cfg Config) TakesMarker(m Marker) bool {
+	if cfg.SchemaVersion < 3 || m.Kind == KindMember {
+		return false
+	}
+	return m.Project == "" || len(cfg.Projects) == 0 || contains(cfg.Projects, m.Project)
 }
 
 // WithMarkerRepos fills cfg's name and repos from the marker m found in the
@@ -162,6 +173,9 @@ func WithMarkerRepos(cfg Config, root string, m Marker) Config {
 	cfg.Repos = repos
 	if m.Branches != nil {
 		cfg.BranchesFrom = m.Branches.From
+	}
+	if m.Publish != nil {
+		cfg.PublishTrailer = m.Publish.Trailer
 	}
 	return cfg
 }

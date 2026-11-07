@@ -7,14 +7,14 @@
 # A package that starts no git process has no entry.
 margin: 1
 packages:
-  cmd/jig: 5052
-  e2e: 6998
+  cmd/jig: 5238
+  e2e: 7031
   internal/correct: 271
   internal/fileshare: 8
   internal/fixture: 708
   internal/gitbudget: 7
   internal/gittest: 6
-  internal/gitx: 1915
+  internal/gitx: 1934
   internal/intent: 51
   internal/locate: 95
   internal/mergefacts: 169
@@ -32,5 +32,5 @@ packages:
   internal/stack: 194
   internal/store: 4000
   internal/verify: 784
-  internal/verifydeliver: 11885
+  internal/verifydeliver: 11908
   lint: 21
