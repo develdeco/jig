@@ -492,6 +492,14 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			return GateReport{}, err
 		}
 		outstanding := append(outstandingAsks(cum, reported), outstandingNotes(cum, reported)...)
+		// A pending keep on a finding this round no longer reports, at a head
+		// other than the one that raised it, is work already built: it queues
+		// no fix slice and is cleared below, read kept, then fixed (GATE-15).
+		fixedKeeps, err := keptAndFixed(d.Store, ticket, n, outstanding, files, round.Review)
+		if err != nil {
+			return GateReport{}, err
+		}
+		outstanding = withoutIDs(outstanding, fixedKeeps)
 		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, info.Triage, files, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
 		if err != nil {
 			return GateReport{}, err
@@ -508,6 +516,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if err != nil {
 			return GateReport{}, err
 		}
+		cleared = mergeIDs(cleared, fixedKeeps)
 		updated := cloneFindings(cum)
 		foldFindings(updated, routed, cleared)
 		// The verdict follows the findings alone. Who reviewed is the

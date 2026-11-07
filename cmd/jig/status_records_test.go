@@ -413,3 +413,23 @@ func TestStatusRoundsCountsByTheStatusJigRoutedTo(t *testing.T) {
 		t.Errorf("rounds block:\n%s\nwant round 2 clean with 0 fix, 1 ask, 3 note", strings.Join(got, "\n"))
 	}
 }
+
+// TestStatusFindingsNamesAnAgentsPendingDecisionAsTheAgents: the findings
+// table's decided_by is the provenance of the decision, so an agent's pending
+// dismissal reads as the agent's and never as a person's.
+func TestStatusFindingsNamesAnAgentsPendingDecisionAsTheAgents(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st := greenTicket(t, fx)
+	writeRound(t, fx.StoreDir, fx.Ticket, 1, roundFiles{
+		report: "round: 1\nverdict: fix-slices\nindependent: true\nreviewer:\n  session: s-rev\n",
+		findings: "scope: full\nreviewed_paths:\n  - a.go\nfindings:\n" +
+			finding("r1-f1", "ask", "high", "a.go", 5, "Unchecked", "asked") + "summary: round 1\n",
+	})
+	if code := triageAs(t, fx, false, "r1-f1", "dismiss", "--reason", "fine"); code != 0 {
+		t.Fatalf("jig triage exit = %d", code)
+	}
+	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",dismiss,agent") {
+		t.Errorf("row of the agent's decision = %q, want it to end in ,dismiss,agent", got)
+	}
+}

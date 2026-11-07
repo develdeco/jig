@@ -806,6 +806,12 @@ func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDe
 			// fixed it, so it reads addressed, not fixed.
 			o.status = "addressed"
 			o.detail = "addressed at " + strings.Join(cleared[id], ", ")
+		case len(cleared[id]) > 0 && decisions[id].Outcome == TriageKeep && (f.Status == StatusAsked || f.Status == StatusNoted):
+			// A keep the closing round found already fixed (GATE-15): it was
+			// kept, no slice was built from it, and a later round no longer
+			// reported it.
+			o.status = "fixed"
+			o.detail = decidedWording("kept", TriageKeep, decisions[id], "", "kept") + ", then fixed and cleared at " + strings.Join(cleared[id], ", ")
 		case len(cleared[id]) > 0:
 			o.status = "fixed"
 			if sliceID := fixedBy[id]; sliceID != "" {
