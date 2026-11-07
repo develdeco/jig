@@ -213,6 +213,53 @@ func TestPublishRecordPRCannotReadBackWithoutAHostOrABody(t *testing.T) {
 	}
 }
 
+// TestPublishRecordPRDoesNotHoldThePullRequestAgainstAnEarlierRender: when
+// the render for the reviewed head fails (a commit past the reviewed head makes
+// PublishBody refuse it), the store holds only an earlier head's render, and a
+// host serving that very render must not read as matching: the pr line says
+// unknown, the pull request is recorded, and the render's reason is a warning.
+func TestPublishRecordPRDoesNotHoldThePullRequestAgainstAnEarlierRender(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	rendered, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	path := filepath.Join(d.Store.Root, filepath.FromSlash(rendered.Repos[0].PRBody))
+	const earlier = "## What\n\n- The body as an earlier round rendered it.\n"
+	if err := os.WriteFile(path, []byte(earlier), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventPrBody, Commit: "0000000000000000000000000000000000000000"}); err != nil {
+		t.Fatal(err)
+	}
+	run(t, fx.RepoDir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", "past the reviewed head")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head,
+		"GH_STUB_BODY="+earlier, "GH_STUB_TITLE="+rendered.Repos[0].Title)
+
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.Readback.Match != journal.BodyUnknown {
+		t.Errorf("readback = %+v, want unknown: the render for the reviewed head failed and the host serves an earlier one", report.Readback)
+	}
+	if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != journal.BodyUnknown {
+		t.Errorf("the pr line says body_match %q, want %q", got, journal.BodyUnknown)
+	}
+	if report.ReviewNotes.Status != ReviewNotesNotPosted || !strings.Contains(report.ReviewNotes.Reason, "could not be rendered") {
+		t.Errorf("review notes = %+v, want not posted with the render's reason", report.ReviewNotes)
+	}
+	if !strings.Contains(strings.Join(warnings, ""), "render the review notes") {
+		t.Errorf("warnings = %q, want the failed render named", warnings)
+	}
+}
+
 // TestPublishRecordPRIgnoresWhatTheHostMadeOfTheDemo: the render shows a
 // recording by the path of the file and the host rewrites it into an upload of
 // its own, so the ## Demo section is left out of the comparison and the pull

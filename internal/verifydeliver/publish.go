@@ -1646,16 +1646,24 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	// held against its own stale self, as matching. Nothing in that render
 	// reads this repo's own pr line, which is written below.
 	var notes ReviewNotesReport
+	renderFailed := false
 	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
 		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
 			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
+			renderFailed = true
 			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
 		}
 	}
 	// The pull request is read back: it may have been opened with a body that
 	// is not the render (a What still to be written, say), and the person
 	// merging reads what the host has, not the store's file.
-	readback := readBack(host, d.Store, ticket, pt.repoName, pt.title, prURL, warn)
+	// When that render failed the store holds no render of the reviewed head,
+	// only an earlier head's, so there is nothing to hold the pull request
+	// against: the read-back is unknown, never a comparison with a stale body.
+	readback := Readback{Match: journal.BodyUnknown}
+	if !renderFailed {
+		readback = readBack(host, d.Store, ticket, pt.repoName, pt.title, prURL, warn)
+	}
 	if readback.Match == journal.BodyDiffers {
 		warn("jig: the %s of %s differs from the render of %s: update the pull request with the title and body `jig publish %s --body` reports\n", readback.Differs, prURL, ticket, ticket)
 	}
