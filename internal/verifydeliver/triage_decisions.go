@@ -102,3 +102,16 @@ func (d TriageDecision) Label(f Finding) string {
 	}
 	return d.Outcome
 }
+
+// Shown is Label, and for a finding a round already dismissed on this line's
+// word (the line is spent, the finding reads dismissed) "dismiss" too, so
+// `jig status` keeps saying who dismissed it once the round has applied it.
+func (d TriageDecision) Shown(f Finding) string {
+	if label := d.Label(f); label != "" {
+		return label
+	}
+	if !d.Pending && d.Outcome == TriageDismiss && f.Status == StatusDismissed {
+		return TriageDismiss
+	}
+	return ""
+}

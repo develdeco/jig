@@ -55,7 +55,7 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 	t.Parallel()
 	st, ticketDir := gate7Rounds(t)
 
-	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(ticketDir, 2, nil)
+	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(ticketDir, nil, 2, nil)
 	if err != nil {
 		t.Fatalf("collectFindingsWithOutcomes: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 	})
 	slices := []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f2"}}}
 
-	outcomes, _, _, err := collectFindingsWithOutcomes(ticketDir, 2, slices)
+	outcomes, _, _, err := collectFindingsWithOutcomes(ticketDir, nil, 2, slices)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 	}
 
 	slices = []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f1"}}}
-	outcomes, _, _, err = collectFindingsWithOutcomes(ticketDir, 2, slices)
+	outcomes, _, _, err = collectFindingsWithOutcomes(ticketDir, nil, 2, slices)
 	if err != nil {
 		t.Fatal(err)
 	}
