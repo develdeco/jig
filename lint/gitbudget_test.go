@@ -2,6 +2,7 @@ package lint
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,5 +157,147 @@ func TestGitBudgetIsAThreshold(t *testing.T) {
 	}
 	if c.Slack <= 0 {
 		t.Errorf("%s: slack %d, want a positive number of processes", gitBudgetFile, c.Slack)
+	}
+}
+
+// runStep runs a step's run script with bash, as the runner would, in a
+// temporary directory, with env added; the test skips without bash.
+func runStep(t *testing.T, script, dir string, env ...string) {
+	t.Helper()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("no bash to run a workflow step: %v", err)
+	}
+	cmd := exec.Command(bash, "-e", "-o", "pipefail", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("step failed: %v: %s\n%s", err, out, script)
+	}
+}
+
+// writeScript writes an executable shell script named name into dir.
+func writeScript(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCIWorkflowGitBudgetStepsDoWhatTheyName runs the label step with a
+// fake gh and the check step with a fake gitbudget, as the runner would,
+// and asserts the wiring between them: the label puts -accepted in the
+// step's output only when gh says the label is there, the check step's env
+// takes exactly that output, -accepted comes first when set, and the
+// baseline argument is the restored file when it exists and "-" when not.
+func TestCIWorkflowGitBudgetStepsDoWhatTheyName(t *testing.T) {
+	jobs := workflowJobs(t, repoRoot(t), "ci.yml")
+	test, _ := yamlMap(jobs["test"])
+	steps, _ := yamlSlice(test["steps"])
+	label, ok := stepNamed(steps, "read the git-budget-accepted label")
+	check, ok2 := stepNamed(steps, "git processes against main's baseline")
+	if !ok || !ok2 {
+		t.Fatalf("ci.yml: the test job lacks the label step or the git budget check step")
+	}
+	labelEnv, _ := yamlMap(label["env"])
+	if got, _ := yamlString(labelEnv["PULL_NUMBER"]); got != "${{ github.event.pull_request.number }}" {
+		t.Errorf("ci.yml: the label step's PULL_NUMBER = %q, want the pull request's number", got)
+	}
+	checkEnv, _ := yamlMap(check["env"])
+	if got, _ := yamlString(checkEnv["ACCEPTED"]); got != "${{ steps.accepted.outputs.flag }}" {
+		t.Fatalf("ci.yml: the check step's ACCEPTED = %q, want the label step's flag output", got)
+	}
+	labelRun, _ := yamlString(label["run"])
+	checkRun, _ := yamlString(check["run"])
+	checkRun = strings.ReplaceAll(checkRun, "${{ steps.packages.outputs.list }}", "pkg/a pkg/b")
+
+	for _, c := range []struct {
+		name        string
+		hasLabel    bool
+		hasBaseline bool
+	}{
+		{"label and baseline", true, true},
+		{"label, no baseline", true, false},
+		{"no label, baseline", false, true},
+		{"no label, no baseline", false, false},
+	} {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "bin")
+		temp := filepath.Join(dir, "temp")
+		for _, d := range []string{bin, temp} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		answer := "false"
+		if c.hasLabel {
+			answer = "true"
+		}
+		writeScript(t, bin, "gh", "echo "+answer+"\n")
+		writeScript(t, temp, "gitbudget", "printf '%s\n' \"$@\" > \"$(dirname \"$0\")/argv\"\n")
+		output := filepath.ToSlash(filepath.Join(dir, "output"))
+		if err := os.WriteFile(output, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runStep(t, labelRun, dir, "PATH="+filepath.ToSlash(bin)+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=x", "PULL_NUMBER=7", "GITHUB_REPOSITORY=o/r", "GITHUB_OUTPUT="+output)
+		data, _ := os.ReadFile(output)
+		flag := ""
+		for _, line := range strings.Split(string(data), "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "flag="); ok {
+				flag = v
+			}
+		}
+		if want := map[bool]string{true: "-accepted", false: ""}[c.hasLabel]; flag != want {
+			t.Errorf("%s: the label step's flag output = %q, want %q", c.name, flag, want)
+		}
+
+		tempSlash := filepath.ToSlash(temp)
+		if c.hasBaseline {
+			if err := os.WriteFile(filepath.Join(temp, "git-baseline.yaml"), []byte("packages: {}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		runStep(t, checkRun, dir, "RUNNER_TEMP="+tempSlash, "ACCEPTED="+flag)
+		argv, err := os.ReadFile(filepath.Join(temp, "argv"))
+		if err != nil {
+			t.Fatalf("%s: the fake gitbudget was not run: %v", c.name, err)
+		}
+		baseline := "-"
+		if c.hasBaseline {
+			baseline = tempSlash + "/git-baseline.yaml"
+		}
+		want := []string{gitBudgetFile, baseline, tempSlash + "/gitcount", "pkg/a", "pkg/b"}
+		if c.hasLabel {
+			want = append([]string{"-accepted"}, want...)
+		}
+		want = append([]string{"check"}, want...)
+		if got := strings.Fields(strings.ReplaceAll(string(argv), "\r", "")); strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("%s: gitbudget ran with %v, want %v", c.name, got, want)
+		}
+	}
+}
+
+// TestReleaseGrantsWhatCIRequests asserts release.yml's ci job grants every
+// permission a job of ci.yml requests: a called workflow can only narrow
+// its caller's token, so a request the caller does not grant refuses the
+// release run at startup, which no pull request run shows.
+func TestReleaseGrantsWhatCIRequests(t *testing.T) {
+	root := repoRoot(t)
+	release, _ := yamlMap(workflowJobs(t, root, "release.yml")["ci"])
+	if uses, _ := yamlString(release["uses"]); uses != "./.github/workflows/ci.yml" {
+		t.Fatalf("release.yml: the ci job uses %q, want the local ci.yml", uses)
+	}
+	granted, _ := yamlMap(release["permissions"])
+	rank := map[string]int{"none": 0, "read": 1, "write": 2}
+	for name, jv := range workflowJobs(t, root, "ci.yml") {
+		job, _ := yamlMap(jv)
+		requested, _ := yamlMap(job["permissions"])
+		for scope, lv := range requested {
+			want, _ := yamlString(lv)
+			got, _ := yamlString(granted[scope])
+			if rank[got] < rank[want] {
+				t.Errorf("release.yml: the ci job grants %s: %q, but ci.yml's %s job requests %q, so GitHub refuses the release run at startup", scope, got, name, want)
+			}
+		}
 	}
 }
