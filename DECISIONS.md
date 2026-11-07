@@ -4207,7 +4207,7 @@ PUB-6's round 2 and PUB-8's round 4, and PUB-7's round 3, left follow-ups on the
 
 Rejected: lowercasing the host, owner and repo in the canonical url, since the display case is the owner's and only the comparison needs to fold; naming the oracle commands from a manifest on disk, which is the reviewed head's only when the gate lease is there. Defaulted (owner: take the recommended answer, 2026-11-06): all of it.
 
-## GATE-15: a kept ask the closing round no longer reports reads fixed
+## A kept ask the closing round no longer reports reads fixed (GATE-15)
 
 A kept ask whose work was built before the next round still got a fix slice at that round's close (DEV-7's `fix-2-r1-f2`). Chosen (defaulted 2026-11-06): at a round's close, a pending `keep` on an earlier round's ask or note that the round neither reports again (`--still-present`, `--prior`) nor reviewed at the same head as the last earlier round that held it (the raising round, or a later one that reported it again or decided it: the safer reading) is cleared in that round's `findings.yaml` and queues no slice; the review notes read it "kept by <who>, then fixed and cleared at round N". The keep applies as before at the same head (nothing can have fixed it), when the round reports the finding again, and when a head is not recorded (a scripted round). Corner cases: a note is treated like an ask; a dismiss is untouched; a keep lacking a build target counts too (the work is done whatever the target); in a project of several repos the finding's own repo head decides. Recorded and shown, never refused. The check sits in `gaterun.go`, before routing, not in the `Triage` hook, because the hook sees no heads.
 
