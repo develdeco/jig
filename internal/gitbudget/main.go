@@ -5,21 +5,25 @@
 // own. git then writes one file there for every git process the package's
 // tests start, in the test binary and in anything the binary runs (the jig
 // binary e2e builds, a git that starts another git). A step after go test
-// compares those counts with .github/git-budget.yaml, so a change that adds
-// git work to the suite says so in its own diff, and a cut records its
-// lower count.
+// compares those counts with the baseline main's last run measured, so a
+// change that adds git work beyond the threshold fails its pull request
+// until a person accepts it, and nothing is committed to a budget.
 //
 // Usage:
 //
 //	gitbudget <test binary> [args...]
-//	gitbudget check <budget file> <count dir> <package>...
-//	gitbudget write <budget file> <count dir> <package>...
+//	gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>...
+//	gitbudget write <baseline file> <count dir> <package>...
 //
 // The first form runs the test binary, counting into $GITBUDGET_DIR when it
 // is set; go test runs it in the package's directory, which names the
-// package. check compares the named packages' counts with their budgets and
-// fails on a count outside the margin either way; write sets their budgets
-// to their counts. Packages are import paths, as go list prints them.
+// package. check compares the named packages' counts with the baseline (a
+// yaml packages map; "-" or a missing file means none, and the check passes
+// saying so) and fails on a count above its baseline plus max(margin
+// percent of it, slack processes) from the config; a decrease never
+// fails, and -accepted turns the overs into passes. It prints a table and
+// appends it as Markdown to $GITHUB_STEP_SUMMARY. write records the counts
+// as the baseline. Packages are import paths, as go list prints them.
 package main
 
 import (
@@ -32,22 +36,18 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
 }
 
-// run is main with its arguments and output passed in.
-func run(args []string, stdout, stderr io.Writer) int {
+// run is main with its arguments, environment and output passed in.
+func run(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: gitbudget <test binary> [args...] | gitbudget check|write <budget file> <count dir> <package>...")
+		fmt.Fprintln(stderr, "usage: gitbudget <test binary> [args...] | gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
 		return 2
 	}
 	switch args[0] {
 	case "check", "write":
-		if len(args) < 3 {
-			fmt.Fprintf(stderr, "usage: gitbudget %s <budget file> <count dir> <package>...\n", args[0])
-			return 2
-		}
-		return checkOrWrite(args[0], args[1], args[2], args[3:], stdout, stderr)
+		return checkOrWrite(args[0], args[1:], getenv, stdout, stderr)
 	}
 	dir := os.Getenv("GITBUDGET_DIR")
 	env := os.Environ()
@@ -84,12 +84,28 @@ func setEnv(env []string, name, value string) []string {
 	return append(out, name+"="+value)
 }
 
-// checkOrWrite is the check and write commands.
-func checkOrWrite(cmd, budgetFile, countDir string, packages []string, stdout, stderr io.Writer) int {
-	b, err := readBudget(budgetFile)
-	if err != nil {
-		fmt.Fprintf(stderr, "gitbudget: %v\n", err)
-		return 1
+// checkOrWrite is the check and write commands; getenv names where the job
+// summary goes ($GITHUB_STEP_SUMMARY).
+func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+	accepted := false
+	if cmd == "check" && len(args) > 0 && args[0] == "-accepted" {
+		accepted, args = true, args[1:]
+	}
+	// write <baseline file> <count dir> <package>...
+	// check <config> <baseline or -> <count dir> <package>...
+	var file, countDir, base string
+	var packages []string
+	need := 3
+	if cmd == "check" {
+		need = 4
+	}
+	if len(args) < need {
+		fmt.Fprintln(stderr, "usage: gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
+		return 2
+	}
+	file, countDir, packages = args[0], args[1], args[2:]
+	if cmd == "check" {
+		base, countDir, packages = args[1], args[2], args[3:]
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -116,22 +132,58 @@ func checkOrWrite(cmd, budgetFile, countDir string, packages []string, stdout, s
 		counts[rel] = n
 	}
 	if cmd == "write" {
-		b.set(counts)
-		if err := os.WriteFile(budgetFile, b.encode(), 0o644); err != nil {
+		if err := os.WriteFile(file, encodeBaseline(counts), 0o644); err != nil {
 			fmt.Fprintf(stderr, "gitbudget: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "gitbudget: wrote %d packages' counts to %s\n", len(counts), budgetFile)
+		fmt.Fprintf(stdout, "gitbudget: wrote %d packages' counts to %s\n", len(counts), file)
 		return 0
 	}
-	rows, ok := b.check(counts)
-	fmt.Fprint(stdout, formatRows(rows, b.Margin))
+	c, err := readConfig(file)
+	if err != nil {
+		fmt.Fprintf(stderr, "gitbudget: %v\n", err)
+		return 1
+	}
+	var b *baseline
+	if base != "-" {
+		if b, err = readBaseline(base); err != nil {
+			fmt.Fprintf(stderr, "gitbudget: %v\n", err)
+			return 1
+		}
+	}
+	var plain, md string
+	ok := true
+	if b == nil {
+		plain, md = formatCounts(counts, false), formatCounts(counts, true)
+	} else {
+		var rows []row
+		rows, ok = c.check(b.Packages, counts, accepted)
+		plain, md = formatRows(rows, c), markdownRows(rows, c)
+	}
+	fmt.Fprint(stdout, plain)
+	if path := getenv("GITHUB_STEP_SUMMARY"); path != "" {
+		if err := appendFile(path, md); err != nil {
+			fmt.Fprintf(stderr, "gitbudget: summary: %v\n", err)
+		}
+	}
 	if ok {
 		return 0
 	}
-	b.set(counts)
-	fmt.Fprintf(stdout, "\nA count is outside its budget's margin. If the change means it, put this in %s:\n\n%s", budgetFile, b.encode())
+	fmt.Fprintln(stdout, "\nA count is over its baseline plus the allowance. If the change means it, add the git-budget-accepted label to the pull request and re-run this job.")
 	return 1
+}
+
+// appendFile appends text to the file at path, making it if need be.
+func appendFile(path, text string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(text + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // moduleOf returns the module path of the go.mod in dir or the nearest
