@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -2019,29 +2020,35 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 	}
 }
 
-// oracleCommandsRan is, for each oracle name, the command of the latest
-// passing line for it, recorded at the reviewed head or at a commit with the
-// same tree (the rule the gate reuses a pass by): an oracle line of a slice
-// that names it (a pass the gate reused), or the gate-oracle line of a run the
-// gate made itself. The line carries the exact command that ran, so nothing
-// here reads a manifest.
-func oracleCommandsRan(lines []journal.Line, slices []store.Slice, dir, reviewed string) map[string]string {
+// oracleCommandsRan is, for each oracle name, the commands that ran for it, one
+// for each workspace (the latest passing line for the oracle in that workspace)
+// and each distinct, in the order the journal first records the workspaces,
+// which for the gate's own runs is the manifest's: lines recorded at the
+// reviewed head or at a commit with the same tree (the rule the gate reuses a
+// pass by). They are the oracle line of a slice that names the oracle (a pass
+// the gate reused, in the slice's workspace) and the gate-oracle line of a run
+// the gate made itself (with its workspace). The line carries the exact command
+// that ran, so nothing here reads a manifest.
+func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed string) map[string][]string {
 	if reviewed == "" {
 		return nil
 	}
-	oracleOf := map[string]string{}
-	for _, s := range slices {
-		oracleOf[s.ID] = s.Oracle
+	type sliceOf struct{ oracle, workspace string }
+	byID := map[string]sliceOf{}
+	for _, s := range built {
+		byID[s.ID] = sliceOf{s.Oracle, s.Workspace}
 	}
 	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
-	commands := map[string]string{}
+	type key struct{ oracle, workspace string }
+	var order []key
+	latest := map[key]string{}
 	for _, l := range lines {
 		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
 			continue
 		}
-		name := l.Oracle
+		name, workspace := l.Oracle, l.Workspace
 		if l.Event == journal.EventOracle {
-			name = oracleOf[l.Slice]
+			name, workspace = byID[l.Slice].oracle, byID[l.Slice].workspace
 		}
 		if name == "" {
 			continue
@@ -2052,7 +2059,17 @@ func oracleCommandsRan(lines []journal.Line, slices []store.Slice, dir, reviewed
 				continue
 			}
 		}
-		commands[name] = l.Command
+		k := key{name, workspace}
+		if _, seen := latest[k]; !seen {
+			order = append(order, k)
+		}
+		latest[k] = l.Command
+	}
+	commands := map[string][]string{}
+	for _, k := range order {
+		if !slices.Contains(commands[k.oracle], latest[k]) {
+			commands[k.oracle] = append(commands[k.oracle], latest[k])
+		}
 	}
 	return commands
 }

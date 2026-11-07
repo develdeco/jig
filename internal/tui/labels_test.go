@@ -159,3 +159,33 @@ func TestActivityLabelsAreTheWordsOfTheSubstepsBlock(t *testing.T) {
 		t.Errorf("the fix slice's label = %q, want it to say the round that sent it back", found["slice:fix-1"])
 	}
 }
+
+// TestAGateOracleLineLandsUnderTheGatesStepWithItsState: the line the gate
+// journals for an oracle run it made itself belongs to the Review step and the
+// round it ran for, says the command passed, and is drawn green; it never
+// reads as a Build line "gate-oracle pass" with no state.
+func TestAGateOracleLineLandsUnderTheGatesStepWithItsState(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-6")
+	tk := ticketOf("JIG-6")
+	g.m.w.tickets["JIG-6"] = tk
+	open := jl(at(3, 0), "JIG-6", "", journal.EventGateOpen)
+	ran := jl(at(3, 1), "JIG-6", "", journal.EventGateOracle, with("", sha('a'), "pass", "", "", ""), func(l *journal.Line) {
+		l.Oracle, l.Workspace, l.Command, l.Seconds = "test", "alpha", "go test ./alpha/...", 4
+	})
+	tk.lines = append(tk.lines, open, ran)
+
+	if got := stepOfLine(ran); got != stepReview {
+		t.Errorf("a gate-oracle line is in step %d, want the Review step %d", got, stepReview)
+	}
+	labels := subLabels{"round:1": "round 1"}
+	if got := tk.labelOf(labels, ran); got != "round 1" {
+		t.Errorf("a gate-oracle line names %q, want the round it ran for", got)
+	}
+	if got := g.m.say(tk, ran); got != "`go test ./alpha/...` passed in 4s" {
+		t.Errorf("a gate-oracle line says %q", got)
+	}
+	if got := eventState(ran); got != StateGreen {
+		t.Errorf("a gate-oracle line is drawn %q, want %q", got, StateGreen)
+	}
+}

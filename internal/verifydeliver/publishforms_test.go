@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,7 +46,17 @@ func withGateCommand(t *testing.T, fx *fixture.Fixture, want string) string {
 	if !strings.Contains(want, line) {
 		t.Fatalf("want has no %q line:\n%s", line, want)
 	}
-	return strings.Replace(want, line, "\n- test: `"+man.OracleCmd("test", man.Workspaces[len(man.Workspaces)-1])+"`\n", 1)
+	named := "\n"
+	var seen []string
+	for _, ws := range man.Workspaces {
+		cmd := man.OracleCmd("test", ws)
+		if slices.Contains(seen, cmd) {
+			continue
+		}
+		seen = append(seen, cmd)
+		named += "- test: `" + cmd + "`\n"
+	}
+	return strings.Replace(want, line, named, 1)
 }
 
 // publishPrCalls counts the calls the fake gh logged that open or edit a pull
@@ -1150,9 +1161,21 @@ func TestPublishBodyNamesTheCommandTheGateRanItself(t *testing.T) {
 	if err != nil || len(man.Workspaces) == 0 {
 		t.Fatalf("manifest.Resolve: %v (%d workspaces)", err, len(man.Workspaces))
 	}
-	want := "- test: `" + man.OracleCmd("test", man.Workspaces[len(man.Workspaces)-1]) + "`\n"
-	if body := publishedBody(t, d, fx); !strings.Contains(body, want) {
-		t.Errorf("the body lacks %q, the command the gate ran:\n%s", want, body)
+	if len(man.Workspaces) < 2 {
+		t.Fatalf("the fixture has %d workspaces, want several", len(man.Workspaces))
+	}
+	body := publishedBody(t, d, fx)
+	last := -1
+	for _, ws := range man.Workspaces {
+		want := "- test: `" + man.OracleCmd("test", ws) + "`\n"
+		i := strings.Index(body, want)
+		if i < 0 {
+			t.Errorf("the body lacks %q, the command the gate ran in workspace %s:\n%s", want, ws.ID, body)
+		}
+		if i < last {
+			t.Errorf("the body names workspace %s's command before an earlier workspace's:\n%s", ws.ID, body)
+		}
+		last = i
 	}
 }
 

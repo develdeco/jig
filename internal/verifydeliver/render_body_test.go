@@ -31,9 +31,9 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 		{Round: 2, Verdict: RoundClean, Scope: "delta"},
 		{Round: 3, Verdict: RoundClean},
 	}
-	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet", "lint"}, map[string]string{"go-test": "go test ./...", "go-vet": "go vet\n  ./..."}, rounds)
+	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet", "lint"}, map[string][]string{"go-test": {"go test ./a/...", "go test ./b/..."}, "go-vet": {"go vet\n  ./..."}}, rounds)
 	want := "## Verification\n\n" +
-		"Oracles green at the reviewed head 0123456:\n\n- go-test: `go test ./...`\n- go-vet: `go vet ./...`\n- lint\n\n" +
+		"Oracles green at the reviewed head 0123456:\n\n- go-test: `go test ./a/...`\n- go-test: `go test ./b/...`\n- go-vet: `go vet ./...`\n- lint\n\n" +
 		"Gate rounds:\n\n- Round 1 (full): findings\n- Round 2 (delta): clean\n- Round 3: clean\n"
 	if got != want {
 		t.Fatalf("renderVerificationSection =\n%s\nwant\n%s", got, want)

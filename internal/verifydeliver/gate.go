@@ -436,7 +436,7 @@ func journalGateRuns(d Deps, ticket, dir string, runs []OracleRun) error {
 				return fmt.Errorf("verifydeliver: gate: resolve HEAD for the oracle lines: %w", err)
 			}
 		}
-		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Command: run.Command, Seconds: run.Seconds, Source: "gate"}
+		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Seconds: run.Seconds, Source: "gate"}
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
 		}
