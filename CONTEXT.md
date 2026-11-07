@@ -311,7 +311,7 @@ The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (
 _Avoid_: roadmap, epic
 
 **Dependency**:
-A ticket's own blocker, recorded in its `ticket.yaml` after graduation: another ticket id plus a kind, always spelled out. `merged` means the child starts from the target branch once all of the parent's PRs have merged (see **Merge fact**); `stacked` means the child starts from the parent's branch in each repo the two share (see **Stacked start point**). Code overlap and priority are not dependencies.
+A ticket's own blocker, recorded in its `ticket.yaml` after graduation: another ticket id plus a kind, always spelled out. `merged` means the child starts from the target branch once all of the parent's PRs have merged (see **Merge fact**); `stacked` means the child starts from the parent's branch in each repo the two share (see **Stacked start point**). Code overlap and priority are not dependencies. A chart's graduation writes it, and `jig depend <ticket> --on <ticket> [--kind merged|stacked]` writes (or, with `--clear`, removes) one for a ticket that stands alone.
 _Avoid_: dep, edge
 
 **Rank**:
