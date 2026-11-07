@@ -58,7 +58,7 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice(t *testing.
 	}
 
 	round2 := filepath.Join(t.TempDir(), "round-2.json")
-	writeJSON(t, round2, map[string]any{"findings": []any{}, "still_present": []any{}, "reviewed_paths": []any{}, "summary": "round 2: nothing new"})
+	writeJSON(t, round2, map[string]any{"findings": []any{}, "still_present": []any{}, "reviewed_paths": []any{"beta/beta.go"}, "summary": "round 2: nothing new"})
 	if open := runJig(t, env, fx.StoreDir, "gate", ticket); open.Code != 0 {
 		t.Fatalf("gate (round 2) exit = %d, want 0\n%s%s", open.Code, open.Stdout, open.Stderr)
 	}
