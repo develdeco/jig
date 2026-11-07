@@ -156,9 +156,10 @@ func (db *objectDB) load(hex string) (storedObject, objState) {
 	return storedObject{kind: obj.Type(), body: body}, objFound
 }
 
-// loadBlob reads the content of the blob. A blob over maxObjectBytes, an
-// object of another kind and one that cannot be read whole are objUnsure: the
-// caller leaves them to the git program.
+// loadBlob reads the content of the blob. An object that is missing, or of
+// another kind (go-git reports both as not found), is objAbsent; a blob over
+// maxObjectBytes and one that cannot be read whole are objUnsure. The caller
+// leaves both to the git program.
 func (db *objectDB) loadBlob(hex string) ([]byte, objState) {
 	obj, err := db.st.EncodedObject(plumbing.BlobObject, plumbing.NewHash(hex))
 	if err != nil {

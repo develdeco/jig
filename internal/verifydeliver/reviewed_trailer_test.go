@@ -58,6 +58,7 @@ func TestReviewedTrailer(t *testing.T) {
 		{"a member marker takes Config's", v3, heads["member"], clone, ""},
 		{"another project's marker takes Config's", v3, heads["other project"], clone, ""},
 		{"a v2 store takes Config's", v2, heads["project"], clone, ""},
+		{"a v2 store does not read the head's jig.yaml", v2, heads["unparsable"], clone, ""},
 		{"an unparsable head jig.yaml takes Config's and warns", v3, heads["unparsable"], clone, "does not parse"},
 		{"a rev that does not resolve takes Config's and warns", v3, strings.Repeat("0", 40), clone, "read jig.yaml"},
 		{"no rev takes Config's", v3, "", clone, ""},
