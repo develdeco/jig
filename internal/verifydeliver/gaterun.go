@@ -541,6 +541,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			}
 		}
 		report.Scope = round.Review.scope()
+		report.CarriedFrom = round.Carried
 		// Findings and NeedsHuman are sorted by risk, high first, then id
 		// (sortByRiskThenID, the same helper routing sorts the human seam
 		// with): "always shown sorted by risk, high first" applies to every
@@ -573,6 +574,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 		line := journal.Line{Event: event, Effort: firstNonEmpty(round.Review.Effort, info.Effort), Model: info.Model, Attempt: n}
 		line.Session, line.Agent = info.Reviewer.Session, info.Reviewer.Agent
+		line.Carried = round.Carried
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
 		}
@@ -603,7 +605,11 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 	}
 
-	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
+	pushed := fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)
+	if report.CarriedFrom > 0 {
+		pushed += fmt.Sprintf(" (carried over from round %d)", report.CarriedFrom)
+	}
+	if err := d.Store.Push(pushed); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
 	}
 	return report, nil

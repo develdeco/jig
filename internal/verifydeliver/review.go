@@ -1081,24 +1081,32 @@ func SortedOracleNames(man manifest.Manifest) []string {
 // or one that hasn't happened yet), no reviewed_sha for repoName, or every
 // round down to the first was a builder's.
 func priorReviewedSHA(st *store.Store, ticket string, round int, repoName string) (string, error) {
+	_, rep, err := priorRound(st, ticket, round)
+	return rep.ReviewedSHA[repoName], err
+}
+
+// priorRound is the round priorReviewedSHA reads (round, or the nearest before
+// it that a builder did not review) and its report: 0 and the zero report when
+// the round reached has no report.yaml.
+func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, error) {
 	for n := round; n >= 1; n-- {
 		data, err := os.ReadFile(filepath.Join(gateRoundDir(st, ticket, n), "report.yaml"))
 		if err != nil {
 			if os.IsNotExist(err) {
-				return "", nil
+				return 0, reportYAML{}, nil
 			}
-			return "", err
+			return 0, reportYAML{}, err
 		}
 		var rep reportYAML
 		if err := yaml.Unmarshal(data, &rep); err != nil {
-			return "", err
+			return 0, reportYAML{}, err
 		}
 		if rep.Independent == IndependentNo {
 			continue
 		}
-		return rep.ReviewedSHA[repoName], nil
+		return n, rep, nil
 	}
-	return "", nil
+	return 0, reportYAML{}, nil
 }
 
 // resolveScopeBase resolves one round's scope and base sha: delta from the
@@ -1117,33 +1125,41 @@ func priorReviewedSHA(st *store.Store, ticket string, round int, repoName string
 // is then not always a commit: every reader of it gives it to git diff, which
 // takes a tree. A git too old to tell is an error.
 func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, err error) {
+	scope, base, _, _, err = resolveScope(st, ticket, leaseDir, repoName, target, round, head)
+	return scope, base, err
+}
+
+// resolveScope is resolveScopeBase and, beside them, how the head relates to
+// the head the delta starts from (kind) and that head (prior): lineOther and ""
+// for a full scope.
+func resolveScope(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, kind lineKind, prior string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
-			return "", "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
+			return "", "", lineOther, "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
 		}
 		if prior != "" {
 			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
 				kind, ownTree, lerr := classifyLine(leaseDir, prior, head, "origin/"+target)
 				if lerr != nil {
-					return "", "", lerr
+					return "", "", lineOther, "", lerr
 				}
 				switch kind {
 				case lineSame, lineClean:
-					return "delta", head, nil
+					return "delta", head, kind, prior, nil
 				case lineResolved:
-					return "delta", ownTree, nil
+					return "delta", ownTree, kind, prior, nil
 				}
-				return "delta", prior, nil
+				return "delta", prior, kind, prior, nil
 			}
 		}
 	}
 
 	base, err = scopebase.Resolve(st, ticket, leaseDir, repoName, target, head)
 	if err != nil {
-		return "", "", err
+		return "", "", lineOther, "", err
 	}
-	return "full", base, nil
+	return "full", base, lineOther, "", nil
 }
 
 // leaseChanged is the read-only guard a session that must never edit is held
@@ -1560,6 +1576,10 @@ type RepoPrep struct {
 	Repo              string
 	Head, Scope, Base string
 	MustReview        []string
+	// Line says how Head relates to Prior, the head a delta starts from:
+	// lineOther, and Prior "", for a full scope.
+	Line  lineKind
+	Prior string
 }
 
 // forRepo is the input of a round over one repo, r, made from the input of a
@@ -1631,12 +1651,12 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err))
 		}
-		scope, base, err := resolveScopeBase(in.Store, in.Ticket, r.LeaseDir, r.Name, r.Target, in.Round, head)
+		scope, base, kind, prior, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, r.Target, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
 		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.LeaseDir, Head: head, Man: r.Manifest})
-		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base})
+		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base, Line: kind, Prior: prior})
 	}
 	// in.Open (findings.go's openAndNotedFindingsList) carries a noted
 	// finding too, so it stays a citable prior target, but a noted finding
@@ -1942,14 +1962,20 @@ func (r *launchedGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	// nothing is outstanding - the previous review already covers head, so
 	// there is nothing for a reviewer session to do.
 	if prep.Empty {
-		return Round{Review: &Review{
+		// A head that only merges the target into the head a reviewer read
+		// carries that round's verdict (GATE-16).
+		carried, note, err := carriedOver(in, prep)
+		if err != nil {
+			return Round{}, false, err
+		}
+		return Round{Carried: carried, Review: &Review{
 			Scope:      prep.Scope,
 			BaseSHA:    prep.Base,
 			HeadSHA:    head,
 			Changed:    prep.Changed,
 			Deleted:    prep.Deleted,
 			MustReview: prep.MustReview,
-			Result:     ReviewResult{ReviewedPaths: []string{}},
+			Result:     ReviewResult{ReviewedPaths: []string{}, Summary: note},
 			Intent:     in.Intent,
 			IntentText: in.IntentText,
 		}}, true, nil

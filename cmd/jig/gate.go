@@ -170,6 +170,11 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if p.Carried != nil {
+		// Nothing to read: the round is recorded, carrying over the verdict of
+		// the round a reviewer read (GATE-16).
+		return printGateReport(stdout, st, ticket, *p.Carried)
+	}
 	blocks := roundBlocks(p, nil, false)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
