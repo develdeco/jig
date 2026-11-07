@@ -1014,6 +1014,45 @@ type publication struct {
 	rewrite func(links []prLink) error
 }
 
+// reviewedTrailer is the text the rendered body ends with. A render is the
+// reviewed head's, never a working tree's or another checkout's (the machine
+// map's clone may sit on an older main than the branch), so the trailer is the
+// publish.trailer of the jig.yaml at rev in dir when the head has one that is
+// not a member marker. Otherwise (no jig.yaml at the head, a member marker) it
+// is fallback, the project's marker on this machine. A head jig.yaml that does
+// not parse takes fallback too, with one warning.
+func reviewedTrailer(dir, rev, fallback string, warn func(format string, args ...any)) string {
+	if rev == "" {
+		return fallback
+	}
+	blobs, err := gitx.BlobsAtRev(dir, rev, []string{project.MarkerFile})
+	if err != nil {
+		warn("jig: read %s at %s: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
+		return fallback
+	}
+	oid, ok := blobs[project.MarkerFile]
+	if !ok {
+		return fallback
+	}
+	data, err := gitx.RunRaw(dir, "cat-file", "blob", oid)
+	if err != nil {
+		warn("jig: read %s at %s: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
+		return fallback
+	}
+	m, err := project.ParseMarker([]byte(data))
+	if err != nil {
+		warn("jig: %s at %s does not parse: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
+		return fallback
+	}
+	if m.Kind == project.KindMember {
+		return fallback
+	}
+	if m.Publish == nil {
+		return ""
+	}
+	return m.Publish.Trailer
+}
+
 // renderPublication renders the pull request body and the review notes for
 // the reviewed head from the store's records: no model is asked, no lease is
 // written, and no branch is touched. The recordings the demo shows are the
@@ -1080,8 +1119,9 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		reviewed = in.head
 	}
 	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
+	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg.PublishTrailer, in.warn)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack, d.Cfg.PublishTrailer)
+		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {

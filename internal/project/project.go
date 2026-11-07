@@ -202,7 +202,9 @@ type Config struct {
 	// PublishTrailer is the text every rendered pull request body ends with:
 	// the jig.yaml marker's publish: trailer:, empty when the marker (or no
 	// marker) sets none. Like BranchesFrom it describes the project, so a v2
-	// store, which has no marker, always has it empty.
+	// store, which has no marker, always has it empty. It is the fallback: a
+	// render reads the reviewed head's own jig.yaml first and uses this only
+	// when the head has none, or a member marker.
 	PublishTrailer string
 }
 

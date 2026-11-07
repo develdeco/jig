@@ -143,9 +143,19 @@ func LoadMarker(path string) (Marker, error) {
 	if err != nil {
 		return Marker{}, fmt.Errorf("project: read marker: %w", err)
 	}
+	m, err := ParseMarker(data)
+	if err != nil {
+		return Marker{}, fmt.Errorf("project: parse marker %s: %w", path, err)
+	}
+	return m, nil
+}
+
+// ParseMarker decodes the bytes of a jig.yaml, as LoadMarker does a file's:
+// unknown keys are ignored and empty bytes are an empty Marker.
+func ParseMarker(data []byte) (Marker, error) {
 	var m Marker
 	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&m); err != nil && !errors.Is(err, io.EOF) {
-		return Marker{}, fmt.Errorf("project: parse marker %s: %w", path, err)
+		return Marker{}, err
 	}
 	return m, nil
 }
