@@ -82,7 +82,7 @@ func (s *Store) AddQuestion(ticket, slice, body string) (Question, error) {
 // ReadQuestion reads the one question qid of ticket. A question that is not
 // there is an error that satisfies os.IsNotExist.
 func (s *Store) ReadQuestion(ticket, qid string) (Question, error) {
-	data, err := readFile(s.questionPath(ticket, qid))
+	data, err := ReadFile(s.questionPath(ticket, qid))
 	if err != nil {
 		return Question{}, err
 	}
@@ -175,7 +175,7 @@ func (s *Store) ReadQuestions(ticket string) ([]Question, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".md")
-		data, err := readFile(s.questionPath(ticket, id))
+		data, err := ReadFile(s.questionPath(ticket, id))
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func (s *Store) AnswerAs(ticket, qid, text, provenance string) (slice string, er
 	}
 	defer release()
 
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +238,7 @@ func (s *Store) Supersede(ticket, qid string) error {
 	}
 	defer release()
 
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		return err
 	}

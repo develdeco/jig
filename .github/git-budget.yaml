@@ -20,7 +20,7 @@ packages:
   internal/mergefacts: 169
   internal/migrate: 295
   internal/mirror: 1536
-  internal/observe: 221
+  internal/observe: 230
   internal/pool: 1862
   internal/project: 382
   internal/ready: 22
@@ -31,6 +31,6 @@ packages:
   internal/slicectx: 61
   internal/stack: 194
   internal/store: 4000
-  internal/verify: 744
+  internal/verify: 784
   internal/verifydeliver: 11447
   lint: 21

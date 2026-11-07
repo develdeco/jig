@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/fileshare"
+	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
@@ -417,5 +419,54 @@ func TestLooseObjectsPastAutoGC(t *testing.T) {
 				t.Fatalf("LooseObjectsPastAutoGC = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// TestWriteBlobWhileTheFileIsReplaced: a scan looping on writeBlob never makes
+// a replacement of the file (a store file swapped in by rename) fail, because
+// it reads with delete sharing. Read with os.ReadFile on Windows, a rename (no
+// retry here) is refused whenever it lands mid-read.
+func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
+	repo, err := git.PlainInit(t.TempDir(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &scan{repo: repo}
+	path := filepath.Join(t.TempDir(), "ticket.yaml")
+	body := []byte("id: JIG-1\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want, err := s.writeBlob(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = s.writeBlob(path)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for i := 0; i < 300; i++ {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileshare.Rename(tmp, path); err != nil {
+			t.Fatalf("replacement %d while writeBlob loops: %v", i, err)
+		}
+	}
+	if got, err := s.writeBlob(path); err != nil || got != want {
+		t.Fatalf("writeBlob after the replacements = %v, %v, want %v", got, err, want)
 	}
 }

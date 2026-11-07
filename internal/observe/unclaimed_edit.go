@@ -102,6 +102,7 @@ func (h *handler) editsInCheckout() bool {
 	if top, err := gitx.TopLevel(cwd); err == nil {
 		root = top
 	}
+	dir := root
 	root = pathKey(resolved(root))
 	for _, f := range h.ev.Files {
 		if f == "" {
@@ -110,7 +111,7 @@ func (h *handler) editsInCheckout() bool {
 		if !filepath.IsAbs(f) && !strings.HasPrefix(f, "/") && !strings.HasPrefix(f, `\`) {
 			f = filepath.Join(cwd, f)
 		}
-		if k := pathKey(resolved(f)); k == root || strings.HasPrefix(k, root+"/") {
+		if k := pathKey(resolved(f)); k == root || strings.HasPrefix(k, root+"/") || viaLink(f, dir) {
 			return true
 		}
 	}
@@ -141,4 +142,20 @@ func resolved(p string) string {
 		return p
 	}
 	return filepath.Join(resolved(dir), base)
+}
+
+// viaLink reports whether file lies below dir by a route that crosses a link
+// that filepath.EvalSymlinks leaves alone, a Windows junction: some directory
+// above the file is dir itself on disk.
+func viaLink(file, dir string) bool {
+	for d := filepath.Dir(filepath.Clean(file)); ; {
+		if gitx.SameDir(d, dir) {
+			return true
+		}
+		up := filepath.Dir(d)
+		if up == d {
+			return false
+		}
+		d = up
+	}
 }

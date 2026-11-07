@@ -15,7 +15,7 @@ import (
 // renaming it into place (fileshare.Replace: on Windows with POSIX semantics, so
 // the name moves in one step even while a reader holds the old file). A
 // rename that still fails because another process has path open
-// is retried until fileshare.ReplaceWindow has passed; readFile rides out
+// is retried until fileshare.ReplaceWindow has passed; ReadFile rides out
 // the same moment from the reading side.
 func AtomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)

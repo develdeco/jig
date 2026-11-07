@@ -155,7 +155,7 @@ func (s *Store) ReadTicket(ticket string) (Ticket, error) {
 // ticket.yaml directly at its old (pre-tickets/) location, before the
 // folder move Store.TicketDir alone could ever name.
 func ReadTicketFile(path string) (Ticket, error) {
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Ticket{}, nil
@@ -556,7 +556,7 @@ func (s *Store) TicketName(ticket string, rec Ticket) string {
 // when the ticket has no brief, no heading, or a heading that is nothing but
 // "<id>:".
 func (s *Store) briefName(ticket string, rec Ticket) string {
-	brief, err := readFile(filepath.Join(s.TicketDir(ticket), "brief.md"))
+	brief, err := ReadFile(filepath.Join(s.TicketDir(ticket), "brief.md"))
 	if err != nil {
 		return ""
 	}

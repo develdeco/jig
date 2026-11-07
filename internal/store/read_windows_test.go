@@ -14,7 +14,7 @@ import (
 )
 
 // TestAtomicWriteReplacesAFileAReaderHolds: on Windows AtomicWrite replaces
-// a file while a reader holds it open as readFile opens it, in one step: the
+// a file while a reader holds it open as ReadFile opens it, in one step: the
 // held handle goes on reading the old bytes, and the next read sees the new.
 func TestAtomicWriteReplacesAFileAReaderHolds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "q-001.md")
@@ -37,8 +37,8 @@ func TestAtomicWriteReplacesAFileAReaderHolds(t *testing.T) {
 	if err := AtomicWrite(path, []byte("new")); err != nil {
 		t.Fatalf("AtomicWrite over a file a reader holds: %v", err)
 	}
-	if data, err := readFile(path); err != nil || string(data) != "new" {
-		t.Errorf("readFile after the replacement = %q, %v, want new", data, err)
+	if data, err := ReadFile(path); err != nil || string(data) != "new" {
+		t.Errorf("ReadFile after the replacement = %q, %v, want new", data, err)
 	}
 	if data, err := io.ReadAll(held); err != nil || string(data) != "old" {
 		t.Errorf("the held handle reads %q, %v, want old", data, err)
@@ -66,8 +66,8 @@ func TestAtomicWriteWaitsOutAReaderThatDoesNotShareDelete(t *testing.T) {
 	if err := AtomicWrite(path, []byte("new")); err != nil {
 		t.Fatalf("AtomicWrite over a file a reader released after 200ms: %v", err)
 	}
-	if data, err := readFile(path); err != nil || string(data) != "new" {
-		t.Errorf("readFile after the replacement = %q, %v, want new", data, err)
+	if data, err := ReadFile(path); err != nil || string(data) != "new" {
+		t.Errorf("ReadFile after the replacement = %q, %v, want new", data, err)
 	}
 }
 

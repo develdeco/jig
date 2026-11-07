@@ -35,3 +35,20 @@ func TestTryLockReportsContentionWithoutProceeding(t *testing.T) {
 	}
 	again()
 }
+
+// TestThePauseBetweenTriesGrowsToItsBound: the wait between tries starts at
+// retryInterval, doubles, and stops growing at maxRetryInterval.
+func TestThePauseBetweenTriesGrowsToItsBound(t *testing.T) {
+	pause := retryInterval
+	var got []time.Duration
+	for range 6 {
+		got = append(got, pause)
+		pause = nextPause(pause)
+	}
+	want := []time.Duration{50, 100, 200, 200, 200, 200}
+	for i, w := range want {
+		if got[i] != w*time.Millisecond {
+			t.Fatalf("pauses = %v, want 50ms, 100ms, then 200ms", got)
+		}
+	}
+}
