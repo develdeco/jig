@@ -112,7 +112,9 @@ type ReviewNotesReport struct {
 	// the status is not posted.
 	File string
 	// Reason is why they were not posted: the repo has no pull-request host,
-	// or the host's error.
+	// the host's error, the notes are not rendered, or they could not be
+	// rendered for the reviewed head (the store's earlier notes are then left
+	// off the pull request).
 	Reason string
 }
 
@@ -1574,9 +1576,14 @@ type RecordReport struct {
 // takes one pull request for each repo, and says which with o.Repo; the last
 // to be recorded finishes the publish, which writes what a publish leaves in
 // the store (changelogs, ledger entry, evidence) and journals publish-done.
-// Once the pull request checks out it posts the repo's review notes on it
-// (postReviewNotes): a failed post is a warning, and the pull request stays
-// recorded. It pushes the store, changes no lease and no branch and pushes
+// Once the pull request checks out it renders the body and the review notes
+// again when the store's are not the reviewed head's (notesRenderedFor: the
+// latest pr-body is at another head, is not after the last closed round, or a
+// publish approval of the head came after it; a pr-body line is journaled) and
+// posts the notes on it (postReviewNotes), matching earlier posts by the parsed
+// pull request without case and journaling its canonical url. A failed post is
+// a warning, and the pull request stays recorded; notes that could not be
+// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no lease and no branch and pushes
 // nothing of the repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket

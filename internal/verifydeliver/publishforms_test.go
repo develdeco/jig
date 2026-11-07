@@ -780,9 +780,10 @@ func TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody(t *testing
 }
 
 // TestPublishBareFormApprovalComesFromHowItWasConfirmed: an interactive yes
-// journals a person's publish-approved line for the head, and the review notes
-// and the pr line say it; --yes stands for no person, so it journals none and
-// the notes say no recorded approval.
+// at a terminal journals a person's publish-approved line for the head, and the
+// review notes and the pr line say it; a piped y, off a terminal, journals an
+// agent's; --yes stands for no person, so it journals none and the notes say no
+// recorded approval.
 func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
