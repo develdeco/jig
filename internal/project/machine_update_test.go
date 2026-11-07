@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/filelock"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/home"
 )
 
@@ -165,32 +166,69 @@ func TestUpdateMachineNeverWritesWithoutTheLock(t *testing.T) {
 	}
 }
 
-// TestReadRetryingRidesOutAFailure: a read that fails for a moment is tried
-// again and returns the data; a missing file is not retried; one that keeps
-// failing gives up after the window with its error.
-func TestReadRetryingRidesOutAFailure(t *testing.T) {
-	calls := 0
-	flaky := func(string) ([]byte, error) {
-		calls++
-		if calls < 4 {
-			return nil, errors.New("The process cannot access the file because it is being used by another process.")
+// TestSaveMachineWaitsOutAHeldLock: a SaveMachine that finds the mapping's
+// lock held waits for its holder and then writes, instead of failing at once.
+func TestSaveMachineWaitsOutAHeldLock(t *testing.T) {
+	jigHome := t.TempDir()
+	path := home.MachinePath(jigHome)
+	release, held, err := filelock.TryLock(path, time.Second)
+	if err != nil || !held {
+		t.Fatalf("holding the lock: held=%v err=%v", held, err)
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		release()
+	}()
+	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := SaveMachine(jigHome, want); err != nil {
+		t.Fatalf("SaveMachine waiting on a lock released in 150ms = %v", err)
+	}
+	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("mapping after the wait = %+v, %v; want %+v", got, err, want)
+	}
+}
+
+// TestLoadMachineWhileTheMappingIsReplaced: a reader looping on LoadMachine
+// never makes a replacement of the mapping fail, because it reads through the
+// store's read, which opens with delete sharing. Read with os.ReadFile on
+// Windows, a rename (no retry here) is refused whenever it lands mid-read.
+func TestLoadMachineWhileTheMappingIsReplaced(t *testing.T) {
+	jigHome := t.TempDir()
+	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := SaveMachine(jigHome, want); err != nil {
+		t.Fatal(err)
+	}
+	path := home.MachinePath(jigHome)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = LoadMachine(jigHome)
+			}
 		}
-		return []byte("ok"), nil
-	}
-	data, err := readRetrying("p", flaky, 5*time.Second)
-	if err != nil || string(data) != "ok" || calls != 4 {
-		t.Fatalf("readRetrying = %q, %v after %d calls; want ok after 4", data, err, calls)
-	}
+	}()
+	defer func() { close(stop); <-done }()
 
-	calls = 0
-	missing := func(string) ([]byte, error) { calls++; return nil, os.ErrNotExist }
-	if _, err := readRetrying("p", missing, 5*time.Second); !os.IsNotExist(err) || calls != 1 {
-		t.Fatalf("a missing file: err=%v calls=%d, want ErrNotExist after 1 call", err, calls)
+	for i := 0; i < 300; i++ {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileshare.Rename(tmp, path); err != nil {
+			t.Fatalf("replacement %d while LoadMachine loops: %v", i, err)
+		}
 	}
-
-	stuck := errors.New("stuck")
-	calls = 0
-	if _, err := readRetrying("p", func(string) ([]byte, error) { calls++; return nil, stuck }, 50*time.Millisecond); !errors.Is(err, stuck) || calls < 2 {
-		t.Fatalf("a read that keeps failing: err=%v calls=%d, want its error after retries", err, calls)
+	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadMachine after the replacements = %+v, %v; want %+v", got, err, want)
 	}
 }

@@ -468,7 +468,7 @@ func entryOfRecordPath(rel string) (e TrackerEntry, flat bool) {
 func (s *Store) readTrackerRecord(rel string) TrackerRecord {
 	entry, flat := entryOfRecordPath(rel)
 	rec := TrackerRecord{Entry: entry, Rel: rel, Flat: flat}
-	data, err := readFile(filepath.Join(s.Root, filepath.FromSlash(rel)))
+	data, err := ReadFile(filepath.Join(s.Root, filepath.FromSlash(rel)))
 	if err != nil {
 		rec.Err = err
 		return rec
@@ -570,7 +570,7 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	// own folder.
 	same := false
 	if s.entryIsFolder(e) {
-		have, rerr := readFile(s.TrackerRecordPath(e))
+		have, rerr := ReadFile(s.TrackerRecordPath(e))
 		same = rerr == nil && bytes.Equal(have, data)
 	}
 	if !same {

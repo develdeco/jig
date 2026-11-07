@@ -68,7 +68,7 @@ func renderIntent(in Intent) string {
 // ReadIntent reads ticket's intent.md. ok is false when it does not exist;
 // any other read or parse failure is returned as an error.
 func (s *Store) ReadIntent(ticket string) (Intent, bool, error) {
-	data, err := readFile(s.IntentPath(ticket))
+	data, err := ReadFile(s.IntentPath(ticket))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Intent{}, false, nil

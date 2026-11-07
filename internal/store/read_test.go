@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TestAMissingFileFailsAtOnceUnlessItsWriteIsUnderWay: readFile retries a
+// TestAMissingFileFailsAtOnceUnlessItsWriteIsUnderWay: ReadFile retries a
 // missing file only while an AtomicWrite of it holds a fresh temp file
 // beside it, so a file that is simply not there costs no wait, and a
 // writer's leftover temp file older than replaceWindow is not a write.
@@ -18,11 +18,11 @@ func TestAMissingFileFailsAtOnceUnlessItsWriteIsUnderWay(t *testing.T) {
 	path := filepath.Join(dir, "q-001.md")
 
 	start := time.Now()
-	if _, err := readFile(path); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("readFile of a missing file = %v, want not found", err)
+	if _, err := ReadFile(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("ReadFile of a missing file = %v, want not found", err)
 	}
 	if took := time.Since(start); took > replaceWindow/4 {
-		t.Errorf("readFile of a missing file took %s, want no wait", took)
+		t.Errorf("ReadFile of a missing file took %s, want no wait", took)
 	}
 	if replacementPending(path) {
 		t.Error("a write is pending with no temp file")
@@ -61,9 +61,9 @@ func TestAReadDuringAFirstWriteGetsTheFile(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		done <- os.Rename(tmp, path)
 	}()
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	if err != nil || string(data) != "whole" {
-		t.Errorf("readFile during the first write = %q, %v, want the file", data, err)
+		t.Errorf("ReadFile during the first write = %q, %v, want the file", data, err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)

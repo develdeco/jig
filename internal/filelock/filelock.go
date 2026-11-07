@@ -14,14 +14,14 @@ import (
 const retryInterval = 50 * time.Millisecond
 
 // maxRetryInterval is where the wait between tries stops growing, so a lock
-// held a long time is asked for ten times a second, not twenty.
+// held a long time is asked for five times a second, not twenty.
 const maxRetryInterval = 200 * time.Millisecond
 
 // TryLock acquires an advisory, exclusive lock on path's sidecar file
 // ("<path>.lock", created if absent and never removed). It retries every 50ms
-// (the pause growing to 200ms) until timeout elapses; on timeout it returns held=false and a nil error,
-// and the caller decides what that means: whether to proceed unlocked, and in
-// what words to say so.
+// (the pause growing to 200ms) until timeout elapses; on timeout it returns
+// held=false and a nil error, and the caller decides what that means: whether
+// to proceed unlocked, and in what words to say so.
 func TryLock(path string, timeout time.Duration) (release func(), held bool, err error) {
 	release = func() {}
 	lockPath := path + ".lock"
@@ -54,8 +54,11 @@ func TryLock(path string, timeout time.Duration) (release func(), held bool, err
 			return release, false, nil
 		}
 		time.Sleep(pause)
-		if pause < maxRetryInterval {
-			pause = min(pause*2, maxRetryInterval)
-		}
+		pause = nextPause(pause)
 	}
+}
+
+// nextPause is the wait after pause: double, up to maxRetryInterval.
+func nextPause(pause time.Duration) time.Duration {
+	return min(pause*2, maxRetryInterval)
 }

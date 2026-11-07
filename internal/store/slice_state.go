@@ -50,7 +50,7 @@ func (s *Store) stateFile(ticket, slice string) string {
 // ReadSliceState reads the slice state; an absent file reads as the
 // zero-attempt queued state.
 func (s *Store) ReadSliceState(ticket, slice string) (SliceState, error) {
-	data, err := readFile(s.stateFile(ticket, slice))
+	data, err := ReadFile(s.stateFile(ticket, slice))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return SliceState{State: "queued"}, nil

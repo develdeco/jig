@@ -108,7 +108,7 @@ func (s *Store) Claims() ([]ClaimLine, error) {
 		}
 		return parseClaims(view.data), nil
 	}
-	data, err := readFile(filepath.Join(s.Root, claimsFile))
+	data, err := ReadFile(filepath.Join(s.Root, claimsFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -376,7 +376,7 @@ func (s *Store) fileClaimsTx(decide claimDecision) (bool, error) {
 			if err != nil {
 				return "", nil, err
 			}
-			data, err := readFile(path)
+			data, err := ReadFile(path)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return "", nil, err
 			}

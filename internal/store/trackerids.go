@@ -73,7 +73,7 @@ func (s *Store) TrackerIDs(ticket string) (TrackerIDs, error) {
 // legacyTrackerIDs reads ticket's ids from the record in its own folder.
 func (s *Store) legacyTrackerIDs(ticket string) (TrackerIDs, error) {
 	path := s.githubRecordPath(ticket)
-	data, err := readFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return TrackerIDs{}, nil

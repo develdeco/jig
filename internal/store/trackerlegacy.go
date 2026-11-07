@@ -79,7 +79,7 @@ func ownersOf(tickets, charts []string) []TrackerOwner {
 // ReadLegacyTrackerRecord reads a record in its old place as the mapping it
 // is: every key, in file order.
 func (s *Store) ReadLegacyTrackerRecord(l LegacyTrackerRecord) (yaml.Node, error) {
-	data, err := readFile(filepath.Join(s.Root, l.Rel))
+	data, err := ReadFile(filepath.Join(s.Root, l.Rel))
 	if err != nil {
 		return yaml.Node{}, err
 	}
