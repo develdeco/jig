@@ -1081,7 +1081,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack)
+		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack, d.Cfg.PublishTrailer)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {

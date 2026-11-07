@@ -639,14 +639,15 @@ func escapeDemoHTML(text string) string {
 // is the shape .github/CONTRIBUTING.md gives it and nothing else - What (the
 // session's bullets, what), Demo (when there is a pick) and Verification (the
 // gates) - after the Stacked on and Part of sections a stacked or multi-repo
-// ticket's pull request names its neighbours in. It is rendered from recorded
-// structure with no model call.
+// ticket's pull request names its neighbours in, and before the trailer the
+// project's jig.yaml ends every body with, when it sets one. It is rendered
+// from recorded structure with no model call.
 //
 // The second return is picked itself, the section publish rendered from the
 // recordings it picked (ADR 0029), or the zero value when there is no pick: a
 // body has a ## Demo section only from a pick.
 func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
-	oracleNames []string, commands map[string][]string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, DemoRenderResult, error) {
+	oracleNames []string, commands map[string][]string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo, trailer string) (string, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -670,6 +671,7 @@ func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
 	b.WriteString(demoResult.Section)
 
 	b.WriteString(renderVerificationSection(rep, oracleNames, commands, rounds))
+	b.WriteString(renderTrailer(trailer))
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return "", DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: create dir: %w", err)
@@ -678,6 +680,21 @@ func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
 		return "", DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: write: %w", err)
 	}
 	return filepath.ToSlash(relPath), demoResult, nil
+}
+
+// renderTrailer renders the text the project's jig.yaml ends every pull
+// request body with: after a blank line, the trailer with CRLF read as LF and
+// surrounding whitespace trimmed (a multi-line trailer keeps its lines), and a
+// final newline like the sections before it. The pull request a session opens
+// from the render is read back against it, so a trailer is part of the render
+// and not something a session appends. An empty trailer renders nothing, which
+// leaves the body byte for byte as it is without one.
+func renderTrailer(trailer string) string {
+	trailer = strings.TrimSpace(strings.ReplaceAll(trailer, "\r\n", "\n"))
+	if trailer == "" {
+		return ""
+	}
+	return "\n" + trailer + "\n"
 }
 
 // prLink is the pull request of another repo of the same ticket: the repo and

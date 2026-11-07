@@ -54,6 +54,8 @@ type Marker struct {
 	Branches *BranchRule `yaml:"branches,omitempty"`
 	// Budget is the default spend limit for a ticket.
 	Budget *Budget `yaml:"budget,omitempty"`
+	// Publish is how the project's pull requests are written.
+	Publish *Publish `yaml:"publish,omitempty"`
 	// Distribution says how the project's repos are shared among people.
 	Distribution string `yaml:"distribution,omitempty"`
 	// Unattended allows work to run without a person watching.
@@ -74,6 +76,17 @@ type MarkerRepo struct {
 type Expects struct {
 	Harness []string `yaml:"harness,omitempty"`
 	Hooks   bool     `yaml:"hooks,omitempty"`
+}
+
+// Publish is how a project writes its pull requests. How they are written
+// describes the project, so the marker holds it (store.yaml keeps how tickets
+// are written).
+type Publish struct {
+	// Trailer is the text every rendered pull request body ends with, after
+	// its Verification section, so the pull request a session opens from the
+	// render reads back as the render even when the project asks for a line
+	// (an attribution, say) at the end of every description.
+	Trailer string `yaml:"trailer,omitempty"`
 }
 
 // BranchRule is how branch names are derived: From names the tracker whose

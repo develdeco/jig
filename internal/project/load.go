@@ -163,6 +163,9 @@ func WithMarkerRepos(cfg Config, root string, m Marker) Config {
 	if m.Branches != nil {
 		cfg.BranchesFrom = m.Branches.From
 	}
+	if m.Publish != nil {
+		cfg.PublishTrailer = m.Publish.Trailer
+	}
 	return cfg
 }
 
