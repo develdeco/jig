@@ -367,7 +367,13 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 	}
 	if coversSuite(man, reused) {
 		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
-		return withSlices(runs, repo, man, slices), err
+		if err != nil {
+			return nil, err
+		}
+		if err := journalGateRuns(d, ticket, dir, runs); err != nil {
+			return nil, err
+		}
+		return withSlices(runs, repo, man, slices), nil
 	}
 
 	var handles []*envrun.Handle
@@ -408,7 +414,38 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 	}
 
 	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
-	return withSlices(runs, repo, man, slices), err
+	if err != nil {
+		return nil, err
+	}
+	if err := journalGateRuns(d, ticket, dir, runs); err != nil {
+		return nil, err
+	}
+	return withSlices(runs, repo, man, slices), nil
+}
+
+// journalGateRuns journals a gate-oracle line for each oracle the gate ran
+// itself (not one reused from a slice's pass, which has its own oracle line),
+// at dir's HEAD with the command that ran, so a publish names that command
+// beside the oracle. It is no oracle line: a slice's state and the frontier
+// read those, and the gate's run is no slice's verification.
+func journalGateRuns(d Deps, ticket, dir string, runs []OracleRun) error {
+	var head string
+	for _, run := range runs {
+		if run.ReusedFrom != "" {
+			continue
+		}
+		if head == "" {
+			var err error
+			if head, err = gitx.RevParse(dir, "HEAD"); err != nil {
+				return fmt.Errorf("verifydeliver: gate: resolve HEAD for the oracle lines: %w", err)
+			}
+		}
+		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Seconds: run.Seconds, Source: "gate"}
+		if err := journal.Append(d.Store, ticket, line); err != nil {
+			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
+		}
+	}
+	return nil
 }
 
 // withSlices names, on each run, the slices whose oracle it is in its

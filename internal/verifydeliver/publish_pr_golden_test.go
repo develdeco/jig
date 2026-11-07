@@ -171,6 +171,7 @@ Gate rounds:
 - Round 2 (delta): findings
 - Round 3 (delta): clean
 `, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
+	wantBody = withGateCommand(t, fx, wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
@@ -330,6 +331,7 @@ Gate rounds:
 - Round 1: findings
 - Round 2: clean
 `
+	wantBody = withGateCommand(t, fx, wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}

@@ -34,7 +34,13 @@ type Line struct {
 	// that was up while it ran ("" for none): what the gate must match to
 	// reuse the run (ADR 0021).
 	Command string `json:"command,omitempty"`
-	Env     string `json:"env,omitempty"`
+	// Oracle is a gate-oracle line's manifest oracle name: the oracle the gate
+	// ran itself, with Command at Commit (the head it reviewed).
+	Oracle string `json:"oracle,omitempty"`
+	// Workspace is a gate-oracle line's manifest workspace: the one Command
+	// ran for, since an oracle has a command for each workspace.
+	Workspace string `json:"workspace,omitempty"`
+	Env       string `json:"env,omitempty"`
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`

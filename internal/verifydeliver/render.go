@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -460,18 +461,21 @@ func renderSlicesSection(slices []store.Slice, commits map[string]string, author
 
 // renderVerificationSection renders the ## Verification section, the gates
 // and nothing of the review's findings: the oracles green at the last clean
-// gate round (oracleNames, the manifest's own, sorted) at the reviewed head,
+// gate round (oracleNames, the manifest's own, sorted, each with the command
+// that ran, from commands) at the reviewed head,
 // and one line per gate round with its scope and verdict. The findings, who
 // reviewed and how the change was fixed are the review notes' (the pull
 // request's first comment), never the body's.
-func renderVerificationSection(rep reportYAML, oracleNames []string, rounds []RoundRecord) string {
+func renderVerificationSection(rep reportYAML, oracleNames []string, commands map[string][]string, rounds []RoundRecord) string {
 	var b strings.Builder
 	b.WriteString("## Verification\n\n")
 
 	if len(oracleNames) > 0 {
 		fmt.Fprintf(&b, "Oracles green%s:\n\n", reviewedHeadWords(rep.ReviewedSHA))
 		for _, name := range oracleNames {
-			fmt.Fprintf(&b, "- %s\n", name)
+			for _, line := range oracleLines(name, commands[name]) {
+				fmt.Fprintf(&b, "- %s\n", line)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -487,6 +491,34 @@ func renderVerificationSection(rep reportYAML, oracleNames []string, rounds []Ro
 		}
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// oracleLines are the lines an oracle takes in the Verification section: one
+// for each distinct command that ran for it (one for each workspace), or its
+// name alone when none is named.
+func oracleLines(name string, commands []string) []string {
+	var out []string
+	for _, c := range commands {
+		if line := oracleLine(name, c); !slices.Contains(out, line) {
+			out = append(out, line)
+		}
+	}
+	if len(out) == 0 {
+		return []string{name}
+	}
+	return out
+}
+
+// oracleLine is an oracle as the Verification section lists it: its name and,
+// when the journal gives one, the command that ran (on one line, in code), so
+// a reader of the body sees what ran. A command that cannot sit in a code span
+// is left out and the name stands alone.
+func oracleLine(name, command string) string {
+	command = strings.Join(strings.Fields(command), " ")
+	if command == "" || strings.Contains(command, "`") {
+		return name
+	}
+	return name + ": `" + command + "`"
 }
 
 // reviewedHeadWords is " at the reviewed head <sha>" for the heads the gate
@@ -614,7 +646,7 @@ func escapeDemoHTML(text string) string {
 // recordings it picked (ADR 0029), or the zero value when there is no pick: a
 // body has a ## Demo section only from a pick.
 func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
-	oracleNames []string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, DemoRenderResult, error) {
+	oracleNames []string, commands map[string][]string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo) (string, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -637,7 +669,7 @@ func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
 	}
 	b.WriteString(demoResult.Section)
 
-	b.WriteString(renderVerificationSection(rep, oracleNames, rounds))
+	b.WriteString(renderVerificationSection(rep, oracleNames, commands, rounds))
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return "", DemoRenderResult{}, fmt.Errorf("verifydeliver: pr body: create dir: %w", err)
