@@ -1017,34 +1017,33 @@ type publication struct {
 // reviewedTrailer is the text the rendered body ends with. A render is the
 // reviewed head's, never a working tree's or another checkout's (the machine
 // map's clone may sit on an older main than the branch), so the trailer is the
-// publish.trailer of the jig.yaml at rev in dir when the head has one that is
-// not a member marker. Otherwise (no jig.yaml at the head, a member marker) it
-// is fallback, the project's marker on this machine. A head jig.yaml that does
-// not parse takes fallback too, with one warning.
-func reviewedTrailer(dir, rev, fallback string, warn func(format string, args ...any)) string {
-	if rev == "" {
+// publish.trailer of the jig.yaml at rev in dir when the store takes that
+// marker as its project's (Config.TakesMarker: a v3 store, not a member
+// marker, a project the store serves, as LoadConfig decides for the marker on
+// disk). Otherwise (a v2 store, no jig.yaml at the head, a member marker,
+// another project's marker) it is cfg.PublishTrailer, the project's marker on
+// this machine. A head jig.yaml that cannot be read or does not parse takes
+// that too, with one warning. The blob is read without a git process in the
+// plain case (gitx.BlobAt), so a render adds none to the git budgets.
+func reviewedTrailer(dir, rev string, cfg project.Config, warn func(format string, args ...any)) string {
+	fallback := cfg.PublishTrailer
+	if rev == "" || cfg.SchemaVersion < 3 {
 		return fallback
 	}
-	blobs, err := gitx.BlobsAtRev(dir, rev, []string{project.MarkerFile})
+	data, found, err := gitx.BlobAt(dir, rev, project.MarkerFile)
 	if err != nil {
 		warn("jig: read %s at %s: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
 		return fallback
 	}
-	oid, ok := blobs[project.MarkerFile]
-	if !ok {
+	if !found {
 		return fallback
 	}
-	data, err := gitx.RunRaw(dir, "cat-file", "blob", oid)
-	if err != nil {
-		warn("jig: read %s at %s: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
-		return fallback
-	}
-	m, err := project.ParseMarker([]byte(data))
+	m, err := project.ParseMarker(data)
 	if err != nil {
 		warn("jig: %s at %s does not parse: %v; the trailer is the project's marker\n", project.MarkerFile, rev, err)
 		return fallback
 	}
-	if m.Kind == project.KindMember {
+	if !cfg.TakesMarker(m) {
 		return fallback
 	}
 	if m.Publish == nil {
@@ -1119,7 +1118,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		reviewed = in.head
 	}
 	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
-	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg.PublishTrailer, in.warn)
+	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg, in.warn)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
 		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
 	}

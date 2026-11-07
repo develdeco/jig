@@ -47,6 +47,7 @@ func TestInProcessReadsMatchGit(t *testing.T) {
 	t.Run("work tree probe", func(t *testing.T) { checkProbe(t, fx) })
 	t.Run("tree entries", func(t *testing.T) { checkTreeEntries(t, fx) })
 	t.Run("paths in a commit", func(t *testing.T) { checkHasPathAt(t, fx) })
+	t.Run("blob content", func(t *testing.T) { checkBlobAt(t, fx) })
 	t.Run("a replace ref", func(t *testing.T) { checkObjectsGitReadsDifferently(t, fx, fx.repl, "HEAD^") })
 	t.Run("alternates", func(t *testing.T) { checkObjectsGitReadsDifferently(t, fx, fx.alt, "") })
 }
@@ -727,6 +728,38 @@ func checkObjectsGitReadsDifferently(t *testing.T, fx *readFixture, dir, parent 
 		_, catErr := Run(dir, "cat-file", "-e", "HEAD:"+path)
 		if got := HasPathAt(dir, "HEAD", path); got != (catErr == nil) {
 			t.Errorf("HasPathAt(HEAD, %s) = %v; git cat-file -e: %v", path, got, catErr)
+		}
+	}
+}
+
+// checkBlobAt compares BlobAt and its in-process read with "git cat-file blob":
+// the same bytes for a file, found false for a path the commit lacks or holds
+// as a directory, and an error for a revision that names no commit.
+func checkBlobAt(t *testing.T, fx *readFixture) {
+	c3 := fx.shas["c3"]
+	for _, c := range []struct{ rev, path string }{
+		{c3, "a.txt"}, {c3, "dir/sub/c.txt"}, {c3, "sp ace.txt"}, {"HEAD", "a.txt"}, {"refs/heads/main", "dir/b.txt"},
+		{fx.shas["c1"], "a.txt"}, {"main", "a.txt"},
+		{c3, "nope"}, {c3, "dir"}, {c3, "dir/nope"}, {c3, "subm"},
+	} {
+		want, werr := RunRaw(fx.main, "cat-file", "blob", c.rev+":"+c.path)
+		got, found, err := BlobAt(fx.main, c.rev, c.path)
+		if err != nil || found != (werr == nil) || (found && string(got) != want) {
+			t.Errorf("BlobAt(%s, %s) = %q, %v, %v; git %q, %v", c.rev, c.path, got, found, err, want, werr)
+		}
+		if p, f, ok := blobAtInProcess(fx.main, c.rev, c.path, os.LookupEnv); ok && (f != (werr == nil) || (f && string(p) != want)) {
+			t.Errorf("blobAtInProcess(%s, %s) = %q, %v; git %q, %v", c.rev, c.path, p, f, want, werr)
+		}
+	}
+	if p, f, ok := blobAtInProcess(fx.main, c3, "dir/sub/c.txt", os.LookupEnv); !ok || !f || len(p) == 0 {
+		t.Errorf("a file in a commit was not read in process: %q, %v, %v", p, f, ok)
+	}
+	if _, f, ok := blobAtInProcess(fx.main, c3, "nope", os.LookupEnv); !ok || f {
+		t.Errorf("a path the commit lacks was not answered in process: found %v, ok %v", f, ok)
+	}
+	for _, rev := range []string{fx.fakeSHA, "refs/heads/nope", "nope"} {
+		if _, found, err := BlobAt(fx.main, rev, "a.txt"); err == nil || found {
+			t.Errorf("BlobAt(%s) = found %v, err %v; want an error", rev, found, err)
 		}
 	}
 }

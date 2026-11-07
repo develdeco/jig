@@ -69,3 +69,29 @@ func TestMarkerReadsThePublishTrailerFromYAML(t *testing.T) {
 		t.Errorf("a marker without publish: Publish = %+v (err %v), want nil", m.Publish, err)
 	}
 }
+
+// TestConfigTakesMarker: a marker is the store's project's only for a v3
+// store, when it is not a member's and when the store serves its project (or
+// names none, or the marker names none).
+func TestConfigTakesMarker(t *testing.T) {
+	t.Parallel()
+	v3 := Config{SchemaVersion: 3, Projects: []string{"demo"}}
+	for name, tc := range map[string]struct {
+		cfg  Config
+		m    Marker
+		want bool
+	}{
+		"a project the store serves":     {v3, Marker{Project: "demo", Kind: KindProject}, true},
+		"a marker naming no project":     {v3, Marker{Kind: KindProject}, true},
+		"a store naming no projects":     {Config{SchemaVersion: 3}, Marker{Project: "other", Kind: KindProject}, true},
+		"an orchestrator":                {v3, Marker{Project: "demo", Kind: KindOrchestrator}, true},
+		"a member marker":                {v3, Marker{Project: "demo", Kind: KindMember}, false},
+		"another project's marker":       {v3, Marker{Project: "other", Kind: KindProject}, false},
+		"a v2 store":                     {Config{SchemaVersion: 2, Projects: []string{"demo"}}, Marker{Project: "demo", Kind: KindProject}, false},
+		"a store with no schema version": {Config{}, Marker{Project: "demo", Kind: KindProject}, false},
+	} {
+		if got := tc.cfg.TakesMarker(tc.m); got != tc.want {
+			t.Errorf("%s: TakesMarker = %v, want %v", name, got, tc.want)
+		}
+	}
+}

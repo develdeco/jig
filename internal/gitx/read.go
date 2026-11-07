@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -317,6 +318,61 @@ func HasPathAt(dir, rev, path string) bool {
 	}
 	_, err := Run(dir, "cat-file", "-e", rev+":"+path)
 	return err == nil
+}
+
+// blobAtInProcess is BlobAt without the git program: ok is false when it
+// cannot say. found false with ok true means the revision names a tree that
+// has no entry at path, which the tree walk settles.
+func blobAtInProcess(dir, rev, path string, env envLookup) (content []byte, found, ok bool) {
+	spec, parsed := parseRev(rev + ":" + path)
+	if !parsed || spec.suffix != ":" {
+		return nil, false, false
+	}
+	r := newReader(dir, env)
+	defer r.close()
+	sha, res := r.rev(spec)
+	switch res {
+	case resNoEntry:
+		return nil, false, true
+	case resFound:
+	default:
+		return nil, false, false
+	}
+	db, haveDB := r.objects()
+	if !haveDB {
+		return nil, false, false
+	}
+	body, st := db.loadBlob(sha)
+	if st != objFound {
+		return nil, false, false
+	}
+	return body, true, true
+}
+
+// BlobAt returns the content of the file at path in the commit rev names in
+// dir, as "git cat-file blob rev:path" prints it, untrimmed and from standard
+// output alone, so a warning git writes to standard error is never part of the
+// content. found is false when rev names a commit that has no file at path (a
+// directory or a submodule there is no file); an error is a rev that names no
+// commit, or a failure of git itself. A path in the plain form is read in
+// process; anything the in-process reads cannot answer goes to the git
+// program.
+func BlobAt(dir, rev, path string) (content []byte, found bool, err error) {
+	if content, found, ok := blobAtInProcess(dir, rev, path, os.LookupEnv); ok {
+		return content, found, nil
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, []string{"cat-file", "blob", rev + ":" + path}); err == nil {
+		return stdout.Bytes(), true, nil
+	}
+	_, ok, err := ResolveCommit(dir, rev)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, fmt.Errorf("gitx: %s names no commit in %s", rev, dir)
+	}
+	return nil, false, nil
 }
 
 // headBranchInProcess is HeadBranch without the git program: ok is false
