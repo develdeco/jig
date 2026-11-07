@@ -59,7 +59,8 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	}
 
 	round2Path := filepath.Join(t.TempDir(), "round-2.json")
-	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{Summary: "round 2: nothing new"})
+	// The kept note's file is in must_review, so the reviewer reads it.
+	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code = roundThroughMain(t, e, fx, round2Path)
 	if code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
 		t.Fatalf("round 2 exit = %d, want 0 and the fix slice fix-2-r1-f1 built from the kept note\n%s", code, out)

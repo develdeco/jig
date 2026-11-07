@@ -155,14 +155,14 @@ func TestStatusRoundsListsEachRecordedRound(t *testing.T) {
 
 	got := block(statusOf(t, fx, st), "rounds[")
 	want := []string{
-		"rounds[2]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files}:",
+		"rounds[2]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files,kept_fixed}:",
 		// Round 1: the request is in the work folder, so its base is there.
-		"  1,findings,s-rev,claude,claude-opus-5,true,1,1,1,full," + sha40("0") + "," + sha40("2") + ",3",
+		"  1,findings,s-rev,claude,claude-opus-5,true,1,1,1,full," + sha40("0") + "," + sha40("2") + ",3,0",
 		// Round 2: only r2-f1 is its own (r1-f2 is round 1's, reported again),
 		// the scope is a delta, so the base is the head round 1 reviewed. The
 		// same session reviewed it, so the harness the journal names for it
 		// stands; the report names no model.
-		"  2,findings,s-rev,claude,-,unknown,0,1,0,delta," + sha40("2") + "," + sha40("4") + ",1",
+		"  2,findings,s-rev,claude,-,unknown,0,1,0,delta," + sha40("2") + "," + sha40("4") + ",1,0",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("rounds block:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -186,10 +186,10 @@ func TestStatusRoundsNamesARoundNoReviewerRan(t *testing.T) {
 	})
 	got := block(statusOf(t, fx, st), "rounds[")
 	want := []string{
-		"rounds[3]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files}:",
-		"  1,findings,-,-,-,-,0,0,0,-,-," + sha40("5") + ",-",
-		"  2,not-independent,s-builder,-,-,false,0,0,0,full,-," + sha40("6") + ",0",
-		"  3,clean,s-rev,-,-,true,0,0,0,delta," + sha40("6") + "," + sha40("7") + ",1",
+		"rounds[3]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files,kept_fixed}:",
+		"  1,findings,-,-,-,-,0,0,0,-,-," + sha40("5") + ",-,0",
+		"  2,not-independent,s-builder,-,-,false,0,0,0,full,-," + sha40("6") + ",0,0",
+		"  3,clean,s-rev,-,-,true,0,0,0,delta," + sha40("6") + "," + sha40("7") + ",1,0",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("rounds block:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -411,5 +411,25 @@ func TestStatusRoundsCountsByTheStatusJigRoutedTo(t *testing.T) {
 	got := block(statusOf(t, fx, st), "rounds[")
 	if len(got) != 2 || !strings.HasPrefix(got[1], "  2,clean,s-rev,") || !strings.Contains(got[1], ",true,0,1,3,full,") {
 		t.Errorf("rounds block:\n%s\nwant round 2 clean with 0 fix, 1 ask, 3 note", strings.Join(got, "\n"))
+	}
+}
+
+// TestStatusFindingsNamesAnAgentsPendingDecisionAsTheAgents: the findings
+// table's decided_by is the provenance of the decision, so an agent's pending
+// dismissal reads as the agent's and never as a person's.
+func TestStatusFindingsNamesAnAgentsPendingDecisionAsTheAgents(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st := greenTicket(t, fx)
+	writeRound(t, fx.StoreDir, fx.Ticket, 1, roundFiles{
+		report: "round: 1\nverdict: fix-slices\nindependent: true\nreviewer:\n  session: s-rev\n",
+		findings: "scope: full\nreviewed_paths:\n  - a.go\nfindings:\n" +
+			finding("r1-f1", "ask", "high", "a.go", 5, "Unchecked", "asked") + "summary: round 1\n",
+	})
+	if code := triageAs(t, fx, false, "r1-f1", "dismiss", "--reason", "fine"); code != 0 {
+		t.Fatalf("jig triage exit = %d", code)
+	}
+	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",dismiss,agent") {
+		t.Errorf("row of the agent's decision = %q, want it to end in ,dismiss,agent", got)
 	}
 }

@@ -2249,7 +2249,7 @@ func TestGateNoRoundKeepsAnOutstandingAskFromGoingClean(t *testing.T) {
 		ID: "r1-f1", File: "alpha/alpha.go", Line: 4, Title: "is this rename intended",
 		Detail: "d", Action: ActionAsk, Risk: RiskHigh, RiskRationale: "callers depend on it",
 		Status: StatusAsked,
-	}}, nil, "round 1", nil, nil)
+	}}, nil, nil, "round 1", nil, nil)
 	if err != nil {
 		t.Fatalf("marshal findings.yaml: %v", err)
 	}

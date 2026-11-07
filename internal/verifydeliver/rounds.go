@@ -68,6 +68,8 @@ type RoundRecord struct {
 	// own label in Action, so a clean round whose fixes the risk floor routed
 	// to notes counts notes and no fix.
 	Fix, Ask, Note int
+	// KeptFixed are the keeps the round spent as fixed, with who kept each.
+	KeptFixed []KeptFixed
 	// FixSlices are the fix slices the round appended.
 	FixSlices []string
 }
@@ -147,6 +149,7 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 
 		if ff, ok, err := readFindingsYAML(st, ticket, n); err == nil && ok {
 			rec.Scope, rec.Files = ff.Scope, len(ff.ReviewedPaths)
+			rec.KeptFixed = ff.KeptFixed
 			for _, f := range ff.Findings {
 				if raisedIn(f, n) == n {
 					rec.Findings = append(rec.Findings, f)

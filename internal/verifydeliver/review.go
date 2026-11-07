@@ -1651,9 +1651,21 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	// `asked` whose latest occurrence the reviewer called `note`. Reading
 	// the label there would drop a finding jig itself holds open from
 	// must_review, so it could never be covered and never clear.
+	// An ask a person has already decided is shown with the decision, so the
+	// reviewer does not raise it again; the round that closes applies it.
+	decisions, err := ReadTriageDecisions(in.Store, in.Ticket)
+	if err != nil {
+		return ReviewPrep{}, err
+	}
 	var openFiles []string
 	openOutstanding := 0
 	for _, f := range in.Open {
+		// A noted finding a person kept (the keep still pending) is work the
+		// closing round may spend as fixed (GATE-15): its file must be read.
+		if d, ok := decisions[f.ID]; ok && f.Status == StatusNoted && d.Pending && d.Outcome == TriageKeep {
+			openFiles = append(openFiles, f.File)
+			continue
+		}
 		if f.Status != StatusOpen && f.Status != StatusAsked {
 			continue
 		}
@@ -1686,12 +1698,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		sort.Strings(prep.MustReview)
 	} else {
 		prep.Head, prep.Scope, prep.Base = prep.Repos[0].Head, prep.Repos[0].Scope, prep.Repos[0].Base
-	}
-	// An ask a person has already decided is shown with the decision, so the
-	// reviewer does not raise it again; the round that closes applies it.
-	decisions, err := ReadTriageDecisions(in.Store, in.Ticket)
-	if err != nil {
-		return ReviewPrep{}, err
 	}
 	if !changedAny && openOutstanding == 0 {
 		prep.Empty = true

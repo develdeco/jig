@@ -171,6 +171,10 @@ type GateReport struct {
 	// triage set each one's final Status/Triage/Decision/
 	// RoutedAs. nil for a scripted round.
 	Findings []Finding
+	// KeptFixed are the keeps this round spent as fixed (a pending keep on a
+	// finding the round no longer reports at a moved head), each with who
+	// kept it. nil for a round that spent none.
+	KeptFixed []KeptFixed
 	// FixSlices is the ids of the fix slices this round appended, in the
 	// order they were built.
 	FixSlices []string
@@ -739,14 +743,14 @@ func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope s
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
 	}
-	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, summary, probes, skips)
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, report.KeptFixed, summary, probes, skips)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), yamlData, 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.yaml: %w", err)
 	}
-	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared)
+	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared, report.KeptFixed)
 	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(md), 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
 	}
