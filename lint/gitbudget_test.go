@@ -233,13 +233,18 @@ func TestCIWorkflowGitBudgetStepsDoWhatTheyName(t *testing.T) {
 		if c.hasLabel {
 			answer = "true"
 		}
-		writeScript(t, bin, "gh", "echo "+answer+"\n")
+		writeScript(t, bin, "gh", "printf '%s\\n' \"$@\" > \"$(dirname \"$0\")/argv\"\necho "+answer+"\n")
 		writeScript(t, temp, "gitbudget", "printf '%s\n' \"$@\" > \"$(dirname \"$0\")/argv\"\n")
 		output := filepath.ToSlash(filepath.Join(dir, "output"))
 		if err := os.WriteFile(output, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		runStep(t, labelRun, dir, "PATH="+filepath.ToSlash(bin)+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=x", "PULL_NUMBER=7", "GITHUB_REPOSITORY=o/r", "GITHUB_OUTPUT="+output)
+		ghArgv, _ := os.ReadFile(filepath.Join(bin, "argv"))
+		wantGh := []string{"api", "repos/o/r/pulls/7", "--jq", labelFilter}
+		if got := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(ghArgv), "\r", "")), "\n"); strings.Join(got, "\x00") != strings.Join(wantGh, "\x00") {
+			t.Errorf("%s: the label step ran gh with %q, want %q", c.name, got, wantGh)
+		}
 		data, _ := os.ReadFile(output)
 		flag := ""
 		for _, line := range strings.Split(string(data), "\n") {
@@ -298,6 +303,34 @@ func TestReleaseGrantsWhatCIRequests(t *testing.T) {
 			if rank[got] < rank[want] {
 				t.Errorf("release.yml: the ci job grants %s: %q, but ci.yml's %s job requests %q, so GitHub refuses the release run at startup", scope, got, name, want)
 			}
+		}
+	}
+}
+
+// labelFilter is the jq filter the label step has gh apply to the pull
+// request: true only when a label is named git-budget-accepted exactly.
+const labelFilter = `.labels | map(.name) | index("git-budget-accepted") != null`
+
+// TestLabelFilterMatchesWholeLabelNames runs the filter the label step is
+// held to (TestCIWorkflowGitBudgetStepsDoWhatTheyName pins the step to it)
+// over canned pull request payloads, when jq is on PATH.
+func TestLabelFilterMatchesWholeLabelNames(t *testing.T) {
+	jq, err := exec.LookPath("jq")
+	if err != nil {
+		t.Skipf("no jq to run the label filter: %v", err)
+	}
+	for payload, want := range map[string]string{
+		`{"labels":[{"name":"git-budget-accepted"}]}`:                "true",
+		`{"labels":[{"name":"bug"},{"name":"git-budget-accepted"}]}`: "true",
+		`{"labels":[{"name":"other"}]}`:                              "false",
+		`{"labels":[{"name":"git-budget-accepted-later"}]}`:          "false",
+		`{"labels":[]}`: "false",
+	} {
+		cmd := exec.Command(jq, labelFilter)
+		cmd.Stdin = strings.NewReader(payload)
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != want {
+			t.Errorf("filter over %s = %q (%v), want %s", payload, out, err, want)
 		}
 	}
 }
