@@ -7,7 +7,7 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and the prompt for it; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
-Two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess, and can surface mid-grilling. A brief mints the ticket, a chart none.
+Two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
 
 ## Recall, then grill
 
@@ -30,15 +30,15 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 ## Brief output (single ticket)
 
 - Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
-- `brief.md`: `## `-sectioned behavioral spec, decisions tagged.
+- `brief.md`: `## `-sectioned behavioral spec.
 - `slices.yaml`: one entry per slice, all strings or lists of strings: `id`, `workspace`, `goal`, `oracle`, `env` (manifest env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: a narrow, COMPLETE, demoable path. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the repo's whole suite names that manifest oracle (such as `test`) so the gate reuses its pass; a literal command is for a narrower proof. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
 - `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (approves nothing, prints each section's sha256), paste them, re-run until `valid: yes`.
 
 ## Chart output
 
-Make a chart with `jig chart new <name> --title "<t>"`, not by hand (it commits `map.md` and an empty `tickets.yaml`). Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, so a re-run makes only new ones.
+Make a chart with `jig chart new <name> --title "<t>"`, not by hand. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, so a re-run makes only new ones.
 
-A batch spanning areas (an audit) takes a chart verdict so its tickets are ordered; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs the order.
+A batch spanning areas (an audit) takes a chart verdict, ordering its tickets; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs the order.
 
 ## Done when
 
@@ -53,7 +53,7 @@ Relay `jig next <T>`'s `prompt:` and stop, unless the prompt named later phases 
 A chart verdict ends a ticket run: report what graduated and what `jig next <chart>` says, then read the prompt's intent from its words (examples, no phrase list); unsure, ask.
 
 - **No intent** (nothing past the brief: "fix this: ...", "fix this, go with your recommendations"): name the prompts that launch one ticket ("Take <ticket> to PR"), several ("Take A and B to PR") or the chart ("Take <chart> to PR"), stop, ask nothing.
-- **Intent, not fully explicit** ("take it to PR", "fix this and open a PR", "take it from brief to PR, go with your recommendations"): ask once to confirm the launch it implied (the chart, or the tickets carrying a named ticket's work), "not now" the other answer; the run goes with your recommendations only if the yes says so; unattended, stop.
+- **Intent, not fully explicit** ("take it to PR", "fix this and open a PR", "take it from brief to PR, go with your recommendations"): ask once to confirm the launch it implied (the chart, or the tickets carrying a named ticket's work), "not now" the other answer; the run goes with your recommendations only if the yes says so; unattended, stop. Why: a ticket's terms ask for a ticket run, which a chart verdict ends.
 - **Fully explicit** (recommendations and working to the end, whatever the shape: "go with your recommendations, keep going until it is all done", "fix it end to end with your recommendations, I'll be away"): say why in one line, run `jig skill chart`, ask nothing.
 
 A named ticket whose grilling ends in a chart enters `tickets.yaml` with its own `id`, `title` and `body` scoped to its part; graduate keeps it `existing`.
