@@ -94,6 +94,18 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep) (origin
 			return 0, reportYAML{}, false, nil
 		}
 	}
+	// A decision a person made since the last round is applied by the next
+	// round that closes, and a carried round applies nothing: it waits for a
+	// round a reviewer reads.
+	decisions, err := ReadTriageDecisions(st, ticket)
+	if err != nil {
+		return 0, reportYAML{}, false, err
+	}
+	for _, d := range decisions {
+		if d.Pending {
+			return 0, reportYAML{}, false, nil
+		}
+	}
 	round, rep, err := priorRound(st, ticket, n-1)
 	if err != nil {
 		return 0, reportYAML{}, false, fmt.Errorf("verifydeliver: gate: read round %d report.yaml: %w", n-1, err)
