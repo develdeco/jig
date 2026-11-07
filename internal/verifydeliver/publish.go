@@ -2020,9 +2020,11 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 }
 
 // oracleCommandsRan is, for each oracle name, the command of the latest
-// passing oracle line of a slice that names it, recorded at the reviewed head
-// or at a commit with the same tree (the rule the gate reuses a pass by). The
-// line carries the exact command that ran, so nothing here reads a manifest.
+// passing line for it, recorded at the reviewed head or at a commit with the
+// same tree (the rule the gate reuses a pass by): an oracle line of a slice
+// that names it (a pass the gate reused), or the gate-oracle line of a run the
+// gate made itself. The line carries the exact command that ran, so nothing
+// here reads a manifest.
 func oracleCommandsRan(lines []journal.Line, slices []store.Slice, dir, reviewed string) map[string]string {
 	if reviewed == "" {
 		return nil
@@ -2034,10 +2036,13 @@ func oracleCommandsRan(lines []journal.Line, slices []store.Slice, dir, reviewed
 	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
 	commands := map[string]string{}
 	for _, l := range lines {
-		if l.Event != journal.EventOracle || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
+		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
 			continue
 		}
-		name := oracleOf[l.Slice]
+		name := l.Oracle
+		if l.Event == journal.EventOracle {
+			name = oracleOf[l.Slice]
+		}
 		if name == "" {
 			continue
 		}

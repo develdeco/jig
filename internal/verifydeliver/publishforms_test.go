@@ -32,6 +32,22 @@ func reviewedInTheClone(t *testing.T) (*fixture.Fixture, Deps, string) {
 	return fx, d, head
 }
 
+// withGateCommand is want with the "- test" line of its Verification given the
+// command the gate ran for the oracle (the fixture's own, which names the Go
+// toolchain of the machine), as the body names it.
+func withGateCommand(t *testing.T, fx *fixture.Fixture, want string) string {
+	t.Helper()
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil || len(man.Workspaces) == 0 {
+		t.Fatalf("manifest.Resolve: %v (%d workspaces)", err, len(man.Workspaces))
+	}
+	line := "\n- test\n"
+	if !strings.Contains(want, line) {
+		t.Fatalf("want has no %q line:\n%s", line, want)
+	}
+	return strings.Replace(want, line, "\n- test: `"+man.OracleCmd("test", man.Workspaces[len(man.Workspaces)-1])+"`\n", 1)
+}
+
 // publishPrCalls counts the calls the fake gh logged that open or edit a pull
 // request.
 func publishPrCalls(t *testing.T, logFile string) int {
@@ -1106,5 +1122,74 @@ func TestPublishRecordPRJournalsAFailedTitleReadAsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(warnings, ""), "read the title") {
 		t.Errorf("warnings = %q, want one for the failed title read", warnings)
+	}
+}
+
+// publishedBody renders the pull request body of the fixture's ticket and
+// returns it.
+func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
+	t.Helper()
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	return string(body)
+}
+
+// TestPublishBodyNamesTheCommandTheGateRanItself: an oracle the gate ran
+// itself, with no slice's pass to reuse, is listed with the command it ran,
+// like one it reused (r2-f2). The fixture journals no oracle line, so the
+// gate's own run is the only source of the command.
+func TestPublishBodyNamesTheCommandTheGateRanItself(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil || len(man.Workspaces) == 0 {
+		t.Fatalf("manifest.Resolve: %v (%d workspaces)", err, len(man.Workspaces))
+	}
+	want := "- test: `" + man.OracleCmd("test", man.Workspaces[len(man.Workspaces)-1]) + "`\n"
+	if body := publishedBody(t, d, fx); !strings.Contains(body, want) {
+		t.Errorf("the body lacks %q, the command the gate ran:\n%s", want, body)
+	}
+}
+
+// TestPublishBodyTakesTheCommandOfTheReviewedHeadOnly: the command the body
+// names comes from a passing line at the reviewed head or at a commit of its
+// tree, never from a line at another head (an earlier slice's green at another
+// tree) and never from a failed run. The journal holds, in this order, a pass
+// at a commit of the head's tree (named), a pass at the base, whose tree
+// differs (not named), and a failure at the head (not named), so each rule is
+// held by the line that would win were it dropped.
+func TestPublishBodyTakesTheCommandOfTheReviewedHeadOnly(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil || len(slices) == 0 {
+		t.Fatalf("ReadSlices: %v (%d slices)", err, len(slices))
+	}
+	lease := gateLeaseOf(t, fx, fx.Ticket)
+	base := run(t, lease, "rev-parse", head+"^")
+	sameTree := run(t, lease, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", head+"^{tree}", "-p", head, "-m", "same tree")
+	for _, l := range []journal.Line{
+		{Slice: slices[0].ID, Outcome: "pass", Commit: sameTree, Command: "ran-at-the-same-tree"},
+		{Slice: slices[0].ID, Outcome: "pass", Commit: base, Command: "ran-at-another-head"},
+		{Slice: slices[0].ID, Outcome: "fail", Commit: head, Command: "failed-at-the-head"},
+	} {
+		l.Event = journal.EventOracle
+		if err := journal.Append(d.Store, fx.Ticket, l); err != nil {
+			t.Fatalf("journal.Append: %v", err)
+		}
+	}
+	body := publishedBody(t, d, fx)
+	if want := "- " + slices[0].Oracle + ": `ran-at-the-same-tree`\n"; !strings.Contains(body, want) {
+		t.Errorf("the body lacks %q:\n%s", want, body)
+	}
+	for _, not := range []string{"ran-at-another-head", "failed-at-the-head"} {
+		if strings.Contains(body, not) {
+			t.Errorf("the body names %q, which did not pass at the reviewed head:\n%s", not, body)
+		}
 	}
 }

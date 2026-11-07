@@ -137,6 +137,7 @@ Gate rounds:
 - Round 1: clean
 - Round 2: clean
 `
+		wantBody = withGateCommand(t, fx, wantBody)
 		if body != wantBody {
 			t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 		}
