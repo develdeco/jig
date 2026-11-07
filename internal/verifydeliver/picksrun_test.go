@@ -239,10 +239,10 @@ func TestPublishRendersAndAttachesThePickedRecordings(t *testing.T) {
 	if strings.Contains(body, "./rec-") {
 		t.Errorf("pr body = %q, want no dead relative path left", body)
 	}
-	// The section sits between What changed and Verification, in that order.
-	whatChanged, demo, verification := strings.Index(body, "## What changed"), strings.Index(body, "## Demo"), strings.Index(body, "## Verification")
+	// The section sits between What and Verification, in that order.
+	whatChanged, demo, verification := strings.Index(body, "## What\n"), strings.Index(body, "## Demo"), strings.Index(body, "## Verification")
 	if whatChanged < 0 || !(whatChanged < demo && demo < verification) {
-		t.Errorf("pr body sections out of order (What changed=%d, Demo=%d, Verification=%d):\n%s", whatChanged, demo, verification, body)
+		t.Errorf("pr body sections out of order (What=%d, Demo=%d, Verification=%d):\n%s", whatChanged, demo, verification, body)
 	}
 	if pf.warned("no demo for") {
 		t.Errorf("warnings = %q, want no word about a missing demo when a pick stands", pf.warnings)

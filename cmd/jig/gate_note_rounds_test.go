@@ -111,13 +111,6 @@ func TestAGateRoundClearsAFloorRoutedNoteAsAddressed(t *testing.T) {
 	if !strings.Contains(string(notes), "Status: addressed at round 2") {
 		t.Errorf("review notes do not read the note addressed at round 2:\n%s", notes)
 	}
-	body, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "pr", "fixture-repo.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "Findings: 0 fixed, 1 addressed, 0 dismissed, 0 noted, 0 asked."; !strings.Contains(string(body), want) {
-		t.Errorf("pull request body lacks %q:\n%s", want, body)
-	}
 }
 
 // TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain: the review

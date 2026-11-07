@@ -43,6 +43,9 @@ type Host interface {
 	// ReadPRBody returns the current body of the pull request at url.
 	ReadPRBody(url string) (string, error)
 
+	// ReadPRTitle returns the current title of the pull request at url.
+	ReadPRTitle(url string) (string, error)
+
 	// PRHead returns the branch and commit the pull request at url is from:
 	// what `jig publish --pr` checks a pull request somebody else opened
 	// against the ticket's branch before it records one.
@@ -386,6 +389,19 @@ func (h *githubHost) ReadPRBody(url string) (string, error) {
 		return "", fmt.Errorf("repohost: failed to parse pr view output: %w", err)
 	}
 	return result["body"], nil
+}
+
+// ReadPRTitle reads the title of the pull request at url.
+func (h *githubHost) ReadPRTitle(url string) (string, error) {
+	out, err := h.run("pr", "view", url, "--repo", h.repoSpec(), "--json", "title")
+	if err != nil {
+		return "", err
+	}
+	var result map[string]string
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return "", fmt.Errorf("repohost: failed to parse pr view output: %w", err)
+	}
+	return result["title"], nil
 }
 
 // PRHead reads the head of the pull request at prURL: its branch, commit and

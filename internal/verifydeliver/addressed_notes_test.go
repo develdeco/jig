@@ -59,7 +59,7 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectFindingsWithOutcomes: %v", err)
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	notes := readNotes(t, st, "T-1", "review-notes.md")
@@ -72,11 +72,6 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 		if !strings.Contains(notes, want) {
 			t.Errorf("review notes lack %q:\n%s", want, notes)
 		}
-	}
-
-	body := renderVerificationSection(reportYAML{}, "oracles-only", nil, outcomes)
-	if want := "Findings: 0 fixed, 1 addressed, 0 dismissed, 2 noted, 0 asked."; !strings.Contains(body, want) {
-		t.Errorf("verification section = %q, want %q", body, want)
 	}
 }
 
@@ -162,7 +157,7 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 		t.Errorf("r1-f4 = %+v, want its first and latest risk", o)
 	}
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if want := "  - History: medium at round 1: four; continued at round 2 as low: four\n"; !strings.Contains(readNotes(t, st, "T-1", "review-notes.md"), want) {

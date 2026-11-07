@@ -35,6 +35,7 @@ const (
 //	  pr_state: opened
 //	  approval: person
 //	  head: <the reviewed head, 40 hex digits>
+//	  pr_render: "differs: ..."   (only when the pull request is not the render)
 //	  branch: jig/JIG-2
 //	  body_file: tickets/JIG-2/pr/demo.md
 //	  body: "<the first lines of the pull request body>"
@@ -115,6 +116,15 @@ func publishBlocks(st *store.Store, ticket string) ([]string, error) {
 		add("pr_state", pr.Outcome)
 		add("approval", pr.Approval)
 		add("head", firstNonEmptyString(pr.Commit, approved.Commit, body.Commit))
+		if pr.BodyMatch == journal.BodyDiffers {
+			add("pr_render", "differs: the pull request does not carry the title and body of the render")
+		}
+	} else {
+		for _, name := range repos {
+			if byRepo[name].pr.BodyMatch == journal.BodyDiffers {
+				add("pr_render_"+name, "differs: the pull request does not carry the title and body of the render")
+			}
+		}
 	}
 	add("branch", firstNonEmptyString(pr.Branch, approved.Branch, body.Branch))
 	if path, ok := inStore(st.Root, body.Ref); ok && !several {

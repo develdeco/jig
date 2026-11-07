@@ -80,6 +80,11 @@ type Line struct {
 	// Approval is the publish approval a pr line's head had when the pull
 	// request was recorded: "person", "agent" or "none".
 	Approval string `json:"approval,omitempty"`
+	// BodyMatch is whether the pull request a pr line recorded had, when it was
+	// recorded, the title and body the render holds: BodyMatches, BodyDiffers,
+	// or BodyUnknown when the host could not be asked (no host, or it failed).
+	// "" on a line that read nothing back.
+	BodyMatch string `json:"body_match,omitempty"`
 	// Unattended is set on a claim line made without a person watching.
 	Unattended bool `json:"unattended,omitempty"`
 	// Branch and URL name a branch or a link the line is about.
@@ -437,3 +442,11 @@ func VerifiedSlices(lines []Line, skip string) []VerifiedSlice {
 	}
 	return out
 }
+
+// What a pr line's BodyMatch says of the pull request it recorded against the
+// render.
+const (
+	BodyMatches = "matches"
+	BodyDiffers = "differs"
+	BodyUnknown = "unknown"
+)

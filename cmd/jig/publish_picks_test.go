@@ -221,7 +221,7 @@ func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
 	if strings.Contains(text, "## Demo") {
 		t.Errorf("pr body has a ## Demo section although nothing was recorded:\n%s", text)
 	}
-	for _, want := range []string{"## What changed", "## Verification"} {
+	for _, want := range []string{"## What\n", "## Verification"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("pr body lacks %q:\n%s", want, text)
 		}

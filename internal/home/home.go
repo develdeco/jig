@@ -143,6 +143,18 @@ func PicksDir(root, storeID, ticket, sha string) (string, error) {
 	return filepath.Join(root, "evidence", storeID, ticket, "picks", sha), nil
 }
 
+// WhatPath returns the file a session writes the pull request's What into,
+// which publish asks for and `jig publish --what` stores in the ticket:
+// <root>/evidence/<storeID>/<ticket>/what/<repo>.md. It sits under the jig
+// home and never in the store, under a "what" directory of the ticket that no
+// other evidence directory shares.
+func WhatPath(root, storeID, ticket, repo string) (string, error) {
+	if err := evidenceParts([]evidencePart{{"store id", storeID}, {"ticket", ticket}, {"repo", repo}}); err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "evidence", storeID, ticket, "what", repo+".md"), nil
+}
+
 // ReviewDir returns where what one gate round hands its reviewer, and the
 // store does not hold, lives under the jig home root:
 // <root>/evidence/<storeID>/<ticket>/reviews/round-<n> (ADR 0029). The round's

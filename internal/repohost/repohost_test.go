@@ -249,6 +249,25 @@ func TestReadPRBody(t *testing.T) {
 	}
 }
 
+// TestReadPRTitle: ReadPRTitle reads the title back through gh, asking for the
+// title alone.
+func TestReadPRTitle(t *testing.T) {
+	h, logFile := hostUnderStub(t, "", "")
+	t.Setenv("GH_STUB_TITLE", "The rendered body ships")
+
+	title, err := h.ReadPRTitle("https://github.example/owner/repo/pull/7")
+	if err != nil {
+		t.Fatalf("ReadPRTitle: %v", err)
+	}
+	if title != "The rendered body ships" {
+		t.Errorf("ReadPRTitle = %q, want $GH_STUB_TITLE's text", title)
+	}
+	want := []string{"pr", "view", "https://github.example/owner/repo/pull/7", "--repo", "owner/repo", "--json", "title"}
+	if lines := readLoggedArgv(t, logFile); len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
+		t.Errorf("logged calls = %v, want exactly %v", lines, want)
+	}
+}
+
 // hostWithEnv builds a GitHub host over the fake gh with exactly the
 // variables vars add to the process's own environment, never editing the
 // environment the test itself runs in.

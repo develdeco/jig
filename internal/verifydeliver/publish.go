@@ -51,6 +51,11 @@ type PublishOpts struct {
 	// the pull request's demo, in the pick result's shape (ParsePicksResult).
 	// "" means the pick an earlier publish of the same head made, if any.
 	Picks string
+	// What is the path of a what file: the bullets the session wrote for the
+	// pull request's What, which the ticket stores (loadWhatFile). "" means the
+	// ones an earlier publish stored, if any. It needs one repo, by o.Repo when
+	// the ticket builds in several.
+	What string
 }
 
 // PublishReport is Publish's result.
@@ -81,6 +86,8 @@ type PublishReport struct {
 	// Picks is what publish did with the build's recordings: the zero value
 	// when the build recorded nothing that could be offered.
 	Picks PicksReport
+	// What is repo -> what the publish did with the What of its pull request.
+	What map[string]WhatReport
 	// Pending names the repos of the ticket that have no pull request
 	// recorded when the publish ended, in the project's order: the ones a
 	// publish narrowed with --repo left alone. The ticket is published when
@@ -617,6 +624,10 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
+	what, err := loadWhatFor(o.What, targets)
+	if err != nil {
+		return PublishReport{}, err
+	}
 	jlines, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
@@ -649,7 +660,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		sh.linked = linksFor(sh.pt, known)
 		sh.pub, err = renderPublication(d, sh.pt, renderInput{
 			dir: sh.lease.Dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
-			picks: picks, warn: fn.warn, links: sh.linked,
+			picks: picks, what: what, warn: fn.warn, links: sh.linked,
 		})
 		if err != nil {
 			return PublishReport{}, inRepo(sh.pt.qualified, sh.pt.repoName, err)
@@ -730,7 +741,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	report = PublishReport{
-		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, PRURL: map[string]string{},
+		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, What: map[string]WhatReport{}, PRURL: map[string]string{},
 		PRUpdated: map[string]bool{}, PRRetargeted: map[string]string{}, PRNote: map[string]string{},
 		ReviewNotes: map[string]ReviewNotesReport{},
 	}
@@ -761,6 +772,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		known[pt.repoName] = prURL
 		report.Head[pt.repoName] = sh.head
 		report.PRBody[pt.repoName] = sh.pub.prPath
+		report.What[pt.repoName] = sh.pub.what
 		report.PRURL[pt.repoName] = prURL
 		report.PRUpdated[pt.repoName] = prOutcome == "updated"
 		if retargeted != "" {
@@ -955,7 +967,9 @@ type renderInput struct {
 	touched     []string
 	oracleNames []string
 	picks       *PicksResult
-	warn        func(format string, args ...any)
+	// what is the What given now, nil for none.
+	what *string
+	warn func(format string, args ...any)
 	// links are the ticket's other repos as the body names them, with the url
 	// of each one's pull request once it has one.
 	links []prLink
@@ -968,6 +982,7 @@ type publication struct {
 	prPath     string
 	title      string
 	picks      PicksReport
+	what       WhatReport
 	picked     *DemoRenderResult
 	demoResult DemoRenderResult
 	mediaDir   string
@@ -996,7 +1011,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	commits := lastGreenCommits(lines)
 	// An adopted ticket's own commits, from the merge base with target up to
 	// the start sha recorded at adoption: the author's work, listed ahead of
-	// jig's in What changed.
+	// jig's in the review notes' Slices.
 	var authorCommits []authorCommit
 	if t.rec.Adopted() {
 		startData, err := fileshare.ReadFile(d.Store.StartSHAPath(ticket, t.repoName))
@@ -1032,10 +1047,18 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	write := func(links []prLink) (string, bool, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, t.bodySlices(), t.report(), "none", commits, authorCommits, in.oracleNames, outcomes, picked, links, t.stack)
+	rounds, err := ReadRounds(d.Store, ticket)
+	if err != nil {
+		return publication{}, err
 	}
-	prPath, omittedBriefIntent, demoResult, err := write(in.links)
+	what, whatReport, err := resolveWhat(d, ticket, t.repoName, t.title, in.what, in.warn)
+	if err != nil {
+		return publication{}, err
+	}
+	write := func(links []prLink) (string, DemoRenderResult, error) {
+		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, rounds, picked, links, t.stack)
+	}
+	prPath, demoResult, err := write(in.links)
 	if err != nil {
 		return publication{}, err
 	}
@@ -1047,26 +1070,6 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	for _, f := range demoResult.MediaFiles {
 		mediaFiles = append(mediaFiles, f.Name)
 	}
-	// A brief that bound as the intent source but has no "## " section with
-	// text to publish as one - no such heading anywhere, or a first section
-	// with nothing under it, which renderIntentSection reads the same way -
-	// leaves the body with no ## Intent section at all, which is the owner's
-	// rule (DECISIONS.md, renderIntentSection) and so never an error - but it
-	// is the one way a published body loses the section that says why the
-	// change exists, and no other part of a run says it happened: the brief
-	// binds whatever bytes it has (resolveIntent), the report records nothing
-	// about the body's sections, and `jig validate` counts sections with
-	// store.BriefSectionHashes, which counts the ones a code fence quotes too.
-	// So the operator is told here, before anything is pushed, while fixing the
-	// brief and gating again is still cheaper than editing a published pull
-	// request. The warning says "with text" because both briefs reach it:
-	// naming only the missing heading would point the operator at an edit that
-	// does not fix the brief that has one and nothing under it.
-	if omittedBriefIntent {
-		in.warn("jig: the pull request body for %s has no ## Intent section: %s has no \"## \" section with text to publish as one\n",
-			ticket, intentFilePath(d.Store, ticket, IntentSourceBrief))
-	}
-
 	// A pull request has a ## Demo section only from a pick. One that was
 	// refused or failed has been said where it was (publishPicks); a ticket
 	// with nothing to pick from has none, and is told so here. When the build
@@ -1102,10 +1105,6 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	rounds, err := ReadRounds(d.Store, ticket)
-	if err != nil {
-		return publication{}, err
-	}
 	journaled, err := journal.Read(d.Store, ticket)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
@@ -1118,18 +1117,18 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		if t.reviewedHead() != "" {
 			approvalLine = publishApprovalLine(lines, t.lineRepo(), t.reviewedHead())
 		}
-		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior)
+		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes))
 	}
 	if err := writeNotes(journaled); err != nil {
 		return publication{}, err
 	}
 	return publication{
-		prPath: prPath, title: t.title, picks: picksReport, picked: picked, demoResult: demoResult,
+		prPath: prPath, title: t.title, picks: picksReport, what: whatReport, picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
 		notesName:  t.notesName(),
 		writeNotes: writeNotes,
 		rewrite: func(links []prLink) error {
-			_, _, _, err := write(links)
+			_, _, err := write(links)
 			return err
 		},
 	}, nil
@@ -1322,6 +1321,8 @@ type RepoBody struct {
 	PRBody      string
 	ReviewNotes string
 	Title       string
+	// What is what the render did with the What of the pull request.
+	What WhatReport
 }
 
 // BodyReport is PublishBody's result.
@@ -1356,6 +1357,10 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 		return BodyReport{}, err
 	}
 	picks, err := loadPicksFile(o.Picks)
+	if err != nil {
+		return BodyReport{}, err
+	}
+	what, err := loadWhatFor(o.What, targets)
 	if err != nil {
 		return BodyReport{}, err
 	}
@@ -1408,7 +1413,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	for _, rd := range reads {
 		pt := rd.pt
 		r, err := renderPublication(d, pt, renderInput{
-			dir: rd.dir, head: rd.rev, touched: rd.touched, oracleNames: rd.names, picks: picks, warn: fn.warn,
+			dir: rd.dir, head: rd.rev, touched: rd.touched, oracleNames: rd.names, picks: picks, what: what, warn: fn.warn,
 			links: linksFor(pt, known),
 		})
 		if err != nil {
@@ -1419,7 +1424,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoBody{
-			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title,
+			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title, What: r.what,
 			ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", r.notesName)),
 		})
 		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {
@@ -1524,6 +1529,9 @@ type RecordReport struct {
 	// ReviewNotes is what recording did with the repo's review notes: posted
 	// on the pull request, already there, or not posted.
 	ReviewNotes ReviewNotesReport
+	// Readback is what reading the pull request's title and body back from the
+	// host found against the render.
+	Readback Readback
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
@@ -1631,19 +1639,37 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if !verified {
 		outcome = "recorded:unverified"
 	}
-	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}); err != nil {
-		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
-	}
-	// The notes posted are those rendered for the reviewed head: when the
-	// store's are an earlier round's, or were never rendered, render them
-	// again first.
+	// The body and the notes are rendered for the reviewed head before the
+	// pull request is read back, so the comparison is always against the
+	// render of the head the review covered: a body last rendered for an
+	// earlier round, or never rendered, would otherwise read as unknown or,
+	// held against its own stale self, as matching. Nothing in that render
+	// reads this repo's own pr line, which is written below.
 	var notes ReviewNotesReport
+	renderFailed := false
 	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
 		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
 			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
+			renderFailed = true
 			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
 		}
+	}
+	// The pull request is read back: it may have been opened with a body that
+	// is not the render (a What still to be written, say), and the person
+	// merging reads what the host has, not the store's file.
+	// When that render failed the store holds no render of the reviewed head,
+	// only an earlier head's, so there is nothing to hold the pull request
+	// against: the read-back is unknown, never a comparison with a stale body.
+	readback := Readback{Match: journal.BodyUnknown}
+	if !renderFailed {
+		readback = readBack(host, d.Store, ticket, pt.repoName, pt.title, prURL, warn)
+	}
+	if readback.Match == journal.BodyDiffers {
+		warn("jig: the %s of %s differs from the render of %s: update the pull request with the title and body `jig publish %s --body` reports\n", readback.Differs, prURL, ticket, ticket)
+	}
+	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
+	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
+		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 	if notes.Status == "" {
 		notes = postReviewNotes(d, host, ticket, prURL, pt.lineRepo(), pt.notesName(), warn)
@@ -1656,7 +1682,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback}, nil
 }
 
 // RepoHead is the head a repo's pull request ships.
@@ -1707,6 +1733,19 @@ func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, er
 		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
 	return report, nil
+}
+
+// loadWhatFor loads the what file of a publish, which is for one repo: a ticket
+// that builds in several says which with --repo.
+func loadWhatFor(path string, targets []*publishTarget) (*string, error) {
+	if path != "" && len(targets) > 1 {
+		return nil, &axi.Error{
+			Msg:  fmt.Sprintf("%s builds in %s: say which repo the what file is for", targets[0].ticket, joinNames(targets[0].covered)),
+			Code: "VALIDATION_ERROR",
+			Help: []string{fmt.Sprintf("Give each repo its own, with --repo: `jig publish %s --what <file> --repo %s`", targets[0].ticket, targets[0].covered[0])},
+		}
+	}
+	return loadWhatFile(path)
 }
 
 // loadPicksFile reads and strictly parses the picks file `jig publish --picks`
@@ -1859,9 +1898,9 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error
 // (reportIntentYAML.SHA256) for a binding source, brief or explicit.
 // Re-reading the same path now and hashing it the same way
 // (intentSHA256) catches a brief.md or intent.md edited after the round -
-// the file renderIntentSection would otherwise render as if it had been
-// reviewed. An inferred or absent intent has nothing pinned to check:
-// neither ever reaches the published body.
+// the round reviewed the change against the intent as it stood, and the
+// pull request would go out, and be merged, against a different one. An
+// inferred or absent intent has nothing pinned to check.
 func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
 	if rep.Intent.Source != IntentSourceBrief && rep.Intent.Source != IntentSourceExplicit {
 		return nil
