@@ -750,12 +750,13 @@ func riskOrder(risk string) int {
 // A finding's outcome is "fixed" whenever its id appears in any round's
 // cleared list, regardless of what its own last recorded status says - a
 // finding that was later fixed never reads as merely dismissed or asked. A
-// dismissed finding is always a human's own decision (DismissedFixIDs and a
-// dismissed ask are both only ever set by the interactive triage prompt,
-// never by DefaultTriage): a repeat of an already-dismissed finding
-// (ApplyRound's rule 2) resets its own Triage field to "" on purpose, since
-// nobody decided that round, so the wording here never depends on it.
-func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store.Slice) (outcomes []findingOutcome, reviewedPaths []string, lastSummary string, err error) {
+// dismissed or kept finding is worded by who decided it, from decisions (the
+// ticket's `jig triage` lines, TriageDecisions; nil for none): "dismissed by a
+// person", "kept by an agent", with the decision's reason. A finding with no
+// such line reads as before: "dismissed by a human". A repeat of an
+// already-dismissed finding (ApplyRound's rule 2) resets its own Triage field
+// to "" on purpose, so the wording comes from the line, never from that field.
+func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDecision, lastRound int, slices []store.Slice) (outcomes []findingOutcome, reviewedPaths []string, lastSummary string, err error) {
 	latest := make(map[string]Finding)
 	first := make(map[string]Finding)
 	firstRound := make(map[string]int)
@@ -814,16 +815,16 @@ func collectFindingsWithOutcomes(ticketDir string, lastRound int, slices []store
 			}
 		case f.Status == StatusDismissed:
 			o.status = "dismissed"
-			o.detail = "dismissed by a human"
+			o.detail = decidedWording("dismissed", TriageDismiss, decisions[id], "", "dismissed by a human")
 		case f.Status == StatusNoted:
 			o.status = "noted"
 			o.detail = "noted"
 		case f.Status == StatusAsked:
 			o.status = "asked"
 			o.detail = "asked and still open"
-		case f.Status == StatusOpen && f.Decision != "":
+		case f.Status == StatusOpen && (f.Decision != "" || decisions[id].Outcome == TriageKeep):
 			o.status = "decided"
-			o.detail = "kept with the human's decision: " + f.Decision
+			o.detail = decidedWording("kept", TriageKeep, decisions[id], f.Decision, "kept with the human's decision: "+f.Decision)
 		default:
 			o.status = "open"
 			o.detail = "open"
@@ -1261,4 +1262,30 @@ func briefApprovalLine(st *store.Store, ticket string) (string, error) {
 		return "Brief approved by an agent, as " + a.By + ", not by a person at a terminal", nil
 	}
 	return "Brief approved by " + a.By + " at a terminal", nil
+}
+
+// decidedWording words a finding a `jig triage` line decided: "<verb> by a
+// person" or "<verb> by an agent", then ": <reason>" from the line, else
+// fallbackReason. A finding with no line for outcome, or a line of no known
+// provenance, reads as legacy.
+func decidedWording(verb, outcome string, d TriageDecision, fallbackReason, legacy string) string {
+	var who string
+	switch {
+	case d.Outcome != outcome:
+		return legacy
+	case d.Provenance == "person":
+		who = "a person"
+	case d.Provenance == "agent":
+		who = "an agent"
+	default:
+		return legacy
+	}
+	reason := d.Reason
+	if reason == "" {
+		reason = fallbackReason
+	}
+	if reason != "" {
+		return verb + " by " + who + ": " + reason
+	}
+	return verb + " by " + who
 }
