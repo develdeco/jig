@@ -56,7 +56,7 @@ reports green.
 
 - Keep a pull request to one concern. If a reviewer would need a map to
   follow the body, split the change instead of writing the map.
-- The body has three parts, and nothing else:
+- The body has three parts, and nothing else bar the project's trailer:
   - **What**: a few bullets. The first one says why the change exists.
   - **Demo**: when the change is visible, show it working. A screenshot
     when one frame shows it; a GIF or a video when it is a flow, such as a
@@ -72,6 +72,10 @@ reports green.
     works too).
   - **Verification**: the gates you ran, and anything you checked beyond
     them.
+  - Then, when the project's `jig.yaml` sets `publish: trailer:`, that
+    text (an attribution line, say), not a section. jig ends the body it
+    renders with it, so add nothing by hand after a rendered body; a
+    hand-built pull request ends with the same text.
 - Everything else a reviewer might want - contract changes, where to look,
   what is safe to skim, decisions and deviations - goes in one "Reviewer
   notes" comment posted when the pull request opens.
