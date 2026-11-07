@@ -2,6 +2,7 @@ package observe
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -122,8 +123,7 @@ func TestAnEditOutsideTheCheckoutHearsNothing(t *testing.T) {
 }
 
 // TestTheCheckoutIsMatchedInBothSlashForms: a harness on Windows may send a
-// path with either slash. The cwd stays in its native form: a backslash cwd
-// makes hooks silent today (RUN-13), so that case cannot pass before RUN-13.
+// path with either slash.
 func TestTheCheckoutIsMatchedInBothSlashForms(t *testing.T) {
 	t.Parallel()
 	for _, form := range []func(string) string{filepath.ToSlash, func(p string) string { return strings.ReplaceAll(p, "/", `\`) }} {
@@ -272,6 +272,63 @@ func TestAnEditThroughASymlinkedCheckoutIsInside(t *testing.T) {
 		if viaLink {
 			cwd, file = r.fx.RepoDir, filepath.Join(link, "new", "file.go")
 		}
+		got := r.handle(r.ev(KindTool, func(e *Event) {
+			e.Cwd, e.Tool, e.Files = cwd, "Edit", []string{file}
+		})).Context
+		if !strings.Contains(got, "jig claim") {
+			t.Errorf("cwd %s, file %s heard no claim note:\n%s", cwd, file, got)
+		}
+	}
+}
+
+// TestAnEditThroughAJunctionedCheckoutIsInside: a Windows junction is a link
+// the checkout match follows as it follows a symlink, whichever of the cwd
+// and the edited file is named through it, for a file at the checkout's top
+// folder and one below it, and from a cwd in a subdirectory of the checkout.
+func TestAnEditThroughAJunctionedCheckoutIsInside(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions only exist on Windows")
+	}
+	for _, c := range []struct {
+		name string
+		// cwdVia and fileVia name the cwd and the file through the junction
+		// rather than the checkout; cwdSub is a subdirectory of the base the
+		// cwd is in, file is relative to its base.
+		cwdVia, fileVia bool
+		cwdSub, file    string
+	}{
+		{"cwd through the junction, file below the top folder", true, false, "", "new/file.go"},
+		{"file through the junction, below the top folder", false, true, "", "new/file.go"},
+		{"file through the junction, at the top folder", false, true, "", "go.mod"},
+		{"file through the junction, cwd in a subdirectory", false, true, "pkg", "new/file.go"},
+	} {
+		r := newPhaseRig(t)
+		link := filepath.Join(t.TempDir(), "junction")
+		out, err := exec.Command("cmd", "/c", "mklink", "/J", link, r.fx.RepoDir).CombinedOutput()
+		if err != nil {
+			t.Skipf("a junction cannot be made here: %v\n%s", err, out)
+		}
+		// Removed before the temp dir holding it, so the cleanup never walks
+		// through the junction into the checkout.
+		t.Cleanup(func() { os.Remove(link) })
+		r.onTicketBranch()
+		r.phases[r.fx.Ticket] = buildPhase(map[string]string{"a": phase.SubPending}, "a")
+		r.handle(r.ev(KindSessionStart))
+		cwdBase, fileBase := r.fx.RepoDir, r.fx.RepoDir
+		if c.cwdVia {
+			cwdBase = link
+		}
+		if c.fileVia {
+			fileBase = link
+		}
+		cwd := filepath.Join(cwdBase, c.cwdSub)
+		if c.cwdSub != "" {
+			if err := os.MkdirAll(cwd, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file := filepath.Join(fileBase, filepath.FromSlash(c.file))
 		got := r.handle(r.ev(KindTool, func(e *Event) {
 			e.Cwd, e.Tool, e.Files = cwd, "Edit", []string{file}
 		})).Context
