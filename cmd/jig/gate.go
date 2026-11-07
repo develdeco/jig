@@ -274,6 +274,16 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.Scope != "" || len(report.FixSlices) > 0 {
 		blocks = append(blocks, axi.Table("fix_slices", []string{"id"}, idRows(report.FixSlices)))
 	}
+	// The keeps this round spent as fixed: a person's decision the round's
+	// reviewer found already built, shown here so a forgotten report is seen
+	// at the close, not only in the pull request's notes.
+	if len(report.KeptFixed) > 0 {
+		var keptRows [][]string
+		for _, k := range report.KeptFixed {
+			keptRows = append(keptRows, []string{k.ID, k.By, k.File, k.Title})
+		}
+		blocks = append(blocks, axi.Table("kept_fixed", []string{"id", "kept_by", "file", "title"}, keptRows))
+	}
 	if len(report.NeedsHuman) > 0 {
 		var needsRows [][]string
 		for _, f := range report.NeedsHuman {

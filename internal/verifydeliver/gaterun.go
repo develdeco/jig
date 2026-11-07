@@ -499,7 +499,9 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if err != nil {
 			return GateReport{}, err
 		}
-		outstanding = withoutIDs(outstanding, fixedKeeps)
+		keptIDs := keptFixedIDs(fixedKeeps)
+		report.KeptFixed = fixedKeeps
+		outstanding = withoutIDs(outstanding, keptIDs)
 		routed, fixSlices, err := routeRound(n, d.Store, ticket, slices, reported, outstanding, info.Triage, files, budgetUsed, *gateCfg.FixRounds, *gateCfg.FixSliceFindings)
 		if err != nil {
 			return GateReport{}, err
@@ -516,7 +518,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		if err != nil {
 			return GateReport{}, err
 		}
-		cleared = mergeIDs(cleared, fixedKeeps)
+		cleared = mergeIDs(cleared, keptIDs)
 		updated := cloneFindings(cum)
 		foldFindings(updated, routed, cleared)
 		// The verdict follows the findings alone. Who reviewed is the

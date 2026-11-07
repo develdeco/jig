@@ -800,7 +800,7 @@ func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDe
 	for id, f := range latest {
 		o := findingOutcome{finding: f, first: first[id], firstRound: firstRound[id], lastRound: lastSeen[id]}
 		switch {
-		case len(cleared[id]) > 0 && fixedBy[id] == "" && f.Status == StatusNoted && f.RoutedAs == ActionNote:
+		case len(cleared[id]) > 0 && fixedBy[id] == "" && f.Status == StatusNoted && f.RoutedAs == ActionNote && decisions[id].Outcome != TriageKeep:
 			// A note the risk floor routed, cleared because a round's change
 			// touched its file and the reviewer no longer saw it: no slice
 			// fixed it, so it reads addressed, not fixed.

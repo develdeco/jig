@@ -83,7 +83,10 @@ type findingsYAML struct {
 	ReviewedPaths []string  `yaml:"reviewed_paths"`
 	Findings      []Finding `yaml:"findings"`
 	Cleared       []string  `yaml:"cleared,omitempty"`
-	Summary       string    `yaml:"summary,omitempty"`
+	// KeptFixed are the keeps this round spent as fixed (GATE-15), each with
+	// who kept it; their ids are in Cleared too.
+	KeptFixed []KeptFixed `yaml:"kept_fixed,omitempty"`
+	Summary   string      `yaml:"summary,omitempty"`
 	// Probes and Skipped are the round's own probes and skips, each with its
 	// file's blob at the round's head (ADR 0036): the behavior the round
 	// tested, beside the files it read.
@@ -812,7 +815,7 @@ func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding,
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil
 // reviewedPaths/findings as [] rather than null; a round with no probes or
 // skips writes neither key.
-func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord) ([]byte, error) {
+func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, keptFixed []KeptFixed, summary string, probes []ProbeRecord, skips []SkipRecord) ([]byte, error) {
 	if reviewedPaths == nil {
 		reviewedPaths = []string{}
 	}
@@ -824,6 +827,7 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 		ReviewedPaths: reviewedPaths,
 		Findings:      findings,
 		Cleared:       cleared,
+		KeptFixed:     keptFixed,
 		Summary:       summary,
 		Probes:        probes,
 		Skipped:       skips,

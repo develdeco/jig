@@ -24,17 +24,30 @@ import (
 // this round reviewed. At the same head nothing can have fixed the finding, so
 // its keep applies as it always did; a head either round does not record
 // (a scripted round) cannot show that the code moved, so it applies too. A
-// dismiss is not touched, and a keep without a build target counts like any
+// dismiss is not touched, a keep on a file the round's reviewer did not read
+// applies as it always did, and a keep without a build target counts like any
 // other: the work is done whatever the target.
-func keptAndFixed(st *store.Store, ticket string, round int, outstanding []Finding, files roundFiles, rv *Review) ([]string, error) {
+func keptAndFixed(st *store.Store, ticket string, round int, outstanding []Finding, files roundFiles, rv *Review) ([]KeptFixed, error) {
+	reviewed := map[string]bool{}
+	for _, p := range rv.Result.ReviewedPaths {
+		if norm, err := normalizeRepoRelPath(p); err == nil {
+			reviewed[norm] = true
+		}
+	}
 	decisions, err := ReadTriageDecisions(st, ticket)
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []KeptFixed
 	for _, f := range outstanding {
 		d, ok := decisions[f.ID]
 		if !ok || !d.Pending || d.Outcome != TriageKeep {
+			continue
+		}
+		// A keep is spent as fixed only on code the round read: the finding's
+		// file must be in reviewed_paths (a noted finding's file is put into
+		// must_review while its keep is pending, so a reviewer has to read it).
+		if !reviewed[f.File] {
 			continue
 		}
 		repo, _, ok := files.of(f.File)
@@ -47,11 +60,31 @@ func keptAndFixed(st *store.Store, ticket string, round int, outstanding []Findi
 		}
 		now := rv.headOf(repo.Name)
 		if raised != "" && now != "" && raised != now {
-			out = append(out, f.ID)
+			out = append(out, KeptFixed{ID: f.ID, By: d.Provenance, File: f.File, Title: f.Title})
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// KeptFixed is a keep spent as fixed at a round's close: the finding, and who
+// kept it ("person" or "agent"). The round's findings.yaml records ID and By
+// beside cleared, the gate report lists it, and `jig status` counts it.
+type KeptFixed struct {
+	ID string `yaml:"id"`
+	By string `yaml:"by"`
+	// File and Title are the finding's, for the gate report; not recorded.
+	File  string `yaml:"-"`
+	Title string `yaml:"-"`
+}
+
+// keptFixedIDs is the ids of ks.
+func keptFixedIDs(ks []KeptFixed) []string {
+	var ids []string
+	for _, k := range ks {
+		ids = append(ids, k.ID)
+	}
+	return ids
 }
 
 // headRaisedAt is the head the latest earlier round that holds finding id

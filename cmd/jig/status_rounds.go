@@ -14,14 +14,14 @@ func init() {
 }
 
 // roundColumns are the columns of the rounds table.
-var roundColumns = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files"}
+var roundColumns = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed"}
 
 // roundsBlocks is the `rounds` table of `jig status`: one row per recorded gate
 // round, oldest first.
 //
-//	rounds[2]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files}:
-//	  1,findings,s-rev,claude,claude-opus-5,true,1,1,0,full,1a2b3c4...,5d6e7f8...,4
-//	  2,clean,s-rev,claude,claude-opus-5,true,0,0,0,delta,5d6e7f8...,9a8b7c6...,2
+//	rounds[2]{round,verdict,reviewer,harness,model,independent,fix,ask,note,scope,base,head,files,kept_fixed}:
+//	  1,findings,s-rev,claude,claude-opus-5,true,1,1,0,full,1a2b3c4...,5d6e7f8...,4,0
+//	  2,clean,s-rev,claude,claude-opus-5,true,0,0,0,delta,5d6e7f8...,9a8b7c6...,2,0
 //
 // verdict is clean, findings or not-independent. reviewer is the session that
 // reported the round, and harness and model are what the journal and the
@@ -29,7 +29,7 @@ var roundColumns = []string{"round", "verdict", "reviewer", "harness", "model", 
 // round a reviewer ran. fix, ask and note count the findings by the status jig
 // routed them to (open, asked, noted; a dismissed one counts in none). scope
 // is full or delta, base and head are the shas the round reviewed, and files
-// is how many paths the reviewer read. A cell that is not known is "-". A
+// is how many paths the reviewer read, and kept_fixed how many keeps the round spent as fixed. A cell that is not known is "-". A
 // ticket with no recorded round has no block.
 func roundsBlocks(st *store.Store, ticket string) ([]string, error) {
 	recs, err := verifydeliver.ReadRounds(st, ticket)
@@ -48,7 +48,7 @@ func roundsBlocks(st *store.Store, ticket string) ([]string, error) {
 		rows = append(rows, []string{
 			strconv.Itoa(r.Round), r.Verdict, dashed(r.Reviewer.Session), dashed(r.Harness), dashed(r.Model),
 			dashed(string(r.Independent)), strconv.Itoa(r.Fix), strconv.Itoa(r.Ask), strconv.Itoa(r.Note),
-			dashed(r.Scope), dashed(r.Base), dashed(r.Head), files,
+			dashed(r.Scope), dashed(r.Base), dashed(r.Head), files, strconv.Itoa(len(r.KeptFixed)),
 		})
 	}
 	return []string{axi.Table("rounds", roundColumns, rows)}, nil
