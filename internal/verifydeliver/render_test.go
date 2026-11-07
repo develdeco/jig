@@ -271,7 +271,7 @@ func TestCollectFindingsWithOutcomes(t *testing.T) {
 	})
 	slices := []store.Slice{{ID: "fix-1", FromGate: 1, Findings: []string{"r1-f2"}}}
 
-	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(ticketDir, 2, slices)
+	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(ticketDir, nil, 2, slices)
 	if err != nil {
 		t.Fatalf("collectFindingsWithOutcomes: %v", err)
 	}

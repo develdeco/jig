@@ -1038,7 +1038,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 			return publication{}, err
 		}
 	}
-	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(d.Store.TicketDir(ticket), t.lastRound, t.slices)
+	outcomes, reviewedPaths, lastSummary, err := collectFindingsWithOutcomes(d.Store.TicketDir(ticket), TriageDecisions(lines), t.lastRound, t.slices)
 	if err != nil {
 		return publication{}, err
 	}
