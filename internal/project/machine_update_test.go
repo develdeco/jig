@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/filelock"
+	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/home"
 )
 
@@ -179,10 +180,55 @@ func TestSaveMachineWaitsOutAHeldLock(t *testing.T) {
 		release()
 	}()
 	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
-	if err := saveMachine(jigHome, want, 30*time.Second); err != nil {
-		t.Fatalf("saveMachine waiting on a lock released in 150ms = %v", err)
+	if err := SaveMachine(jigHome, want); err != nil {
+		t.Fatalf("SaveMachine waiting on a lock released in 150ms = %v", err)
 	}
 	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("mapping after the wait = %+v, %v; want %+v", got, err, want)
+	}
+}
+
+// TestLoadMachineWhileTheMappingIsReplaced: a reader looping on LoadMachine
+// never makes a replacement of the mapping fail, because it reads through the
+// store's read, which opens with delete sharing. Read with os.ReadFile on
+// Windows, a rename (no retry here) is refused whenever it lands mid-read.
+func TestLoadMachineWhileTheMappingIsReplaced(t *testing.T) {
+	jigHome := t.TempDir()
+	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
+	if err := SaveMachine(jigHome, want); err != nil {
+		t.Fatal(err)
+	}
+	path := home.MachinePath(jigHome)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = LoadMachine(jigHome)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for i := 0; i < 300; i++ {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileshare.Rename(tmp, path); err != nil {
+			t.Fatalf("replacement %d while LoadMachine loops: %v", i, err)
+		}
+	}
+	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoadMachine after the replacements = %+v, %v; want %+v", got, err, want)
 	}
 }

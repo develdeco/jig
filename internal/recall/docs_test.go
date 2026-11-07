@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/develdeco/jig/internal/fileshare"
 )
 
 func writeTree(t *testing.T, root string, files map[string]string) {
@@ -84,5 +86,45 @@ func TestDocOfTakesTitleHeadAndMatches(t *testing.T) {
 	plain := docOf(DocText{Path: "platform/x.md", Text: "first line\nsecond line\n"}, nil)
 	if plain.Title != "first line" || len(plain.Matches) != 0 {
 		t.Errorf("a document with no heading = %+v, want its first line as the title and no matches", plain)
+	}
+}
+
+// TestReadHeadWhileTheFileIsReplaced: a reader looping on readHead never makes
+// a replacement of the file (a store file swapped in by rename) fail, because
+// it opens with delete sharing. Opened with os.Open on Windows, a rename (no
+// retry here) is refused whenever it lands mid-read.
+func TestReadHeadWhileTheFileIsReplaced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "contract-index.md")
+	body := "# Contract index\n\nthe platform's contracts\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = readHead(path, maxDocBytes)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for i := 0; i < 300; i++ {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileshare.Rename(tmp, path); err != nil {
+			t.Fatalf("replacement %d while readHead loops: %v", i, err)
+		}
+	}
+	if got, err := readHead(path, maxDocBytes); err != nil || got != body {
+		t.Fatalf("readHead after the replacements = %q, %v, want %q", got, err, body)
 	}
 }
