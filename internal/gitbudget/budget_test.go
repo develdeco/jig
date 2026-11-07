@@ -45,8 +45,8 @@ func writeFile(t *testing.T, name, body string) string {
 // and baselines: every verdict, and the edge where exactly the limit passes
 // and one over fails.
 func TestCheckVerdictsAndTheThresholdEdge(t *testing.T) {
-	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 100\n")
-	base := writeFile(t, "baseline.yaml", "packages:\n  big: 4000\n  small: 10\n  gone: 50\n  shrunk: 500\n")
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	base := writeFile(t, "baseline.yaml", "packages:\n  big: 400\n  small: 10\n  gone: 5\n  shrunk: 50\n")
 	for _, c := range []struct {
 		name     string
 		counts   map[string]int
@@ -54,16 +54,16 @@ func TestCheckVerdictsAndTheThresholdEdge(t *testing.T) {
 		code     int
 		verdicts map[string]string
 	}{
-		{"within the percent of a big package", map[string]int{"big": 4200}, false, 0, map[string]string{"big": "ok"}},
-		{"exactly at the limit (5% of 4000 is 200)", map[string]int{"big": 4200, "small": 110}, false, 0, map[string]string{"big": "ok", "small": "ok"}},
-		{"one over the limit of a big package", map[string]int{"big": 4201}, false, 1, map[string]string{"big": "over"}},
-		{"one over the slack of a small package", map[string]int{"small": 111}, false, 1, map[string]string{"small": "over"}},
+		{"within the percent of a big package", map[string]int{"big": 420}, false, 0, map[string]string{"big": "ok"}},
+		{"exactly at the limit (5% of 400 is 20; the slack of 10 is the larger for small)", map[string]int{"big": 420, "small": 20}, false, 0, map[string]string{"big": "ok", "small": "ok"}},
+		{"one over the limit of a big package", map[string]int{"big": 421}, false, 1, map[string]string{"big": "over"}},
+		{"one over the slack of a small package", map[string]int{"small": 21}, false, 1, map[string]string{"small": "over"}},
 		{"a decrease never fails", map[string]int{"shrunk": 0, "big": 1}, false, 0, map[string]string{"shrunk": "ok", "big": "ok"}},
-		{"new package within the slack", map[string]int{"fresh": 100}, false, 0, map[string]string{"fresh": "new"}},
-		{"new package past the slack", map[string]int{"fresh": 101}, false, 1, map[string]string{"fresh": "over"}},
+		{"new package within the slack", map[string]int{"fresh": 10}, false, 0, map[string]string{"fresh": "new"}},
+		{"new package past the slack", map[string]int{"fresh": 11}, false, 1, map[string]string{"fresh": "over"}},
 		{"a package with no git work and no entry is not listed", map[string]int{"quiet": 0}, false, 0, map[string]string{}},
 		{"a baseline package that did not run", map[string]int{"small": 10}, false, 0, map[string]string{"small": "ok", "gone": "not run", "big": "not run", "shrunk": "not run"}},
-		{"accepted turns an over into a pass", map[string]int{"big": 9000, "small": 10}, true, 0, map[string]string{"big": "accepted", "small": "ok"}},
+		{"accepted turns an over into a pass", map[string]int{"big": 900, "small": 10}, true, 0, map[string]string{"big": "accepted", "small": "ok"}},
 	} {
 		var stdout, stderr bytes.Buffer
 		counts := fixture(t, c.counts)
@@ -108,22 +108,22 @@ func TestCheckVerdictsAndTheThresholdEdge(t *testing.T) {
 }
 
 func TestCheckWithoutABaselinePassesAndSaysSo(t *testing.T) {
-	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 100\n")
-	counts := fixture(t, map[string]int{"e2e": 7000})
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	counts := fixture(t, map[string]int{"e2e": 70})
 	missing := filepath.Join(t.TempDir(), "absent.yaml")
 	for _, base := range []string{"-", missing} {
 		var stdout, stderr bytes.Buffer
 		code := run([]string{"check", cfg, base, counts, testModule + "/e2e"}, func(string) string { return "" }, &stdout, &stderr)
-		if code != 0 || !strings.Contains(stdout.String(), "no main baseline") || !strings.Contains(stdout.String(), "7000") {
+		if code != 0 || !strings.Contains(stdout.String(), "no main baseline") || !strings.Contains(stdout.String(), "70") {
 			t.Errorf("baseline %q: exit %d, want 0 with the no-baseline line and the counts:\n%s%s", base, code, stdout.String(), stderr.String())
 		}
 	}
 }
 
 func TestCheckWritesTheMarkdownSummary(t *testing.T) {
-	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 100\n")
-	base := writeFile(t, "baseline.yaml", "packages:\n  e2e: 1000\n")
-	counts := fixture(t, map[string]int{"e2e": 1500})
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	base := writeFile(t, "baseline.yaml", "packages:\n  e2e: 100\n")
+	counts := fixture(t, map[string]int{"e2e": 150})
 	summary := filepath.Join(t.TempDir(), "summary.md")
 	env := func(k string) string {
 		if k == "GITHUB_STEP_SUMMARY" {
@@ -139,7 +139,7 @@ func TestCheckWritesTheMarkdownSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "| package | baseline | count | change | percent | verdict |") || !strings.Contains(string(got), "| e2e | 1000 | 1500 | +500 | +50.0% | over |") {
+	if !strings.Contains(string(got), "| package | baseline | count | change | percent | verdict |") || !strings.Contains(string(got), "| e2e | 100 | 150 | +50 | +50.0% | over |") {
 		t.Errorf("summary:\n%s", got)
 	}
 }
@@ -160,7 +160,7 @@ func TestWriteThenCheckRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(string(data), baselineHeader) || !strings.Contains(string(data), "  cmd/jig: 7\n  e2e: 12\n") {
 		t.Errorf("baseline file:\n%s", data)
 	}
-	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 100\n")
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
 	if code := run(append([]string{"check", cfg, path, counts}, pkgs...), func(string) string { return "" }, new(bytes.Buffer), new(bytes.Buffer)); code != 0 {
 		t.Errorf("check against the baseline just written: exit %d, want 0", code)
 	}
@@ -168,8 +168,8 @@ func TestWriteThenCheckRoundTrip(t *testing.T) {
 
 func TestReadConfigAndBaselineRefuseWhatTheyCannotJudge(t *testing.T) {
 	for name, body := range map[string]string{
-		"old packages map": "margin: 5\nslack: 100\npackages:\n  e2e: 1\n",
-		"margin over":      "margin: 101\nslack: 100\n",
+		"old packages map": "margin: 5\nslack: 10\npackages:\n  e2e: 1\n",
+		"margin over":      "margin: 101\nslack: 10\n",
 		"negative slack":   "margin: 5\nslack: -1\n",
 		"not a mapping":    "- e2e\n",
 	} {
