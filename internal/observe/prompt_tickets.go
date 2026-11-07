@@ -66,9 +66,9 @@ func (h *handler) namedTickets() []string {
 }
 
 // phaseNotes is the note for each of the named tickets that is not done, at
-// most maxNamedTickets of them, once for each ticket and phase (the Ref is phase:<ticket>:<phase>). A ticket
+// most maxNamedTickets of them that the session has not heard, once for each ticket and phase (the Ref is phase:<ticket>:<phase>). A ticket
 // whose phase cannot be derived costs its own note.
-func (h *handler) phaseNotes(tickets []string) []Note {
+func (h *handler) phaseNotes(mem sessionMemory, tickets []string) []Note {
 	if h.d.Derive == nil {
 		return nil
 	}
@@ -85,6 +85,10 @@ func (h *handler) phaseNotes(tickets []string) []Note {
 		if t.Code == phase.CodeDone || t.Code == phase.CodeClosed {
 			continue
 		}
+		ref := fmt.Sprintf("phase:%s:%s", id, t.Current)
+		if mem.delivered[ref] {
+			continue // heard already: it takes no place from a ticket still to hear
+		}
 		state := "ready"
 		if !t.Ready {
 			state = "not ready"
@@ -93,7 +97,7 @@ func (h *handler) phaseNotes(tickets []string) []Note {
 			}
 		}
 		out = append(out, Note{
-			Ref: fmt.Sprintf("phase:%s:%s", id, t.Current),
+			Ref: ref,
 			Text: fmt.Sprintf("%s is at its %s phase, %s: use the %s skill (`jig skill %s`); `jig next %s` says what the phase needs.",
 				id, t.Current, state, phaseSkill[t.Current], phaseSkill[t.Current], id),
 		})

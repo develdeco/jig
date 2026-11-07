@@ -167,3 +167,27 @@ func TestAPublishPhaseNoteNamesTheDraftedSkillAndATicketWithoutAPhaseCostsOnlyIt
 		t.Errorf("context = %s\nwant JIG-1's publish note alone", got)
 	}
 }
+
+func TestTicketsAlreadyHeardDoNotUseThePlacesOfANewOne(t *testing.T) {
+	t.Parallel()
+	r := newPhaseRig(t, "JIG-2", "JIG-3", "JIG-4")
+	for _, id := range []string{"JIG-2", "JIG-3", "JIG-4"} {
+		r.phases[id] = phase.Ticket{Current: phase.Review, Ready: true}
+	}
+	r.handle(r.ev(KindSessionStart))
+	first := r.prompt("JIG-1, JIG-2 and JIG-3")
+	for _, id := range []string{"JIG-1", "JIG-2", "JIG-3"} {
+		if !strings.Contains(first, id+" is at its") {
+			t.Fatalf("the first prompt lacks %s's note:\n%s", id, first)
+		}
+	}
+	got := r.prompt("JIG-1, JIG-2, JIG-3 and now JIG-4")
+	if !strings.Contains(got, "JIG-4 is at its review phase") {
+		t.Errorf("context = %s\nwant JIG-4's note though three heard tickets come first", got)
+	}
+	for _, id := range []string{"JIG-1", "JIG-2", "JIG-3"} {
+		if strings.Contains(got, id+" is at its") {
+			t.Errorf("%s's note was told twice:\n%s", id, got)
+		}
+	}
+}
