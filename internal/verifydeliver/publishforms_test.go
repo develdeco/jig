@@ -396,7 +396,8 @@ func TestPublishRecordPRThroughMerges(t *testing.T) {
 
 	// The target moves, and the branch merges it in without a conflict.
 	run(t, fx.RepoDir, "checkout", "main")
-	writeAndCommit(t, fx.RepoDir, "main1.txt", "from main", "the target moves")
+	moved := writeAndCommit(t, fx.RepoDir, "main1.txt", "from main", "the target moves")
+	run(t, fx.RepoDir, "update-ref", "refs/remotes/origin/main", moved)
 	run(t, fx.RepoDir, "checkout", branch)
 	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "main")
 	clean := run(t, fx.RepoDir, "rev-parse", "HEAD")

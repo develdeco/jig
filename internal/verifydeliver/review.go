@@ -1124,7 +1124,7 @@ func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string
 		}
 		if prior != "" {
 			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
-				kind, ownTree, lerr := classifyLine(leaseDir, prior, head)
+				kind, ownTree, lerr := classifyLine(leaseDir, prior, head, "origin/"+target)
 				if lerr != nil {
 					return "", "", lerr
 				}
