@@ -24,6 +24,11 @@ jobs:
   ci:
     needs: repo-visibility
     uses: ./.github/workflows/ci.yml
+    # ci.yml's test job requests pull-requests: read (its label step); a
+    # called workflow can only narrow the caller's token, never raise it.
+    permissions:
+      contents: read
+      pull-requests: read
     with:
       release: true
 

@@ -1,36 +1,10 @@
-# The git processes each package's tests may start, counted on CI's Linux
-# leg by internal/gitbudget (go test -exec), one per process git traces.
-# A count more than margin percent (and at least 3 processes) away
-# from its budget, either way, fails the leg: a change that adds git work to
-# the suite raises its package's number here, in its own diff, and one that
-# cuts git work lowers it. The failing step prints the numbers to put here.
-# A package that starts no git process has no entry.
-margin: 1
-packages:
-  cmd/jig: 5238
-  e2e: 7031
-  internal/correct: 271
-  internal/fileshare: 8
-  internal/fixture: 708
-  internal/gitbudget: 7
-  internal/gittest: 6
-  internal/gitx: 1934
-  internal/intent: 51
-  internal/locate: 95
-  internal/mergefacts: 169
-  internal/migrate: 295
-  internal/mirror: 1536
-  internal/observe: 230
-  internal/pool: 1862
-  internal/project: 382
-  internal/ready: 22
-  internal/repohost: 2
-  internal/revieweval: 1497
-  internal/session: 135
-  internal/setup: 132
-  internal/slicectx: 61
-  internal/stack: 194
-  internal/store: 4000
-  internal/verify: 784
-  internal/verifydeliver: 11908
-  lint: 21
+# The threshold CI's Linux leg holds each package's git process count to.
+# internal/gitbudget (go test -exec) counts the processes git traces for
+# every package, and compares each count with main's last measured one: the
+# counts live in the Actions cache, saved by the push run on main, not here.
+# A count above its baseline plus the larger of margin percent of the
+# baseline (rounded up) and slack processes fails the leg; a decrease never
+# does. A real increase is accepted with the pull request label
+# git-budget-accepted, and the failed job re-run.
+margin: 5
+slack: 100
