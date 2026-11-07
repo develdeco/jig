@@ -44,7 +44,7 @@ Only a person's approval, from a terminal, stands in for the question a bare `ji
 
 ## The What you write
 
-The body is `## What`, `## Demo` (when picked) and `## Verification`; slices, findings and reviewers are in the review notes comment. Until the ticket has a What the body's is its title and `--body` reports `what: pending` with a `what_request` file: write a few bullets there, the first saying why the change exists, and run `jig publish T-1 --body --what <file>` (`--repo <r>` in several repos). jig stores them in the ticket; later renders reuse them.
+The body is `## What`, `## Demo` (when picked) and `## Verification`, then the trailer the project's `jig.yaml` sets (`publish: trailer:`); slices, findings and reviewers are in the review notes comment. Hand `gh` the body as rendered: a line added after it reads back as `differs`, so an attribution line belongs in the trailer. Until the ticket has a What the body's is its title and `--body` reports `what: pending` with a `what_request` file: write a few bullets there, the first saying why the change exists, and run `jig publish T-1 --body --what <file>` (`--repo <r>` in several repos). jig stores them in the ticket; later renders reuse them.
 
 ## Recordings for the demo
 
