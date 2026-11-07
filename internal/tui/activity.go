@@ -47,7 +47,7 @@ func stepOfLine(l events.Envelope) int {
 	switch l.Event {
 	case journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return stepBrief
-	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
+	case journal.EventGateOpen, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
 		return stepReview
 	case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
@@ -233,7 +233,7 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "drafted"
 	case journal.EventRevalidate, eventSlicesSeen:
 		return "slices"
-	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
+	case journal.EventGateOpen, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return "round:" + strconv.Itoa(t.roundOf(l))
 	case journal.EventTriage:
 		return "asks"
@@ -352,6 +352,12 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 			return cmd + " passed" + took(l.Seconds)
 		}
 		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+	case journal.EventGateOracle:
+		cmd := "its oracle"
+		if l.Command != "" {
+			cmd = "`" + l.Command + "`"
+		}
+		return cmd + " passed" + took(l.Seconds)
 	case journal.EventVerified:
 		return "verified " + short(l.Commit)
 	case journal.EventVerifyError:

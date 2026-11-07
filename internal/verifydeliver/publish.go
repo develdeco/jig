@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -112,7 +113,9 @@ type ReviewNotesReport struct {
 	// the status is not posted.
 	File string
 	// Reason is why they were not posted: the repo has no pull-request host,
-	// or the host's error.
+	// the host's error, the notes are not rendered, or they could not be
+	// rendered for the reviewed head (the store's earlier notes are then left
+	// off the pull request).
 	Reason string
 }
 
@@ -400,6 +403,27 @@ func publishBranch(d Deps, ticket string, rec store.Ticket, repos []*gateRepo) (
 	return branch, nil
 }
 
+// ConfirmPrompt is the question a bare publish asks before it pushes, naming
+// which of the things it is agreeing to: opening a pull request, updating the
+// open one at openPR, or pushing alone when the repo has no pull-request host.
+func ConfirmPrompt(branch, ticket, openPR string, hasHost bool) string {
+	switch {
+	case !hasHost:
+		return fmt.Sprintf("Push %s for %s? [y/N] ", branch, ticket)
+	case openPR != "":
+		return fmt.Sprintf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
+	default:
+		return fmt.Sprintf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+	}
+}
+
+// ConfirmAnswer reads one line from r and reports whether it is a yes.
+func ConfirmAnswer(r *bufio.Reader) bool {
+	line, _ := r.ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
+}
+
 // publishFuncs are the seams a publish form takes from Deps, each with its
 // production default.
 type publishFuncs struct {
@@ -421,16 +445,8 @@ func (d Deps) publishFuncs() publishFuncs {
 	// request, updating that one, or pushing alone when there is no host.
 	if f.confirm == nil {
 		f.confirm = func(branch, ticket, openPR string, hasHost bool) bool {
-			if !hasHost {
-				fmt.Printf("Push %s for %s? [y/N] ", branch, ticket)
-			} else if openPR != "" {
-				fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
-			} else {
-				fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
-			}
-			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-			answer := strings.ToLower(strings.TrimSpace(line))
-			return answer == "y" || answer == "yes"
+			fmt.Print(ConfirmPrompt(branch, ticket, openPR, hasHost))
+			return ConfirmAnswer(bufio.NewReader(os.Stdin))
 		}
 	}
 	if f.guardedPush == nil {
@@ -1055,8 +1071,17 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
+	// The commands the oracles ran, from the journal's oracle lines for the
+	// reviewed head (the exact command that ran), never from a working tree,
+	// which may be another branch or a later head when the gate lease is gone.
+	// An oracle no line carries a command for is listed by its name alone.
+	reviewed := t.reviewedHead()
+	if reviewed == "" {
+		reviewed = in.head
+	}
+	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, rounds, picked, links, t.stack)
+		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {
@@ -1199,7 +1224,7 @@ func postPublishChecks(d Deps, host repohost.Host, ticket, prURL, repo string, r
 // (canonicalPRURL) and the notes' sha256 in its summary. Notes whose sha256 a
 // review-notes line for the same pull request already has are not posted
 // again, whichever way the url was spelled (a trailing slash, /files, a
-// fragment): a re-publish of the same head, or a second --pr, adds no
+// fragment, the case of its host, owner and repo): a re-publish of the same head, or a second --pr, adds no
 // duplicate, while notes that changed post anew. A failed post is a soft
 // failure, not a publish failure: a warning, the pull request stands, and the
 // report names the file, kept in the store for a manual post. Notes never
@@ -1236,7 +1261,7 @@ func postReviewNotes(d Deps, host repohost.Host, ticket, prURL, repo, notesName 
 		if l.Event != journal.EventReviewNotes || l.Summary != sum {
 			continue
 		}
-		if other, err := repohost.ParsePRURL(l.URL); err == nil && other == ref {
+		if other, err := repohost.ParsePRURL(l.URL); err == nil && samePullRequest(other, ref) {
 			return ReviewNotesReport{Status: ReviewNotesAlreadyPosted, File: path}
 		}
 	}
@@ -1251,6 +1276,13 @@ func postReviewNotes(d Deps, host repohost.Host, ticket, prURL, repo, notesName 
 	return ReviewNotesReport{Status: ReviewNotesPosted, File: path}
 }
 
+// samePullRequest reports whether a and b are one pull request: the host,
+// owner and repo read without case, as GitHub reads them, and the number as it
+// is.
+func samePullRequest(a, b repohost.PRRef) bool {
+	return a.Number == b.Number && strings.EqualFold(a.Host, b.Host) && strings.EqualFold(a.Owner, b.Owner) && strings.EqualFold(a.Repo, b.Repo)
+}
+
 // canonicalPRURL is the one spelling of a pull request's url the journal
 // keeps: https://<host>/<owner>/<repo>/pull/<number>.
 func canonicalPRURL(ref repohost.PRRef) string {
@@ -1258,16 +1290,21 @@ func canonicalPRURL(ref repohost.PRRef) string {
 }
 
 // notesRenderedFor reports whether the repo's latest pr-body line is at the
-// reviewed head and no publish approval of that head was journaled after it:
-// the notes in the store then describe the round the pull request ships, and
-// say the approval it had, not an earlier round's or none.
+// reviewed head, comes after the last gate-round or gate-clean line, and has
+// no publish approval of that head journaled after it: the notes in the store
+// then describe the round the pull request ships, and say the approval it had,
+// not an earlier round's or none. A round closed after the body (a triage after
+// a clean round makes the gate run another at the same head) leaves the
+// notes an earlier round's, the rule phase.readPublish counts a body by.
 func notesRenderedFor(lines []journal.Line, repo, reviewed string) bool {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := lines[i]
-		if l.Event == journal.EventPublishApproved && l.Repo == repo && l.Commit == reviewed && reviewed != "" {
+		switch {
+		case l.Event == journal.EventGateRound || l.Event == journal.EventGateClean:
 			return false
-		}
-		if l.Event == journal.EventPrBody && l.Repo == repo {
+		case l.Event == journal.EventPublishApproved && l.Repo == repo && l.Commit == reviewed && reviewed != "":
+			return false
+		case l.Event == journal.EventPrBody && l.Repo == repo:
 			return l.Commit == reviewed
 		}
 	}
@@ -1542,9 +1579,14 @@ type RecordReport struct {
 // takes one pull request for each repo, and says which with o.Repo; the last
 // to be recorded finishes the publish, which writes what a publish leaves in
 // the store (changelogs, ledger entry, evidence) and journals publish-done.
-// Once the pull request checks out it posts the repo's review notes on it
-// (postReviewNotes): a failed post is a warning, and the pull request stays
-// recorded. It pushes the store, changes no lease and no branch and pushes
+// Once the pull request checks out it renders the body and the review notes
+// again when the store's are not the reviewed head's (notesRenderedFor: the
+// latest pr-body is at another head, is not after the last closed round, or a
+// publish approval of the head came after it; a pr-body line is journaled) and
+// posts the notes on it (postReviewNotes), matching earlier posts by the parsed
+// pull request without case and journaling its canonical url. A failed post is
+// a warning, and the pull request stays recorded; notes that could not be
+// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no lease and no branch and pushes
 // nothing of the repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket
@@ -1976,4 +2018,58 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 			next,
 		},
 	}
+}
+
+// oracleCommandsRan is, for each oracle name, the commands that ran for it, one
+// for each workspace (the latest passing line for the oracle in that workspace)
+// and each distinct, in the order the journal first records the workspaces,
+// which for the gate's own runs is the manifest's: lines recorded at the
+// reviewed head or at a commit with the same tree (the rule the gate reuses a
+// pass by). They are the oracle line of a slice that names the oracle (a pass
+// the gate reused, in the slice's workspace) and the gate-oracle line of a run
+// the gate made itself (with its workspace). The line carries the exact command
+// that ran, so nothing here reads a manifest.
+func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed string) map[string][]string {
+	if reviewed == "" {
+		return nil
+	}
+	type sliceOf struct{ oracle, workspace string }
+	byID := map[string]sliceOf{}
+	for _, s := range built {
+		byID[s.ID] = sliceOf{s.Oracle, s.Workspace}
+	}
+	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
+	type key struct{ oracle, workspace string }
+	var order []key
+	latest := map[key]string{}
+	for _, l := range lines {
+		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
+			continue
+		}
+		name, workspace := l.Oracle, l.Workspace
+		if l.Event == journal.EventOracle {
+			name, workspace = byID[l.Slice].oracle, byID[l.Slice].workspace
+		}
+		if name == "" {
+			continue
+		}
+		if l.Commit != reviewed {
+			other, found, _ := gitx.Resolve(dir, l.Commit+"^{tree}")
+			if !haveTree || !found || other != tree {
+				continue
+			}
+		}
+		k := key{name, workspace}
+		if _, seen := latest[k]; !seen {
+			order = append(order, k)
+		}
+		latest[k] = l.Command
+	}
+	commands := map[string][]string{}
+	for _, k := range order {
+		if !slices.Contains(commands[k.oracle], latest[k]) {
+			commands[k.oracle] = append(commands[k.oracle], latest[k])
+		}
+	}
+	return commands
 }

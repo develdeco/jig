@@ -21,6 +21,7 @@ const (
 	EventEnvUp          = "env-up"
 	EventFixSlice       = "fix-slice"
 	EventGateClean      = "gate-clean"
+	EventGateOracle     = "gate-oracle"
 	EventGateOpen       = "gate-open"
 	EventGateReviewer   = "gate-reviewer"
 	EventGateRound      = "gate-round"

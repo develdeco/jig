@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/repohost"
 )
 
 // reviewedInTheClone is cloneBuilt taken through one clean, independent round:
@@ -28,6 +31,32 @@ func reviewedInTheClone(t *testing.T) (*fixture.Fixture, Deps, string) {
 		t.Fatalf("GateFinish: %v", err)
 	}
 	return fx, d, head
+}
+
+// withGateCommand is want with the "- test" line of its Verification given the
+// command the gate ran for the oracle (the fixture's own, which names the Go
+// toolchain of the machine), as the body names it.
+func withGateCommand(t *testing.T, fx *fixture.Fixture, want string) string {
+	t.Helper()
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil || len(man.Workspaces) == 0 {
+		t.Fatalf("manifest.Resolve: %v (%d workspaces)", err, len(man.Workspaces))
+	}
+	line := "\n- test\n"
+	if !strings.Contains(want, line) {
+		t.Fatalf("want has no %q line:\n%s", line, want)
+	}
+	named := "\n"
+	var seen []string
+	for _, ws := range man.Workspaces {
+		cmd := man.OracleCmd("test", ws)
+		if slices.Contains(seen, cmd) {
+			continue
+		}
+		seen = append(seen, cmd)
+		named += "- test: `" + cmd + "`\n"
+	}
+	return strings.Replace(want, line, named, 1)
 }
 
 // publishPrCalls counts the calls the fake gh logged that open or edit a pull
@@ -779,9 +808,10 @@ func TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody(t *testing
 }
 
 // TestPublishBareFormApprovalComesFromHowItWasConfirmed: an interactive yes
-// journals a person's publish-approved line for the head, and the review notes
-// and the pr line say it; --yes stands for no person, so it journals none and
-// the notes say no recorded approval.
+// at a terminal journals a person's publish-approved line for the head, and the
+// review notes and the pr line say it; a piped y, off a terminal, journals an
+// agent's; --yes stands for no person, so it journals none and the notes say no
+// recorded approval.
 func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -836,5 +866,353 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 				t.Errorf("%d publish-approved line(s); notes lack the no-approval line:\n%s", approved, notes)
 			}
 		})
+	}
+}
+
+// TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody: --body renders
+// the notes after one round; a second round then closes at the same head (a
+// triage decision after a clean round makes the gate run one, GATE-8); --pr
+// then posts the second round's notes, not the earlier round's the store
+// still holds.
+func TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare for the second round: %v", err)
+	}
+	if p.Round != 2 || p.Head != head {
+		t.Fatalf("second round = %d at %s, want round 2 at the same head %s", p.Round, p.Head, head)
+	}
+	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer-two", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish for the second round: %v", err)
+	}
+
+	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	notes, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "review-notes.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(notes), "Round 2") {
+		t.Fatalf("the notes --pr posted are the earlier round's, they do not include the second round:\n%s", notes)
+	}
+}
+
+// TestPublishRecordPRPostsTheNotesOnceWhateverTheCaseOfTheURL: GitHub reads a
+// pull request's host, owner and repo without case, so two spellings that
+// differ only there are one pull request and its notes are posted once.
+func TestPublishRecordPRPostsTheNotesOnceWhateverTheCaseOfTheURL(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	for i, url := range []string{"https://github.com/owner/fixture-repo/pull/7", "https://GitHub.com/Owner/Fixture-Repo/pull/7"} {
+		report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, url, nil)
+		if err != nil {
+			t.Fatalf("PublishRecordPR %s: %v", url, err)
+		}
+		want := ReviewNotesPosted
+		if i == 1 {
+			want = ReviewNotesAlreadyPosted
+		}
+		if report.ReviewNotes.Status != want {
+			t.Fatalf("--pr %s: review notes %q, want %q", url, report.ReviewNotes.Status, want)
+		}
+	}
+	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
+		t.Fatalf("one pull request spelled in two cases got %d comment(s), want 1", n)
+	}
+}
+
+// TestPublishRecordPRJournalsTheCanonicalURLOfTheNotes: the first --pr, given
+// the pull request in a non-canonical spelling, journals the review-notes line
+// with https://<host>/<owner>/<repo>/pull/<n>.
+func TestPublishRecordPRJournalsTheCanonicalURLOfTheNotes(t *testing.T) {
+	t.Parallel()
+	const canonical = "https://github.com/owner/fixture-repo/pull/7"
+	for _, spelled := range []string{canonical + "/files", "http://github.com/owner/fixture-repo/pull/7"} {
+		fx, d, head := reviewedInTheClone(t)
+		_, addEnv := useGithubHost(t, &d, "", "")
+		addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+		if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, spelled, nil); err != nil {
+			t.Fatalf("PublishRecordPR %s: %v", spelled, err)
+		}
+		if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 1 || posted[0].URL != canonical {
+			t.Errorf("--pr %s: review-notes lines = %+v, want one with the url %s", spelled, posted, canonical)
+		}
+	}
+}
+
+// TestPublishRecordPRPostsNothingWhenTheRenderFails: the store holds an earlier
+// head's notes and the render for the reviewed head is refused (the head is no
+// longer a branch tip). The earlier notes are not posted: the report says why,
+// and no comment reaches the pull request.
+func TestPublishRecordPRPostsNothingWhenTheRenderFails(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	logFile, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	notes := filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "review-notes.md")
+	if err := os.MkdirAll(filepath.Dir(notes), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notes, []byte("# Review Notes\n\nan earlier head's\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeAndCommit(t, fx.RepoDir, "late.txt", "after the round", "a commit after the round")
+
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.ReviewNotes.Status != ReviewNotesNotPosted || !strings.Contains(report.ReviewNotes.Reason, "could not be rendered") {
+		t.Fatalf("review notes = %+v, want not posted with the render's reason", report.ReviewNotes)
+	}
+	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 0 {
+		t.Fatalf("a failed render still posted %d comment(s)", n)
+	}
+	if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 0 {
+		t.Fatalf("a failed render journaled review-notes lines %+v", posted)
+	}
+	if len(warnings) == 0 {
+		t.Error("a failed render warned of nothing")
+	}
+}
+
+// TestPublishRecordPRWithNoHostNamesNotesThatExist: with no pull-request host
+// and no --body first, --pr renders the notes for the reviewed head, so the
+// file it names to post by hand is there and is the current round's.
+func TestPublishRecordPRWithNoHostNamesNotesThatExist(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, "https://git.example/o/r/pull/3", func(string, ...any) {})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	notes := report.ReviewNotes
+	if notes.Status != ReviewNotesNotPosted || notes.File == "" {
+		t.Fatalf("review notes = %+v, want not posted, naming the file to post by hand", notes)
+	}
+	data, err := os.ReadFile(notes.File)
+	if err != nil {
+		t.Fatalf("the file --pr names does not exist: %v", err)
+	}
+	if !strings.Contains(string(data), "Round 1") {
+		t.Errorf("the file --pr names is not the reviewed round's notes:\n%s", data)
+	}
+}
+
+// failingReadHost is a host whose reads of a pull request's body and title
+// fail, the rest of it a real host's.
+type failingReadHost struct{ repohost.Host }
+
+func (failingReadHost) ReadPRBody(string) (string, error)  { return "", fmt.Errorf("read refused") }
+func (failingReadHost) ReadPRTitle(string) (string, error) { return "", fmt.Errorf("read refused") }
+
+// TestPublishRecordPRJournalsAFailedReadBackAsUnknown: when the host's body
+// cannot be read back the pr line says body_match unknown, never matches, the
+// read is warned of, and the pull request is recorded all the same.
+func TestPublishRecordPRJournalsAFailedReadBackAsUnknown(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	d.Host = failingReadHost{d.Host}
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.Readback.Match != journal.BodyUnknown || !report.Verified {
+		t.Errorf("report = %+v, want the pull request recorded verified with the readback unknown", report)
+	}
+	if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != journal.BodyUnknown {
+		t.Errorf("the pr line says body_match %q, want %q", got, journal.BodyUnknown)
+	}
+	if !strings.Contains(strings.Join(warnings, ""), "read the body") {
+		t.Errorf("warnings = %q, want one for the failed read", warnings)
+	}
+}
+
+// TestPublishBodyNamesTheCommandThatRanNotTheWorkingTrees: the body's
+// Verification gives an oracle's command from the journal's oracle line for the
+// reviewed head, never from a manifest on disk, so a working tree whose manifest
+// names another command cannot put one in the body that did not run.
+func TestPublishBodyNamesTheCommandThatRanNotTheWorkingTrees(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil || len(slices) == 0 {
+		t.Fatalf("ReadSlices: %v (%d slices)", err, len(slices))
+	}
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil {
+		t.Fatalf("manifest.Resolve: %v", err)
+	}
+	onDisk := man.Oracles[slices[0].Oracle]
+	if onDisk == "" || onDisk == "the-command-that-ran" {
+		t.Fatalf("the working tree's manifest gives %q for oracle %q, want another command", onDisk, slices[0].Oracle)
+	}
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{
+		Event: journal.EventOracle, Slice: slices[0].ID, Outcome: "pass", Commit: head, Command: "the-command-that-ran",
+	}); err != nil {
+		t.Fatalf("journal.Append: %v", err)
+	}
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	if want := "- " + slices[0].Oracle + ": `the-command-that-ran`\n"; !strings.Contains(string(body), want) {
+		t.Errorf("the body lacks %q:\n%s", want, body)
+	}
+	if strings.Contains(string(body), onDisk) {
+		t.Errorf("the body names the working tree's command %q, which did not run:\n%s", onDisk, body)
+	}
+}
+
+// failingTitleHost is a host whose body reads as the render and whose title
+// read fails.
+type failingTitleHost struct {
+	repohost.Host
+	body string
+}
+
+func (h failingTitleHost) ReadPRBody(string) (string, error) { return h.body, nil }
+func (failingTitleHost) ReadPRTitle(string) (string, error)  { return "", fmt.Errorf("title refused") }
+
+// TestPublishRecordPRJournalsAFailedTitleReadAsUnknown: a body that reads as
+// the render with a title that cannot be read is unknown, never matches, the
+// read is warned of, and the pull request is recorded.
+func TestPublishRecordPRJournalsAFailedTitleReadAsUnknown(t *testing.T) {
+	t.Parallel()
+	const prURL = "https://github.com/owner/fixture-repo/pull/7"
+	fx, d, head := reviewedInTheClone(t)
+	_, addEnv := useGithubHost(t, &d, "", "")
+	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	rendered, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the render: %v", err)
+	}
+	d.Host = failingTitleHost{Host: d.Host, body: string(rendered)}
+	var warnings []string
+	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("PublishRecordPR: %v", err)
+	}
+	if report.Readback.Match != journal.BodyUnknown || !report.Verified {
+		t.Errorf("report = %+v, want the pull request recorded verified with the readback unknown", report)
+	}
+	if got := lastPrLine(t, d, fx.Ticket).BodyMatch; got != journal.BodyUnknown {
+		t.Errorf("the pr line says body_match %q, want %q", got, journal.BodyUnknown)
+	}
+	if !strings.Contains(strings.Join(warnings, ""), "read the title") {
+		t.Errorf("warnings = %q, want one for the failed title read", warnings)
+	}
+}
+
+// publishedBody renders the pull request body of the fixture's ticket and
+// returns it.
+func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
+	t.Helper()
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	return string(body)
+}
+
+// TestPublishBodyNamesTheCommandTheGateRanItself: an oracle the gate ran
+// itself, with no slice's pass to reuse, is listed with the command it ran,
+// like one it reused (r2-f2). The fixture journals no oracle line, so the
+// gate's own run is the only source of the command.
+func TestPublishBodyNamesTheCommandTheGateRanItself(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	man, err := manifest.Resolve(fx.RepoDir)
+	if err != nil || len(man.Workspaces) == 0 {
+		t.Fatalf("manifest.Resolve: %v (%d workspaces)", err, len(man.Workspaces))
+	}
+	if len(man.Workspaces) < 2 {
+		t.Fatalf("the fixture has %d workspaces, want several", len(man.Workspaces))
+	}
+	body := publishedBody(t, d, fx)
+	last := -1
+	for _, ws := range man.Workspaces {
+		want := "- test: `" + man.OracleCmd("test", ws) + "`\n"
+		i := strings.Index(body, want)
+		if i < 0 {
+			t.Errorf("the body lacks %q, the command the gate ran in workspace %s:\n%s", want, ws.ID, body)
+		}
+		if i < last {
+			t.Errorf("the body names workspace %s's command before an earlier workspace's:\n%s", ws.ID, body)
+		}
+		last = i
+	}
+}
+
+// TestPublishBodyTakesTheCommandOfTheReviewedHeadOnly: the command the body
+// names comes from a passing line at the reviewed head or at a commit of its
+// tree, never from a line at another head (an earlier slice's green at another
+// tree) and never from a failed run. The journal holds, in this order, a pass
+// at a commit of the head's tree (named), a pass at the base, whose tree
+// differs (not named), and a failure at the head (not named), so each rule is
+// held by the line that would win were it dropped.
+func TestPublishBodyTakesTheCommandOfTheReviewedHeadOnly(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	slices, err := d.Store.ReadSlices(fx.Ticket)
+	if err != nil || len(slices) == 0 {
+		t.Fatalf("ReadSlices: %v (%d slices)", err, len(slices))
+	}
+	lease := gateLeaseOf(t, fx, fx.Ticket)
+	base := run(t, lease, "rev-parse", head+"^")
+	sameTree := run(t, lease, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", head+"^{tree}", "-p", head, "-m", "same tree")
+	for _, l := range []journal.Line{
+		{Slice: slices[0].ID, Outcome: "pass", Commit: sameTree, Command: "ran-at-the-same-tree"},
+		{Slice: slices[0].ID, Outcome: "pass", Commit: base, Command: "ran-at-another-head"},
+		{Slice: slices[0].ID, Outcome: "fail", Commit: head, Command: "failed-at-the-head"},
+	} {
+		l.Event = journal.EventOracle
+		if err := journal.Append(d.Store, fx.Ticket, l); err != nil {
+			t.Fatalf("journal.Append: %v", err)
+		}
+	}
+	body := publishedBody(t, d, fx)
+	if want := "- " + slices[0].Oracle + ": `ran-at-the-same-tree`\n"; !strings.Contains(body, want) {
+		t.Errorf("the body lacks %q:\n%s", want, body)
+	}
+	for _, not := range []string{"ran-at-another-head", "failed-at-the-head"} {
+		if strings.Contains(body, not) {
+			t.Errorf("the body names %q, which did not pass at the reviewed head:\n%s", not, body)
+		}
 	}
 }
