@@ -122,6 +122,11 @@ jobs:
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.os) }}
     runs-on: ${{ matrix.os }}
+    # pull-requests: read lets the git budget step read the pull request's
+    # labels; nothing here writes to the repository.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -194,11 +199,35 @@ jobs:
           printf '%s\n' "$packages"
           echo "list=$(printf '%s\n' "$packages" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       # The Linux leg runs every test binary through internal/gitbudget,
-      # which counts the git processes each package's tests start, and holds
-      # the counts to .github/git-budget.yaml: a change that adds git work to
-      # the suite raises its package's number there in its own diff, and a
-      # cut lowers it. Counted on Linux only, where a trace file costs
-      # nothing; the count is the same work on every OS.
+      # which counts the git processes each package's tests start, and
+      # compares the counts with main's last measured ones: a package whose
+      # count rises above its baseline by more than the larger of
+      # margin percent and slack processes (.github/git-budget.yaml) fails
+      # the leg. Counted on Linux only, where a trace file costs nothing;
+      # the count is the same work on every OS. Main's baseline lives in the
+      # Actions cache, saved by the push run on main under
+      # gitbudget-main-<sha>; a pull request restores the newest. With none
+      # the leg passes and the job summary says so.
+      - name: restore main's git baseline
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/git-baseline.yaml
+          key: gitbudget-main-${{ github.sha }}
+          restore-keys: gitbudget-main-
+      # The label is read through the API, not the event payload, so a re-run
+      # sees a label added after the push.
+      - name: read the git-budget-accepted label
+        id: accepted
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          has=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PULL_NUMBER" --jq '.labels | map(.name) | index("git-budget-accepted") != null')
+          if [ "$has" = true ]; then
+            echo "flag=-accepted" >> "$GITHUB_OUTPUT"
+          fi
       - name: build the git process counter
         if: runner.os == 'Linux'
         run: go build -o "$RUNNER_TEMP/gitbudget" ./internal/gitbudget
@@ -213,10 +242,33 @@ jobs:
         env:
           GITBUDGET_DIR: ${{ runner.os == 'Linux' && format('{0}/gitcount', runner.temp) || '' }}
         run: go test -count=1 -timeout 30m ${{ runner.os == 'Linux' && format('-exec={0}/gitbudget', runner.temp) || '' }} ${{ steps.packages.outputs.list }}
-      - name: git processes against the budget
+      - name: git processes against main's baseline
         if: runner.os == 'Linux'
+        env:
+          ACCEPTED: ${{ steps.accepted.outputs.flag }}
         run: |
-          "$RUNNER_TEMP/gitbudget" check .github/git-budget.yaml "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
+          baseline=-
+          if [ -f "$RUNNER_TEMP/git-baseline.yaml" ]; then
+            baseline="$RUNNER_TEMP/git-baseline.yaml"
+          fi
+          flags=()
+          if [ -n "$ACCEPTED" ]; then
+            flags+=("$ACCEPTED")
+          fi
+          "$RUNNER_TEMP/gitbudget" check "${flags[@]}" .github/git-budget.yaml "$baseline" "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
+      # Only the push to main saves: it tests every package, so the baseline
+      # holds them all. Not a pull request, the schedule, a dispatch, or a
+      # release's call (whose push is of a tag, not main).
+      - name: write main's git baseline
+        if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          "$RUNNER_TEMP/gitbudget" write "$RUNNER_TEMP/git-baseline.yaml" "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
+      - name: save main's git baseline
+        if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/git-baseline.yaml
+          key: gitbudget-main-${{ github.sha }}
 
   # The package the test job's Windows leg skips, on a Windows runner of its
   # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
