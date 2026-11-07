@@ -335,6 +335,44 @@ func (s *Store) SetTicketRank(ticket string, rank *int) error {
 	return s.mutateTicket(ticket, func(t *Ticket) { t.Rank = rank })
 }
 
+// SetTicketDep records that ticket waits for parent with the given kind in
+// <ticket>/ticket.yaml's blocked_by: it adds the entry, or replaces the kind
+// of the entry parent already has (one entry per parent, in the place it
+// held), leaving the rest of the record untouched. It writes the same
+// {ticket, kind} shape `jig graduate` writes and only the file: `jig depend`
+// commits it through Claim.
+func (s *Store) SetTicketDep(ticket, parent, kind string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		for i := range t.BlockedBy {
+			if t.BlockedBy[i].Ticket == parent {
+				t.BlockedBy[i].Kind = kind
+				return
+			}
+		}
+		t.BlockedBy = append(t.BlockedBy, TicketBlockedBy{Ticket: parent, Kind: kind})
+	})
+}
+
+// RemoveTicketDep removes parent's entry from <ticket>/ticket.yaml's
+// blocked_by, leaving the rest of the record untouched.
+func (s *Store) RemoveTicketDep(ticket, parent string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		var kept []TicketBlockedBy
+		for _, b := range t.BlockedBy {
+			if b.Ticket != parent {
+				kept = append(kept, b)
+			}
+		}
+		t.BlockedBy = kept
+	})
+}
+
+// ClearTicketDeps removes every entry of <ticket>/ticket.yaml's blocked_by,
+// leaving the rest of the record untouched.
+func (s *Store) ClearTicketDeps(ticket string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) { t.BlockedBy = nil })
+}
+
 // SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store
 // migrate` leaves it: title and body resolved on the v1 store (fonts filled
 // with the chart entry's or history's text where ticket.yaml itself had
