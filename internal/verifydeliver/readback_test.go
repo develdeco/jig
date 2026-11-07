@@ -122,8 +122,8 @@ func TestPublishRecordPRReadsTheTitleAndBodyBack(t *testing.T) {
 }
 
 // TestPublishRecordPRCannotReadBackWithoutAHostOrABody: with no host to ask,
-// or no body rendered to hold it against, the pr line says unknown and the
-// pull request is recorded all the same.
+// or a failed read, the pr line says unknown and the pull request is recorded
+// all the same; a body not rendered yet is rendered first, and held against.
 func TestPublishRecordPRCannotReadBackWithoutAHostOrABody(t *testing.T) {
 	t.Parallel()
 	const prURL = "https://github.com/owner/fixture-repo/pull/7"

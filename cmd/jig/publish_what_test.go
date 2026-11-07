@@ -106,7 +106,7 @@ func TestPublishRefusesWhatAndPicksOutsideTheFormsThatTakeThem(t *testing.T) {
 			args := append([]string{"publish", "T-1"}, form...)
 			args = append(args, flag, "file.md")
 			out, code := runMain(t, e, "", args...)
-			if code == 0 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "does not take "+flag) || !strings.Contains(out, "--body") {
+			if code == 0 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "jig publish "+form[0]+" does not take "+flag) || !strings.Contains(out, "--body") {
 				t.Errorf("jig %s: exit = %d, want a VALIDATION_ERROR naming %s and the forms that take it\n%s", strings.Join(args, " "), code, flag, out)
 			}
 		}
