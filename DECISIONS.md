@@ -3,6 +3,8 @@
 A log of judgment calls made while building v0.1: one entry per decision, covering what
 was ambiguous, what was chosen, and why.
 
+New entries live in [docs/build-log/](docs/build-log/), one file per ticket; this file is the history.
+
 ## Testing
 
 - No test in `internal/` edits process-global state (environment, working directory,

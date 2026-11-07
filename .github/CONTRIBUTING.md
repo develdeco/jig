@@ -46,11 +46,13 @@ reports green.
   and docs share.
 - Write an ADR (`docs/adr/000N-title.md`, following the existing ones) when a
   decision constrains future design - a choice later work has to live with
-  or deliberately reverse. Record a judgment call in `DECISIONS.md` instead
-  when it resolved something ambiguous during a build but doesn't bind
-  future design - the "what was ambiguous, what was chosen, and why" log at
-  the top of that file. Correct a stale fact in place; record a new decision
-  as a new entry.
+  or deliberately reverse. Record a judgment call in `docs/build-log/<TICKET>.md`
+  instead when it resolved something ambiguous during a build but doesn't bind
+  future design - the "what was ambiguous, what was chosen, and why" log. It is
+  one file per ticket, so two branches never conflict on it; a hand PR with no
+  ticket that has a judgment call uses a lowercase slug of its branch as the
+  name, and a bump or routine change writes no entry. `DECISIONS.md` is the
+  history before this folder and is not edited. Correct a stale fact in place.
 
 ## Pull requests
 
