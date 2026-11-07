@@ -73,8 +73,15 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	if err != nil || !strings.Contains(string(ff), "kept_fixed:") || !strings.Contains(string(ff), "by: person") {
 		t.Fatalf("findings.yaml does not name who kept the spent keep (err %v):\n%s", err, ff)
 	}
-	if st, _ := runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir); !strings.Contains(st, "kept_fixed") {
-		t.Fatalf("status rounds row has no kept_fixed count:\n%s", st)
+	st, _ := runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
+	var round2 string
+	for _, ln := range strings.Split(st, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "2,") {
+			round2 = strings.TrimSpace(ln)
+		}
+	}
+	if cells := strings.Split(round2, ","); round2 == "" || cells[len(cells)-1] != "1" {
+		t.Fatalf("status rounds row for round 2 does not count the spent keep (kept_fixed 1):\n%s", st)
 	}
 }
 

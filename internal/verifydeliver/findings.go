@@ -845,8 +845,9 @@ var riskRank = map[string]int{RiskHigh: 0, RiskMedium: 1, RiskLow: 2}
 // reported against it this round. cleared lists the ids this round cleared
 // (rule 3); findings is every finding this round reported (ApplyRound's
 // "reported"), after routing and triage have set each one's final Status,
-// Triage, Decision and RoutedAs.
-func renderFindingsMD(round int, verdict, summary string, findings []Finding, cleared []string) string {
+// Triage, Decision and RoutedAs. keptFixed are the keeps this round spent as
+// fixed, each listed with who kept it, as the gate report does.
+func renderFindingsMD(round int, verdict, summary string, findings []Finding, cleared []string, keptFixed []KeptFixed) string {
 	sorted := make([]Finding, len(findings))
 	copy(sorted, findings)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -903,6 +904,14 @@ func renderFindingsMD(round int, verdict, summary string, findings []Finding, cl
 	}
 	if len(clearedSorted) > 0 {
 		fmt.Fprintf(&b, "cleared: %s\n", strings.Join(clearedSorted, ", "))
+	}
+	if len(keptFixed) > 0 {
+		parts := make([]string, 0, len(keptFixed))
+		for _, k := range keptFixed {
+			parts = append(parts, fmt.Sprintf("%s (%s)", k.ID, k.By))
+		}
+		sort.Strings(parts)
+		fmt.Fprintf(&b, "kept and fixed: %s\n", strings.Join(parts, ", "))
 	}
 	return b.String()
 }

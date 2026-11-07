@@ -933,7 +933,7 @@ func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
 		{ID: "r1-f2", Title: "high one", Risk: RiskHigh, RiskRationale: "r", Status: StatusOpen},
 		{ID: "r1-f3", Title: "medium one", Risk: RiskMedium, RiskRationale: "r", Status: StatusOpen},
 	}
-	md := renderFindingsMD(1, "fix-slices", "a summary", findings, nil)
+	md := renderFindingsMD(1, "fix-slices", "a summary", findings, nil, nil)
 	first := indexOf(md, "high one")
 	second := indexOf(md, "medium one")
 	third := indexOf(md, "low one")
@@ -948,7 +948,7 @@ func TestRenderFindingsMDSortsByRiskHighFirst(t *testing.T) {
 func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
 	t.Parallel()
 
-	md := renderFindingsMD(2, "clean", "", nil, nil)
+	md := renderFindingsMD(2, "clean", "", nil, nil, nil)
 	if indexOf(md, "clean") < 0 {
 		t.Errorf("findings.md = %q, want it to say clean", md)
 	}
@@ -961,7 +961,7 @@ func TestRenderFindingsMDCleanWhenNoFindings(t *testing.T) {
 func TestRenderFindingsMDNeverSaysCleanForANonCleanRound(t *testing.T) {
 	t.Parallel()
 
-	md := renderFindingsMD(3, "fix-slices", "", nil, nil)
+	md := renderFindingsMD(3, "fix-slices", "", nil, nil, nil)
 	if indexOf(md, "clean") >= 0 {
 		t.Errorf("findings.md = %q, must not say clean for a fix-slices round", md)
 	}
@@ -981,11 +981,26 @@ func TestRenderFindingsMDShowsTriageDecisionRoutedAsAndCleared(t *testing.T) {
 		{ID: "r2-f2", Title: "recurrence bound", Risk: RiskMedium, RiskRationale: "r", Status: StatusAsked,
 			Action: ActionFix, Triage: TriageAuto, RoutedAs: ActionAsk},
 	}
-	md := renderFindingsMD(2, "fix-slices", "", findings, []string{"r1-f9"})
+	md := renderFindingsMD(2, "fix-slices", "", findings, []string{"r1-f9"}, nil)
 	for _, want := range []string{"triage: human", "decision: go ahead", "triage: auto", "routed as: ask", "cleared: r1-f9"} {
 		if indexOf(md, want) < 0 {
 			t.Errorf("findings.md missing %q:\n%s", want, md)
 		}
+	}
+}
+
+// A keep the round spent as fixed is listed with who kept it, not only as a
+// bare cleared id.
+func TestRenderFindingsMDListsASpentKeepWithWhoKeptIt(t *testing.T) {
+	t.Parallel()
+	md := renderFindingsMD(2, "clean", "", nil, []string{"r1-f1"}, []KeptFixed{{ID: "r1-f1", By: "person"}})
+	for _, want := range []string{"cleared: r1-f1", "kept and fixed: r1-f1 (person)"} {
+		if indexOf(md, want) < 0 {
+			t.Errorf("findings.md missing %q:\n%s", want, md)
+		}
+	}
+	if plain := renderFindingsMD(2, "clean", "", nil, []string{"r1-f1"}, nil); indexOf(plain, "kept and fixed") >= 0 {
+		t.Errorf("findings.md names a spent keep when none was spent:\n%s", plain)
 	}
 }
 
@@ -1069,8 +1084,8 @@ func TestFindingsSortStable(t *testing.T) {
 		{ID: "r1-f1", Title: "a", Risk: RiskHigh, RiskRationale: "r"},
 		{ID: "r1-f2", Title: "b", Risk: RiskHigh, RiskRationale: "r"},
 	}
-	a := renderFindingsMD(1, "fix-slices", "", findings, nil)
-	b := renderFindingsMD(1, "fix-slices", "", findings, nil)
+	a := renderFindingsMD(1, "fix-slices", "", findings, nil, nil)
+	b := renderFindingsMD(1, "fix-slices", "", findings, nil, nil)
 	if a != b {
 		t.Fatalf("renderFindingsMD is not deterministic:\n%s\n---\n%s", a, b)
 	}

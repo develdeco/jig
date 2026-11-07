@@ -713,7 +713,7 @@ func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope s
 	if err := os.WriteFile(filepath.Join(dir, "findings.yaml"), yamlData, 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.yaml: %w", err)
 	}
-	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared)
+	md := renderFindingsMD(n, report.Verdict, summary, findings, cleared, report.KeptFixed)
 	if err := os.WriteFile(filepath.Join(dir, "findings.md"), []byte(md), 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write findings.md: %w", err)
 	}
