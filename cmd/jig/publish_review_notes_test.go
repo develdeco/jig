@@ -1,10 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -66,5 +70,67 @@ func TestUnrenderedReviewNotesNameTheCommandNotAFile(t *testing.T) {
 	got := reviewNotesWords("JIG-7", verifydeliver.ReviewNotesReport{Status: verifydeliver.ReviewNotesNotPosted, Reason: "the review notes are not rendered"})
 	if !strings.Contains(got, "jig publish JIG-7 --body") || strings.Contains(got, "by hand") && strings.Contains(got, ".md") {
 		t.Errorf("row = %q, want the render command and no file to post", got)
+	}
+}
+
+// TestBarePublishJournalsAPipedYesAsAnAgents: a bare publish answered by a
+// scripted y reads the answer from the same stdin it asks about the terminal.
+// Off a terminal the yes is journaled as an agent's publish-approved line and
+// the review notes say an agent's; at a terminal it is a person's. A mutant that
+// makes every yes a person's, or none, fails one of the two.
+func TestBarePublishJournalsAPipedYesAsAnAgents(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name       string
+		terminal   bool
+		provenance string
+		notes      string
+	}{
+		{"piped y, not a terminal", false, "agent", "Publish approved by an agent"},
+		{"typed y at a terminal", true, "person", "at a terminal"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			jigHome := t.TempDir()
+			e := testEnv(jigHome)
+			if c.terminal {
+				e = e.atTerminal()
+			}
+			fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+			buildFixtureTicket(t, fx)
+			gateCleanThroughMain(t, testEnv(jigHome), fx)
+
+			out, code := runMain(t, e, "y\n", "publish", fx.Ticket, "--store", fx.StoreDir)
+			if code != 0 {
+				t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
+			}
+			st, err := store.Open(fx.StoreDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, err := journal.Read(st, fx.Ticket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approvals := 0
+			for _, l := range lines {
+				if l.Event == journal.EventPublishApproved {
+					approvals++
+					if l.Provenance != c.provenance {
+						t.Errorf("publish-approved line = %+v, want provenance %s", l, c.provenance)
+					}
+				}
+			}
+			if approvals != 1 {
+				t.Fatalf("%d publish-approved line(s), want 1 for the yes", approvals)
+			}
+			notes, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "review-notes.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(notes), c.notes) {
+				t.Errorf("review notes lack %q:\n%s", c.notes, notes)
+			}
+		})
 	}
 }

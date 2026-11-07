@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -135,6 +136,13 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	// The confirmation reads stdin, so its terminal-ness decides whether a
 	// yes is a person's.
 	deps.StdinIsTerminal = func() bool { return e.stdinIsTerminal(stdin) }
+	// The answer is read from that same stdin, so the fact that decides whose
+	// yes it is and the yes itself have one source.
+	answers := bufio.NewReader(stdin)
+	deps.Confirm = func(branch, ticket, openPR string, hasHost bool) bool {
+		fmt.Fprint(stdout, verifydeliver.ConfirmPrompt(branch, ticket, openPR, hasHost))
+		return verifydeliver.ConfirmAnswer(answers)
+	}
 	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Yes: *yes, Picks: *picks, What: *what}
 
 	switch {

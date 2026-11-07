@@ -400,6 +400,27 @@ func publishBranch(d Deps, ticket string, rec store.Ticket, repos []*gateRepo) (
 	return branch, nil
 }
 
+// ConfirmPrompt is the question a bare publish asks before it pushes, naming
+// which of the things it is agreeing to: opening a pull request, updating the
+// open one at openPR, or pushing alone when the repo has no pull-request host.
+func ConfirmPrompt(branch, ticket, openPR string, hasHost bool) string {
+	switch {
+	case !hasHost:
+		return fmt.Sprintf("Push %s for %s? [y/N] ", branch, ticket)
+	case openPR != "":
+		return fmt.Sprintf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
+	default:
+		return fmt.Sprintf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
+	}
+}
+
+// ConfirmAnswer reads one line from r and reports whether it is a yes.
+func ConfirmAnswer(r *bufio.Reader) bool {
+	line, _ := r.ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
+}
+
 // publishFuncs are the seams a publish form takes from Deps, each with its
 // production default.
 type publishFuncs struct {
@@ -421,16 +442,8 @@ func (d Deps) publishFuncs() publishFuncs {
 	// request, updating that one, or pushing alone when there is no host.
 	if f.confirm == nil {
 		f.confirm = func(branch, ticket, openPR string, hasHost bool) bool {
-			if !hasHost {
-				fmt.Printf("Push %s for %s? [y/N] ", branch, ticket)
-			} else if openPR != "" {
-				fmt.Printf("Push %s and update its open PR %s for %s? [y/N] ", branch, openPR, ticket)
-			} else {
-				fmt.Printf("Push %s and open a PR for %s? [y/N] ", branch, ticket)
-			}
-			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-			answer := strings.ToLower(strings.TrimSpace(line))
-			return answer == "y" || answer == "yes"
+			fmt.Print(ConfirmPrompt(branch, ticket, openPR, hasHost))
+			return ConfirmAnswer(bufio.NewReader(os.Stdin))
 		}
 	}
 	if f.guardedPush == nil {
