@@ -63,8 +63,8 @@ func TestRecordedBlocksSayWhatBecameOfTheReviewNotes(t *testing.T) {
 // renders them.
 func TestUnrenderedReviewNotesNameTheCommandNotAFile(t *testing.T) {
 	t.Parallel()
-	got := reviewNotesWords(verifydeliver.ReviewNotesReport{Status: verifydeliver.ReviewNotesNotPosted, Reason: "the review notes are not rendered"})
-	if !strings.Contains(got, "jig publish <ticket> --body") || strings.Contains(got, "by hand") && strings.Contains(got, ".md") {
+	got := reviewNotesWords("JIG-7", verifydeliver.ReviewNotesReport{Status: verifydeliver.ReviewNotesNotPosted, Reason: "the review notes are not rendered"})
+	if !strings.Contains(got, "jig publish JIG-7 --body") || strings.Contains(got, "by hand") && strings.Contains(got, ".md") {
 		t.Errorf("row = %q, want the render command and no file to post", got)
 	}
 }

@@ -1055,8 +1055,15 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
+	// The commands the oracles run, from the manifest at the head the gate
+	// reviewed, so the body says what ran and not only the names. A manifest
+	// that cannot be read leaves the names alone.
+	var commands map[string]string
+	if man, err := manifest.Resolve(in.dir); err == nil {
+		commands = man.Oracles
+	}
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, rounds, picked, links, t.stack)
+		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {
@@ -1199,7 +1206,7 @@ func postPublishChecks(d Deps, host repohost.Host, ticket, prURL, repo string, r
 // (canonicalPRURL) and the notes' sha256 in its summary. Notes whose sha256 a
 // review-notes line for the same pull request already has are not posted
 // again, whichever way the url was spelled (a trailing slash, /files, a
-// fragment): a re-publish of the same head, or a second --pr, adds no
+// fragment, the case of its host, owner and repo): a re-publish of the same head, or a second --pr, adds no
 // duplicate, while notes that changed post anew. A failed post is a soft
 // failure, not a publish failure: a warning, the pull request stands, and the
 // report names the file, kept in the store for a manual post. Notes never
@@ -1236,7 +1243,7 @@ func postReviewNotes(d Deps, host repohost.Host, ticket, prURL, repo, notesName 
 		if l.Event != journal.EventReviewNotes || l.Summary != sum {
 			continue
 		}
-		if other, err := repohost.ParsePRURL(l.URL); err == nil && other == ref {
+		if other, err := repohost.ParsePRURL(l.URL); err == nil && samePullRequest(other, ref) {
 			return ReviewNotesReport{Status: ReviewNotesAlreadyPosted, File: path}
 		}
 	}
@@ -1251,6 +1258,13 @@ func postReviewNotes(d Deps, host repohost.Host, ticket, prURL, repo, notesName 
 	return ReviewNotesReport{Status: ReviewNotesPosted, File: path}
 }
 
+// samePullRequest reports whether a and b are one pull request: the host,
+// owner and repo read without case, as GitHub reads them, and the number as it
+// is.
+func samePullRequest(a, b repohost.PRRef) bool {
+	return a.Number == b.Number && strings.EqualFold(a.Host, b.Host) && strings.EqualFold(a.Owner, b.Owner) && strings.EqualFold(a.Repo, b.Repo)
+}
+
 // canonicalPRURL is the one spelling of a pull request's url the journal
 // keeps: https://<host>/<owner>/<repo>/pull/<number>.
 func canonicalPRURL(ref repohost.PRRef) string {
@@ -1258,16 +1272,21 @@ func canonicalPRURL(ref repohost.PRRef) string {
 }
 
 // notesRenderedFor reports whether the repo's latest pr-body line is at the
-// reviewed head and no publish approval of that head was journaled after it:
-// the notes in the store then describe the round the pull request ships, and
-// say the approval it had, not an earlier round's or none.
+// reviewed head, comes after the last gate-round or gate-clean line, and has
+// no publish approval of that head journaled after it: the notes in the store
+// then describe the round the pull request ships, and say the approval it had,
+// not an earlier round's or none. A round closed after the body (a triage after
+// a clean round makes the gate run another at the same head) leaves the
+// notes an earlier round's, the rule phase.readPublish counts a body by.
 func notesRenderedFor(lines []journal.Line, repo, reviewed string) bool {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := lines[i]
-		if l.Event == journal.EventPublishApproved && l.Repo == repo && l.Commit == reviewed && reviewed != "" {
+		switch {
+		case l.Event == journal.EventGateRound || l.Event == journal.EventGateClean:
 			return false
-		}
-		if l.Event == journal.EventPrBody && l.Repo == repo {
+		case l.Event == journal.EventPublishApproved && l.Repo == repo && l.Commit == reviewed && reviewed != "":
+			return false
+		case l.Event == journal.EventPrBody && l.Repo == repo:
 			return l.Commit == reviewed
 		}
 	}

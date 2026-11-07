@@ -211,7 +211,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		pushedTable(report),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
-		reviewNotesTable(report),
+		reviewNotesTable(ticket, report),
 		axi.Help(help),
 	)
 	return 0
@@ -234,7 +234,7 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 		{"commit", report.Commit}, {"verified", verified},
 	}
 	if report.ReviewNotes.Status != "" {
-		kv = append(kv, [2]string{"review_notes", reviewNotesWords(report.ReviewNotes)})
+		kv = append(kv, [2]string{"review_notes", reviewNotesWords(ticket, report.ReviewNotes)})
 	}
 	if report.Readback.Match != "" {
 		kv = append(kv, [2]string{"body_match", readbackWords(report.Readback)})
@@ -427,12 +427,12 @@ func pushedTable(report verifydeliver.PublishReport) string {
 // reviewNotesWords says what publish did with a pull request's review notes:
 // "posted", "already posted", or "not posted" with the reason and the file to
 // post by hand, or, for notes never rendered, the command that renders them.
-func reviewNotesWords(r verifydeliver.ReviewNotesReport) string {
+func reviewNotesWords(ticket string, r verifydeliver.ReviewNotesReport) string {
 	if r.Status != verifydeliver.ReviewNotesNotPosted {
 		return r.Status
 	}
 	if r.File == "" {
-		return fmt.Sprintf("%s: %s; render them with `jig publish <ticket> --body`, then post them by hand", r.Status, r.Reason)
+		return fmt.Sprintf("%s: %s; render them with `jig publish %s --body`, then post them by hand", r.Status, r.Reason, ticket)
 	}
 	return fmt.Sprintf("%s: %s; post %s as a comment on the pull request by hand", r.Status, r.Reason, r.File)
 }
@@ -440,7 +440,7 @@ func reviewNotesWords(r verifydeliver.ReviewNotesReport) string {
 // reviewNotesTable is the bare publish's account of the review notes of each
 // repo's pull request: a row for each, in the repo's name order. It is empty
 // when the report has none.
-func reviewNotesTable(report verifydeliver.PublishReport) string {
+func reviewNotesTable(ticket string, report verifydeliver.PublishReport) string {
 	repos := make([]string, 0, len(report.ReviewNotes))
 	for repo := range report.ReviewNotes {
 		repos = append(repos, repo)
@@ -448,7 +448,7 @@ func reviewNotesTable(report verifydeliver.PublishReport) string {
 	sort.Strings(repos)
 	rows := make([][]string, 0, len(repos))
 	for _, repo := range repos {
-		rows = append(rows, []string{repo, reviewNotesWords(report.ReviewNotes[repo])})
+		rows = append(rows, []string{repo, reviewNotesWords(ticket, report.ReviewNotes[repo])})
 	}
 	return axi.Table("review_notes", []string{"repo", "outcome"}, rows)
 }

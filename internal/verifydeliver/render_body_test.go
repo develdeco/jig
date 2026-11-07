@@ -31,9 +31,9 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 		{Round: 2, Verdict: RoundClean, Scope: "delta"},
 		{Round: 3, Verdict: RoundClean},
 	}
-	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet"}, rounds)
+	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet", "lint"}, map[string]string{"go-test": "go test ./...", "go-vet": "go vet\n  ./..."}, rounds)
 	want := "## Verification\n\n" +
-		"Oracles green at the reviewed head 0123456:\n\n- go-test\n- go-vet\n\n" +
+		"Oracles green at the reviewed head 0123456:\n\n- go-test: `go test ./...`\n- go-vet: `go vet ./...`\n- lint\n\n" +
 		"Gate rounds:\n\n- Round 1 (full): findings\n- Round 2 (delta): clean\n- Round 3: clean\n"
 	if got != want {
 		t.Fatalf("renderVerificationSection =\n%s\nwant\n%s", got, want)
@@ -45,7 +45,7 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 	}
 
 	// A ticket reviewed clean in one round, the common case, still names it.
-	one := renderVerificationSection(reportYAML{}, []string{"test"}, []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}})
+	one := renderVerificationSection(reportYAML{}, []string{"test"}, nil, []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}})
 	if want := "Gate rounds:\n\n- Round 1 (full): clean\n"; !strings.Contains(one, want) {
 		t.Errorf("renderVerificationSection with one round = %q, want it to hold %q", one, want)
 	}
@@ -54,14 +54,14 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 func TestRenderVerificationSectionWithoutAReviewedHeadOrRounds(t *testing.T) {
 	t.Parallel()
 
-	if got, want := renderVerificationSection(reportYAML{}, []string{"test"}, nil), "## Verification\n\nOracles green:\n\n- test\n"; got != want {
+	if got, want := renderVerificationSection(reportYAML{}, []string{"test"}, nil, nil), "## Verification\n\nOracles green:\n\n- test\n"; got != want {
 		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
 	}
 	two := reportYAML{ReviewedSHA: map[string]string{"web": "bbbbbbbbb", "api": "aaaaaaaaa"}}
-	if got, want := renderVerificationSection(two, []string{"test"}, nil), "Oracles green at the reviewed heads api aaaaaaa, web bbbbbbb:\n"; !strings.Contains(got, want) {
+	if got, want := renderVerificationSection(two, []string{"test"}, nil, nil), "Oracles green at the reviewed heads api aaaaaaa, web bbbbbbb:\n"; !strings.Contains(got, want) {
 		t.Fatalf("renderVerificationSection = %q, want it to hold %q", got, want)
 	}
-	if got, want := renderVerificationSection(reportYAML{}, nil, nil), "## Verification\n"; got != want {
+	if got, want := renderVerificationSection(reportYAML{}, nil, nil, nil), "## Verification\n"; got != want {
 		t.Fatalf("renderVerificationSection with nothing = %q, want %q", got, want)
 	}
 }
