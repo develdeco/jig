@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -54,5 +55,43 @@ func TestOutcomeNamesWhoDecided(t *testing.T) {
 				t.Fatalf("outcome = (%q, %q), want (%q, %q)", o.status, o.detail, tc.status, tc.want)
 			}
 		})
+	}
+}
+
+// TestPublishedReviewNotesNameWhoDecided is the seam TestOutcomeNamesWhoDecided
+// does not reach: publish hands the journal's `triage` lines to the review
+// notes. A finding an agent dismissed reads "dismissed by an agent" in
+// pr/review-notes.md, and one a person kept reads "kept by a person" with the
+// reason.
+func TestPublishedReviewNotesNameWhoDecided(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	useGithubHost(t, &d, "", "")
+	writeFindingsYAMLAt(t, d.Store.TicketDir(fx.Ticket), 1, findingsYAML{
+		Scope:         "full",
+		ReviewedPaths: []string{"a.go"},
+		Findings: []Finding{
+			{ID: "r1-f1", File: "a.go", Risk: RiskLow, Title: "Dismissed finding", Status: StatusDismissed},
+			{ID: "r1-f2", File: "a.go", Risk: RiskLow, Title: "Kept finding", Status: StatusOpen},
+		},
+		Summary: "round 1",
+	})
+	for _, l := range []journal.Line{
+		{Event: journal.EventTriage, Ref: "r1-f1", Outcome: "dismiss", Provenance: "agent"},
+		{Event: journal.EventTriage, Ref: "r1-f2", Outcome: "keep", Provenance: "person", Summary: "worth fixing"},
+	} {
+		if err := journal.Append(d.Store, fx.Ticket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
+	for _, want := range []string{"dismissed by an agent", "kept by a person: worth fixing"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("published review notes lack %q:\n%s", want, notes)
+		}
 	}
 }

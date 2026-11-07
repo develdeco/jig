@@ -48,7 +48,7 @@ func findingsBlocks(st *store.Store, ticket string) ([]string, error) {
 	rows := make([][]string, 0, len(latest.Findings))
 	for _, f := range latest.Findings {
 		d := decisions[f.ID]
-		decision, decidedBy := d.Shown(f), ""
+		decision, decidedBy := d.Label(f), ""
 		if decision != "" {
 			decidedBy = d.Provenance
 		}
