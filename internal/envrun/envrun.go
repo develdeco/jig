@@ -152,6 +152,28 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 	return ShellOutputEnv(cmd, dir, limit, nil)
 }
 
+// ErrTimedOut is what a command the wedge guard killed for outliving its limit
+// matches under errors.Is. A kill is read from this, never from the error's
+// text, which embeds the command and so can hold any words.
+var ErrTimedOut = errors.New("did not finish within its limit")
+
+// TimedOutError is the error of a command killed for outliving Limit.
+type TimedOutError struct {
+	Cmd   string
+	Limit time.Duration
+}
+
+func (e *TimedOutError) Error() string {
+	return fmt.Sprintf("shell %q: %s", e.Cmd, e.Reason())
+}
+
+// Reason is the guard's own words, without the command: "did not finish
+// within <limit>".
+func (e *TimedOutError) Reason() string { return "did not finish within " + e.Limit.String() }
+
+// Is reports a TimedOutError as ErrTimedOut.
+func (e *TimedOutError) Is(target error) bool { return target == ErrTimedOut }
+
 // ShellOutputEnv is ShellOutput with extra environment variables, each as
 // "NAME=value", added to the process environment for this command alone. It
 // sets them on the command, never on the process, since two runs of jig's
@@ -171,7 +193,7 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 	c.WaitDelay = 10 * time.Second
 	out, err := c.CombinedOutput()
 	if ctx.Err() != nil {
-		return string(out), fmt.Errorf("shell %q: did not finish within %s", cmd, limit)
+		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
 	}
 	if err != nil {
 		return string(out), fmt.Errorf("shell %q: %w", cmd, err)

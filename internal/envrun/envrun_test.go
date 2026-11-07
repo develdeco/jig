@@ -40,13 +40,17 @@ func TestShellOutputReturnsOutputAndHonorsItsLimit(t *testing.T) {
 	if err != nil || trimEOL(out) != "hello" {
 		t.Fatalf("echo: out=%q err=%v, want hello and no error", out, err)
 	}
-	if _, err := ShellOutput("exit 3", dir, time.Minute); err == nil {
-		t.Fatal("exit 3: want an error")
+	if _, err := ShellOutput("exit 3", dir, time.Minute); err == nil || errors.Is(err, ErrTimedOut) {
+		t.Fatalf("exit 3: err=%v, want a plain error, not a timeout", err)
 	}
 	start := time.Now()
 	_, err = ShellOutput("sleep 30", dir, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "did not finish within") {
-		t.Fatalf("a command past its limit: err=%v, want the limit named", err)
+	var timedOut *TimedOutError
+	if !errors.Is(err, ErrTimedOut) || !errors.As(err, &timedOut) || timedOut.Limit != time.Second || timedOut.Cmd != "sleep 30" {
+		t.Fatalf("a command past its limit: err=%v, want ErrTimedOut with the command and the 1s limit", err)
+	}
+	if want := `shell "sleep 30": did not finish within 1s`; err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
 	}
 	if took := time.Since(start); took > 20*time.Second {
 		t.Errorf("ShellOutput took %s past a 1s limit, want it to stop waiting", took)

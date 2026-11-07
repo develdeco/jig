@@ -177,7 +177,7 @@ func TestStartShaPrefersTheRecordedOne(t *testing.T) {
 // printed nothing has only the reason; any other failure is its output.
 func TestFailureTailKeepsTheReasonOfATimeout(t *testing.T) {
 	t.Parallel()
-	timeout := errors.New(`shell "go test ./...": did not finish within 30m0s`)
+	timeout := timedOut("go test ./...")
 	got := failureTail("PASS ok a\nstill running...\n", timeout)
 	if !strings.HasSuffix(got, "did not finish within 30m0s") || !strings.Contains(got, "still running") {
 		t.Errorf("failureTail of a timeout = %q, want the output and then the reason", got)

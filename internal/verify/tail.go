@@ -1,6 +1,12 @@
 package verify
 
-import "strings"
+import (
+	"errors"
+	"strings"
+
+	"github.com/develdeco/jig/internal/envrun"
+	"github.com/develdeco/jig/internal/outcome"
+)
 
 // tailBytes is how much of an oracle's output the machine-local log keeps
 // of a failed run.
@@ -24,9 +30,12 @@ func outputTail(out string) string {
 // a journal summary. The kept part starts at a line boundary, so two
 // identical failures summarize identically and the stall counter can match
 // them. (Copied from the frontier.)
-func oneLine(s string) string {
-	if len(s) > summaryBytes {
-		s = s[len(s)-summaryBytes:]
+func oneLine(s string) string { return oneLineMax(s, summaryBytes) }
+
+// oneLineMax is oneLine with a bound of max bytes.
+func oneLineMax(s string, max int) string {
+	if len(s) > max {
+		s = s[len(s)-max:]
 		if i := strings.IndexByte(s, '\n'); i >= 0 {
 			s = s[i+1:]
 		}
@@ -98,30 +107,64 @@ const markerOldTail = "--- the last bytes of the output ---"
 // lines on one line. With no baseline, or no new line, they are today's.
 func failureOutput(out string, err error, baseline map[string]bool) (tail, summary string) {
 	old := failureTail(out, err)
-	if baseline == nil {
-		return old, oneLine(old)
-	}
-	fresh := newLines(out, baseline)
-	if len(fresh) == 0 {
-		return old, oneLine(old)
-	}
 	// A run the wedge guard killed says so in today's tail; the reason is
 	// not in the output, so it follows the new lines in the tail and keeps
-	// its own room in the summary, whatever the new lines' length.
-	reason := ""
-	if strings.Contains(err.Error(), "did not finish within") {
-		reason = err.Error()
+	// its own room in the summary, shortened to its ending (the full error
+	// embeds the oracle command), whatever the new lines' length.
+	reason := killedReason(err)
+	var fresh []string
+	if baseline != nil {
+		fresh = newLines(out, baseline)
 	}
+	if len(fresh) == 0 {
+		if reason == "" {
+			return old, oneLine(old)
+		}
+		return old, joinReason(oneLineMax(outputTail(out), summaryBytes-len(reason)-1), reason)
+	}
+	tail = headBytes(fresh, tailBytes)
+	if reason != "" {
+		tail += "\n" + err.Error()
+	}
+	tail += "\n" + markerOldTail + "\n" + old
 	if reason == "" {
-		tail = headBytes(fresh, tailBytes) + "\n" + markerOldTail + "\n" + old
 		return tail, strings.Join(strings.Fields(headBytes(fresh, summaryBytes)), " ")
 	}
-	tail = headBytes(append(append([]string(nil), fresh...), reason), tailBytes) + "\n" + markerOldTail + "\n" + old
 	room := summaryBytes - len(reason) - 1
-	if room < 0 {
-		room = 0
+	return tail, joinReason(strings.Join(strings.Fields(headBytes(fresh, room)), " "), reason)
+}
+
+// killedReason is the wedge guard's own words, "did not finish within
+// <limit>", when err is its kill of the run, "" otherwise. A kill is read
+// from the error (envrun.ErrTimedOut), never from its text: the text embeds
+// the oracle command, which can hold any words.
+func killedReason(err error) string {
+	var t *envrun.TimedOutError
+	if errors.As(err, &t) {
+		return t.Reason()
 	}
-	return tail, strings.Join(strings.Fields(headBytes(fresh, room)+" "+reason), " ")
+	return ""
+}
+
+// joinReason is body then reason on one line.
+func joinReason(body, reason string) string {
+	return strings.Join(strings.Fields(body+" "+reason), " ")
+}
+
+// failureSignature is a failed run's stall signature. It reads the start of
+// the summary, so a killed run's reason, which ends the summary, is added
+// apart from it (without its variable parts, as Signature drops digits):
+// two kills of one slice match however many new lines precede the reason,
+// and a kill does not match a plain failure.
+func failureSignature(slice, summary string, err error) string {
+	reason := killedReason(err)
+	if reason == "" {
+		return outcome.Signature(slice, outcome.CodeBug, summary)
+	}
+	body := strings.TrimSpace(strings.TrimSuffix(summary, reason))
+	gist := outcome.Signature("", "", reason)
+	gist = gist[strings.LastIndex(gist, "|")+1:]
+	return outcome.Signature(slice, outcome.CodeBug, body) + "|" + gist
 }
 
 // baselineText is the file body for a passing run's output: its distinct
