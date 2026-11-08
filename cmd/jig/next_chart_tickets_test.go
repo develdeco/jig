@@ -15,7 +15,7 @@ func tripleRig(t *testing.T) chartRig {
 	t.Helper()
 	r := newChartRig(t)
 	r.overlapRig(t, "repos:\n  - remote: /srv/app.git\n    label: app\n", map[string][2]string{
-		"TK-1": {"aliases:\n  - first-one\n", sliceFile("alpha")},
+		"TK-1": {"aliases:\n  - first-one\n", sliceFile("alpha", "solo")},
 		"TK-2": {"", sliceFile("alpha")},
 		"TK-3": {"blocked_by:\n  - ticket: TK-2\n    kind: stacked\n", sliceFile("alpha")},
 	})

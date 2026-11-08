@@ -298,8 +298,8 @@ func TestNextWarnsOfOverlappingBranches(t *testing.T) {
 	}
 	r := runJig(t, env, fx.RepoDir, "next")
 	for _, want := range []string{
-		"warning: local branches of different tickets change the same files\n",
-		"overlap[1]{repo,file,tickets}:\n  fixture-repo,alpha/alpha.go,JIG-1+JIG-2\n",
+		"warning: branches of different tickets change the same files\n",
+		"overlap[1]{repo,file,tickets,conflict}:\n  fixture-repo,alpha/alpha.go,JIG-1+JIG-2,conflict\n",
 	} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig next lacks %q:\n%s", want, r.Stdout)

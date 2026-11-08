@@ -43,7 +43,7 @@ func observeDeps(e env, jigHome string) observe.Deps {
 // text a session is given as it starts. st is the store Locate named, nil when
 // it is not on this machine.
 func hereText(e env, w locate.Where, jigHome string, st *store.Store) (string, error) {
-	hc := hereCtx{e: e, Where: w, Store: st, JigHome: jigHome}
+	hc := hereCtx{e: e, Where: w, Store: st, JigHome: jigHome, memo: &hereMemo{}}
 	view, err := buildHereView(hc)
 	if err != nil {
 		return "", err

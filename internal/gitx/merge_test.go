@@ -150,3 +150,54 @@ func TestFirstParentLine(t *testing.T) {
 		t.Errorf("FirstParentLine from an unknown ref succeeded")
 	}
 }
+
+// TestMergeConflicts: a clean merge lists no file; a merge that conflicts lists
+// the files git reports unmerged and no other file the two sides changed; a
+// ref the repository lacks is an error.
+func TestMergeConflicts(t *testing.T) {
+	t.Parallel()
+	dir := mergeRepo(t)
+	if files, err := MergeConflicts(dir, "main", "topic"); err != nil || len(files) != 0 {
+		t.Fatalf("MergeConflicts(main, topic) = %v, %v, want none", files, err)
+	}
+
+	pinnedGit(t, dir, "switch", "-q", "-c", "left", "main")
+	writeFileT(t, dir, "a.txt", "one\ntwo\nthree\nfour\nleft\n")
+	writeFileT(t, dir, "c.txt", "left\n")
+	writeFileT(t, dir, "d.txt", "only left\n")
+	pinnedGit(t, dir, "add", "-A")
+	pinnedGit(t, dir, "commit", "-q", "-m", "left")
+	pinnedGit(t, dir, "switch", "-q", "-c", "right", "main")
+	writeFileT(t, dir, "a.txt", "one\ntwo\nthree\nfour\nright\n")
+	writeFileT(t, dir, "c.txt", "right\n")
+	writeFileT(t, dir, "e.txt", "only right\n")
+	pinnedGit(t, dir, "add", "-A")
+	pinnedGit(t, dir, "commit", "-q", "-m", "right")
+
+	files, err := MergeConflicts(dir, "left", "right")
+	if err != nil || !reflect.DeepEqual(files, []string{"a.txt", "c.txt"}) {
+		t.Errorf("MergeConflicts(left, right) = %v, %v, want a.txt and c.txt only", files, err)
+	}
+	if files, err = MergeConflicts(dir, "main", "nosuchref"); err == nil || len(files) != 0 {
+		t.Errorf("MergeConflicts(main, nosuchref) = %v, %v, want an error", files, err)
+	}
+}
+
+// TestDiffNameOnlySince: what head changed since it left base, from one
+// process: the same files as a merge-base call and a diff from it, and not the
+// files base changed on its own.
+func TestDiffNameOnlySince(t *testing.T) {
+	t.Parallel()
+	dir := mergeRepo(t) // main changed a.txt, topic added b.txt
+	got, err := DiffNameOnlySince(dir, "main", "topic", "ACDMRTUXB")
+	if err != nil || !reflect.DeepEqual(got, []string{"b.txt"}) {
+		t.Fatalf("DiffNameOnlySince(main, topic) = %v, %v, want b.txt only", got, err)
+	}
+	mb, err := Run(dir, "merge-base", "main", "topic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, err := DiffNameOnly(dir, mb, "topic", "ACDMRTUXB"); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffNameOnlySince = %v, merge-base then diff = %v, %v", got, want, err)
+	}
+}

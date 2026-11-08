@@ -60,6 +60,8 @@ type hereCtx struct {
 	Where   locate.Where
 	Store   *store.Store
 	JigHome string
+	// memo keeps what one `jig here` reads once for several of its parts.
+	memo *hereMemo
 }
 
 // hereSection is one block-producing part of `jig here`. Blocks returns the

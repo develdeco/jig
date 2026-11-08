@@ -200,6 +200,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	}
 
+	printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)
 	report, err := verifydeliver.Publish(deps, opts)
 	if err != nil {
 		return renderErr(stdout, err)

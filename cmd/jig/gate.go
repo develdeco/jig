@@ -148,6 +148,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
+	printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)
 	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 	opts := verifydeliver.GateOpts{
 		Ticket:    ticket,

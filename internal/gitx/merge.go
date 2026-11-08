@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -27,6 +28,36 @@ func MergeTree(dir, a, b string) (tree string, clean bool, err error) {
 	var stdout, stderr bytes.Buffer
 	err = run(dir, nil, false, &stdout, &stderr, args)
 	return mergeTreeOutcome(args, stdout.String(), stderr.String(), err)
+}
+
+// MergeConflicts is the files git reports unmerged when it merges a and b in
+// dir without touching a work tree or an index (`git merge-tree --write-tree
+// --name-only --no-messages a b`), sorted. A clean merge has none. A call that
+// fails (a bad ref, a git older than 2.38) is an error, as for MergeTree.
+func MergeConflicts(dir, a, b string) ([]string, error) {
+	args := []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", a, b}
+	var stdout, stderr bytes.Buffer
+	err := run(dir, nil, false, &stdout, &stderr, args)
+	_, clean, rerr := mergeTreeOutcome(args, stdout.String(), stderr.String(), err)
+	if rerr != nil || clean {
+		return nil, rerr
+	}
+	var files []string
+	seen := map[string]bool{}
+	for i, l := range strings.Split(strings.ReplaceAll(stdout.String(), "\r\n", "\n"), "\n") {
+		if i == 0 {
+			continue
+		}
+		if l == "" {
+			break
+		}
+		if !seen[l] {
+			seen[l] = true
+			files = append(files, l)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // mergeTreeOutcome reads what a `git merge-tree --write-tree` call left: its

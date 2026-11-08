@@ -1014,7 +1014,7 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)
 		r.overlapRig(t, one, map[string][2]string{
-			"TK-1": {"rank: 2\n", sliceFile("alpha")},
+			"TK-1": {"rank: 2\n", sliceFile("alpha", "solo")},
 			"TK-2": {"rank: 1\n", sliceFile("alpha")},
 		})
 		n := r.next(t, "c")
@@ -1039,6 +1039,66 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		}
 		if got := overlapsOf(n); len(got) != 0 || n.WorkspaceOverlaps == nil {
 			t.Errorf("overlaps = %v (nil %v), want an empty list", got, n.WorkspaceOverlaps == nil)
+		}
+	})
+
+	t.Run("one workspace in the whole project lists none", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("alpha")},
+		})
+		out, code := r.run(t, "next", "c")
+		if code != 0 || strings.Contains(out, "workspace_overlap") {
+			t.Fatalf("exit %d, want the chart printed with no workspace overlap:\n%s", code, out)
+		}
+		if n := r.next(t, "c"); len(n.WorkspaceOverlaps) != 0 {
+			t.Errorf("overlaps = %v, want none: every pair would share the one workspace", overlapsOf(n))
+		}
+	})
+
+	t.Run("a wave of one workspace is listed when the project has two", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("alpha")},
+			"TK-3": {"blocked_by:\n  - ticket: TK-1\n    kind: stacked\n", sliceFile("web")},
+		})
+		n := r.next(t, "c")
+		if want := [][]string{{"TK-1", "TK-2"}, {"TK-3"}}; !reflect.DeepEqual(n.Run, want) {
+			t.Fatalf("run = %v, want %v", n.Run, want)
+		}
+		if got, want := overlapsOf(n), []string{"app/alpha:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: the project has two workspaces, whatever one wave holds", got, want)
+		}
+	})
+
+	t.Run("the root workspaces of two repos are two sites", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		two := one + "  - remote: /srv/lib.git\n    label: lib\n"
+		r.overlapRig(t, two, map[string][2]string{
+			"TK-1": {"", sliceFile("app/root")},
+			"TK-2": {"", sliceFile("app/root")},
+			"TK-3": {"", sliceFile("lib/root")},
+		})
+		if got, want := overlapsOf(r.next(t, "c")), []string{"app/root:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: app/root and lib/root are two workspaces", got, want)
+		}
+	})
+
+	t.Run("workspace ids with a slash stay whole", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("svc/api")},
+			"TK-2": {"", sliceFile("svc/api")},
+			"TK-3": {"", sliceFile("web/api")},
+		})
+		if got, want := overlapsOf(r.next(t, "c")), []string{"app/svc/api:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: svc/api and web/api are two workspaces", got, want)
 		}
 	})
 
@@ -1150,7 +1210,7 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)
 		r.overlapRig(t, one, map[string][2]string{
-			"TK-1": {"", sliceFile("alpha")},
+			"TK-1": {"", sliceFile("alpha", "solo")},
 			"TK-2": {"", sliceFile("alpha")},
 		})
 		cfg, err := project.LoadStoreConfig(r.root)
@@ -1194,7 +1254,7 @@ func TestChartWorkspaceOverlapsText(t *testing.T) {
 	one := "repos:\n  - remote: /srv/app.git\n    label: app\n"
 	r := newChartRig(t)
 	r.overlapRig(t, one, map[string][2]string{
-		"TK-1": {"", sliceFile("alpha")},
+		"TK-1": {"", sliceFile("alpha", "solo")},
 		"TK-2": {"", sliceFile("alpha")},
 	})
 	for _, verb := range []string{"next", "status"} {

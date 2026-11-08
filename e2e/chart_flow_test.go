@@ -81,6 +81,19 @@ func (c chartOut) reachOf(t *testing.T, id string) string {
 	return ""
 }
 
+// alsoInBeta gives ticket id a second slice in workspace beta, so the project's
+// slices name two workspaces and the workspace rule has something to say: with
+// one workspace in the whole project it lists nothing.
+func alsoInBeta(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	path := filepath.Join(st.TicketDir(id), "slices.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFileOrFatal(t, path, append(data, []byte("  - id: b\n    workspace: beta\n    goal: Build it too.\n    oracle: test\n    blocked_by: []\n    from_brief: []\n")...))
+}
+
 // briefed gives ticket id a brief and one slice and records a person's approval
 // of the brief, as `jig validate` does once the person confirmed it.
 func briefed(t *testing.T, st *store.Store, id string) {
@@ -334,6 +347,7 @@ func TestChartWorkspaceOverlapBecomesAStackedEdge(t *testing.T) {
 	}
 	briefed(t, st, id[1])
 	briefed(t, st, id[2])
+	alsoInBeta(t, st, id[1])
 
 	c = nextJSON[chartOut](t, env, fx.RepoDir, "c")
 	if want := [][]string{{id[1], id[2]}}; !reflect.DeepEqual(c.Run, want) {
@@ -428,6 +442,7 @@ func TestChartTicketsSubset(t *testing.T) {
 	for pos := 1; pos <= 3; pos++ {
 		briefed(t, st, id[pos])
 	}
+	alsoInBeta(t, st, id[1])
 	rowsOf := func(c chartOut) []string {
 		out := []string{}
 		for _, row := range c.Tickets {

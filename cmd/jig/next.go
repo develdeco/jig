@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -183,11 +185,15 @@ type nextTicket struct {
 	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
-	Stack     []nextStack `json:"stack,omitempty"`
-	Ready     []nextBatch `json:"ready"`
-	Unplaced  []string    `json:"unplaced_workspaces,omitempty"`
-	Ambiguous []string    `json:"ambiguous_workspaces,omitempty"`
-	Topology  []nextSlice `json:"topology,omitempty"`
+	Stack []nextStack `json:"stack,omitempty"`
+	// Conflicts are the files this ticket's branch cannot merge with another
+	// open ticket's (conflict.go); Clean are sharing pairs that merge fine.
+	Conflicts []ticketConflict `json:"conflicts,omitempty"`
+	CleanWith []cleanShare     `json:"-"`
+	Ready     []nextBatch      `json:"ready"`
+	Unplaced  []string         `json:"unplaced_workspaces,omitempty"`
+	Ambiguous []string         `json:"ambiguous_workspaces,omitempty"`
+	Topology  []nextSlice      `json:"topology,omitempty"`
 	// Advice is how to share the ready slices out, and, when review is the
 	// phase that can start, who reviews (Fresh says whether the calling
 	// session may itself).
@@ -419,16 +425,7 @@ func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
 
 // isPublished reports whether ticket's journal has a publish-done line.
 func isPublished(st *store.Store, id string) (bool, error) {
-	lines, err := journal.Read(st, id)
-	if err != nil {
-		return false, err
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventPublishDone {
-			return true, nil
-		}
-	}
-	return false, nil
+	return journal.HasEvent(st, id, journal.EventPublishDone)
 }
 
 // nextForTicket works out what is ready to build on ticket id, and which phase
@@ -484,6 +481,8 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	n.Stack = stackRows(plan, data.in.Published)
+	advice := ticketConflictAdvice(st, cfg, mp, id, merges)
+	n.Conflicts, n.CleanWith = advice.Conflicts, advice.Clean
 	for _, b := range ready.Batches(readySlices, place.Repo) {
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
 	}
@@ -614,6 +613,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
 	}
 	blocks = append(blocks, worktreeBlocks(n.Worktrees)...)
+	blocks = append(blocks, conflictBlocks(conflictAdvice{Ticket: n.Ticket, Conflicts: n.Conflicts, Clean: n.CleanWith}, true)...)
 	if topology {
 		var rows [][]string
 		for _, s := range n.Topology {
@@ -625,7 +625,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(append(worktreeHelp(n.Ticket, n.Worktrees), n.help()...)...))
+	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), n.help()...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
@@ -809,6 +809,38 @@ type nextOverlap struct {
 	File     string   `json:"file"`
 	Tickets  []string `json:"tickets"`
 	Branches []string `json:"branches"`
+	// Conflict is conflict, clean or untested: whether git's in-memory merge
+	// of the branches of the sharing tickets leaves conflicts. Files are the
+	// files it reports unmerged.
+	Conflict string   `json:"conflict"`
+	Files    []string `json:"files,omitempty"`
+}
+
+// The three outcomes of testing a pair of ticket branches that share a file.
+const (
+	pairConflict = "conflict"
+	pairClean    = "clean"
+	pairUntested = "untested"
+)
+
+// testPair merges the branch heads a and b in dir in memory, and says whether
+// they conflict and in which files. A merge-tree call that fails leaves the
+// pair untested: this is advice, never an error.
+func testPair(dir, a, b string) (string, []string) {
+	return testPairWith(dir, a, b)
+}
+
+// testPairWith is the merge itself, a variable so a test can count the merges
+// a scan makes.
+var testPairWith = func(dir, a, b string) (string, []string) {
+	files, err := gitx.MergeConflicts(dir, a, b)
+	switch {
+	case err != nil:
+		return pairUntested, nil
+	case len(files) > 0:
+		return pairConflict, files
+	}
+	return pairClean, nil
 }
 
 // nextForStore lists the tickets of the store in order with what blocks each,
@@ -855,8 +887,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	for _, s := range ready.SharedRanks(ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
-	out.WorkspaceOverlaps = workspaceOverlaps(cfg, mp, out.Next, slicesOf)
-	out.Overlaps = findOverlaps(st, cfg, mp)
+	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, slicesOf)
+	out.Overlaps = findOverlaps(st, cfg, mp, ticketOpenFilter(st, merges))
 	return out, nil
 }
 
@@ -866,8 +898,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 // start them, so a pair names the one to start first before the other. A
 // ticket's workspace that no repo owns is no site (it is not known whose it
 // is), and it overlaps nothing.
-func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
-	if len(order) < 2 {
+func workspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
+	if len(order) < 2 || singleWorkspace(st, cfg, mp) {
 		return nil
 	}
 	repos := ready.ProjectRepos(cfg, mp.Clones)
@@ -880,6 +912,26 @@ func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []st
 		out = append(out, nextWorkspaceOverlap{Repo: o.Repo, Workspace: o.Workspace, Tickets: o.Tickets[:]})
 	}
 	return out
+}
+
+// singleWorkspace says the project has one workspace: the slices of every
+// ticket of the store, placed in the repos as `jig next <ticket>` places them,
+// build in one site (repo and workspace id) or none. The rule then carries no
+// information: every pair of tickets would share it, which blocked parallel
+// builds that had no real conflict. It is judged over the project, not over
+// the tickets being compared, so whether a pair is listed does not depend on a
+// third ticket, and the root workspaces of two repos are two sites. The
+// conflict advice (conflict.go) covers the one-workspace case once branches
+// exist.
+func singleWorkspace(st *store.Store, cfg project.Config, mp project.MachineProject) bool {
+	var all []store.Slice
+	ids, _ := st.Tickets()
+	for _, id := range ids {
+		if slices, err := st.ReadSlices(id); err == nil {
+			all = append(all, slices...)
+		}
+	}
+	return len(ready.Sites(all, ready.Place(ready.ProjectRepos(cfg, mp.Clones), all))) <= 1
 }
 
 func (n nextStore) blocks() []string {
@@ -954,10 +1006,10 @@ func (n nextStore) blocks() []string {
 	if len(n.Overlaps) > 0 {
 		var orows [][]string
 		for _, o := range n.Overlaps {
-			orows = append(orows, []string{o.Repo, o.File, joinPlus(o.Tickets)})
+			orows = append(orows, []string{o.Repo, o.File, joinPlus(o.Tickets), o.Conflict})
 		}
-		blocks = append(blocks, "warning: local branches of different tickets change the same files",
-			axi.Table("overlap", []string{"repo", "file", "tickets"}, orows))
+		blocks = append(blocks, "warning: branches of different tickets change the same files",
+			axi.Table("overlap", []string{"repo", "file", "tickets", "conflict"}, orows))
 	}
 	var help []string
 	switch {
@@ -1072,8 +1124,31 @@ func namedTickets(st *store.Store, chart, list string) ([]string, error) {
 // both change since the repo's target branch (git diff --name-only
 // <target>...<branch>). A repo with no clone here, or whose target is not
 // there, is skipped: this is a warning, not a gate.
-func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) []nextOverlap {
+func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, open func(string) bool) []nextOverlap {
+	out, _ := scanOverlaps(st, cfg, mp, open, "")
+	return out
+}
+
+// testedPair is a pair of tickets of one repo whose branches share a changed
+// file, with what merging the two in memory gave (testPair).
+type testedPair struct {
+	Repo             string
+	A, B             string // ticket ids, A before B
+	BranchA, BranchB string
+	Shared           []string // the files both change
+	State            string   // pairConflict, pairClean or pairUntested
+	Files            []string // the files git reports unmerged
+}
+
+// scanOverlaps is findOverlaps with, besides, each pair of tickets that
+// shares a file, merged once however many files it shares.
+//
+// Only the branches of tickets open says are open are paired. A ticket named
+// in only limits the work to the pairs that hold it: the other tickets' files
+// are listed, but only the merges that can be shown are made.
+func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, open func(string) bool, only string) ([]nextOverlap, []testedPair) {
 	var out []nextOverlap
+	var pairs []testedPair
 	for _, r := range cfg.Repos {
 		dir := mp.Clones[r.Name()]
 		if dir == "" {
@@ -1083,24 +1158,48 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			continue
 		}
 		target := r.TargetBranch()
-		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-		if err != nil || listing == "" {
-			continue
-		}
 		type bound struct{ ticket, branch string }
 		var bounds []bound
 		tickets := map[string]bool{}
-		for _, b := range strings.Split(listing, "\n") {
-			b = strings.TrimSpace(b)
-			if b == "" || b == target {
-				continue
+		// Local branches first; origin's stand in for a ticket with no local
+		// branch here.
+		// One process lists both: git processes are what a session start pays
+		// for.
+		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+		if err != nil {
+			continue
+		}
+		for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/"} {
+			local := map[string]bool{}
+			for id := range tickets {
+				local[id] = true
 			}
-			if id, _, err := st.TicketForBranch(b); err == nil && id != "" {
-				bounds = append(bounds, bound{id, b})
-				tickets[id] = true
+			var refs, names []string
+			for _, full := range strings.Split(listing, "\n") {
+				full = strings.TrimSpace(full)
+				if !strings.HasPrefix(full, prefix) {
+					continue
+				}
+				name := strings.TrimPrefix(full, prefix)
+				if prefix == "refs/heads/" {
+					refs = append(refs, name)
+				} else {
+					refs = append(refs, "origin/"+name)
+				}
+				names = append(names, name)
+			}
+			boundTo := st.TicketsForBranches(names)
+			for i, name := range names {
+				if name == target || name == "HEAD" || name == "origin" {
+					continue
+				}
+				if id := boundTo[name]; id != "" && !local[id] && (open == nil || open(id)) {
+					bounds = append(bounds, bound{id, refs[i]})
+					tickets[id] = true
+				}
 			}
 		}
-		if len(tickets) < 2 {
+		if len(tickets) < 2 || (only != "" && !tickets[only]) {
 			continue
 		}
 		base := ""
@@ -1117,16 +1216,23 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			tickets, branches map[string]bool
 		}
 		files := map[string]*touch{}
-		for _, b := range bounds {
-			mb, err := gitx.MergeBase(dir, base, b.branch)
-			if err != nil {
-				continue
-			}
-			names, err := gitx.DiffNameOnly(dir, mb, b.branch, "ACDMRTUXB")
-			if err != nil {
-				continue
-			}
-			for _, f := range names {
+		// One git process for each branch, started together: a session start
+		// waits for the slowest, not for the sum.
+		changed := make([][]string, len(bounds))
+		var wg sync.WaitGroup
+		slots := make(chan struct{}, diffConcurrency())
+		for i, b := range bounds {
+			wg.Add(1)
+			slots <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-slots }()
+				changed[i], _ = gitx.DiffNameOnlySince(dir, base, b.branch, "ACDMRTUXB")
+			}()
+		}
+		wg.Wait()
+		for i, b := range bounds {
+			for _, f := range changed[i] {
 				t := files[f]
 				if t == nil {
 					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}}
@@ -1136,15 +1242,64 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				t.branches[b.branch] = true
 			}
 		}
+		// A pair of tickets that shares a file is merged once, however many
+		// files it shares.
+		branchOf := map[string]string{}
+		for _, b := range bounds {
+			if _, ok := branchOf[b.ticket]; !ok {
+				branchOf[b.ticket] = b.branch
+			}
+		}
+		type verdict struct {
+			state string
+			files []string
+		}
+		tested := map[[2]string]verdict{}
+		pairAt := map[[2]string]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
-			if len(t.tickets) < 2 {
+			if len(t.tickets) < 2 || (only != "" && !t.tickets[only]) {
 				continue
 			}
-			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: sortedStrings(mapKeys(t.tickets)), Branches: sortedStrings(mapKeys(t.branches))})
+			ids := sortedStrings(mapKeys(t.tickets))
+			state := pairClean
+			var conflicted []string
+			for i := range ids {
+				for j := i + 1; j < len(ids); j++ {
+					if only != "" && ids[i] != only && ids[j] != only {
+						continue
+					}
+					key := [2]string{ids[i], ids[j]}
+					v, ok := tested[key]
+					if !ok {
+						v.state, v.files = testPair(dir, branchOf[ids[i]], branchOf[ids[j]])
+						tested[key] = v
+						pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: branchOf[ids[i]], BranchB: branchOf[ids[j]], State: v.state, Files: v.files})
+						pairAt[key] = len(pairs) - 1
+					}
+					pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
+					switch {
+					case v.state == pairConflict:
+						state = pairConflict
+						conflicted = append(conflicted, v.files...)
+					case v.state == pairUntested && state == pairClean:
+						state = pairUntested
+					}
+				}
+			}
+			sort.Strings(conflicted)
+			conflicted = slices.Compact(conflicted)
+			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: ids, Branches: sortedStrings(mapKeys(t.branches)), Conflict: state, Files: conflicted})
 		}
 	}
-	return out
+	return out, pairs
+}
+
+// diffConcurrency is how many branch diffs run at once (a variable so a test can force the bound): a few, and no more
+// than half the processors, so a clone with many branches does not start them
+// all together (git processes are slow to start on Windows).
+var diffConcurrency = func() int {
+	return max(1, min(4, runtime.GOMAXPROCS(0)/2))
 }
 
 func mapKeys[V any](m map[string]V) []string {

@@ -252,7 +252,7 @@ func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp
 				}
 			}
 		}
-		for _, o := range workspaceOverlaps(cfg, mp, ids, slicesOf) {
+		for _, o := range workspaceOverlaps(st, cfg, mp, ids, slicesOf) {
 			if edges[o.Tickets[0]][o.Tickets[1]] || edges[o.Tickets[1]][o.Tickets[0]] {
 				continue
 			}
