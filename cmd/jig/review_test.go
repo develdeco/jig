@@ -62,7 +62,7 @@ func TestStringListSplitsOnCommasAndCollectsRepeats(t *testing.T) {
 // state, and lists the unprobed hunks as the sweep's work list.
 func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 	p := verifydeliver.Prepared{
-		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "delta", Lease: "/lease",
+		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "full", Lease: "/lease",
 		Request: verifydeliver.ReviewRequest{
 			MustReview:    []string{"a/a.go"},
 			OraclesPassed: []verifydeliver.OracleRun{{Oracle: "test", Workspace: "a", Command: "go test ./a/...", Seconds: 4, Slices: []string{"s1", "s2"}}},
@@ -77,7 +77,7 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 			},
 		},
 	}
-	out := strings.Join(roundBlocks(p, nil, true), "\n")
+	out := strings.Join(roundBlocks(p, nil, true, nil), "\n")
 	for _, want := range []string{
 		"hunks: 3",
 		"unprobed: 1",
@@ -89,7 +89,7 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 			t.Errorf("the round's view lacks %q\n%s", want, out)
 		}
 	}
-	if brief := strings.Join(roundBlocks(p, nil, false), "\n"); strings.Contains(brief, "unprobed") {
+	if brief := strings.Join(roundBlocks(p, nil, false, nil), "\n"); strings.Contains(brief, "unprobed") {
 		t.Errorf("the short view of a round counts unprobed hunks, want only the full one to\n%s", brief)
 	}
 }
