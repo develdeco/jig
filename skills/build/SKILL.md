@@ -34,7 +34,7 @@ git commit -m "<message>" -m "Jig-Slice: <slice>"
 ```
 
   The trailer is how jig finds the commit to verify, and how the next slice's context finds what this one built. `jig here` shows what is verified and what is still being checked; `jig verify` runs the oracle on a commit by hand.
-- Never edit the store's files by hand; the verbs below are the way in.
+- Never edit the store's files by hand. A slice needing more work is `jig slice add <T> --id --goal --oracle`.
 
 ## Stuck? Ask
 
@@ -44,7 +44,7 @@ jig ask --slice <slice> --wait "<question>"   # waits (--timeout, 10m by default
 jig ask --slice <slice> --wait                # waits again on the question the slice has open
 ```
 
-Ask one question at a time, and say what you would do by default. The answer says who it speaks for: `provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure. A `--wait` that runs out exits 2 and leaves the question open. Without `--wait`, carry on with what the question does not block; the answer reaches you at your next prompt, and `jig context` always has it.
+Ask one question at a time, with your default. The answer says who it speaks for: `provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure. A `--wait` that runs out exits 2 and leaves the question open. Without it, carry on with what the question does not block; the answer reaches you at your next prompt, and `jig context` has it.
 
 ## Leave a note
 
