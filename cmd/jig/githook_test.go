@@ -265,7 +265,7 @@ func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testi
 		t.Setenv(name, "from-the-hook")
 	}
 	t.Setenv("GIT_EXEC_PATH", os.Getenv("GIT_EXEC_PATH"))
-	e.unsetenv = func(name string) { os.Unsetenv(name) }
+	e.unsetenv = processEnv().unsetenv // the remover the binary runs with
 	var seen []string
 	e = e.withSpawn(func(s spawn.Spec) (int, error) {
 		if s.Env != nil {
