@@ -409,6 +409,9 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventGateRound:
 		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished with findings"
 	case journal.EventGateClean:
+		if l.Carried > 0 {
+			return "clean, carried over from round " + strconv.Itoa(l.Carried) + " (no reviewer)"
+		}
 		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "the reviewer") + " finished: clean"
 	case journal.EventRoute:
 		return strings.TrimSpace("the round's findings were routed: " + firstOf(l.Summary, l.Outcome))

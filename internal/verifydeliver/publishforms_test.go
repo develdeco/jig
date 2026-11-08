@@ -396,7 +396,8 @@ func TestPublishRecordPRThroughMerges(t *testing.T) {
 
 	// The target moves, and the branch merges it in without a conflict.
 	run(t, fx.RepoDir, "checkout", "main")
-	writeAndCommit(t, fx.RepoDir, "main1.txt", "from main", "the target moves")
+	moved := writeAndCommit(t, fx.RepoDir, "main1.txt", "from main", "the target moves")
+	run(t, fx.RepoDir, "update-ref", "refs/remotes/origin/main", moved)
 	run(t, fx.RepoDir, "checkout", branch)
 	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "main")
 	clean := run(t, fx.RepoDir, "rev-parse", "HEAD")
@@ -409,6 +410,16 @@ func TestPublishRecordPRThroughMerges(t *testing.T) {
 	// An ordinary commit past the merge is refused.
 	ordinary := writeAndCommit(t, fx.RepoDir, "late.txt", "after the merge", "a commit after the merge")
 	addEnv("GH_STUB_HEAD_OID=" + ordinary)
+	_, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
+	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
+
+	// A clean merge of a branch that is not the target is refused.
+	run(t, fx.RepoDir, "reset", "--hard", head)
+	run(t, fx.RepoDir, "checkout", "-b", "side")
+	writeAndCommit(t, fx.RepoDir, "side.txt", "work that is not on the target", "a side branch")
+	run(t, fx.RepoDir, "checkout", branch)
+	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "side")
+	addEnv("GH_STUB_HEAD_OID=" + run(t, fx.RepoDir, "rev-parse", "HEAD"))
 	_, err = PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
 	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
 

@@ -45,8 +45,12 @@ func roundsBlocks(st *store.Store, ticket string) ([]string, error) {
 		if r.Files >= 0 {
 			files = strconv.Itoa(r.Files)
 		}
+		verdict := r.Verdict
+		if r.CarriedFrom > 0 {
+			verdict += " (carried over from round " + strconv.Itoa(r.CarriedFrom) + ")"
+		}
 		rows = append(rows, []string{
-			strconv.Itoa(r.Round), r.Verdict, dashed(r.Reviewer.Session), dashed(r.Harness), dashed(r.Model),
+			strconv.Itoa(r.Round), verdict, dashed(r.Reviewer.Session), dashed(r.Harness), dashed(r.Model),
 			dashed(string(r.Independent)), strconv.Itoa(r.Fix), strconv.Itoa(r.Ask), strconv.Itoa(r.Note),
 			dashed(r.Scope), dashed(r.Base), dashed(r.Head), files, strconv.Itoa(len(r.KeptFixed)),
 		})
