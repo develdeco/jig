@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -57,6 +58,9 @@ func TestSliceAdd(t *testing.T) {
 	}
 	if !strings.Contains(out, "validate DEMO-1 --check") {
 		t.Fatalf("output does not point at validate --check:\n%s", out)
+	}
+	if lines := r.journalLines(t, journal.EventSliceAdd); len(lines) != 1 || lines[0].Slice != "a" || lines[0].Ref != "a" || lines[0].Summary != "Seams" {
+		t.Fatalf("slice-add journal lines = %+v, want one for a stamped from Seams", lines)
 	}
 	got := r.slices(t)
 	if len(got) != 1 || got[0].ID != "a" || got[0].Workspace != "root" || got[0].Goal != "first" || got[0].Oracle != "true" {

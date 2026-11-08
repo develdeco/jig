@@ -6,8 +6,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
+
+// journalLines returns DEMO-1's journal lines of one event.
+func (r dependRig) journalLines(t *testing.T, event string) []journal.Line {
+	t.Helper()
+	lines, err := journal.Read(&store.Store{Root: r.storeDir}, "DEMO-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []journal.Line
+	for _, l := range lines {
+		if l.Event == event {
+			out = append(out, l)
+		}
+	}
+	return out
+}
 
 func (r dependRig) setBrief(t *testing.T, body string) {
 	t.Helper()
@@ -72,7 +89,7 @@ func TestValidateRestamp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("validate --restamp: exit %d\n%s", code, out)
 	}
-	for _, want := range []string{"restamped[2]{id,state,sections}", "a,green,Seams", "b,queued,", "valid: yes", "not recorded (--restamp)", "sections["} {
+	for _, want := range []string{"restamped[2]{id,state,sections}", "a,green,Seams", "b,queued,\"Problem, Seams\"", "valid: yes", "not recorded (--restamp)", "sections["} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -82,6 +99,17 @@ func TestValidateRestamp(t *testing.T) {
 	}
 	if got := r.state(t, "a"); got.State != "green" || got.Attempts != 2 {
 		t.Fatalf("a restamped slice's state changed: %+v", got)
+	}
+	// D5: b was stamped from Problem and Seams; Problem is unchanged, so it
+	// keeps that hash beside Seams' new one.
+	for _, sl := range r.slices(t) {
+		if sl.ID == "b" && strings.Join(sl.FromBrief, ",") != r.sectionHash(t, "Problem")+","+r.sectionHash(t, "Seams") {
+			t.Errorf("b from_brief = %v, want the current Problem and Seams hashes", sl.FromBrief)
+		}
+	}
+	// One restamp line per restamped slice, ref the id, summary the headings.
+	if lines := r.journalLines(t, journal.EventRestamp); len(lines) != 2 || lines[0].Ref != "a" || lines[0].Summary != "Seams" || lines[1].Ref != "b" || lines[1].Summary != "Problem, Seams" {
+		t.Errorf("restamp journal lines = %+v, want one for a and one for b", lines)
 	}
 	if got := r.state(t, "b"); got.State != "queued" {
 		t.Fatalf("b state = %+v", got)
@@ -98,6 +126,9 @@ func TestValidateRestamp(t *testing.T) {
 	out, code = r.jig(t, "validate", "DEMO-1", "--restamp")
 	if code != 0 || !strings.Contains(out, "restamped[0]") || r.slicesYAML(t) != before {
 		t.Fatalf("a second restamp: exit %d, changed=%v\n%s", code, r.slicesYAML(t) != before, out)
+	}
+	if lines := r.journalLines(t, journal.EventRestamp); len(lines) != 2 {
+		t.Errorf("a restamp that changed nothing journaled: %+v", lines)
 	}
 	if out, code := r.jig(t, "validate", "DEMO-1", "--restamp", "--check"); code == 0 {
 		t.Fatalf("--restamp with --check: exit 0\n%s", out)
@@ -161,5 +192,22 @@ func TestValidateRestampUnresolved(t *testing.T) {
 	out, code = r.jig(t, "validate", "DEMO-1", "--restamp")
 	if code == 0 || !strings.Contains(out, "d,"+strings.Repeat("0", 64)) {
 		t.Fatalf("exit %d, want d listed as unresolved\n%s", code, out)
+	}
+}
+
+// TestValidateRestampOneUnresolved: a single stamp history cannot explain is
+// still listed, with the D6 error, rather than falling through to the generic
+// stale-hash failure.
+func TestValidateRestampOneUnresolved(t *testing.T) {
+	t.Parallel()
+	r := restampRig(t)
+	st := &store.Store{Root: r.storeDir}
+	zero := strings.Repeat("0", 64)
+	if err := st.AppendSlices("DEMO-1", []store.Slice{{ID: "d", Workspace: "root", Goal: "g", Oracle: "true", BlockedBy: []string{}, FromBrief: []string{zero}}}); err != nil {
+		t.Fatal(err)
+	}
+	out, code := r.jig(t, "validate", "DEMO-1", "--restamp")
+	if code == 0 || !strings.Contains(out, "unresolved[1]{id,hash}") || !strings.Contains(out, "d,"+zero) || !strings.Contains(out, "no committed brief revision") {
+		t.Fatalf("exit %d, want the one unresolved row and the D6 message\n%s", code, out)
 	}
 }
