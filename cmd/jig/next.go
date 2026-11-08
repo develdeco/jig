@@ -915,35 +915,24 @@ func workspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachinePr
 	return out
 }
 
-// singleWorkspace says the project has one workspace: the workspaces its
-// repos' manifests declare and the slices of every ticket of the store name,
-// across all repos, are one or none. The rule then carries no information:
-// every pair of tickets would share it, which blocked parallel builds that had
-// no real conflict. It is judged over the project, not over the tickets being
-// compared, so whether a pair is listed does not depend on a third ticket. The
-// conflict advice (conflict.go) covers that case once branches exist.
+// singleWorkspace says the project has one workspace: the slices of every
+// ticket of the store, placed in the repos as `jig next <ticket>` places them,
+// build in one site (repo and workspace id) or none. The rule then carries no
+// information: every pair of tickets would share it, which blocked parallel
+// builds that had no real conflict. It is judged over the project, not over
+// the tickets being compared, so whether a pair is listed does not depend on a
+// third ticket, and the root workspaces of two repos are two sites. The
+// conflict advice (conflict.go) covers the one-workspace case once branches
+// exist.
 func singleWorkspace(st *store.Store, cfg project.Config, mp project.MachineProject) bool {
-	seen := map[string]bool{}
-	name := func(w string) {
-		if i := strings.LastIndex(w, "/"); i >= 0 {
-			w = w[i+1:]
-		}
-		seen[w] = true
-	}
-	for _, r := range ready.ProjectRepos(cfg, mp.Clones) {
-		for _, w := range r.Workspaces {
-			name(w)
-		}
-	}
+	var all []store.Slice
 	ids, _ := st.Tickets()
 	for _, id := range ids {
 		if slices, err := st.ReadSlices(id); err == nil {
-			for _, s := range slices {
-				name(s.Workspace)
-			}
+			all = append(all, slices...)
 		}
 	}
-	return len(seen) <= 1
+	return len(ready.Sites(all, ready.Place(ready.ProjectRepos(cfg, mp.Clones), all))) <= 1
 }
 
 func (n nextStore) blocks() []string {

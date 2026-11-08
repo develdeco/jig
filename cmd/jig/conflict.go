@@ -208,9 +208,14 @@ func printConflicts(stdout io.Writer, st *store.Store, cfg project.Config, mp pr
 
 // ticketOpenFilter says whether a ticket is open: it is not closed, and its
 // work has not merged. A branch bound to a closed or merged ticket is a
-// leftover and says nothing about a conflict. merges is asked only for a
-// published ticket; nil asks nothing, so a published ticket stays open. A
-// ticket whose record cannot be read is not open.
+// leftover and says nothing about a conflict. A ticket that has not published
+// is open. A published one is open only when merges positively says its pull
+// request is open: a merge it cannot tell (no pull request recorded, none
+// cached, the host not asked, a squash merge the clone cannot see) leaves it
+// out, the way a pair that cannot be tested says nothing, so a session start
+// is never told to stack on work that merged long ago. merges nil asks
+// nothing, which leaves every published ticket out. A ticket whose record
+// cannot be read is not open.
 func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
 	known := map[string]bool{}
 	return func(id string) bool {
@@ -220,13 +225,29 @@ func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
 		open := false
 		if rec, err := st.ReadTicket(id); err == nil && rec.Closed == nil {
 			open = true
-			if published, err := isPublished(st, id); err == nil && published && merges != nil {
-				if m, err := merges.Of(id); err == nil && m.Met() {
-					open = false
-				}
+			if published, err := isPublished(st, id); err == nil && published {
+				open = publishedWorkIsOpen(merges, id)
 			}
 		}
 		known[id] = open
 		return open
 	}
+}
+
+// publishedWorkIsOpen says the pull request of a published ticket is open, in
+// some repo, and the work has not merged in all of them.
+func publishedWorkIsOpen(merges mergeSource, id string) bool {
+	if merges == nil {
+		return false
+	}
+	m, err := merges.Of(id)
+	if err != nil || m.Met() {
+		return false
+	}
+	for _, r := range m.Repos {
+		if r.State == ready.PROpen {
+			return true
+		}
+	}
+	return false
 }

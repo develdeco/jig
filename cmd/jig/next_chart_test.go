@@ -1075,6 +1075,33 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		}
 	})
 
+	t.Run("the root workspaces of two repos are two sites", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		two := one + "  - remote: /srv/lib.git\n    label: lib\n"
+		r.overlapRig(t, two, map[string][2]string{
+			"TK-1": {"", sliceFile("app/root")},
+			"TK-2": {"", sliceFile("app/root")},
+			"TK-3": {"", sliceFile("lib/root")},
+		})
+		if got, want := overlapsOf(r.next(t, "c")), []string{"app/root:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: app/root and lib/root are two workspaces", got, want)
+		}
+	})
+
+	t.Run("workspace ids with a slash stay whole", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("svc/api")},
+			"TK-2": {"", sliceFile("svc/api")},
+			"TK-3": {"", sliceFile("web/api")},
+		})
+		if got, want := overlapsOf(r.next(t, "c")), []string{"app/svc/api:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: svc/api and web/api are two workspaces", got, want)
+		}
+	})
+
 	t.Run("no slices and unreadable slices are left out", func(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)

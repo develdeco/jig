@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/mergefacts"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -69,11 +71,15 @@ const (
 	bottomChanged = "1\n2\n3\n4\n5\n6\n7\n8\n9\nBOTTOM\n"
 )
 
-// fakeMerges says the tickets in it have merged.
+// fakeMerges says whether the published tickets in it have merged; one that
+// has not has an open pull request.
 type fakeMerges map[string]bool
 
 func (f fakeMerges) Of(id string) (ready.Merge, error) {
-	return ready.Merge{Published: true, Repos: []ready.RepoMerge{{Met: f[id]}}}, nil
+	if f[id] {
+		return ready.Merge{Published: true, Repos: []ready.RepoMerge{{Met: true, State: ready.PRMerged}}}, nil
+	}
+	return ready.Merge{Published: true, Repos: []ready.RepoMerge{{State: ready.PROpen}}}, nil
 }
 
 // pairsOf names the pairs of a scan as "A+B".
@@ -221,5 +227,44 @@ func TestNextTicketHelpStacksOnAConflict(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("jig next T-2 lacks %q:\n%s", want, text)
 		}
+	}
+}
+
+// TestAdviceLeavesOutPublishedTicketsWhoseMergeIsNotKnown: the reader `jig here`,
+// gate and publish use asks no host. A published ticket whose pull request it
+// cannot tell the state of (a squash merge leaves nothing in the clone, and the
+// cache holds nothing) is left out, as is one with no pull request recorded;
+// one the cache knows is open stays; one it knows merged is left out.
+func TestAdviceLeavesOutPublishedTicketsWhoseMergeIsNotKnown(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2", "T-3", "T-4", "T-5")
+	const pull = "https://github.com/demo/app/pull/"
+	for id, n := range map[string]string{"T-2": "2", "T-3": "3", "T-4": "4"} {
+		if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPr, URL: pull + n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"T-2", "T-3", "T-4", "T-5"} {
+		if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPublishDone}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.branch("T-1-hand", topChanged)
+	r.branch("T-2-unknown", topChangedAlt)
+	r.branch("T-3-open", topChangedNew)
+	r.branch("T-4-merged", "FOUR\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	r.branch("T-5-unrecorded", "FIVE\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+
+	known := map[string]string{pull + "3": repohost.StateOpen, pull + "4": repohost.StateMerged}
+	reader := &mergefacts.Reader{Store: r.st, Cfg: r.cfg, Clones: r.mp.Clones, PRs: &mergefacts.PRCache{
+		Ask: func(url string) (string, bool) { s, ok := known[url]; return s, ok },
+	}}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, reader), "T-1")
+	if got, want := pairsOf(pairs), []string{"T-1+T-3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("pairs = %v, want %v: T-2 (state unknown), T-4 (merged) and T-5 (no pull request) are left out", got, want)
+	}
+	// With no reader a published ticket cannot be told either.
+	_, pairs = scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, nil), "T-1")
+	if len(pairs) != 0 {
+		t.Errorf("pairs = %v, want none: no published ticket is known to be open", pairsOf(pairs))
 	}
 }
