@@ -900,7 +900,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 // ticket's workspace that no repo owns is no site (it is not known whose it
 // is), and it overlaps nothing.
 func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
-	if len(order) < 2 {
+	if len(order) < 2 || singleWorkspace(order, slicesOf) {
 		return nil
 	}
 	repos := ready.ProjectRepos(cfg, mp.Clones)
@@ -913,6 +913,21 @@ func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []st
 		out = append(out, nextWorkspaceOverlap{Repo: o.Repo, Workspace: o.Workspace, Tickets: o.Tickets[:]})
 	}
 	return out
+}
+
+// singleWorkspace says the slices of the tickets name one workspace between
+// them, across all repos. The rule then carries no information: every pair of
+// tickets would share it, which blocked parallel builds that had no real
+// conflict. The conflict advice (conflict.go) covers that case once branches
+// exist.
+func singleWorkspace(tickets []string, slicesOf map[string][]store.Slice) bool {
+	seen := map[string]bool{}
+	for _, id := range tickets {
+		for _, s := range slicesOf[id] {
+			seen[s.Workspace] = true
+		}
+	}
+	return len(seen) <= 1
 }
 
 func (n nextStore) blocks() []string {

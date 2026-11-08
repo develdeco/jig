@@ -1014,7 +1014,7 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)
 		r.overlapRig(t, one, map[string][2]string{
-			"TK-1": {"rank: 2\n", sliceFile("alpha")},
+			"TK-1": {"rank: 2\n", sliceFile("alpha", "solo")},
 			"TK-2": {"rank: 1\n", sliceFile("alpha")},
 		})
 		n := r.next(t, "c")
@@ -1039,6 +1039,22 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		}
 		if got := overlapsOf(n); len(got) != 0 || n.WorkspaceOverlaps == nil {
 			t.Errorf("overlaps = %v (nil %v), want an empty list", got, n.WorkspaceOverlaps == nil)
+		}
+	})
+
+	t.Run("one workspace in the whole project lists none", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("alpha")},
+		})
+		out, code := r.run(t, "next", "c")
+		if code != 0 || strings.Contains(out, "workspace_overlap") {
+			t.Fatalf("exit %d, want the chart printed with no workspace overlap:\n%s", code, out)
+		}
+		if n := r.next(t, "c"); len(n.WorkspaceOverlaps) != 0 {
+			t.Errorf("overlaps = %v, want none: every pair would share the one workspace", overlapsOf(n))
 		}
 	})
 
@@ -1150,7 +1166,7 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)
 		r.overlapRig(t, one, map[string][2]string{
-			"TK-1": {"", sliceFile("alpha")},
+			"TK-1": {"", sliceFile("alpha", "solo")},
 			"TK-2": {"", sliceFile("alpha")},
 		})
 		cfg, err := project.LoadStoreConfig(r.root)
@@ -1194,7 +1210,7 @@ func TestChartWorkspaceOverlapsText(t *testing.T) {
 	one := "repos:\n  - remote: /srv/app.git\n    label: app\n"
 	r := newChartRig(t)
 	r.overlapRig(t, one, map[string][2]string{
-		"TK-1": {"", sliceFile("alpha")},
+		"TK-1": {"", sliceFile("alpha", "solo")},
 		"TK-2": {"", sliceFile("alpha")},
 	})
 	for _, verb := range []string{"next", "status"} {
