@@ -136,7 +136,9 @@ func deltaFileSet(diffs []deltaDiff) map[string]bool {
 }
 
 // answers is what a delta reviewer looks for in the diff: every finding still
-// open or asked, and every noted finding a person has kept (a pending keep). A noted finding with no decision, or one a person is dismissing, is left out. The id is what the reviewer names with --prior or --still-present.
+// open or asked, and every noted finding a person has kept (a pending keep).
+// A noted finding with no decision, or one a person is dismissing, is left
+// out. The id is what the reviewer names with --prior or --still-present.
 func answers(open []verifydeliver.OpenFinding) [][]string {
 	var rows [][]string
 	for _, f := range open {

@@ -1,14 +1,17 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// deltaPrepared is a delta round 2 over web/ui/page.go with a recordings list,
-// an excerpt, and hunks of the whole change in two files.
+// deltaPrepared is a delta round 2 over a/a.go with a recordings list,
+// an excerpt, and hunks of the whole change in a/a.go and a/other.go.
 func deltaPrepared(intent string) verifydeliver.Prepared {
 	return verifydeliver.Prepared{
 		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "delta", Lease: "/lease",
@@ -90,5 +93,54 @@ func TestAnswersHoldTheFindingsADeltaAnswers(t *testing.T) {
 	}
 	if got := strings.Join(ids, ","); got != "r1-f1,r1-f2,r1-f4" {
 		t.Errorf("answers = %s, want r1-f1,r1-f2,r1-f4", got)
+	}
+}
+
+// TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff: the files of a
+// repo's delta are read from git and prefixed with the repo by
+// computeDeltaDiffs, so the work list of a project of several repos names the
+// moved repo's hunk, as the round's hunks do, and nothing of the repo that did
+// not move.
+func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
+	t.Parallel()
+	mk := func(name string) (dir, base, head string) {
+		dir = t.TempDir()
+		gitMust(t, dir, "init", "-q")
+		if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte("package x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitMust(t, dir, "add", "-A")
+		gitMust(t, dir, "commit", "-q", "-m", name+" base")
+		base = gitMust(t, dir, "rev-parse", "HEAD")
+		return dir, base, base
+	}
+	apiDir, apiBase, apiHead := mk("api")
+	webDir, webBase, _ := mk("web")
+	if err := os.WriteFile(filepath.Join(webDir, "f.go"), []byte("package x\n// changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitMust(t, webDir, "commit", "-q", "-am", "web change")
+	webHead := gitMust(t, webDir, "rev-parse", "HEAD")
+
+	p := deltaPrepared(verifydeliver.IntentSourceBrief)
+	p.RequestPath = filepath.Join(t.TempDir(), "review.json")
+	p.Repos = []verifydeliver.PreparedRepo{
+		{Repo: "api", Lease: apiDir, Base: apiBase, Head: apiHead, Scope: "delta"},
+		{Repo: "web", Lease: webDir, Base: webBase, Head: webHead, Scope: "delta"},
+	}
+	p.Request.Hunks = []verifydeliver.HunkEntry{
+		{File: "api/f.go", From: 1, To: 1},
+		{File: "web/f.go", From: 2, To: 2},
+	}
+	diffs, err := computeDeltaDiffs(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 2 || len(diffs[0].Files) != 0 || !reflect.DeepEqual(diffs[1].Files, []string{"web/f.go"}) {
+		t.Fatalf("delta files = %+v, want none for api and web/f.go for web", diffs)
+	}
+	out := strings.Join(roundBlocks(p, nil, true, diffs), "\n")
+	if !strings.Contains(out, "unprobed[1]{hunk}:\n  \"web/f.go:2-2\"") || strings.Contains(out, "api/f.go") {
+		t.Errorf("the work list is not the web's hunk alone\n%s", out)
 	}
 }
