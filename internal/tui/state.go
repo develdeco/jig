@@ -263,7 +263,7 @@ var buildEventNames = []string{
 	journal.EventClaim, journal.EventRelease, journal.EventDispatch, journal.EventVerifyPending,
 	journal.EventOracle, journal.EventVerified, journal.EventVerifyError, journal.EventQuestion,
 	journal.EventAnswer, journal.EventStall, journal.EventRequeue, journal.EventResult,
-	journal.EventFixSlice,
+	journal.EventFixSlice, journal.EventSliceAdd,
 }
 
 // verifying lists the slices whose latest verify-pending has had no result

@@ -164,10 +164,7 @@ func TestGitBudgetIsAThreshold(t *testing.T) {
 // temporary directory, with env added; the test skips without bash.
 func runStep(t *testing.T, script, dir string, env ...string) {
 	t.Helper()
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skipf("no bash to run a workflow step: %v", err)
-	}
+	bash := requireBash(t, "a workflow step")
 	cmd := exec.Command(bash, "-e", "-o", "pipefail", "-c", script)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)

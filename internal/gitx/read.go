@@ -354,7 +354,8 @@ func blobAtInProcess(dir, rev, path string, env envLookup) (content []byte, foun
 // output alone, so a warning git writes to standard error is never part of the
 // content. found is false when rev names a commit that has no file at path (a
 // directory or a submodule there is no file); an error is a rev that names no
-// commit, or a failure of git itself. A path in the plain form is read in
+// commit, a blob at path that git cannot read (an object missing or damaged),
+// or a failure of git itself. A path in the plain form is read in
 // process; anything the in-process reads cannot answer goes to the git
 // program.
 func BlobAt(dir, rev, path string) (content []byte, found bool, err error) {
@@ -371,6 +372,17 @@ func BlobAt(dir, rev, path string) (content []byte, found bool, err error) {
 	}
 	if !ok {
 		return nil, false, fmt.Errorf("gitx: %s names no commit in %s", rev, dir)
+	}
+	// The revision resolves and git could not print the path as a blob. An
+	// entry that is a blob there is a blob git cannot read (an object missing
+	// or damaged): that is a failure, never "no file". An absent path, a
+	// directory and a submodule are the files the commit lacks.
+	entryType, present, err := treeEntryAtRev(dir, rev, path)
+	if err != nil {
+		return nil, false, err
+	}
+	if present && entryType == "blob" {
+		return nil, false, fmt.Errorf("gitx: %s:%s is a blob git cannot read in %s: %s", rev, path, dir, strings.TrimSpace(stderr.String()))
 	}
 	return nil, false, nil
 }

@@ -2,6 +2,8 @@ package verifydeliver
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,6 +29,13 @@ func trailerHeads(t *testing.T) (dir string, heads map[string]string) {
 		{"unparsable", "kind: [unclosed\n  : nope\n"},
 	} {
 		heads[h.name] = writeAndCommit(t, dir, "jig.yaml", h.yaml, "marker: "+h.name)
+	}
+	// A head whose jig.yaml is in its tree but whose blob git cannot read (the
+	// object is gone): the file is there, so this is a failure to read it.
+	heads["unreadable"] = writeAndCommit(t, dir, "jig.yaml", "jig: \"1\"\nproject: demo\nkind: project\npublish:\n  trailer: lost with its blob\n", "marker: unreadable")
+	blob := run(t, dir, "rev-parse", heads["unreadable"]+":jig.yaml")
+	if err := os.Remove(filepath.Join(dir, ".git", "objects", blob[:2], blob[2:])); err != nil {
+		t.Fatalf("remove the head's jig.yaml blob: %v", err)
 	}
 	return dir, heads
 }
@@ -60,6 +69,7 @@ func TestReviewedTrailer(t *testing.T) {
 		{"a v2 store takes Config's", v2, heads["project"], clone, ""},
 		{"a v2 store does not read the head's jig.yaml", v2, heads["unparsable"], clone, ""},
 		{"an unparsable head jig.yaml takes Config's and warns", v3, heads["unparsable"], clone, "does not parse"},
+		{"a jig.yaml whose blob git cannot read takes Config's and warns", v3, heads["unreadable"], clone, "read jig.yaml"},
 		{"a rev that does not resolve takes Config's and warns", v3, strings.Repeat("0", 40), clone, "read jig.yaml"},
 		{"no rev takes Config's", v3, "", clone, ""},
 	} {

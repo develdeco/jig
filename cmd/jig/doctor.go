@@ -9,9 +9,12 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/clonebehind"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/setup"
 )
@@ -151,6 +154,7 @@ func cmdDoctor(e env, args []string, stdout io.Writer) int {
 	findings = append(findings, d.hooks(hs)...)
 	findings = append(findings, d.githook()...)
 	findings = append(findings, d.hint()...)
+	d.cloneNotes()
 
 	exe, _ := e.executable()
 	rows := make([][]string, len(findings))
@@ -441,6 +445,72 @@ func (d *doctorCtx) githook() []setup.Finding {
 		d.note("githook: %s", u)
 	}
 	return []setup.Finding{f}
+}
+
+// cloneNotes adds a note for each clone in scope that is behind (or has
+// diverged from) its origin target, and for a clone it cannot judge for want
+// of an origin ref. clonebehind.Check is the judge `jig here` uses too.
+func (d *doctorCtx) cloneNotes() {
+	for _, scope := range d.target.Clones {
+		// A linked worktree is judged as the clone it belongs to, and the
+		// clone is named as the machine map spells it, as jig here does.
+		clone := d.cloneName(scope)
+		target := d.cloneTarget(clone)
+		res := clonebehind.Check(clone, target)
+		switch {
+		case res.State == clonebehind.Behind:
+			d.note("clone is %d %s behind %s (as of its last fetch): %s", res.Behind, plural(res.Behind, "commit", "commits"), res.Of, res.Pull)
+		case res.State == clonebehind.Diverged:
+			d.note("%s", clonebehind.DivergedNote(clone, res))
+		case res.NoRemote:
+			d.note("cannot tell whether %s is behind: it has no origin remote", clone)
+		case res.NoRef:
+			d.note("cannot tell whether %s is behind: it has no %s; run git -C %s fetch origin", clone, res.Of, clonebehind.Quote(clone))
+		}
+	}
+}
+
+// cloneName is the path jig here names the clone dir belongs to by: the
+// machine map's spelling of the clone, found with symlinks resolved on both
+// sides (git reports /private/var where the map holds /var), else the clone
+// root itself.
+func (d *doctorCtx) cloneName(dir string) string {
+	root := locate.CloneRoot(dir)
+	if machine, err := project.LoadMachine(d.jigHome); err == nil {
+		for _, mp := range machine {
+			for _, mapped := range mp.Clones {
+				if gitx.SameDir(mapped, root) {
+					return mapped
+				}
+			}
+		}
+	}
+	return root
+}
+
+// cloneTarget is the branch the marker's repo for clone lands work on:
+// the repo whose directory is the clone, else the marker's only repo, else
+// main.
+func (d *doctorCtx) cloneTarget(clone string) string {
+	if d.marker == nil {
+		return "main"
+	}
+	for _, r := range d.marker.Repos {
+		if gitx.SameDir(project.RepoDir(d.target.Dir, r), clone) {
+			return project.Repo{Target: r.Target}.TargetBranch()
+		}
+	}
+	if len(d.marker.Repos) == 1 {
+		return project.Repo{Target: d.marker.Repos[0].Target}.TargetBranch()
+	}
+	return "main"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func programOrJig(program string) string {
