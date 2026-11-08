@@ -45,7 +45,7 @@ type Manifest struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// Light declares the delta that reuses a whole-suite pass; the zero value
 	// declares none, so a repo that says nothing never reuses.
-	Light Light `yaml:"light"`
+	Light Light `yaml:"light,omitempty"`
 }
 
 // Light is the rule for a delta that cannot change what the slice's oracle

@@ -81,7 +81,7 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 	for _, want := range []string{
 		"hunks: 3",
 		"unprobed: 1",
-		"oracles_passed[1]{oracle,workspace,seconds,slices,reused_from}:\n  test,a,4,\"s1,s2\",",
+		"oracles_passed[1]{oracle,workspace,seconds,slices,reused_from,ran}:\n  test,a,4,\"s1,s2\",,",
 		"probed[2]{round,file:line,outcome,state,seam,mutation}:\n  1,\"a/a.go:3\",caught,current,a total,drop the factor\n  1,\"a/b.go:7\",survived,stale,a total,negate it",
 		"unprobed[1]{hunk}:\n  \"a/b.go:6-8\"",
 	} {

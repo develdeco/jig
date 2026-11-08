@@ -255,6 +255,11 @@ type reportYAML struct {
 	// scenario fix slices): the fix budget's own used-rounds count
 	// (UsedFixBudget) is a round whose list here is non-empty.
 	FixSlices []string `yaml:"fix_slices,omitempty"`
+	// Reuse is, for an oracle name whose pass stands on an earlier whole-suite
+	// run through the manifest's light rule, the words that say so. It is
+	// derived from the journal when a publish renders the body, never read from
+	// or written to a report.
+	Reuse map[string]string `yaml:"-"`
 }
 
 // reportIntentYAML is report.yaml's own "intent" block: the source
@@ -376,6 +381,16 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 	if err != nil {
 		return nil, err
 	}
+	if usesLight(man, reused) {
+		// The reused pass is of an earlier tree: the light oracle runs on this
+		// head, so it is never admitted with nothing run on it.
+		if err := runOracle(d.oracle(), man.Light.Oracle, dir); err != nil {
+			return nil, &axi.Error{
+				Msg:  fmt.Sprintf("the light oracle failed on the head: %v", err),
+				Code: "GATE_ORACLE_FAILED",
+			}
+		}
+	}
 	if coversSuite(man, reused) {
 		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
 		if err != nil {
@@ -480,6 +495,17 @@ func withSlices(runs []OracleRun, repo string, man manifest.Manifest, slices []s
 type reusedPass struct {
 	Commit  string
 	Seconds int
+	// Light is set when the pass stands on a tree that differs from HEAD's
+	// only in the manifest's light paths: nothing ran on HEAD's tree itself,
+	// so the gate runs the light oracle on HEAD (runGateOracles). Commit is
+	// still the pass's own commit.
+	Light bool
+	// Origin is the commit of the whole-suite run the pass stands on: Commit,
+	// or for a pass that verify itself reused, the run it named.
+	Origin string
+	// Ran is the light command a verify light line ran in place of the
+	// suite, "" for a full run.
+	Ran string
 }
 
 // reusablePasses returns, by exact command, the oracle pass jig recorded at
@@ -510,15 +536,41 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 	}
 	passed, failed := map[string]reusedPass{}, map[string]bool{}
 	for _, l := range lines {
-		if l.Event != "oracle" || l.Commit == "" || l.Command == "" || !sameTree(l.Commit) {
+		if l.Event != "oracle" || l.Commit == "" || l.Command == "" {
 			continue
+		}
+		exact := sameTree(l.Commit)
+		origin := l.Commit
+		if l.ReusedFrom != "" {
+			origin = l.ReusedFrom
 		}
 		switch l.Outcome {
 		case "fail":
-			failed[l.Command] = true
+			if exact {
+				failed[l.Command] = true
+			}
+			// A failed full run of the command stands between an earlier pass
+			// and a head that differs from it, as it does for verify.
+			if l.Ran == "" {
+				if p, ok := passed[l.Command]; ok && p.Light {
+					delete(passed, l.Command)
+				}
+			}
 		case "pass":
-			if sameEnvs(l.Env, envs) {
-				passed[l.Command] = reusedPass{Commit: l.Commit, Seconds: l.Seconds}
+			if !sameEnvs(l.Env, envs) {
+				continue
+			}
+			p := reusedPass{Commit: l.Commit, Seconds: l.Seconds, Origin: origin, Ran: l.Ran}
+			switch {
+			case exact:
+				passed[l.Command] = p
+			case lightTree(man.Light, dir, l.Commit):
+				// A pass on the exact tree is never replaced by one that
+				// needs the light oracle run on HEAD.
+				if cur, ok := passed[l.Command]; !ok || cur.Light {
+					p.Light = true
+					passed[l.Command] = p
+				}
 			}
 		}
 	}
@@ -526,6 +578,16 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		delete(passed, cmd)
 	}
 	return passed, nil
+}
+
+// lightTree reports whether commit's tree differs from HEAD's in dir only in
+// files the manifest's light rule covers (and differs at all).
+func lightTree(light manifest.Light, dir, commit string) bool {
+	if !light.Declared() {
+		return false
+	}
+	files, err := gitx.DiffNameOnly(dir, commit, "HEAD", "ACDMRTUXB")
+	return err == nil && light.Matches(files)
 }
 
 // gateEnvs is the set of env classes runGateOracles brings up: every one a
@@ -570,7 +632,7 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 		for _, name := range SortedOracleNames(man) {
 			cmd := man.OracleCmd(name, ws)
 			if pass, ok := reused[cmd]; ok {
-				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: pass.Commit, Seconds: pass.Seconds})
+				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: pass.Origin, Ran: ranOf(man, pass), Seconds: pass.Seconds})
 				continue
 			}
 			start := time.Now()
@@ -584,6 +646,29 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 		}
 	}
 	return runs, nil
+}
+
+// ranOf is the light command that stands in for the suite on a reused pass:
+// the manifest's when the gate runs it on HEAD, the pass's own when verify ran
+// it, "" for a pass of the full suite on HEAD's tree.
+func ranOf(man manifest.Manifest, pass reusedPass) string {
+	if pass.Light {
+		return man.Light.Oracle
+	}
+	return pass.Ran
+}
+
+// usesLight reports whether the suite takes a reused pass that needs the
+// light oracle run on HEAD.
+func usesLight(man manifest.Manifest, reused map[string]reusedPass) bool {
+	for _, ws := range man.Workspaces {
+		for name := range man.Oracles {
+			if pass, ok := reused[man.OracleCmd(name, ws)]; ok && pass.Light {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // wholeSeconds is d rounded up to whole seconds, so any run takes at least 1:
