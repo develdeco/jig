@@ -222,3 +222,40 @@ func TestReviewerLinesSayACarriedRoundWasNotReviewed(t *testing.T) {
 		t.Errorf("round 2 line = %q, want it carried over from round 1 and not reviewed by anyone", lines[1])
 	}
 }
+
+// TestGatePrepareHoldsAStackedTicketToItsParentsBranch: for a ticket stacked on
+// a parent that has not merged, the branch a merge must bring in is the
+// parent's, as publish reads it (D9, D10): a merge of the moved parent branch
+// is carried over, and a merge of main, which is not where the pull request
+// goes, is read.
+func TestGatePrepareHoldsAStackedTicketToItsParentsBranch(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	d.Stack = stackedOnJIG0
+	branch := ticketBranch(fx.Ticket)
+
+	// The parent's branch is on origin and moves; the ticket merges it in.
+	run(t, fx.RepoDir, "checkout", "-b", "jig/JIG-0", "main")
+	writeAndCommit(t, fx.RepoDir, "parent.txt", "from the parent", "the parent moves")
+	run(t, fx.RepoDir, "push", "origin", "jig/JIG-0")
+	run(t, fx.RepoDir, "checkout", branch)
+	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "jig/JIG-0")
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare after merging the parent's branch: %v", err)
+	}
+	if p.Carried == nil || p.Carried.CarriedFrom != 1 {
+		t.Fatalf("Prepared = %+v, want round 2 carried over: the parent's branch is the stacked ticket's target", p)
+	}
+
+	// Main moves and the ticket merges it: not the branch its pull request
+	// goes into, so a reviewer reads it.
+	targetMoves(t, fx, "main1.txt")
+	p, err = GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare after merging main: %v", err)
+	}
+	if p.Carried != nil || p.Round != 3 {
+		t.Fatalf("Prepared = %+v, want an open round 3: a merge of main is read for a ticket stacked on a parent", p)
+	}
+}
