@@ -117,7 +117,21 @@ func TestTicketsForBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	branches := []string{"jig/JIG-1", "JIG-1-foo", "OLD-5-x", "main", "feature/JIG-1", "JIG-9-nobody", "102-an-issue"}
+	// A branch that leads with an issue number binds through the tracker's
+	// record of the ticket; one number that two tickets own binds to neither.
+	if err := st.CreateTicketRecord("JIG-3", Ticket{Title: "Mirrored"}); err != nil {
+		t.Fatal(err)
+	}
+	mirrorTo(t, st, "JIG-3", "acme/tracking", 102)
+	if err := st.CreateTicketRecord("JIG-4", Ticket{Title: "Shared one"}); err != nil {
+		t.Fatal(err)
+	}
+	mirrorTo(t, st, "JIG-4", "acme/one", 7)
+	if err := st.CreateTicketRecord("JIG-5", Ticket{Title: "Shared two"}); err != nil {
+		t.Fatal(err)
+	}
+	mirrorTo(t, st, "JIG-5", "acme/two", 7)
+	branches := []string{"jig/JIG-1", "JIG-1-foo", "OLD-5-x", "main", "feature/JIG-1", "JIG-9-nobody", "102-an-issue", "jig/102-an-issue", "103-unmirrored", "7-shared"}
 	got := st.TicketsForBranches(branches)
 	want := map[string]string{}
 	for _, b := range branches {
@@ -125,8 +139,8 @@ func TestTicketsForBranches(t *testing.T) {
 			want[b] = id
 		}
 	}
-	if len(want) != 3 || len(got) != len(want) {
-		t.Fatalf("TicketsForBranches = %v, want %v (three branches bind)", got, want)
+	if len(want) != 5 || len(got) != len(want) {
+		t.Fatalf("TicketsForBranches = %v, want %v (five branches bind)", got, want)
 	}
 	for b, id := range want {
 		if got[b] != id {

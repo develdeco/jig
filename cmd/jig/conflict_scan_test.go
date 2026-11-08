@@ -310,3 +310,36 @@ func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
 		t.Errorf("T-1 shares f.txt with T-2: pairs = %v, merges = %d, want one of each", pairsOf(pairs), calls)
 	}
 }
+
+// TestAdviceJudgesAPublishedTicketByItsLatestPullRequest: a ticket whose first
+// pull request (pull/3) still reads open but was replaced by a later one of the
+// same repo (pull/4, merged) is not open; one whose later pull request is open
+// is, whatever the earlier one reads.
+func TestAdviceJudgesAPublishedTicketByItsLatestPullRequest(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2", "T-3")
+	const pull = "https://github.com/demo/app/pull/"
+	for _, id := range []string{"T-2", "T-3"} {
+		if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPr, URL: pull + "3"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPr, URL: pull + "4"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPublishDone}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	r.branch("T-3-c", topChangedNew)
+	// T-2's list reads 3 open and 4 merged; T-3's later one is open: the
+	// source answers by url, so give T-3 its own pair of urls.
+	if err := journal.Append(r.st, "T-3", journal.Line{Event: journal.EventPr, URL: pull + "5"}); err != nil {
+		t.Fatal(err)
+	}
+	states := fakeMerges{pull + "3": ready.PROpen, pull + "4": ready.PRMerged, pull + "5": ready.PROpen}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, states), "T-1")
+	if got, want := pairsOf(pairs), []string{"T-1+T-3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("pairs = %v, want %v: T-2's latest pull request is merged, T-3's is open", got, want)
+	}
+}

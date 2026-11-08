@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -1219,10 +1220,13 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		// waits for the slowest, not for the sum.
 		changed := make([][]string, len(bounds))
 		var wg sync.WaitGroup
+		slots := make(chan struct{}, diffConcurrency())
 		for i, b := range bounds {
 			wg.Add(1)
+			slots <- struct{}{}
 			go func() {
 				defer wg.Done()
+				defer func() { <-slots }()
 				changed[i], _ = gitx.DiffNameOnlySince(dir, base, b.branch, "ACDMRTUXB")
 			}()
 		}
@@ -1289,6 +1293,13 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 	}
 	return out, pairs
+}
+
+// diffConcurrency is how many branch diffs run at once: a few, and no more
+// than half the processors, so a clone with many branches does not start them
+// all together (git processes are slow to start on Windows).
+func diffConcurrency() int {
+	return max(1, min(4, runtime.GOMAXPROCS(0)/2))
 }
 
 func mapKeys[V any](m map[string]V) []string {

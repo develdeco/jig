@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
@@ -11,6 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/mergefacts"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -252,8 +254,23 @@ func publishedWorkIsOpen(st *store.Store, prs mergefacts.PRs, id string) bool {
 	if err != nil {
 		return false
 	}
+	// A repo's pull request is the latest one recorded for it, as the merge
+	// fact judges it (mergefacts.pullRequestOf): an earlier one, replaced by a
+	// new one, says nothing.
+	latest := map[string]string{}
+	var repos []string
 	for _, url := range urls {
-		if prs.Read(url).State == ready.PROpen {
+		key := url
+		if ref, err := repohost.ParsePRURL(url); err == nil {
+			key = strings.ToLower(ref.Owner + "/" + ref.Repo)
+		}
+		if _, seen := latest[key]; !seen {
+			repos = append(repos, key)
+		}
+		latest[key] = url
+	}
+	for _, key := range repos {
+		if prs.Read(latest[key]).State == ready.PROpen {
 			return true
 		}
 	}
