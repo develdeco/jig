@@ -57,6 +57,9 @@ func verificationNotes(c NoteCtx) ([]Note, error) {
 			if v.Seconds > 0 {
 				text += fmt.Sprintf(", %ds", v.Seconds)
 			}
+			if w := v.LightWords(); w != "" {
+				text += ", " + w
+			}
 			notes = append(notes, Note{Ref: fmt.Sprintf("verified:%s:%s:%d", sha, l.Slice, l.Attempt), Text: text + ")"})
 		case failed:
 			if at, ok := lastPass[l.Slice]; ok && at > i {

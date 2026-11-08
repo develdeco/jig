@@ -473,7 +473,11 @@ func renderVerificationSection(rep reportYAML, oracleNames []string, commands ma
 	if len(oracleNames) > 0 {
 		fmt.Fprintf(&b, "Oracles green%s:\n\n", reviewedHeadWords(rep.ReviewedSHA))
 		for _, name := range oracleNames {
-			for _, line := range oracleLines(name, commands[name]) {
+			lines := oracleLines(name, commands[name])
+			for i, line := range lines {
+				if note := rep.Reuse[name]; note != "" && i == len(lines)-1 {
+					line += " (" + note + ")"
+				}
 				fmt.Fprintf(&b, "- %s\n", line)
 			}
 		}

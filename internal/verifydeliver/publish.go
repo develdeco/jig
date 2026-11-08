@@ -1133,10 +1133,12 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if reviewed == "" {
 		reviewed = in.head
 	}
-	commands := oracleCommandsRan(lines, t.slices, in.dir, reviewed)
+	commands, reuse := oracleRan(lines, t.slices, in.dir, reviewed)
 	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg, in.warn)
+	rep := t.report()
+	rep.Reuse = reuse
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, t.report(), in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
+		return writePRBody(d.Store, ticket, t.repoName, what, rep, in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {
@@ -2085,8 +2087,19 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 // the gate made itself (with its workspace). The line carries the exact command
 // that ran, so nothing here reads a manifest.
 func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed string) map[string][]string {
+	commands, _ := oracleRan(lines, built, dir, reviewed)
+	return commands
+}
+
+// oracleRan is oracleCommandsRan and, for each oracle name whose latest pass
+// stands on an earlier whole-suite run through the manifest's light rule, the
+// words that say so: the origin run it reused and the light command that ran.
+// A pass on a commit that differs from the reviewed head only in light paths
+// counts, so a head after a Markdown-only change still names its oracles; a
+// pass on the exact tree is never replaced by one of those.
+func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) (map[string][]string, map[string]string) {
 	if reviewed == "" {
-		return nil
+		return nil, nil
 	}
 	type sliceOf struct{ oracle, workspace string }
 	byID := map[string]sliceOf{}
@@ -2094,9 +2107,16 @@ func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed 
 		byID[s.ID] = sliceOf{s.Oracle, s.Workspace}
 	}
 	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
+	var light manifest.Light
+	if man, err := manifest.Resolve(dir); err == nil {
+		light = man.Light
+	}
 	type key struct{ oracle, workspace string }
 	var order []key
 	latest := map[key]string{}
+	exact := map[key]bool{}
+	lightDelta := map[string]bool{}
+	notes := map[key]string{}
 	for _, l := range lines {
 		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
 			continue
@@ -2108,23 +2128,55 @@ func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed 
 		if name == "" {
 			continue
 		}
-		if l.Commit != reviewed {
+		sameTree := l.Commit == reviewed
+		if !sameTree {
 			other, found, _ := gitx.Resolve(dir, l.Commit+"^{tree}")
-			if !haveTree || !found || other != tree {
+			sameTree = haveTree && found && other == tree
+		}
+		ran := l.Ran
+		if !sameTree {
+			// Without a light rule no other tree can stand: no diff to take.
+			if !light.Declared() {
 				continue
 			}
+			ok, seen := lightDelta[l.Commit]
+			if !seen {
+				files, err := gitx.DiffNameOnly(dir, l.Commit, reviewed, "ACDMRTUXB")
+				ok = err == nil && light.Matches(files)
+				lightDelta[l.Commit] = ok
+			}
+			if !ok {
+				continue
+			}
+			ran = light.Oracle
 		}
 		k := key{name, workspace}
+		if exact[k] && !sameTree {
+			continue
+		}
 		if _, seen := latest[k]; !seen {
 			order = append(order, k)
 		}
 		latest[k] = l.Command
+		exact[k] = sameTree && l.Ran == ""
+		delete(notes, k)
+		if ran != "" {
+			origin := l.Commit
+			if l.ReusedFrom != "" {
+				origin = l.ReusedFrom
+			}
+			notes[k] = fmt.Sprintf("reused the whole-suite pass of %s, and the light oracle ran: `%s`", shortSHA(origin), strings.Join(strings.Fields(ran), " "))
+		}
 	}
 	commands := map[string][]string{}
+	reuse := map[string]string{}
 	for _, k := range order {
 		if !slices.Contains(commands[k.oracle], latest[k]) {
 			commands[k.oracle] = append(commands[k.oracle], latest[k])
 		}
+		if n, ok := notes[k]; ok {
+			reuse[k.oracle] = n
+		}
 	}
-	return commands
+	return commands, reuse
 }

@@ -37,6 +37,9 @@ type hereVerifyHeadInfo struct {
 	Attempt int    `json:"attempt,omitempty"`
 	Seconds int    `json:"seconds,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	// Light says a pass stood on an earlier whole-suite run: "lint only,
+	// reusing <sha>".
+	Light string `json:"light,omitempty"`
 }
 
 // hereVerifyHead reads how HEAD of the located repo stands for the located
@@ -60,7 +63,7 @@ func hereVerifyHead(c hereCtx) (*hereVerifyHeadInfo, error) {
 	if v.State == journal.VerifyNone {
 		return nil, nil
 	}
-	return &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary}, nil
+	return &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords()}, nil
 }
 
 // hereVerifyBlocks renders the section: one verification block for HEAD.
@@ -75,6 +78,9 @@ func hereVerifyBlocks(c hereCtx) ([]string, error) {
 	}
 	if h.Seconds > 0 {
 		kv = append(kv, [2]string{"seconds", strconv.Itoa(h.Seconds)})
+	}
+	if h.Light != "" {
+		kv = append(kv, [2]string{"pass", h.Light})
 	}
 	if h.Summary != "" {
 		kv = append(kv, [2]string{"summary", h.Summary})

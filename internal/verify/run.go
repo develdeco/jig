@@ -97,6 +97,10 @@ type Result struct {
 	// was up for it.
 	Command string
 	Env     string
+	// Ran and ReusedFrom are set when the delta was light: the light command
+	// that ran in the place of Command, and the commit of the full run the
+	// pass stands on.
+	Ran, ReusedFrom string
 	// Seconds is the oracle's wall time, rounded up.
 	Seconds int
 	// Summary is a failure's flattened tail (at most 600 bytes) or the reason
@@ -492,7 +496,8 @@ func (x *run) execute() (why string, err error) {
 			}
 		}()
 	}
-	return "", x.runOracle(m, cmd)
+	light, isLight := x.lightFor(m, cmd)
+	return "", x.runOracle(m, cmd, light, isLight)
 }
 
 // checkCheckout holds the fresh checkout to what an oracle run needs of it to
@@ -615,14 +620,24 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 // oracle line, the recorded line of a pass that recorded, then the green
 // state and the verified line, in that order (see the pass below); a failure
 // leaves the slice building.
-func (x *run) runOracle(m manifest.Manifest, cmd string) error {
+//
+// On a light delta (lightFor) the manifest's light oracle runs in the place of
+// cmd, and the oracle line, which still carries cmd so slice state and the gate
+// read it as ever, names the light command (Ran) and the full run it stands on
+// (ReusedFrom).
+func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) error {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
 
 	limit := m.OracleLimit()
 	started := d.now()
-	out, oerr := d.oracle(cmd, x.dir, target.env(), limit)
+	runs := cmd
+	if isLight {
+		runs = light.ran
+		x.logf("the delta from the last pass of %q is light: running %q in its place", cmd, runs)
+	}
+	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	// Rounded up, so every run records at least a second and 0 keeps meaning
 	// "never ran".
 	seconds := int((d.now().Sub(started) + time.Second - 1) / time.Second)
@@ -632,12 +647,16 @@ func (x *run) runOracle(m manifest.Manifest, cmd string) error {
 	x.res.Seconds = seconds
 
 	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
+	if isLight {
+		line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
+		x.res.Ran, x.res.ReusedFrom = light.ran, light.reusedFrom
+	}
 	if oerr == nil {
-		x.keepBaseline(cmd, out)
+		x.keepBaseline(runs, out)
 		line.Outcome = "pass"
 		x.res.State = journal.VerifyPass
 	} else {
-		x.res.Tail, x.res.Summary = x.failureOf(out, oerr, cmd)
+		x.res.Tail, x.res.Summary = x.failureOf(out, oerr, runs)
 		x.res.Signature = failureSignature(x.r.Slice, x.res.Summary, oerr)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
