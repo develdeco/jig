@@ -52,7 +52,8 @@ reports green.
   one file per ticket, so two branches never conflict on it; a hand PR with no
   ticket that has a judgment call uses a lowercase slug of its branch as the
   name, and a bump or routine change writes no entry. `DECISIONS.md` is the
-  history before this folder and is not edited. Correct a stale fact in place.
+  history before this folder and is not edited. A stale fact in a build-log
+  file is corrected in that file; `DECISIONS.md` stays untouched.
 
 ## Pull requests
 

@@ -17,6 +17,10 @@ The brief left four things open; each was user-confirmed on 2026-11-07.
 - This ticket writes its own entry (this file), which proves the form and leaves the
   folder non-empty. DECISIONS.md keeps every entry as history and gains one pointer line.
 
-Rejected: appending to DECISIONS.md with a merge driver (hides the conflict instead of
-removing it), and a lint that checks prose for a ban on appending (the owner's rule is
-concepts, not phrase checks).
+Rejected, each user-confirmed on 2026-11-07:
+- `merge=union` for DECISIONS.md: unverified on GitHub, and it can splice two entries
+  into one.
+- A merge queue.
+- Turning off "require branches up to date".
+- A lint that checks prose for a ban on appending to DECISIONS.md: the owner's rule is
+  concepts, not phrase checks.
