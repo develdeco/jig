@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -308,6 +309,53 @@ func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
 	}
 	if _, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-1"); len(pairs) != 1 || calls != 1 {
 		t.Errorf("T-1 shares f.txt with T-2: pairs = %v, merges = %d, want one of each", pairsOf(pairs), calls)
+	}
+}
+
+// TestScanWithMoreBranchesThanDiffSlots: nine bound branches against four diff
+// slots, and against one: every branch's files arrive, the rows and pairs come
+// out in the same order each time, and the scan finishes. A slot that is never
+// released would hang the fifth branch (or the second, with one slot), so the
+// scan runs under a timeout and fails instead of hanging.
+func TestScanWithMoreBranchesThanDiffSlots(t *testing.T) {
+	ids := []string{"T-1", "T-2", "T-3", "T-4", "T-5", "T-6", "T-7", "T-8", "T-9"}
+	r := newConflictRig(t, ids...)
+	for i, id := range ids {
+		r.branch(id+"-b", strings.Repeat("x", i+1)+"\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	}
+	real := diffConcurrency
+	defer func() { diffConcurrency = real }()
+
+	var first []string
+	for _, slots := range []int{4, 1, 4} {
+		diffConcurrency = func() int { return slots }
+		type result struct {
+			rows  []nextOverlap
+			pairs []testedPair
+		}
+		done := make(chan result, 1)
+		go func() {
+			rows, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+			done <- result{rows, pairs}
+		}()
+		var got result
+		select {
+		case got = <-done:
+		case <-time.After(60 * time.Second):
+			t.Fatalf("the scan with %d diff slots and nine branches did not finish: a slot is never released", slots)
+		}
+		if len(got.rows) != 1 || len(got.rows[0].Tickets) != 9 || len(got.rows[0].Branches) != 9 {
+			t.Fatalf("slots %d: rows = %+v, want one row of f.txt holding all nine tickets and branches", slots, got.rows)
+		}
+		if len(got.pairs) != 36 {
+			t.Fatalf("slots %d: %d pairs, want all 36", slots, len(got.pairs))
+		}
+		order := pairsOf(got.pairs)
+		if first == nil {
+			first = order
+		} else if !reflect.DeepEqual(order, first) {
+			t.Errorf("slots %d: pairs came in another order than with four slots:\n%v\n%v", slots, order, first)
+		}
 	}
 }
 

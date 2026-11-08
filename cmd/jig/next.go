@@ -1295,10 +1295,10 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 	return out, pairs
 }
 
-// diffConcurrency is how many branch diffs run at once: a few, and no more
+// diffConcurrency is how many branch diffs run at once (a variable so a test can force the bound): a few, and no more
 // than half the processors, so a clone with many branches does not start them
 // all together (git processes are slow to start on Windows).
-func diffConcurrency() int {
+var diffConcurrency = func() int {
 	return max(1, min(4, runtime.GOMAXPROCS(0)/2))
 }
 
