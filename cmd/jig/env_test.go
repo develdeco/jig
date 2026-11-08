@@ -43,6 +43,7 @@ func envFrom(vars map[string]string) env {
 	e.getenv = func(key string) string { return vars[key] }
 	e.mirrorClient = noGitHub()
 	e.spawn = refuseSpawn
+	e.unsetenv = func(string) {}
 	return e
 }
 

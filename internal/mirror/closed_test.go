@@ -172,3 +172,46 @@ func TestClosedTicketStatus(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncReportsNoDriftWhenGitHubAlreadyHoldsTheStoresValue: GitHub's own
+// automation closed the issue and set its item to Done before the sync that
+// carries the store's closure. GitHub then holds exactly what the sync would
+// write, so nothing is overwritten: no drift, no write, and synced: records
+// the value.
+func TestSyncReportsNoDriftWhenGitHubAlreadyHoldsTheStoresValue(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	mintTestTicket(t, st, "DEMO-1", "Covered by other work")
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{}
+	if _, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{}); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	rec := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
+
+	// GitHub closes the issue and moves the item to Done on its own.
+	is := client.issue(rec.NodeID)
+	is.Open = false
+	is.Reason = "completed"
+	client.itemFields[rec.Item] = fakeItemFields{Status: "Done", StoreID: "DEMO-1"}
+
+	closeForTest(t, st, "DEMO-1", store.CloseCovered, "example/product#82", "Shipped.")
+
+	closedBefore, notPlannedBefore, reopenedBefore, placedBefore := len(client.closedDone), len(client.closed), len(client.reopened), len(client.placedItems)
+
+	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if len(report.Drift) != 0 {
+		t.Errorf("drift = %+v, want none: GitHub already holds the store's value", report.Drift)
+	}
+	if len(client.closedDone) != closedBefore || len(client.closed) != notPlannedBefore || len(client.reopened) != reopenedBefore || len(client.placedItems) != placedBefore {
+		t.Errorf("a write was sent for a value GitHub already holds")
+	}
+	got := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
+	if got.Synced == nil || got.Synced.State != "CLOSED" || got.Synced.Status != "Done" || got.Synced.StoreID != "DEMO-1" {
+		t.Errorf("synced = %+v, want CLOSED / Done / DEMO-1", got.Synced)
+	}
+}

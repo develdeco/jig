@@ -289,9 +289,8 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			changed = append(changed, "state")
 			synced.State = openState(wantOpen)
 		} else {
-			if synced.State != "" && curState != synced.State {
-				report.Drift = append(report.Drift, DriftLine{What: what, Issue: rec.Issue, Field: "state"})
-			}
+			// GitHub already holds the store's value: nothing is overwritten,
+			// so nothing is drift. Record it so the next sync has a baseline.
 			synced.State = curState
 		}
 

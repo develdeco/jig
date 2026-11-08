@@ -150,10 +150,10 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 			curStatus, curStoreID := cur.Status, cur.StoreID
 			synced := rec.Synced
 			if synced != nil {
-				if synced.Status != "" && curStatus != synced.Status {
+				if synced.Status != "" && curStatus != synced.Status && curStatus != status {
 					report.Drift = append(report.Drift, DriftLine{What: it.what(), Issue: rec.Issue, Field: "status"})
 				}
-				if synced.StoreID != "" && curStoreID != synced.StoreID {
+				if synced.StoreID != "" && curStoreID != synced.StoreID && curStoreID != it.what() {
 					report.Drift = append(report.Drift, DriftLine{What: it.what(), Issue: rec.Issue, Field: "store_id"})
 				}
 			}
