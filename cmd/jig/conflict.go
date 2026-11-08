@@ -60,8 +60,8 @@ type conflictAdvice struct {
 // ticketConflictAdvice tests the branch of ticket against the branches of the
 // other open tickets that share a changed file with it (scanOverlaps tests
 // each such pair once). A pair that could not be tested says nothing.
-func ticketConflictAdvice(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) conflictAdvice {
-	_, pairs := scanOverlaps(st, cfg, mp)
+func ticketConflictAdvice(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string, merges mergeSource) conflictAdvice {
+	_, pairs := scanOverlaps(st, cfg, mp, ticketOpenFilter(st, merges), ticket)
 	return adviceFromPairs(st, pairs, ticket)
 }
 
@@ -176,7 +176,7 @@ func readHereConflicts(c hereCtx) (conflictAdvice, bool) {
 	if !ok {
 		return conflictAdvice{}, false
 	}
-	return ticketConflictAdvice(c.Store, cfg, mp, c.Where.Ticket), true
+	return ticketConflictAdvice(c.Store, cfg, mp, c.Where.Ticket, cachedMergeReader(c.Store, cfg, mp, c.JigHome)), true
 }
 
 // locatedProject is the project config and the machine's mapping of it for
@@ -197,11 +197,36 @@ func locatedProject(where locate.Where, jigHome string) (project.Config, project
 // pushes, which other open tickets' branches the ticket's cannot merge with:
 // the same warning, table and help as `jig here`, and nothing for a clean
 // pair. It is advice: it changes no exit code, round or verdict.
-func printConflicts(stdout io.Writer, st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) {
-	a := ticketConflictAdvice(st, cfg, mp, ticket)
+func printConflicts(stdout io.Writer, st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, ticket string) {
+	a := ticketConflictAdvice(st, cfg, mp, ticket, merges)
 	blocks := conflictBlocks(a, false)
 	if len(blocks) == 0 {
 		return
 	}
 	axi.Render(stdout, append(blocks, axi.Help(conflictHelp(ticket, a.Conflicts)...))...)
+}
+
+// ticketOpenFilter says whether a ticket is open: it is not closed, and its
+// work has not merged. A branch bound to a closed or merged ticket is a
+// leftover and says nothing about a conflict. merges is asked only for a
+// published ticket; nil asks nothing, so a published ticket stays open. A
+// ticket whose record cannot be read is not open.
+func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
+	known := map[string]bool{}
+	return func(id string) bool {
+		if open, ok := known[id]; ok {
+			return open
+		}
+		open := false
+		if rec, err := st.ReadTicket(id); err == nil && rec.Closed == nil {
+			open = true
+			if published, err := isPublished(st, id); err == nil && published && merges != nil {
+				if m, err := merges.Of(id); err == nil && m.Met() {
+					open = false
+				}
+			}
+		}
+		known[id] = open
+		return open
+	}
 }

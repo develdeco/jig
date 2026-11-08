@@ -488,7 +488,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	n.Stack = stackRows(plan, data.in.Published)
-	advice := ticketConflictAdvice(st, cfg, mp, id)
+	advice := ticketConflictAdvice(st, cfg, mp, id, merges)
 	n.Conflicts, n.CleanWith = advice.Conflicts, advice.Clean
 	for _, b := range ready.Batches(readySlices, place.Repo) {
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
@@ -888,8 +888,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	for _, s := range ready.SharedRanks(ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
-	out.WorkspaceOverlaps = workspaceOverlaps(cfg, mp, out.Next, slicesOf)
-	out.Overlaps = findOverlaps(st, cfg, mp)
+	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, slicesOf)
+	out.Overlaps = findOverlaps(st, cfg, mp, ticketOpenFilter(st, merges))
 	return out, nil
 }
 
@@ -899,8 +899,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 // start them, so a pair names the one to start first before the other. A
 // ticket's workspace that no repo owns is no site (it is not known whose it
 // is), and it overlaps nothing.
-func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
-	if len(order) < 2 || singleWorkspace(order, slicesOf) {
+func workspaceOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, order []string, slicesOf map[string][]store.Slice) []nextWorkspaceOverlap {
+	if len(order) < 2 || singleWorkspace(st, cfg, mp) {
 		return nil
 	}
 	repos := ready.ProjectRepos(cfg, mp.Clones)
@@ -915,16 +915,32 @@ func workspaceOverlaps(cfg project.Config, mp project.MachineProject, order []st
 	return out
 }
 
-// singleWorkspace says the slices of the tickets name one workspace between
-// them, across all repos. The rule then carries no information: every pair of
-// tickets would share it, which blocked parallel builds that had no real
-// conflict. The conflict advice (conflict.go) covers that case once branches
-// exist.
-func singleWorkspace(tickets []string, slicesOf map[string][]store.Slice) bool {
+// singleWorkspace says the project has one workspace: the workspaces its
+// repos' manifests declare and the slices of every ticket of the store name,
+// across all repos, are one or none. The rule then carries no information:
+// every pair of tickets would share it, which blocked parallel builds that had
+// no real conflict. It is judged over the project, not over the tickets being
+// compared, so whether a pair is listed does not depend on a third ticket. The
+// conflict advice (conflict.go) covers that case once branches exist.
+func singleWorkspace(st *store.Store, cfg project.Config, mp project.MachineProject) bool {
 	seen := map[string]bool{}
-	for _, id := range tickets {
-		for _, s := range slicesOf[id] {
-			seen[s.Workspace] = true
+	name := func(w string) {
+		if i := strings.LastIndex(w, "/"); i >= 0 {
+			w = w[i+1:]
+		}
+		seen[w] = true
+	}
+	for _, r := range ready.ProjectRepos(cfg, mp.Clones) {
+		for _, w := range r.Workspaces {
+			name(w)
+		}
+	}
+	ids, _ := st.Tickets()
+	for _, id := range ids {
+		if slices, err := st.ReadSlices(id); err == nil {
+			for _, s := range slices {
+				name(s.Workspace)
+			}
 		}
 	}
 	return len(seen) <= 1
@@ -1120,8 +1136,8 @@ func namedTickets(st *store.Store, chart, list string) ([]string, error) {
 // both change since the repo's target branch (git diff --name-only
 // <target>...<branch>). A repo with no clone here, or whose target is not
 // there, is skipped: this is a warning, not a gate.
-func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) []nextOverlap {
-	out, _ := scanOverlaps(st, cfg, mp)
+func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, open func(string) bool) []nextOverlap {
+	out, _ := scanOverlaps(st, cfg, mp, open, "")
 	return out
 }
 
@@ -1138,7 +1154,11 @@ type testedPair struct {
 
 // scanOverlaps is findOverlaps with, besides, each pair of tickets that
 // shares a file, merged once however many files it shares.
-func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) ([]nextOverlap, []testedPair) {
+//
+// Only the branches of tickets open says are open are paired. A ticket named
+// in only limits the work to the pairs that hold it: the other tickets' files
+// are listed, but only the merges that can be shown are made.
+func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject, open func(string) bool, only string) ([]nextOverlap, []testedPair) {
 	var out []nextOverlap
 	var pairs []testedPair
 	for _, r := range cfg.Repos {
@@ -1173,13 +1193,13 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				if ref == "" || name == target || name == "HEAD" || name == "origin" {
 					continue
 				}
-				if id, _, err := st.TicketForBranch(name); err == nil && id != "" && !local[id] {
+				if id, _, err := st.TicketForBranch(name); err == nil && id != "" && !local[id] && (open == nil || open(id)) {
 					bounds = append(bounds, bound{id, ref})
 					tickets[id] = true
 				}
 			}
 		}
-		if len(tickets) < 2 {
+		if len(tickets) < 2 || (only != "" && !tickets[only]) {
 			continue
 		}
 		base := ""
@@ -1231,7 +1251,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		pairAt := map[[2]string]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
-			if len(t.tickets) < 2 {
+			if len(t.tickets) < 2 || (only != "" && !t.tickets[only]) {
 				continue
 			}
 			ids := sortedStrings(mapKeys(t.tickets))
@@ -1239,6 +1259,9 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			var conflicted []string
 			for i := range ids {
 				for j := i + 1; j < len(ids); j++ {
+					if only != "" && ids[i] != only && ids[j] != only {
+						continue
+					}
 					key := [2]string{ids[i], ids[j]}
 					v, ok := tested[key]
 					if !ok {

@@ -1058,6 +1058,23 @@ func TestChartWorkspaceOverlaps(t *testing.T) {
 		}
 	})
 
+	t.Run("a wave of one workspace is listed when the project has two", func(t *testing.T) {
+		t.Parallel()
+		r := newChartRig(t)
+		r.overlapRig(t, one, map[string][2]string{
+			"TK-1": {"", sliceFile("alpha")},
+			"TK-2": {"", sliceFile("alpha")},
+			"TK-3": {"blocked_by:\n  - ticket: TK-1\n    kind: stacked\n", sliceFile("web")},
+		})
+		n := r.next(t, "c")
+		if want := [][]string{{"TK-1", "TK-2"}, {"TK-3"}}; !reflect.DeepEqual(n.Run, want) {
+			t.Fatalf("run = %v, want %v", n.Run, want)
+		}
+		if got, want := overlapsOf(n), []string{"app/alpha:TK-1+TK-2"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("overlaps = %v, want %v: the project has two workspaces, whatever one wave holds", got, want)
+		}
+	})
+
 	t.Run("no slices and unreadable slices are left out", func(t *testing.T) {
 		t.Parallel()
 		r := newChartRig(t)

@@ -143,19 +143,19 @@ func TestPrintConflictsNamesARealConflictOnly(t *testing.T) {
 	mp := project.MachineProject{Clones: map[string]string{"app": dir}}
 
 	var out bytes.Buffer
-	printConflicts(&out, st, cfg, mp, "T-2")
+	printConflicts(&out, st, cfg, mp, nil, "T-2")
 	for _, w := range []string{"conflict[1]{repo,ticket,file,branch}:", "app,T-1,f.txt,T-1-one", "jig depend T-2 --on T-1 --kind stacked"} {
 		if !strings.Contains(out.String(), w) {
 			t.Errorf("output lacks %q:\n%s", w, out.String())
 		}
 	}
 	out.Reset()
-	printConflicts(&out, st, cfg, mp, "T-1")
+	printConflicts(&out, st, cfg, mp, nil, "T-1")
 	if !strings.Contains(out.String(), "jig depend T-2 --on T-1 --kind stacked") {
 		t.Errorf("T-1 is not told to be stacked on:\n%s", out.String())
 	}
 	out.Reset()
-	printConflicts(&out, st, cfg, mp, "T-3")
+	printConflicts(&out, st, cfg, mp, nil, "T-3")
 	if out.Len() != 0 {
 		t.Errorf("a clean pair printed:\n%s", out.String())
 	}

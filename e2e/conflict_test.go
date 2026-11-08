@@ -73,6 +73,17 @@ func TestConflictAdviceIsARealConflictShownWhereTheSessionLooks(t *testing.T) {
 		t.Errorf("the conflict does not come first in the gate output:\n%s", gate.Stdout)
 	}
 
+	// jig publish prints the same block before it pushes (and then refuses a
+	// ticket with nothing to publish), and jig here --json carries the rows.
+	publish := runJig(t, env, fx.RepoDir, "publish", "JIG-1")
+	if !strings.Contains(publish.Stdout, table+"  fixture-repo,JIG-2,shared.txt,jig/JIG-2\n") {
+		t.Errorf("jig publish JIG-1 lacks the conflict:\n%s", publish.Stdout)
+	}
+	hereJSON := runJig(t, env, fx.RepoDir, "here", "--json")
+	if !strings.Contains(hereJSON.Stdout, `"conflicts":[{"repo":"fixture-repo","ticket":"JIG-2","file":"shared.txt","branch":"jig/JIG-2","first":"JIG-1"}]`) {
+		t.Errorf("jig here --json lacks the conflicts array:\n%s", hereJSON.Stdout)
+	}
+
 	// The clean pair: nothing for JIG-3 at the gate, no warning in jig here.
 	gitLog(t, fx.RepoDir, "switch", "jig/JIG-3")
 	clean := runJig(t, env, fx.RepoDir, "here")
