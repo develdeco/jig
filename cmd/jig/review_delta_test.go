@@ -45,7 +45,7 @@ func TestADeltaRoundsContextHoldsOnlyItsDelta(t *testing.T) {
 		"  diff: |\n",
 		"+// Greet trims nothing yet.",
 		"diff --git a/beta/beta.go b/beta/beta.go",
-		"answers[1]{file:line,action,risk,title,decision}:",
+		"answers[1]{id,file:line,action,risk,title,decision}:",
 		"Greet does not trim surrounding whitespace",
 		"decided: keep",
 		"must_review[1]{path}:\n  beta/beta.go",
@@ -121,7 +121,6 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 		t.Fatalf("a long delta's context names no diff file\n%s", out)
 	}
 	path := strings.Trim(strings.SplitN(out[i+len("diff_path: "):], "\n", 2)[0], `"`)
-	path = strings.ReplaceAll(path, `\`, `\`)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("the diff file: %v", err)
@@ -129,7 +128,7 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 	if !strings.Contains(string(data), "filler line 449") {
 		t.Errorf("the diff file lacks the change")
 	}
-	if !strings.Contains(out, "lines: 4") {
+	if !strings.Contains(out, "  lines: 458\n") {
 		t.Errorf("the context does not state the line count\n%s", out)
 	}
 }

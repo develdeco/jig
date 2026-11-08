@@ -136,14 +136,14 @@ func deltaFileSet(diffs []deltaDiff) map[string]bool {
 }
 
 // answers is what a delta reviewer looks for in the diff: every finding still
-// open or asked, and every noted finding a person has decided (a pending keep).
+// open or asked, and every noted finding a person has kept (a pending keep). A noted finding with no decision, or one a person is dismissing, is left out. The id is what the reviewer names with --prior or --still-present.
 func answers(open []verifydeliver.OpenFinding) [][]string {
 	var rows [][]string
 	for _, f := range open {
-		if f.Status == verifydeliver.StatusNoted && f.Decision == "" {
+		if f.Status == verifydeliver.StatusNoted && !strings.HasPrefix(f.Decision, verifydeliver.TriageKeep) {
 			continue
 		}
-		rows = append(rows, []string{fmt.Sprintf("%s:%d", f.File, f.Line), f.Action, f.Risk, f.Title, f.DecisionText()})
+		rows = append(rows, []string{f.ID, fmt.Sprintf("%s:%d", f.File, f.Line), f.Action, f.Risk, f.Title, f.DecisionText()})
 	}
 	return rows
 }

@@ -148,7 +148,7 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	}
 	if delta {
 		blocks = append(blocks, deltaBlock(deltas))
-		blocks = append(blocks, axi.Table("answers", []string{"file:line", "action", "risk", "title", "decision"}, answers(req.Open)))
+		blocks = append(blocks, axi.Table("answers", []string{"id", "file:line", "action", "risk", "title", "decision"}, answers(req.Open)))
 	}
 
 	mustRows := make([][]string, len(req.MustReview))

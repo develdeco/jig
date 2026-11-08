@@ -303,7 +303,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Fatalf("jig review context (round 2) exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
 	// Round 2 is a delta round (GATE-17): the ask is in its answers table.
-	const answersHeader = "answers[1]{file:line,action,risk,title,decision}:\n"
+	const answersHeader = "answers[1]{id,file:line,action,risk,title,decision}:\n"
 	i := strings.Index(ctx.Stdout, answersHeader)
 	if i < 0 {
 		t.Fatalf("the round's answers lack the ask:\n%s", ctx.Stdout)

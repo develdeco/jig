@@ -48,7 +48,7 @@ jig finding T-1 --still-present r1-f2 --line 14     # an earlier finding, unchan
 
 - `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
 - `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the manifest oracle that best proves the fix (required with more than one oracle, for a fix or an ask).
-- `--prior r1-f2` for a changed version of a finding under `open` or `dismissed`, `--still-present` for an unchanged one. Never raise again what a person dismissed.
+- `--prior r1-f2` for a changed version of a finding under `open`, `answers` or `dismissed`, `--still-present` for an unchanged one. Never raise again what a person dismissed.
 - A missing test is a problem only at a seam the intent names, or as proof of a defect you report.
 
 ## Close the round
