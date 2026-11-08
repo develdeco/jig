@@ -221,3 +221,30 @@ func TestReadRoundsCountsByTheStatusJigRoutedTo(t *testing.T) {
 		t.Errorf("round 2 counts = %d fix, %d ask, %d note, want 0, 1, 3", r.Fix, r.Ask, r.Note)
 	}
 }
+
+// TestReadRoundsCountsEveryEarlierAskStillOpen: an ask an earlier round raised
+// holds each later round open until a round decides it, whether or not that
+// round reports it again; a round that clears it no longer holds.
+func TestReadRoundsCountsEveryEarlierAskStillOpen(t *testing.T) {
+	t.Parallel()
+	st, ticket, record := roundStore(t)
+	rep := func(n int) string {
+		return "round: " + string(rune('0'+n)) + "\nverdict: fix-slices\nreviewed_sha: {repo: " + sha40("2") + "}\nindependent: true\n"
+	}
+	record(1, rep(1), "scope: full\nreviewed_paths: [b.go]\nfindings:\n  - {id: r1-f1, file: b.go, line: 9, title: asked, action: ask, risk: medium, status: asked}\n")
+	// Round 2 raises a note and never mentions r1-f1.
+	record(2, rep(2), "scope: delta\nreviewed_paths: [b.go]\nfindings:\n  - {id: r2-f1, file: b.go, line: 2, title: note, action: note, risk: low, status: noted}\n")
+	// Round 3 clears it.
+	record(3, rep(3), "scope: delta\nreviewed_paths: [b.go]\nfindings:\n  - {id: r3-f1, file: b.go, line: 2, title: note, action: note, risk: low, status: noted}\ncleared: [r1-f1]\n")
+
+	got, err := ReadRounds(st, ticket)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("ReadRounds = %+v, %v; want three rounds", got, err)
+	}
+	if got[0].HeldAsks != 0 || got[1].HeldAsks != 1 || got[2].HeldAsks != 0 {
+		t.Errorf("HeldAsks = %d, %d, %d; want 0 (raised in the round), 1 (held, not reported again), 0 (cleared)", got[0].HeldAsks, got[1].HeldAsks, got[2].HeldAsks)
+	}
+	if line := roundLine(got[1]); line != "asks for the person" {
+		t.Errorf("round 2 reads %q, want it to ask for the person", line)
+	}
+}

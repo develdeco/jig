@@ -27,14 +27,19 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 	t.Parallel()
 
 	rounds := []RoundRecord{
-		{Round: 1, Verdict: RoundFindings, Scope: "full"},
+		{Round: 1, Verdict: RoundFindings, Scope: "full", FixSlices: []string{"f1", "f2"}},
 		{Round: 2, Verdict: RoundClean, Scope: "delta"},
 		{Round: 3, Verdict: RoundClean},
+		{Round: 4, Verdict: RoundFindings, FixSlices: []string{"f3"}},
+		{Round: 5, Verdict: RoundFindings, Ask: 1},
+		{Round: 6, Verdict: RoundFindings, Note: 2},
+		{Round: 7, Verdict: RoundClean, CarriedFrom: 6},
+		{Round: 8, Verdict: VerdictNotIndependent},
 	}
 	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet", "lint"}, map[string][]string{"go-test": {"go test ./a/...", "go test ./b/..."}, "go-vet": {"go vet\n  ./..."}}, rounds)
 	want := "## Verification\n\n" +
 		"Oracles green at the reviewed head 0123456:\n\n- go-test: `go test ./a/...`\n- go-test: `go test ./b/...`\n- go-vet: `go vet ./...`\n- lint\n\n" +
-		"Gate rounds:\n\n- Round 1 (full): findings\n- Round 2 (delta): clean\n- Round 3: clean\n"
+		"Gate rounds:\n\n- Round 1 (full): 2 fix slices asked\n- Round 2 (delta): clean\n- Round 3: clean\n- Round 4: 1 fix slice asked\n- Round 5: asks for the person\n- Round 6: notes only\n- Round 7: carried over\n- Round 8: not-independent\n"
 	if got != want {
 		t.Fatalf("renderVerificationSection =\n%s\nwant\n%s", got, want)
 	}
@@ -94,5 +99,18 @@ func TestRenderSlicesSection(t *testing.T) {
 	}
 	if got := renderSlicesSection(nil, nil, nil, nil); got != "" {
 		t.Fatalf("renderSlicesSection with nothing = %q, want none", got)
+	}
+}
+
+// TestRoundLineOfARoundHeldOpenByAnEarlierAsk: a findings round with no fix
+// slice and no ask of its own, run while an earlier round's ask was still
+// undecided, asks for the person; it is not "notes only".
+func TestRoundLineOfARoundHeldOpenByAnEarlierAsk(t *testing.T) {
+	t.Parallel()
+	if got := roundLine(RoundRecord{Verdict: RoundFindings, HeldAsks: 1, Note: 1}); got != "asks for the person" {
+		t.Errorf("roundLine = %q, want %q", got, "asks for the person")
+	}
+	if got := roundLine(RoundRecord{Verdict: RoundFindings, Note: 1}); got != "notes only" {
+		t.Errorf("roundLine = %q, want %q", got, "notes only")
 	}
 }

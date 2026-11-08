@@ -484,13 +484,35 @@ func renderVerificationSection(rep reportYAML, oracleNames []string, commands ma
 		b.WriteString("Gate rounds:\n\n")
 		for _, r := range rounds {
 			if r.Scope != "" {
-				fmt.Fprintf(&b, "- Round %d (%s): %s\n", r.Round, r.Scope, r.Verdict)
+				fmt.Fprintf(&b, "- Round %d (%s): %s\n", r.Round, r.Scope, roundLine(r))
 			} else {
-				fmt.Fprintf(&b, "- Round %d: %s\n", r.Round, r.Verdict)
+				fmt.Fprintf(&b, "- Round %d: %s\n", r.Round, roundLine(r))
 			}
 		}
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// roundLine says what a gate round came to in the Gate rounds list: what it
+// asked of the build rather than the verdict's name. A clean round is clean,
+// unless it carried an earlier round's verdict over (nobody read its head); a
+// round with findings says how many fix slices it asked, else that it asks
+// for the person, else that it left notes only; a round that was not
+// independent keeps its verdict.
+func roundLine(r RoundRecord) string {
+	switch {
+	case r.Verdict == RoundClean && r.CarriedFrom > 0:
+		return "carried over"
+	case r.Verdict != RoundFindings:
+		return r.Verdict
+	case len(r.FixSlices) == 1:
+		return "1 fix slice asked"
+	case len(r.FixSlices) > 1:
+		return fmt.Sprintf("%d fix slices asked", len(r.FixSlices))
+	case r.Ask > 0 || r.HeldAsks > 0:
+		return "asks for the person"
+	}
+	return "notes only"
 }
 
 // oracleLines are the lines an oracle takes in the Verification section: one

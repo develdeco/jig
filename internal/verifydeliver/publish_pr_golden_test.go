@@ -167,8 +167,8 @@ Oracles green at the reviewed head %s:
 
 Gate rounds:
 
-- Round 1 (full): findings
-- Round 2 (delta): findings
+- Round 1 (full): 2 fix slices asked
+- Round 2 (delta): 1 fix slice asked
 - Round 3 (delta): clean
 `, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
 	wantBody = withGateCommand(t, fx, wantBody)
@@ -328,7 +328,7 @@ Oracles green:
 
 Gate rounds:
 
-- Round 1: findings
+- Round 1: 1 fix slice asked
 - Round 2: clean
 `
 	wantBody = withGateCommand(t, fx, wantBody)
