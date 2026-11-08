@@ -4,7 +4,7 @@ Ambiguous: a verification started from a commit's git hook ran with the hook's e
 
 Chosen:
 - F1: `jig githook post-commit` removes the hook-only variables from its own process before it starts anything: `JIG_GITHOOK_WRAPPED`, `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `GIT_INDEX_FILE`, `GIT_PREFIX`, `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`. `GIT_EXEC_PATH` stays. The removal goes through an env seam (`unsetenv`) that a test env leaves as a no-op, because the in-process tests share one process whose pinned identity must survive.
-- F1 also drops the command-line config git exports for a commit made with `git -c` (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`), kept from gate round 1 (r1-f2): they outrank the repository's own config, so they would author the oracle's commits as the `-c` identity.
+- F1 also drops `GIT_CONFIG_PARAMETERS`, which git exports for a commit made with `git -c` (gate round 1, r1-f2): it outranks the repository's own config, so it would author the oracle's commits as the `-c` identity. `GIT_CONFIG_COUNT` and its `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pairs are kept: they are how a person configures git, not something git exports to a hook (r3-f1); a test shows they reach the verification.
 - F2: e2e's `jigEnv.environ()` drops `JIG_GITHOOK_WRAPPED` unless the test sets it through `extra`.
 - F3: the hook reads only its working directory and repository, so nothing it records changes.
 

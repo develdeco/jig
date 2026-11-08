@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -260,12 +261,19 @@ func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testi
 		"JIG_GITHOOK_WRAPPED", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
 		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
 		"GIT_INDEX_FILE", "GIT_PREFIX", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
-		"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
+		"GIT_CONFIG_PARAMETERS",
 	}
 	for _, name := range hookOnly {
 		t.Setenv(name, "from-the-hook")
 	}
 	t.Setenv("GIT_EXEC_PATH", os.Getenv("GIT_EXEC_PATH"))
+	// A person's own git configuration through the environment reaches the
+	// verification: git does not export these to a hook.
+	kept := []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.abbrev", "GIT_CONFIG_VALUE_0=9"}
+	for _, kv := range kept {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
 	e.unsetenv = processEnv().unsetenv // the remover the binary runs with
 	var seen []string
 	e = e.withSpawn(func(s spawn.Spec) (int, error) {
@@ -286,6 +294,11 @@ func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testi
 			if strings.EqualFold(strings.SplitN(kv, "=", 2)[0], name) {
 				t.Errorf("the verification inherits %s", kv)
 			}
+		}
+	}
+	for _, kv := range kept {
+		if !slices.Contains(seen, kv) {
+			t.Errorf("the verification lost %s", kv)
 		}
 	}
 }
