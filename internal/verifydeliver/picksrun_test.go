@@ -12,6 +12,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
@@ -61,6 +62,7 @@ type picksFixture struct {
 	logFile  string
 	setGh    func(vars ...string) // points the fake gh at other pulls, failures and bodies
 	warnings []string
+	owned    string // a test file the ticket changed, which recordings are tagged with
 }
 
 func newPicksFixture(t *testing.T) *picksFixture {
@@ -86,6 +88,11 @@ func newPicksFixture(t *testing.T) *picksFixture {
 	if pf.head == "" {
 		t.Fatal("the clean round recorded no reviewed head")
 	}
+	files, err := gitx.DiffNameOnly(buildLeaseDir(t, pf.fx), pf.built[0]+"^", pf.built[0], "AMT")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("files the first built commit changed = %v (err %v), want some", files, err)
+	}
+	pf.owned = files[0]
 	pf.logFile, pf.setGh = useGithubHost(t, &pf.d, "", "")
 	return pf
 }
@@ -94,6 +101,11 @@ func newPicksFixture(t *testing.T) *picksFixture {
 // appends the recorded line that describes them.
 func (pf *picksFixture) record(t *testing.T, commit, run string, specs ...recSpec) {
 	t.Helper()
+	for i := range specs {
+		if specs[i].Source == "" {
+			specs[i].Source = pf.owned
+		}
+	}
 	line := recordBuild(t, pf.d, pf.fx.Ticket, commit, run, specs)
 	if err := journal.Append(pf.d.Store, pf.fx.Ticket, line); err != nil {
 		t.Fatal(err)
@@ -507,7 +519,7 @@ func (pf *picksFixture) step(t *testing.T, result *PicksResult) picksStep {
 	}
 	return picksStep{
 		d: pf.d, result: result, ticket: pf.fx.Ticket, repoName: "fixture-repo",
-		leaseDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, warn: pf.d.Warn,
+		leaseDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, own: map[string]bool{pf.owned: true}, warn: pf.d.Warn,
 	}
 }
 
@@ -790,7 +802,7 @@ func TestStagingLeavesNothingOfAnEarlierPickOfTheSameHead(t *testing.T) {
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
 	s := pf.step(t, nil)
-	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,7 +847,7 @@ func TestStagingNeverWritesThroughALink(t *testing.T) {
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
 	s := pf.step(t, nil)
-	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -225,15 +226,54 @@ var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // one step can be two files, a screenshot and a video), since a
 // later build recorded the same scenario again. A candidate is then checked
 // against its file under the jig home (recordingProblem); one that fails is no
-// candidate, and dropped names it and why. The candidates come back in a
+// candidate, and dropped names it and why. Only the ticket's own recordings are
+// candidates: those whose source is in own (ownSources), left out silently
+// otherwise. The candidates come back in a
 // stable order, flow then step then scenario, with ids r1, r2, ... in that
 // order, so the same set of recordings always reads the same.
-func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head string) (cands []pickCandidate, dropped []string, err error) {
+func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head string, own map[string]bool) (cands []pickCandidate, dropped []string, err error) {
 	all, err := recordedCandidates(d, lines, leaseDir, head)
 	if err != nil || len(all) == 0 {
 		return nil, nil, err
 	}
+	all = ownRecordings(all, own)
+	if len(all) == 0 {
+		return nil, nil, nil
+	}
 	return verifiedCandidates(d, ticket, all)
+}
+
+// ownSources returns the files the ticket's commits added, modified or
+// changed the type of in leaseDir: those from the merge base of head and
+// origin/base up to head. Renames are off, so a renamed test file counts under
+// its new path and a deleted one is not in the set.
+func ownSources(leaseDir, base, head string) (map[string]bool, error) {
+	mb, err := gitx.MergeBase(leaseDir, head, "origin/"+base)
+	if err != nil {
+		return nil, fmt.Errorf("find where %s leaves origin/%s: %w", head, base, err)
+	}
+	files, err := gitx.DiffNameOnly(leaseDir, mb, head, "AMT")
+	if err != nil {
+		return nil, fmt.Errorf("list the files the ticket changed: %w", err)
+	}
+	own := make(map[string]bool, len(files))
+	for _, f := range files {
+		own[path.Clean(filepath.ToSlash(f))] = true
+	}
+	return own, nil
+}
+
+// ownRecordings keeps the candidates the ticket made: those whose source (the
+// test file its tag named) is in own. A recording with no source, or of a file
+// the ticket did not touch, is not offered, and nothing is said of it.
+func ownRecordings(all []pickCandidate, own map[string]bool) []pickCandidate {
+	var kept []pickCandidate
+	for _, c := range all {
+		if c.rec.Source != "" && own[path.Clean(filepath.ToSlash(c.rec.Source))] {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // recordedCandidates is the first half of pickCandidates: the latest recording
