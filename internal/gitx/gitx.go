@@ -300,7 +300,18 @@ func Missing(dir, ref string, commits []string) ([]string, error) {
 // back exactly as git prints them: repo-relative with forward slashes,
 // tree order (not sorted).
 func DiffNameOnly(dir, base, head, diffFilter string) ([]string, error) {
-	args := []string{"diff", "--name-only", "-z", "--no-renames", "--diff-filter=" + diffFilter, base, head}
+	return diffNames(dir, diffFilter, base, head)
+}
+
+// DiffNameOnlySince is DiffNameOnly of the changes head made since it left
+// base (`git diff base...head`): git finds the merge base itself, so one
+// process answers what a merge-base call and a diff call would.
+func DiffNameOnlySince(dir, base, head, diffFilter string) ([]string, error) {
+	return diffNames(dir, diffFilter, base+"..."+head)
+}
+
+func diffNames(dir, diffFilter string, revs ...string) ([]string, error) {
+	args := append([]string{"diff", "--name-only", "-z", "--no-renames", "--diff-filter=" + diffFilter}, revs...)
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
 		return nil, callError(args, stderr.String(), err)

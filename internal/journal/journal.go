@@ -462,3 +462,44 @@ const (
 	BodyDiffers = "differs"
 	BodyUnknown = "unknown"
 )
+
+// HasEvent says whether the ticket's journal holds a line of the event. It
+// looks for the event's field in the file's text, without decoding the lines:
+// a journal of a ticket built over many rounds is hundreds of kilobytes, and a
+// caller that asks of many tickets at once (the conflict advice at every
+// session start) would otherwise decode them all for one fact. A line that
+// quotes the field inside a string has it escaped, so it does not match.
+func HasEvent(st *store.Store, ticket, event string) (bool, error) {
+	data, err := fileshare.ReadFile(journalPath(st, ticket))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return bytes.Contains(data, []byte(`"event":"`+event+`"`)), nil
+}
+
+// PRURLs are the pull request urls the ticket's journal records, oldest first.
+// Like HasEvent it decodes only the lines that carry the event.
+func PRURLs(st *store.Store, ticket string) ([]string, error) {
+	data, err := fileshare.ReadFile(journalPath(st, ticket))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	marker := []byte(`"event":"` + EventPr + `"`)
+	var urls []string
+	for _, raw := range bytes.Split(data, []byte{'\n'}) {
+		if !bytes.Contains(raw, marker) {
+			continue
+		}
+		var l Line
+		if err := json.Unmarshal(bytes.TrimSpace(raw), &l); err == nil && l.Event == EventPr && l.URL != "" {
+			urls = append(urls, l.URL)
+		}
+	}
+	return urls, nil
+}

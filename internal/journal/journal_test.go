@@ -504,3 +504,38 @@ func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 		t.Fatalf("Read after the replacements = %+v, %v, want the merged line", lines, err)
 	}
 }
+
+// TestHasEventAndPRURLs: the two quick reads of a journal see what the full
+// read sees, and a line that merely quotes an event inside a string is not the
+// event.
+func TestHasEventAndPRURLs(t *testing.T) {
+	st := newTestStore(t)
+	if has, err := HasEvent(st, "JIG-1", EventPublishDone); err != nil || has {
+		t.Fatalf("HasEvent with no journal = %v, %v, want false", has, err)
+	}
+	if urls, err := PRURLs(st, "JIG-1"); err != nil || len(urls) != 0 {
+		t.Fatalf("PRURLs with no journal = %v, %v, want none", urls, err)
+	}
+	for _, l := range []Line{
+		{Ticket: "JIG-1", Event: "oracle", Summary: `jig: {"event":"publish-done"} in the output`},
+		{Ticket: "JIG-1", Event: EventPr, URL: "https://github.com/o/r/pull/1"},
+		{Ticket: "JIG-1", Event: EventPr, URL: "https://github.com/o/r/pull/2"},
+	} {
+		if err := Append(st, "JIG-1", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if has, _ := HasEvent(st, "JIG-1", EventPublishDone); has {
+		t.Errorf("HasEvent = true for a line that only quotes the event")
+	}
+	if err := Append(st, "JIG-1", Line{Ticket: "JIG-1", Event: EventPublishDone}); err != nil {
+		t.Fatal(err)
+	}
+	if has, _ := HasEvent(st, "JIG-1", EventPublishDone); !has {
+		t.Errorf("HasEvent = false after a publish-done line")
+	}
+	urls, err := PRURLs(st, "JIG-1")
+	if want := []string{"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}; err != nil || !reflect.DeepEqual(urls, want) {
+		t.Errorf("PRURLs = %v, %v, want %v", urls, err, want)
+	}
+}

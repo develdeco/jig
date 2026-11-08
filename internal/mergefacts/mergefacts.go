@@ -226,3 +226,7 @@ func hasCommit(dir, ref string) bool {
 	out, found, _ := gitx.ResolveCommit(dir, ref)
 	return found && out != ""
 }
+
+// PullRequests is the source of pull request states the reader judges by, nil
+// when it has none.
+func (r *Reader) PullRequests() PRs { return r.PRs }

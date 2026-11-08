@@ -71,15 +71,29 @@ const (
 	bottomChanged = "1\n2\n3\n4\n5\n6\n7\n8\n9\nBOTTOM\n"
 )
 
-// fakeMerges says whether the published tickets in it have merged; one that
-// has not has an open pull request.
-type fakeMerges map[string]bool
+// fakeMerges is a merge source whose pull request states are given by url. It
+// answers the merge facts nothing, as the open filter asks only for the states.
+type fakeMerges map[string]string
 
-func (f fakeMerges) Of(id string) (ready.Merge, error) {
-	if f[id] {
-		return ready.Merge{Published: true, Repos: []ready.RepoMerge{{Met: true, State: ready.PRMerged}}}, nil
+func (f fakeMerges) Of(string) (ready.Merge, error) { return ready.Merge{}, nil }
+
+func (f fakeMerges) PullRequests() mergefacts.PRs { return fakePRs(f) }
+
+type fakePRs map[string]string
+
+func (f fakePRs) Read(url string) mergefacts.PRRead { return mergefacts.PRRead{State: f[url]} }
+
+// publish records that ticket id published with a pull request at url.
+func publish(t *testing.T, st *store.Store, id, url string) {
+	t.Helper()
+	if url != "" {
+		if err := journal.Append(st, id, journal.Line{Event: journal.EventPr, URL: url}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return ready.Merge{Published: true, Repos: []ready.RepoMerge{{State: ready.PROpen}}}, nil
+	if err := journal.Append(st, id, journal.Line{Event: journal.EventPublishDone}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // pairsOf names the pairs of a scan as "A+B".
@@ -100,21 +114,21 @@ func TestAdviceLeavesOutBranchesOfTicketsThatAreNotOpen(t *testing.T) {
 	if err := r.st.CreateTicketRecord("T-1", store.Ticket{Title: "closed", Closed: &store.Closed{Reason: store.CloseNotPlanned}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := journal.Append(r.st, "T-3", journal.Line{Event: journal.EventPublishDone}); err != nil {
-		t.Fatal(err)
-	}
+	publish(t, r.st, "T-3", "https://github.com/demo/app/pull/3")
 	r.branch("T-1-closed", topChanged)
 	r.branch("T-2-open", topChangedAlt)
 	r.branch("T-3-merged", topChangedNew)
 	r.branch("T-4-open", "FOUR\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
 	r.branch("T-9-nobody", "NINE\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
 
-	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, fakeMerges{"T-3": true}), "")
+	merged := fakeMerges{"https://github.com/demo/app/pull/3": ready.PRMerged}
+	stillOpen := fakeMerges{"https://github.com/demo/app/pull/3": ready.PROpen}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, merged), "")
 	if got, want := pairsOf(pairs), []string{"T-2+T-4"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("pairs = %v, want %v: only open tickets are paired", got, want)
 	}
 	var out bytes.Buffer
-	printConflicts(&out, r.st, r.cfg, r.mp, fakeMerges{"T-3": true}, "T-4")
+	printConflicts(&out, r.st, r.cfg, r.mp, merged, "T-4")
 	for _, leftover := range []string{"T-1", "T-3", "T-9"} {
 		if strings.Contains(out.String(), leftover) {
 			t.Errorf("the advice names %s, which is not an open ticket:\n%s", leftover, out.String())
@@ -124,7 +138,7 @@ func TestAdviceLeavesOutBranchesOfTicketsThatAreNotOpen(t *testing.T) {
 		t.Errorf("the advice lacks the open ticket's row:\n%s", out.String())
 	}
 	// A published ticket whose work has not merged is still open.
-	_, pairs = scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, fakeMerges{"T-3": false}), "T-4")
+	_, pairs = scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, stillOpen), "T-4")
 	if got := pairsOf(pairs); !reflect.DeepEqual(got, []string{"T-2+T-4", "T-3+T-4"}) {
 		t.Errorf("pairs = %v, want T-3 (published, not merged) paired too", got)
 	}
@@ -266,5 +280,33 @@ func TestAdviceLeavesOutPublishedTicketsWhoseMergeIsNotKnown(t *testing.T) {
 	_, pairs = scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, nil), "T-1")
 	if len(pairs) != 0 {
 		t.Errorf("pairs = %v, want none: no published ticket is known to be open", pairsOf(pairs))
+	}
+}
+
+// TestAdviceMergesNothingForATicketThatSharesNoFile: the early skip. A ticket
+// whose branch changes a file no other open ticket changes is told nothing
+// and no merge is made for it, however many other pairs share files.
+func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2", "T-3")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	gitIn(t, r.dir, "switch", "-c", "T-3-c", "main")
+	if err := os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("own file"+string(rune(10))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, "add", "-A")
+	gitIn(t, r.dir, "commit", "-m", "g")
+	gitIn(t, r.dir, "switch", "main")
+
+	calls := 0
+	real := testPairWith
+	testPairWith = func(dir, a, b string) (string, []string) { calls++; return real(dir, a, b) }
+	defer func() { testPairWith = real }()
+
+	if _, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-3"); len(pairs) != 0 || calls != 0 {
+		t.Errorf("T-3 shares no file: pairs = %v, merges = %d, want none", pairsOf(pairs), calls)
+	}
+	if _, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-1"); len(pairs) != 1 || calls != 1 {
+		t.Errorf("T-1 shares f.txt with T-2: pairs = %v, merges = %d, want one of each", pairsOf(pairs), calls)
 	}
 }

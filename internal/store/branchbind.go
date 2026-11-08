@@ -109,3 +109,35 @@ func (s *Store) ticketForRemoteLead(lead string) (id, how string, err error) {
 		return "", "", remoteLeadCollisionError(lead, owners)
 	}
 }
+
+// TicketsForBranches binds many branch names at once: the ticket each binds
+// to, as TicketForBranch would say, for the branches that bind to one. A
+// branch that binds to nothing, or whose binding is refused (a collision), is
+// left out. The tracker's ids are read once for all of them, not once for each
+// branch that leads with an issue number, which a clone with many such
+// branches would otherwise pay for on every call.
+func (s *Store) TicketsForBranches(branches []string) map[string]string {
+	out := map[string]string{}
+	var leads map[string][]string
+	leadsRead := false
+	for _, branch := range branches {
+		if lead := BranchLeadID(branch); lead != "" {
+			if id, _, err := s.TicketForBranch(branch); err == nil && id != "" {
+				out[branch] = id
+			}
+			continue
+		}
+		issue := BranchLeadIssue(branch)
+		if issue == "" {
+			continue
+		}
+		if !leadsRead {
+			leadsRead = true
+			leads, _ = s.remoteLeads()
+		}
+		if owners := leads[issue]; len(owners) == 1 {
+			out[branch] = owners[0]
+		}
+	}
+	return out
+}

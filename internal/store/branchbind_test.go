@@ -104,3 +104,33 @@ func TestBranchLeadID(t *testing.T) {
 		}
 	}
 }
+
+// TestTicketsForBranches: binding many branches at once says what
+// TicketForBranch says for each, and leaves out the ones that bind to nothing.
+func TestTicketsForBranches(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for id, rec := range map[string]Ticket{
+		"JIG-1": {Title: "First"},
+		"JIG-2": {Title: "Renamed", Aliases: []string{"OLD-5"}},
+	} {
+		if err := st.CreateTicketRecord(id, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	branches := []string{"jig/JIG-1", "JIG-1-foo", "OLD-5-x", "main", "feature/JIG-1", "JIG-9-nobody", "102-an-issue"}
+	got := st.TicketsForBranches(branches)
+	want := map[string]string{}
+	for _, b := range branches {
+		if id, _, err := st.TicketForBranch(b); err == nil && id != "" {
+			want[b] = id
+		}
+	}
+	if len(want) != 3 || len(got) != len(want) {
+		t.Fatalf("TicketsForBranches = %v, want %v (three branches bind)", got, want)
+	}
+	for b, id := range want {
+		if got[b] != id {
+			t.Errorf("TicketsForBranches[%s] = %q, want %q", b, got[b], id)
+		}
+	}
+}

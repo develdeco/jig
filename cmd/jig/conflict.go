@@ -6,7 +6,9 @@ import (
 	"sort"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
+	"github.com/develdeco/jig/internal/mergefacts"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -209,14 +211,21 @@ func printConflicts(stdout io.Writer, st *store.Store, cfg project.Config, mp pr
 // ticketOpenFilter says whether a ticket is open: it is not closed, and its
 // work has not merged. A branch bound to a closed or merged ticket is a
 // leftover and says nothing about a conflict. A ticket that has not published
-// is open. A published one is open only when merges positively says its pull
-// request is open: a merge it cannot tell (no pull request recorded, none
-// cached, the host not asked, a squash merge the clone cannot see) leaves it
-// out, the way a pair that cannot be tested says nothing, so a session start
-// is never told to stack on work that merged long ago. merges nil asks
-// nothing, which leaves every published ticket out. A ticket whose record
-// cannot be read is not open.
+// is open. A published one is open only when the pull request states say one
+// of its pull requests is open: a state they cannot tell (no pull request
+// recorded, none cached, the host not asked) leaves it out, the way a pair
+// that cannot be tested says nothing, so a session start is never told to
+// stack on work that merged long ago. It reads the recorded pull requests and
+// their states alone - not the clone's branches or the slices the full merge
+// fact reads - because it runs for every branch of the clone at every session
+// start. merges is the source of those states (a merge reader); nil, or one
+// with none, leaves every published ticket out. A ticket whose record cannot
+// be read is not open.
 func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
+	var prs mergefacts.PRs
+	if src, ok := merges.(interface{ PullRequests() mergefacts.PRs }); ok {
+		prs = src.PullRequests()
+	}
 	known := map[string]bool{}
 	return func(id string) bool {
 		if open, ok := known[id]; ok {
@@ -226,7 +235,7 @@ func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
 		if rec, err := st.ReadTicket(id); err == nil && rec.Closed == nil {
 			open = true
 			if published, err := isPublished(st, id); err == nil && published {
-				open = publishedWorkIsOpen(merges, id)
+				open = publishedWorkIsOpen(st, prs, id)
 			}
 		}
 		known[id] = open
@@ -234,18 +243,17 @@ func ticketOpenFilter(st *store.Store, merges mergeSource) func(string) bool {
 	}
 }
 
-// publishedWorkIsOpen says the pull request of a published ticket is open, in
-// some repo, and the work has not merged in all of them.
-func publishedWorkIsOpen(merges mergeSource, id string) bool {
-	if merges == nil {
+// publishedWorkIsOpen says a pull request of the published ticket is open.
+func publishedWorkIsOpen(st *store.Store, prs mergefacts.PRs, id string) bool {
+	if prs == nil {
 		return false
 	}
-	m, err := merges.Of(id)
-	if err != nil || m.Met() {
+	urls, err := journal.PRURLs(st, id)
+	if err != nil {
 		return false
 	}
-	for _, r := range m.Repos {
-		if r.State == ready.PROpen {
+	for _, url := range urls {
+		if prs.Read(url).State == ready.PROpen {
 			return true
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -423,16 +424,7 @@ func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
 
 // isPublished reports whether ticket's journal has a publish-done line.
 func isPublished(st *store.Store, id string) (bool, error) {
-	lines, err := journal.Read(st, id)
-	if err != nil {
-		return false, err
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventPublishDone {
-			return true, nil
-		}
-	}
-	return false, nil
+	return journal.HasEvent(st, id, journal.EventPublishDone)
 }
 
 // nextForTicket works out what is ready to build on ticket id, and which phase
@@ -834,6 +826,12 @@ const (
 // they conflict and in which files. A merge-tree call that fails leaves the
 // pair untested: this is advice, never an error.
 func testPair(dir, a, b string) (string, []string) {
+	return testPairWith(dir, a, b)
+}
+
+// testPairWith is the merge itself, a variable so a test can count the merges
+// a scan makes.
+var testPairWith = func(dir, a, b string) (string, []string) {
 	files, err := gitx.MergeConflicts(dir, a, b)
 	switch {
 	case err != nil:
@@ -1164,26 +1162,38 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		tickets := map[string]bool{}
 		// Local branches first; origin's stand in for a ticket with no local
 		// branch here.
-		for _, prefix := range []string{"refs/heads", "refs/remotes/origin"} {
-			listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname:short)", prefix)
-			if err != nil {
-				continue
-			}
+		// One process lists both: git processes are what a session start pays
+		// for.
+		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+		if err != nil {
+			continue
+		}
+		for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/"} {
 			local := map[string]bool{}
 			for id := range tickets {
 				local[id] = true
 			}
-			for _, ref := range strings.Split(listing, "\n") {
-				ref = strings.TrimSpace(ref)
-				name := ref
-				if prefix != "refs/heads" {
-					name = strings.TrimPrefix(ref, "origin/")
-				}
-				if ref == "" || name == target || name == "HEAD" || name == "origin" {
+			var refs, names []string
+			for _, full := range strings.Split(listing, "\n") {
+				full = strings.TrimSpace(full)
+				if !strings.HasPrefix(full, prefix) {
 					continue
 				}
-				if id, _, err := st.TicketForBranch(name); err == nil && id != "" && !local[id] && (open == nil || open(id)) {
-					bounds = append(bounds, bound{id, ref})
+				name := strings.TrimPrefix(full, prefix)
+				if prefix == "refs/heads/" {
+					refs = append(refs, name)
+				} else {
+					refs = append(refs, "origin/"+name)
+				}
+				names = append(names, name)
+			}
+			boundTo := st.TicketsForBranches(names)
+			for i, name := range names {
+				if name == target || name == "HEAD" || name == "origin" {
+					continue
+				}
+				if id := boundTo[name]; id != "" && !local[id] && (open == nil || open(id)) {
+					bounds = append(bounds, bound{id, refs[i]})
 					tickets[id] = true
 				}
 			}
@@ -1205,16 +1215,20 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			tickets, branches map[string]bool
 		}
 		files := map[string]*touch{}
-		for _, b := range bounds {
-			mb, err := gitx.MergeBase(dir, base, b.branch)
-			if err != nil {
-				continue
-			}
-			names, err := gitx.DiffNameOnly(dir, mb, b.branch, "ACDMRTUXB")
-			if err != nil {
-				continue
-			}
-			for _, f := range names {
+		// One git process for each branch, started together: a session start
+		// waits for the slowest, not for the sum.
+		changed := make([][]string, len(bounds))
+		var wg sync.WaitGroup
+		for i, b := range bounds {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				changed[i], _ = gitx.DiffNameOnlySince(dir, base, b.branch, "ACDMRTUXB")
+			}()
+		}
+		wg.Wait()
+		for i, b := range bounds {
+			for _, f := range changed[i] {
 				t := files[f]
 				if t == nil {
 					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}}
