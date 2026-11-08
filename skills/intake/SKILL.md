@@ -31,8 +31,8 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 - Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
 - `brief.md`: `## `-sectioned behavioral spec.
-- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (`test`) so the gate reuses its pass; a literal command, a narrower one. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
-- `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, `jig validate <ticket> --restamp`, or `jig requeue --from-brief-diff` to rebuild.
+- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (e.g. `test`) so the gate reuses its pass; a narrower one, a literal command. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
+- `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, `jig validate <T> --restamp`, or `jig requeue <T> --from-brief-diff` first to rebuild.
 
 ## Chart output
 
@@ -42,7 +42,7 @@ A batch spanning areas takes a chart verdict, ordering its tickets; a standalone
 
 ## Done when
 
-The person confirmed the brief, `jig validate <ticket>` prints `valid: yes`, and every decision carries its provenance mark.
+The person confirmed the brief, `jig validate <T>` prints `valid: yes`, and every decision carries its provenance mark.
 
 Without `--check`, `valid: yes` records the approval `jig claim --unattended` requires (`provenance: agent` from your session, `person` at a terminal). Run it once confirmed: show the brief and ask, even if it restates the prompt. A prompt to go with your recommendations answers the round with them (each `defaulted`) and confirms for the person; otherwise ask and wait, even in a start-to-finish run. Editing `brief.md` withdraws the approval: validate again. Read its `advisories`: slices no `blocked_by` edge connects may be separate tickets; a goal near shipped work may be done.
 
