@@ -40,6 +40,13 @@ type Line struct {
 	// that was up while it ran ("" for none): what the gate must match to
 	// reuse the run (ADR 0021).
 	Command string `json:"command,omitempty"`
+	// ReusedFrom and Ran mark an oracle line that passed on a light delta
+	// (the manifest's light rule): Ran is the light command that actually
+	// ran in the place of Command, and ReusedFrom the commit of the full run
+	// the pass stands on. A pass that was itself reused names its origin, so
+	// the chain does not grow.
+	ReusedFrom string `json:"reused_from,omitempty"`
+	Ran        string `json:"ran,omitempty"`
 	// Oracle is a gate-oracle line's manifest oracle name: the oracle the gate
 	// ran itself, with Command at Commit (the head it reviewed).
 	Oracle string `json:"oracle,omitempty"`
