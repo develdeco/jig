@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -190,4 +191,17 @@ func locatedProject(where locate.Where, jigHome string) (project.Config, project
 		return project.Config{}, project.MachineProject{}, false
 	}
 	return cfg, machine[cfg.Name], true
+}
+
+// printConflicts tells the session, before a gate runs its oracle or a publish
+// pushes, which other open tickets' branches the ticket's cannot merge with:
+// the same warning, table and help as `jig here`, and nothing for a clean
+// pair. It is advice: it changes no exit code, round or verdict.
+func printConflicts(stdout io.Writer, st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) {
+	a := ticketConflictAdvice(st, cfg, mp, ticket)
+	blocks := conflictBlocks(a, false)
+	if len(blocks) == 0 {
+		return
+	}
+	axi.Render(stdout, append(blocks, axi.Help(conflictHelp(ticket, a.Conflicts)...))...)
 }

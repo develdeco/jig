@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -99,5 +101,62 @@ func TestConflictAdviceForTheTicketInHand(t *testing.T) {
 	}
 	if none := adviceFromPairs(st, pairs, "T-9"); len(none.Conflicts)+len(none.Clean) != 0 || len(conflictBlocks(none, true)) != 0 {
 		t.Errorf("a ticket in no pair got advice: %+v", none)
+	}
+}
+
+// TestPrintConflictsNamesARealConflictOnly: before a gate or a publish, two
+// open tickets whose branches change the same lines of a file are told, with
+// the file and the other branch; branches that change different parts of one
+// file print nothing; the other ticket is told the same from its side.
+func TestPrintConflictsNamesARealConflictOnly(t *testing.T) {
+	_, storeRoot := setupGraduateStore(t)
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"T-1", "T-2", "T-3"} {
+		if err := st.CreateTicketRecord(id, store.Ticket{Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := cmdGitRepo(t, filepath.Join(t.TempDir(), "app"))
+	body := "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"
+	write := func(s string) {
+		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(body)
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-m", "base")
+	branch := func(name, s string) {
+		gitIn(t, dir, "switch", "-c", name, "main")
+		write(s)
+		gitIn(t, dir, "commit", "-am", name)
+	}
+	branch("T-1-one", "ONE\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	branch("T-2-two", "TWO\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	branch("T-3-three", "1\n2\n3\n4\n5\n6\n7\n8\n9\nTHREE\n")
+	gitIn(t, dir, "switch", "main")
+
+	cfg := project.Config{Name: "demo", Repos: []project.Repo{{Remote: "git@example.invalid:demo/app.git"}}}
+	mp := project.MachineProject{Clones: map[string]string{"app": dir}}
+
+	var out bytes.Buffer
+	printConflicts(&out, st, cfg, mp, "T-2")
+	for _, w := range []string{"conflict[1]{repo,ticket,file,branch}:", "app,T-1,f.txt,T-1-one", "jig depend T-2 --on T-1 --kind stacked"} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("output lacks %q:\n%s", w, out.String())
+		}
+	}
+	out.Reset()
+	printConflicts(&out, st, cfg, mp, "T-1")
+	if !strings.Contains(out.String(), "jig depend T-2 --on T-1 --kind stacked") {
+		t.Errorf("T-1 is not told to be stacked on:\n%s", out.String())
+	}
+	out.Reset()
+	printConflicts(&out, st, cfg, mp, "T-3")
+	if out.Len() != 0 {
+		t.Errorf("a clean pair printed:\n%s", out.String())
 	}
 }
