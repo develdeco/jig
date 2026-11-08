@@ -198,7 +198,11 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 		case last.State == StateReady && pending:
 			// Clean, but a step before it is not done any more.
 			s.State = StateQueued
-			s.Text = "round " + strconv.Itoa(last.N) + " was clean, but an earlier step changed since"
+			clean := "clean"
+			if last.Carried > 0 {
+				clean += " (carried over from round " + strconv.Itoa(last.Carried) + ")"
+			}
+			s.Text = "round " + strconv.Itoa(last.N) + " was " + clean + ", but an earlier step changed since"
 		case last.State == StateReady:
 			// Clean, but the build went on after it: the head is not reviewed.
 			s.State = StateReady

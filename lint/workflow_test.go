@@ -244,10 +244,7 @@ func runPlan(t *testing.T, jobs map[string]interface{}, event string, changed []
 	if script == "" {
 		t.Fatalf("ci.yml: the %s job has no step with id plan, whose outputs the job passes on", planJob)
 	}
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skipf("no bash to run the %s job's step: %v", planJob, err)
-	}
+	bash := requireBash(t, "the "+planJob+" job's step")
 	dir := t.TempDir()
 	for name, content := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -670,10 +667,7 @@ func requireGateStepFailsClosed(t *testing.T, gate string, job map[string]interf
 	if script == "" {
 		t.Fatalf("ci.yml: the %s job has no step reading needs.<job>.result in its env, so it cannot fail on a needed job's result", gate)
 	}
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skipf("no bash to run the %s job's step: %v", gate, err)
-	}
+	bash := requireBash(t, "the "+gate+" job's step")
 	for _, c := range []struct {
 		results string
 		pass    bool

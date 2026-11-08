@@ -757,6 +757,27 @@ func checkBlobAt(t *testing.T, fx *readFixture) {
 	if _, f, ok := blobAtInProcess(fx.main, c3, "nope", os.LookupEnv); !ok || f {
 		t.Errorf("a path the commit lacks was not answered in process: found %v, ok %v", f, ok)
 	}
+	// A path whose tree entry is a blob that git cannot read (the object is
+	// missing) is an error, never "no file": the commit has the file.
+	tree, err := RunInput(fx.main, []byte("100644 blob "+fx.fakeSHA+"\tbroken.txt\n"), "mktree", "--missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := RunInput(fx.main, []byte("tree "+tree+"\nauthor "+fiIdent+"\ncommitter "+fiIdent+"\n\nunreadable blob\n"), "hash-object", "-t", "commit", "-w", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, werr := RunRaw(fx.main, "cat-file", "blob", commit+":broken.txt"); werr == nil {
+		t.Fatal("git read the blob the fixture made unreadable")
+	}
+	if got, found, err := BlobAt(fx.main, commit, "broken.txt"); err == nil || found || got != nil {
+		t.Errorf("BlobAt of an unreadable blob = %q, %v, %v; want an error", got, found, err)
+	}
+	for _, path := range []string{"nope", "broken.txt/x"} {
+		if _, found, err := BlobAt(fx.main, commit, path); err != nil || found {
+			t.Errorf("BlobAt(%s) beside an unreadable blob = found %v, err %v; want not found and no error", path, found, err)
+		}
+	}
 	for _, rev := range []string{fx.fakeSHA, "refs/heads/nope", "nope"} {
 		if _, found, err := BlobAt(fx.main, rev, "a.txt"); err == nil || found {
 			t.Errorf("BlobAt(%s) = found %v, err %v; want an error", rev, found, err)

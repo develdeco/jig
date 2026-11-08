@@ -212,6 +212,23 @@ func TestKilledSummaryRoomIsExact(t *testing.T) {
 			t.Errorf("%s: summary = %q (%d bytes), want %q", name, s, len(s), want)
 		}
 	}
+	// Retained text that fills the room exactly keeps every byte: a room one
+	// byte smaller would drop one from the failing line.
+	full := strings.Repeat("y", room)
+	fullOut := "pad\n" + full
+	for name, c := range map[string]struct {
+		out  string
+		base map[string]bool
+	}{
+		"no baseline": {fullOut, nil},
+		"no new line": {fullOut, baselineOf(fullOut)},
+		"new line":    {"ok\n" + full, baselineOf("ok\n")},
+	} {
+		_, s := failureOutput(c.out, longKill(300), c.base)
+		if want := full + " " + reason; s != want || len(s) != summaryBytes {
+			t.Errorf("%s, full room: summary = %q (%d bytes), want %d bytes %q", name, s, len(s), summaryBytes, want)
+		}
+	}
 }
 
 // plainPhraseFail is the error of a plain failure (exit status 1) of a command

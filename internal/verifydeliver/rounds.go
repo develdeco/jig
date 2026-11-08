@@ -33,6 +33,9 @@ const (
 // RoundRecord is one recorded gate round.
 type RoundRecord struct {
 	Round int
+	// CarriedFrom is the round whose verdict a clean round carries over
+	// (GATE-16), 0 for a round a reviewer read.
+	CarriedFrom int
 	// Verdict is RoundClean, RoundFindings or VerdictNotIndependent.
 	Verdict string
 	// Reviewer is who reported the round: the report's own record of them, else
@@ -141,6 +144,7 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 			rec.Verdict = RoundFindings
 		}
 		rec.Model, rec.Effort = rep.Model, rep.Effort
+		rec.CarriedFrom = rep.CarriedFrom
 		if rep.Reviewer != nil {
 			rec.Reviewer = *rep.Reviewer
 		}

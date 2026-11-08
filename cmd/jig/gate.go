@@ -170,6 +170,11 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if p.Carried != nil {
+		// Nothing to read: the round is recorded, carrying over the verdict of
+		// the round a reviewer read (GATE-16).
+		return printGateReport(stdout, st, ticket, *p.Carried)
+	}
 	blocks := roundBlocks(p, nil, false)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
@@ -214,7 +219,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	}
 	kv = append(kv,
 		[2]string{"round", strconv.Itoa(report.Round)},
-		[2]string{"verdict", report.Verdict},
+		[2]string{"verdict", carriedVerdict(report)},
 	)
 	// Who reviewed, as the reviewer said (model and effort are self-reported;
 	// jig chooses none) and as jig found out (the reviewer and whether it
@@ -225,7 +230,14 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	if report.Effort != "" {
 		kv = append(kv, [2]string{"effort", report.Effort})
 	}
-	if report.Reviewer.Known() {
+	switch {
+	case report.CarriedFrom > 0:
+		label := "none ran"
+		if report.Reviewer.Known() {
+			label += "; round " + strconv.Itoa(report.CarriedFrom) + "'s was " + reviewerLabel(report.Reviewer)
+		}
+		kv = append(kv, [2]string{"reviewer", label})
+	case report.Reviewer.Known():
 		kv = append(kv, [2]string{"reviewer", reviewerLabel(report.Reviewer)})
 	}
 	if report.Independent != "" {
@@ -234,6 +246,8 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	kv = append(kv, [2]string{"intent", intentRow})
 	if report.Scope != "" {
 		kv = append(kv, [2]string{"scope", report.Scope})
+	}
+	if report.Scope != "" && report.CarriedFrom == 0 {
 		// What behavior the reviewer round tested (ADR 0036): a clean
 		// verdict that probed little shows it here.
 		kv = append(kv,
@@ -297,6 +311,15 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		return 2
 	}
 	return 0
+}
+
+// carriedVerdict is the verdict of a round, with "(carried over from round N)"
+// after a clean one no reviewer read (GATE-16).
+func carriedVerdict(report verifydeliver.GateReport) string {
+	if report.CarriedFrom > 0 {
+		return report.Verdict + " (carried over from round " + strconv.Itoa(report.CarriedFrom) + ")"
+	}
+	return report.Verdict
 }
 
 // reviewerLabel names a reviewer for a report row: its session, then its
