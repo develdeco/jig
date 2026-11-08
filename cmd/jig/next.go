@@ -183,11 +183,15 @@ type nextTicket struct {
 	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
-	Stack     []nextStack `json:"stack,omitempty"`
-	Ready     []nextBatch `json:"ready"`
-	Unplaced  []string    `json:"unplaced_workspaces,omitempty"`
-	Ambiguous []string    `json:"ambiguous_workspaces,omitempty"`
-	Topology  []nextSlice `json:"topology,omitempty"`
+	Stack []nextStack `json:"stack,omitempty"`
+	// Conflicts are the files this ticket's branch cannot merge with another
+	// open ticket's (conflict.go); Clean are sharing pairs that merge fine.
+	Conflicts []ticketConflict `json:"conflicts,omitempty"`
+	CleanWith []cleanShare     `json:"-"`
+	Ready     []nextBatch      `json:"ready"`
+	Unplaced  []string         `json:"unplaced_workspaces,omitempty"`
+	Ambiguous []string         `json:"ambiguous_workspaces,omitempty"`
+	Topology  []nextSlice      `json:"topology,omitempty"`
 	// Advice is how to share the ready slices out, and, when review is the
 	// phase that can start, who reviews (Fresh says whether the calling
 	// session may itself).
@@ -484,6 +488,8 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	n.Stack = stackRows(plan, data.in.Published)
+	advice := ticketConflictAdvice(st, cfg, mp, id)
+	n.Conflicts, n.CleanWith = advice.Conflicts, advice.Clean
 	for _, b := range ready.Batches(readySlices, place.Repo) {
 		n.Ready = append(n.Ready, nextBatch{Repo: b.Repo, Slices: b.Slices, Start: startPoint(cfg, plan, b.Repo)})
 	}
@@ -614,6 +620,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		blocks = append(blocks, "note: the phase of "+n.Ticket+" could not be told: "+n.PhaseProblem)
 	}
 	blocks = append(blocks, worktreeBlocks(n.Worktrees)...)
+	blocks = append(blocks, conflictBlocks(conflictAdvice{Ticket: n.Ticket, Conflicts: n.Conflicts, Clean: n.CleanWith}, true)...)
 	if topology {
 		var rows [][]string
 		for _, s := range n.Topology {
@@ -625,7 +632,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(append(worktreeHelp(n.Ticket, n.Worktrees), n.help()...)...))
+	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), n.help()...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
@@ -1099,7 +1106,26 @@ func namedTickets(st *store.Store, chart, list string) ([]string, error) {
 // <target>...<branch>). A repo with no clone here, or whose target is not
 // there, is skipped: this is a warning, not a gate.
 func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) []nextOverlap {
+	out, _ := scanOverlaps(st, cfg, mp)
+	return out
+}
+
+// testedPair is a pair of tickets of one repo whose branches share a changed
+// file, with what merging the two in memory gave (testPair).
+type testedPair struct {
+	Repo             string
+	A, B             string // ticket ids, A before B
+	BranchA, BranchB string
+	Shared           []string // the files both change
+	State            string   // pairConflict, pairClean or pairUntested
+	Files            []string // the files git reports unmerged
+}
+
+// scanOverlaps is findOverlaps with, besides, each pair of tickets that
+// shares a file, merged once however many files it shares.
+func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject) ([]nextOverlap, []testedPair) {
 	var out []nextOverlap
+	var pairs []testedPair
 	for _, r := range cfg.Repos {
 		dir := mp.Clones[r.Name()]
 		if dir == "" {
@@ -1187,6 +1213,7 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			files []string
 		}
 		tested := map[[2]string]verdict{}
+		pairAt := map[[2]string]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
 			if len(t.tickets) < 2 {
@@ -1202,7 +1229,10 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 					if !ok {
 						v.state, v.files = testPair(dir, branchOf[ids[i]], branchOf[ids[j]])
 						tested[key] = v
+						pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: branchOf[ids[i]], BranchB: branchOf[ids[j]], State: v.state, Files: v.files})
+						pairAt[key] = len(pairs) - 1
 					}
+					pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
 					switch {
 					case v.state == pairConflict:
 						state = pairConflict
@@ -1217,7 +1247,7 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: ids, Branches: sortedStrings(mapKeys(t.branches)), Conflict: state, Files: conflicted})
 		}
 	}
-	return out
+	return out, pairs
 }
 
 func mapKeys[V any](m map[string]V) []string {

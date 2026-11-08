@@ -84,7 +84,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 		return 0
 	}
 
-	hc := hereCtx{e: e, Where: where, JigHome: jigHome}
+	hc := hereCtx{e: e, Where: where, JigHome: jigHome, memo: &hereMemo{}}
 	if hc.Store, _, err = openLocatedStore(where); err != nil {
 		return renderErr(stdout, err)
 	}
@@ -411,7 +411,8 @@ func (v hereView) help(hc hereCtx) []string {
 	case w.StorePath == "":
 		return []string{"The store of this project is not on this machine; pass --store, or `jig map <repo>=<path>` once it is"}
 	case w.Ticket != "":
-		return []string{fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt))}
+		a, _ := hereConflicts(hc)
+		return append(conflictHelp(w.Ticket, a.Conflicts), fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt)))
 	case w.Branch != "":
 		return []string{fmt.Sprintf("Branch %s binds no ticket: work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief; to take a ticket that exists run `jig next`, or name one: `jig here <ticket>`", w.Branch)}
 	default:
@@ -438,6 +439,9 @@ type hereJSON struct {
 	State    *hereStateJSON `json:"state,omitempty"`
 	Sections map[string]any `json:"sections,omitempty"`
 	Explain  []string       `json:"explain,omitempty"`
+	// Conflicts are the files the ticket's branch cannot merge with another
+	// open ticket's (conflict.go).
+	Conflicts []ticketConflict `json:"conflicts,omitempty"`
 }
 
 type hereStoreJSON struct {
@@ -503,6 +507,9 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 			st.PendingVerifications = []herePending{}
 		}
 		out.State = st
+	}
+	if a, ok := hereConflicts(hc); ok {
+		out.Conflicts = a.Conflicts
 	}
 	for _, sec := range sections {
 		if sec.JSON == nil {

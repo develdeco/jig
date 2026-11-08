@@ -4,7 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/develdeco/jig/internal/store"
 )
 
 // TestTestPair: two branches that change the same lines of a file conflict in
@@ -38,5 +41,63 @@ func TestTestPair(t *testing.T) {
 	}
 	if state, files := testPair(dir, "top", "nosuchref"); state != pairUntested || len(files) != 0 {
 		t.Errorf("a bad ref: %s %v, want untested", state, files)
+	}
+}
+
+// TestConflictAdviceForTheTicketInHand: a conflicting pair gives the ticket in
+// hand one row for each conflicted file, naming the other ticket and its
+// branch, and the ticket that comes first in next order (rank, then id); a
+// clean sharing pair gives an info line only where asked; a pair of other
+// tickets or an untested pair gives nothing; the help stacks the later ticket
+// on the first.
+func TestConflictAdviceForTheTicketInHand(t *testing.T) {
+	_, storeRoot := setupGraduateStore(t)
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, two := 1, 2
+	for id, rank := range map[string]*int{"T-1": &two, "T-2": &one, "T-3": nil, "T-4": nil} {
+		if err := st.CreateTicketRecord(id, store.Ticket{Title: id, Rank: rank}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pairs := []testedPair{
+		{Repo: "app", A: "T-1", B: "T-2", BranchA: "b1", BranchB: "b2", State: pairConflict, Files: []string{"a.go", "b.go"}, Shared: []string{"a.go", "b.go", "c.go"}},
+		{Repo: "app", A: "T-1", B: "T-3", BranchA: "b1", BranchB: "b3", State: pairClean, Shared: []string{"d.go"}},
+		{Repo: "app", A: "T-1", B: "T-4", BranchA: "b1", BranchB: "b4", State: pairUntested, Shared: []string{"e.go"}},
+		{Repo: "app", A: "T-2", B: "T-3", BranchA: "b2", BranchB: "b3", State: pairConflict, Files: []string{"z.go"}},
+	}
+	a := adviceFromPairs(st, pairs, "T-1")
+	want := []ticketConflict{
+		{Repo: "app", Ticket: "T-2", File: "a.go", Branch: "b2", First: "T-2"},
+		{Repo: "app", Ticket: "T-2", File: "b.go", Branch: "b2", First: "T-2"},
+	}
+	if !reflect.DeepEqual(a.Conflicts, want) {
+		t.Errorf("conflicts = %+v, want %+v", a.Conflicts, want)
+	}
+	if !reflect.DeepEqual(a.Clean, []cleanShare{{Repo: "app", Ticket: "T-3", File: "d.go"}}) {
+		t.Errorf("clean = %+v, want the one clean share", a.Clean)
+	}
+	blocks := strings.Join(conflictBlocks(a, true), "\n")
+	for _, w := range []string{"warning:", "conflict[2]{repo,ticket,file,branch}:", "app,T-2,a.go,b2", "info: T-1 shares d.go with T-3; merges cleanly"} {
+		if !strings.Contains(blocks, w) {
+			t.Errorf("blocks lack %q:\n%s", w, blocks)
+		}
+	}
+	if quiet := strings.Join(conflictBlocks(a, false), "\n"); strings.Contains(quiet, "info:") {
+		t.Errorf("a clean pair printed where it should not:\n%s", quiet)
+	}
+	help := conflictHelp("T-1", a.Conflicts)
+	if len(help) != 1 || help[0] != "Stack it with `jig depend T-1 --on T-2 --kind stacked`, or wait for T-2 to merge" {
+		t.Errorf("help = %q", help)
+	}
+	// Seen from T-2, which comes first, the other is the one to stack.
+	b := adviceFromPairs(st, pairs, "T-2")
+	if help := conflictHelp("T-2", b.Conflicts); len(help) != 2 || !strings.Contains(help[0], "jig depend T-1 --on T-2 --kind stacked") {
+		t.Errorf("help from the first ticket = %q", help)
+	}
+	if none := adviceFromPairs(st, pairs, "T-9"); len(none.Conflicts)+len(none.Clean) != 0 || len(conflictBlocks(none, true)) != 0 {
+		t.Errorf("a ticket in no pair got advice: %+v", none)
 	}
 }
