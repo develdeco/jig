@@ -1095,7 +1095,13 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	// none to make, leaves the pull request without one. The pick is made for
 	// the head the gate reviewed, whose history holds the recorded commits.
 	// Only recordings of tests the ticket's commits changed are offered.
-	own, err := ownSources(in.dir, t.base(), in.head)
+	// The stacked parent's branch may not be fetched (a body only render): the
+	// ticket's own files are then counted from the repo's target.
+	ownBase := t.base()
+	if _, err := gitx.RevParse(in.dir, "refs/remotes/origin/"+ownBase); err != nil {
+		ownBase = t.target
+	}
+	own, err := ownSources(in.dir, ownBase, in.head)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: %w", err)
 	}
