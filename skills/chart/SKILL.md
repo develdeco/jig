@@ -19,7 +19,7 @@ You are the main session. Every question to the person is yours; a subagent cann
 
 Before the first wave, ask once to allow what the builds run (`jig`, `git`, the tickets' oracles); one yes covers it. A run going with the recommendations, intake's explicit launch included, asks nothing: permission settings decide, a refused command hands its ticket back and the report names it. jig sets no permission.
 
-Stack the later (Plan order) on the earlier with `jig depend <later> --on <earlier> --kind stacked` for each `workspace_overlaps` pair before a wave and, with one workspace (none listed), each `conflicts` row of `jig next <T>` at wave start and before a gate; `jig validate <T> --check`, re-read, say so. Parallel only if the person says so (merged by hand).
+Stack the later (Plan order) on the earlier with `jig depend <later> --on <earlier> --kind stacked` for each `workspace_overlaps` pair before a wave and, with one workspace (none listed), each `conflicts` row of `jig next <T>` at each wave's start; `jig validate <T> --check`, re-read, say so. Parallel only if the person says so (merged by hand).
 
 Go through `run` wave by wave (no edge lies inside one). Start a subagent per wave ticket (`subagent_type: general-purpose`, `model: sonnet` unless the person named another, background), each in its own worktree: run the `add` commands of the ticket's `worktrees` (`jig next <T>`, or the chart's), one at a time, and re-read `jig next <T>` when a stacked ticket's wave starts. `present`: use its `dir`. `no_clone`: tell the person; do not start it. Its prompt:
 
