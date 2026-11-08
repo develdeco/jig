@@ -861,3 +861,48 @@ func TestTicketFileRelPath(t *testing.T) {
 		t.Fatalf("TicketFileRelPath = %q, want %q", got, want)
 	}
 }
+
+// TestSetTicketDeps: an edge is added, its kind replaced in place, one edge
+// removed and all removed, and no other field of the record changes.
+func TestSetTicketDeps(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	three := 3
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "Fix the thing", Branch: "fix/T-1", Rank: &three}); err != nil {
+		t.Fatalf("CreateTicketRecord: %v", err)
+	}
+	check := func(step string, want []TicketBlockedBy) {
+		t.Helper()
+		got, err := st.ReadTicket("T-1")
+		if err != nil {
+			t.Fatalf("%s: ReadTicket: %v", step, err)
+		}
+		if !reflect.DeepEqual(got.BlockedBy, want) || got.Title != "Fix the thing" || got.Branch != "fix/T-1" || got.Rank == nil || *got.Rank != 3 {
+			t.Fatalf("%s: record = %+v, want blockers %v with the other fields kept", step, got, want)
+		}
+	}
+	a, b := TicketBlockedBy{Ticket: "T-4", Kind: "merged"}, TicketBlockedBy{Ticket: "T-5", Kind: "stacked"}
+	if err := st.SetTicketDep("T-1", "T-4", "merged"); err != nil {
+		t.Fatal(err)
+	}
+	check("add", []TicketBlockedBy{a})
+	if err := st.SetTicketDep("T-1", "T-5", "stacked"); err != nil {
+		t.Fatal(err)
+	}
+	check("add another", []TicketBlockedBy{a, b})
+	if err := st.SetTicketDep("T-1", "T-4", "stacked"); err != nil {
+		t.Fatal(err)
+	}
+	check("replace the kind", []TicketBlockedBy{{Ticket: "T-4", Kind: "stacked"}, b})
+	if err := st.RemoveTicketDep("T-1", "T-4"); err != nil {
+		t.Fatal(err)
+	}
+	check("remove one", []TicketBlockedBy{b})
+	if err := st.ClearTicketDeps("T-1"); err != nil {
+		t.Fatal(err)
+	}
+	check("remove all", nil)
+	data, err := os.ReadFile(st.TicketFilePath("T-1"))
+	if err != nil || strings.Contains(string(data), "blocked_by") {
+		t.Fatalf("ticket.yaml = %q, %v, want no blocked_by key", data, err)
+	}
+}

@@ -377,7 +377,7 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 		}
 	}
 
-	if cyc := ticketDepsCycle(st, ticket); cyc != "" {
+	if cyc := ticketDepsCycle(st, ticket, nil); cyc != "" {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
 	}
 	return problems
@@ -441,8 +441,11 @@ func validateTicketBranch(st *store.Store, cfg project.Config, ticket string) []
 // each visited ticket's own ticket.yaml as it goes, and returns a description
 // of the first cycle found, or "" when none exists. A ticket id that cannot
 // name a store folder, or whose ticket.yaml does not parse, contributes no
-// further edges: that ticket's own validate reports the problem.
-func ticketDepsCycle(st *store.Store, ticket string) string {
+// further edges: that ticket's own validate reports the problem. A non-nil
+// prospective is an edge of ticket not yet written: it is read as ticket's
+// entry for that parent (added, or replacing the one there), so `jig depend`
+// asks the same DFS before it writes.
+func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBlockedBy) string {
 	cache := map[string][]store.TicketBlockedBy{}
 	deps := func(id string) []store.TicketBlockedBy {
 		if d, ok := cache[id]; ok {
@@ -451,6 +454,9 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 		var d []store.TicketBlockedBy
 		if pool.CheckTicket(id) == nil {
 			d, _ = st.ReadTicketDeps(id)
+		}
+		if id == ticket && prospective != nil {
+			d = append(append([]store.TicketBlockedBy{}, d...), *prospective)
 		}
 		cache[id] = d
 		return d
