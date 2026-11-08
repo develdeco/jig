@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -502,5 +503,34 @@ func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 	lines, err := Read(st, "JIG-1")
 	if err != nil || len(lines) != 1 || lines[0].Event != "merged" {
 		t.Fatalf("Read after the replacements = %+v, %v, want the merged line", lines, err)
+	}
+}
+
+// TestRecordingSourceKeyIsPinned: the journal's recorded line carries a
+// recording's test file under the key "source", and omits it when empty, so
+// an old line and a new reader agree.
+func TestRecordingSourceKeyIsPinned(t *testing.T) {
+	t.Parallel()
+	with, err := json.Marshal(Recording{File: "a.svg", Source: "e2e/a_test.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(with), `"source":"e2e/a_test.go"`) {
+		t.Errorf("recording = %s, want the source key", with)
+	}
+	without, err := json.Marshal(Recording{File: "a.svg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(without), "source") {
+		t.Errorf("recording = %s, want no source key when empty", without)
+	}
+	var old Recording
+	if err := json.Unmarshal([]byte(`{"file":"a.svg","sha256":"x","size":1,"scenario":"s"}`), &old); err != nil || old.Source != "" {
+		t.Errorf("old line = %+v (err %v), want it read with no source", old, err)
+	}
+	var back Recording
+	if err := json.Unmarshal([]byte(`{"file":"a.svg","source":"x_test.go"}`), &back); err != nil || back.Source != "x_test.go" {
+		t.Errorf("source key read as %+v (err %v)", back, err)
 	}
 }

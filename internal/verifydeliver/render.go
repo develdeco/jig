@@ -509,7 +509,7 @@ func roundLine(r RoundRecord) string {
 		return "1 fix slice asked"
 	case len(r.FixSlices) > 1:
 		return fmt.Sprintf("%d fix slices asked", len(r.FixSlices))
-	case r.Ask > 0:
+	case r.Ask > 0 || r.HeldAsks > 0:
 		return "asks for the person"
 	}
 	return "notes only"

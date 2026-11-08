@@ -685,3 +685,14 @@ func unknownItemKey(data []byte) bool {
 	}
 	return false
 }
+
+// hasRecordings says whether the journal holds a recorded line that wrote
+// files, the only thing a pick is made from.
+func hasRecordings(lines []journal.Line) bool {
+	for _, l := range lines {
+		if l.Event == "recorded" && len(l.Recordings) > 0 {
+			return true
+		}
+	}
+	return false
+}

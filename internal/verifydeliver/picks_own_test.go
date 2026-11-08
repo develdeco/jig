@@ -5,16 +5,29 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
 )
 
-// ownRepo makes a repo whose origin/main holds base files, then applies edit
-// on a branch and commits it; it returns the repo and the branch head.
-func ownRepo(t *testing.T, base map[string]string, edit func(dir string)) (dir, head string) {
-	t.Helper()
-	dir = t.TempDir()
+// TestOwnSourcesAreTheFilesTheTicketAddedChangedOrRetyped: the set is the
+// files added, modified or type-changed from the merge base of the head with
+// origin/<base>. A deleted file is not in it and a renamed one is there under
+// its new path only. Three things are pinned by history the plain answers
+// would get wrong:
+//   - main moves on after the branch point and modifies same_test.go, which
+//     the branch never touched: a diff from origin/main itself would list it,
+//     only the merge base keeps it out;
+//   - the local main is left behind the branch point, while c1_test.go was
+//     added on origin/main before it: only origin/<base> keeps it out;
+//   - link_test.go is a regular file that the branch turns into a symlink (a
+//     type change, written to the index directly so it needs no symlink
+//     support): the T of the filter holds it.
+func TestOwnSourcesAreTheFilesTheTicketAddedChangedOrRetyped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
 	run(t, dir, "init", "-b", "main")
 	write := func(name, content string) {
 		t.Helper()
@@ -26,51 +39,55 @@ func ownRepo(t *testing.T, base map[string]string, edit func(dir string)) (dir, 
 			t.Fatal(err)
 		}
 	}
-	for name, content := range base {
-		write(name, content)
+	commit := func(msg string) {
+		t.Helper()
+		run(t, dir, "add", "-A")
+		if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "--allow-empty", "-m", msg); err != nil {
+			t.Fatal(err)
+		}
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "--allow-empty", "-m", "base"); err != nil {
-		t.Fatal(err)
-	}
+	write("a_test.go", "a\n")
+	write("gone_test.go", "gone\n")
+	write("old_test.go", "a long enough body to rename\nline2\nline3\n")
+	write("same_test.go", "same\n")
+	write("link_test.go", "regular\n")
+	commit("c0")
+	// The local main stays here.
+	run(t, dir, "checkout", "-q", "-b", "work")
+	write("c1_test.go", "added on main before the branch point\n")
+	commit("c1")
 	run(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
-	run(t, dir, "checkout", "-b", "work")
-	edit(dir)
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "--allow-empty", "-m", "work"); err != nil {
-		t.Fatal(err)
-	}
-	return dir, run(t, dir, "rev-parse", "HEAD")
-}
 
-// TestOwnSourcesAreTheFilesTheTicketAddedChangedOrRetyped: the set is the
-// files added, modified or type-changed from the merge base with the base
-// branch; a deleted file is not in it, and a renamed one is there under its
-// new path only. A commit on the base branch after the branch point adds
-// nothing.
-func TestOwnSourcesAreTheFilesTheTicketAddedChangedOrRetyped(t *testing.T) {
-	t.Parallel()
-	dir, head := ownRepo(t,
-		map[string]string{"a_test.go": "a\n", "gone_test.go": "gone\n", "old_test.go": "a long enough body to rename\nline2\nline3\n", "same_test.go": "same\n"},
-		func(dir string) {
-			if err := os.WriteFile(filepath.Join(dir, "a_test.go"), []byte("a2\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "new_test.go"), []byte("new\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			run(t, dir, "rm", "-q", "gone_test.go")
-			run(t, dir, "mv", "old_test.go", "moved_test.go")
-		})
-	run(t, dir, "checkout", "-q", "main")
-	if err := os.WriteFile(filepath.Join(dir, "later_test.go"), []byte("later\n"), 0o644); err != nil {
+	write("a_test.go", "a2\n")
+	write("new_test.go", "new\n")
+	run(t, dir, "rm", "-q", "gone_test.go")
+	run(t, dir, "mv", "old_test.go", "moved_test.go")
+	commit("work")
+	// Turn link_test.go into a symlink entry without touching the filesystem.
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("a_test.go"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "main moves on"); err != nil {
+	sha := run(t, dir, "hash-object", "-w", target)
+	if err := os.Remove(target); err != nil {
 		t.Fatal(err)
 	}
+	run(t, dir, "update-index", "--add", "--cacheinfo", "120000,"+sha+",link_test.go")
+	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "link"); err != nil {
+		t.Fatal(err)
+	}
+	head := run(t, dir, "rev-parse", "HEAD")
+	if got := run(t, dir, "diff", "--name-only", "--diff-filter=T", "origin/main", head); strings.TrimSpace(got) != "link_test.go" {
+		t.Fatalf("link_test.go is not a type change on the branch: %q", got)
+	}
+
+	// Main moves on after the branch point; the local main does not follow.
+	run(t, dir, "checkout", "-q", "-f", "-b", "later", "origin/main")
+	write("same_test.go", "same, changed on main\n")
+	write("later_test.go", "later\n")
+	commit("main moves on")
 	run(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	run(t, dir, "checkout", "-q", "-f", "work")
 
 	own, err := ownSources(dir, "main", head)
 	if err != nil {
@@ -81,9 +98,9 @@ func TestOwnSourcesAreTheFilesTheTicketAddedChangedOrRetyped(t *testing.T) {
 		got = append(got, f)
 	}
 	sort.Strings(got)
-	want := []string{"a_test.go", "moved_test.go", "new_test.go"}
+	want := []string{"a_test.go", "link_test.go", "moved_test.go", "new_test.go"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("own = %v, want %v (not the deleted, the unchanged, the old name or main's later file)", got, want)
+		t.Errorf("own = %v, want %v (not the deleted, the unchanged, the old name, c1_test.go, or what main changed after the branch point)", got, want)
 	}
 }
 
@@ -113,5 +130,28 @@ func TestOwnRecordingsDropWhatTheTicketDidNotMake(t *testing.T) {
 	}
 	if got := ownRecordings(all, nil); len(got) != 0 {
 		t.Errorf("with no changed file kept %v, want none", got)
+	}
+}
+
+// TestHasRecordingsIsTrueOnlyForARecordedLineThatWroteFiles: a ticket with
+// nothing recorded (or only refused or empty lines) has no pick to make, so
+// publish does not compute its own files at all.
+func TestHasRecordingsIsTrueOnlyForARecordedLineThatWroteFiles(t *testing.T) {
+	t.Parallel()
+	rec := journal.Line{Event: "recorded", Recordings: []journal.Recording{{File: "a.svg"}}}
+	cases := []struct {
+		name  string
+		lines []journal.Line
+		want  bool
+	}{
+		{"no lines", nil, false},
+		{"an oracle line", []journal.Line{{Event: "oracle"}}, false},
+		{"a recorded line with no files", []journal.Line{{Event: "recorded", Outcome: "refused: x"}}, false},
+		{"a recorded line with files", []journal.Line{{Event: "oracle"}, rec}, true},
+	}
+	for _, c := range cases {
+		if got := hasRecordings(c.lines); got != c.want {
+			t.Errorf("%s: hasRecordings = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -101,3 +101,16 @@ func TestRenderSlicesSection(t *testing.T) {
 		t.Fatalf("renderSlicesSection with nothing = %q, want none", got)
 	}
 }
+
+// TestRoundLineOfARoundHeldOpenByAnEarlierAsk: a findings round with no fix
+// slice and no ask of its own, run while an earlier round's ask was still
+// undecided, asks for the person; it is not "notes only".
+func TestRoundLineOfARoundHeldOpenByAnEarlierAsk(t *testing.T) {
+	t.Parallel()
+	if got := roundLine(RoundRecord{Verdict: RoundFindings, HeldAsks: 1, Note: 1}); got != "asks for the person" {
+		t.Errorf("roundLine = %q, want %q", got, "asks for the person")
+	}
+	if got := roundLine(RoundRecord{Verdict: RoundFindings, Note: 1}); got != "notes only" {
+		t.Errorf("roundLine = %q, want %q", got, "notes only")
+	}
+}

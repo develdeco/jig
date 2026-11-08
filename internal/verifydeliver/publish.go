@@ -1097,13 +1097,18 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	// Only recordings of tests the ticket's commits changed are offered.
 	// The stacked parent's branch may not be fetched (a body only render): the
 	// ticket's own files are then counted from the repo's target.
-	ownBase := t.base()
-	if _, err := gitx.RevParse(in.dir, "refs/remotes/origin/"+ownBase); err != nil {
-		ownBase = t.target
-	}
-	own, err := ownSources(in.dir, ownBase, in.head)
-	if err != nil {
-		return publication{}, fmt.Errorf("verifydeliver: publish: %w", err)
+	// Computed only for a ticket with recordings, so one with nothing to pick
+	// cannot have its publish stopped by it.
+	var own map[string]bool
+	if hasRecordings(lines) {
+		ownBase := t.base()
+		if _, err := gitx.RevParse(in.dir, "refs/remotes/origin/"+ownBase); err != nil {
+			ownBase = t.target
+		}
+		var err error
+		if own, err = ownSources(in.dir, ownBase, in.head); err != nil {
+			return publication{}, fmt.Errorf("verifydeliver: publish: %w", err)
+		}
 	}
 	picksReport, picked, err := publishPicks(picksStep{
 		d: d, result: in.picks, ticket: ticket, repoName: t.repoName,
