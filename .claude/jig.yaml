@@ -5,3 +5,13 @@
 # oracle run, so a hung test still fails with go test's own message naming it.
 oracles:
   test: go test -timeout 25m ./...
+# A delta of Markdown alone cannot change what the suite proves, except for the
+# tests that read it: ./lint reads the docs and skills, internal/screen reads
+# ARCHITECTURE.md. A commit whose files all match runs these in the suite's
+# place after a whole-suite pass (GATE-18).
+light:
+  paths:
+    - "*.md"
+    - ".github/*.md"
+    - "docs/**/*.md"
+  oracle: go test -count=1 ./lint ./internal/screen
