@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/spawn"
 )
 
 func (ie installerEnv) gitEnv() []string { return []string{"GIT_CONFIG_GLOBAL=" + ie.gitGlobal} }
@@ -237,5 +239,66 @@ func TestGithookPostCommitIsHidden(t *testing.T) {
 	}
 	if v, _, ok := lookupVerb([]string{"githook", "--global"}); !ok || v.Spec.Name != "githook" {
 		t.Errorf("lookupVerb(githook --global) = %q, %v", v.Spec.Name, ok)
+	}
+}
+
+// TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables runs the
+// hook with the variables git and the wrapper export for one commit's hooks and
+// shows the verification it starts does not inherit them (a spawn with a nil
+// Env inherits the process environment, which the spawner reads when called).
+// It sets process environment, so it does not run in parallel.
+func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testing.T) {
+	fx, e, _ := observeRig(t)
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "alpha", "n.txt"), []byte("n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range [][]string{{"add", "--", "alpha/n.txt"}, {"commit", "-q", "-m", "work", "-m", "Jig-Slice: a"}} {
+		if _, err := gitx.Run(fx.RepoDir, a...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hookOnly := []string{
+		"JIG_GITHOOK_WRAPPED", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+		"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+		"GIT_INDEX_FILE", "GIT_PREFIX", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+		"GIT_CONFIG_PARAMETERS",
+	}
+	for _, name := range hookOnly {
+		t.Setenv(name, "from-the-hook")
+	}
+	t.Setenv("GIT_EXEC_PATH", os.Getenv("GIT_EXEC_PATH"))
+	// A person's own git configuration through the environment reaches the
+	// verification: git does not export these to a hook.
+	kept := []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.abbrev", "GIT_CONFIG_VALUE_0=9"}
+	for _, kv := range kept {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	e.unsetenv = processEnv().unsetenv // the remover the binary runs with
+	var seen []string
+	e = e.withSpawn(func(s spawn.Spec) (int, error) {
+		if s.Env != nil {
+			t.Errorf("spawn Env = %v, want nil (inherit)", s.Env)
+		}
+		seen = os.Environ()
+		return 777, nil
+	})
+	if out, code := runMain(t, e, "", "githook", "post-commit"); code != 0 || out != "" {
+		t.Fatalf("exit %d, output %q, want a silent success", code, out)
+	}
+	if seen == nil {
+		t.Fatal("the hook started no verification")
+	}
+	for _, kv := range seen {
+		for _, name := range hookOnly {
+			if strings.EqualFold(strings.SplitN(kv, "=", 2)[0], name) {
+				t.Errorf("the verification inherits %s", kv)
+			}
+		}
+	}
+	for _, kv := range kept {
+		if !slices.Contains(seen, kv) {
+			t.Errorf("the verification lost %s", kv)
+		}
 	}
 }
