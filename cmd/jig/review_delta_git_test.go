@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -122,7 +123,7 @@ func TestAMultiRepoDeltaLabelsEachRepoAndNamesItsLongDiffFile(t *testing.T) {
 	if diffs[0].Path != "" || filepath.Base(diffs[1].Path) != "delta-web.diff" {
 		t.Fatalf("diff paths = %q and %q, want api's printed and web's in delta-web.diff", diffs[0].Path, diffs[1].Path)
 	}
-	if !strings.Contains(out, "  diff_path: \""+diffs[1].Path+"\"\n") || !strings.Contains(out, "  diff: |\n    diff --git a/a.go b/a.go") {
+	if !strings.Contains(out, "  diff_path: "+axi.Quote(diffs[1].Path)+"\n") || !strings.Contains(out, "  diff: |\n    diff --git a/a.go b/a.go") {
 		t.Errorf("the block does not print api's diff and name web's file\n%s", out)
 	}
 	if _, err := os.Stat(diffs[1].Path); err != nil {
