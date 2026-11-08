@@ -189,6 +189,21 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		reviewed = pushed
 	})
 
+	step(t, "a clean merge of a branch that is not the target is refused", func(t *testing.T) {
+		other := cloneFrom(t, fx.RepoRemote)
+		run(t, other, "checkout", branch)
+		run(t, other, "checkout", "-b", "side")
+		writeAndCommit(t, other, "side.txt", "work that is not on the target", "a side branch")
+		run(t, other, "checkout", branch)
+		run(t, other, "merge", "--no-ff", "--no-edit", "side")
+		run(t, other, "push", "origin", branch)
+
+		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
+
+		// Origin's branch goes back to the reviewed head for the step after.
+		run(t, other, "push", "--force", "origin", reviewed+":refs/heads/"+branch)
+	})
+
 	step(t, "the reviewed head is shipped as it is after the target moves", func(t *testing.T) {
 		advanceTarget(t, fx)
 
@@ -216,18 +231,18 @@ func TestCheckReviewedHead(t *testing.T) {
 	t.Parallel()
 
 	recorded := reportYAML{ReviewedSHA: map[string]string{"api": "aaa"}}
-	if err := checkReviewedHead(recorded, "api", "aaa", "T-1", ""); err != nil {
+	if err := checkReviewedHead(recorded, "api", "aaa", "T-1", "", ""); err != nil {
 		t.Errorf("the reviewed head: %v", err)
 	}
-	wantAxiCode(t, checkReviewedHead(recorded, "api", "bbb", "T-1", ""), "PUBLISH_UNREVIEWED_HEAD")
-	if err := checkReviewedHead(reportYAML{}, "api", "bbb", "T-1", ""); err != nil {
+	wantAxiCode(t, checkReviewedHead(recorded, "api", "bbb", "T-1", "", ""), "PUBLISH_UNREVIEWED_HEAD")
+	if err := checkReviewedHead(reportYAML{}, "api", "bbb", "T-1", "", ""); err != nil {
 		t.Errorf("a round that recorded no head: %v", err)
 	}
-	if err := checkReviewedHead(reportYAML{ReviewedSHA: map[string]string{}}, "api", "bbb", "T-1", ""); err != nil {
+	if err := checkReviewedHead(reportYAML{ReviewedSHA: map[string]string{}}, "api", "bbb", "T-1", "", ""); err != nil {
 		t.Errorf("a round that recorded an empty set of heads: %v", err)
 	}
 
-	err := checkReviewedHead(recorded, "web", "bbb", "T-1", "")
+	err := checkReviewedHead(recorded, "web", "bbb", "T-1", "", "")
 	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
 	var ae *axi.Error
 	if !errors.As(err, &ae) {
@@ -240,7 +255,7 @@ func TestCheckReviewedHead(t *testing.T) {
 		t.Errorf("the refusal's help = %q, want %q", ae.Help, want)
 	}
 	// A repo recorded with an empty sha is no record of a head either.
-	wantAxiCode(t, checkReviewedHead(reportYAML{ReviewedSHA: map[string]string{"api": ""}}, "api", "bbb", "T-1", ""), "PUBLISH_UNREVIEWED_HEAD")
+	wantAxiCode(t, checkReviewedHead(reportYAML{ReviewedSHA: map[string]string{"api": ""}}, "api", "bbb", "T-1", "", ""), "PUBLISH_UNREVIEWED_HEAD")
 
 	// A head past the reviewed one by merges git itself would have made is the
 	// reviewed head; any other is refused as a different one, as is any head when
@@ -248,7 +263,7 @@ func TestCheckReviewedHead(t *testing.T) {
 	dir, cases := lineCases(t)
 	for _, c := range cases {
 		rep := reportYAML{ReviewedSHA: map[string]string{"api": c.reviewed}}
-		err := checkReviewedHead(rep, "api", c.head, "T-1", dir)
+		err := checkReviewedHead(rep, "api", c.head, "T-1", dir, "main")
 		if c.kind == lineSame || c.kind == lineClean {
 			if err != nil {
 				t.Errorf("%s: %v", c.name, err)
@@ -257,7 +272,7 @@ func TestCheckReviewedHead(t *testing.T) {
 			wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
 		}
 		if c.kind != lineSame {
-			wantAxiCode(t, checkReviewedHead(rep, "api", c.head, "T-1", ""), "PUBLISH_UNREVIEWED_HEAD")
+			wantAxiCode(t, checkReviewedHead(rep, "api", c.head, "T-1", "", ""), "PUBLISH_UNREVIEWED_HEAD")
 		}
 	}
 }

@@ -109,6 +109,11 @@ const gitTraceEnv = "GIT_TRACE2_EVENT"
 // records, and never write there.
 func (e jigEnv) environ() []string {
 	drop := append(slices.Clone(e.unset), recordDirEnv)
+	// The marker the global git hook wrapper exports belongs to one commit's
+	// hooks, never to the suite; a test that needs it sets it through extra.
+	if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), "JIG_GITHOOK_WRAPPED") }) {
+		drop = append(drop, "JIG_GITHOOK_WRAPPED")
+	}
 	// A harness session the suite runs inside (Claude Code sets its id in the
 	// environment of what its agent runs) is not the jig under test's.
 	for _, name := range locate.HarnessSessionEnv {

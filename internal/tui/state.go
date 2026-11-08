@@ -362,6 +362,9 @@ type roundRow struct {
 	State    string // StateReviewing, StateFindings or StateReady
 	At       string
 	Reviewer string
+	// Carried is the round whose verdict a clean round carries over, 0 for a
+	// round a reviewer read.
+	Carried int
 }
 
 // rounds are the gate rounds the journal records, closed ones by their
@@ -385,7 +388,7 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 		if _, dup := closed[n]; !dup {
 			order = append(order, n)
 		}
-		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session}
+		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Carried: l.Carried}
 		lastClosed = i
 	}
 	sort.Ints(order)
@@ -628,6 +631,9 @@ func describe(l events.Envelope) string {
 	case journal.EventGateRound:
 		return roundWord(l, "findings")
 	case journal.EventGateClean:
+		if l.Carried > 0 {
+			return roundWord(l, "clean (carried over from round "+strconv.Itoa(l.Carried)+")")
+		}
 		return roundWord(l, "clean")
 	case journal.EventTriage:
 		return strings.TrimSpace(l.Ref + " " + l.Outcome + who + " " + l.Summary)

@@ -331,5 +331,5 @@ The standing of a published stacked ticket whose stack plan asks for a restack o
 _Avoid_: stale, out of date
 
 **Reviewed head**:
-The head a clean gate round reviewed (`reviewed_sha`), which a publish ships. A head is also reviewed when every commit between it and that head, along first parents, is a merge whose tree is git's own merge of its two parents (a *clean merge*): the target merged in brings nothing to review. Any other commit is not, and a merge resolved by hand needs a new round, whose delta is the resolution alone, the merge's tree against git's own.
+The head a clean gate round reviewed (`reviewed_sha`), which a publish ships. A head is also reviewed when every commit between it and that head, along first parents, is a merge of the target whose tree is git's own merge of its two parents (a *clean merge*; its second parent is reachable from the target): the target merged in brings nothing to review, and `jig gate` records such a head as a round *carried over* from the round that was reviewed, with no reviewer. Any other commit is not, a merge of any other branch is not, and a merge resolved by hand needs a new round, whose delta is the resolution alone, the merge's tree against git's own.
 _Avoid_: approved head

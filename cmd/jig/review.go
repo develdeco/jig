@@ -281,6 +281,13 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		if p, err = verifydeliver.GatePrepare(deps, verifydeliver.GateOpts{Ticket: ticket}); err != nil {
 			return renderErr(stdout, err)
 		}
+		if p.Carried != nil {
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("round %d of %s needs no reviewer: the head only merges the target into the head round %d reviewed, so the gate recorded it as carried over", p.Round, ticket, p.Carried.CarriedFrom),
+				Code: "REVIEW_NOT_OPEN",
+				Help: []string{fmt.Sprintf("Run `jig status %s` for the round, then publish", ticket)},
+			})
+		}
 	}
 	who := reviewerFromFlags(e, *session)
 	who.Model, who.Effort = *model, *effort

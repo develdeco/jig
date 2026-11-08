@@ -534,7 +534,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
 	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir); err != nil {
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir, "origin/"+pt.base()); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
@@ -1570,10 +1570,10 @@ func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 	}
 	help := []string{fmt.Sprintf("Run `jig gate %s` to review the branch as it is now, then render the body again.", t.ticket)}
 	if reviewed == "" {
-		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "")
+		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "", "")
 	}
 	for _, tip := range branchTips(d, t, dir) {
-		covered, err := headReviewed(tip.dir, reviewed, tip.sha)
+		covered, err := headReviewed(tip.dir, reviewed, tip.sha, "origin/"+t.base())
 		if err != nil {
 			return err
 		}
@@ -1919,7 +1919,7 @@ func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, err
 		dirs = append(dirs, dir)
 	}
 	for _, dir := range dirs {
-		covered, err := headReviewed(dir, reviewed, head)
+		covered, err := headReviewed(dir, reviewed, head, "origin/"+pt.base())
 		if err != nil {
 			return false, err
 		}
@@ -1941,7 +1941,7 @@ func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, err
 // as it always has been. A round that recorded heads, but none for this repo,
 // reviewed something else - a repo renamed since, say - and is refused like a
 // different head: what was reviewed is not what would ship.
-func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error {
+func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir, targetRef string) error {
 	if len(rep.ReviewedSHA) == 0 {
 		return nil
 	}
@@ -1959,7 +1959,7 @@ func checkReviewedHead(rep reportYAML, repoName, head, ticket, dir string) error
 			Help: help,
 		}
 	}
-	covered, err := headReviewed(dir, reviewed, head)
+	covered, err := headReviewed(dir, reviewed, head, targetRef)
 	if err != nil {
 		return err
 	}
