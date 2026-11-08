@@ -115,6 +115,9 @@ func (m *Model) reviewPage(id string) page {
 // they stood apart from the builders, and what range of the change it read.
 func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
 	word := map[string]string{StateReviewing: "open", StateFindings: "findings", StateReady: "clean"}[r.State]
+	if r.State == StateReady && r.Carried > 0 {
+		word += " (carried over from round " + strconv.Itoa(r.Carried) + ")"
+	}
 	state := r.State
 	if state == StateReady {
 		state = StateOK
