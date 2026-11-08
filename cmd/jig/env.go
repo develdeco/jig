@@ -76,6 +76,10 @@ type env struct {
 	// stdoutIsTerminal reports whether stdout is an interactive terminal,
 	// which decides whether a command draws a screen or writes plain lines.
 	stdoutIsTerminal func(w io.Writer) bool
+	// unsetenv removes a variable from this process's environment: os.Unsetenv
+	// in production. A test env leaves the process alone, since the tests
+	// share it; one that checks the removal hands its own.
+	unsetenv func(key string)
 	// stderr is where a command writes a warning that is not its output:
 	// os.Stderr in production. The screens (`jig tui`) own the terminal, so
 	// a command they run writes it into the output they show instead.
@@ -97,6 +101,7 @@ func processEnv() env {
 		lookPath:         exec.LookPath,
 		stdoutIsTerminal: stdoutIsTerminal,
 		stderr:           os.Stderr,
+		unsetenv:         func(key string) { os.Unsetenv(key) },
 	}
 }
 

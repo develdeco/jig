@@ -211,10 +211,31 @@ func cmdGithookPostCommit(e env, stdout io.Writer) (code int) {
 			code = 0
 		}
 	}()
+	dropHookEnv(e)
 	if err := observeGitCommit(e); err != nil {
 		say(err)
 	}
 	return 0
+}
+
+// hookOnlyEnv names the variables that describe one commit inside its hooks:
+// the wrapper's marker and the ones git exports to a post-commit hook. After
+// the hook they are nobody's setting, so what the hook starts must not inherit
+// them. GIT_EXEC_PATH stays: it only names git's own helpers.
+var hookOnlyEnv = []string{
+	"JIG_GITHOOK_WRAPPED",
+	"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+	"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+	"GIT_INDEX_FILE", "GIT_PREFIX", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+}
+
+// dropHookEnv removes hookOnlyEnv from this process, so the verification the
+// hook starts (and every other child) gets the environment a person's own
+// commands get.
+func dropHookEnv(e env) {
+	for _, name := range hookOnlyEnv {
+		e.unsetenv(name)
+	}
 }
 
 func observeGitCommit(e env) error {
