@@ -1105,3 +1105,14 @@ func TestClaimReportsLeftoverPathsWhenUndoFails(t *testing.T) {
 		}
 	})
 }
+
+// TestOutermostDropsPathsInsideAnother pins the clean's pathspec: a file
+// listed with the folder that holds it is cleaned through the folder, since git
+// leaves the emptied folder behind when the file comes first.
+func TestOutermostDropsPathsInsideAnother(t *testing.T) {
+	got := outermost([]string{"a/b/7/record.yaml", "a/b/7", "c", "c", "ab"})
+	want := []string{"a/b/7", "c", "ab"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("outermost = %v, want %v", got, want)
+	}
+}

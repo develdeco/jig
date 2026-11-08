@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -317,7 +318,9 @@ func (s *Store) undoPaths(sha string, paths []string) error {
 			}
 		}
 	}
-	args := append([]string{"clean", "-fdx", "--"}, paths...)
+	// Only the outermost paths are cleaned: git clean leaves the emptied
+	// directory behind when a file inside it is listed before the directory.
+	args := append([]string{"clean", "-fdx", "--"}, outermost(paths)...)
 	if _, err := gitx.Run(s.Root, args...); err != nil {
 		errs = append(errs, err)
 		for _, p := range paths {
@@ -330,6 +333,24 @@ func (s *Store) undoPaths(sha string, paths []string) error {
 		return nil
 	}
 	return &undoPathsError{err: errors.Join(errs...), leftovers: leftovers}
+}
+
+// outermost returns the paths that no other path in paths contains.
+func outermost(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		nested := false
+		for _, q := range paths {
+			if q != p && strings.HasPrefix(filepath.ToSlash(p), strings.TrimSuffix(filepath.ToSlash(q), "/")+"/") {
+				nested = true
+				break
+			}
+		}
+		if !nested && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // undoPathsError is undoPaths' failure: the joined step errors, and the
