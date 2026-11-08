@@ -73,6 +73,10 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	if err != nil || !strings.Contains(string(ff), "kept_fixed:") || !strings.Contains(string(ff), "by: person") {
 		t.Fatalf("findings.yaml does not name who kept the spent keep (err %v):\n%s", err, ff)
 	}
+	md, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-2", "findings.md"))
+	if err != nil || !strings.Contains(string(md), "kept and fixed: r1-f1 (person)") {
+		t.Fatalf("findings.md does not name who kept the spent keep (err %v):\n%s", err, md)
+	}
 	st, _ := runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
 	var round2 string
 	for _, ln := range strings.Split(st, "\n") {

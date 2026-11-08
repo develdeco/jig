@@ -78,7 +78,10 @@ type picksStep struct {
 	leaseDir string
 	head     string
 	lines    []journal.Line
-	warn     func(format string, args ...any)
+	// own is the set of files the ticket changed (ownSources); a recording is
+	// offered only when its source is in it.
+	own  map[string]bool
+	warn func(format string, args ...any)
 }
 
 // publishPicks runs the pick for one publish. With no candidate recordings it
@@ -90,7 +93,7 @@ type picksStep struct {
 // The error is publish's own failure, the journal line that could not be
 // written.
 func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
-	cands, dropped, cerr := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head)
+	cands, dropped, cerr := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
 	report := PicksReport{Dropped: dropped}
 	if len(dropped) > 0 {
 		s.warn("jig: recordings left out of the choice for %s: %s\n", s.ticket, strings.Join(dropped, "; "))

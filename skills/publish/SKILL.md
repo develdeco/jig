@@ -48,7 +48,7 @@ The body is `## What`, `## Demo` (when picked) and `## Verification`, then the t
 
 ## Recordings for the demo
 
-When the build recorded end-to-end scenarios and nobody picked, `--body` and `jig publish` report `picks: pending` and name a `picks_request` file: the candidates, each with an id, and the intent. Pick the recordings that show the change, compose them into flows, and write the answer:
+When the ticket's own tests recorded scenarios and nobody picked, `--body` and `jig publish` report `picks: pending` and name a `picks_request` file: the candidates, each with an id, and the intent. Pick the recordings that show the change, compose them into flows, and write the answer:
 
 ```
 {"flows": [{"title": "...", "items": [{"id": "r2"}, {"id": "r3", "caption": "..."}]}], "summary": "..."}

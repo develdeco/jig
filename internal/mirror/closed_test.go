@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -213,5 +215,81 @@ func TestSyncReportsNoDriftWhenGitHubAlreadyHoldsTheStoresValue(t *testing.T) {
 	got := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
 	if got.Synced == nil || got.Synced.State != "CLOSED" || got.Synced.Status != "Done" || got.Synced.StoreID != "DEMO-1" {
 		t.Errorf("synced = %+v, want CLOSED / Done / DEMO-1", got.Synced)
+	}
+}
+
+// rewriteTestRecord replaces the tracker record of what with rec, as a record
+// written by an earlier sync (or the bridge) would read.
+func rewriteTestRecord(t *testing.T, st *store.Store, what string, rec githubRecord) {
+	t.Helper()
+	var fields yaml.Node
+	if err := fields.Encode(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteTrackerRecord(githubEntry(rec.Repo, rec.Issue), ownerOfWhat(what), &fields, recordHeader); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSyncReportsNoStoreIDDriftWhenGitHubHoldsTheStoresValueButNotSynced: the
+// Store ID on GitHub already equals the store's value, though it differs from
+// what synced: last recorded (the record is stale, say after a first sync
+// elsewhere). GitHub holds what the sync would write, so nothing is
+// overwritten and nothing drifted.
+func TestSyncReportsNoStoreIDDriftWhenGitHubHoldsTheStoresValueButNotSynced(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	mintTestTicket(t, st, "DEMO-1", "Covered by other work")
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{}
+	if _, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{}); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	rec := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
+	if got := client.itemFields[rec.Item]; got.StoreID != "DEMO-1" {
+		t.Fatalf("board Store ID after the first sync = %q, want DEMO-1", got.StoreID)
+	}
+	rec.Synced.StoreID = "DEMO-OLD"
+	rewriteTestRecord(t, st, "DEMO-1", rec)
+
+	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	for _, d := range report.Drift {
+		t.Errorf("drift = %+v, want none: GitHub's Store ID already equals the store's value", d)
+	}
+}
+
+// TestSyncReportsNoDriftOnAFirstSyncOfARecordWithNoSyncedBoardFields: a record
+// has its item but its synced: holds no Status and no Store ID (nothing the
+// sync wrote to compare), and the board differs. This is the first sync of
+// those fields, not drift: the board is set and synced: records it.
+func TestSyncReportsNoDriftOnAFirstSyncOfARecordWithNoSyncedBoardFields(t *testing.T) {
+	st, work, _ := newTestRemoteStore(t)
+	mintTestTicket(t, st, "DEMO-1", "First ticket")
+	runGit(t, work, "push", "origin", "main")
+
+	cfg := loadCfg(t, st)
+	client := &fakeClient{}
+	if _, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{}); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	rec := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
+	rec.Synced.Status, rec.Synced.StoreID = "", ""
+	rewriteTestRecord(t, st, "DEMO-1", rec)
+	client.itemFields[rec.Item] = fakeItemFields{Status: "In progress", StoreID: "SOMEONE-ELSES"}
+
+	report, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	for _, d := range report.Drift {
+		t.Errorf("drift = %+v, want none: synced: holds no Status or Store ID to compare", d)
+	}
+	got := readTestRecord(t, treeRecordPath(t, st, "DEMO-1"))
+	if got.Synced == nil || got.Synced.Status != "Backlog" || got.Synced.StoreID != "DEMO-1" {
+		t.Errorf("synced = %+v, want Backlog / DEMO-1 recorded", got.Synced)
 	}
 }

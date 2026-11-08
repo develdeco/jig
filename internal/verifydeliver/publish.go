@@ -1094,9 +1094,25 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	// A pick that stands renders the ## Demo section; one that does not, or
 	// none to make, leaves the pull request without one. The pick is made for
 	// the head the gate reviewed, whose history holds the recorded commits.
+	// Only recordings of tests the ticket's commits changed are offered.
+	// The stacked parent's branch may not be fetched (a body only render): the
+	// ticket's own files are then counted from the repo's target.
+	// Computed only for a ticket with recordings, so one with nothing to pick
+	// cannot have its publish stopped by it.
+	var own map[string]bool
+	if hasRecordings(lines) {
+		ownBase := t.base()
+		if _, err := gitx.RevParse(in.dir, "refs/remotes/origin/"+ownBase); err != nil {
+			ownBase = t.target
+		}
+		var err error
+		if own, err = ownSources(in.dir, ownBase, in.head); err != nil {
+			return publication{}, fmt.Errorf("verifydeliver: publish: %w", err)
+		}
+	}
 	picksReport, picked, err := publishPicks(picksStep{
 		d: d, result: in.picks, ticket: ticket, repoName: t.repoName,
-		leaseDir: in.dir, head: in.head, lines: lines, warn: in.warn,
+		leaseDir: in.dir, head: in.head, lines: lines, own: own, warn: in.warn,
 	})
 	if err != nil {
 		return publication{}, err

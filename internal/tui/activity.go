@@ -431,6 +431,12 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 			text += ": " + f
 		}
 		return text
+	case journal.EventSliceAdd:
+		text := "added " + l.Slice
+		if f := t.goals()[l.Slice]; f != "" {
+			text += ": " + f
+		}
+		return text
 	case journal.EventPrBody:
 		return "written for " + repoWords(l) + commitWords(t, l.Commit)
 	case journal.EventPublishPicks:

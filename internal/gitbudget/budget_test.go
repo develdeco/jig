@@ -46,7 +46,7 @@ func writeFile(t *testing.T, name, body string) string {
 // and one over fails.
 func TestCheckVerdictsAndTheThresholdEdge(t *testing.T) {
 	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
-	base := writeFile(t, "baseline.yaml", "packages:\n  big: 400\n  small: 10\n  gone: 5\n  shrunk: 50\n")
+	base := writeFile(t, "baseline.yaml", "packages:\n  big: 400\n  small: 10\n  gone: 5\n  shrunk: 50\n  odd: 401\n")
 	for _, c := range []struct {
 		name     string
 		counts   map[string]int
@@ -57,6 +57,8 @@ func TestCheckVerdictsAndTheThresholdEdge(t *testing.T) {
 		{"within the percent of a big package", map[string]int{"big": 420}, false, 0, map[string]string{"big": "ok"}},
 		{"exactly at the limit (5% of 400 is 20; the slack of 10 is the larger for small)", map[string]int{"big": 420, "small": 20}, false, 0, map[string]string{"big": "ok", "small": "ok"}},
 		{"one over the limit of a big package", map[string]int{"big": 421}, false, 1, map[string]string{"big": "over"}},
+		{"the percent of 401 rounds up (5% is 20.05, allowed 21): 422 passes", map[string]int{"odd": 422}, false, 0, map[string]string{"odd": "ok"}},
+		{"the percent of 401 rounds up: 423 is one over", map[string]int{"odd": 423}, false, 1, map[string]string{"odd": "over"}},
 		{"one over the slack of a small package", map[string]int{"small": 21}, false, 1, map[string]string{"small": "over"}},
 		{"a decrease never fails", map[string]int{"shrunk": 0, "big": 1}, false, 0, map[string]string{"shrunk": "ok", "big": "ok"}},
 		{"new package within the slack", map[string]int{"fresh": 10}, false, 0, map[string]string{"fresh": "new"}},
@@ -120,6 +122,31 @@ func TestCheckWithoutABaselinePassesAndSaysSo(t *testing.T) {
 	}
 }
 
+// A check with no baseline still writes the job summary: the counts and the
+// no-baseline line, in Markdown, at $GITHUB_STEP_SUMMARY.
+func TestCheckWithoutABaselineStillWritesTheSummary(t *testing.T) {
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	counts := fixture(t, map[string]int{"e2e": 70})
+	summary := filepath.Join(t.TempDir(), "summary.md")
+	env := func(k string) string {
+		if k == "GITHUB_STEP_SUMMARY" {
+			return summary
+		}
+		return ""
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check", cfg, "-", counts, testModule + "/e2e"}, env, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, want 0: %s%s", code, stdout.String(), stderr.String())
+	}
+	got, err := os.ReadFile(summary)
+	if err != nil {
+		t.Fatalf("no summary written: %v", err)
+	}
+	if !strings.Contains(string(got), noBaselineNote) || !strings.Contains(string(got), "| e2e | 70 |") {
+		t.Errorf("summary:\n%s", got)
+	}
+}
+
 func TestCheckWritesTheMarkdownSummary(t *testing.T) {
 	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
 	base := writeFile(t, "baseline.yaml", "packages:\n  e2e: 100\n")
@@ -170,6 +197,7 @@ func TestReadConfigAndBaselineRefuseWhatTheyCannotJudge(t *testing.T) {
 	for name, body := range map[string]string{
 		"old packages map": "margin: 5\nslack: 10\npackages:\n  e2e: 1\n",
 		"margin over":      "margin: 101\nslack: 10\n",
+		"negative margin":  "margin: -1\nslack: 10\n",
 		"negative slack":   "margin: 5\nslack: -1\n",
 		"not a mapping":    "- e2e\n",
 	} {

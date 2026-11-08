@@ -345,7 +345,7 @@ func collectRecordings(top, dir string, changed func() []string) (collected, err
 		if scenario == "" {
 			scenario = strings.TrimSuffix(f.Name, filepath.Ext(f.Name))
 		}
-		got.recs = append(got.recs, journal.Recording{File: f.Name, SHA256: f.SHA256, Size: f.Size, Scenario: scenario, Flow: tag.Flow, Step: tag.Step, Caption: tag.Caption})
+		got.recs = append(got.recs, journal.Recording{File: f.Name, SHA256: f.SHA256, Size: f.Size, Scenario: scenario, Flow: tag.Flow, Step: tag.Step, Caption: tag.Caption, Source: tag.File})
 	}
 	return got, nil
 }

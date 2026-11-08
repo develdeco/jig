@@ -257,7 +257,7 @@ The sessions run these for you; `jig <command> -h` prints any one's flags.
 | Where | Commands |
 |---|---|
 | Set up | `setup`, `attach`, `doctor`, `init`, `repos`, `share`, `map`, `ignore` |
-| Plan | `ticket new`, `graduate` (a chart's tickets), `recall`, `validate`, `brief show` (a brief and its illustration, served on 127.0.0.1), `rank` (the order to start ready tickets), `close` and `reopen` (a ticket closed without a pull request: covered, superseded or not planned) |
+| Plan | `ticket new`, `graduate` (a chart's tickets), `recall`, `validate`, `brief show` (a brief and its illustration, served on 127.0.0.1), `rank` (the order to start ready tickets), `depend` (make a ticket wait for another), `close` and `reopen` (a ticket closed without a pull request: covered, superseded or not planned) |
 | Build | `here`, `next`, `claim`, `context`, `ask`, `answer`, `note`, `verify` |
 | Review and publish | `gate`, `review context`, `finding`, `review done`, `triage`, `publish` |
 | Watch | `status`, `events`, `tui`, `budget` |

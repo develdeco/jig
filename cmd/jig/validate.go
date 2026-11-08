@@ -25,6 +25,7 @@ func init() {
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"check", validateCheckUsage, false},
+			{"restamp", validateRestampUsage, false},
 		}, false},
 		Order: 190,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
@@ -37,6 +38,9 @@ func init() {
 // validateCheckUsage is the --check flag's usage, in the help row and the
 // FlagSet alike.
 const validateCheckUsage = "check only: print the verdict and the brief's section hashes, and record no approval"
+
+// validateRestampUsage is the --restamp flag's usage.
+const validateRestampUsage = "restamp the slices whose brief section changed, requeue none, and record no approval"
 
 // cmdValidate implements `jig validate <ticket> [--check]`. A ticket that is
 // valid has its brief approved: the approval is recorded for the brief as it
@@ -51,6 +55,7 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	check := fs.Bool("check", false, validateCheckUsage)
+	restamp := fs.Bool("restamp", false, validateRestampUsage)
 	ticket, rest, err := requirePositional(args, "ticket")
 	if err != nil {
 		return renderErr(stdout, err)
@@ -59,6 +64,10 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	} else if err != nil {
 		return renderErr(stdout, err)
+	}
+
+	if *check && *restamp {
+		return renderErr(stdout, &axi.Error{Msg: "--restamp cannot be combined with --check: it writes the slices' stamps", Code: "VALIDATION_ERROR"})
 	}
 
 	st, cfg, mp, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
@@ -74,6 +83,24 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	ticket, err = resolveTicketArg(st, ticket, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+
+	var blocks []string
+	if *restamp {
+		res, err := restampTicket(st, ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		blocks = append(blocks, axi.Table("restamped", []string{"id", "state", "sections"}, res.restamped))
+		if len(res.unresolved) > 0 {
+			blocks = append(blocks, axi.Table("unresolved", []string{"id", "hash"}, res.unresolved))
+			axi.Render(stdout, blocks...)
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("ticket %s has stamps that no committed brief revision or current heading explains", ticket),
+				Code: "VALIDATION_ERROR",
+				Help: []string{fmt.Sprintf("Add a replacement with `jig slice add %s`, or fix the stamp by hand", ticket)},
+			})
+		}
 	}
 
 	// The hash is taken before the checks read the brief: a brief edited
@@ -98,7 +125,7 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	advisories := validateAdvisories(st, ticket, slices, ready.ProjectRepos(cfg, mp.Clones))
-	blocks := []string{"valid: yes"}
+	blocks = append(blocks, "valid: yes")
 	nextLines := []string{fmt.Sprintf("Run `jig next %s` to see what is ready, then `jig claim %s --slice <slice>` to take one", ticket, ticket)}
 	if *check {
 		blocks = append(blocks, axi.KV("approval", [][2]string{{"result", approvalChecked}}))
@@ -107,6 +134,9 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			brief = data
 		}
 		nextLines = checkNext(ticket, defaultedDecisions(brief), e.stdinIsTerminal(stdin))
+	} else if *restamp {
+		blocks = append(blocks, axi.KV("approval", [][2]string{{"result", approvalRestamped}}))
+		nextLines = []string{fmt.Sprintf("The brief was edited, so its approval is withdrawn: run `jig validate %s` once the person confirms it", ticket)}
 	} else {
 		approval, result, err := recordApproval(e, st, ticket, sum, defaultProvenance(e, stdin))
 		if err != nil {
@@ -261,7 +291,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	for _, sl := range slices {
 		for _, h := range sl.FromBrief {
 			if !hashExists(h) {
-				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section", sl.ID, h))
+				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section; run `jig validate %s --restamp` if the slice's work is still right, or `jig requeue %s --from-brief-diff` to rebuild it first", sl.ID, h, ticket, ticket))
 			}
 		}
 		for _, b := range sl.BlockedBy {
@@ -377,7 +407,7 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 		}
 	}
 
-	if cyc := ticketDepsCycle(st, ticket); cyc != "" {
+	if cyc := ticketDepsCycle(st, ticket, nil); cyc != "" {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
 	}
 	return problems
@@ -441,8 +471,11 @@ func validateTicketBranch(st *store.Store, cfg project.Config, ticket string) []
 // each visited ticket's own ticket.yaml as it goes, and returns a description
 // of the first cycle found, or "" when none exists. A ticket id that cannot
 // name a store folder, or whose ticket.yaml does not parse, contributes no
-// further edges: that ticket's own validate reports the problem.
-func ticketDepsCycle(st *store.Store, ticket string) string {
+// further edges: that ticket's own validate reports the problem. A non-nil
+// prospective is an edge of ticket not yet written: it is read as ticket's
+// entry for that parent (added, or replacing the one there), so `jig depend`
+// asks the same DFS before it writes.
+func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBlockedBy) string {
 	cache := map[string][]store.TicketBlockedBy{}
 	deps := func(id string) []store.TicketBlockedBy {
 		if d, ok := cache[id]; ok {
@@ -451,6 +484,9 @@ func ticketDepsCycle(st *store.Store, ticket string) string {
 		var d []store.TicketBlockedBy
 		if pool.CheckTicket(id) == nil {
 			d, _ = st.ReadTicketDeps(id)
+		}
+		if id == ticket && prospective != nil {
+			d = append(append([]store.TicketBlockedBy{}, d...), *prospective)
 		}
 		cache[id] = d
 		return d

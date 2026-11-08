@@ -158,6 +158,9 @@ type Recording struct {
 	Flow     string `json:"flow,omitempty"`
 	Step     int    `json:"step,omitempty"`
 	Caption  string `json:"caption,omitempty"`
+	// Source is the repo-relative file of the test that made the recording,
+	// from its tag's file. Lines journaled before it existed have none.
+	Source string `json:"source,omitempty"`
 }
 
 // Pick is what a publish-picks line records of a pick: Candidates fingerprints
