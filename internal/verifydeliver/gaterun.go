@@ -143,6 +143,20 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 		return r, err
 	}
 	r.repos = repos
+	// A ticket stacked on another goes into the parent's branch where they
+	// share a repo (as publish reads it): a merge of that branch is the one
+	// that brings in the target.
+	if d.Stack != nil {
+		plan, err := d.Stack(ticket)
+		if err != nil {
+			return r, fmt.Errorf("verifydeliver: gate: read what %s is stacked on: %w", ticket, err)
+		}
+		for _, gr := range repos {
+			if sr, ok := plan.In(gr.name); ok && sr.Shared() && sr.PRTarget != "" {
+				gr.mergeRef = "origin/" + sr.PRTarget
+			}
+		}
+	}
 	// Resolved once: every lease and every copy of the branch name this one
 	// branch. The ticket's own record names it, or --branch adopts one
 	// (resolveGateBranch); an adoption is recorded further down, once every
@@ -293,13 +307,13 @@ func (r *gateRun) roundInput() RoundInput {
 	}
 	if !r.qualified {
 		gr := r.repos[0]
-		in.LeaseDir, in.RepoName, in.Target = gr.lease.Dir, gr.name, gr.target
+		in.LeaseDir, in.RepoName, in.Target, in.MergeRef = gr.lease.Dir, gr.name, gr.target, gr.mergeRef
 		in.OperatorClone, in.Manifest, in.OracleRuns = operatorClone(r.d, gr.name), gr.man, gr.oracleRuns
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
-			Name: gr.name, Target: gr.target, LeaseDir: gr.lease.Dir,
+			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir,
 			OperatorClone: operatorClone(r.d, gr.name), Manifest: gr.man, OracleRuns: gr.oracleRuns,
 		})
 	}

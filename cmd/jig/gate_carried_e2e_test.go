@@ -61,6 +61,9 @@ func TestGateCarriesACleanMergeOfTheTargetAndPublishTakesTheHead(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "verdict: clean") {
 		t.Fatalf("gate after a clean merge: exit = %d, want 0 and a clean verdict\n%s", code, out)
 	}
+	if !strings.Contains(out, "verdict: clean (carried over from round 1)") || strings.Contains(out, "probes:") || !strings.Contains(out, "none ran") {
+		t.Errorf("gate does not print the round as carried over, with no reviewer and no probe counts:\n%s", out)
+	}
 	if strings.Contains(out, "jig review done") {
 		t.Errorf("gate asked for a reviewer for a clean merge of the target:\n%s", out)
 	}

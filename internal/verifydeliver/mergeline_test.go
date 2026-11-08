@@ -422,10 +422,19 @@ func TestCheckBodyHeadThroughMerges(t *testing.T) {
 	r.commit("more.txt", "an ordinary commit\n")
 	wantAxiCode(t, checkBodyHead(d, target(), ""), "PUBLISH_UNREVIEWED_HEAD")
 
+	// A clean merge of a branch that is not the target is refused.
+	r.git("reset", "--hard", reviewed)
+	seed := r.git("rev-list", "--max-parents=0", "main")
+	r.git("switch", "-c", "unrelated", seed)
+	r.commit("unrelated.txt", "work that is not on the target\n")
+	r.git("switch", "work")
+	r.git("merge", "--no-ff", "--no-edit", "unrelated")
+	wantAxiCode(t, checkBodyHead(d, target(), ""), "PUBLISH_UNREVIEWED_HEAD")
+
 	// A tip is read in the repository it was found in: the reader's copy of
 	// origin's branch (dir) holds the merge and its parents, so it covers it
 	// though the operator maps no clone at all.
-	r.git("reset", "--hard", "HEAD~1")
+	r.git("reset", "--hard", reviewed)
 	r.onMain("main3.txt", "from main, third time\n")
 	r.merge()
 	r.git("update-ref", "refs/remotes/origin/work", "HEAD")

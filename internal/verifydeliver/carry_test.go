@@ -66,7 +66,7 @@ func TestGatePrepareCarriesACleanMergeOfTheTarget(t *testing.T) {
 		t.Errorf("a carried round names a model/effort (%q, %q)", rep.Model, rep.Effort)
 	}
 	md, err := os.ReadFile(filepath.Join(gateRoundDir(d.Store, fx.Ticket, 2), "findings.md"))
-	if err != nil || !strings.Contains(string(md), "Carried over from round 1: head "+merged) || !strings.Contains(string(md), "the oracle ran and passed") {
+	if err != nil || !strings.Contains(string(md), "Carried over from round 1: head "+merged+" merges origin/main (") || !strings.Contains(string(md), "and its tree equals git's own merge; the oracle ran and passed.") {
 		t.Errorf("findings.md = %q (%v), want it to say the round carries over from round 1", md, err)
 	}
 	if _, ok, _ := readOpenFile(d.Store, fx.Ticket, 2); ok {
@@ -155,4 +155,70 @@ func TestGatePrepareOpensARoundForWhatIsNotAMergeOfTheTarget(t *testing.T) {
 			t.Fatalf("Prepared = %+v, want an open round 2: a merge of another branch is read", p)
 		}
 	})
+}
+
+// TestGatePrepareOpensARoundWhenTheIntentChangedSinceTheReviewedRound: a brief
+// edited after the reviewed round is an intent no reviewer read, so a clean
+// merge of the target is not carried over: publish holds the last clean round
+// to the intent it pinned (PUBLISH_UNREVIEWED_INTENT), and a carried round
+// that pinned the new brief would launder the edit.
+func TestGatePrepareOpensARoundWhenTheIntentChangedSinceTheReviewedRound(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
+	original, err := os.ReadFile(briefPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(briefPath, append(original, []byte("\nEdited after the clean round.\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.Push(fx.Ticket + ": edit brief.md after the clean round"); err != nil {
+		t.Fatal(err)
+	}
+	targetMoves(t, fx, "main1.txt")
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried != nil || p.Round != 2 {
+		t.Fatalf("Prepared = %+v, want an open round 2: the brief changed since round 1", p)
+	}
+}
+
+// TestGatePrepareOpensARoundForAPendingDecision: a decision a person made since
+// the last closed round is applied by the next round that closes. A carried
+// round applies nothing, so with one pending the gate opens a round.
+func TestGatePrepareOpensARoundForAPendingDecision(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventTriage, Ref: "r1-f1", Outcome: TriageKeep, Provenance: "person"}); err != nil {
+		t.Fatal(err)
+	}
+	targetMoves(t, fx, "main1.txt")
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried != nil || p.Round != 2 {
+		t.Fatalf("Prepared = %+v, want an open round 2: a keep is pending", p)
+	}
+}
+
+// TestReviewerLinesSayACarriedRoundWasNotReviewed: the pull request's review
+// notes word a carried round as carried over, never as reviewed by round N's
+// reviewer.
+func TestReviewerLinesSayACarriedRoundWasNotReviewed(t *testing.T) {
+	t.Parallel()
+	who := Provenance{Session: "s-rev"}
+	lines := reviewerLines([]RoundRecord{
+		{Round: 1, Scope: "full", Base: "aaaaaaa1", Head: "bbbbbbb2", Reviewer: who, Independent: IndependentYes},
+		{Round: 2, Scope: "delta", Base: "bbbbbbb2", Head: "ccccccc3", Reviewer: who, Independent: IndependentYes, CarriedFrom: 1},
+	})
+	if len(lines) != 2 || !strings.Contains(lines[0], "reviewed by") {
+		t.Fatalf("lines = %q, want round 1 reviewed by its reviewer", lines)
+	}
+	if !strings.Contains(lines[1], "Round 2") || !strings.Contains(lines[1], "carried over from round 1") || strings.Contains(lines[1], "reviewed by") {
+		t.Errorf("round 2 line = %q, want it carried over from round 1 and not reviewed by anyone", lines[1])
+	}
 }

@@ -31,13 +31,13 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	}
 	repos := make([]RoundRepo, len(r.repos))
 	for i, gr := range r.repos {
-		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, LeaseDir: gr.lease.Dir}
+		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir}
 	}
-	origin, rep, ok, err := carriedFrom(r.d.Store, r.ticket, r.n, prep)
+	origin, rep, ok, err := carriedFrom(r.d.Store, r.ticket, r.n, prep, r.intent.Source, r.intentSHA256)
 	if err != nil || !ok {
 		return GateReport{}, false, err
 	}
-	heads, targetSHA := map[string]string{}, map[string]string{}
+	heads, targetSHA, mergeTips, mergeRefs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	for i, rp := range prep.Repos {
 		heads[rp.Repo] = rp.Head
 		tip, err := gitx.RevParse(repos[i].LeaseDir, "origin/"+repos[i].Target)
@@ -45,6 +45,11 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", repos[i].Target, err))
 		}
 		targetSHA[rp.Repo] = tip
+		ref := mergeRefOf(repos[i].MergeRef, repos[i].Target)
+		mergeRefs[rp.Repo] = ref
+		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].LeaseDir, ref); err != nil {
+			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve %s: %w", ref, err))
+		}
 	}
 
 	report := GateReport{
@@ -63,7 +68,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	if r.gb.Adopted {
 		report.Branch = r.branch
 	}
-	findings := fmt.Sprintf("# Gate round %d\n\n%s\n", r.n, carriedNote(origin, prep, r.qualified, targetSHA))
+	findings := fmt.Sprintf("# Gate round %d\n\n%s\n", r.n, carriedNote(origin, r.n-1, prep, r.qualified, mergeTips, mergeRefs))
 	if err := writeCarriedRound(r.d, r.ticket, r.n, report, findings); err != nil {
 		return GateReport{}, false, err
 	}
@@ -85,7 +90,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 // round a scripted gate recorded, a hand-resolved merge and anything else. A
 // carried round names the round that was really reviewed, so a chain of them
 // all name the one.
-func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep) (origin int, rep reportYAML, ok bool, err error) {
+func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep, intentSource, intentSHA string) (origin int, rep reportYAML, ok bool, err error) {
 	if n < 2 || len(prep.Repos) == 0 {
 		return 0, reportYAML{}, false, nil
 	}
@@ -120,6 +125,13 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep) (origin
 	if round == 0 {
 		return 0, reportYAML{}, false, nil
 	}
+	// The intent the reviewed round pinned is the one this gate resolves: a
+	// brief edited since is an intent no reviewer read, and publish holds the
+	// last clean round to it (PUBLISH_UNREVIEWED_INTENT), so a carried round
+	// must not launder the edit.
+	if rep.Intent.Source != intentSource || rep.Intent.SHA256 != intentSHA {
+		return 0, reportYAML{}, false, nil
+	}
 	origin = round
 	if rep.CarriedFrom > 0 {
 		origin = rep.CarriedFrom
@@ -128,14 +140,15 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep) (origin
 }
 
 // carriedNote is the sentence findings.md carries for a carried round: whose
-// verdict it is and why it holds. targetSHA is each repo's origin/<target>
-// (RoundRepo targets are named by the caller through repos).
-func carriedNote(origin int, prep ReviewPrep, qualified bool, targetSHA map[string]string) string {
+// verdict it is and why it holds. tips and refs are, by repo, the commit and the
+// name of the ref the head merges (origin/<target>, or a stacked parent's
+// branch); prior is the round just before this one.
+func carriedNote(origin, prior int, prep ReviewPrep, qualified bool, tips, refs map[string]string) string {
 	var parts []string
 	for _, rp := range prep.Repos {
-		what := fmt.Sprintf("head %s is the head round %d reviewed", rp.Head, origin)
+		what := fmt.Sprintf("head %s is unchanged since round %d", rp.Head, prior)
 		if rp.Line == lineClean {
-			what = fmt.Sprintf("head %s merges the target (%s) and its tree equals git's own merge", rp.Head, targetSHA[rp.Repo])
+			what = fmt.Sprintf("head %s merges %s (%s) and its tree equals git's own merge", rp.Head, refs[rp.Repo], tips[rp.Repo])
 		}
 		if qualified {
 			what = rp.Repo + ": " + what
@@ -148,17 +161,28 @@ func carriedNote(origin int, prep ReviewPrep, qualified bool, targetSHA map[stri
 // carriedOver is carriedFrom and carriedNote for a launched round with nothing
 // to read: the round it carries, or 0 and no note.
 func carriedOver(in RoundInput, prep ReviewPrep) (origin int, note string, err error) {
-	origin, _, ok, err := carriedFrom(in.Store, in.Ticket, in.Round, prep)
+	origin, _, ok, err := carriedFrom(in.Store, in.Ticket, in.Round, prep, in.Intent.Source, intentSHA256(in.Intent.Source, in.IntentText))
 	if err != nil || !ok {
 		return 0, "", err
 	}
-	tips := map[string]string{}
+	tips, refs := map[string]string{}, map[string]string{}
 	for _, r := range in.repoList() {
-		if tip, terr := gitx.RevParse(r.LeaseDir, "origin/"+r.Target); terr == nil {
+		refs[r.Name] = mergeRefOf(r.MergeRef, r.Target)
+		if tip, terr := gitx.RevParse(r.LeaseDir, refs[r.Name]); terr == nil {
 			tips[r.Name] = tip
 		}
 	}
-	return origin, carriedNote(origin, prep, in.qualified(), tips), nil
+	return origin, carriedNote(origin, in.Round-1, prep, in.qualified(), tips, refs), nil
+}
+
+// mergeRefOf is the ref a merge must bring in to count as the target's
+// (classifyLine): ref when the round names one (a stacked ticket's parent
+// branch), else origin/<target>.
+func mergeRefOf(ref, target string) string {
+	if ref != "" {
+		return ref
+	}
+	return "origin/" + target
 }
 
 // reviewerOf is the reviewer a report records, the zero value for a round

@@ -189,6 +189,21 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		reviewed = pushed
 	})
 
+	step(t, "a clean merge of a branch that is not the target is refused", func(t *testing.T) {
+		other := cloneFrom(t, fx.RepoRemote)
+		run(t, other, "checkout", branch)
+		run(t, other, "checkout", "-b", "side")
+		writeAndCommit(t, other, "side.txt", "work that is not on the target", "a side branch")
+		run(t, other, "checkout", branch)
+		run(t, other, "merge", "--no-ff", "--no-edit", "side")
+		run(t, other, "push", "origin", branch)
+
+		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
+
+		// Origin's branch goes back to the reviewed head for the step after.
+		run(t, other, "push", "--force", "origin", reviewed+":refs/heads/"+branch)
+	})
+
 	step(t, "the reviewed head is shipped as it is after the target moves", func(t *testing.T) {
 		advanceTarget(t, fx)
 

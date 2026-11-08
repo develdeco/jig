@@ -1125,14 +1125,14 @@ func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, err
 // is then not always a commit: every reader of it gives it to git diff, which
 // takes a tree. A git too old to tell is an error.
 func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, err error) {
-	scope, base, _, _, err = resolveScope(st, ticket, leaseDir, repoName, target, round, head)
+	scope, base, _, _, err = resolveScope(st, ticket, leaseDir, repoName, "origin/"+target, target, round, head)
 	return scope, base, err
 }
 
 // resolveScope is resolveScopeBase and, beside them, how the head relates to
 // the head the delta starts from (kind) and that head (prior): lineOther and ""
 // for a full scope.
-func resolveScope(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, kind lineKind, prior string, err error) {
+func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
@@ -1140,7 +1140,7 @@ func resolveScope(st *store.Store, ticket, leaseDir, repoName, target string, ro
 		}
 		if prior != "" {
 			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
-				kind, ownTree, lerr := classifyLine(leaseDir, prior, head, "origin/"+target)
+				kind, ownTree, lerr := classifyLine(leaseDir, prior, head, targetRef)
 				if lerr != nil {
 					return "", "", lineOther, "", lerr
 				}
@@ -1338,8 +1338,12 @@ func commonScope(repos []ReviewedRepo, single string) string {
 // round reads it and what the gate learned of it, as RoundInput's own fields
 // are for a round over one repo.
 type RoundRepo struct {
-	Name     string
-	Target   string
+	Name   string
+	Target string
+	// MergeRef is the ref a merge must bring in to count as the target's: a
+	// stacked ticket's parent branch while the parent has not merged, "" for
+	// origin/<Target>.
+	MergeRef string
 	LeaseDir string
 	// OperatorClone is the operator's mapped clone of the repo, or "".
 	OperatorClone string
@@ -1360,6 +1364,8 @@ type RoundInput struct {
 	LeaseDir string
 	RepoName string
 	Target   string
+	// MergeRef is RoundRepo.MergeRef of the one repo.
+	MergeRef string
 	// Repos are the repos of a round in a project of several repos. When set
 	// they replace LeaseDir, RepoName, Target, OperatorClone, Manifest and
 	// OracleRuns, which describe the one repo of a round over one, and the
@@ -1437,7 +1443,7 @@ func (in RoundInput) repoList() []RoundRepo {
 		return in.Repos
 	}
 	return []RoundRepo{{
-		Name: in.RepoName, Target: in.Target, LeaseDir: in.LeaseDir,
+		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir,
 		OperatorClone: in.OperatorClone, Manifest: in.Manifest, OracleRuns: in.OracleRuns,
 	}}
 }
@@ -1587,7 +1593,7 @@ type RepoPrep struct {
 func (in RoundInput) forRepo(r RoundRepo) RoundInput {
 	one := in
 	one.Repos = nil
-	one.LeaseDir, one.RepoName, one.Target = r.LeaseDir, r.Name, r.Target
+	one.LeaseDir, one.RepoName, one.Target, one.MergeRef = r.LeaseDir, r.Name, r.Target, r.MergeRef
 	one.OperatorClone, one.Manifest, one.OracleRuns = r.OperatorClone, r.Manifest, r.OracleRuns
 	return one
 }
@@ -1651,7 +1657,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err))
 		}
-		scope, base, kind, prior, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, r.Target, in.Round, head)
+		scope, base, kind, prior, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
