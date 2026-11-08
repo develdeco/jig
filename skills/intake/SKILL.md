@@ -7,11 +7,11 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and the prompt for it; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
-Two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
+Two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess. A brief mints the ticket.
 
 ## Recall, then grill
 
-Before round one run `jig recall <the work in a few words>`. It lists open tickets and edges and names those near your words (extend or block on one; never mint twice), and brings each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
+Before round one run `jig recall <the work in a few words>`. It lists open tickets and edges and names those near your words (extend or block on one), and brings each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours; only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
 
 ## Three shapes
 
@@ -31,8 +31,8 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 - Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
 - `brief.md`: `## `-sectioned behavioral spec.
-- `slices.yaml`: one entry per slice, all strings or lists of strings: `id`, `workspace`, `goal`, `oracle`, `env` (manifest env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: a narrow, COMPLETE, demoable path. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the repo's whole suite names that manifest oracle (such as `test`) so the gate reuses its pass; a literal command is for a narrower proof. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
-- `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (approves nothing, prints each section's sha256), paste them, re-run until `valid: yes`.
+- `slices.yaml`: one entry per slice, all strings or lists of strings: `id`, `workspace`, `goal`, `oracle`, `env` (manifest env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices stay separate, first. A slice proving itself with the repo's whole suite names that manifest oracle (such as `test`) so the gate reuses its pass; a literal command is for a narrower proof. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
+- `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (hashes; no approval), paste them, re-run until `valid: yes`. A later slice is `jig slice add`, and after a brief edit `jig validate <ticket> --restamp` keeps built slices (`jig requeue --from-brief-diff` first to rebuild).
 
 ## Chart output
 
@@ -44,7 +44,7 @@ A batch spanning areas (an audit) takes a chart verdict, ordering its tickets; a
 
 The person confirmed the brief, `jig validate <ticket>` prints `valid: yes`, and every decision carries its provenance mark.
 
-Without `--check`, `valid: yes` records the approval `jig claim --unattended` requires (`provenance: agent` from your session, `person` at a terminal). Run it once the person confirmed: show the brief and ask, even if it restates the prompt. A prompt to go with your recommendations answers the round with them (each `defaulted`) and confirms for the person; otherwise ask and wait, even in a start-to-finish run. Editing `brief.md` withdraws the approval: validate again. Read its `advisories`: slices no `blocked_by` edge connects may be separate tickets; a goal near shipped work may be done.
+Without `--check`, `valid: yes` records the approval `jig claim --unattended` requires (`provenance: agent` from your session, `person` at a terminal). Run it once confirmed: show the brief and ask, even if it restates the prompt. A prompt to go with your recommendations answers the round with them (each `defaulted`) and confirms for the person; otherwise ask and wait, even in a start-to-finish run. Editing `brief.md` withdraws the approval: validate again. Read its `advisories`: slices no `blocked_by` edge connects may be separate tickets; a goal near shipped work may be done.
 
 ## Then
 
