@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -79,6 +80,20 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // write wrote survives a failed Claim: no caller ever has to clean up a
 // folder or a file edit Claim itself could not land.
 //
+// A write that fails returns its paths too: paths are meaningful whatever
+// the error is, and list every path the write created or edited so far -
+// only what it touched, because the undo restores a path that existed before
+// the claim to that commit's content and removes one that did not, so a
+// reported path the write never touched would lose a person's own
+// uncommitted edit. Claim then undoes exactly those paths (undoPaths; no
+// reset, nothing was committed) and returns the write's own error. A write
+// that fails before touching anything returns no paths and nothing is undone.
+// Every undo is best effort: it tries each step for each path and the final
+// clean, and one that does not finish returns an error naming the leftover
+// paths and how to finish by hand, which unwraps to the write's own error
+// (a failed write) or stays ID_NOT_CLAIMED (a push); IsUndoIncomplete tells
+// either shape apart through any wrapping.
+//
 // Claim holds the checkpoint lock (LockCheckpoint) for the whole of it,
 // every retry included, so no other process's Sync or Push, and no journal
 // append, runs between its commit and its undo.
@@ -112,7 +127,7 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 
 		id, paths, err := write()
 		if err != nil {
-			return "", err
+			return "", s.undoFailedWrite(err, pre, havePre, paths)
 		}
 		claimSHA, err := s.stageAndCommitPaths(paths, msg(id))
 		if err != nil {
@@ -142,7 +157,7 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 				effectiveSHA = pre
 			}
 			if resetRan, err := s.undoClaim(pre, paths); err != nil {
-				return "", undoFailedError(err, effectiveSHA, pre, resetRan)
+				return "", withLeftovers(undoFailedError(err, effectiveSHA, pre, resetRan), nil, err, s.Root)
 			}
 		}
 		if !rejected {
@@ -257,30 +272,149 @@ func foreignCommitError(foreign string) error {
 // the branch is already back at the pre-claim commit and a later, per-path
 // step failed instead (see undoFailedError).
 func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error) {
-	// The paths may hold tracker records, which this takes off the disk behind
-	// the index's back.
-	defer s.invalidateTrackerIndex()
 	if _, err := gitx.Run(s.Root, "reset", "--soft", sha); err != nil {
 		return false, err
 	}
-	for _, p := range paths {
-		existed, err := gitx.PathExistsAtRev(s.Root, sha, p)
-		if err != nil {
-			return true, err
-		}
-		if existed {
-			if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
-				return true, err
+	return true, s.undoPaths(sha, paths)
+}
+
+// undoPaths puts paths back as they were at sha: a path that existed there is
+// restored (index and working tree) to that commit's content, one that did not
+// is taken out of the index (`rm -r --cached --ignore-unmatch`, so a path
+// nothing staged is no error) and then cleaned off the disk with its ignored
+// files (-x), such as a ticket folder's .lock sidecar. On an unborn branch (sha
+// is "") only the clean runs. It is best effort: every step for every path and
+// the final clean are tried even after one fails, and the errors come back
+// joined, as an *undoPathsError naming the paths whose own step failed.
+// Called with no paths it does nothing - `clean -fdx --` with no pathspec would
+// clean the whole store.
+func (s *Store) undoPaths(sha string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	// The paths may hold tracker records, which this takes off the disk behind
+	// the index's back.
+	defer s.invalidateTrackerIndex()
+	var errs []error
+	var leftovers []string
+	fail := func(p string, err error) {
+		errs = append(errs, err)
+		leftovers = append(leftovers, p)
+	}
+	if sha != "" {
+		for _, p := range paths {
+			existed, err := gitx.PathExistsAtRev(s.Root, sha, p)
+			if err != nil {
+				fail(p, err)
+				continue
 			}
-		} else {
-			if _, err := gitx.Run(s.Root, "rm", "-r", "--cached", "--", p); err != nil {
-				return true, err
+			if existed {
+				if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
+					fail(p, err)
+				}
+			} else if _, err := gitx.Run(s.Root, "rm", "-r", "--cached", "--ignore-unmatch", "--", p); err != nil {
+				fail(p, err)
 			}
 		}
 	}
 	args := append([]string{"clean", "-fdx", "--"}, paths...)
-	_, err = gitx.Run(s.Root, args...)
-	return true, err
+	if _, err := gitx.Run(s.Root, args...); err != nil {
+		errs = append(errs, err)
+		for _, p := range paths {
+			if !slices.Contains(leftovers, p) {
+				leftovers = append(leftovers, p)
+			}
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return &undoPathsError{err: errors.Join(errs...), leftovers: leftovers}
+}
+
+// undoPathsError is undoPaths' failure: the joined step errors, and the
+// paths whose own step failed.
+type undoPathsError struct {
+	err       error
+	leftovers []string
+}
+
+func (e *undoPathsError) Error() string { return e.err.Error() }
+func (e *undoPathsError) Unwrap() error { return e.err }
+
+// undoIncompleteError is what Claim returns when an undo did not finish. It
+// renders as ae (an *axi.Error, found by errors.As) and, for a failed write,
+// also unwraps to the write's own error (cause), so a caller's errors.Is and
+// errors.As on its own sentinel keep working. leftovers are the paths the
+// undo could not clear.
+type undoIncompleteError struct {
+	ae        *axi.Error
+	cause     error
+	leftovers []string
+}
+
+func (e *undoIncompleteError) Error() string { return e.ae.Msg }
+func (e *undoIncompleteError) Unwrap() []error {
+	if e.cause == nil {
+		return []error{e.ae}
+	}
+	return []error{e.ae, e.cause}
+}
+
+// IsUndoIncomplete reports whether err (through any wrapping) is a Claim
+// refusal whose undo did not finish: some path it wrote may still sit in the
+// store, uncommitted, and the error names which.
+func IsUndoIncomplete(err error) bool {
+	var e *undoIncompleteError
+	return errors.As(err, &e)
+}
+
+// withLeftovers wraps ae, the report of an undo that did not finish, as an
+// undoIncompleteError. The leftover paths come from undoErr (an
+// *undoPathsError); cause, when non-nil, is the write's own error. ae gains
+// the leftover list and a help line to finish by hand.
+func withLeftovers(ae *axi.Error, cause, undoErr error, root string) error {
+	out := &axi.Error{Msg: ae.Msg, Code: ae.Code, Help: slices.Clone(ae.Help)}
+	var leftovers []string
+	var upe *undoPathsError
+	if errors.As(undoErr, &upe) {
+		leftovers = upe.leftovers
+	}
+	if len(leftovers) > 0 {
+		list := strings.Join(leftovers, ", ")
+		out.Msg += fmt.Sprintf(" (left in the store: %s)", list)
+		out.Help = append(out.Help, fmt.Sprintf("Finish by hand in %s once nothing holds %s: `git restore --source=HEAD --staged --worktree -- <path>` for one the store already tracked, otherwise `git rm -r --cached --ignore-unmatch -- <path>` and `git clean -fdx -- <path>`.", root, list))
+	}
+	return &undoIncompleteError{ae: out, cause: cause, leftovers: leftovers}
+}
+
+// undoFailedWrite is Claim's answer to a write that returned err: write's
+// paths are meaningful on error and list only what it touched, so exactly
+// those are undone (nothing was committed, so there is no reset), and err comes
+// back as it was. With no paths nothing runs. An undo that does not finish
+// returns an error that unwraps to err and names what is left
+// (IsUndoIncomplete).
+func (s *Store) undoFailedWrite(err error, pre string, havePre bool, paths []string) error {
+	if len(paths) == 0 {
+		return err
+	}
+	if !havePre {
+		pre = ""
+	}
+	uerr := s.undoPaths(pre, paths)
+	if uerr == nil {
+		return err
+	}
+	ae := &axi.Error{
+		Msg:  fmt.Sprintf("%v; undoing what the write left behind did not finish: %v", err, uerr),
+		Code: idNotClaimedCode,
+	}
+	var orig *axi.Error
+	if errors.As(err, &orig) {
+		ae.Code = orig.Code
+		ae.Help = slices.Clone(orig.Help)
+	}
+	return withLeftovers(ae, err, uerr, s.Root)
 }
 
 // stageAndCommitPaths stages exactly paths (never -A) and, when anything of
@@ -356,7 +490,7 @@ func idNotClaimedError(cause error) error {
 //     commit".
 //   - resetRan, committed: undoClaim's documented happy path - the reset
 //     already moved claimSHA off the branch before a later step failed.
-func undoFailedError(cause error, claimSHA, pre string, resetRan bool) error {
+func undoFailedError(cause error, claimSHA, pre string, resetRan bool) *axi.Error {
 	if claimSHA == "" {
 		claimSHA = "unknown"
 	}
