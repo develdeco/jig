@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -229,12 +230,23 @@ var hookOnlyEnv = []string{
 	"GIT_INDEX_FILE", "GIT_PREFIX", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
 }
 
-// dropHookEnv removes hookOnlyEnv from this process, so the verification the
-// hook starts (and every other child) gets the environment a person's own
-// commands get.
+// dropHookEnv removes hookOnlyEnv, and the command-line config git exports for
+// a commit made with `git -c` or GIT_CONFIG_COUNT (GIT_CONFIG_PARAMETERS,
+// GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n), from this process,
+// so the verification the hook starts (and every other child) gets the
+// environment a person's own commands get.
 func dropHookEnv(e env) {
 	for _, name := range hookOnlyEnv {
 		e.unsetenv(name)
+	}
+	e.unsetenv("GIT_CONFIG_PARAMETERS")
+	e.unsetenv("GIT_CONFIG_COUNT")
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		upper := strings.ToUpper(name)
+		if strings.HasPrefix(upper, "GIT_CONFIG_KEY_") || strings.HasPrefix(upper, "GIT_CONFIG_VALUE_") {
+			e.unsetenv(name)
+		}
 	}
 }
 
