@@ -1,12 +1,14 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/clonebehind"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/project"
 )
 
 // cloneFx is a marked project whose clone has a bare origin and a second
@@ -126,5 +128,43 @@ func TestDoctorSaysWhenItCannotTell(t *testing.T) {
 	out, _ = runMain(t, e, "", "doctor")
 	if !strings.Contains(out, "it has no origin remote") || strings.Contains(out, "fetch origin") {
 		t.Errorf("a clone with no origin remote:\n%s", out)
+	}
+}
+
+// TestDoctorNamesTheCloneAsTheMachineMapSpellsIt: git reports a clone by its
+// resolved path, while the map (and so jig here) may hold a symlinked one; the
+// note must carry the map's, from the clone and from a linked worktree.
+func TestDoctorNamesTheCloneAsTheMachineMapSpellsIt(t *testing.T) {
+	t.Parallel()
+	ie := newInstallerEnv(t)
+	f := newCloneFx(t, ie, "project: demo\nkind: project\n")
+	link := filepath.Join(ie.root, "via-link")
+	if err := os.Symlink(f.repo, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if err := project.UpdateMachine(ie.jigHome, func(m map[string]project.MachineProject) error {
+		m["demo"] = project.MachineProject{Clones: map[string]string{"app": link}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(ie.root, "app.wt")
+	f.git(f.repo, "worktree", "add", "-q", "-b", "feat", worktree)
+
+	d := &doctorCtx{jigHome: ie.jigHome}
+	for name, dir := range map[string]string{"the clone": f.repo, "the symlink": link, "a linked worktree": worktree} {
+		if got := d.cloneName(dir); got != link {
+			t.Errorf("cloneName(%s) = %q, want the map's %q", name, got, link)
+		}
+	}
+
+	f.originMoves(t, "main", "x.txt")
+	out, _ := runMain(t, ie.env.inDir(worktree), "", "doctor")
+	if want := "git -C " + clonebehind.Quote(link) + " pull --ff-only origin main"; !strings.Contains(out, want) {
+		t.Errorf("doctor from a worktree:\n%s\nwant the map's spelling %q", out, want)
+	}
+
+	if got := (&doctorCtx{jigHome: ie.jigHome}).cloneName(ie.root); !gitx.SameDir(got, ie.root) {
+		t.Errorf("an unmapped dir = %q", got)
 	}
 }
