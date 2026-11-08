@@ -7,11 +7,11 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and its prompt; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
-Two destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
+Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
 
 ## Recall, then grill
 
-Before round one run `jig recall <the work in a few words>`. It lists open tickets and edges and names those near your words (extend or block on one; never mint twice), and brings each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
+Before round one run `jig recall <the work, briefly>`. It lists open tickets and edges, naming those near your words (extend or block on one; never mint twice), and each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
 
 ## Three shapes
 
@@ -31,14 +31,14 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 - Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
 - `brief.md`: `## `-sectioned behavioral spec.
-- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the repo's whole suite names that manifest oracle (such as `test`) so the gate reuses its pass; a literal command is for a narrower one. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
-- `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, validate with `--restamp`.
+- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (`test`) so the gate reuses its pass; a literal command, a narrower one. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
+- `from_brief` hashes: write `slices.yaml`, run `jig validate <ticket> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, `jig validate <ticket> --restamp`, or `jig requeue --from-brief-diff` to rebuild.
 
 ## Chart output
 
-Make a chart with `jig chart new <name> --title "<t>"`, not by hand. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, so a re-run makes only new ones.
+Make a chart with `jig chart new <name> --title "<t>"`, not by hand. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, a re-run makes only new ones.
 
-A batch spanning areas (an audit) takes a chart verdict, ordering its tickets; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs the order.
+A batch spanning areas takes a chart verdict, ordering its tickets; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
 
 ## Done when
 
