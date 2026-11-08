@@ -40,6 +40,13 @@ type Line struct {
 	// that was up while it ran ("" for none): what the gate must match to
 	// reuse the run (ADR 0021).
 	Command string `json:"command,omitempty"`
+	// ReusedFrom and Ran mark an oracle line that passed on a light delta
+	// (the manifest's light rule): Ran is the light command that actually
+	// ran in the place of Command, and ReusedFrom the commit of the full run
+	// the pass stands on. A pass that was itself reused names its origin, so
+	// the chain does not grow.
+	ReusedFrom string `json:"reused_from,omitempty"`
+	Ran        string `json:"ran,omitempty"`
 	// Oracle is a gate-oracle line's manifest oracle name: the oracle the gate
 	// ran itself, with Command at Commit (the head it reviewed).
 	Oracle string `json:"oracle,omitempty"`
@@ -383,10 +390,12 @@ func GreenClaims(lines []Line) []string {
 // LastOracleSeconds is the wall time of the latest oracle run of command,
 // with env class env up ("" for none), in lines that recorded one, or 0
 // when none did. The same command can take very different times with and
-// without an env class, so both must match.
+// without an env class, so both must match. A light line (Ran set) carries
+// the slice's command with the light oracle's time, so it is not a run of
+// command and is skipped.
 func LastOracleSeconds(lines []Line, command, env string) int {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := lines[i]; l.Event == "oracle" && l.Command == command && l.Env == env && l.Seconds > 0 {
+		if l := lines[i]; l.Event == "oracle" && l.Command == command && l.Env == env && l.Seconds > 0 && l.Ran == "" {
 			return l.Seconds
 		}
 	}

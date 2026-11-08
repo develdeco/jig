@@ -43,6 +43,101 @@ type Manifest struct {
 	// (OracleLimit gives the default). It is a wedge guard, never a cost
 	// cap: a run past it is killed and counts as failed.
 	Timeout time.Duration `yaml:"timeout"`
+	// Light declares the delta that reuses a whole-suite pass; the zero value
+	// declares none, so a repo that says nothing never reuses.
+	Light Light `yaml:"light,omitempty"`
+}
+
+// Light is the rule for a delta that cannot change what the slice's oracle
+// proves: Paths are the patterns a changed file must match (in a pattern "*"
+// stops at "/" and a "**" segment crosses any number of directories, so
+// "docs/**/*.md" covers "docs/x.md" and "docs/adr/y.md"), and Oracle the
+// command that runs in the oracle's place on such a delta. jig holds only the
+// mechanism; which files are safe is a fact of the repo whose tests read them.
+type Light struct {
+	Paths  []string `yaml:"paths"`
+	Oracle string   `yaml:"oracle"`
+}
+
+// Declared reports whether the manifest declared a light rule.
+func (l Light) Declared() bool { return len(l.Paths) > 0 && strings.TrimSpace(l.Oracle) != "" }
+
+// Matches reports whether files, repo-relative with forward slashes, are a
+// light delta: there is at least one, and every one matches a pattern. A
+// delta with no file is not light (nothing to say it is safe), and neither is
+// any delta when no light rule is declared.
+func (l Light) Matches(files []string) bool {
+	if !l.Declared() || len(files) == 0 {
+		return false
+	}
+	for _, f := range files {
+		if !l.matchesFile(f) {
+			return false
+		}
+	}
+	return true
+}
+
+func (l Light) matchesFile(file string) bool {
+	segs := strings.Split(file, "/")
+	for _, p := range l.Paths {
+		if matchSegments(strings.Split(p, "/"), segs) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchSegments matches a pattern's segments against a path's: a "**"
+// segment takes zero or more path segments, any other is a path.Match
+// pattern for exactly one.
+func matchSegments(pat, segs []string) bool {
+	if len(pat) == 0 {
+		return len(segs) == 0
+	}
+	if pat[0] == "**" {
+		for i := 0; i <= len(segs); i++ {
+			if matchSegments(pat[1:], segs[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(segs) == 0 {
+		return false
+	}
+	if ok, _ := path.Match(pat[0], segs[0]); !ok {
+		return false
+	}
+	return matchSegments(pat[1:], segs[1:])
+}
+
+// validateLight checks a declared light rule: both keys, and patterns that
+// are relative, forward-slashed, inside the repo and valid for path.Match.
+func validateLight(l Light) error {
+	if len(l.Paths) == 0 || strings.TrimSpace(l.Oracle) == "" {
+		return fmt.Errorf("light needs both paths and oracle")
+	}
+	for _, p := range l.Paths {
+		if p == "" {
+			return fmt.Errorf("light path is empty")
+		}
+		if strings.HasPrefix(p, "/") || (len(p) > 1 && p[1] == ':') {
+			return fmt.Errorf("light path %q is absolute", p)
+		}
+		if strings.Contains(p, "\\") {
+			return fmt.Errorf("light path %q contains backslashes; use forward slashes", p)
+		}
+		for _, seg := range strings.Split(p, "/") {
+			if seg == ".." {
+				return fmt.Errorf("light path %q escapes the repo", p)
+			}
+			if _, err := path.Match(seg, "x"); err != nil {
+				return fmt.Errorf("light path %q is not a valid pattern: %w", p, err)
+			}
+		}
+	}
+	return nil
 }
 
 // DefaultOracleLimit is how long one oracle run may take when the manifest
@@ -123,6 +218,12 @@ func Resolve(repoDir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("manifest: timeout %s is negative", declared.Timeout)
 	}
 	m.Timeout = declared.Timeout
+	if len(declared.Light.Paths) > 0 || declared.Light.Oracle != "" {
+		if err := validateLight(declared.Light); err != nil {
+			return Manifest{}, fmt.Errorf("manifest: validate light: %w", err)
+		}
+		m.Light = declared.Light
+	}
 
 	return m, nil
 }

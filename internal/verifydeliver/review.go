@@ -120,6 +120,11 @@ type OracleRun struct {
 	// reused a pass jig recorded at a slice's green on a commit whose tree is
 	// this head's tree (ADR 0021): that commit.
 	ReusedFrom string `json:"reused_from,omitempty"`
+	// Ran is set with ReusedFrom when the delta from the reused pass to this
+	// head is light (the manifest's light rule): the light command that ran
+	// in the place of the suite, whose pass ReusedFrom names (the origin
+	// full run, not the commit of a pass that was itself reused).
+	Ran string `json:"ran,omitempty"`
 	// Seconds is the wall time of the run the entry stands for, rounded up to
 	// whole seconds: the gate's own run, or for a reused pass the green run it
 	// reused (0 when that run recorded none). A reviewer picks a probe's

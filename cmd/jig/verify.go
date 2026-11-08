@@ -388,6 +388,7 @@ type verifyReport struct {
 	summary, signature        string
 	log                       string
 	pushErr, warning          string
+	light                     string
 }
 
 // blocks renders the report as the verify block, a warning block when there
@@ -410,7 +411,7 @@ func (r verifyReport) blocks(help string) []string {
 	if r.seconds > 0 {
 		kv = append(kv, [2]string{"seconds", strconv.Itoa(r.seconds)})
 	}
-	for _, f := range [][2]string{{"command", r.command}, {"env", r.env}, {"summary", r.summary}, {"signature", r.signature}, {"log", r.log}} {
+	for _, f := range [][2]string{{"pass", r.light}, {"command", r.command}, {"env", r.env}, {"summary", r.summary}, {"signature", r.signature}, {"log", r.log}} {
 		if f[1] != "" {
 			kv = append(kv, f)
 		}
@@ -442,7 +443,7 @@ func verifyReportOf(res verify.Result, log string) verifyReport {
 	return verifyReport{
 		ticket: res.Ticket, slice: res.Slice, sha: res.SHA, state: res.State, attempt: res.Attempt, seconds: res.Seconds,
 		existing: res.Existing, command: res.Command, env: res.Env, summary: res.Summary, signature: res.Signature,
-		log: log, pushErr: res.PushErr,
+		log: log, pushErr: res.PushErr, light: lightWords(res.Ran, res.ReusedFrom),
 	}
 }
 
@@ -567,4 +568,10 @@ func waitForVerification(e env, d verify.Deps, res verify.Result) verify.Result 
 		case <-time.After(verifyPoll):
 		}
 	}
+}
+
+// lightWords is how a light pass is told: "lint only, reusing <sha>", "" when
+// the verification ran the slice's own oracle.
+func lightWords(ran, reusedFrom string) string {
+	return journal.Verification{State: journal.VerifyPass, Ran: ran, ReusedFrom: reusedFrom}.LightWords()
 }

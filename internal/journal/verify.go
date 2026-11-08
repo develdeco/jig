@@ -42,6 +42,24 @@ type Verification struct {
 	// Session and Agent are who asked for the verification.
 	Session string
 	Agent   string
+	// Ran and ReusedFrom are set on a pass whose delta was light: the light
+	// command that ran in the place of the slice's oracle, and the commit of
+	// the full run the pass stands on.
+	Ran, ReusedFrom string
+}
+
+// LightWords says how a light pass stood: "lint only, reusing <sha>" with the
+// origin run's sha shortened to 12, and "" for a verification that was not a
+// light pass.
+func (v Verification) LightWords() string {
+	if v.State != VerifyPass || v.Ran == "" || v.ReusedFrom == "" {
+		return ""
+	}
+	origin := v.ReusedFrom
+	if len(origin) > 12 {
+		origin = origin[:12]
+	}
+	return "lint only, reusing " + origin
 }
 
 // verificationLine reports the state a line puts its (commit, slice) in, and
@@ -87,12 +105,12 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 		if !ok {
 			continue
 		}
-		next := Verification{State: state, Attempt: l.Attempt, TS: l.TS, Session: l.Session, Agent: l.Agent}
+		next := Verification{State: state, Attempt: l.Attempt, TS: l.TS, Session: l.Session, Agent: l.Agent, Ran: l.Ran, ReusedFrom: l.ReusedFrom}
 		switch {
 		case l.Event == EventVerified && v.State == VerifyPass && v.Attempt == l.Attempt:
 			// The verified line that follows its own attempt's oracle line
 			// carries no time of its own: keep the oracle line's.
-			next.Seconds = v.Seconds
+			next.Seconds, next.Ran, next.ReusedFrom = v.Seconds, v.Ran, v.ReusedFrom
 		case state == VerifyPending:
 			// A pending line's summary is the commit's subject, which says
 			// what is verified, not how a run came out.
