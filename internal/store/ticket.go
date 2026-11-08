@@ -296,9 +296,10 @@ func writeTicketFile(path string, t Ticket) error {
 // WriteTicketBranch sets <ticket>/ticket.yaml's branch to branch, leaving
 // any recorded title and blockers untouched, and creating the record when
 // the ticket has none. With SetTicketRank it is an update of a record that
-// already exists: a ticket's title and blockers are written once, whole, by
-// CreateTicketRecord when the ticket is minted, and nothing changes them
-// afterwards. A ticket records a branch when it adopts one (`jig gate
+// already exists: a ticket's title and blockers are written whole by
+// CreateTicketRecord when the ticket is minted, its title is never changed
+// afterwards, and its blockers change only through SetTicketDep,
+// RemoveTicketDep and ClearTicketDeps (`jig depend`). A ticket records a branch when it adopts one (`jig gate
 // --branch`) or when a session claims a slice on a branch no ticket's id
 // leads, so a recorded branch is an adopted one; CheckAdoptableBranch is the
 // check a name passes before it is written, since this does none.
@@ -333,6 +334,44 @@ func (s *Store) SetTicketRank(ticket string, rank *int) error {
 		}
 	}
 	return s.mutateTicket(ticket, func(t *Ticket) { t.Rank = rank })
+}
+
+// SetTicketDep records that ticket waits for parent with the given kind in
+// <ticket>/ticket.yaml's blocked_by: it adds the entry, or replaces the kind
+// of the entry parent already has (one entry per parent, in the place it
+// held), leaving the rest of the record untouched. It writes the same
+// {ticket, kind} shape `jig graduate` writes and only the file: `jig depend`
+// commits it through Claim.
+func (s *Store) SetTicketDep(ticket, parent, kind string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		for i := range t.BlockedBy {
+			if t.BlockedBy[i].Ticket == parent {
+				t.BlockedBy[i].Kind = kind
+				return
+			}
+		}
+		t.BlockedBy = append(t.BlockedBy, TicketBlockedBy{Ticket: parent, Kind: kind})
+	})
+}
+
+// RemoveTicketDep removes parent's entry from <ticket>/ticket.yaml's
+// blocked_by, leaving the rest of the record untouched.
+func (s *Store) RemoveTicketDep(ticket, parent string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		var kept []TicketBlockedBy
+		for _, b := range t.BlockedBy {
+			if b.Ticket != parent {
+				kept = append(kept, b)
+			}
+		}
+		t.BlockedBy = kept
+	})
+}
+
+// ClearTicketDeps removes every entry of <ticket>/ticket.yaml's blocked_by,
+// leaving the rest of the record untouched.
+func (s *Store) ClearTicketDeps(ticket string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) { t.BlockedBy = nil })
 }
 
 // SetMigratedTicket rewrites ticket's whole ticket.yaml as `jig store

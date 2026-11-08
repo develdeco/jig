@@ -29,7 +29,11 @@ const (
 	lineResolved
 )
 
-// classifyLine says how head relates to reviewed in the repository dir. ownTree
+// classifyLine says how head relates to reviewed in the repository dir. A merge
+// counts only when it brings in the target (GATE-16): its second parent is
+// reachable from targetRef (origin/<target>, or the branch of the parent a
+// stacked ticket goes into); a merge of any other branch is lineOther, and the
+// reviewer reads what it brought. ownTree
 // is, for lineResolved, git's own merge of the tip's parents. A git failure (an
 // object dir lacks, say) or an empty dir is lineOther with no error, so a refusal
 // stays what it was; only a git too old to merge without a work tree
@@ -38,7 +42,7 @@ const (
 // before git is asked to merge anything: only a line that could be reviewed
 // through merges reaches git's merge, and a git too old to make it is an error
 // for that line alone.
-func classifyLine(dir, reviewed, head string) (kind lineKind, ownTree string, err error) {
+func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree string, err error) {
 	if reviewed != "" && head == reviewed {
 		return lineSame, "", nil
 	}
@@ -51,6 +55,12 @@ func classifyLine(dir, reviewed, head string) (kind lineKind, ownTree string, er
 	}
 	for _, c := range line {
 		if len(c.Parents) != 2 {
+			return lineOther, "", nil
+		}
+		if targetRef == "" {
+			return lineOther, "", nil
+		}
+		if in, aerr := gitx.IsAncestor(dir, c.Parents[1], targetRef); aerr != nil || !in {
 			return lineOther, "", nil
 		}
 	}
@@ -85,9 +95,10 @@ func tooOld(err error) bool {
 }
 
 // headReviewed says head is reviewed through the head a gate round reviewed:
-// it is that head, or only merges git itself would have made lie between them.
-func headReviewed(dir, reviewed, head string) (bool, error) {
-	kind, _, err := classifyLine(dir, reviewed, head)
+// it is that head, or only merges of targetRef git itself would have made lie
+// between them.
+func headReviewed(dir, reviewed, head, targetRef string) (bool, error) {
+	kind, _, err := classifyLine(dir, reviewed, head, targetRef)
 	if err != nil {
 		return false, err
 	}

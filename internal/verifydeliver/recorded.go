@@ -129,6 +129,11 @@ type Prepared struct {
 	Opened       time.Time
 	// Reviewer is what the reviewer told jig of itself, if it did.
 	Reviewer Provenance
+	// Carried is set when no round was left open: the head only merged the
+	// target into the head a reviewer read, so the gate recorded a clean round
+	// that carries that verdict over (GATE-16), and this is its report. The
+	// other fields hold only the ticket, the round and the branch.
+	Carried *GateReport
 	// Request is the review.json at RequestPath.
 	Request ReviewRequest
 	// RequestPath is the reviewer's copy of the request, under the jig home:
@@ -311,6 +316,17 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	prep, err := PrepareReviewRequest(in)
 	if err != nil {
 		return Prepared{}, err
+	}
+	if prep.Empty {
+		// Nothing to read: the head only merged the target into the head a
+		// reviewer read (GATE-16). The oracles have run; the verdict carries.
+		report, carried, err := run.carryOver(prep)
+		if err != nil {
+			return Prepared{}, err
+		}
+		if carried {
+			return Prepared{Ticket: run.ticket, Round: run.n, Branch: run.branch, Carried: &report}, nil
+		}
 	}
 
 	prev, hadPrev, err := readOpenFile(d.Store, run.ticket, run.n)

@@ -762,7 +762,8 @@ func TestResolveScopeBaseAfterAMerge(t *testing.T) {
 		run("switch", "main")
 		writeReviewFile(t, dir, "target-a.go", "a")
 		writeReviewFile(t, dir, "target-b.go", "b")
-		commitReviewLease(t, dir, "the target moves")
+		moved := commitReviewLease(t, dir, "the target moves")
+		run("update-ref", "refs/remotes/origin/main", moved)
 		run("switch", "work")
 		return dir, st, run, round1
 	}

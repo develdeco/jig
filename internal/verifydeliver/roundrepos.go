@@ -32,6 +32,9 @@ type gateRepo struct {
 	repo   project.Repo
 	name   string
 	target string
+	// mergeRef is the ref a merge must bring in to count as the target's
+	// (classifyLine), "" for origin/<target>: a stacked ticket's parent branch.
+	mergeRef string
 	// slices are the ticket's slices that build in the repo, fix slices
 	// included.
 	slices []store.Slice

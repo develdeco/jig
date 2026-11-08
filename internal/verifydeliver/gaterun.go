@@ -143,6 +143,20 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 		return r, err
 	}
 	r.repos = repos
+	// A ticket stacked on another goes into the parent's branch where they
+	// share a repo (as publish reads it): a merge of that branch is the one
+	// that brings in the target.
+	if d.Stack != nil {
+		plan, err := d.Stack(ticket)
+		if err != nil {
+			return r, fmt.Errorf("verifydeliver: gate: read what %s is stacked on: %w", ticket, err)
+		}
+		for _, gr := range repos {
+			if sr, ok := plan.In(gr.name); ok && sr.Shared() && sr.PRTarget != "" {
+				gr.mergeRef = "origin/" + sr.PRTarget
+			}
+		}
+	}
 	// Resolved once: every lease and every copy of the branch name this one
 	// branch. The ticket's own record names it, or --branch adopts one
 	// (resolveGateBranch); an adoption is recorded further down, once every
@@ -293,13 +307,13 @@ func (r *gateRun) roundInput() RoundInput {
 	}
 	if !r.qualified {
 		gr := r.repos[0]
-		in.LeaseDir, in.RepoName, in.Target = gr.lease.Dir, gr.name, gr.target
+		in.LeaseDir, in.RepoName, in.Target, in.MergeRef = gr.lease.Dir, gr.name, gr.target, gr.mergeRef
 		in.OperatorClone, in.Manifest, in.OracleRuns = operatorClone(r.d, gr.name), gr.man, gr.oracleRuns
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
-			Name: gr.name, Target: gr.target, LeaseDir: gr.lease.Dir,
+			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir,
 			OperatorClone: operatorClone(r.d, gr.name), Manifest: gr.man, OracleRuns: gr.oracleRuns,
 		})
 	}
@@ -541,6 +555,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			}
 		}
 		report.Scope = round.Review.scope()
+		report.CarriedFrom = round.Carried
 		// Findings and NeedsHuman are sorted by risk, high first, then id
 		// (sortByRiskThenID, the same helper routing sorts the human seam
 		// with): "always shown sorted by risk, high first" applies to every
@@ -573,6 +588,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 		line := journal.Line{Event: event, Effort: firstNonEmpty(round.Review.Effort, info.Effort), Model: info.Model, Attempt: n}
 		line.Session, line.Agent = info.Reviewer.Session, info.Reviewer.Agent
+		line.Carried = round.Carried
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return GateReport{}, fmt.Errorf("verifydeliver: gate: journal %s: %w", event, err)
 		}
@@ -603,7 +619,11 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 	}
 
-	if err := d.Store.Push(fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)); err != nil {
+	pushed := fmt.Sprintf("%s: gate round %d %s", ticket, n, report.Verdict)
+	if report.CarriedFrom > 0 {
+		pushed += fmt.Sprintf(" (carried over from round %d)", report.CarriedFrom)
+	}
+	if err := d.Store.Push(pushed); err != nil {
 		return GateReport{}, fmt.Errorf("verifydeliver: gate: push store: %w", err)
 	}
 	return report, nil

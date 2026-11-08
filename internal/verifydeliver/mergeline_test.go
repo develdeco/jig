@@ -34,6 +34,7 @@ func newLineRepo(t *testing.T) *lineRepo {
 	r.write("shared.txt", "one\ntwo\nthree\n")
 	r.git("add", "-A")
 	r.git("commit", "-m", "seed")
+	r.git("update-ref", "refs/remotes/origin/main", "HEAD")
 	r.git("switch", "-c", "work")
 	return r
 }
@@ -72,6 +73,7 @@ func (r *lineRepo) onMain(name, body string) string {
 	r.t.Helper()
 	r.git("switch", "main")
 	sha := r.commit(name, body)
+	r.git("update-ref", "refs/remotes/origin/main", sha)
 	r.git("switch", "work")
 	return sha
 }
@@ -173,7 +175,41 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 	r.git("merge", "--no-ff", "--no-edit", "main", side)
 	octopus := r.git("rev-parse", "HEAD")
 	cases = append(cases, lineCase{name: "an octopus", reviewed: after, head: octopus, kind: lineOther})
+
+	// A merge that does not bring in the target (GATE-16): a clean merge of an
+	// unrelated branch, then a hand-resolved one, are the reviewer's to read.
+	r.git("switch", "-c", "unrelated", seed)
+	r.commit("unrelated.txt", "work that is not on the target\n")
+	r.git("switch", "work")
+	r.git("merge", "--no-ff", "--no-edit", "unrelated")
+	unrelated := r.git("rev-parse", "HEAD")
+	cases = append(cases, lineCase{name: "a clean merge of an unrelated branch", reviewed: octopus, head: unrelated, kind: lineOther})
+	r.git("reset", "--hard", octopus)
+	r.git("merge", "--no-ff", "--no-commit", "unrelated")
+	r.write("shared.txt", "one\ntwo\nthree\nan unrelated hand edit\n")
+	r.git("add", "-A")
+	r.git("commit", "-m", "merge unrelated, by hand")
+	unrelatedResolved := r.git("rev-parse", "HEAD")
+	cases = append(cases, lineCase{name: "a hand-resolved merge of an unrelated branch", reviewed: octopus, head: unrelatedResolved, kind: lineOther})
 	return r.dir, cases
+}
+
+// TestClassifyLineNeedsTheTarget: a clean merge of the target is clean only
+// against a ref that holds the merged commit; with no ref, or one that does not,
+// it is lineOther.
+func TestClassifyLineNeedsTheTarget(t *testing.T) {
+	t.Parallel()
+	r := newLineRepo(t)
+	reviewed := r.commit("work.txt", "the work\n")
+	r.onMain("main1.txt", "from main\n")
+	merged := r.merge()
+	r.git("branch", "parent", reviewed)
+	for ref, want := range map[string]lineKind{"main": lineClean, "": lineOther, "parent": lineOther, "missing": lineOther} {
+		kind, _, err := classifyLine(r.dir, reviewed, merged, ref)
+		if err != nil || kind != want {
+			t.Errorf("target %q: classifyLine = %d, %v, want %d", ref, kind, err, want)
+		}
+	}
 }
 
 // TestClassifyLine: the table over a real repository - the same head, merges
@@ -182,7 +218,7 @@ func TestClassifyLine(t *testing.T) {
 	t.Parallel()
 	dir, cases := lineCases(t)
 	for _, c := range cases {
-		kind, own, err := classifyLine(dir, c.reviewed, c.head)
+		kind, own, err := classifyLine(dir, c.reviewed, c.head, "main")
 		if err != nil {
 			t.Errorf("%s: %v", c.name, err)
 			continue
@@ -226,7 +262,7 @@ func TestClassifyLineGivesTheRefusalItHadWhenGitCannotTell(t *testing.T) {
 		"a head the directory lacks":    {dir, reviewed, stray, lineOther},
 		"nothing reviewed":              {dir, "", head, lineOther},
 	} {
-		kind, own, err := classifyLine(c.dir, c.reviewed, c.head)
+		kind, own, err := classifyLine(c.dir, c.reviewed, c.head, "main")
 		if err != nil || kind != c.kind || own != "" {
 			t.Errorf("%s: classifyLine = %d, %q, %v, want %d with no error", name, kind, own, err, c.kind)
 		}
@@ -294,7 +330,7 @@ func TestClassifyLineOldGitHelper(t *testing.T) {
 	_, _, err := gitx.MergeTree(dir, reviewed, reviewed)
 	t.Logf("merge-tree: %s", code(err))
 	for i, head := range heads {
-		kind, own, err := classifyLine(dir, reviewed, head)
+		kind, own, err := classifyLine(dir, reviewed, head, "main")
 		t.Logf("head[%d]: kind=%d own=%q err=%s", i, kind, own, code(err))
 	}
 }
@@ -344,7 +380,7 @@ func TestHeadReviewedThroughMerges(t *testing.T) {
 	t.Parallel()
 	dir, cases := lineCases(t)
 	for _, c := range cases {
-		got, err := headReviewed(dir, c.reviewed, c.head)
+		got, err := headReviewed(dir, c.reviewed, c.head, "main")
 		if err != nil {
 			t.Errorf("%s: %v", c.name, err)
 			continue
@@ -353,7 +389,7 @@ func TestHeadReviewedThroughMerges(t *testing.T) {
 			t.Errorf("%s: headReviewed = %v, want %v", c.name, got, want)
 		}
 	}
-	if ok, err := headReviewed("", cases[0].reviewed, cases[3].head); ok || err != nil {
+	if ok, err := headReviewed("", cases[0].reviewed, cases[3].head, "main"); ok || err != nil {
 		t.Errorf("with no directory to ask: %v, %v, want a plain no", ok, err)
 	}
 }
@@ -368,7 +404,7 @@ func TestCheckBodyHeadThroughMerges(t *testing.T) {
 	reviewed := r.commit("work.txt", "the work\n")
 	d := Deps{Machine: project.MachineProject{Clones: map[string]string{"api": r.dir}}, Home: t.TempDir()}
 	target := func() *publishTarget {
-		return &publishTarget{ticket: "T-1", repoName: "api", branch: "work", gateRep: reportYAML{ReviewedSHA: map[string]string{"api": reviewed}}}
+		return &publishTarget{ticket: "T-1", repoName: "api", target: "main", branch: "work", gateRep: reportYAML{ReviewedSHA: map[string]string{"api": reviewed}}}
 	}
 
 	if err := checkBodyHead(d, target(), ""); err != nil {
@@ -386,10 +422,19 @@ func TestCheckBodyHeadThroughMerges(t *testing.T) {
 	r.commit("more.txt", "an ordinary commit\n")
 	wantAxiCode(t, checkBodyHead(d, target(), ""), "PUBLISH_UNREVIEWED_HEAD")
 
+	// A clean merge of a branch that is not the target is refused.
+	r.git("reset", "--hard", reviewed)
+	seed := r.git("rev-list", "--max-parents=0", "main")
+	r.git("switch", "-c", "unrelated", seed)
+	r.commit("unrelated.txt", "work that is not on the target\n")
+	r.git("switch", "work")
+	r.git("merge", "--no-ff", "--no-edit", "unrelated")
+	wantAxiCode(t, checkBodyHead(d, target(), ""), "PUBLISH_UNREVIEWED_HEAD")
+
 	// A tip is read in the repository it was found in: the reader's copy of
 	// origin's branch (dir) holds the merge and its parents, so it covers it
 	// though the operator maps no clone at all.
-	r.git("reset", "--hard", "HEAD~1")
+	r.git("reset", "--hard", reviewed)
 	r.onMain("main3.txt", "from main, third time\n")
 	r.merge()
 	r.git("update-ref", "refs/remotes/origin/work", "HEAD")
