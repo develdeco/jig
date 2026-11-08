@@ -89,10 +89,17 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep) (origin
 	if n < 2 || len(prep.Repos) == 0 {
 		return 0, reportYAML{}, false, nil
 	}
+	merged := false
 	for _, rp := range prep.Repos {
 		if rp.Prior == "" || (rp.Line != lineSame && rp.Line != lineClean) {
 			return 0, reportYAML{}, false, nil
 		}
+		merged = merged || rp.Line == lineClean
+	}
+	if !merged {
+		// The gate run again on the head a reviewer read opens a round, as it
+		// always has: only a merge brings in something to carry over.
+		return 0, reportYAML{}, false, nil
 	}
 	// A decision a person made since the last round is applied by the next
 	// round that closes, and a carried round applies nothing: it waits for a
