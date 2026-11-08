@@ -387,10 +387,12 @@ func GreenClaims(lines []Line) []string {
 // LastOracleSeconds is the wall time of the latest oracle run of command,
 // with env class env up ("" for none), in lines that recorded one, or 0
 // when none did. The same command can take very different times with and
-// without an env class, so both must match.
+// without an env class, so both must match. A light line (Ran set) carries
+// the slice's command with the light oracle's time, so it is not a run of
+// command and is skipped.
 func LastOracleSeconds(lines []Line, command, env string) int {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := lines[i]; l.Event == "oracle" && l.Command == command && l.Env == env && l.Seconds > 0 {
+		if l := lines[i]; l.Event == "oracle" && l.Command == command && l.Env == env && l.Seconds > 0 && l.Ran == "" {
 			return l.Seconds
 		}
 	}

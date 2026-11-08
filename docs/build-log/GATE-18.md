@@ -27,3 +27,13 @@ A notes or docs slice changes no code, yet its oracle was the 13-minute whole su
 ## Cost, not measured here
 
 Expected saving: about 13 minutes of suite per docs or notes slice, at the slice and again at the gate. No git counts are committed. The measurement is due on the next real ticket with a notes slice.
+
+## Round 1 fixes
+
+- `LastOracleSeconds` skips a light line, so `jig context`'s `oracle_seconds` stays the suite's; `oracles_passed` gives a light line's pass the origin run's seconds, not the lint's.
+- The publish body takes no per-commit diff when the manifest declares no light rule, and a diff once for each commit otherwise (the gate caches the same way).
+- Tests: the gate refusing a head whose light oracle fails, a failed full run since the pass (a rerun of the passing commit, so the next Markdown delta is light from it), a pass of another command, and a deleted non-light file at verify and at the gate.
+
+## `jig here` timing
+
+`jig here` now reads a light pass's state. Measured on the real store from the PUB-11 worktree, four alternating runs each, on a loaded machine: the installed jig 446 to 570 ms (median about 535); this branch's binary 333 to 426 ms (median about 336). The branch adds no measurable cost, so nothing was removed.

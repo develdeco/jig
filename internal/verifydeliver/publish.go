@@ -2099,6 +2099,7 @@ func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) 
 	var order []key
 	latest := map[key]string{}
 	exact := map[key]bool{}
+	lightDelta := map[string]bool{}
 	notes := map[key]string{}
 	for _, l := range lines {
 		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
@@ -2118,8 +2119,17 @@ func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) 
 		}
 		ran := l.Ran
 		if !sameTree {
-			files, err := gitx.DiffNameOnly(dir, l.Commit, reviewed, "ACDMRTUXB")
-			if err != nil || !light.Matches(files) {
+			// Without a light rule no other tree can stand: no diff to take.
+			if !light.Declared() {
+				continue
+			}
+			ok, seen := lightDelta[l.Commit]
+			if !seen {
+				files, err := gitx.DiffNameOnly(dir, l.Commit, reviewed, "ACDMRTUXB")
+				ok = err == nil && light.Matches(files)
+				lightDelta[l.Commit] = ok
+			}
+			if !ok {
 				continue
 			}
 			ran = light.Oracle

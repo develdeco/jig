@@ -535,6 +535,8 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		return found && tree == headTree
 	}
 	passed, failed := map[string]reusedPass{}, map[string]bool{}
+	lightCache := map[string]bool{}
+	fullSeconds := map[string]int{} // a full run's commit -> its seconds
 	for _, l := range lines {
 		if l.Event != "oracle" || l.Commit == "" || l.Command == "" {
 			continue
@@ -560,11 +562,18 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 			if !sameEnvs(l.Env, envs) {
 				continue
 			}
-			p := reusedPass{Commit: l.Commit, Seconds: l.Seconds, Origin: origin, Ran: l.Ran}
+			seconds := l.Seconds
+			if l.Ran == "" {
+				fullSeconds[l.Commit] = l.Seconds
+			} else {
+				// A light line's time is the lint's: the suite's is its origin's.
+				seconds = fullSeconds[origin]
+			}
+			p := reusedPass{Commit: l.Commit, Seconds: seconds, Origin: origin, Ran: l.Ran}
 			switch {
 			case exact:
 				passed[l.Command] = p
-			case lightTree(man.Light, dir, l.Commit):
+			case lightTree(man.Light, dir, l.Commit, lightCache):
 				// A pass on the exact tree is never replaced by one that
 				// needs the light oracle run on HEAD.
 				if cur, ok := passed[l.Command]; !ok || cur.Light {
@@ -582,12 +591,16 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 
 // lightTree reports whether commit's tree differs from HEAD's in dir only in
 // files the manifest's light rule covers (and differs at all).
-func lightTree(light manifest.Light, dir, commit string) bool {
+func lightTree(light manifest.Light, dir, commit string, cache map[string]bool) bool {
 	if !light.Declared() {
 		return false
 	}
+	if v, ok := cache[commit]; ok {
+		return v
+	}
 	files, err := gitx.DiffNameOnly(dir, commit, "HEAD", "ACDMRTUXB")
-	return err == nil && light.Matches(files)
+	cache[commit] = err == nil && light.Matches(files)
+	return cache[commit]
 }
 
 // gateEnvs is the set of env classes runGateOracles brings up: every one a

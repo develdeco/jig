@@ -351,9 +351,10 @@ func TestLastOracleSeconds(t *testing.T) {
 		{Slice: "c", Event: "oracle", Command: "go test ./..."},
 		{Slice: "c", Event: "result", Command: "go test ./...", Seconds: 1},
 		{Slice: "d", Event: "oracle", Command: "go test ./...", Env: "rig", Seconds: 900},
+		{Slice: "n", Event: "oracle", Command: "go test ./...", Seconds: 3, Ran: "go test ./lint", ReusedFrom: "abc"},
 	}
 	if got := LastOracleSeconds(lines, "go test ./...", ""); got != 640 {
-		t.Errorf("LastOracleSeconds(go test ./...) = %d, want 640", got)
+		t.Errorf("LastOracleSeconds(go test ./...) = %d, want 640: a light line is no run of the suite", got)
 	}
 	if got := LastOracleSeconds(lines, "go test ./...", "rig"); got != 900 {
 		t.Errorf("LastOracleSeconds(go test ./..., rig) = %d, want 900", got)

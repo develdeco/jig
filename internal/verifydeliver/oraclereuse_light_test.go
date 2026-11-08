@@ -8,6 +8,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/session"
 )
 
 const lightGateOracle = "echo lint-only"
@@ -102,11 +103,15 @@ func TestGateReusesThePassOfALightDelta(t *testing.T) {
 		rec := &oracleRecorder{}
 		d.Oracle = rec.run
 		origin := commitInBuildLease(t, fx, map[string]string{"alpha/extra.txt": "w\n"})
-		recordOracle(t, d, fx.Ticket, "pass", origin, alpha(), "rig")
-		recordOracle(t, d, fx.Ticket, "pass", origin, beta(), "rig")
+		for _, cmd := range []string{alpha(), beta()} {
+			full := journal.Line{Slice: "a", Event: "oracle", Outcome: "pass", Commit: origin, Attempt: 1, Command: cmd, Env: "rig", Seconds: 777}
+			if err := journal.Append(d.Store, fx.Ticket, full); err != nil {
+				t.Fatal(err)
+			}
+		}
 		head := commitInBuildLease(t, fx, map[string]string{"README.md": "verified light\n"})
 		for _, cmd := range []string{alpha(), beta()} {
-			line := journal.Line{Slice: "a", Event: "oracle", Outcome: "pass", Commit: head, Attempt: 2, Command: cmd, Env: "rig", Ran: lightGateOracle, ReusedFrom: origin}
+			line := journal.Line{Slice: "a", Event: "oracle", Outcome: "pass", Commit: head, Attempt: 2, Command: cmd, Env: "rig", Seconds: 3, Ran: lightGateOracle, ReusedFrom: origin}
 			if err := journal.Append(d.Store, fx.Ticket, line); err != nil {
 				t.Fatal(err)
 			}
@@ -116,9 +121,49 @@ func TestGateReusesThePassOfALightDelta(t *testing.T) {
 		if got["alpha"].ReusedFrom != origin || got["alpha"].Ran != lightGateOracle {
 			t.Errorf("alpha = %+v, want the origin %s and the lint", got["alpha"], origin)
 		}
+		if got["alpha"].Seconds != 777 {
+			t.Errorf("alpha seconds = %d, want the suite's 777, not the lint's", got["alpha"].Seconds)
+		}
 		if ran := rec.ran(); len(ran) != 0 {
 			t.Errorf("the gate ran %q, want nothing: the lint ran on this tree already", ran)
 		}
+	})
+
+	step(t, "a delta that deletes a non-light file runs the suite", func(t *testing.T) {
+		rec := &oracleRecorder{}
+		d.Oracle = rec.run
+		doomed := commitInBuildLease(t, fx, map[string]string{"alpha/doomed.txt": "x\n"})
+		recordOracle(t, d, fx.Ticket, "pass", doomed, alpha(), "rig")
+		recordOracle(t, d, fx.Ticket, "pass", doomed, beta(), "rig")
+		if err := os.Remove(filepath.Join(buildLeaseDir(t, fx), "alpha", "alpha.go")); err != nil {
+			t.Fatal(err)
+		}
+		commitInBuildLease(t, fx, map[string]string{"README.md": "dropped a file\n"})
+
+		got := runsByWorkspace(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
+		if got["alpha"].ReusedFrom != "" || got["beta"].ReusedFrom != "" {
+			t.Errorf("runs = %+v, want none reused across a deleted code file", got)
+		}
+	})
+
+	step(t, "a head whose light oracle fails is refused", func(t *testing.T) {
+		d.Oracle = func(cmd, _ string) (string, error) {
+			if cmd == lightGateOracle {
+				return "lint red", errString("lint red")
+			}
+			return "", nil
+		}
+		base := commitInBuildLease(t, fx, map[string]string{"alpha/extra.txt": "v\n"})
+		recordOracle(t, d, fx.Ticket, "pass", base, alpha(), "rig")
+		recordOracle(t, d, fx.Ticket, "pass", base, beta(), "rig")
+		commitInBuildLease(t, fx, map[string]string{"README.md": "breaks the lint\n"})
+
+		backend := stubBackend{run: func(session.Dispatch) error {
+			t.Fatal("a round whose light oracle fails dispatched a reviewer")
+			return nil
+		}}
+		_, err := Gate(d, newReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket})
+		wantAxiCode(t, err, "GATE_ORACLE_FAILED")
 	})
 
 	step(t, "no light rule never reuses a pass of another tree", func(t *testing.T) {
@@ -143,3 +188,7 @@ func TestGateReusesThePassOfALightDelta(t *testing.T) {
 		}
 	})
 }
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
