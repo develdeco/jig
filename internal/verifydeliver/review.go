@@ -42,7 +42,10 @@ const (
 // cumulative findings state across rounds is findings bookkeeping;
 // RoundInput carries it as an input here.
 type OpenFinding struct {
-	ID     string `json:"id"`
+	ID string `json:"id"`
+	// Status is the finding's place in jig's bookkeeping (open, asked or
+	// noted), which the reviewer's own action label can differ from.
+	Status string `json:"status,omitempty"`
 	File   string `json:"file"`
 	Line   int    `json:"line"`
 	Title  string `json:"title"`
