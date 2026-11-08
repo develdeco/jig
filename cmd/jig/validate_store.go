@@ -345,6 +345,7 @@ const (
 	approvalRecorded  = "recorded"
 	approvalUnchanged = "unchanged"
 	approvalChecked   = "not recorded (--check)"
+	approvalRestamped = "not recorded (--restamp)"
 )
 
 // provenanceRank orders who an approval speaks for: the word of a person is
