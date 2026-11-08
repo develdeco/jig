@@ -95,6 +95,10 @@ func TestCheck(t *testing.T) {
 			mustGit(t, p.clone, "update-ref", "-d", "refs/remotes/origin/main")
 			return p.clone
 		}, Unjudged, 0, 0, true},
+		{"no origin remote", func(t *testing.T, p pair) string {
+			mustGit(t, p.clone, "remote", "remove", "origin")
+			return p.clone
+		}, Unjudged, 0, 0, false},
 		{"missing directory", func(t *testing.T, p pair) string {
 			return filepath.Join(t.TempDir(), "gone")
 		}, Unjudged, 0, 0, false},
@@ -115,12 +119,44 @@ func TestCheck(t *testing.T) {
 			}
 			if wantPull := got.State == Behind; (got.Pull != "") != wantPull {
 				t.Fatalf("Pull = %q for state %s", got.Pull, got.State)
-			} else if wantPull && got.Pull != "git -C "+dir+" pull --ff-only" {
+			} else if wantPull && got.Pull != "git -C "+Quote(dir)+" pull --ff-only origin main" {
 				t.Fatalf("Pull = %q", got.Pull)
 			}
 			if got.State == Unjudged && got.Reason == "" {
 				t.Fatal("an unjudged clone carries no reason")
 			}
 		})
+	}
+}
+
+func TestCheckNoRemoteIsNotNoRef(t *testing.T) {
+	p := newPair(t)
+	mustGit(t, p.clone, "remote", "remove", "origin")
+	if got := Check(p.clone, "main"); !got.NoRemote || got.NoRef {
+		t.Fatalf("Check = %+v, want NoRemote and not NoRef", got)
+	}
+}
+
+func TestDivergedNote(t *testing.T) {
+	p := newPair(t)
+	commit(t, p.clone, "local")
+	p.originMoves(t, "x")
+	r := Check(p.clone, "main")
+	want := "clone " + p.clone + " has diverged from origin/main (as of its last fetch): 1 behind, 1 ahead; a fast-forward pull will refuse, so it needs a merge or rebase by a person"
+	if got := DivergedNote(p.clone, r); got != want {
+		t.Fatalf("DivergedNote = %q, want %q", got, want)
+	}
+}
+
+func TestQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"/work/app":    "/work/app",
+		"/work/my app": `"/work/my app"`,
+		`C:\work`:      `"C:\work"`,
+		`/w/a"b$c`:     `"/w/a\"b\$c"`,
+	} {
+		if got := Quote(in); got != want {
+			t.Errorf("Quote(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

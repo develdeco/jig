@@ -14,6 +14,7 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/setup"
 )
@@ -450,7 +451,10 @@ func (d *doctorCtx) githook() []setup.Finding {
 // diverged from) its origin target, and for a clone it cannot judge for want
 // of an origin ref. clonebehind.Check is the judge `jig here` uses too.
 func (d *doctorCtx) cloneNotes() {
-	for _, clone := range d.target.Clones {
+	for _, scope := range d.target.Clones {
+		// A linked worktree is judged as the clone it belongs to, as jig
+		// here does.
+		clone := locate.CloneRoot(scope)
 		target := d.cloneTarget(clone)
 		res := clonebehind.Check(clone, target)
 		switch {
@@ -458,8 +462,10 @@ func (d *doctorCtx) cloneNotes() {
 			d.note("clone is %d %s behind %s (as of its last fetch): %s", res.Behind, plural(res.Behind, "commit", "commits"), res.Of, res.Pull)
 		case res.State == clonebehind.Diverged:
 			d.note("%s", clonebehind.DivergedNote(clone, res))
+		case res.NoRemote:
+			d.note("cannot tell whether %s is behind: it has no origin remote", clone)
 		case res.NoRef:
-			d.note("cannot tell whether %s is behind: it has no %s; run git -C %s fetch origin", clone, res.Of, clone)
+			d.note("cannot tell whether %s is behind: it has no %s; run git -C %s fetch origin", clone, res.Of, clonebehind.Quote(clone))
 		}
 	}
 }

@@ -7,6 +7,7 @@
 package clonebehind
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -44,9 +45,12 @@ type Result struct {
 	Of string
 	// Pull is the command that brings a Behind clone up to date.
 	Pull string
-	// NoRef is set when the clone has the target checked out but no
-	// remote-tracking ref for it.
+	// NoRef is set when the clone has the target checked out and an origin
+	// remote but no remote-tracking ref for the target.
 	NoRef bool
+	// NoRemote is set when the clone has the target checked out but no
+	// origin remote at all.
+	NoRemote bool
 	// Reason says why an Unjudged clone was not judged.
 	Reason string
 }
@@ -76,16 +80,16 @@ func Check(dir, target string) Result {
 		return r
 	}
 	if !exists {
+		if _, err := gitx.Run(dir, "remote", "get-url", "origin"); err != nil {
+			r.NoRemote = true
+			r.Reason = "the clone has no origin remote"
+			return r
+		}
 		r.NoRef = true
 		r.Reason = "the clone has no " + of
 		return r
 	}
-	behind, err := count(dir, "HEAD.."+ref)
-	if err != nil {
-		r.Reason = "the commits could not be counted"
-		return r
-	}
-	ahead, err := count(dir, ref+"..HEAD")
+	behind, ahead, err := count(dir, ref)
 	if err != nil {
 		r.Reason = "the commits could not be counted"
 		return r
@@ -96,19 +100,38 @@ func Check(dir, target string) Result {
 		r.State = Diverged
 	case behind > 0:
 		r.State = Behind
-		r.Pull = "git -C " + dir + " pull --ff-only"
+		r.Pull = "git -C " + Quote(dir) + " pull --ff-only origin " + target
 	default:
 		r.State = Current
 	}
 	return r
 }
 
-func count(dir, rangeSpec string) (int, error) {
-	out, err := gitx.Run(dir, "rev-list", "--count", rangeSpec)
+// count returns how many commits ref has that HEAD lacks and how many HEAD
+// has that ref lacks, in one git call.
+func count(dir, ref string) (behind, ahead int, err error) {
+	out, err := gitx.Run(dir, "rev-list", "--left-right", "--count", ref+"...HEAD")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(out))
+	f := strings.Fields(out)
+	if len(f) != 2 {
+		return 0, 0, fmt.Errorf("rev-list --count printed %q", out)
+	}
+	if behind, err = strconv.Atoi(f[0]); err != nil {
+		return 0, 0, err
+	}
+	ahead, err = strconv.Atoi(f[1])
+	return behind, ahead, err
+}
+
+// Quote spells a path for a shell command line: as it is when it is plain,
+// else in double quotes.
+func Quote(path string) string {
+	if path != "" && !strings.ContainsAny(path, " 	\\\"'$`&;()<>|*?[]{}!#~") {
+		return path
+	}
+	return `"` + strings.NewReplacer(`"`, `\"`, "$", `\$`, "`", "\\`").Replace(path) + `"`
 }
 
 // DivergedNote is the sentence for a diverged clone: both counts, and that a

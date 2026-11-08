@@ -509,6 +509,10 @@ func (l *locator) cloneRoot() string {
 	return l.root
 }
 
+// CloneRoot is the clone dir belongs to: dir itself when it is a clone's top
+// level, and for a linked worktree the clone it was added from.
+func CloneRoot(dir string) string { return cloneRootOf(dir) }
+
 // cloneRootOf is the clone dir belongs to: dir itself when it is a clone's
 // top level (or not a repo at all), and for a linked worktree, whose .git is
 // a file, the directory holding the common .git.
