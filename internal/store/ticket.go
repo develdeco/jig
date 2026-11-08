@@ -296,9 +296,10 @@ func writeTicketFile(path string, t Ticket) error {
 // WriteTicketBranch sets <ticket>/ticket.yaml's branch to branch, leaving
 // any recorded title and blockers untouched, and creating the record when
 // the ticket has none. With SetTicketRank it is an update of a record that
-// already exists: a ticket's title and blockers are written once, whole, by
-// CreateTicketRecord when the ticket is minted, and nothing changes them
-// afterwards. A ticket records a branch when it adopts one (`jig gate
+// already exists: a ticket's title and blockers are written whole by
+// CreateTicketRecord when the ticket is minted, its title is never changed
+// afterwards, and its blockers change only through SetTicketDep,
+// RemoveTicketDep and ClearTicketDeps (`jig depend`). A ticket records a branch when it adopts one (`jig gate
 // --branch`) or when a session claims a slice on a branch no ticket's id
 // leads, so a recorded branch is an adopted one; CheckAdoptableBranch is the
 // check a name passes before it is written, since this does none.

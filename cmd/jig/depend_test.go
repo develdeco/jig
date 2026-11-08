@@ -189,3 +189,28 @@ func TestDependResolvesAnAlias(t *testing.T) {
 		t.Errorf("the edge names the alias:\n%s", r.ticketYAML(t, "DEMO-1"))
 	}
 }
+
+// TestDependRefusesARemovedTicket: a ticket removed by a commit leaves its
+// folder emptied, and that folder is no ticket: jig depend refuses it as jig
+// rank does, and writes no record into it.
+func TestDependRefusesARemovedTicket(t *testing.T) {
+	t.Parallel()
+	r := newDependRig(t)
+	gitMust(t, r.storeDir, "rm", "-r", "-q", "tickets/DEMO-4")
+	gitMust(t, r.storeDir, "commit", "-q", "-m", "remove DEMO-4")
+	if err := os.MkdirAll(filepath.Join(r.storeDir, "tickets", "DEMO-4"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	head := r.head(t)
+
+	out, code := r.jig(t, "depend", "DEMO-4", "--on", "DEMO-3")
+	if code == 0 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "DEMO-4 not found") {
+		t.Errorf("depend on a removed ticket: exit %d, want a not-found refusal\n%s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(r.storeDir, "tickets", "DEMO-4", "ticket.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a ticket.yaml was written into the removed ticket's folder (stat err = %v)", err)
+	}
+	if r.head(t) != head {
+		t.Errorf("the refusal committed")
+	}
+}

@@ -70,7 +70,9 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 	}
 	child, err := resolveTicketArg(st, positionals[0], stdout)
 	if err == nil {
-		err = requireTicketID(st, child)
+		// The child is a ticket to write, as for rank and close: a folder a
+		// removal emptied is no ticket, and is not given a record.
+		err = requireTicket(st, child)
 	}
 	if err != nil {
 		return renderErr(stdout, err)
@@ -130,7 +132,11 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 	default:
 		edge := store.TicketBlockedBy{Ticket: parent, Kind: kind}
 		if cyc := ticketDepsCycle(st, child, &edge); cyc != "" {
-			return renderErr(stdout, dependUsage("this edge would close a cycle: "+strings.ReplaceAll(cyc, "->", " -> ")))
+			chain := strings.ReplaceAll(cyc, "->", " -> ")
+			if strings.Contains(cyc, child+"->"+parent+"->") || strings.HasSuffix(cyc, child+"->"+parent) {
+				return renderErr(stdout, dependUsage("this edge would close a cycle: "+chain))
+			}
+			return renderErr(stdout, dependUsage("this edge reaches an existing cycle: "+chain))
 		}
 		result = "recorded"
 		if held != nil {
