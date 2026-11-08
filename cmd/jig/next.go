@@ -809,6 +809,32 @@ type nextOverlap struct {
 	File     string   `json:"file"`
 	Tickets  []string `json:"tickets"`
 	Branches []string `json:"branches"`
+	// Conflict is conflict, clean or untested: whether git's in-memory merge
+	// of the branches of the sharing tickets leaves conflicts. Files are the
+	// files it reports unmerged.
+	Conflict string   `json:"conflict"`
+	Files    []string `json:"files,omitempty"`
+}
+
+// The three outcomes of testing a pair of ticket branches that share a file.
+const (
+	pairConflict = "conflict"
+	pairClean    = "clean"
+	pairUntested = "untested"
+)
+
+// testPair merges the branch heads a and b in dir in memory, and says whether
+// they conflict and in which files. A merge-tree call that fails leaves the
+// pair untested: this is advice, never an error.
+func testPair(dir, a, b string) (string, []string) {
+	files, err := gitx.MergeConflicts(dir, a, b)
+	switch {
+	case err != nil:
+		return pairUntested, nil
+	case len(files) > 0:
+		return pairConflict, files
+	}
+	return pairClean, nil
 }
 
 // nextForStore lists the tickets of the store in order with what blocks each,
@@ -954,10 +980,10 @@ func (n nextStore) blocks() []string {
 	if len(n.Overlaps) > 0 {
 		var orows [][]string
 		for _, o := range n.Overlaps {
-			orows = append(orows, []string{o.Repo, o.File, joinPlus(o.Tickets)})
+			orows = append(orows, []string{o.Repo, o.File, joinPlus(o.Tickets), o.Conflict})
 		}
-		blocks = append(blocks, "warning: local branches of different tickets change the same files",
-			axi.Table("overlap", []string{"repo", "file", "tickets"}, orows))
+		blocks = append(blocks, "warning: branches of different tickets change the same files",
+			axi.Table("overlap", []string{"repo", "file", "tickets", "conflict"}, orows))
 	}
 	var help []string
 	switch {
@@ -1083,21 +1109,33 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			continue
 		}
 		target := r.TargetBranch()
-		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-		if err != nil || listing == "" {
-			continue
-		}
 		type bound struct{ ticket, branch string }
 		var bounds []bound
 		tickets := map[string]bool{}
-		for _, b := range strings.Split(listing, "\n") {
-			b = strings.TrimSpace(b)
-			if b == "" || b == target {
+		// Local branches first; origin's stand in for a ticket with no local
+		// branch here.
+		for _, prefix := range []string{"refs/heads", "refs/remotes/origin"} {
+			listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname:short)", prefix)
+			if err != nil {
 				continue
 			}
-			if id, _, err := st.TicketForBranch(b); err == nil && id != "" {
-				bounds = append(bounds, bound{id, b})
-				tickets[id] = true
+			local := map[string]bool{}
+			for id := range tickets {
+				local[id] = true
+			}
+			for _, ref := range strings.Split(listing, "\n") {
+				ref = strings.TrimSpace(ref)
+				name := ref
+				if prefix != "refs/heads" {
+					name = strings.TrimPrefix(ref, "origin/")
+				}
+				if ref == "" || name == target || name == "HEAD" || name == "origin" {
+					continue
+				}
+				if id, _, err := st.TicketForBranch(name); err == nil && id != "" && !local[id] {
+					bounds = append(bounds, bound{id, ref})
+					tickets[id] = true
+				}
 			}
 		}
 		if len(tickets) < 2 {
@@ -1136,12 +1174,47 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				t.branches[b.branch] = true
 			}
 		}
+		// A pair of tickets that shares a file is merged once, however many
+		// files it shares.
+		branchOf := map[string]string{}
+		for _, b := range bounds {
+			if _, ok := branchOf[b.ticket]; !ok {
+				branchOf[b.ticket] = b.branch
+			}
+		}
+		type verdict struct {
+			state string
+			files []string
+		}
+		tested := map[[2]string]verdict{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
 			if len(t.tickets) < 2 {
 				continue
 			}
-			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: sortedStrings(mapKeys(t.tickets)), Branches: sortedStrings(mapKeys(t.branches))})
+			ids := sortedStrings(mapKeys(t.tickets))
+			state := pairClean
+			var conflicted []string
+			for i := range ids {
+				for j := i + 1; j < len(ids); j++ {
+					key := [2]string{ids[i], ids[j]}
+					v, ok := tested[key]
+					if !ok {
+						v.state, v.files = testPair(dir, branchOf[ids[i]], branchOf[ids[j]])
+						tested[key] = v
+					}
+					switch {
+					case v.state == pairConflict:
+						state = pairConflict
+						conflicted = append(conflicted, v.files...)
+					case v.state == pairUntested && state == pairClean:
+						state = pairUntested
+					}
+				}
+			}
+			sort.Strings(conflicted)
+			conflicted = slices.Compact(conflicted)
+			out = append(out, nextOverlap{Repo: r.Name(), File: f, Tickets: ids, Branches: sortedStrings(mapKeys(t.branches)), Conflict: state, Files: conflicted})
 		}
 	}
 	return out
