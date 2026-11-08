@@ -58,6 +58,36 @@ func gateCleanThroughMain(t *testing.T, e env, fx *fixture.Fixture) {
 // store it was journaled in.
 func recordGreeting(t *testing.T, jigHome string, fx *fixture.Fixture) *store.Store {
 	t.Helper()
+	return recordGreetingFrom(t, jigHome, fx, ownedFile(t, fx))
+}
+
+// ownedFile is a file the fixture ticket added or changed: the first one its
+// first verified commit touched, repo relative.
+func ownedFile(t *testing.T, fx *fixture.Fixture) string {
+	t.Helper()
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	lines, err := journal.Read(st, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	built := journal.BuiltCommits(lines)
+	if len(built) == 0 {
+		t.Fatal("the build journaled no verified commit")
+	}
+	files, err := gitx.DiffNameOnly(fx.RepoDir, built[0]+"^", built[0], "AMT")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("files the first built commit changed = %v (err %v), want some", files, err)
+	}
+	return files[0]
+}
+
+// recordGreetingFrom is recordGreeting with the test file the recording's
+// tag names given.
+func recordGreetingFrom(t *testing.T, jigHome string, fx *fixture.Fixture, source string) *store.Store {
+	t.Helper()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -88,7 +118,7 @@ func recordGreeting(t *testing.T, jigHome string, fx *fixture.Fixture) *store.St
 	sum := sha256.Sum256([]byte(content))
 	if err := journal.Append(st, fx.Ticket, journal.Line{
 		Slice: "a", Event: "recorded", Commit: built[0], Attempt: 1, RecordRun: "a-a1-f0",
-		Recordings: []journal.Recording{{File: "greet.svg", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(content)), Scenario: "greet", Caption: "Greet reads casual"}},
+		Recordings: []journal.Recording{{File: "greet.svg", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(content)), Scenario: "greet", Caption: "Greet reads casual", Source: source}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -261,5 +291,32 @@ func TestPicksRowsSayWhatWasPickedOrWhy(t *testing.T) {
 				t.Errorf("picksRows(%+v)[%d] = %v, want %v", c.report, i, got[i], c.want[i])
 			}
 		}
+	}
+}
+
+// TestPublishOffersNoRecordingOfATestTheTicketDidNotTouchThroughMain: the
+// journal holds a recording, but of a test file the ticket's commits never
+// changed, so publish prints no picks row and no waiting warning, and the body
+// has no ## Demo section.
+func TestPublishOffersNoRecordingOfATestTheTicketDidNotTouchThroughMain(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	gateCleanThroughMain(t, e, fx)
+	st := recordGreetingFrom(t, jigHome, fx, "untouched_test.go")
+
+	out, code := runMain(t, e, "", "publish", fx.Ticket, "--body", "--store", fx.StoreDir)
+	if code != 0 {
+		t.Fatalf("publish --body: exit = %d, want 0\n%s", code, out)
+	}
+	for _, bad := range []string{"picks", "waiting to be picked"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("publish output mentions %q for a recording of an untouched test:\n%s", bad, out)
+		}
+	}
+	if body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")); err != nil || strings.Contains(string(body), "## Demo") {
+		t.Errorf("pr body = %q (err %v), want one with no demo", body, err)
 	}
 }

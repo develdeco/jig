@@ -176,7 +176,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		// the round a reviewer read (GATE-16).
 		return printGateReport(stdout, st, ticket, *p.Carried)
 	}
-	blocks := roundBlocks(p, nil, false)
+	blocks := roundBlocks(p, nil, false, nil)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0

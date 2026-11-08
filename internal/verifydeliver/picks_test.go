@@ -21,7 +21,9 @@ import (
 // wrote and the tags it gave it.
 type recSpec struct {
 	File, Content, Scenario, Flow, Caption string
-	Step                                   int
+	// Source is the test file the tag names; empty means ownTestFile.
+	Source string
+	Step   int
 }
 
 // recordBuild writes specs where a builder's green oracle run at commit leaves
@@ -48,13 +50,17 @@ func recordBuild(t *testing.T, d Deps, ticket, commit, run string, specs []recSp
 			t.Fatalf("write %s: %v", s.File, err)
 		}
 		sum := sha256.Sum256([]byte(s.Content))
+		source := s.Source
+		if source == "" {
+			source = ownTestFile
+		}
 		scenario := s.Scenario
 		if scenario == "" {
 			scenario = strings.TrimSuffix(s.File, filepath.Ext(s.File))
 		}
 		line.Recordings = append(line.Recordings, journal.Recording{
 			File: s.File, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(s.Content)),
-			Scenario: scenario, Flow: s.Flow, Step: s.Step, Caption: s.Caption,
+			Scenario: scenario, Flow: s.Flow, Step: s.Step, Caption: s.Caption, Source: source,
 		})
 	}
 	return line
@@ -130,7 +136,7 @@ func TestPickCandidatesAreTheLatestRecordingOfEachStepOnTheHeadsHistory(t *testi
 	})
 	lines := []journal.Line{older, {Event: "oracle", Outcome: "pass"}, newer, dropped, offBranch, refused, unknown}
 
-	cands, droppedNames, err := pickCandidates(d, fx.Ticket, lines, repo, c2)
+	cands, droppedNames, err := pickCandidates(d, fx.Ticket, lines, repo, c2, ownAll)
 	if err != nil {
 		t.Fatalf("pickCandidates: %v", err)
 	}
@@ -193,7 +199,7 @@ func TestPickCandidatesDropsAFileThatNoLongerMatchesItsLine(t *testing.T) {
 		}
 	}
 
-	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2)
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2, ownAll)
 	if err != nil {
 		t.Fatalf("pickCandidates: %v", err)
 	}
@@ -223,18 +229,18 @@ func TestPickCandidatesRefuseAJournaledNameThatClimbsOutOfTheRecordingDirectory(
 	repo, _, c2, _ := history(t)
 
 	line := recordBuild(t, d, fx.Ticket, c2, "a-a1-f0", []recSpec{{File: "ok.svg", Content: "ok"}})
-	line.Recordings = append(line.Recordings, journal.Recording{File: "../ok.svg", SHA256: line.Recordings[0].SHA256, Size: 2, Scenario: "up"})
+	line.Recordings = append(line.Recordings, journal.Recording{File: "../ok.svg", SHA256: line.Recordings[0].SHA256, Size: 2, Scenario: "up", Source: ownTestFile})
 	badRun := line
 	badRun.RecordRun = "../a-a1-f0"
 
-	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2)
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2, ownAll)
 	if err != nil {
 		t.Fatalf("pickCandidates: %v", err)
 	}
 	if len(cands) != 1 || cands[0].Name != "ok.svg" || len(dropped) != 1 || !strings.HasPrefix(dropped[0], "../ok.svg") {
 		t.Errorf("candidates = %+v, dropped = %q; want ok.svg alone and the climbing name dropped", cands, dropped)
 	}
-	cands, dropped, err = pickCandidates(d, fx.Ticket, []journal.Line{badRun}, repo, c2)
+	cands, dropped, err = pickCandidates(d, fx.Ticket, []journal.Line{badRun}, repo, c2, ownAll)
 	if err != nil {
 		t.Fatalf("pickCandidates: %v", err)
 	}
@@ -533,7 +539,7 @@ func TestPickCandidatesOfferEveryFileOfTheLatestLineThatSharesAKey(t *testing.T)
 		{File: "checkout.png", Content: "checkout screenshot", Scenario: "checkout", Flow: "buy", Step: 1},
 	})
 
-	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{older, newer}, repo, c2)
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{older, newer}, repo, c2, ownAll)
 	if err != nil || len(dropped) != 0 {
 		t.Fatalf("pickCandidates: dropped %q, err %v", dropped, err)
 	}
@@ -579,7 +585,7 @@ func TestPickCandidatesDropsARecordingBehindALink(t *testing.T) {
 	}
 	symlinkOrSkip(t, moved, commitDir)
 
-	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2)
+	cands, dropped, err := pickCandidates(d, fx.Ticket, []journal.Line{line}, repo, c2, ownAll)
 	if err != nil {
 		t.Fatalf("pickCandidates: %v", err)
 	}
@@ -843,3 +849,10 @@ func TestRenderPicksSectionMarksAnOlderRecordingWhoseCaptionWasScrubbed(t *testi
 		t.Errorf("section:\n%s\nwant:\n%s", out.Section, want)
 	}
 }
+
+// ownTestFile is the source a recSpec without one is tagged with, and ownAll
+// the set of changed files that holds it: the recordings of most tests are the
+// ticket's own.
+const ownTestFile = "own_test.go"
+
+var ownAll = map[string]bool{ownTestFile: true}

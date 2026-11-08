@@ -302,10 +302,13 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if ctx.Code != 0 {
 		t.Fatalf("jig review context (round 2) exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
-	if !strings.Contains(ctx.Stdout, "open[1]{id,file:line,action,risk,title,decision}:") {
-		t.Fatalf("the round's open list lacks the ask:\n%s", ctx.Stdout)
+	// Round 2 is a delta round (GATE-17): the ask is in its answers table.
+	const answersHeader = "answers[1]{id,file:line,action,risk,title,decision}:\n"
+	i := strings.Index(ctx.Stdout, answersHeader)
+	if i < 0 {
+		t.Fatalf("the round's answers lack the ask:\n%s", ctx.Stdout)
 	}
-	if row := lineStarting(ctx.Stdout, "  r1-f1,"); !strings.HasSuffix(row, `,"decided: dismiss, by a person"`) {
+	if row := strings.SplitN(ctx.Stdout[i+len(answersHeader):], "\n", 2)[0]; !strings.HasSuffix(row, `,"decided: dismiss, by a person"`) {
 		t.Errorf("the ask's open row = %q, want it to end in the decision and who made it", row)
 	}
 	if !strings.Contains(ctx.Stdout, "dismissed[0]") {

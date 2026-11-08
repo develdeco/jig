@@ -195,3 +195,21 @@ func TestRenderStackedSection(t *testing.T) {
 		}
 	}
 }
+
+// TestStackedBodyOfATicketWithRecordingsCountsItsOwnFilesFromTheTarget: a
+// stacked ticket that journaled a recording renders its body while the
+// parent's branch is not on the origin: the files it changed are counted from
+// the repo's target, not from the missing branch.
+func TestStackedBodyOfATicketWithRecordingsCountsItsOwnFilesFromTheTarget(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	d.Stack = stackedOnJIG0
+	useGithubHost(t, &d, "", "")
+	line := recordBuild(t, d, fx.Ticket, head, "a-a1-f0", []recSpec{{File: "x.svg", Content: "x"}})
+	if err := journal.Append(d.Store, fx.Ticket, line); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+}

@@ -24,7 +24,7 @@ import (
 const (
 	loginSVG   = "<svg xmlns='http://www.w3.org/2000/svg'><title>login</title></svg>"
 	payPNG     = "\x89PNG pretend bytes of a screenshot"
-	payTagJSON = `{"scenario":"checkout","flow":"purchase","step":2,"caption":"pays for the cart"}`
+	payTagJSON = `{"scenario":"checkout","flow":"purchase","step":2,"caption":"pays for the cart","file":"e2e/pay_test.go"}`
 )
 
 // oracleRun is one call the oracle stub received.

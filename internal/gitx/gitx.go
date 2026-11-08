@@ -323,6 +323,19 @@ func diffNames(dir, diffFilter string, revs ...string) ([]string, error) {
 	return strings.Split(raw, "\x00"), nil
 }
 
+// DiffPatch returns the patch base..head in dir as a reader reads it: three
+// lines of context, no color, renames off as in DiffNameOnly, no external diff
+// driver or textconv. base may be a tree, which git diff takes. Untrimmed.
+func DiffPatch(dir, base, head string) (string, error) {
+	args := []string{"-c", "core.quotepath=false", "diff", "-U3", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return "", callError(args, stderr.String(), err)
+	}
+	return stdout.String(), nil
+}
+
 // Hunk is one hunk of a diff as its new side reads: Path is the file's path
 // at head, From and To the hunk's first and last line there (1-based,
 // inclusive).

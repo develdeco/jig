@@ -447,10 +447,11 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if probedIn["api/server/handler.go"] != 1 || probedIn["web/ui/page.go"] != 0 {
 		t.Errorf("round 2 hunks = %+v, want the api's hunk probed once and the web's unprobed", req2.Hunks)
 	}
-	// The reviewer reads the same in the round's view: the probes with their
-	// state, and the web's hunks as the work list.
+	// The reviewer reads the delta round's view (GATE-17): the stale probe as a
+	// row, the api's current caught probe as one count, and the web's hunks as
+	// the work list.
 	ctx2 := rev.Jig("review", "context", ticket)
-	for _, want := range []string{"probed[2]{round,file:line,outcome,state,seam,mutation}:", ",caught,current,", ",survived,stale,", "\"web/ui/page.go:"} {
+	for _, want := range []string{"probed[1]{round,file:line,outcome,state,seam,mutation}:", ",survived,stale,", "probed_current_caught: 1", "\"web/ui/page.go:"} {
 		if ctx2.Code != 0 || !strings.Contains(ctx2.Stdout, want) {
 			t.Errorf("jig review context of round 2: exit %d, lacks %q\n%s", ctx2.Code, want, ctx2.Stdout)
 		}

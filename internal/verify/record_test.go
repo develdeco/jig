@@ -779,7 +779,7 @@ func TestRecorderJournalsWhatTheScenariosRecorded(t *testing.T) {
 	}
 	want := []journal.Recording{
 		{File: "login.svg", SHA256: sum(loginSVG), Size: int64(len(loginSVG)), Scenario: "login"},
-		{File: "pay.png", SHA256: sum(payPNG), Size: int64(len(payPNG)), Scenario: "checkout", Flow: "purchase", Step: 2, Caption: "pays for the cart"},
+		{File: "pay.png", SHA256: sum(payPNG), Size: int64(len(payPNG)), Scenario: "checkout", Flow: "purchase", Step: 2, Caption: "pays for the cart", Source: "e2e/pay_test.go"},
 	}
 	if !reflect.DeepEqual(rec[0].Recordings, want) {
 		t.Errorf("Recordings = %+v\nwant         %+v", rec[0].Recordings, want)

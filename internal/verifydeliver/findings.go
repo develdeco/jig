@@ -671,7 +671,7 @@ func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []Open
 	out := make([]OpenFinding, 0, len(fs))
 	for _, f := range fs {
 		row := OpenFinding{
-			ID: f.ID, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
+			ID: f.ID, Status: f.Status, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
 		}
 		if d, ok := decisions[f.ID]; ok && (f.Status == StatusAsked || f.Status == StatusNoted) && d.Decided() {
