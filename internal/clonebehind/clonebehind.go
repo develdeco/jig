@@ -38,6 +38,8 @@ type Result struct {
 	// origin/<target>..HEAD); set for Behind and Diverged.
 	Behind int
 	Ahead  int
+	// Dir is the clone judged.
+	Dir string
 	// Of names the ref judged against, "origin/<target>".
 	Of string
 	// Pull is the command that brings a Behind clone up to date.
@@ -53,7 +55,7 @@ type Result struct {
 // only local state.
 func Check(dir, target string) Result {
 	of := "origin/" + target
-	r := Result{State: Unjudged, Of: of}
+	r := Result{State: Unjudged, Dir: dir, Of: of}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		r.Reason = "the clone is not on disk"
 		return r
