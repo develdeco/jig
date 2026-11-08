@@ -433,7 +433,7 @@ var buildEvents = map[string]bool{
 	journal.EventClaim: true, journal.EventRelease: true, journal.EventDispatch: true, journal.EventVerifyPending: true,
 	journal.EventOracle: true, journal.EventVerified: true, journal.EventVerifyError: true, journal.EventQuestion: true,
 	journal.EventAnswer: true, journal.EventStall: true, journal.EventRequeue: true, journal.EventResult: true,
-	journal.EventFixSlice: true,
+	journal.EventFixSlice: true, journal.EventSliceAdd: true,
 }
 
 // startedEvents are the lines that show work began, whatever phase it was in.
