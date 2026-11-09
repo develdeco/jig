@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,6 +106,39 @@ func TestGlobalPiecesFollowClaudeConfigDir(t *testing.T) {
 			t.Errorf("doctor with %s set: %s,%s = %v, want installed\n%s", claudeConfigDirEnv, key[0], key[1], r, out)
 		}
 	}
+	// Each skills row reads its own root and the helpers row reads both: a
+	// skill and a helper gone from one root shows on that root's row and on
+	// the helpers row, never on the other root's.
+	for _, c := range []struct {
+		root, gone, kept string
+	}{
+		{filepath.Join(claudeDir, "skills"), "claude", "agents"},
+		{filepath.Join(ie.userHome, ".agents", "skills"), "agents", "claude"},
+	} {
+		for _, name := range []string{"here", "jig-init"} {
+			if err := os.RemoveAll(filepath.Join(c.root, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, _ := runMain(t, e, "", "doctor")
+		rows := doctorRows(t, out)
+		if r := findRow(rows, "skills", c.gone); r["state"] == "installed" {
+			t.Errorf("with a skill gone from %s: skills,%s = %v, want it not installed\n%s", c.root, c.gone, r, out)
+		}
+		if r := findRow(rows, "skills", c.kept); r["state"] != "installed" {
+			t.Errorf("with a skill gone from %s: skills,%s = %v, want installed\n%s", c.root, c.kept, r, out)
+		}
+		if r := findRow(rows, "helpers", ""); r["state"] == "installed" {
+			t.Errorf("with a helper gone from %s: helpers = %v, want it not installed\n%s", c.root, r, out)
+		}
+		if out, code := runMain(t, e, "", "skills", "--global", "--helpers"); code != 0 {
+			t.Fatalf("reinstalling the skills: exit %d\n%s", code, out)
+		}
+		if out, code := runMain(t, e, "", "skills", "--global"); code != 0 {
+			t.Fatalf("reinstalling the skills: exit %d\n%s", code, out)
+		}
+	}
+
 	out, _ = runMain(t, plain, "", "doctor")
 	if strings.Contains(out, claudeConfigDirEnv) {
 		t.Errorf("doctor without the variable notes it:\n%s", out)
