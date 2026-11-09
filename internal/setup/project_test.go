@@ -302,11 +302,19 @@ func TestPlanHint(t *testing.T) {
 func TestHintFiles(t *testing.T) {
 	t.Parallel()
 	for harness, want := range map[string]string{"claude": ".claude/CLAUDE.md", "codex": ".codex/AGENTS.md", "gemini": ".gemini/GEMINI.md"} {
-		if got := filepath.ToSlash(HintFile(harness, "home")); got != "home/"+want {
+		if got := filepath.ToSlash(HintFile(harness, UserDirs{Home: "home"})); got != "home/"+want {
 			t.Errorf("HintFile(%s) = %s", harness, got)
 		}
 	}
-	if HintFile("cursor", "home") != "" {
+	// Claude Code's directory of its own (CLAUDE_CONFIG_DIR) moves its memory
+	// file, and only its.
+	moved := UserDirs{Home: "home", Claude: filepath.Join("c", "work")}
+	for harness, want := range map[string]string{"claude": "c/work/CLAUDE.md", "codex": "home/.codex/AGENTS.md", "gemini": "home/.gemini/GEMINI.md"} {
+		if got := filepath.ToSlash(HintFile(harness, moved)); got != want {
+			t.Errorf("HintFile(%s) with Claude Code's directory moved = %s, want %s", harness, got, want)
+		}
+	}
+	if HintFile("cursor", UserDirs{Home: "home"}) != "" {
 		t.Error("cursor has a memory file")
 	}
 	if got := filepath.ToSlash(ProjectHintFile("w", false)); got != "w/CLAUDE.local.md" {

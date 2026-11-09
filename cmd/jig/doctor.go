@@ -67,10 +67,12 @@ func bestOf(cands ...candidate) candidate {
 
 // doctorCtx is what the checks share.
 type doctorCtx struct {
-	e        env
-	userHome string
-	jigHome  string
-	version  string
+	e env
+	// dirs are the operator's own directories: the home, and Claude Code's
+	// user directory, where the global pieces are looked for.
+	dirs    setup.UserDirs
+	jigHome string
+	version string
 	// program is the program part of the hook commands this jig would write
 	// ("" when the binary is not named jig).
 	program string
@@ -105,14 +107,14 @@ func cmdDoctor(e env, args []string, stdout io.Writer) int {
 
 	d := &doctorCtx{e: e, version: binaryVersion()}
 	var err error
-	if d.userHome, err = e.userHomeDir(); err != nil {
+	if d.dirs, err = e.userDirs(); err != nil {
 		return renderErr(stdout, err)
 	}
 	if d.jigHome, err = e.jigHome(); err != nil {
 		return renderErr(stdout, err)
 	}
-	if dir := e.getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		d.note("CLAUDE_CONFIG_DIR is set to %s: Claude Code reads its settings and skills from there, and jig writes to %s", dir, filepath.Join(d.userHome, ".claude"))
+	if d.dirs.Claude != "" {
+		d.note("%s is set: Claude Code's skills, hooks and hint are checked in %s", claudeConfigDirEnv, d.dirs.Claude)
 	}
 	if prog, err := jigCommand(e); err == nil {
 		d.program = prog
@@ -198,7 +200,7 @@ func (d *doctorCtx) harnesses(value string) ([]setup.Harness, error) {
 			out = append(out, h)
 			continue
 		}
-		if info, err := os.Stat(h.ConfigDir(d.userHome)); err == nil && info.IsDir() {
+		if info, err := os.Stat(h.ConfigDir(d.dirs)); err == nil && info.IsDir() {
 			out = append(out, h)
 		}
 	}
@@ -255,8 +257,9 @@ func (d *doctorCtx) skills() []setup.Finding {
 	}
 
 	var out []setup.Finding
-	for _, root := range []struct{ harness, rel string }{{"claude", filepath.Join(".claude", "skills")}, {"agents", filepath.Join(".agents", "skills")}} {
-		cands := []candidate{inspect(filepath.Join(d.userHome, root.rel), expected, scopeGlobal)}
+	global := d.dirs.SkillRoots()
+	for i, root := range []struct{ harness, rel string }{{"claude", filepath.Join(".claude", "skills")}, {"agents", filepath.Join(".agents", "skills")}} {
+		cands := []candidate{inspect(global[i], expected, scopeGlobal)}
 		if d.hasProject() {
 			cands = append(cands,
 				inspect(filepath.Join(d.target.Dir, root.rel), expected, "here (tracked)"),
@@ -282,8 +285,8 @@ func (d *doctorCtx) skills() []setup.Finding {
 
 	if len(helpers) > 0 {
 		var all []setup.SkillStatus
-		for _, rel := range []string{filepath.Join(".claude", "skills"), filepath.Join(".agents", "skills")} {
-			st, err := setup.InspectSkills(filepath.Join(d.userHome, rel), helpers, d.version)
+		for _, root := range global {
+			st, err := setup.InspectSkills(root, helpers, d.version)
 			if err == nil {
 				all = append(all, st...)
 			}
@@ -310,7 +313,7 @@ func (d *doctorCtx) skills() []setup.Finding {
 func (d *doctorCtx) hooks(hs []setup.Harness) []setup.Finding {
 	var out []setup.Finding
 	for _, h := range hs {
-		files := []struct{ where, path string }{{scopeGlobal, h.GlobalFile(d.userHome)}}
+		files := []struct{ where, path string }{{scopeGlobal, h.GlobalFile(d.dirs)}}
 		if d.hasProject() {
 			untracked, tracked := h.ProjectFile(d.target.Dir, false), h.ProjectFile(d.target.Dir, true)
 			files = append(files, struct{ where, path string }{"here", untracked})
@@ -525,12 +528,12 @@ func programOrJig(program string) string {
 func (d *doctorCtx) hint() []setup.Finding {
 	var out []setup.Finding
 	for _, name := range setup.HintHarnesses() {
-		path := setup.HintFile(name, d.userHome)
+		path := setup.HintFile(name, d.dirs)
 		global := d.inspectHint(path, scopeGlobal)
 		if name != harnessClaude && global.state == setup.StateMissing {
 			// A harness the person does not use has no memory file to check.
 			h, _ := setup.HarnessNamed(name)
-			if info, err := os.Stat(h.ConfigDir(d.userHome)); err != nil || !info.IsDir() {
+			if info, err := os.Stat(h.ConfigDir(d.dirs)); err != nil || !info.IsDir() {
 				continue
 			}
 		}

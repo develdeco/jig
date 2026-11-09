@@ -240,14 +240,15 @@ func lackingNote(lacking []string) string {
 }
 
 // skillRoots are the skills directories of a scope: Claude Code's and the
-// shared agents one, under the person's home or under the project folder.
+// shared agents one, the person's own (in Claude Code's user directory and
+// the home's .agents) or under the project folder.
 func skillRoots(e env, req installReq) (roots []string, dir string, err error) {
 	if req.kind == scopeGlobal {
-		userHome, err := e.userHomeDir()
+		u, err := e.userDirs()
 		if err != nil {
 			return nil, "", err
 		}
-		return []string{filepath.Join(userHome, ".claude", "skills"), filepath.Join(userHome, ".agents", "skills")}, "", nil
+		return u.SkillRoots(), "", nil
 	}
 	dir, err = projectDir(req.target)
 	if err != nil {
@@ -371,14 +372,14 @@ func skillsSteps(e env, req installReq, sel skillSelection) ([]step, error) {
 // none is named: Claude Code's always, and the others' when the person has a
 // directory for the harness, so jig does not make one for a tool they do not
 // use.
-func defaultHintHarnesses(userHome string) []string {
+func defaultHintHarnesses(u setup.UserDirs) []string {
 	out := []string{"claude"}
 	for _, name := range setup.HintHarnesses() {
 		if name == "claude" {
 			continue
 		}
 		if h, ok := setup.HarnessNamed(name); ok {
-			if info, err := os.Stat(h.ConfigDir(userHome)); err == nil && info.IsDir() {
+			if info, err := os.Stat(h.ConfigDir(u)); err == nil && info.IsDir() {
 				out = append(out, name)
 			}
 		}
@@ -389,9 +390,9 @@ func defaultHintHarnesses(userHome string) []string {
 // hintHarnesses picks the harnesses whose memory file gets the hint: the ones
 // --harness names that have one, or those defaultHintHarnesses finds. A
 // --harness that names none of them is a refusal.
-func hintHarnesses(value, userHome string) ([]string, error) {
+func hintHarnesses(value string, u setup.UserDirs) ([]string, error) {
 	if strings.TrimSpace(value) == "" {
-		return defaultHintHarnesses(userHome), nil
+		return defaultHintHarnesses(u), nil
 	}
 	hs, err := parseHarnesses(value, nil)
 	if err != nil {
@@ -414,20 +415,20 @@ func hintHarnesses(value, userHome string) ([]string, error) {
 	return out, nil
 }
 
-// hintSteps plans the hint. Globally it goes in each harness's memory file in
-// the person's home. In a project it goes in CLAUDE.local.md, which git
+// hintSteps plans the hint. Globally it goes in each harness's memory file of
+// the person's own (Claude Code's in its user directory). In a project it goes in CLAUDE.local.md, which git
 // ignores, or, tracked, in the AGENTS.md the project shares (and in a CLAUDE.md
 // that does not import it).
 func hintSteps(e env, req installReq, harnesses []string) ([]step, error) {
 	type file struct{ harness, path string }
 	var files []file
 	if req.kind == scopeGlobal {
-		userHome, err := e.userHomeDir()
+		u, err := e.userDirs()
 		if err != nil {
 			return nil, err
 		}
 		for _, h := range harnesses {
-			files = append(files, file{h, setup.HintFile(h, userHome)})
+			files = append(files, file{h, setup.HintFile(h, u)})
 		}
 	} else {
 		dir, err := projectDir(req.target)

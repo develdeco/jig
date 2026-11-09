@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	hintUsageGlobal    = "your own memory files: ~/.claude/CLAUDE.md, and ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md for the harnesses you have a directory for"
+	hintUsageGlobal    = "your own memory files: ~/.claude/CLAUDE.md ($CLAUDE_CONFIG_DIR/CLAUDE.md when it is set), and ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md for the harnesses you have a directory for"
 	hintUsageProject   = "the named project of this machine: a CLAUDE.local.md in its folder, which git ignores"
 	hintUsageHere      = "the project or repository you are in, as --project does"
 	hintUsageHarness   = "with --global, these memory files whether or not the harness has a directory: claude, codex, gemini (a name, a comma-separated list or all)"
@@ -58,11 +58,11 @@ func cmdHint(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if fs.NArg() > 0 {
 		return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("unexpected argument %q", fs.Arg(0)), Code: "VALIDATION_ERROR"})
 	}
-	userHome, err := e.userHomeDir()
+	dirs, err := e.userDirs()
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	harnesses, err := hintHarnesses(*harness, userHome)
+	harnesses, err := hintHarnesses(*harness, dirs)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

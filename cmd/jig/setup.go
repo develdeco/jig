@@ -343,11 +343,11 @@ func runSetup(e env, verbName string, p setupParams, stdout io.Writer, stdin io.
 	// The hint goes to the memory files of the harnesses in use unless
 	// --harness names them; a --harness of harnesses with none (cursor, say)
 	// leaves it out.
-	userHome, err := e.userHomeDir()
+	dirs, err := e.userDirs()
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	hintHs := defaultHintHarnesses(userHome)
+	hintHs := defaultHintHarnesses(dirs)
 	if p.harness != "" {
 		hintHs = nil
 		for _, h := range hooksHarnesses {

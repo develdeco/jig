@@ -365,17 +365,18 @@ func PlanHint(path string, uninstall bool) (FilePlan, error) {
 	return plan, nil
 }
 
-// HintFile is the memory file an agent harness reads in the person's home, or
-// "" for a harness that has none jig writes: Claude Code's CLAUDE.md, Codex's
-// AGENTS.md and the Gemini CLI's GEMINI.md.
-func HintFile(harness, userHome string) string {
+// HintFile is the memory file of the person's own that an agent harness
+// reads, or "" for a harness that has none jig writes: Claude Code's
+// CLAUDE.md in u.ClaudeDir(), Codex's AGENTS.md and the Gemini CLI's
+// GEMINI.md under u.Home.
+func HintFile(harness string, u UserDirs) string {
 	switch harness {
 	case "claude":
-		return filepath.Join(userHome, ".claude", "CLAUDE.md")
+		return filepath.Join(u.ClaudeDir(), "CLAUDE.md")
 	case "codex":
-		return filepath.Join(userHome, ".codex", "AGENTS.md")
+		return filepath.Join(u.Home, ".codex", "AGENTS.md")
 	case "gemini":
-		return filepath.Join(userHome, ".gemini", "GEMINI.md")
+		return filepath.Join(u.Home, ".gemini", "GEMINI.md")
 	}
 	return ""
 }
