@@ -22,7 +22,7 @@ import (
 // a jig project.
 
 const (
-	setupUsageGlobal    = "set up for you, on this machine: ~/.claude and ~/.agents skills, harness hooks, git's global hooks, the hint"
+	setupUsageGlobal    = "set up for you, on this machine: ~/.claude (or $CLAUDE_CONFIG_DIR) and ~/.agents skills, harness hooks, git's global hooks, the hint"
 	setupUsageProject   = "set up the named project of this machine, in its folder"
 	setupUsageHere      = "set up the project or repository you are in"
 	setupUsageSkills    = "the project skills (here, intake, chart, build, review, publish): in full globally, as one stub in a project"

@@ -55,11 +55,12 @@ func TestUserDirsResolvesClaudesDirectory(t *testing.T) {
 }
 
 // TestGlobalPiecesFollowClaudeConfigDir: with CLAUDE_CONFIG_DIR set to a
-// directory outside the home, the global skills, hooks and hint for Claude
-// Code go there and nothing goes in <home>/.claude, the shared agents skills
-// stay in the home, and doctor finds them installed there and says which
-// directory it checked. Doctor without the variable looks in the home and
-// finds them missing; each uninstall takes them out of the same directory.
+// directory outside the home, the global skills (the helpers too), hooks and
+// hint for Claude Code go there and nothing goes in <home>/.claude, the shared
+// agents skills stay in the home, and doctor finds each of them installed
+// where it is and says which directory it checked. Doctor without the
+// variable looks in the home and finds Claude Code's missing; each uninstall
+// takes them out of the same directory.
 func TestGlobalPiecesFollowClaudeConfigDir(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
@@ -68,16 +69,18 @@ func TestGlobalPiecesFollowClaudeConfigDir(t *testing.T) {
 	e := plain.withVar(claudeConfigDirEnv, claudeDir)
 	homeClaude := filepath.Join(ie.userHome, ".claude")
 
-	for _, args := range [][]string{{"skills", "--global"}, {"hooks", "--global", "--yes"}, {"hint", "--global", "--yes"}} {
+	for _, args := range [][]string{{"skills", "--global"}, {"skills", "--global", "--helpers"}, {"hooks", "--global", "--yes"}, {"hint", "--global", "--yes"}} {
 		if out, code := runMain(t, e, "", args...); code != 0 || !strings.Contains(out, "result: installed") {
 			t.Fatalf("jig %s: exit %d\n%s", strings.Join(args, " "), code, out)
 		}
 	}
-	if !exists(filepath.Join(claudeDir, "skills", "here", "SKILL.md")) {
-		t.Error("the skills are not in Claude Code's directory")
-	}
-	if !exists(filepath.Join(ie.userHome, ".agents", "skills", "here", "SKILL.md")) {
-		t.Error("the shared agents skills left the home")
+	for _, name := range []string{"here", "jig-init"} {
+		if !exists(filepath.Join(claudeDir, "skills", name, "SKILL.md")) {
+			t.Errorf("skill %s is not in Claude Code's directory", name)
+		}
+		if !exists(filepath.Join(ie.userHome, ".agents", "skills", name, "SKILL.md")) {
+			t.Errorf("the shared agents copy of %s left the home", name)
+		}
 	}
 	if !strings.Contains(readFileOrFail(t, filepath.Join(claudeDir, "settings.json")), "observe") {
 		t.Error("the hooks are not in Claude Code's settings.json")
@@ -97,9 +100,9 @@ func TestGlobalPiecesFollowClaudeConfigDir(t *testing.T) {
 		t.Errorf("doctor does not say which directory it checked (%q):\n%s", want, out)
 	}
 	rows := doctorRows(t, out)
-	for _, piece := range []string{"skills", "hooks", "hint"} {
-		if r := findRow(rows, piece, "claude"); r["state"] != "installed" || r["fix"] != "" {
-			t.Errorf("doctor with %s set: %s,claude = %v, want installed\n%s", claudeConfigDirEnv, piece, r, out)
+	for _, key := range [][2]string{{"skills", "claude"}, {"skills", "agents"}, {"helpers", ""}, {"hooks", "claude"}, {"hint", "claude"}} {
+		if r := findRow(rows, key[0], key[1]); r["state"] != "installed" || r["fix"] != "" {
+			t.Errorf("doctor with %s set: %s,%s = %v, want installed\n%s", claudeConfigDirEnv, key[0], key[1], r, out)
 		}
 	}
 	out, _ = runMain(t, plain, "", "doctor")

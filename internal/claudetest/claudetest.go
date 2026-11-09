@@ -305,15 +305,19 @@ func toolResultsOf(content json.RawMessage) []ToolResult {
 // at it through the environment, with t.Setenv so every process t starts
 // inherits it: the API's URL, a dummy key, a throwaway config dir, and no
 // auto-updater or nonessential traffic, so no real account or setting is
-// involved.
-func Serve(t testing.TB, api *API) {
+// involved. It returns that config dir (CLAUDE_CONFIG_DIR), for a caller
+// that builds a child's environment itself and must pass it on: e2e's
+// jigEnv drops an inherited CLAUDE_CONFIG_DIR unless the test sets it.
+func Serve(t testing.TB, api *API) (configDir string) {
 	t.Helper()
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
+	configDir = t.TempDir()
 	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
 	t.Setenv("ANTHROPIC_API_KEY", "jig-contract-test-not-a-key")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 	t.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
 	t.Setenv("DISABLE_AUTOUPDATER", "1")
+	return configDir
 }
