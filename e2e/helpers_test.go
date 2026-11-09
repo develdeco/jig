@@ -101,6 +101,11 @@ func (e jigEnv) overrides() []string {
 // it, so the count stays a function of the code.
 const gitTraceEnv = "GIT_TRACE2_EVENT"
 
+// claudeConfigDirEnv names the directory Claude Code reads its user settings,
+// skills and memory from in place of ~/.claude, and where jig writes Claude
+// Code's global pieces when it is set.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
 // so the subprocess sees each name once), and without the names e leaves
@@ -108,20 +113,26 @@ const gitTraceEnv = "GIT_TRACE2_EVENT"
 // into, and the jig under test must run the same whether or not the suite
 // records, and never write there.
 func (e jigEnv) environ() []string {
+	return e.environFrom(os.Environ())
+}
+
+// environFrom is environ over base in place of the process environment.
+func (e jigEnv) environFrom(base []string) []string {
 	drop := append(slices.Clone(e.unset), recordDirEnv)
-	// The marker the global git hook wrapper exports belongs to one commit's
-	// hooks, never to the suite; a test that needs it sets it through extra.
-	if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), "JIG_GITHOOK_WRAPPED") }) {
-		drop = append(drop, "JIG_GITHOOK_WRAPPED")
-	}
-	// A harness session the suite runs inside (Claude Code sets its id in the
-	// environment of what its agent runs) is not the jig under test's.
-	for _, name := range locate.HarnessSessionEnv {
+	// Some variables the suite's own process may carry are never the jig
+	// under test's, which gets one only from a test that sets it through
+	// extra: the marker the global git hook wrapper exports belongs to one
+	// commit's hooks; the id of a harness session the suite runs inside
+	// (Claude Code sets it in the environment of what its agent runs) names
+	// that session; and the Claude Code directory of the person running the
+	// suite is a real one, which a global install would write into.
+	inherited := append([]string{"JIG_GITHOOK_WRAPPED", claudeConfigDirEnv}, locate.HarnessSessionEnv...)
+	for _, name := range inherited {
 		if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), name) }) {
 			drop = append(drop, name)
 		}
 	}
-	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), drop...)
+	return withoutEnv(replaceEnv(base, e.overrides()), drop...)
 }
 
 // withoutEnv returns base without the entries named like one of names.
