@@ -233,7 +233,11 @@ and `<jig home>/logs/observe.log` has what went wrong.
 (the project you are in; `jig attach` is the same) or `--project <name>`. The
 pieces are `--skills`, `--hooks`, `--githook` and `--hint`, and `--artifacts` is
 all four. `jig doctor` lists what is in place and what each missing piece costs,
-and `--uninstall` takes away exactly what the same flags wrote.
+and `--uninstall` takes away exactly what the same flags wrote. Globally,
+Claude Code's skills, hooks and hint go in `~/.claude`, or in
+`$CLAUDE_CONFIG_DIR` when it is set, where Claude Code reads them: run `jig
+setup` and `jig doctor` with the same `CLAUDE_CONFIG_DIR` as the sessions they
+serve, once for each directory you use.
 
 | You are | Run | What you get |
 |---|---|---|
