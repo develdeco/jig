@@ -217,6 +217,11 @@ type GateReport struct {
 	// CarriedFrom is the number of the round whose verdict this clean round
 	// carries over (GATE-16): 0 for a round a reviewer read.
 	CarriedFrom int
+	// StoreRefs are the lines the ticket's whole change adds that name
+	// something only the store holds (storerefs.go): a fact of the round,
+	// never a reason it is not clean. nil for a scripted round and for a round
+	// with none.
+	StoreRefs []StoreRef
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -244,6 +249,10 @@ type reportYAML struct {
 	// that round reviewed. It names the round that was really reviewed. 0 for
 	// every round a reviewer read.
 	CarriedFrom int `yaml:"carried_from,omitempty"`
+	// StoreRefs are the added lines that name something only the store holds,
+	// in diff order, every one of them; absent when there are none and in a
+	// report an older jig wrote.
+	StoreRefs []StoreRef `yaml:"store_refs,omitempty"`
 	// Reviewer is who reported the round, as the reviewer's session and
 	// agent ids and how jig learned them.
 	Reviewer *Provenance `yaml:"reviewer,omitempty"`
@@ -887,6 +896,7 @@ func writeReportYAML(dir string, report GateReport) error {
 		Independent:  report.Independent,
 		CarriedFrom:  report.CarriedFrom,
 		OracleNames:  report.OracleNames,
+		StoreRefs:    report.StoreRefs,
 	}
 	if report.Independent != "" {
 		reviewer := report.Reviewer
