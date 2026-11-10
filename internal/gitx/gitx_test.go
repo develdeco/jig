@@ -409,6 +409,69 @@ func TestDiffHunks(t *testing.T) {
 	}
 }
 
+// TestDiffAdded checks the added lines with their new-side numbers: a changed
+// line, a line that reads "+++" inside a hunk, a deletion-only change that adds
+// none, a renamed file as all added lines at its new path, a deleted file, a
+// binary file and a submodule pointer with none, and a name with a space.
+func TestDiffAdded(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if _, err := Run(dir, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	write := func(rel, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.name", "jig-fixture")
+	run("config", "user.email", "fixture@example.invalid")
+	write("keep.txt", "a\nb\nc\nd\n")
+	write("del.txt", "1\n2\n3\n")
+	write("gone.txt", "x\n")
+	write("old.txt", "o\n")
+	write("with space.txt", "1\n")
+	write("blob.bin", "a\x00b\n")
+	run("add", "-A")
+	run("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,sub")
+	run("commit", "-m", "c1")
+	base, err := RevParse(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("keep.txt", "a\nB\nc\n++ plus\n")
+	write("del.txt", "1\n3\n")
+	write("blob.bin", "a\x00c\n")
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "old.txt"), filepath.Join(dir, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write("with space.txt", "1\n2\n")
+	run("add", "-A")
+	run("update-index", "--add", "--cacheinfo", "160000,2222222222222222222222222222222222222222,sub")
+	run("commit", "-m", "c2")
+
+	got, err := DiffAdded(dir, base, "HEAD")
+	if err != nil {
+		t.Fatalf("DiffAdded: %v", err)
+	}
+	want := []AddedLine{
+		{Path: "keep.txt", Line: 2, Text: "B"},
+		{Path: "keep.txt", Line: 4, Text: "++ plus"},
+		{Path: "new.txt", Line: 1, Text: "o"},
+		{Path: "with space.txt", Line: 2, Text: "2"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DiffAdded = %+v, want %+v", got, want)
+	}
+}
+
 // TestBlobsAtRev checks that a file at rev maps to its blob, that a
 // directory and an absent path are left out, and that a rev that is no
 // commit is an error.

@@ -374,18 +374,11 @@ func parseHunks(patch string) ([]Hunk, error) {
 		case strings.HasPrefix(line, "diff --git "):
 			path, inHeader = "", true
 		case inHeader && strings.HasPrefix(line, "+++ "):
-			// git ends the line with a tab when the name holds a space.
-			name := strings.TrimSuffix(strings.TrimPrefix(line, "+++ "), "\t")
-			if strings.HasPrefix(name, `"`) {
-				unq, err := strconv.Unquote(name)
-				if err != nil {
-					return nil, fmt.Errorf("gitx: diff hunks: unquote %s: %w", name, err)
-				}
-				name = unq
+			name, err := newSidePath(line)
+			if err != nil {
+				return nil, fmt.Errorf("gitx: diff hunks: %w", err)
 			}
-			if name != "/dev/null" {
-				path = strings.TrimPrefix(name, "b/")
-			}
+			path = name
 		case strings.HasPrefix(line, "@@ "):
 			inHeader = false
 			m := hunkHeaderRe.FindStringSubmatch(line)
@@ -404,6 +397,80 @@ func parseHunks(patch string) ([]Hunk, error) {
 		}
 	}
 	return hunks, nil
+}
+
+// newSidePath reads a file header's "+++ " line: the file's path at head, or
+// "" for /dev/null (a deleted file).
+func newSidePath(line string) (string, error) {
+	// git ends the line with a tab when the name holds a space.
+	name := strings.TrimSuffix(strings.TrimPrefix(line, "+++ "), "\t")
+	if strings.HasPrefix(name, `"`) {
+		unq, err := strconv.Unquote(name)
+		if err != nil {
+			return "", fmt.Errorf("unquote %s: %w", name, err)
+		}
+		name = unq
+	}
+	if name == "/dev/null" {
+		return "", nil
+	}
+	return strings.TrimPrefix(name, "b/"), nil
+}
+
+// AddedLine is one line a diff adds, as the new side reads: Path is the file's
+// path at head, Line the line's 1-based number there and Text its content
+// without the line ending.
+type AddedLine struct {
+	Path string
+	Line int
+	Text string
+}
+
+// DiffAdded returns every line base..head adds in dir, in diff order, with
+// renames off as in DiffNameOnly, so a renamed file is all added lines at its
+// new path. Deleted and unchanged lines are left out, and a binary file and a
+// submodule add none. Paths come back repo-relative with forward slashes,
+// unquoted.
+func DiffAdded(dir, base, head string) ([]AddedLine, error) {
+	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	return parseAdded(stdout.String())
+}
+
+// parseAdded reads DiffAdded's patch, which has no context lines: after a hunk
+// header every "+" line is an added one, numbered on from the header's new
+// start.
+func parseAdded(patch string) ([]AddedLine, error) {
+	var added []AddedLine
+	path, inHeader, next := "", false, 0
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			path, inHeader = "", true
+		case inHeader && strings.HasPrefix(line, "+++ "):
+			name, err := newSidePath(line)
+			if err != nil {
+				return nil, fmt.Errorf("gitx: diff added: %w", err)
+			}
+			path = name
+		case strings.HasPrefix(line, "@@ "):
+			inHeader = false
+			m := hunkHeaderRe.FindStringSubmatch(line)
+			if m == nil {
+				return nil, fmt.Errorf("gitx: diff added: unreadable hunk header %q", line)
+			}
+			next, _ = strconv.Atoi(m[1])
+		case !inHeader && path != "" && strings.HasPrefix(line, "+"):
+			added = append(added, AddedLine{Path: path, Line: next, Text: line[1:]})
+			next++
+		}
+	}
+	return added, nil
 }
 
 // BlobsAtRev returns the object id of each of paths that is a blob in dir's
