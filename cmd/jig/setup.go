@@ -22,7 +22,7 @@ import (
 // a jig project.
 
 const (
-	setupUsageGlobal    = "set up for you, on this machine: ~/.claude and ~/.agents skills, harness hooks, git's global hooks, the hint"
+	setupUsageGlobal    = "set up for you, on this machine: ~/.claude (or $CLAUDE_CONFIG_DIR) and ~/.agents skills, harness hooks, git's global hooks, the hint"
 	setupUsageProject   = "set up the named project of this machine, in its folder"
 	setupUsageHere      = "set up the project or repository you are in"
 	setupUsageSkills    = "the project skills (here, intake, chart, build, review, publish): in full globally, as one stub in a project"
@@ -343,11 +343,11 @@ func runSetup(e env, verbName string, p setupParams, stdout io.Writer, stdin io.
 	// The hint goes to the memory files of the harnesses in use unless
 	// --harness names them; a --harness of harnesses with none (cursor, say)
 	// leaves it out.
-	userHome, err := e.userHomeDir()
+	dirs, err := e.userDirs()
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	hintHs := defaultHintHarnesses(userHome)
+	hintHs := defaultHintHarnesses(dirs)
 	if p.harness != "" {
 		hintHs = nil
 		for _, h := range hooksHarnesses {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
+	"github.com/develdeco/jig/internal/setup"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -120,6 +121,30 @@ func (e env) jigHome() (string, error) {
 // environment, by os.UserHomeDir's rule.
 func (e env) userHomeDir() (string, error) {
 	return home.UserDirFrom(e.getenv)
+}
+
+// claudeConfigDirEnv is the variable Claude Code reads its user directory
+// from (settings, skills, memory) in place of ~/.claude.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// userDirs resolves where the operator's own harness files are from e's
+// environment: the home directory (userHomeDir), and Claude Code's user
+// directory, which is $CLAUDE_CONFIG_DIR made absolute against e's working
+// directory when it is set and not empty, else <home>/.claude, as Claude
+// Code itself reads it. Every global Claude Code piece jig writes or checks
+// is found through it.
+func (e env) userDirs() (setup.UserDirs, error) {
+	h, err := e.userHomeDir()
+	if err != nil {
+		return setup.UserDirs{}, err
+	}
+	u := setup.UserDirs{Home: h}
+	if dir := e.getenv(claudeConfigDirEnv); dir != "" {
+		if u.Claude, err = e.abs(dir); err != nil {
+			return setup.UserDirs{}, err
+		}
+	}
+	return u, nil
 }
 
 // abs makes path absolute against e's working directory, where filepath.Abs

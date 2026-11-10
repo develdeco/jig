@@ -61,3 +61,28 @@ func TestJigEnvDropsTheRecordDir(t *testing.T) {
 		}
 	}
 }
+
+// TestJigEnvDropsTheClaudeConfigDir: a CLAUDE_CONFIG_DIR the suite's own
+// process has never reaches the jig under test, which would write Claude
+// Code's global pieces into that real directory; one a test sets through
+// with does, once.
+func TestJigEnvDropsTheClaudeConfigDir(t *testing.T) {
+	t.Parallel()
+	base := []string{"PATH=/bin", claudeConfigDirEnv + "=/real/.claude-work", "HOME=/real"}
+	env := jigEnv{home: "/h", userHome: "/u"}
+	for _, kv := range env.environFrom(base) {
+		if sameEnvName(envName(kv), claudeConfigDirEnv) {
+			t.Errorf("environFrom holds %q, want no %s from the process", kv, claudeConfigDirEnv)
+		}
+	}
+
+	var got []string
+	for _, kv := range env.with(claudeConfigDirEnv + "=/t/claude").environFrom(base) {
+		if sameEnvName(envName(kv), claudeConfigDirEnv) {
+			got = append(got, kv)
+		}
+	}
+	if want := []string{claudeConfigDirEnv + "=/t/claude"}; !slices.Equal(got, want) {
+		t.Errorf("with a %s set by the test, environFrom holds %q, want %q", claudeConfigDirEnv, got, want)
+	}
+}

@@ -110,7 +110,9 @@ func TestHooksLive(t *testing.T) {
 		{Name: "commit the subagent's slice", Call: claudetest.Bash(
 			"git -c user.name=jig-e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m 'b: scripted by a subagent' -m 'Jig-Slice: b' && git rev-parse HEAD")},
 	}}
-	claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
+	// The CLI's throwaway config dir reaches it only through env: environ
+	// drops a CLAUDE_CONFIG_DIR it inherits.
+	env = env.with(claudeConfigDirEnv + "=" + claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -124,7 +126,7 @@ func TestHooksLive(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen = append(seen, messages...)
-	}})
+	}}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -309,7 +311,9 @@ func TestHooksLiveNested(t *testing.T) {
 		{Name: "commit the slice", Call: claudetest.Bash(
 			"git -c user.name=jig-e2e -c user.email=e2e@example.invalid commit -q --allow-empty -m 'c: scripted by a builder' -m 'Jig-Slice: c' && git rev-parse HEAD")},
 	}}
-	claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
+	// The CLI's throwaway config dir reaches it only through env: environ
+	// drops a CLAUDE_CONFIG_DIR it inherits.
+	env = env.with(claudeConfigDirEnv + "=" + claudetest.Serve(t, &claudetest.API{Route: func(p string) *claudetest.Session {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -325,7 +329,7 @@ func TestHooksLiveNested(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		seen = append(seen, messages...)
-	}})
+	}}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

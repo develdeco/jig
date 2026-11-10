@@ -262,7 +262,7 @@ func TestSetupHarnessAllWritesEveryHarnessAndUninstallRemovesThem(t *testing.T) 
 	}
 	var files []string
 	for _, h := range setup.Harnesses() {
-		f := h.GlobalFile(ie.userHome)
+		f := h.GlobalFile(setup.UserDirs{Home: ie.userHome})
 		files = append(files, f)
 		if !exists(f) {
 			t.Errorf("%s: %s was not written", h.Name, f)
@@ -275,7 +275,7 @@ func TestSetupHarnessAllWritesEveryHarnessAndUninstallRemovesThem(t *testing.T) 
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}
 	for _, h := range setup.Harnesses() {
-		f := h.GlobalFile(ie.userHome)
+		f := h.GlobalFile(setup.UserDirs{Home: ie.userHome})
 		switch h.Name {
 		case "claude", "gemini":
 			// Settings files that are the person's: left, with jig's entries out.

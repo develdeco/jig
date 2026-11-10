@@ -23,10 +23,10 @@ type Harness struct {
 	// harness: what it needs on its side to read the hooks.
 	Note string
 
-	// configDir is the harness's directory in the person's home, relative to
-	// it: where its presence says the person uses the harness.
-	configDir string
-	global    func(userHome string) string
+	// configDir is the harness's own directory of the person's: where its
+	// presence says the person uses the harness.
+	configDir func(UserDirs) string
+	global    func(UserDirs) string
 	project   func(dir string, tracked bool) string
 	merge     func(data []byte, jig string) ([]byte, bool, error)
 	unmerge   func(data []byte) ([]byte, bool, error)
@@ -48,8 +48,8 @@ func Harnesses() []Harness {
 			Name:      "claude",
 			Events:    specEvents(ClaudeHooks()),
 			Note:      "Start a new session for the harness to read them; Claude Code ignores hooks in a folder it does not trust and under --bare",
-			configDir: ".claude",
-			global:    func(home string) string { return filepath.Join(home, ".claude", "settings.json") },
+			configDir: UserDirs.ClaudeDir,
+			global:    func(u UserDirs) string { return filepath.Join(u.ClaudeDir(), "settings.json") },
 			project: func(dir string, tracked bool) string {
 				if tracked {
 					return filepath.Join(dir, ".claude", "settings.json")
@@ -65,8 +65,8 @@ func Harnesses() []Harness {
 			Events:    specEvents(CodexHooks()),
 			Dedicated: true,
 			Note:      "Codex reads hooks only when its hooks feature is on (codex_hooks in ~/.codex/config.toml, which jig does not edit); start a new session, and Codex does not read them in a folder it does not trust",
-			configDir: ".codex",
-			global:    func(home string) string { return filepath.Join(home, ".codex", "hooks.json") },
+			configDir: inHome(".codex"),
+			global:    inHome(".codex", "hooks.json"),
 			project:   func(dir string, _ bool) string { return filepath.Join(dir, ".codex", "hooks.json") },
 			merge:     mergeCodex,
 			unmerge:   UnmergeClaude,
@@ -76,8 +76,8 @@ func Harnesses() []Harness {
 			Name:      "gemini",
 			Events:    specEvents(GeminiHooks()),
 			Note:      "Start a new Gemini CLI session; hooks must be enabled in its settings (they are on by default in recent versions)",
-			configDir: ".gemini",
-			global:    func(home string) string { return filepath.Join(home, ".gemini", "settings.json") },
+			configDir: inHome(".gemini"),
+			global:    inHome(".gemini", "settings.json"),
 			project:   func(dir string, _ bool) string { return filepath.Join(dir, ".gemini", "settings.json") },
 			merge:     mergeGemini,
 			unmerge:   UnmergeClaude,
@@ -88,8 +88,8 @@ func Harnesses() []Harness {
 			Events:    CursorEvents(),
 			Dedicated: true,
 			Note:      "Restart Cursor to read them; its hooks run from the .cursor directory",
-			configDir: ".cursor",
-			global:    func(home string) string { return filepath.Join(home, ".cursor", "hooks.json") },
+			configDir: inHome(".cursor"),
+			global:    inHome(".cursor", "hooks.json"),
 			project:   func(dir string, _ bool) string { return filepath.Join(dir, ".cursor", "hooks.json") },
 			merge:     cursorFormat.merge,
 			unmerge:   cursorFormat.unmerge,
@@ -100,8 +100,8 @@ func Harnesses() []Harness {
 			Events:    CopilotEvents(),
 			Dedicated: true,
 			Note:      "Start a new Copilot session; jig keeps its hooks in a jig.json of their own",
-			configDir: ".copilot",
-			global:    func(home string) string { return filepath.Join(home, ".copilot", "hooks", "jig.json") },
+			configDir: inHome(".copilot"),
+			global:    inHome(".copilot", "hooks", "jig.json"),
 			project:   func(dir string, _ bool) string { return filepath.Join(dir, ".github", "hooks", "jig.json") },
 			merge:     copilotFormat.merge,
 			unmerge:   copilotFormat.unmerge,
@@ -112,8 +112,8 @@ func Harnesses() []Harness {
 			Events:    OpenCodeEvents(),
 			Dedicated: true,
 			Note:      "Restart OpenCode to load the plugin; it needs node on PATH to run jig",
-			configDir: filepath.Join(".config", "opencode"),
-			global:    func(home string) string { return filepath.Join(home, ".config", "opencode", "plugins", "jig.js") },
+			configDir: inHome(".config", "opencode"),
+			global:    inHome(".config", "opencode", "plugins", "jig.js"),
 			project:   func(dir string, _ bool) string { return filepath.Join(dir, ".opencode", "plugins", "jig.js") },
 			merge:     mergeOpenCode,
 			unmerge:   unmergeOpenCode,
@@ -143,12 +143,15 @@ func HarnessNames() []string {
 	return out
 }
 
-// ConfigDir is the harness's own directory in the home of the person who owns
-// userHome; that it exists says the person uses the harness.
-func (h Harness) ConfigDir(userHome string) string { return filepath.Join(userHome, h.configDir) }
+// ConfigDir is the harness's own directory of the person whose directories u
+// names (Claude Code's is u.ClaudeDir()); that it exists says the person uses
+// the harness.
+func (h Harness) ConfigDir(u UserDirs) string { return h.configDir(u) }
 
-// GlobalFile is the harness's hook file for the person who owns userHome.
-func (h Harness) GlobalFile(userHome string) string { return h.global(userHome) }
+// GlobalFile is the harness's hook file for the person whose directories u
+// names: Claude Code's settings.json in u.ClaudeDir(), the others' under
+// u.Home.
+func (h Harness) GlobalFile(u UserDirs) string { return h.global(u) }
 
 // ProjectFile is the harness's hook file inside the project folder dir. With
 // tracked, Claude Code's goes in the settings.json the project shares rather

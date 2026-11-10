@@ -118,6 +118,51 @@ func TestDoctorNamesMissingPieces(t *testing.T) {
 	}
 }
 
+// TestSetupGlobalFollowsClaudeConfigDir: a person who runs Claude Code with
+// CLAUDE_CONFIG_DIR gets the global pieces where that Claude Code reads them.
+// jig setup --global --artifacts --yes writes the skills, the hook entries
+// and the hint into the directory the variable names, outside the home, and
+// nothing into <home>/.claude; jig doctor then reports Claude Code's rows
+// installed and names the directory it checked.
+func TestSetupGlobalFollowsClaudeConfigDir(t *testing.T) {
+	t.Parallel()
+	r := newHookRepo(t)
+	claudeDir := filepath.Join(t.TempDir(), "claude-work")
+	r.env = r.env.with(claudeConfigDirEnv + "=" + claudeDir)
+	nowhere := r.work // in no project and no repository
+
+	if res := r.jigIn(nowhere, "setup", "--global", "--artifacts", "--yes"); res.Code != 0 || !strings.Contains(res.Stdout, "result: installed") {
+		t.Fatalf("jig setup --global --artifacts --yes = exit %d\n%s%s", res.Code, res.Stdout, res.Stderr)
+	}
+	for rel, mark := range map[string]string{
+		filepath.Join("skills", "here", "SKILL.md"): "jig here",
+		"settings.json": "observe",
+		"CLAUDE.md":     "jig here",
+	} {
+		data, err := os.ReadFile(filepath.Join(claudeDir, rel))
+		if err != nil || !strings.Contains(string(data), mark) {
+			t.Errorf("%s in Claude Code's directory: %v, want it written by jig\n%s", rel, err, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(r.env.userHome, ".claude")); !os.IsNotExist(err) {
+		t.Errorf("setup wrote into the home's .claude, which this Claude Code does not read: %v", err)
+	}
+
+	res := r.jigIn(nowhere, "doctor")
+	if res.Code != 0 {
+		t.Fatalf("jig doctor = exit %d\n%s%s", res.Code, res.Stdout, res.Stderr)
+	}
+	if want := "checked in " + claudeDir; !strings.Contains(res.Stdout, want) {
+		t.Errorf("doctor does not name the directory it checked (%q):\n%s", want, res.Stdout)
+	}
+	rows := piecesTable(t, res.Stdout)
+	for _, key := range []string{"skills,claude", "skills,agents", "hooks,claude", "hint,claude"} {
+		if row, ok := rows[key]; !ok || row.state != "installed" {
+			t.Errorf("%s = %+v, want installed\n%s", key, row, res.Stdout)
+		}
+	}
+}
+
 type pieceRow struct{ state, fix string }
 
 // piecesTable reads the pieces table of a doctor report: row key is
