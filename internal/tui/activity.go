@@ -366,6 +366,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return strings.TrimSpace(who + " asks: " + firstLine(l.Summary))
 	case journal.EventAnswer:
 		return strings.TrimSpace(firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " answered the question: " + firstLine(l.Summary))
+	case journal.EventCall:
+		return strings.TrimSpace(who + " made a call: " + firstLine(l.Summary))
 	case journal.EventStall:
 		return strings.TrimSpace("stalled: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventRequeue:

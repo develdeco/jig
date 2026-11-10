@@ -256,7 +256,7 @@ func TestDescribeAndEventStateCoverEveryJournalEvent(t *testing.T) {
 	t.Parallel()
 	for _, ev := range []string{
 		journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventOracle, journal.EventVerified,
-		journal.EventVerifyError, journal.EventQuestion, journal.EventAnswer, journal.EventNote, journal.EventStall,
+		journal.EventVerifyError, journal.EventQuestion, journal.EventAnswer, journal.EventCall, journal.EventNote, journal.EventStall,
 		journal.EventGateOpen, journal.EventGateRound, journal.EventGateClean, journal.EventTriage, journal.EventPrBody,
 		journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
 	} {

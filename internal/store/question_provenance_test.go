@@ -126,3 +126,33 @@ func TestBriefSectionsKeepBodiesAndHashes(t *testing.T) {
 		t.Error("a brief with no \"## \" heading has sections")
 	}
 }
+
+// TestAddCallRoundTripsItsKind: a call is stored answered, as kind call with
+// provenance agent, and reads back so; a question put to a person has no kind.
+func TestAddCallRoundTripsItsKind(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	if _, err := st.AddQuestion("JIG-1", "a", "which?"); err != nil {
+		t.Fatal(err)
+	}
+	made, err := st.AddCall("JIG-1", "", "which tone?", "casual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made.ID != "q-002" {
+		t.Fatalf("call id = %s, want q-002", made.ID)
+	}
+	got, err := st.ReadQuestion("JIG-1", "q-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != made || got.Kind != KindCall || got.Status != "answered" || got.Provenance != "agent" || got.Answer != "casual" {
+		t.Fatalf("read %+v, wrote %+v", got, made)
+	}
+	if first, _ := st.ReadQuestion("JIG-1", "q-001"); first.Kind != "" {
+		t.Errorf("an ask has kind %q", first.Kind)
+	}
+	data, _ := ReadFile(st.questionPath("JIG-1", "q-001"))
+	if strings.Contains(string(data), "kind") {
+		t.Errorf("an ask's file names a kind:\n%s", data)
+	}
+}
