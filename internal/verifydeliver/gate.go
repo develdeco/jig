@@ -36,7 +36,7 @@ type Round struct {
 	Receipts   map[string][]byte
 	Review     *Review
 	// Carried is the number of the round whose verdict a reviewer round with
-	// nothing to read carries over (GATE-16): 0 for a round a reviewer read.
+	// nothing to read carries over: 0 for a round a reviewer read.
 	Carried int
 }
 
@@ -215,7 +215,7 @@ type GateReport struct {
 	// no current skip over them (ADR 0036): 0 for a scripted round.
 	Probes, Unprobed int
 	// CarriedFrom is the number of the round whose verdict this clean round
-	// carries over (GATE-16): 0 for a round a reviewer read.
+	// carries over: 0 for a round a reviewer read.
 	CarriedFrom int
 }
 
@@ -240,7 +240,7 @@ type reportYAML struct {
 	// is not clean (ADR 0046).
 	Independent Independence `yaml:"independent,omitempty"`
 	// CarriedFrom is the number of the round whose verdict this clean round
-	// carries over (GATE-16): its head only merged the target into the head
+	// carries over: its head only merged the target into the head
 	// that round reviewed. It names the round that was really reviewed. 0 for
 	// every round a reviewer read.
 	CarriedFrom int `yaml:"carried_from,omitempty"`

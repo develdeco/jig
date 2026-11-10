@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end test of the light delta (GATE-18): a slice verified by the whole
+// End-to-end test of the light delta: a slice verified by the whole
 // suite, a Markdown-only commit verified with the manifest's light oracle
 // alone, and a gate that reuses the earlier whole-suite pass; and a delta with
 // one non-light file, which runs the slice's oracle.

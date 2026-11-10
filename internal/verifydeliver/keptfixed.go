@@ -1,6 +1,6 @@
 package verifydeliver
 
-// A keep the closing round finds already fixed (GATE-15). `jig triage <T> <f>
+// A keep the closing round finds already fixed. `jig triage <T> <f>
 // keep` is applied by the next round that closes (recordedTriage), which turns
 // the kept ask or note into a fix slice. When the code moved since the round
 // that raised the finding, and the closing round's reviewer no longer reports

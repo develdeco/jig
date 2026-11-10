@@ -913,7 +913,7 @@ func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDe
 			o.status = "addressed"
 			o.detail = "addressed at " + strings.Join(cleared[id], ", ")
 		case len(cleared[id]) > 0 && decisions[id].Outcome == TriageKeep && (f.Status == StatusAsked || f.Status == StatusNoted):
-			// A keep the closing round found already fixed (GATE-15): it was
+			// A keep the closing round found already fixed: it was
 			// kept, no slice was built from it, and a later round no longer
 			// reported it.
 			o.status = "fixed"
@@ -1001,7 +1001,7 @@ func reviewerLines(rounds []RoundRecord) []string {
 		label := fmt.Sprintf("Round %d", r.Round)
 		if r.CarriedFrom > 0 {
 			// No reviewer read this round: its head only merged the target
-			// into the head a reviewer read (GATE-16).
+			// into the head a reviewer read.
 			out = append(out, fmt.Sprintf("- %s: carried over from round %d (the head only merges the target into the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
 			continue
 		}

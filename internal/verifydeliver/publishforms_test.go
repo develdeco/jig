@@ -882,7 +882,7 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 
 // TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody: --body renders
 // the notes after one round; a second round then closes at the same head (a
-// triage decision after a clean round makes the gate run one, GATE-8); --pr
+// triage decision after a clean round makes the gate run one); --pr
 // then posts the second round's notes, not the earlier round's the store
 // still holds.
 func TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody(t *testing.T) {

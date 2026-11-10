@@ -173,7 +173,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	if p.Carried != nil {
 		// Nothing to read: the round is recorded, carrying over the verdict of
-		// the round a reviewer read (GATE-16).
+		// the round a reviewer read.
 		return printGateReport(stdout, st, ticket, *p.Carried)
 	}
 	blocks := roundBlocks(p, nil, false, nil)
@@ -315,7 +315,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 }
 
 // carriedVerdict is the verdict of a round, with "(carried over from round N)"
-// after a clean one no reviewer read (GATE-16).
+// after a clean one no reviewer read.
 func carriedVerdict(report verifydeliver.GateReport) string {
 	if report.CarriedFrom > 0 {
 		return report.Verdict + " (carried over from round " + strconv.Itoa(report.CarriedFrom) + ")"

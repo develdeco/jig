@@ -176,7 +176,7 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 	octopus := r.git("rev-parse", "HEAD")
 	cases = append(cases, lineCase{name: "an octopus", reviewed: after, head: octopus, kind: lineOther})
 
-	// A merge that does not bring in the target (GATE-16): a clean merge of an
+	// A merge that does not bring in the target: a clean merge of an
 	// unrelated branch, then a hand-resolved one, are the reviewer's to read.
 	r.git("switch", "-c", "unrelated", seed)
 	r.commit("unrelated.txt", "work that is not on the target\n")

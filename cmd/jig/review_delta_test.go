@@ -30,7 +30,7 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 	return fx, out
 }
 
-// TestADeltaRoundsContextHoldsOnlyItsDelta (GATE-17): a round 2 over one
+// TestADeltaRoundsContextHoldsOnlyItsDelta: a round 2 over one
 // changed file prints that file's diff, the kept note it answers, the file in
 // must_review and the read line, and none of the round 1 reading: no
 // recordings, no whole-change hunks count.

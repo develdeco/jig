@@ -34,7 +34,7 @@ const (
 type RoundRecord struct {
 	Round int
 	// CarriedFrom is the round whose verdict a clean round carries over
-	// (GATE-16), 0 for a round a reviewer read.
+	// (the head only merged the target), 0 for a round a reviewer read.
 	CarriedFrom int
 	// Verdict is RoundClean, RoundFindings or VerdictNotIndependent.
 	Verdict string

@@ -385,8 +385,8 @@ func malformedTrackerEntryError(why string) error {
 
 // keyRE matches a key: entry's own key: 2 to 10 uppercase ASCII letters and
 // digits, starting with a letter. Keys are uppercase so that a filesystem
-// that ignores case, the Windows and macOS default, never confuses STORE-1
-// with store-1.
+// that ignores case, the Windows and macOS default, never confuses ABC-1
+// with abc-1.
 var keyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
 // loadKeys resolves c.Keys from raw's keys:, refusing the shapes

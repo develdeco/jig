@@ -72,7 +72,7 @@ func init() {
 // dismissed, and the oracles that passed.
 func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full bool, deltas []deltaDiff) []string {
 	req := p.Request
-	// A delta round reads only its delta (GATE-17): it drops what round 1 read.
+	// A delta round reads only its delta: it drops what round 1 read.
 	delta := full && roundIsDelta(p)
 	deltaFiles := deltaFileSet(deltas)
 	kv := [][2]string{

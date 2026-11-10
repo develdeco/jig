@@ -1695,7 +1695,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	openOutstanding := 0
 	for _, f := range in.Open {
 		// A noted finding a person kept (the keep still pending) is work the
-		// closing round may spend as fixed (GATE-15): its file must be read.
+		// closing round may spend as fixed: its file must be read.
 		if d, ok := decisions[f.ID]; ok && f.Status == StatusNoted && d.Pending && d.Outcome == TriageKeep {
 			openFiles = append(openFiles, f.File)
 			continue
@@ -1977,7 +1977,7 @@ func (r *launchedGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 	// there is nothing for a reviewer session to do.
 	if prep.Empty {
 		// A head that only merges the target into the head a reviewer read
-		// carries that round's verdict (GATE-16).
+		// carries that round's verdict.
 		carried, note, err := carriedOver(in, prep)
 		if err != nil {
 			return Round{}, false, err
