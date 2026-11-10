@@ -185,8 +185,8 @@ func TestRenderPicksSectionCaptionWithAnUnbalancedBracketStillShowsTheImage(t *t
 	}
 }
 
-// TestRenderPicksSectionEscapesHTMLInSummaryAndCaption: gate finding r4-f3,
-// the owner's decision. Neither the summary's demoteHeadings/closeOpenFence
+// TestRenderPicksSectionEscapesHTMLInSummaryAndCaption: a gate
+// finding, the owner's decision. Neither the summary's demoteHeadings/closeOpenFence
 // nor sanitizeDemoCaption's bracket strip touches raw HTML, which GitHub
 // renders a sanitized subset of inside a pull request body - a video or
 // captionless bullet's caption, and the summary outright, could otherwise put

@@ -14,8 +14,8 @@ import (
 // TestInitStandaloneLocal runs a bare `jig init` in a git repo that holds no
 // nested repos: jig reads the case off the folder, says it picked a
 // single-repo project before it writes, and leaves a project that is usable
-// with no remote anywhere (the digester chart's decision 30, a project is
-// local until shared): a v3 store beside the repo, a jig.yaml in it with no
+// with no remote anywhere (a project is local until
+// shared): a v3 store beside the repo, a jig.yaml in it with no
 // store: key, and the machine map entry. `ticket new` and `here` work at once.
 func TestInitStandaloneLocal(t *testing.T) {
 	t.Parallel()

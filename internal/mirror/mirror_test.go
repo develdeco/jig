@@ -1352,7 +1352,7 @@ func TestSyncLinksBlockedByThroughAnAlias(t *testing.T) {
 	}
 }
 
-// TestSyncDryRunPreviewsLinksWithoutMutating is gate finding r2-f3's own
+// TestSyncDryRunPreviewsLinksWithoutMutating is a gate finding's own
 // case: TestSyncDryRunPreviewsAgainstExistingRecords's store carries one
 // chartless, blocker-free ticket, so links.go's own dryRun branches
 // (linkParent, linkBlockedBy and the RemoveSubIssue/RemoveBlockedBy guards)

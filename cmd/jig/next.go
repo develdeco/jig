@@ -296,7 +296,7 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 
 // setReviewer says who reviews the ticket when review is the phase that can
 // start now: whether the calling session (envSession) may review it itself, and
-// the advice for it (decision 39). It adds nothing when review is not ready, as
+// the advice for it. It adds nothing when review is not ready, as
 // while a round is open, whose reviewer is at work already, or when the
 // environment names no session.
 func (n *nextTicket) setReviewer(e env, d verifydeliver.Deps) {

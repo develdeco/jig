@@ -261,7 +261,7 @@ func TestFindPullRequestsRefetchesARecordedOneTheHeadQueryMisses(t *testing.T) {
 }
 
 // TestFindPullRequestsKeepsARecordedOneGitHubNoLongerHas checks the human's
-// r9-f1/r9-f2 decision: a recorded pull request neither the head query nor
+// decision: a recorded pull request neither the head query nor
 // a fetch by its node id turns up - GitHub answered NOT_FOUND, which can
 // mean the token lost access rather than that the pull request is truly
 // gone - stays listed and in the record with no State, and is reported in
@@ -286,7 +286,7 @@ func TestFindPullRequestsKeepsARecordedOneGitHubNoLongerHas(t *testing.T) {
 }
 
 // TestFindPullRequestsKeepsARecordedOneWithNoNodeID checks brief.md#Records'
-// "adopted as they are" and the human's r9-f1 decision: a recorded prs:
+// "adopted as they are" and the human's decision: a recorded prs:
 // entry with no node_id (hand-edited, or written by a bridge version that
 // omitted it) stays listed and in the record with no State, never sent to
 // PullRequestsByIDs as an empty id - client.PullRequestsByIDs would fail

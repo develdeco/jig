@@ -49,14 +49,14 @@ type prsFound struct {
 // when GitHub no longer has it - a recorded prs: entry carries no state of
 // its own (record.go's prRecord), so a merged pull request whose head branch
 // GitHub has since deleted would otherwise be listed with no state and
-// never count toward Done. A sync never deletes store data it cannot check
-// (the human's r9-f1 decision): a recorded entry with no node_id
+// never count toward Done. A sync never deletes store data it cannot check:
+// a recorded entry with no node_id
 // (hand-edited, or written by a bridge version that omitted it;
 // brief.md#Records says records the bridge wrote are adopted as they are)
 // stays in the result with no State, listed in the body and kept in the
 // record exactly as before this re-check existed - it is only left out of
 // the PullRequestsByIDs lookup, rather than sent as an empty id. An entry
-// PullRequestsByIDs does send but GitHub answers NOT_FOUND for (r9-f2: that
+// PullRequestsByIDs does send but GitHub answers NOT_FOUND for (that
 // can mean the token lost access, not that the pull request is gone) stays
 // the same way too, with one warning returned in gone so the caller can
 // print it and the operator can remove the entry by hand if it really is
@@ -137,8 +137,8 @@ func findPullRequests(ctx context.Context, client github.Client, cfg project.Con
 			pr, ok := byNodeID[rec.NodeID]
 			if !ok {
 				// GitHub answered NOT_FOUND for this id, which can mean the token
-				// lost access rather than that the pull request is truly gone
-				// (r9-f2). It stays listed and recorded with no State, and the
+				// lost access rather than that the pull request is truly gone.
+				// It stays listed and recorded with no State, and the
 				// caller is told so it can warn the operator, who can remove the
 				// entry by hand if it really is gone.
 				out[i].prs = append(out[i].prs, PRRef{Owner: rec.Owner, Repo: rec.Repo, Number: rec.Number, NodeID: rec.NodeID})
@@ -153,7 +153,7 @@ func findPullRequests(ctx context.Context, client github.Client, cfg project.Con
 
 // GoneRecordedPR is one recorded pull request PullRequestsByIDs could not
 // find (GitHub answered NOT_FOUND for its node id). findPullRequests keeps
-// it listed and recorded anyway (r9-f2) and reports it here, Ticket left
+// it listed and recorded anyway and reports it here, Ticket left
 // for the caller to fill in, so the caller can print one warning naming
 // the ticket, Owner, Repo and Number, since NOT_FOUND can mean the token
 // lost access rather than that the pull request is gone.

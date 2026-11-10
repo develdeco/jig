@@ -439,7 +439,7 @@ func TestSyncRecreatesAnIssueGoneFromGitHub(t *testing.T) {
 }
 
 // TestSyncSucceedsWithARecordedPullRequestMissingANodeID is the owner's
-// decision for gate finding r8-f2, and the human's r9-f1 decision on top of
+// decision for a gate finding, and the human's decision on top of
 // it: a prs: entry with no node_id (hand-edited, or written by a bridge
 // version that omitted it; brief.md#Records says records the bridge wrote
 // are adopted as they are) must never reach PullRequestsByIDs as an empty

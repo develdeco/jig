@@ -555,7 +555,7 @@ func (s *Store) branchNameFault(branch, target string) *branchFault {
 // "<id>:" that heading may lead with (briefSlug). Tickets minted through jig
 // have a title, so this is a ticket whose folder was made by hand. A ticket
 // with no slug from either is named by the bare id: the "jig/<id>" prefix
-// went with the branches named for their titles (decision 31), and a
+// went with the branches named for their titles, and a
 // jig/<id> branch still binds to its ticket (TicketForBranch).
 func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 	slug := rec.Slug

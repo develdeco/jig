@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests of branch names (digester decision 31): a ticket's branch is
+// End-to-end tests of branch names: a ticket's branch is
 // <id>-<slug>, led by the GitHub issue number once the mirror has given the
 // ticket one; the name binds a branch to its ticket with no claim; and a branch
 // a session chose for itself is recorded by its claim and is the one publish

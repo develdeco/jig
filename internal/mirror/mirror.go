@@ -40,7 +40,7 @@ import (
 // two link mutations, three board mutations), so a sync bounded inside every
 // command would never finish it; the owner's call is to keep the bound only
 // where it protects a command's own latency, and let the on-demand command
-// run to completion instead (gate finding r2-f5).
+// run to completion instead.
 const syncTimeout = 2 * time.Minute
 
 // Deps bundles what Sync needs beyond the store and project config, per
@@ -74,7 +74,7 @@ type SyncOpts struct {
 	// Unbounded lifts syncTimeout: this sync runs until it is done rather
 	// than stopping after 2 minutes. Set by `jig trackers sync`, which is
 	// run on demand rather than from inside another command, so it has no
-	// reason to share that bound (gate finding r2-f5); a sync from inside a
+	// reason to share that bound; a sync from inside a
 	// command (the checkpoint hook) leaves this false.
 	Unbounded bool
 }
@@ -139,7 +139,7 @@ type SyncReport struct {
 	// run.
 	PlacedPRs []PlacedPR
 	// GoneRecordedPRs is every recorded pull request nodes(ids:) answered
-	// NOT_FOUND for (r9-f2): kept in the record and listed with no state,
+	// NOT_FOUND for: kept in the record and listed with no state,
 	// since NOT_FOUND can mean the token lost access rather than that the
 	// pull request is gone. One warning per entry, naming the ticket, the
 	// repo and the number, so the operator can remove it by hand if it
@@ -296,12 +296,12 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	// newItemPRs returns it's own pull requests, for previewCreateRender to
 	// render ahead of a create, so the create-time scan (dry run or live)
 	// covers the same `## Pull requests` block updateIssues will later
-	// render and scan (brief.md#Status and pull requests; r4-f1's narrower
+	// render and scan (brief.md#Status and pull requests; the narrower
 	// seam: a term matching a pull request's repo must refuse the create
 	// too, not just updateIssues' later skip). A chart has no pull
 	// requests. When trackers: has no repos: entries, findPullRequests
 	// queries nothing, so no client is ensured either - keeping the dry
-	// run with no new items' pull requests to find needing none (r1-f3's
+	// run with no new items' pull requests to find needing none (the
 	// guarantee for a store with no repos: configured). The first call finds
 	// the pull requests of every ticket with no record at once, so a store's
 	// first sync reads them in one batch rather than a query per ticket; a
@@ -362,11 +362,11 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 			// A dry run claims nothing, so an item with no record never
 			// reaches updateIssues; it previews (and scans) the full render
 			// here instead, so a store with no records yet still gets a
-			// meaningful preview and publish-safety check (r1-f3). It
+			// meaningful preview and publish-safety check. It
 			// cannot learn the issue repo's visibility without a client it
 			// otherwise has no need for yet, so it scans unconditionally,
 			// previewing every hit it might otherwise miss. Its pull
-			// requests are found the same way a live sync would (r4-f1),
+			// requests are found the same way a live sync would,
 			// since a dry run reads GitHub too (brief.md#jig trackers sync).
 			prs, err := newItemPRs(it)
 			if err != nil {
@@ -396,10 +396,10 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 			// (brief.md#Publish safety), not just the footer-only body
 			// CreateIssue is about to write: a hit anywhere in the item's
 			// real body must refuse the create, not just a hit in the
-			// marker footer (r4-f1). The issue number does not exist yet
+			// marker footer. The issue number does not exist yet
 			// either way, and changes no text the scan matches, so scanning
 			// before it exists (step 3, ahead of step 4's full render) is
-			// sound. Its pull requests are included too (r4-f1's narrower
+			// sound. Its pull requests are included too (the narrower
 			// seam): a term matching a pull request's repo must refuse the
 			// create, the same as updateIssues would later skip the update
 			// on it.
@@ -607,8 +607,8 @@ func (it item) render(st *store.Store) (title, body string, err error) {
 
 // previewCreateRender returns item's full title and body, as updateIssues
 // would render them once the issue exists, for a dry run's preview and
-// publish-safety scan of an item that has no record yet (r1-f3), and for the
-// live create step's own scan ahead of CreateIssue (r4-f1). prs is it's own
+// publish-safety scan of an item that has no record yet, and for the
+// live create step's own scan ahead of CreateIssue. prs is it's own
 // pull requests (newItemPRs), nil for a chart, which has none.
 func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRRef) (title, body string, err error) {
 	if it.kind == "chart" {
