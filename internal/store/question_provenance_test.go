@@ -156,3 +156,14 @@ func TestAddCallRoundTripsItsKind(t *testing.T) {
 		t.Errorf("an ask's file names a kind:\n%s", data)
 	}
 }
+
+// TestHasLedgerEntry: only a ticket-shaped heading of that ticket opens its
+// entry.
+func TestHasLedgerEntry(t *testing.T) {
+	ledger := "# Ledger\n\n## JIG-1 - One\n\n**Answers:**\n- q-001: A?\n## Options\n\n## JIG-3\n\nx\n"
+	for ticket, want := range map[string]bool{"JIG-1": true, "JIG-3": true, "JIG-2": false, "Options": false} {
+		if got := HasLedgerEntry(ledger, ticket); got != want {
+			t.Errorf("HasLedgerEntry(%s) = %v, want %v", ticket, got, want)
+		}
+	}
+}

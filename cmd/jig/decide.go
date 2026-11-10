@@ -8,6 +8,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
+	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // decideUsage is the shape of the verb, named by each refusal.
@@ -80,6 +81,11 @@ func cmdDecide(e env, args []string, stdout io.Writer) int {
 		Session: w.Session, Ref: q.ID, Provenance: "agent", Summary: flatten(text+" - chose: "+answer, summaryMax),
 	})
 	if err != nil {
+		return renderErr(stdout, err)
+	}
+	// A published ticket's ledger entry shows the call too; the same commit
+	// carries both.
+	if err := verifydeliver.RefreshLedgerEntry(w.St, w.Ticket); err != nil {
 		return renderErr(stdout, err)
 	}
 	if err := w.St.Push(fmt.Sprintf("%s: call %s", w.Ticket, q.ID)); err != nil {

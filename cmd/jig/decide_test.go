@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -89,5 +90,51 @@ func TestDecideOnTheWholeTicketAndAPublishedOne(t *testing.T) {
 	}
 	if out, code := runMain(t, e, "", "decide", T, "--slice", "nope", "Which tone?", "--chose", "casual"); code == 0 || !strings.Contains(out, "SLICE_NOT_FOUND") {
 		t.Errorf("an unknown slice: exit %d\n%s", code, out)
+	}
+}
+
+// TestDecideRewritesOnlyThePublishedTicketsLedgerEntry: with three tickets in
+// the ledger, a call on the second rewrites its entry in place, with the call
+// listed, and leaves the others as they were; a ticket with no entry leaves
+// the ledger untouched.
+func TestDecideRewritesOnlyThePublishedTicketsLedgerEntry(t *testing.T) {
+	t.Parallel()
+	fx, st, e := workFixture(t)
+	T := fx.Ticket
+	first := "## AAA-1 - First\n\nDelivered 1 slice(s).\n\n**Answers:**\nnone\n"
+	third := "## ZZZ-3 - Third\n\nDelivered 1 slice(s).\n\n**Answers:**\n- q-001: Which? -> This.\n"
+	stale := "## " + T + " - Stale title\n\nDelivered 9 slice(s).\n\n**Answers:**\nnone\n"
+	ledger := "# Ledger\n\n" + first + "\n" + stale + "\n" + third
+	if err := os.WriteFile(st.LedgerPath(), []byte(ledger), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := runMain(t, e, "", "decide", T, "--slice", "c", "Which tone?", "--chose", "casual"); code != 0 {
+		t.Fatalf("decide: exit %d\n%s", code, out)
+	}
+	data, err := os.ReadFile(st.LedgerPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	i1, i2, i3 := strings.Index(got, "## AAA-1"), strings.Index(got, "## "+T), strings.Index(got, "## ZZZ-3")
+	if !(0 < i1 && i1 < i2 && i2 < i3) || strings.Count(got, "## "+T) != 1 {
+		t.Fatalf("entries are not in place:\n%s", got)
+	}
+	if !strings.Contains(got, "- q-001 (call): Which tone? -> casual") || strings.Contains(got, "Stale title") {
+		t.Errorf("the entry does not list the call:\n%s", got)
+	}
+	if !strings.Contains(got, first) || !strings.HasSuffix(got, third) {
+		t.Errorf("the other entries changed:\n%s", got)
+	}
+
+	// An unpublished ticket: no entry for it, so the ledger stays as it is.
+	if err := os.WriteFile(st.LedgerPath(), []byte("# Ledger\n\n"+first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := runMain(t, e, "", "decide", T, "Another?", "--chose", "yes"); code != 0 {
+		t.Fatalf("decide: exit %d\n%s", code, out)
+	}
+	if data, _ := os.ReadFile(st.LedgerPath()); string(data) != "# Ledger\n\n"+first {
+		t.Errorf("the ledger changed for an unpublished ticket:\n%s", data)
 	}
 }
