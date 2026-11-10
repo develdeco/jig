@@ -199,7 +199,7 @@ func TestReviewNotesStoreRefsNameTheCountAndEachPlace(t *testing.T) {
 	if err := writeReviewNotes(st, "ZQX-7", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs[:1]); err != nil {
 		t.Fatal(err)
 	}
-	if got := readNotes(t, st, "ZQX-7", "review-notes.md"); !strings.Contains(got, "adds 1 line that") {
+	if got := readNotes(t, st, "ZQX-7", "review-notes.md"); !strings.Contains(got, "adds 1 line that names something") {
 		t.Errorf("one reference reads %q, want a singular", got)
 	}
 }
@@ -234,7 +234,7 @@ func TestReviewNotesStoreRefsCountLinesNotNames(t *testing.T) {
 		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-7"},
 		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-9"},
 	})
-	if want := "adds 1 line that name something only the jig store holds:\n\n- a.go:3\n\n"; !strings.HasSuffix(notes, want) {
+	if want := "adds 1 line that names something only the jig store holds:\n\n- a.go:3\n\n"; !strings.HasSuffix(notes, want) {
 		t.Errorf("notes =\n%q\nwant them to end with %q", notes, want)
 	}
 }

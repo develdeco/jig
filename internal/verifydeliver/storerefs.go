@@ -254,11 +254,11 @@ func storeRefsNotes(refs []StoreRef) string {
 		}
 	}
 	var b strings.Builder
-	noun := "lines"
+	noun, verb := "lines", "name"
 	if len(places) == 1 {
-		noun = "line"
+		noun, verb = "line", "names"
 	}
-	fmt.Fprintf(&b, "## Store references\n\nThe change adds %d %s that name something only the jig store holds:\n\n", len(places), noun)
+	fmt.Fprintf(&b, "## Store references\n\nThe change adds %d %s that %s something only the jig store holds:\n\n", len(places), noun, verb)
 	for _, p := range places {
 		fmt.Fprintf(&b, "- %s\n", p)
 	}
