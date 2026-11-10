@@ -139,7 +139,7 @@ func TestRenderTicketBodyMatchesTheGolden(t *testing.T) {
 }
 
 // TestRenderTicketBodySameRepoStaysBare checks the "except the issues live
-// in the product repo itself" case the brief calls out explicitly: with no
+// in the product repo itself" case: with no
 // repo to qualify against, #5 (and example/demo#31, already qualified)
 // stay exactly as written.
 func TestRenderTicketBodySameRepoStaysBare(t *testing.T) {
@@ -260,9 +260,9 @@ func TestRenderTicketBodyJoinsIndentedContinuationsOfListItems(t *testing.T) {
 // item indented four or more spaces is itself a block start (kept on its
 // own line), but its own hard-wrapped continuation - not itself a list item
 // - joins onto it like any other lazy continuation, with no indented-code
-// rule nested inside a list item: the bridge joins both T-22's own brief's
+// rule nested inside a list item: the bridge joins both a ticket body's
 // "Each change ... reaches the" / "issue at the next checkpoint." and a
-// chart's "A6 builds on L1's ..." / "retires the bridge sync ...", which
+// chart's "... builds on ..." / "retires the bridge sync ...", which
 // the renderer's prior, stricter rule wrongly kept apart.
 func TestRenderTicketBodyKeepsBridgeRuleCorners(t *testing.T) {
 	cases := []struct {

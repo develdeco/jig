@@ -150,7 +150,7 @@ func longOutput() string {
 	return b.String() + "FAIL pkg9 last line\n"
 }
 
-// TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine: round 1 r1-f1. A
+// TestKilledSummaryHoldsItsBoundWithNoBaselineOrNoNewLine: a
 // long output and a long command, with no baseline and with a baseline that
 // has no new line, give one line within the bound that ends with the reason,
 // holds no part of the command and keeps the output's last line.
@@ -174,7 +174,7 @@ func phraseKill(pad int) error {
 	return timedOut("grep -v 'did not finish within' " + strings.Repeat("x", pad))
 }
 
-// TestKilledReasonIsTheGuardsOwnWords: round 1 r1-f2. A command that holds
+// TestKilledReasonIsTheGuardsOwnWords: a command that holds
 // "did not finish within" does not make the reason the rest of the command:
 // the summary stays within its bound, keeps the failing line and does not
 // panic, with or without a baseline.
@@ -197,7 +197,7 @@ func TestKilledReasonIsTheGuardsOwnWords(t *testing.T) {
 	}
 }
 
-// TestKilledSummaryRoomIsExact: round 2 r1-f1. The end of the output is cut to
+// TestKilledSummaryRoomIsExact: the end of the output is cut to
 // exactly the room the reason leaves, one byte for the space before it: here
 // the output is laid so that a room one byte larger would keep the line "Z".
 func TestKilledSummaryRoomIsExact(t *testing.T) {
@@ -237,8 +237,7 @@ func plainPhraseFail(pad int) error {
 	return errors.New(`shell "grep -v 'did not finish within' ` + strings.Repeat("x", pad) + `": exit status 1`)
 }
 
-// TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill: round 2 r1-f2.
-// A command that holds "did not finish within" does not make its plain failure
+// TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill: a command that holds "did not finish within" does not make its plain failure
 // a kill: the summary keeps its bound and its failing line, ends with no
 // timeout, and the signature has none.
 func TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill(t *testing.T) {
@@ -264,7 +263,7 @@ func TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill(t *testing.T) {
 	}
 }
 
-// TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace: round 1 r1-f3.
+// TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace.
 func TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace(t *testing.T) {
 	t.Parallel()
 	_, s := failureOutput("ok\nboom: pkg9 broke\n", longKill(50), baselineOf("ok\n"))

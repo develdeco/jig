@@ -1163,7 +1163,7 @@ func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
 
 // TestPublishBodyNamesTheCommandTheGateRanItself: an oracle the gate ran
 // itself, with no slice's pass to reuse, is listed with the command it ran,
-// like one it reused (r2-f2). The fixture journals no oracle line, so the
+// like one it reused. The fixture journals no oracle line, so the
 // gate's own run is the only source of the command.
 func TestPublishBodyNamesTheCommandTheGateRanItself(t *testing.T) {
 	t.Parallel()

@@ -406,7 +406,7 @@ func TestRewriteUnrewrittenReferences(t *testing.T) {
 			wantChanged: true,
 		},
 		{
-			// r2-f5: the Intent section carries its own, unrelated link using
+			// the Intent section carries its own, unrelated link using
 			// the same file name as its link text - the exact shape gh's own
 			// appended link takes, and the one an unscoped read-back could
 			// mistake for it (the doc's stale URL, not the uploaded asset).
@@ -420,7 +420,7 @@ func TestRewriteUnrewrittenReferences(t *testing.T) {
 			wantChanged: true,
 		},
 		{
-			// r2-f5: the demo summary itself mentions the file's relative path
+			// the demo summary itself mentions the file's relative path
 			// in passing, ahead of the real bullet in the same ## Demo section;
 			// only the bullet - "- ./<name>", writePRBody's own rendered form -
 			// is the reference to rewrite.
@@ -452,7 +452,7 @@ func TestRewriteUnrewrittenReferences(t *testing.T) {
 // TestRewriteUnrewrittenReferencesToleratesTheShapesGhPrViewActuallyReturns:
 // `gh pr view --json body` commonly returns a body with no trailing newline
 // at all, and one last edited in the web UI comes back with "\r\n" line
-// endings throughout - both are shapes the fix for r2-f2 must patch exactly
+// endings throughout - both are shapes the rewrite must patch exactly
 // like the plain "\n", trailing-newline body the other cases above cover.
 func TestRewriteUnrewrittenReferencesToleratesTheShapesGhPrViewActuallyReturns(t *testing.T) {
 	t.Parallel()

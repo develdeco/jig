@@ -1232,7 +1232,7 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 }
 
-// TestGraduateRunsItsOwnCheckpointSync is the symmetric fix to r2-f8's
+// TestGraduateRunsItsOwnCheckpointSync is the symmetric case to
 // TestTicketNewRunsItsOwnCheckpointSync: `jig graduate` reaches the store
 // through Store.Claim alone too, so it must run the checkpoint sync itself,
 // explicitly, once every entry's claim has landed - one sync covering every
@@ -1265,7 +1265,7 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 	}
 }
 
-// TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers r4-f2: a
+// TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers a
 // chart whose first entry claims cleanly but whose second entry's mint fails
 // for a standing reason (here, a plain file named DEMO-2 sitting where that id's
 // ticket folder must go, so CreateTicketRecord's own MkdirAll refuses it)
@@ -1309,7 +1309,7 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 }
 
 // TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint covers
-// r5-f1: an entry whose st.Mint lands but whose chart write then fails
+// this case: an entry whose st.Mint lands but whose chart write then fails
 // leaves its ticket folder and ticket.yaml on disk, uncommitted, with the
 // chart entry still missing its id - a half-minted ticket a full sync (not
 // scoped to createdIDs) would still find on its scan of the store root and
@@ -1317,7 +1317,7 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 // must skip the checkpoint sync entirely on this failure, even though entry
 // A landed whole earlier in the same run, rather than risk that.
 //
-// The chart write failure is driven through env.writeChart (r6-f1):
+// The chart write failure is driven through env.writeChart:
 // entry A's own WriteChart call passes through to the real st.WriteChart, and
 // entry B's is forced to fail, the same write-after-mint shape on every OS -
 // an OS-specific read-only chmod raced against store.AtomicWrite's own

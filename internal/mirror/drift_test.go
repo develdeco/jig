@@ -217,7 +217,7 @@ func TestSyncRemovesExtraChartSubIssueAsDrift(t *testing.T) {
 // TestSyncRestoresRemovedParentLinkAsDrift checks the ownership and
 // drift rule's parent side: a sub-issue link to its chart that this sync
 // itself wrote, now removed on GitHub, is restored and reported as drift -
-// not silently left unlinked, the gap finding 5 of this slice closed.
+// not silently left unlinked.
 func TestSyncRestoresRemovedParentLinkAsDrift(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "Chart ticket")

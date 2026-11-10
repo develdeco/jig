@@ -668,8 +668,7 @@ func TestSyncReportsAClientFailure(t *testing.T) {
 	}
 }
 
-// TestSyncBoundedTimeoutNamesRemainingItemsAndTrackersSync is gate finding
-// r2-f5's own case: a sync from inside a command (SyncOpts{}, the checkpoint
+// TestSyncBoundedTimeoutNamesRemainingItemsAndTrackersSync covers this case: a sync from inside a command (SyncOpts{}, the checkpoint
 // hook's default) that runs out of its bound names how many tickets or
 // charts still have no GitHub issue and points at `jig trackers sync`,
 // rather than just surfacing the bare context.DeadlineExceeded every
@@ -935,7 +934,7 @@ func TestSyncDryRunReportsAPublishSafetyHit(t *testing.T) {
 	}
 }
 
-// TestSyncDryRunPreviewsFullBodyForANewItem is r1-f3's own gap: on a store
+// TestSyncDryRunPreviewsFullBodyForANewItem covers this gap: on a store
 // whose items are all new, the live sync's create step writes only the
 // marker as the issue body
 // and relies on updateIssues rendering the full body once claimIssue's
@@ -968,13 +967,13 @@ func TestSyncDryRunPreviewsFullBodyForANewItem(t *testing.T) {
 	}
 }
 
-// TestSyncRefusesACreateOnABodyHitLikeTheDryRunPreviewsIt is r4-f1: a new
+// TestSyncRefusesACreateOnABodyHitLikeTheDryRunPreviewsIt covers this case: a new
 // item's hit lives only in its description, which the live create's
 // footer-only render (it.render) never carries, so without scanning
 // previewCreateRender's full render first, the live sync used to create the
 // issue and claim a record, then have updateIssues skip the very next
 // update on the same hit - disagreeing with the dry run, which already
-// previews (and scans) the full body (r1-f3). Both paths must land on the
+// previews (and scans) the full body. Both paths must land on the
 // same outcome: skipped, no CreateIssue, no record.
 func TestSyncRefusesACreateOnABodyHitLikeTheDryRunPreviewsIt(t *testing.T) {
 	newStore := func(t *testing.T) (*store.Store, string) {
@@ -1025,13 +1024,13 @@ func TestSyncRefusesACreateOnABodyHitLikeTheDryRunPreviewsIt(t *testing.T) {
 	}
 }
 
-// TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip is r4-f1's
+// TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip is the
 // narrower case: previewCreateRender left a new item's pull requests out of
 // its render, so a term matching a pull request's repo passed the
 // create-time scan, CreateIssue wrote the issue, claimIssue committed and
 // pushed the record, and updateIssues then hit the same term in the
 // `## Pull requests` block it renders and skipped the update - the same
-// created-plus-skipped, permanently bodyless issue r4-f1 named, now for a
+// created-plus-skipped, permanently bodyless issue the description case produces, now for a
 // pull request rather than a description. DEMO-1's own title and body carry
 // no hit; only its one pull request's repo (example/demo) does, via
 // publish-terms.txt. Both a dry run and a live sync must refuse the create.
@@ -1103,10 +1102,10 @@ func TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip(t *testing
 // be reported in Skipped, make no UpdateIssue call, write no record change,
 // and win no new board placement either, while DEMO-2 (clean) still syncs
 // normally. A chart ("demo") whose own map.md is edited to carry a hit gets
-// the same treatment on its *link* writes (r1-f1, r2-f2): a second ticket
+// the same treatment on its *link* writes: a second ticket
 // (DEMO-4) newly added to its tickets.yaml in the same commit must not
 // become a sub-issue of it, since the chart's own update is skipped - the
-// proof r2-f2 needs, since links.go used to probe the skip set by the
+// proof needed, since links.go used to probe the skip set by the
 // chart's bare name while updateIssues keys it by what() ("charts/<name>").
 func TestSyncSkipsAPublishSafetyHitOnUpdate(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)

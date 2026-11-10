@@ -155,7 +155,7 @@ func TestRenderPicksSectionCollapsesAMultiLineCaptionToOneLine(t *testing.T) {
 	}
 }
 
-// TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText: r2-f6, a
+// TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText: a
 // caption carrying its own "](" closes the alt text early and reads whatever
 // follows as the image's own URL, which lets the session's own words point the
 // rendered image at an address of their choosing. sanitizeDemoCaption drops
@@ -173,7 +173,7 @@ func TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText(t *testing.T) 
 }
 
 // TestRenderPicksSectionCaptionWithAnUnbalancedBracketStillShowsTheImage:
-// r2-f6, an unbalanced "[" in the caption would otherwise pair with the "]"
+// an unbalanced "[" in the caption would otherwise pair with the "]"
 // jig itself writes to close the alt text, losing the image reference (and so
 // the recording) entirely. sanitizeDemoCaption drops the bracket instead of
 // letting it pair across the boundary jig did not intend.

@@ -287,8 +287,8 @@ func (s *stubGitHub) ItemFieldValues(context.Context, []string) (map[string]gith
 	return nil, nil
 }
 
-// TestTicketNewRunsItsOwnCheckpointSync is the gate finding's own fix
-// (r2-f8): `jig ticket new` reaches the store through Store.Claim alone,
+// TestTicketNewRunsItsOwnCheckpointSync covers this gap:
+// `jig ticket new` reaches the store through Store.Claim alone,
 // which stays hook-free (the mirror's own claims, through claimIssue,
 // commit new records through Claim too, and hooking Claim would re-enter
 // the mirror), so the command runs the checkpoint sync itself, explicitly,
