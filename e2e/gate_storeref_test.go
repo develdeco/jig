@@ -40,3 +40,22 @@ func TestGateNotesAStoreReference(t *testing.T) {
 		t.Errorf("report.yaml store_refs[0] = %v, want notes.txt line 2 naming %s", ref, b.fx.Ticket)
 	}
 }
+
+// TestGatePrintsNoStoreReferenceNoteWithoutOne: a round whose change cites
+// nothing of the store prints no count and no table, when it opens and when it
+// closes, and records no store_refs.
+func TestGatePrintsNoStoreReferenceNoteWithoutOne(t *testing.T) {
+	t.Parallel()
+	b := newBuiltTicket(t, false)
+
+	gate := b.openRound(t)
+	done := b.reviewedClean(t, 1)
+	for name, out := range map[string]string{"jig gate": gate.Stdout, "jig review done": done.Stdout} {
+		if strings.Contains(out, "store_references") {
+			t.Errorf("%s output names store references the round does not have:\n%s", name, out)
+		}
+	}
+	if _, has := b.report(t, "1")["store_refs"]; has {
+		t.Errorf("report.yaml records store_refs for a round with none")
+	}
+}
