@@ -362,7 +362,7 @@ what the render step builds from it for the body is.
 
 "Publishing the media" above renders every media file as a `./demo-<n>.<ext>`
 reference and trusts `gh ... --attach` to rewrite it, reporting one it left
-unrewritten rather than fixing it. Gate finding r1-f3 (DECISIONS.md) found
+unrewritten rather than fixing it. A gate finding showed
 that reference form is exactly the one `gh` does not reliably rewrite - a
 bare path - so every published body, images included, carried dead relative
 links beside `gh`'s own appended URLs, never "a reviewer sees them in the
@@ -381,8 +381,8 @@ upload URL `gh` appended for that file - a markdown link naming it,
 reference-free attach still leaves behind - and moves it to where the
 bare reference stands, removing the appended line, before publish edits
 the pull request a second time with the fix. This reverses the build-time
-call recorded in DECISIONS.md ("never rewrites the pull request a second
-time"): guessing which upload URL belongs to which reference is still
+call that publish never rewrites the pull request a second
+time: guessing which upload URL belongs to which reference is still
 avoided, since the URL is read from `gh`'s own appended record of that
 exact file, never inferred from position or kind. Only a file `gh`
 appended no URL for at all - a failed attach, or an image `gh` itself did

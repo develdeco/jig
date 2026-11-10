@@ -340,8 +340,6 @@ that name a local host. See
   [ADR 0032](docs/adr/0032-jig-attaches-to-the-harness.md) is the one behind
   this design, and [ADR 0033](docs/adr/0033-phases-are-asked-for-by-prompt.md)
   the one behind asking for a phase by prompt.
-- [DECISIONS.md](DECISIONS.md) - the log of past judgment calls; new ones are
-  recorded with jig.
 - [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) - how to build, test and
   change jig.
 - [skills/](skills/) - the session skills embedded in the binary.

@@ -107,9 +107,25 @@ its repo gone) is simply opened again, rather than failing the sync.
   afterward reports zero changes and no drift when the two agree, which is
   how the operator confirms the handoff.
 
-See [DECISIONS.md](../../DECISIONS.md) for the records' exact keys, the
-renderer's golden format, the publish-safety scan, and the drift slice's
-own mechanics.
+Details the design leaves to the code:
+
+- A record is `<ticket>/tracker/github.yaml` or `charts/<name>/github.yaml`
+  with `repo`, `issue` and `node_id`, and a `synced:` block (`title`,
+  `body_sha256`, `state`, `status`, `store_id`, and the node ids of the links
+  last written) that says what the mirror last wrote.
+- The renderer unwraps hard-wrapped paragraphs and list items, leaves fenced
+  and indented code, headings, quotes, HTML and rules on their own lines,
+  qualifies a bare `#123` to `<owner>/<repo>#123` when the project's one repo
+  differs from the issue repo, and truncates a brief or map to GitHub's cap
+  with a `*(Truncated: ...)*` note.
+- When the issue repo is public, each title and body about to be created is
+  scanned (email, home-path, token-prefix and private-key patterns, plus the
+  jig home's `publish-terms.txt`) before the issue exists; a hit skips that one
+  item, is reported with its line, and makes `jig trackers sync` exit non-zero.
+  A dry run scans unconditionally, since it cannot learn the repo's visibility.
+- Drift is GitHub's current value of a field differing from both its `synced:`
+  value and what the store would write: it is reported and the store's value is
+  written anyway.
 
 ## Amendment: a checkpoint lands what its sync wrote
 

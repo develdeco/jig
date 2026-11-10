@@ -27,7 +27,7 @@ The owner walked a harness session beside `jig tui` through the whole flow in a 
 
 ## Consequences
 
-- Amends [ADR 0033](0033-phases-are-asked-for-by-prompt.md): decision 37 (a run of several phases is the prompt) gains a run aimed at a chart, and decision 39 no longer holds that a subagent and its parent are one agent to the hooks, since a note and a hold now follow the agent id (a review's independence still follows who ran `jig review context`, and the main session still never reads the round). The planner no longer mints first (DECISIONS.md, "The reviewer subagent runs in the foreground, and the planner mints its ticket", is superseded in its minting half): the TUI, which tied the drafting to the ticket at the mint, now opens on the ticket after the grilling, not before.
+- Amends [ADR 0033](0033-phases-are-asked-for-by-prompt.md): decision 37 (a run of several phases is the prompt) gains a run aimed at a chart, and decision 39 no longer holds that a subagent and its parent are one agent to the hooks, since a note and a hold now follow the agent id (a review's independence still follows who ran `jig review context`, and the main session still never reads the round). The planner no longer mints first, which supersedes the earlier rule that it mints with `jig ticket new` before its first question: the TUI, which tied the drafting to the ticket at the mint, now opens on the ticket after the grilling, not before.
 - Amends [ADR 0035](0035-start-to-finish-and-recommendations-are-separate.md): a chart verdict ends a start-to-finish run, and the same person's moments stay theirs in a chart run unless the prompt hands them over.
 - `CONTEXT.md` gains *Chart run* and *Chart standing* and corrects *Chart* (jig reads `map.md`'s sections), *Intake*, *Start-to-finish run*, *Note* and *Unattended*.
 - `ARCHITECTURE.md` changes in the hooks (a `SubagentStop`), notes (per session and agent, the claim holder), the TUI (eight screens), `internal/phase`, `internal/recall`, `internal/ledger` and `internal/observe` rows, and the skills paragraph.
@@ -54,7 +54,7 @@ Consequences:
 - The chart verb asks the host about the pull requests it names on every read, so a merge shows in the next tick's read. The listing `jig next --json`, which the tick also reads, may take an open pull request's state from this machine's memory when it is under two minutes old, so a blocker in the listing can read an open pull request up to two minutes late.
 - A merge judged by ancestry shows once something fetched the clone: a person's `git fetch`, or a pull. The timer does not fetch.
 - A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
-- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row) and the README say the same.
 
 ## Amendment: the chart screen's activity includes the chart's store history (GRAPH-16)
 
@@ -75,7 +75,7 @@ Consequences:
 
 - Every JSON read of a chart starts one `git log` in the store clone, so the git budgets of the packages whose tests read one (`.github/git-budget.yaml`) move up.
 - The Activity shows the time of day of an old commit, as it does for a ticket's line, with no date.
-- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) say the same.
 
 ## Amendment: the chart screen details the ticket under the cursor (2026-11-02)
 
@@ -100,7 +100,7 @@ Consequences:
 
 - On an 80 by 24 screen the map line and the Run panel's waves give way to the panel, and a taller screen keeps them.
 - A harness with no hooks shows the holder and never the agent, and a hold only the hooks write is never shown.
-- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row) and the README say the same.
 
 ## Amendment: a subagent drafts each brief and publishes each ticket (2026-11-03)
 
@@ -120,4 +120,4 @@ Consequences:
 - The main session keeps the run: the waves, the questions and the approvals. Drafters and publishers are Sonnet subagents with no approval of their own.
 - The skill text grew by at most 150 net bytes, inside the budget the chart skill shares with ADRs 0044 and 0045 (6000 bytes and 100 lines).
 - A publisher's `gh` and push may meet a permission prompt the one yes for the builds does not cover: the group's yes is the place to say it.
-- `CONTEXT.md` (*Chart run*), `ARCHITECTURE.md` (the Phases paragraph) and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart run*), `ARCHITECTURE.md` (the Phases paragraph) say the same.

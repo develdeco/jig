@@ -91,8 +91,16 @@ surfaces as a merge or rebase conflict, only as a different id on each.
   the store is truth, and a tracker only ever projects it outward - is not
   superseded; this ADR is the sharper form of exactly that for ids.
 
-See [DECISIONS.md](../../DECISIONS.md) for the attempt bound, the lock
-path, and the claim commit's exact shape.
+The mint holds the store's own lock (`.jig-mint`, a sidecar with the same
+30-second timeout as every other store writer) across the scan for the next id
+and the write of the record, so two mints on one clone never compute the same
+id. The claim runs in a retry loop bounded at five attempts: it stages exactly
+the paths the write reported and commits them under a pathspec-scoped commit,
+so nothing else dirty in the store rides along. A rejected push is undone
+scoped to those paths, never repo-wide, and a commit another process made in
+between is never rewound: the claim then refuses `ID_NOT_CLAIMED` and leaves
+both commits for the operator. The last rejection also refuses
+`ID_NOT_CLAIMED`, leaving no folder, no commit and no claim behind.
 
 ## Amendment: an id gains an area key (T-26)
 

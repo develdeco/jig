@@ -48,8 +48,7 @@ reports green.
   decision constrains future design - a choice later work has to live with
   or deliberately reverse. A comment says why; a build's judgment call (what
   was ambiguous, what was chosen and why) is recorded with jig, in the store,
-  not in a repo file. `DECISIONS.md` is the history before that and is not
-  edited.
+  not in a repo file.
 
 ## Pull requests
 
