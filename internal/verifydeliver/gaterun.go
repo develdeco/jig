@@ -556,6 +556,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		}
 		report.Scope = round.Review.scope()
 		report.CarriedFrom = round.Carried
+		report.StoreRefs = round.Review.StoreRefs
 		// Findings and NeedsHuman are sorted by risk, high first, then id
 		// (sortByRiskThenID, the same helper routing sorts the human seam
 		// with): "always shown sorted by risk, high first" applies to every

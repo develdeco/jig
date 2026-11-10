@@ -186,6 +186,22 @@ func (t *publishTarget) bodySlices() []store.Slice {
 	return t.slices
 }
 
+// storeRefs are the store references of the last gate round that lie in this
+// repo: the lines the change adds here that name something only the store
+// holds.
+func (t *publishTarget) storeRefs() []StoreRef {
+	if !t.several() {
+		return t.gateRep.StoreRefs
+	}
+	var own []StoreRef
+	for _, r := range t.gateRep.StoreRefs {
+		if r.Repo == t.repoName {
+			own = append(own, r)
+		}
+	}
+	return own
+}
+
 // notesName is the name of the repo's review notes in the ticket's pr
 // directory.
 func (t *publishTarget) notesName() string { return reviewNotesFile(t.repoName, t.several()) }
@@ -1199,7 +1215,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		if t.reviewedHead() != "" {
 			approvalLine = publishApprovalLine(lines, t.lineRepo(), t.reviewedHead())
 		}
-		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes))
+		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes), t.storeRefs())
 	}
 	if err := writeNotes(journaled); err != nil {
 		return publication{}, err

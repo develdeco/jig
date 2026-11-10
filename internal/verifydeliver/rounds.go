@@ -36,6 +36,10 @@ type RoundRecord struct {
 	// CarriedFrom is the round whose verdict a clean round carries over
 	// (the head only merged the target), 0 for a round a reviewer read.
 	CarriedFrom int
+	// StoreRefs are the lines the round's change adds that name something only
+	// the store holds, as report.yaml records them: none for a round that has
+	// none and for one an older jig recorded.
+	StoreRefs []StoreRef
 	// Verdict is RoundClean, RoundFindings or VerdictNotIndependent.
 	Verdict string
 	// Reviewer is who reported the round: the report's own record of them, else
@@ -148,6 +152,7 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 		}
 		rec.Model, rec.Effort = rep.Model, rep.Effort
 		rec.CarriedFrom = rep.CarriedFrom
+		rec.StoreRefs = rep.StoreRefs
 		if rep.Reviewer != nil {
 			rec.Reviewer = *rep.Reviewer
 		}

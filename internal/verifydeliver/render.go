@@ -1068,7 +1068,7 @@ func reviewNotesFile(repo string, several bool) string {
 // approval, for the line on who approved it; approvalLine, the line on who
 // approved the publish, comes from the caller ("" for none), and so does
 // slicesSection, the rendered ## Slices (renderSlicesSection, "" for none).
-func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string) error {
+func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string, storeRefs []StoreRef) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1086,6 +1086,10 @@ func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRo
 
 	if lines := reviewerLines(rounds); len(lines) > 0 {
 		b.WriteString("## Reviewers\n\n" + strings.Join(lines, "\n") + "\n\n")
+	}
+
+	if len(storeRefs) > 0 {
+		b.WriteString(storeRefsNotes(storeRefs))
 	}
 
 	if lastSummary != "" {

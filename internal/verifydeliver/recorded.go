@@ -873,7 +873,7 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	review := &Review{
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
-		Effort: prov.Effort, Hunks: p.Request.Hunks,
+		Effort: prov.Effort, Hunks: p.Request.Hunks, StoreRefs: p.Request.StoreRefs,
 	}
 	if qualified {
 		for _, r := range covered {

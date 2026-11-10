@@ -265,6 +265,10 @@ type ReviewRequest struct {
 	// this head with the probes and skip that cover it (ADR 0036).
 	Probed []ProbedEntry `json:"probed"`
 	Hunks  []HunkEntry   `json:"hunks"`
+	// StoreRefs are the lines the whole change adds that name something only
+	// the store holds (storerefs.go), in diff order. The round records them
+	// beside its verdict; the reviewer has nothing to do with them.
+	StoreRefs []StoreRef `json:"store_refs,omitempty"`
 }
 
 // ResultFinding is one finding as the reviewer session reports it in
@@ -1290,6 +1294,8 @@ type Review struct {
 	// rounds' current probes and skips cover: with the round's own, they say
 	// how many hunks the round leaves unprobed (ADR 0036).
 	Hunks []HunkEntry
+	// StoreRefs are the request's store references, which the round records.
+	StoreRefs []StoreRef
 }
 
 // headOf is the commit the review read repo at: the one HeadSHA of a round over
@@ -1581,6 +1587,9 @@ type ReviewPrep struct {
 	// outstanding: the previous review covers the head, and nothing was
 	// written.
 	Empty bool
+	// StoreRefs are the store references in the lines the whole change adds,
+	// from the base a full round uses in every repo of the round.
+	StoreRefs []StoreRef
 }
 
 // RepoPrep is one repo's part of a ReviewPrep: the commit under review there,
@@ -1765,6 +1774,15 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	if err != nil {
 		return ReviewPrep{}, err
 	}
+	// The store references of the whole change, from the same bases.
+	var refRepos []storeRefRepo
+	for i, r := range repos {
+		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.LeaseDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
+	}
+	prep.StoreRefs, err = storeRefsOf(in.Store, in.Ticket, in.Round, refRepos)
+	if err != nil {
+		return ReviewPrep{}, err
+	}
 
 	prep.Request = ReviewRequest{
 		Ticket:        in.Ticket,
@@ -1778,6 +1796,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		MustReview:    prep.MustReview,
 		Probed:        probed,
 		Hunks:         hunks,
+		StoreRefs:     prep.StoreRefs,
 	}
 	if !qualified {
 		prep.Request.Scope, prep.Request.BaseSHA, prep.Request.HeadSHA = prep.Scope, prep.Base, prep.Head
@@ -2066,5 +2085,6 @@ func (r *launchedGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		IntentNote: prep.IntentNote,
 		Effort:     effort,
 		Hunks:      prep.Request.Hunks,
+		StoreRefs:  prep.StoreRefs,
 	}}, true, nil
 }

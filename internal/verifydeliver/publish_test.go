@@ -522,6 +522,22 @@ func TestPublishFullChain(t *testing.T) {
 	step(t, "a review notes comment that cannot be posted still publishes, with a warning", func(t *testing.T) {
 		dd := gh(t, "", "pr comment")
 		dd.GuardedPush = (&pushRecorder{}).push
+		// The latest round records a store reference: the review notes the
+		// publish writes carry it, by place and not by what it cites.
+		reportPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 2), "report.yaml")
+		reportBefore, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		withRefs := append(append([]byte(nil), reportBefore...), []byte("store_refs:\n  - {repo: fixture-repo, file: alpha/note.go, line: 4, id: ZQX-7}\n")...)
+		if err := os.WriteFile(reportPath, withRefs, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.WriteFile(reportPath, reportBefore, 0o644); err != nil {
+				t.Error(err)
+			}
+		}()
 		var warning string
 		dd.Warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
 		journalBefore := journalLen(t, dd, fx.Ticket)
@@ -543,8 +559,12 @@ func TestPublishFullChain(t *testing.T) {
 		if calls := ghCallsNow(t); ghCalls(calls, "pr", "create") != 1 {
 			t.Errorf("pr create not called or called multiple times: %v", calls)
 		}
-		if _, err := os.Stat(reviewNotesPath); err != nil {
-			t.Errorf("review notes file was not kept at %s: %v", reviewNotesPath, err)
+		notes, err := os.ReadFile(reviewNotesPath)
+		if err != nil {
+			t.Fatalf("review notes file was not kept at %s: %v", reviewNotesPath, err)
+		}
+		if !strings.Contains(string(notes), "## Store references\n\nThe change adds 1 line that names something only the jig store holds:\n\n- alpha/note.go:4\n") || strings.Contains(string(notes), "ZQX-7") {
+			t.Errorf("review notes lack the store references section, or name what a line cites:\n%s", notes)
 		}
 		var publishDone bool
 		for _, l := range journalFrom(t, dd, fx.Ticket, journalBefore) {

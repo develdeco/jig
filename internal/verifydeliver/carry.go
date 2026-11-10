@@ -64,6 +64,8 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 		ReviewedBase: heads,
 		Scope:        "delta",
 		CarriedFrom:  origin,
+		// None ran, so the refs are those of the round that was read.
+		StoreRefs: rep.StoreRefs,
 	}
 	if r.gb.Adopted {
 		report.Branch = r.branch

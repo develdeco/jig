@@ -177,6 +177,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return printGateReport(stdout, st, ticket, *p.Carried)
 	}
 	blocks := roundBlocks(p, nil, false, nil)
+	blocks = append(blocks, storeRefBlocks(p.Request.StoreRefs)...)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
@@ -222,6 +223,11 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		[2]string{"round", strconv.Itoa(report.Round)},
 		[2]string{"verdict", carriedVerdict(report)},
 	)
+	// A store reference is a fact of the diff, beside the verdict and never a
+	// reason for it: the count shows only when there are some.
+	if len(report.StoreRefs) > 0 {
+		kv = append(kv, [2]string{"store_references", strconv.Itoa(len(report.StoreRefs))})
+	}
 	// Who reviewed, as the reviewer said (model and effort are self-reported;
 	// jig chooses none) and as jig found out (the reviewer and whether it
 	// built what it reviewed). A scripted or launched round has none of it.
@@ -306,12 +312,23 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		}
 		blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
 	}
+	blocks = append(blocks, storeRefBlocks(report.StoreRefs)...)
 	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)...))
 	axi.Render(stdout, blocks...)
 	if len(report.NeedsHuman) > 0 {
 		return 2
 	}
 	return 0
+}
+
+// storeRefBlocks is the store_references table of a round: the lines its whole
+// change adds that name something only the store holds, at most 20 rows and
+// then an "and N more in K files" row. A round with none has no table.
+func storeRefBlocks(refs []verifydeliver.StoreRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	return []string{axi.Table("store_references", []string{"repo", "file:line", "id"}, verifydeliver.StoreRefsRows(refs))}
 }
 
 // carriedVerdict is the verdict of a round, with "(carried over from round N)"
