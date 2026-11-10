@@ -183,7 +183,7 @@ func TestRecallSuppliesTheStoreAroundTheQuery(t *testing.T) {
 
 	// Blocks carry the same sections.
 	r := runJig(t, env, fx.StoreDir, "recall")
-	for _, want := range []string{"tickets[", "edges[1]{ticket,blocked_by,kind,blocker}:\n", "fog[2]{chart,item}:\n", "platform[1]{path,title,bytes}:\n", "answers[2]{ticket,title,id,text}:\n"} {
+	for _, want := range []string{"tickets[", "edges[1]{ticket,blocked_by,kind,blocker}:\n", "fog[2]{chart,item}:\n", "platform[1]{path,title,bytes}:\n", "answers[2]{ticket,title,id,by,text}:\n"} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig recall stdout lacks %q:\n%s", want, r.Stdout)
 		}

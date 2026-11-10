@@ -71,7 +71,11 @@ func answersBlock(questions []store.Question) string {
 		if q.Status != "answered" || q.Answer == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, oneLine(q.Body), oneLine(q.Answer)))
+		id := q.ID
+		if q.Kind == store.KindCall {
+			id += " (call)"
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", id, oneLine(q.Body), oneLine(q.Answer)))
 	}
 	if len(lines) == 0 {
 		return "none"
