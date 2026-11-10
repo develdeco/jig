@@ -39,13 +39,13 @@ A prompt that names several tickets of one chart ("Take A and B to PR", "Continu
 - **`jig next <chart> --tickets A,B`** reads the chart this way: ids or aliases, any order, a repeat counted once. A name that is not a graduated ticket of the chart is refused, every offender named, with the chart's tickets in the help. `jig status <chart>` has no flag: it is the whole chart's standing.
 - **A named ticket behind an unnamed one is an end.** An unmet need on an unnamed ticket that is not done takes `CHART_BLOCKER_NOT_NAMED`: the run does not build that ticket, so the named one is after-merge whatever the edge's kind, and the end names the blocker. When it is all the run waits for first (an end behind a named ticket that waits itself follows from that ticket's own end), it is the verdict's code, with the help "Name A too, or take A first", since no merge frees it. Beside a merge wait the verdict is `CHART_WAITS_MERGE`. A done unnamed blocker keeps today's rules.
 - **The prompt names the tickets.** `TakeTicketsPrompt` and `ContinueTicketsPrompt` word it in row order. One named ticket is a ticket run, so it gets the ticket's own prompt. The echo is `named`, in JSON and as a pair of the `next` block.
-- **No record.** Nothing stores the named set (ADR 0033, decision 4): the prompt carries it, and "Continue A and B" is read again with the same `--tickets`.
+- **No record.** Nothing stores the named set: the prompt carries it, and "Continue A and B" is read again with the same `--tickets`.
 - The chart skill reads such a prompt (one clause, the chart found in the `charts` table of `jig next`) and intake's report lists it among the prompts that launch. Its confirmation follows the same intent reading as the whole chart's.
 
 ### Rejected alternatives
 
 - **A filter over the output in `cmd/jig`.** The waves, ends and overlaps would come from two derivations that can disagree.
-- **A recorded run or a named run object.** The prompt is the span of a run (decision 4).
+- **A recorded run or a named run object.** The prompt is the span of a run.
 - **A Go parser of prompts to find the tickets.** ADR 0035: the session reads the words and passes the ids.
 - **Building the unnamed blocker in the run.** The person did not ask for it.
 

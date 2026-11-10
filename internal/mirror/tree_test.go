@@ -49,7 +49,7 @@ func treeRecordPath(t *testing.T, st *store.Store, what string) string {
 	return st.TrackerRecordPath(recs[0].Entry)
 }
 
-// legacyRecordPath is where A6's mirror first kept what's record: in the
+// legacyRecordPath is where the mirror first kept what's record: in the
 // folder of the ticket or chart itself.
 func legacyRecordPath(st *store.Store, what string) string {
 	if name, ok := strings.CutPrefix(what, "charts/"); ok {

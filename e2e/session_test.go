@@ -172,7 +172,7 @@ func TestHereMintsSession(t *testing.T) {
 
 	first := runJig(t, env, fx.RepoDir, "here")
 	if first.Code == 2 && strings.Contains(first.Stdout, `unknown command "here"`) {
-		t.Skip("jig here is not in this binary yet (D3 adds it); its session section is covered by the cmd/jig tests")
+		t.Skip("jig here is not in this binary yet its session section is covered by the cmd/jig tests")
 	}
 	if first.Code != 0 {
 		t.Fatalf("jig here: exit %d\n%s%s", first.Code, first.Stdout, first.Stderr)
