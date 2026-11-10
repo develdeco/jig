@@ -19,7 +19,7 @@ The intake skill carries the chain and diet principles into every brief, sizes s
 
 Testing knowledge lives in three places, and each fact has one owner:
 - **jig's method**, the same for any repo: the skills, the prompts and jig's contract ADRs. Example: the intake skill.
-- **The project's facts**, declared by the project and read by jig, never imposed: its oracles and invariant paths (`.claude/jig.yaml`) and its conventions (CLAUDE.md, AGENTS.md, CONTRIBUTING). Example: jig's own CONTRIBUTING rule that no test in `internal/` edits process-global state, from BS-1, and jig's own `test` oracle with its longer timeout.
+- **The project's facts**, declared by the project and read by jig, never imposed: its oracles and invariant paths (`.claude/jig.yaml`) and its conventions (CLAUDE.md, AGENTS.md, CONTRIBUTING). Example: jig's own CONTRIBUTING rule that no test in `internal/` edits process-global state, from the first measured run, and jig's own `test` oracle with its longer timeout.
 - **A run's choices**, such as how one diet is cut: they live in that run's plan and briefs. Example: the build-speed run's verifydeliver-first diet.
 
 ## No greenfield mode

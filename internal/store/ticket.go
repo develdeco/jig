@@ -60,7 +60,7 @@ type Ticket struct {
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
 	// Aliases is every earlier id this ticket has carried. Every rewrite of
-	// the record keeps them; nothing but L3's migration (out of scope here)
+	// the record keeps them; nothing but the v1-to-v2 migration (out of scope here)
 	// writes them for real - in this ticket only tests set them. Store.
 	// ResolveTicket is the one place an alias turns back into this ticket's
 	// current id.

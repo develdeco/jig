@@ -4,7 +4,7 @@
 
 The staircase chose every build attempt's model from three rungs (Haiku 4.5, Sonnet 5, Opus 5). Every attempt opened on Haiku. It climbed one rung when the ticket's cumulative lease diff passed 400 lines or 10 files, and floored to Opus when a changed file matched a declared invariant path. A failed attempt did not climb: a retry ran on the same model that had just failed.
 
-The first ticket measured on this (BS-1, build-speed run, 2026-10-06) paid for that order:
+The first ticket measured on this (the first measured run, 2026-10-06) paid for that order:
 - Haiku built the first slices, and the gate's first round found three high-risk defects in them: a lint that matched nothing, an exempted package, and a requirement never implemented.
 - One Haiku attempt failed, and its retry ran on Haiku again.
 - The ticket needed three fix rounds, about 3.5M weighted tokens and 95 minutes of rework.
@@ -20,7 +20,7 @@ no-mistakes puts the stronger tier on the first pass and keeps model choice the 
   - A question (needs-input), a flawed brief or a blocked environment is not the builder failing, so it does not climb.
   - The count comes from the ticket's journal (`journal.FailedAttempts`), since slice state counts every attempt.
 - **An invariant match still floors to the dearest rung.**
-- **The volume rule is gone.** The cumulative lease diff measures the ticket so far, not the slice in hand. With Sonnet opening, it would have pushed most later slices of a multi-slice ticket to Opus, BS-1's by its second slice. Escalation now follows outcomes, not size thresholds.
+- **The volume rule is gone.** The cumulative lease diff measures the ticket so far, not the slice in hand. With Sonnet opening, it would have pushed most later slices of a multi-slice ticket to Opus, the first measured run's by its second slice. Escalation now follows outcomes, not size thresholds.
 
 The climb carries across requeues: a requeued slice resumes on the rung its earlier failures earned. An attempt that produced nothing jig could read counts as a failure too: a backend error, or a session that wrote no result, is journaled as failed.
 

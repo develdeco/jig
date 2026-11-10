@@ -111,13 +111,13 @@ of area key to its one-line meaning - and an id is `<key>-<n>`, counted per
 key; `Mint` takes the bare key to mint under, already resolved against the
 project's declared keys (`project.Config.ResolveKey`) before it is ever
 called, and computes `<key>-<n>` itself. `ticket_format` is still read, but
-only as the one key a pre-migration store declares (`<KEY>-{n}`), until L3's
+only as the one key a pre-migration store declares (`<KEY>-{n}`), until the
 migration writes `keys:` for it.
 
 `Store.TicketIDs` dropped its `format` parameter: it lists every id-shaped
 store-root folder under any key, declared or not, sorted by key then by
 number, rather than the folders one specific format matched. This is the
-one function minting's own per-key count and A6's mirror both read tickets
+one function minting's own per-key count and the mirror both read tickets
 through, so a key removed from `project.yaml` still lists - and keeps - the
 tickets minted under it, where a format-scoped list would have dropped
 them.
@@ -136,7 +136,7 @@ a keyed one without losing the id it was minted, found, or talked about
 under before. `ticket.yaml` gains `aliases:`, a list of a ticket's earlier
 ids, kept unchanged by every rewrite of the record the same way every other
 field is; no command in this ticket renames a ticket or writes a real one -
-only a test does, standing in for the migration (L3) that will.
+only a test does, standing in for the migration that will.
 
 This ADR's claim guarantee - an id, once claimed, names exactly one ticket
 - would otherwise break the moment an alias exists: an id or alias that two

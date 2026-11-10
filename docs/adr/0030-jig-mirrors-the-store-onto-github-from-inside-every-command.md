@@ -7,7 +7,7 @@ Project and its issues: one ticket or chart, one issue; the project's
 Status and Store ID fields; sub-issue and blocked-by links; pull requests.
 It could not run while jig used the store, so the board moved only between
 jig commands, and a store the bridge was never pointed at never reached a
-board at all - a design flaw, by the owner's own call (2026-10-04). L1
+board at all - a design flaw, by the owner's own call (2026-10-04). An earlier change
 (develdeco/jig#102) made the ground safe to build this on: jig mints
 and claims every ticket id itself (ADR 0028), the tracker package is gone,
 pull requests come from `internal/repohost`, and `project.yaml`'s
@@ -46,7 +46,7 @@ ownership promise printed in every issue footer unverifiable in practice.
 
 ## Until the store's layout moves, the mirror keeps the bridge's shape
 
-L2 to L4 bring the rest of the store layout after this one (area-key ids,
+The rest of the store layout comes after this one (area-key ids,
 `tickets/<id>/`, the tracker tree); until then, the mirror keeps its
 records exactly where the bridge kept them - `<ticket>/tracker/github.yaml`,
 `charts/<name>/github.yaml`, in the bridge's own keys - so the bridge's
@@ -93,7 +93,7 @@ its repo gone) is simply opened again, rather than failing the sync.
   command, and at one mutation per second a first sync of a sizeable store
   needs more than 2 minutes to finish - so a bounded sync that runs out of
   time names how many tickets or charts still have no issue and points at
-  `jig trackers sync` instead; the cutover and an L3 migration each run one
+  `jig trackers sync` instead; the cutover and a store migration each run one
   full `jig trackers sync` rather than waiting out the backlog.
 - A project's board and issues can now be trusted to reflect the store
   exactly, as of the last sync: any edit made directly on a jig-owned field

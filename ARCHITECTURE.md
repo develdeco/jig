@@ -256,7 +256,7 @@ against the store (a log/show path, a diff path, a rendered pull request
 note's link); every caller goes through one or the other rather than
 joining `tickets` and an id itself. `Store.TicketIDs` lists every id-shaped
 folder under `tickets/`, sorted by key then by number; it is the one
-function minting's per-key counter, A6's mirror and every other listing
+function minting's per-key counter, the mirror and every other listing
 that shows many tickets read tickets through. `charts/`, `platform/`, `trackers/`,
 `ledger.md` and `store.yaml` (`project.yaml` in a v2 store) stay at the store root. One chart folder,
 one tracker entry and one ticket folder, in full:

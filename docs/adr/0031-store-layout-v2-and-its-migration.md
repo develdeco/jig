@@ -29,7 +29,7 @@ folder under `tickets/`, under any key, sorted by key then number - the
 one function minting's per-key counter, the GitHub mirror, and every other
 listing that shows many tickets read tickets through. A ticket folder's
 own contents (brief, slices, journal, gate rounds, changelogs, `pr/`, and
-A6's `tracker/github.yaml`) are unchanged by the move.
+the mirror's `tracker/github.yaml`) are unchanged by the move.
 
 `project.Config.CheckSchemaVersion`, called once from `cmd/jig`'s
 `resolveStore` (the one place every command loads `project.yaml`), refuses
@@ -39,8 +39,8 @@ upgraded to understand it), and one older than 2 for every command except
 rewriting it onto schema 2 - and `jig help`/`jig version`, which never
 resolve a store at all. A schema-2 `project.yaml` refuses `ticket_format`
 and `tracker:` outright, since the migration is what rewrites them into
-`keys:` and `trackers:`; the v1 reads that once made sense of them (`L1`'s
-`tracker: local`, `L2`'s `ticket_format`-as-key, `MintLocalID`, and the
+`keys:` and `trackers:`; the v1 reads that once made sense of them (the
+earlier `tracker: local`, `ticket_format`-as-key, `MintLocalID`, and the
 mirror's own read of `tracker/ticket.md` history) are gone with them.
 
 The alias scan `Store.ResolveTicket` reads (`Store.aliasClaims`, memoized
@@ -121,7 +121,7 @@ describes.
 
 The last paragraph above said jig's own store would be migrated after this ticket merged. It was: the owner's rename map gave its 43 tickets nine area keys and kept every old id as an alias, a `pre-v2` tag marks the store as it was, and the v3 step followed. Each step was a reviewed pull request of its own, rehearsed first on a scratch clone, after the twelve stale leases of merged tickets (which the migration refuses to move past) were removed. The first sync after the move updated the 46 issues in place and created none.
 
-## Amendment: the tracker tree (L4)
+## Amendment: the tracker tree
 
 The mirror's records move out of the ticket and chart folders into `trackers/<provider>/<scope>/<remote id>.yaml`, each with a relative symlink at `<remote id>` to its ticket or chart. The record names its owner (`ticket:` or `chart:`) and the provider keeps every other key; the link is rebuilt from the records on every sync, with no provider and no network, and `jig validate` checks the tree and reports what is wrong as advisories. A record still in an old place is read as a fallback and moved into the tree by the next sync. The schema stays at 3 (2 for a v2 store): the tree is part of the layout both read.
 

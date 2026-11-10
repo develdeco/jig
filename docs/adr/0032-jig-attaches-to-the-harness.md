@@ -61,14 +61,14 @@ These were named in the chart and no ticket of the build carries them:
 
 | ADR | Verdict | Under attached mode |
 |---|---|---|
-| 0001 no orchestration framework | keep | Disk state and resume-by-recompute stay; the while-loop goes with `jig run` (decision 26), and the frontier becomes a read verb ("what is unverified, what is next"). |
+| 0001 no orchestration framework | keep | Disk state and resume-by-recompute stay; the while-loop goes with `jig run`, and the frontier becomes a read verb ("what is unverified, what is next"). |
 | 0002 one binary plus skills | keep | Skills become the entry point; "dispatch" and `_screen` drop from the binary's list; the git hook, the SessionStart hook, the MCP server, `init`, `share`, `setup` with `attach` as its alias, the piece verbs, `repos` and `doctor` are subcommands of the one `jig`, and the helper skills ship in it beside the project skills. |
 | 0003 store schema is the API | keep | Hooks, skills and MCP are more readers of the same subtrees under the same `schema_version`; the sessions ledger is deliberately not a store subtree. |
 | 0004 disk-only pipeline seam | keep | Becomes literally true: the verifier is a separate process started by git, sharing nothing with the session but the store and the sha. |
 | 0005 tracker is a projection | keep | Unchanged. |
 | 0006 Go packages are internal | keep | Strengthened: every new door goes through commands, flags, output and exit codes; "unmapped means silent exit" is an exit-code contract. |
 | 0007 gate owns bookkeeping, not judgment | keep | Unchanged for the gate; the deferred "files the reviewer opened" evidence becomes available wherever the harness emits PostToolUse records. |
-| 0008 headless permission model | retire | The harness owns permissions, and `_screen` retires with the box (decision 22). What survives is advice to whoever launches the review session (decision 17: not jig): capability versus instructions (no settings from the code under review, `CLAUDE.md` from HEAD's tree); the read-only guard inverts to a post-round check. The kill mechanics move to the background oracle runner as a wedge guard, never a cost cap. |
+| 0008 headless permission model | retire | The harness owns permissions, and `_screen` retires with the box. What survives is advice to whoever launches the review session (not jig): capability versus instructions (no settings from the code under review, `CLAUDE.md` from HEAD's tree); the read-only guard inverts to a post-round check. The kill mechanics move to the background oracle runner as a wedge guard, never a cost cap. |
 | 0009 review eval, structural gold | keep | The gate's default model is named outright rather than derived from the builder staircase. |
 | 0010 dependencies live on the ticket | keep | The edges feed recall and validate; "a stacked child starts only on a clean parent gate" is enforced at claim or attach time, advisory when interactive. |
 | 0011 the store runs git in process | keep | Motive strengthens: a post-commit hook must return fast, so cheap store writes matter more. |
@@ -83,12 +83,12 @@ These were named in the chart and no ticket of the build carries them:
 | 0020 jig runs the oracle at green | invert | The trigger flips from `result.json` to an observed commit; the red run becomes a record the session reads at its next turn; the fix budget parks for a person instead of climbing; the run bound is re-derived. |
 | 0021 the gate reuses an oracle pass | keep | The same-tree condition becomes structural on a detached worktree; a counted in-session run carries its source on the line. |
 | 0022 the reviewer confirms by id | keep | Unchanged. |
-| 0023 dearest rung and efforts | keep for the reviewer; retire builder effort | The harness's model and effort are recorded in the ledger, not chosen (decision 27); the reviewer's rung is a seam of the review record that whoever launches the reviewer honors. |
+| 0023 dearest rung and efforts | keep for the reviewer; retire builder effort | The harness's model and effort are recorded in the ledger, not chosen; the reviewer's rung is a seam of the review record that whoever launches the reviewer honors. |
 | 0024 builders are told the oracle's time | invert | The background run stamps `seconds`; the context verb returns it by `LastOracleSeconds`'s rule. |
 | 0025 a builder reads earlier slices | invert | The context verb returns the same fields; a slice's files are the commits that name it, replacing attempt ranges. |
 | 0026 code graph starting points | invert | The graph runs on demand in the mapped clone; the `graph` line moves to the ledger. |
 | 0027 jig's testing method | keep | "At a builder's green" becomes "at each commit naming a slice"; the intake skill gains weight. |
-| 0028 jig mints every id | keep | Unchanged; `ticket new` and `graduate` run from inside the session; the mint lands on the claims branch (decision 12) and is authored by the person (decision 32). |
+| 0028 jig mints every id | keep | Unchanged; `ticket new` and `graduate` run from inside the session; the mint lands on the claims branch and is authored by the person. |
 | 0029 demos are recordings | invert | Recording moves to the background verification, run named per verification; a counted in-session run records nothing. |
 | 0030 mirror from inside every command | keep | Checkpoints come from verification writes and verbs; read-only verbs pay no sync. |
 

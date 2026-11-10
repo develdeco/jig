@@ -98,7 +98,7 @@ func ParseTicketID(id string) (key string, n int, ok bool) {
 
 // TicketIDs lists every id-shaped folder under tickets/, under any key -
 // declared in project.yaml or not - sorted by key, then by number: the one
-// function minting's per-key counter (nextID), A6's mirror and every other
+// function minting's per-key counter (nextID), the mirror and every other
 // listing that shows many tickets read tickets through, and nothing else
 // lists them.
 func (s *Store) TicketIDs() ([]string, error) {

@@ -478,8 +478,8 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 // clone's push won the race first, so issue is closed as not planned with a
 // comment naming the other, and this clone drops its own record and adopts
 // the other's instead of retrying (brief.md#Syncing at every checkpoint).
-// Otherwise Claim's own retry (up to maxClaimAttempts, as L1 tries for an
-// id) runs as it does for a plain id claim. It returns the other issue's
+// Otherwise Claim's own retry (up to maxClaimAttempts)
+// runs as it does for a plain id claim. It returns the other issue's
 // number when it adopted one, 0 when issue's own record was claimed.
 func claimIssue(ctx context.Context, st *store.Store, client github.Client, it item, repo string, issue github.Issue, rec githubRecord, msg string) (adopted int, err error) {
 	what := it.what()
@@ -702,7 +702,7 @@ func repoChangedError(it item, recorded, configured string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("%s's record names %s, but trackers: github: repo: is now %s", it.what(), recorded, configured),
 		Code: "MIRROR_REPO_CHANGED",
-		Help: []string{"moving issues to a new repo is T-30"},
+		Help: []string{"moving issues to a new repo is not built; point trackers: github: repo: back at the recorded repo"},
 	}
 }
 

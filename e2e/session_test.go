@@ -163,7 +163,7 @@ func TestSessionVisibleAcrossProcesses(t *testing.T) {
 // session that was given is left as it is, and a directory outside a project
 // mints nothing.
 //
-// It needs the `jig here` verb, which D3 adds; against a binary without it
+// It needs the `jig here` verb; against a binary without it
 // the test skips rather than fail on a verb this ticket does not own.
 func TestHereMintsSession(t *testing.T) {
 	t.Parallel()

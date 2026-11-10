@@ -84,7 +84,7 @@ type recordRef struct {
 	// entry is the record's place in the tracker tree, when inTree.
 	entry  store.TrackerEntry
 	inTree bool
-	// legacy is the record still in the item's own folder, where A6's mirror
+	// legacy is the record still in the item's own folder, where the mirror
 	// first kept it. A sync moves it into the tree before it does anything
 	// else; a dry run, which writes nothing, reads it from there.
 	legacy *store.LegacyTrackerRecord

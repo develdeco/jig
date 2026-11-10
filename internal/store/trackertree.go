@@ -60,7 +60,7 @@ const trackerRecordFile = "record.yaml"
 // <remote id>.yaml, beside the link named <remote id>.
 const flatRecordSuffix = ".yaml"
 
-// legacyRecordFile is the name of the record A6's mirror first kept in a
+// legacyRecordFile is the name of the record the mirror first kept in a
 // ticket's tracker/ folder and in a chart's folder, before the tree.
 const legacyRecordFile = "github.yaml"
 
