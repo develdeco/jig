@@ -1,6 +1,6 @@
 ---
 name: build
-description: Builds a ticket's slices in the repo clone you work in - claim a slice, pull its context, commit with the slice trailer so jig verifies each commit, ask the person when stuck, release when done. Use when asked to build, implement or continue a ticket or slice.
+description: Builds a ticket's slices in the repo clone you work in - claim a slice, pull its context, commit with the slice trailer so jig verifies each commit, ask the person when stuck, release when done. Use when asked to build or continue a ticket or slice.
 ---
 
 # build
@@ -18,22 +18,22 @@ jig claim <ticket> --slice <slice>
 jig context <ticket> --slice <slice>
 ```
 
-`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. A condition the claim does not meet (a blocker not published or merged, a stacked parent with no clean gate round, a brief nobody approved) prints as a warning and the claim goes through, because a person is watching. **Stop on any claim warning**: tell the person what it says and give the prompt that clears it (`ask:` in the warning, such as `Plan <T> (approve its brief)`), and release the slice unless they say to go on. Pass `--unattended` when nobody is watching: the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`. A slice another session holds needs `--take`.
+`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. A condition the claim does not meet (a blocker not published or merged, a stacked parent with no clean gate round, a brief nobody approved) prints as a warning, and the claim goes through. **Stop on any claim warning**: tell the person what it says and give the prompt that clears it (`ask:` in the warning, such as `Plan <T> (approve its brief)`), and release the slice unless they say to go on. Pass `--unattended` when nobody is watching: the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`. A slice another session holds needs `--take`.
 
 ## Read the context
 
-`jig context` is what jig holds for the slice in one call (`--json` for one object): its goal and oracle command, the brief sections and Seams it builds from, what the verified slices built, the failed attempts and why, its questions with answers, and notes. Read it first, and again after an answer. The code is yours to find with your own tools, starting from the files the verified slices changed.
+`jig context` is what jig holds for the slice in one call (`--json` for one object): its goal and oracle, the brief sections and Seams, what the verified slices built, the failed attempts, its questions with answers, and notes. Read it first, and again after an answer. Find the code with your own tools, starting from the files the verified slices changed.
 
 ## Build
 
-- Work on this slice's goal only. Test at the seams the brief names, and run the narrowest tests that cover your change: jig runs the oracle on each commit, and `oracle_seconds` says what that costs.
+- Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change: jig runs the oracle on each commit.
 - Commit as you land, each commit with the trailer that ties it to the slice:
 
 ```
 git commit -m "<message>" -m "Jig-Slice: <slice>"
 ```
 
-  The trailer is how jig finds the commit to verify, and how the next slice's context finds what this one built. `jig here` shows what is verified and what is still being checked; `jig verify` runs the oracle on a commit by hand.
+  The trailer is how jig finds the commit to verify, and how the next slice's context finds what this one built. `jig here` shows what is verified; `jig verify` runs the oracle on a commit by hand.
 - Never edit the store's files by hand. A slice needing more work is `jig slice add <T> --id --goal --oracle`.
 
 ## Stuck? Ask
@@ -44,7 +44,7 @@ jig ask --slice <slice> --wait "<question>"   # waits (--timeout, 10m by default
 jig ask --slice <slice> --wait                # waits again on the question the slice has open
 ```
 
-Ask one question at a time, with your default. The answer says who it speaks for: `provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure. A `--wait` that runs out exits 2 and leaves the question open. Without it, carry on with what the question does not block; the answer reaches you at your next prompt, and `jig context` has it.
+Ask one question at a time, with your default. The answer says who it speaks for: `provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure. A `--wait` that runs out exits 2 and leaves the question open. Without it, carry on with what it does not block; the answer reaches you at your next prompt.
 
 ## Leave a note
 
@@ -52,7 +52,15 @@ Ask one question at a time, with your default. The answer says who it speaks for
 jig note --slice <slice> "<text>"
 ```
 
-A note is a sentence or two for whoever builds this slice next, or the person: what you chose and why, what you left. Without `--slice` it is on the whole ticket.
+A note is a sentence or two for whoever builds next: what you left. Without `--slice` it is on the whole ticket.
+
+## Record a judgment call
+
+```
+jig decide --slice <slice> "<what was ambiguous>" --chose "<what you picked, and why>"
+```
+
+An ambiguity you settle yourself goes here, not in a note, an ask or a repo file. It parks nothing, and shows in the ledger and `jig recall` as a call.
 
 ## Finish or let go
 
@@ -73,11 +81,11 @@ Run `jig claim <ticket> --slice <slice> --session <your id>`, then `jig context 
 While you work run only the tests that cover your change. jig runs the oracle on every commit that carries `Jig-Slice: <slice>`; a red run comes back to you with the tail of its output, at your next prompt and in `jig here`. Fix the cause and commit again.
 Commit as you land, and commit or revert changes to tracked files: jig verifies commits, not the working tree.
 You are done when `jig here` shows the slice verified. There is no result file to write.
-Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, and carry on with what it does not block. A brief that cannot be built as written, or an oracle that cannot pass, is a question, not another try. An environment that will not come up is a note (`jig note`) and a release.
+Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, and carry on with what it does not block. A brief that cannot be built as written, or an oracle that cannot pass, is a question, not another try. An environment that will not come up is a note and a release.
 Leave pushing to publish, and never answer your own question.
 ```
 
-With `--unattended`, jig holds the session back from stopping while a verification runs, tracked changes are uncommitted, every slice is green and no review round is open (open the gate and review it), or a ticket a person approved is not yet published.
+With `--unattended`, jig holds the session back from stopping while a verification runs, tracked changes are uncommitted, every slice is green and no round is open (open the gate and review it), or an approved ticket is not yet published.
 
 ## Then
 
