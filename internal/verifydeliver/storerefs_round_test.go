@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -52,7 +53,15 @@ func TestStoreRefsSurviveIntoADeltaRound(t *testing.T) {
 			t.Fatalf("parse review.json: %v", err)
 		}
 		reqs = append(reqs, req)
-		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, ReviewResult{ReviewedPaths: req.MustReview, Summary: "clean"}), 0o644)
+		result := ReviewResult{ReviewedPaths: req.MustReview, Summary: "clean"}
+		if len(reqs) == 1 {
+			// Round 1 reports a finding, whose id a later line can cite.
+			result.Findings = []ResultFinding{{
+				File: "note.txt", Line: 1, Title: "an aside", Detail: "nothing to fix", Action: ActionNote,
+				Risk: RiskLow, RiskRationale: "an aside",
+			}}
+		}
+		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
 	}})
 	noted := func(report GateReport) []StoreRef {
 		t.Helper()
@@ -83,7 +92,7 @@ func TestStoreRefsSurviveIntoADeltaRound(t *testing.T) {
 		t.Fatalf("round 1: verdict %s, store refs %+v, request %+v; want clean and %+v", report1.Verdict, report1.StoreRefs, reqs[0].StoreRefs, want)
 	}
 
-	commit("other.txt", "nothing to note\n", "an unrelated change")
+	commit("other.txt", "cites r1-f1 here\n", "cite the finding of round 1")
 	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate round 2: %v", err)
@@ -91,11 +100,14 @@ func TestStoreRefsSurviveIntoADeltaRound(t *testing.T) {
 	if reqs[1].Scope != "delta" {
 		t.Fatalf("round 2 scope = %q, want delta", reqs[1].Scope)
 	}
-	if report2.Verdict != "clean" || !reflect.DeepEqual(noted(report2), want) {
-		t.Errorf("round 2: verdict %s, store refs %+v; want clean and the round 1 addition %+v", report2.Verdict, report2.StoreRefs, want)
+	want2 := append(append([]StoreRef(nil), want...), StoreRef{Repo: want[0].Repo, File: "other.txt", Line: 1, ID: "r1-f1"})
+	sort.Slice(want2, func(i, j int) bool { return want2[i].File < want2[j].File })
+	if report2.Verdict != "clean" || !reflect.DeepEqual(noted(report2), want2) {
+		t.Errorf("round 2: verdict %s, store refs %+v; want clean, the round 1 addition and the citation of round 1's finding id: %+v", report2.Verdict, report2.StoreRefs, want2)
 	}
 
 	commit("note.txt", "plain\n", "drop the citation")
+	commit("other.txt", "nothing\n", "drop the second citation")
 	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate round 3: %v", err)
