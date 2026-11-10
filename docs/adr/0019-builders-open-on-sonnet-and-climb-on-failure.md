@@ -4,7 +4,7 @@
 
 The staircase chose every build attempt's model from three rungs (Haiku 4.5, Sonnet 5, Opus 5). Every attempt opened on Haiku. It climbed one rung when the ticket's cumulative lease diff passed 400 lines or 10 files, and floored to Opus when a changed file matched a declared invariant path. A failed attempt did not climb: a retry ran on the same model that had just failed.
 
-The first ticket measured on this (the first measured run, 2026-10-06) paid for that order:
+The first ticket measured on this (2026-10-06) paid for that order:
 - Haiku built the first slices, and the gate's first round found three high-risk defects in them: a lint that matched nothing, an exempted package, and a requirement never implemented.
 - One Haiku attempt failed, and its retry ran on Haiku again.
 - The ticket needed three fix rounds, about 3.5M weighted tokens and 95 minutes of rework.
