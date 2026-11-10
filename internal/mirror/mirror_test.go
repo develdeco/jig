@@ -668,11 +668,12 @@ func TestSyncReportsAClientFailure(t *testing.T) {
 	}
 }
 
-// TestSyncBoundedTimeoutNamesRemainingItemsAndTrackersSync covers this case: a sync from inside a command (SyncOpts{}, the checkpoint
-// hook's default) that runs out of its bound names how many tickets or
-// charts still have no GitHub issue and points at `jig trackers sync`,
-// rather than just surfacing the bare context.DeadlineExceeded every
-// client call already reported on its own (TestSyncReportsAClientFailure).
+// TestSyncBoundedTimeoutNamesRemainingItemsAndTrackersSync covers this case: a
+// sync from inside a command (SyncOpts{}, the checkpoint hook's default) that
+// runs out of its bound names how many tickets or charts still have no GitHub
+// issue and points at `jig trackers sync`, rather than just surfacing the bare
+// context.DeadlineExceeded every client call already reported on its own
+// (TestSyncReportsAClientFailure).
 func TestSyncBoundedTimeoutNamesRemainingItemsAndTrackersSync(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
@@ -714,11 +715,12 @@ func TestSyncUnboundedRunsPastTheBound(t *testing.T) {
 }
 
 // TestSyncAdoptsAnotherClonesIssueOnARejectedPush is the "two clones creating
-// the same ticket's issue" critical path: another clone claims DEMO-1's record and pushes it first, so
-// this Sync's own push for the issue it just opened is rejected; the pull
-// that follows brings the other clone's record in, so this clone must close
-// its own issue as not planned (naming the other in a comment), drop its own
-// record and adopt the other's - ending with one open issue and one record.
+// the same ticket's issue" critical path: another clone claims DEMO-1's record
+// and pushes it first, so this Sync's own push for the issue it just opened is
+// rejected; the pull that follows brings the other clone's record in, so this
+// clone must close its own issue as not planned (naming the other in a
+// comment), drop its own record and adopt the other's - ending with one open
+// issue and one record.
 func TestSyncAdoptsAnotherClonesIssueOnARejectedPush(t *testing.T) {
 	adoptsAnotherClonesIssue(t, false)
 }
@@ -1096,17 +1098,17 @@ func TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip(t *testing
 }
 
 // TestSyncSkipsAPublishSafetyHitOnUpdate is the update half of "a
-// publish-safety hit skips that one ticket or chart": DEMO-1 already has a record from an earlier sync, and
-// its rendered body - the only text that ever reaches GitHub through
-// UpdateIssue - is edited to carry a hit its title never did. The hit must
-// be reported in Skipped, make no UpdateIssue call, write no record change,
-// and win no new board placement either, while DEMO-2 (clean) still syncs
-// normally. A chart ("demo") whose own map.md is edited to carry a hit gets
-// the same treatment on its *link* writes: a second ticket
-// (DEMO-4) newly added to its tickets.yaml in the same commit must not
-// become a sub-issue of it, since the chart's own update is skipped - the
-// proof needed, since links.go used to probe the skip set by the
-// chart's bare name while updateIssues keys it by what() ("charts/<name>").
+// publish-safety hit skips that one ticket or chart": DEMO-1 already has a
+// record from an earlier sync, and its rendered body - the only text that ever
+// reaches GitHub through UpdateIssue - is edited to carry a hit its title never
+// did. The hit must be reported in Skipped, make no UpdateIssue call, write no
+// record change, and win no new board placement either, while DEMO-2 (clean)
+// still syncs normally. A chart ("demo") whose own map.md is edited to carry a
+// hit gets the same treatment on its *link* writes: a second ticket (DEMO-4)
+// newly added to its tickets.yaml in the same commit must not become a
+// sub-issue of it, since the chart's own update is skipped - the proof needed,
+// since links.go used to probe the skip set by the chart's bare name while
+// updateIssues keys it by what() ("charts/<name>").
 func TestSyncSkipsAPublishSafetyHitOnUpdate(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "A clean title")

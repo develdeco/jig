@@ -281,7 +281,7 @@ func TestRenderTicketBodyKeepsBridgeRuleCorners(t *testing.T) {
 				"    <name>\";\n",
 		},
 		{
-			name: "a list item's own continuation joins, T-22's brief",
+			name: "a list item's own continuation joins, a ticket's brief",
 			body: "A ticket in the store becomes an issue.\n\n" +
 				"    - Each change to the ticket's record reaches the\n" +
 				"      issue at the next checkpoint.\n" +

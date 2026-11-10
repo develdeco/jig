@@ -204,8 +204,8 @@ func (c *prFakeClient) ItemFieldValues(context.Context, []string) (map[string]gi
 	return nil, nil
 }
 
-// TestFindPullRequestsOrdersByRepoThenNumber checks the ordering: per repo in the project's own order, by number
-// within each.
+// TestFindPullRequestsOrdersByRepoThenNumber checks the ordering: per repo in
+// the project's own order, by number within each.
 func TestFindPullRequestsOrdersByRepoThenNumber(t *testing.T) {
 	client := &prFakeClient{byRepo: map[string][]github.PullRequest{
 		"example/first":  {{Number: 9, State: "OPEN"}, {Number: 2, State: "MERGED"}},

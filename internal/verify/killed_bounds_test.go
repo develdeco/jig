@@ -237,9 +237,10 @@ func plainPhraseFail(pad int) error {
 	return errors.New(`shell "grep -v 'did not finish within' ` + strings.Repeat("x", pad) + `": exit status 1`)
 }
 
-// TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill: a command that holds "did not finish within" does not make its plain failure
-// a kill: the summary keeps its bound and its failing line, ends with no
-// timeout, and the signature has none.
+// TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill: a command that
+// holds "did not finish within" does not make its plain failure a kill: the
+// summary keeps its bound and its failing line, ends with no timeout, and the
+// signature has none.
 func TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill(t *testing.T) {
 	t.Parallel()
 	base := baselineOf("ok\n")
@@ -263,7 +264,6 @@ func TestPlainFailureWhoseCommandHoldsTheGuardsPhraseIsNotAKill(t *testing.T) {
 	}
 }
 
-// TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace.
 func TestKilledSummaryJoinsItsLinesAndReasonWithOneSpace(t *testing.T) {
 	t.Parallel()
 	_, s := failureOutput("ok\nboom: pkg9 broke\n", longKill(50), baselineOf("ok\n"))

@@ -5,9 +5,10 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// The state a slice is in follows what its session does: a claim makes it building, a release queued
-// again, a question parks it as needs-input and the answer sends it back. These are the moves,
-// as functions of the state, so each is one rule in one place.
+// The state a slice is in follows what its session does: a claim makes it
+// building, a release queued again, a question parks it as needs-input and the
+// answer sends it back. These are the moves, as functions of the state, so each
+// is one rule in one place.
 
 // claimHolder returns the session of the claim line of slice that no release
 // line has undone since, and whether there is one. The session is "" for a

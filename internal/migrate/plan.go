@@ -172,8 +172,9 @@ func BuildPlan(st *store.Store, m Map, platform string) (Plan, error) {
 }
 
 // assignNewIDs numbers every ticket of each key in old-id order, by the old
-// id's own number: the lowest old id under a key becomes <key>-1. Keys are assigned in sorted order so the
-// result (and so the plan's printed order) is deterministic.
+// id's own number: the lowest old id under a key becomes <key>-1. Keys are
+// assigned in sorted order so the result (and so the plan's printed order) is
+// deterministic.
 func assignNewIDs(oldIDs []string, m Map) ([]Rename, error) {
 	byKey := map[string][]string{}
 	for _, id := range oldIDs {

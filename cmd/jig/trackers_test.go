@@ -319,16 +319,16 @@ func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
 	}
 }
 
-// TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput is
-// the reporting rule that drift lines print in the output of the command
-// whose checkpoint found them, and in jig trackers sync's, plus the rule
-// that a publish-safety skip names the ticket or chart, the line number and
-// the line, at the checkpoint side of those two places. The store has one ticket whose issue was edited on GitHub (drift
-// against what the last sync recorded) and one whose title trips the
-// built-in email pattern (skipped, since the issue repo is public), and the
-// one sync a checkpoint runs must report both through the writer the
-// resolving command handed resolveStore - not swallow the report, as the
-// hook did before this slice.
+// TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput is the
+// reporting rule that drift lines print in the output of the command whose
+// checkpoint found them, and in jig trackers sync's, plus the rule that a
+// publish-safety skip names the ticket or chart, the line number and the line,
+// at the checkpoint side of those two places. The store has one ticket whose
+// issue was edited on GitHub (drift against what the last sync recorded) and
+// one whose title trips the built-in email pattern (skipped, since the issue
+// repo is public), and the one sync a checkpoint runs must report both through
+// the writer the resolving command handed resolveStore - not swallow the
+// report, as the hook did before this slice.
 func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())

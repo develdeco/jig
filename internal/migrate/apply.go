@@ -79,8 +79,8 @@ func applyUncommitted(st *store.Store, plan Plan, id gitx.Identity) error {
 }
 
 // moveTicket moves oldID's whole ticket folder to newID's, then deletes the
-// local tracker files the migration retires: tracker/ticket.md, tracker/subtasks.yaml and tracker/comments/,
-// keeping tracker/github.yaml.
+// local tracker files the migration retires: tracker/ticket.md,
+// tracker/subtasks.yaml and tracker/comments/, keeping tracker/github.yaml.
 func moveTicket(st *store.Store, oldID, newID string) error {
 	oldDir, newDir := oldTicketDir(st.Root, oldID), st.TicketDir(newID)
 	if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {

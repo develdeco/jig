@@ -34,22 +34,22 @@ type linkTicket struct {
 	has bool
 }
 
-// linkParentsAndBlockers wires the parent and blocked-by links for every item that already
-// has a record (an issue to link): each chart's tickets become sub-issues
-// of the chart's issue, in the chart's own tickets.yaml order, and each
-// ticket's blocked_by edges become native blocked-by links. A blocker with
-// no issue yet is skipped and reported as not linked, rather than failing
-// the sync. What each ticket ends up linked to is written back to its own
-// record's synced.links (the record keeps the node ids of the links
-// it last wrote), so a later sync only repeats a mutation whose
-// link this one did not already write. curByWhat is the current GitHub state
-// updateIssues already fetched for every item with a record, this step's own
-// read of each chart's sub-issues: a sub-issue found there that is no ticket
-// of the chart's is removed again, as drift (a sub-issue added on
-// GitHub to a chart's issue that is no ticket's issue is taken out again). skip names every item updateIssues skipped on a
-// publish-safety hit: it is left out of every write below, though it can
-// still be linked against as another ticket's blocker (its existing issue
-// is untouched, just not re-rendered this sync). dryRun previews every link
+// linkParentsAndBlockers wires the parent and blocked-by links for every item
+// that already has a record (an issue to link): each chart's tickets become
+// sub-issues of the chart's issue, in the chart's own tickets.yaml order, and
+// each ticket's blocked_by edges become native blocked-by links. A blocker with
+// no issue yet is skipped and reported as not linked, rather than failing the
+// sync. What each ticket ends up linked to is written back to its own record's
+// synced.links (the record keeps the node ids of the links it last wrote), so a
+// later sync only repeats a mutation whose link this one did not already write.
+// curByWhat is the current GitHub state updateIssues already fetched for every
+// item with a record, this step's own read of each chart's sub-issues: a
+// sub-issue found there that is no ticket of the chart's is removed again, as
+// drift (a sub-issue added on GitHub to a chart's issue that is no ticket's
+// issue is taken out again). skip names every item updateIssues skipped on a
+// publish-safety hit: it is left out of every write below, though it can still
+// be linked against as another ticket's blocker (its existing issue is
+// untouched, just not re-rendered this sync). dryRun previews every link
 // (LinkedParents, LinkedBlockedBy, NotLinked, Drift) without calling
 // AddSubIssue, RemoveSubIssue, AddBlockedBy, RemoveBlockedBy or writing a
 // record.

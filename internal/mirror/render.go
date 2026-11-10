@@ -303,9 +303,10 @@ func closedBlock(st *store.Store, c store.Closed, needQualify bool, ownerRepo st
 	return block, nil
 }
 
-// RenderTicketBody renders ticket's full issue body: its description, how it was closed when it was, "Waits for",
-// "## Slices", "## Pull requests", the brief, and the footer, each part left
-// out when empty, joined by one blank line.
+// RenderTicketBody renders ticket's full issue body: its description, how it
+// was closed when it was, "Waits for", "## Slices", "## Pull requests", the
+// brief, and the footer, each part left out when empty, joined by one blank
+// line.
 func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []PRRef) (string, error) {
 	_, desc, err := ResolveTicketTitleBody(st, ticket)
 	if err != nil {
@@ -361,8 +362,8 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 	return strings.Join(parts, "\n\n"), nil
 }
 
-// RenderChartBody renders chart's full issue body: its map.md without the heading line, unwrapped and qualified, a
-// blank line, then the footer.
+// RenderChartBody renders chart's full issue body: its map.md without the
+// heading line, unwrapped and qualified, a blank line, then the footer.
 func RenderChartBody(st *store.Store, cfg project.Config, chart string) (string, error) {
 	data, err := os.ReadFile(st.ChartMapFile(chart))
 	if err != nil {
@@ -400,9 +401,9 @@ func stripHeadingLine(text string) string {
 	return strings.TrimLeft(rest, "\n")
 }
 
-// qualifyRepo reports the product repo's "owner/repo" and whether bare
-// "#123" references need qualifying with it: the project has exactly one repo, its GitHub owner/repo is known,
-// and it differs from the issue repo.
+// qualifyRepo reports the product repo's "owner/repo" and whether bare "#123"
+// references need qualifying with it: the project has exactly one repo, its
+// GitHub owner/repo is known, and it differs from the issue repo.
 func qualifyRepo(cfg project.Config) (ownerRepo string, needed bool) {
 	if cfg.GitHub == nil || len(cfg.Repos) != 1 {
 		return "", false

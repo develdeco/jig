@@ -404,12 +404,13 @@ func (c *countingMirrorClient) UpdateIssue(ctx context.Context, nodeID, title, b
 
 // TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace covers the gap the
 // gate finding named: the mirror sync against its fake GraphQL server, on a
-// migrated store, where after the migration a sync updates each mirrored
-// issue in place and creates none. T-1 and T-2 both already carry a tracker/github.yaml record before
-// the migration moves their folders; afterwards, jig trackers sync must find
-// each record at its ticket's new path (through Store.TicketRelDir,
-// internal/mirror/record.go) and update its issue in place, never mistake
-// the moved ticket for a new one and create a duplicate.
+// migrated store, where after the migration a sync updates each mirrored issue
+// in place and creates none. T-1 and T-2 both already carry a
+// tracker/github.yaml record before the migration moves their folders;
+// afterwards, jig trackers sync must find each record at its ticket's new path
+// (through Store.TicketRelDir, internal/mirror/record.go) and update its issue
+// in place, never mistake the moved ticket for a new one and create a
+// duplicate.
 func TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace(t *testing.T) {
 	t.Parallel()
 	fx := newMigrateFixtureWithMirroredTickets(t)

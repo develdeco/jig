@@ -176,8 +176,9 @@ type Client interface {
 	// ReopenIssue reopens nodeID, for an issue the store now says is not Done
 	// but GitHub (or an earlier sync) left closed.
 	ReopenIssue(ctx context.Context, nodeID string) error
-	// RemoveSubIssue removes subIssueID from parentID's sub-issues: the drift rule that takes a sub-issue added on
-	// GitHub to a chart's issue, when it is no ticket's issue, out again.
+	// RemoveSubIssue removes subIssueID from parentID's sub-issues: the drift
+	// rule that takes a sub-issue added on GitHub to a chart's issue, when it
+	// is no ticket's issue, out again.
 	RemoveSubIssue(ctx context.Context, parentID, subIssueID string) error
 	// ItemFieldValues reads each of itemIDs' current Status and Store ID,
 	// the baseline the drift check compares a board item's owned fields
@@ -185,16 +186,18 @@ type Client interface {
 	// and reads as one with no values, which places it again.
 	ItemFieldValues(ctx context.Context, itemIDs []string) (map[string]ItemFields, error)
 	// LookupProject reports whether the GitHub Project at ownerLogin/number
-	// resolves at all, with no mutation: a dry run's own read of the board's project, which cannot call EnsureProject without risking
-	// the field or link mutation that a plain preview must withhold.
+	// resolves at all, with no mutation: a dry run's own read of the board's
+	// project, which cannot call EnsureProject without risking the field or
+	// link mutation that a plain preview must withhold.
 	LookupProject(ctx context.Context, ownerLogin string, isOrg bool, number int) (bool, error)
 }
 
-// defaultMutationInterval and defaultBackoffBase are the client's own defaults - one mutation per second, as GitHub asks of
-// clients that create content, and the first wait of maxAttempts's own
-// retry with backoff (1s, 2s, 4s between the 4 attempts) - used whenever a GraphQLClient's own
-// MutationInterval or BackoffBase field is zero (production never sets
-// either; this package's own tests do, to run at full speed).
+// defaultMutationInterval and defaultBackoffBase are the client's own defaults
+// - one mutation per second, as GitHub asks of clients that create content, and
+// the first wait of maxAttempts's own retry with backoff (1s, 2s, 4s between
+// the 4 attempts) - used whenever a GraphQLClient's own MutationInterval or
+// BackoffBase field is zero (production never sets either; this package's own
+// tests do, to run at full speed).
 const (
 	defaultMutationInterval = time.Second
 	defaultBackoffBase      = time.Second
@@ -1039,8 +1042,8 @@ const updateProjectV2FieldMutation = `mutation($fieldId: ID!, $options: [Project
   }
 }`
 
-// linkProjectV2ToRepositoryMutation links a repository to a project, so the project is linked to the issue
-// repo when it is not linked yet.
+// linkProjectV2ToRepositoryMutation links a repository to a project, so the
+// project is linked to the issue repo when it is not linked yet.
 const linkProjectV2ToRepositoryMutation = `mutation($projectId: ID!, $repositoryId: ID!) {
   linkProjectV2ToRepository(input: {projectId: $projectId, repositoryId: $repositoryId}) {
     repository { id }
