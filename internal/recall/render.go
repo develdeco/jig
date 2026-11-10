@@ -83,10 +83,10 @@ func (r Report) Blocks() []string {
 		var rows [][]string
 		for _, e := range r.Answers {
 			for _, a := range e.Answers {
-				rows = append(rows, []string{e.Ticket, e.Title, a.ID, a.Text})
+				rows = append(rows, []string{e.Ticket, e.Title, a.ID, a.By, a.Text})
 			}
 		}
-		blocks = append(blocks, axi.Table("answers", []string{"ticket", "title", "id", "text"}, rows))
+		blocks = append(blocks, axi.Table("answers", []string{"ticket", "title", "id", "by", "text"}, rows))
 	}
 	return blocks
 }

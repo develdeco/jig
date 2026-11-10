@@ -200,7 +200,7 @@ func answerTails(entries []LedgerEntry, query map[string]bool) []LedgerEntry {
 		e := c.e
 		answers := make([]Answer, len(e.Answers))
 		for i, a := range e.Answers {
-			answers[i] = Answer{ID: a.ID, Text: clip(a.Text, MaxItemRunes)}
+			answers[i] = Answer{ID: a.ID, By: a.By, Text: clip(a.Text, MaxItemRunes)}
 		}
 		e.Answers = answers
 		out = append(out, e)

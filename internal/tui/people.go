@@ -32,7 +32,7 @@ func roleOf(event string) string {
 	case journal.EventApproval, journal.EventRevalidate:
 		return rolePlanner
 	case journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventQuestion,
-		journal.EventDispatch, journal.EventResult:
+		journal.EventDispatch, journal.EventResult, journal.EventCall:
 		return roleBuilder
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return roleReviewer
