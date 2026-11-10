@@ -71,7 +71,11 @@ func answersBlock(questions []store.Question) string {
 		if q.Status != "answered" || q.Answer == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, oneLine(q.Body), oneLine(q.Answer)))
+		id := q.ID
+		if q.Kind == store.KindCall {
+			id += " (call)"
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", id, oneLine(q.Body), oneLine(q.Answer)))
 	}
 	if len(lines) == 0 {
 		return "none"
@@ -108,6 +112,34 @@ func writeLedgerEntry(st *store.Store, ticket, title string, slices []store.Slic
 	return editStoreDoc(st.LedgerPath(), "ledger", func(text string) string {
 		return store.ReplaceLedgerEntry(text, ticket, entry)
 	})
+}
+
+// RefreshLedgerEntry rewrites the ticket's ledger entry, in place, from the
+// store as it is now: the same entry a republish writes, so an answer or a
+// call recorded after the publish shows without one. A ledger with no entry
+// for the ticket (it is not published) is left as it is, and a ledger that
+// does not exist is not created.
+func RefreshLedgerEntry(st *store.Store, ticket string) error {
+	existing, err := fileshare.ReadFile(st.LedgerPath())
+	if os.IsNotExist(err) || (err == nil && !store.HasLedgerEntry(string(existing), ticket)) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read: %w", err)
+	}
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read ticket record: %w", err)
+	}
+	sls, err := st.ReadSlices(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read slices: %w", err)
+	}
+	questions, err := st.ReadQuestions(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read questions: %w", err)
+	}
+	return writeLedgerEntry(st, ticket, publishTitle(st.TicketName(ticket, rec), ticket), sls, questions)
 }
 
 // writeContractIndexEntry puts this ticket's contract-index entry in the

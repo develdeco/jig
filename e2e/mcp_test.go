@@ -318,7 +318,7 @@ func TestMCPAskWithoutElicitationFallsBackToTheRecord(t *testing.T) {
 		t.Errorf("answer = %+v, want answered as an agent and the slice queued", ans)
 	}
 	ctx := c.tool("context", map[string]any{"ticket": fx.Ticket, "slice": "c"})
-	if ctx.IsError || !strings.Contains(ctx.Text, "questions[1]{id,status,question,answer,provenance}:") || !strings.Contains(ctx.Text, "Casual, please.") {
+	if ctx.IsError || !strings.Contains(ctx.Text, "questions[1]{id,status,question,answer,provenance,kind}:") || !strings.Contains(ctx.Text, "Casual, please.") {
 		t.Errorf("context = %+v, want the answered question", ctx)
 	}
 

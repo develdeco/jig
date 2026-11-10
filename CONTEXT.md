@@ -163,12 +163,16 @@ The jig home's append-only record of what happened on this machine: sessions, to
 _Avoid_: history, audit log
 
 **Ledger entry**:
-One store entry per ticket in `ledger.md`, headed `## <id> - <title>` and ending in an Answers recall tail. A publish of a ticket that has an entry replaces it where it stands, and `jig store migrate` renames the id in its heading when the ticket gets a new one and keeps only the newest of a ticket's entries.
+One store entry per ticket in `ledger.md`, headed `## <id> - <title>` and ending in an Answers recall tail. A **Judgment call** is listed there as `- q-004 (call): ...`. A publish of a ticket that has an entry replaces it where it stands, and `jig store migrate` renames the id in its heading when the ticket gets a new one and keeps only the newest of a ticket's entries.
 _Avoid_: index, registry
 
 **Contract index entry**:
 One line per ticket in `platform/contract-index.md`, `- <id>: workspaces ..., oracles ...`, kept the way a **Ledger entry** is: one per ticket, replaced by the next publish, renamed and reduced to the newest by the migration.
 _Avoid_: ledger entry
+
+**Judgment call**:
+A choice a builder settled itself where the brief was ambiguous, recorded with `jig decide` as a question already answered, of kind `call`. It parks no slice and waits on no one, unlike an ask; it shows in the ledger entry and in `jig recall` marked `call`.
+_Avoid_: decision (a person's answer to a finding), note
 
 **Hook**:
 What a harness (or git) calls when something happens in a session: session start, a prompt, a tool call, a stop, a session end, a commit. jig's hooks all end in `jig observe` or `jig githook post-commit`, which exit 0 and print nothing whatever they are handed, and which record nothing for a directory in no jig project.

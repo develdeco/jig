@@ -931,6 +931,7 @@ func TestEverClaimed(t *testing.T) {
 	}{
 		{"an empty journal", nil, false},
 		{"an approval and a note", []journal.Line{ln(journal.EventApproval), ln(journal.EventNote)}, false},
+		{"a call alone", []journal.Line{ln(journal.EventCall, onSlice("a"))}, false},
 		{"a question, an answer and a stall alone", []journal.Line{ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")), ln(journal.EventStall, onSlice("a"))}, false},
 		{"a claim", []journal.Line{ln(journal.EventClaim, onSlice("a"), by("s-1"))}, true},
 		{"a claim released again", []journal.Line{ln(journal.EventClaim, onSlice("a")), ln(journal.EventRelease, onSlice("a"))}, true},

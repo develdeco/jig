@@ -14,6 +14,7 @@ package journal
 const (
 	EventAdopt          = "adopt"
 	EventAnswer         = "answer"
+	EventCall           = "call"
 	EventChangelog      = "changelog"
 	EventDispatch       = "dispatch"
 	EventEnvDown        = "env-down"
