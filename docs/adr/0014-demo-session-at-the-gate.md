@@ -341,7 +341,7 @@ verbatim, the same "jig does not filter model prose" stance "The contract"
 takes for the record. That stance holds for `demo.yaml`, which only the
 store and the operator's own machine ever see; it does not hold once the
 same words reach a pull request body, which the tracker (GitHub) makes
-public. Gate finding r1-f13's owner decision draws that line at the render
+public. The owner's decision draws that line at the render
 step rather than the record: before `renderDemoSection` builds the `##
 Demo` section, the summary and each verified file's own caption are checked
 for the literal paths jig itself handed the demo session - `media_dir`, the

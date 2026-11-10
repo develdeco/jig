@@ -7,8 +7,8 @@ tied an id to a round trip the store itself did not need: `jig ticket new`
 neither committed nor pushed what it minted, so two clones of one store
 could compute the same next id and both write it, and an id minted by
 opening a tracker issue could not be retried without leaving an orphan
-behind if the write that followed failed. The store-layout destination
-(decision 7) settles this the other way: the store is the source of truth,
+behind if the write that followed failed. The store as the destination of
+all state settles this the other way: the store is the source of truth,
 and a tracker only ever mirrors it. An id is store state like any other, so
 minting it must be the store's own, atomic act, not a side effect of asking
 some other system to agree.
@@ -102,7 +102,7 @@ between is never rewound: the claim then refuses `ID_NOT_CLAIMED` and leaves
 both commits for the operator. The last rejection also refuses
 `ID_NOT_CLAIMED`, leaving no folder, no commit and no claim behind.
 
-## Amendment: an id gains an area key (T-26)
+## Amendment: an id gains an area key
 
 `Store.Mint` took a `project.yaml` `ticket_format` string (`"JIG-{n}"`),
 parsed it into a regexp, and used that to both scan for the next number and
@@ -129,7 +129,7 @@ always `<key>-<n>` - a key is uppercase letters and digits with no `-`, and
 longer; they stay as a defensive check on a value this ADR's claim
 guarantee still depends on being safe to write under.
 
-## Amendment: a ticket keeps its earlier ids as aliases (T-26)
+## Amendment: a ticket keeps its earlier ids as aliases
 
 An id gaining a key (above) only matters once a ticket can actually move to
 a keyed one without losing the id it was minted, found, or talked about

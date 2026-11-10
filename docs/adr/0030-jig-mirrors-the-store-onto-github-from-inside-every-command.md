@@ -8,7 +8,7 @@ Status and Store ID fields; sub-issue and blocked-by links; pull requests.
 It could not run while jig used the store, so the board moved only between
 jig commands, and a store the bridge was never pointed at never reached a
 board at all - a design flaw, by the owner's own call (2026-10-04). L1
-(T-23, develdeco/jig#102) made the ground safe to build this on: jig mints
+(develdeco/jig#102) made the ground safe to build this on: jig mints
 and claims every ticket id itself (ADR 0028), the tracker package is gone,
 pull requests come from `internal/repohost`, and `project.yaml`'s
 `trackers:` list replaces the single `tracker:` key.
@@ -46,7 +46,7 @@ ownership promise printed in every issue footer unverifiable in practice.
 
 ## Until the store's layout moves, the mirror keeps the bridge's shape
 
-L2 to L4 bring the store-layout tickets after this one (area-key ids,
+L2 to L4 bring the rest of the store layout after this one (area-key ids,
 `tickets/<id>/`, the tracker tree); until then, the mirror keeps its
 records exactly where the bridge kept them - `<ticket>/tracker/github.yaml`,
 `charts/<name>/github.yaml`, in the bridge's own keys - so the bridge's

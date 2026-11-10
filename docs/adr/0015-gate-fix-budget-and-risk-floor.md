@@ -178,7 +178,7 @@ file-path remotes.
 
 ## References
 
-- BG-1 incident (not in public repo) showed 8 gate rounds on low-risk findings
+- An earlier incident (not in this repo) showed 8 gate rounds on low-risk findings
   alone, rounds 5-8 costing roughly a quarter of the ticket's 29M weighted
   tokens and 3 hours.
 - no-mistakes (internal policy): fix attempts are bounded per step; only

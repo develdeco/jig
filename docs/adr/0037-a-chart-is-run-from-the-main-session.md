@@ -34,7 +34,7 @@ The owner walked a harness session beside `jig tui` through the whole flow in a 
 - A project that attached jig before this has no `SubagentStop` entry until it runs `jig attach` or `jig hooks` again; `jig doctor` lists the missing entry, and until then a build subagent is never held at its stop.
 - The skills stay under the 6000 bytes and 100 lines the lint allows: the new `chart` skill is its own, and intake gave up a few sentences to make room.
 
-## Amendment: a screen that waits on a merge is read again on a timer (GRAPH-15)
+## Amendment: a screen that waits on a merge is read again on a timer
 
 The chart screen was read again on open, on `r`, and after the screen had been quiet since an event of one of the chart's tickets. A merge on the host writes no line to any journal, so a chart that ended at a pull request showed "waits for a merge" until a person pressed `r` or something happened to one of its tickets. The owner decided that a screen that waits on a merge is read again on a timer, every two minutes (chart flow, C14).
 
@@ -56,7 +56,7 @@ Consequences:
 - A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
 - `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row) and the README say the same.
 
-## Amendment: the chart screen's activity includes the chart's store history (GRAPH-16)
+## Amendment: the chart screen's activity includes the chart's store history
 
 A chart has no journal, so the chart screen's Activity panel showed its tickets' lines and nothing else. A map edit or a graduation leaves no ticket line: a chart whose map was just edited, or that was just graduated, read "nothing yet". The store is a git repo, and the commits that touched `charts/<name>/` are the chart's own history. The owner decided the chart screen shows them as part of its activity (chart flow, C13).
 
@@ -67,7 +67,7 @@ A chart has no journal, so the chart screen's Activity panel showed its tickets'
 
 Rejected alternatives:
 
-- **A chart journal.** A file the chart's actions append to would record the run, which decision 4 of the chart's map rejected, and would be a second copy of what git holds.
+- **A chart journal.** A file the chart's actions append to would record the run, which was rejected, and would be a second copy of what git holds.
 - **The TUI reading the store itself.** `TestTheScreensReadNoStore` forbids the screens importing `store`, `project` and `gitx`: they learn everything from a verb's output, and this stays one.
 - **An in-process log walk in `internal/gitx`.** Merge simplification and the path filter are git's to compute, and a second implementation would drift from it.
 

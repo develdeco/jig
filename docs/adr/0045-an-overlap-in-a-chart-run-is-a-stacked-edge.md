@@ -17,7 +17,7 @@
 - **An implicit edge in `DeriveChart`.** It would hide an order the person can neither see nor change in the ticket's file, and a pure derivation would need the project's repos.
 - **Serializing every overlap in jig's own run.** A person who wants two in parallel says so; the skill leaves them in one wave then, and they merge by hand.
 - **Listing every pair of the run, edge or not.** The list would never empty, and the skill could not act on "every listed pair".
-- **Writing the edge from jig.** jig never edits a ticket's `blocked_by` after graduation. (2026-11-08: `jig depend`, GRAPH-23, now writes `blocked_by` after graduation; this decision keeps the session's edge, not jig's own run, as the overlap answer.)
+- **Writing the edge from jig.** jig never edits a ticket's `blocked_by` after graduation. (2026-11-08: `jig depend` now writes `blocked_by` after graduation; this decision keeps the session's edge, not jig's own run, as the overlap answer.)
 
 ## Consequences
 

@@ -10,8 +10,7 @@ and nothing told `project.yaml`'s readers which `schema_version` a given
 store actually followed, since `project.yaml` declared the field but
 nothing ever checked it.
 
-Two decisions of the store-layout map settle this (chart decisions 1, 6, 9
-and 13): real tickets move under `tickets/<id>/`, and `schema_version` is
+Two decisions settle this: real tickets move under `tickets/<id>/`, and `schema_version` is
 enforced from the one place every command loads `project.yaml`. Both
 landed with an area key on every id (ADR 0028's `ticket_format` replaced
 by `keys:`, an earlier slice of this same ticket): an id is `<key>-<n>`,
@@ -56,7 +55,7 @@ resolve at once, not only after its next write of its own.
 Older jig builds cannot be made to refuse a v2 store on their own, since
 they never checked `schema_version` at all - so the upgrade is a
 one-time, operator-run procedure, not something jig enforces across every
-clone at once (chart decision 13). `jig store migrate --map <file>` reads
+clone at once. `jig store migrate --map <file>` reads
 an operator-supplied rename map - `keys:` (the new area keys and their
 meaning) and `tickets:` (every existing ticket's old id to its new key) -
 and refuses a ticket the map leaves out, one the store does not have, an
@@ -115,8 +114,7 @@ Branches in the product repos, and the machine's evidence tree (keyed by
 old ids, which belong to tickets in flight the migration's own branch
 warning already tells the operator to finish first), are the operator's to
 carry forward, not jig's to rewrite. jig's own store's migration - the
-owner's rename map and the rehearsal-then-cutover procedure of chart
-decision 13 - runs after this ticket merges, using the command this ADR
+owner's rename map and the rehearsal-then-cutover procedure - runs after this ticket merges, using the command this ADR
 describes.
 
 ## Amendment: jig's own store was migrated
@@ -129,8 +127,8 @@ The mirror's records move out of the ticket and chart folders into `trackers/<pr
 
 ## Amendment: a tracker entry is a folder
 
-Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/STORE-6`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). A record that cannot be read refuses a sync (`MIRROR_RECORD_INVALID`) before anything is written, since it names no ticket and the ticket would look like one with no issue and get a second; the tree's findings in `jig validate` are advisories.
+Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/ABC-1`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). A record that cannot be read refuses a sync (`MIRROR_RECORD_INVALID`) before anything is written, since it names no ticket and the ticket would look like one with no issue and get a second; the tree's findings in `jig validate` are advisories.
 
 ## Amendment: the ledger and the contract index are rewritten
 
-"Out of scope" above said every other history file is read by id and an old id resolves through its alias. That holds for the files a command opens by ticket, and not for two the store keeps by text: `ledger.md` and `platform/contract-index.md`. A publish writes one entry into each under the ticket's id, and `jig recall` reads the ledger's entries by the id in their headings, so after jig's own store migrated they named ids that no longer existed (`T-22` for what is now `TRACK-1`). The migration now renames the ticket id in each ledger entry heading and each contract index line through the same rename map, and the dry run lists either file when it would rewrite it. A ticket the file holds more than once, from a publish that appended on every run, is left with its newest entry in the place of its first, and the dry run counts what it drops. The newest entry wins because a publish regenerates an entry whole from the ticket's current state, and every duplicate in the file goes, not only those the rename makes, so the result is the same on any store. Otherwise only the id changes: a title or an answer that mentions one is the person's words. Every new id differs from every old one (the map's keys must not clash with the old ids' own), so a file already renamed is not renamed again.
+"Out of scope" above said every other history file is read by id and an old id resolves through its alias. That holds for the files a command opens by ticket, and not for two the store keeps by text: `ledger.md` and `platform/contract-index.md`. A publish writes one entry into each under the ticket's id, and `jig recall` reads the ledger's entries by the id in their headings, so after jig's own store migrated they named ids that no longer existed (an old id for what is now a new one). The migration now renames the ticket id in each ledger entry heading and each contract index line through the same rename map, and the dry run lists either file when it would rewrite it. A ticket the file holds more than once, from a publish that appended on every run, is left with its newest entry in the place of its first, and the dry run counts what it drops. The newest entry wins because a publish regenerates an entry whole from the ticket's current state, and every duplicate in the file goes, not only those the rename makes, so the result is the same on any store. Otherwise only the id changes: a title or an answer that mentions one is the person's words. Every new id differs from every old one (the map's keys must not clash with the old ids' own), so a file already renamed is not renamed again.
