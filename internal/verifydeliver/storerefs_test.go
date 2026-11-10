@@ -170,3 +170,57 @@ func TestStoreRefsRowsSumUpTheRest(t *testing.T) {
 		t.Errorf("first row file:line = %q, want a.go:1", rows[0][1])
 	}
 }
+
+// TestReviewNotesStoreRefsNameTheCountAndEachPlace: the notes say how many
+// lines the change adds that name the store and where, without what they cite,
+// and a change with none has the notes it always had.
+func TestReviewNotesStoreRefsNameTheCountAndEachPlace(t *testing.T) {
+	t.Parallel()
+	st := &store.Store{Root: t.TempDir()}
+	refs := []StoreRef{
+		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-7"},
+		{Repo: "app", File: "docs/b.md", Line: 12, ID: "zq-f1"},
+	}
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs); err != nil {
+		t.Fatal(err)
+	}
+	want := "# Review Notes\n\n" +
+		"## Store references\n\nThe change adds 2 lines that name something only the jig store holds:\n\n- a.go:3\n- docs/b.md:12\n\n" +
+		"## Coverage\n\n"
+	got := readNotes(t, st, "T-1", "review-notes.md")
+	if got != want {
+		t.Errorf("notes =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, "ZQX-7") || strings.Contains(got, "zq-f1") {
+		t.Errorf("the notes are public and name what a line cites:\n%s", got)
+	}
+
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if got := readNotes(t, st, "T-1", "review-notes.md"); !strings.Contains(got, "adds 1 line that") {
+		t.Errorf("one reference reads %q, want a singular", got)
+	}
+}
+
+// TestReviewNotesStoreRefsOfTheReposPullRequest: a ticket that publishes in
+// several repos names, in each repo's notes, the places in that repo alone.
+func TestReviewNotesStoreRefsOfTheReposPullRequest(t *testing.T) {
+	t.Parallel()
+	pt := &publishTarget{
+		repoName: "web",
+		covered:  []string{"api", "web"},
+		gateRep: reportYAML{StoreRefs: []StoreRef{
+			{Repo: "api", File: "a.go", Line: 1, ID: "ZQX-7"},
+			{Repo: "web", File: "w.ts", Line: 9, ID: "ZQX-7"},
+		}},
+	}
+	got := pt.storeRefs()
+	if want := []StoreRef{{Repo: "web", File: "w.ts", Line: 9, ID: "ZQX-7"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("store refs of web = %+v, want %+v", got, want)
+	}
+	one := &publishTarget{repoName: "app", covered: []string{"app"}, gateRep: reportYAML{StoreRefs: pt.gateRep.StoreRefs}}
+	if got := one.storeRefs(); len(got) != 2 {
+		t.Errorf("a ticket in one repo lists %d, want all 2", len(got))
+	}
+}

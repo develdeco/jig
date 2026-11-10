@@ -59,7 +59,7 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectFindingsWithOutcomes: %v", err)
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	notes := readNotes(t, st, "T-1", "review-notes.md")
@@ -157,7 +157,7 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 		t.Errorf("r1-f4 = %+v, want its first and latest risk", o)
 	}
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := "  - History: medium at round 1: four; continued at round 2 as low: four\n"; !strings.Contains(readNotes(t, st, "T-1", "review-notes.md"), want) {

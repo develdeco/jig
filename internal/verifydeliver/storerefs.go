@@ -208,26 +208,50 @@ func storeRefsOf(st *store.Store, ticket string, round int, repos []storeRefRepo
 	return refs, nil
 }
 
-// storeRefsLimit is how many store references a gate round lists before it
-// sums the rest up: report.yaml keeps every one.
-const storeRefsLimit = 20
+// StoreRefsLimit is how many store references a table lists before it sums the
+// rest up: report.yaml keeps every one.
+const StoreRefsLimit = 20
 
-// StoreRefsRows is refs as the rows a table lists (repo, file:line, id): at most storeRefsLimit,
-// then, when more remain, a last row "and N more in K files" in the repo column (the files the
-// remaining ones lie in, counted by repo and path).
+// StoreRefsRows is refs as the rows a table lists (repo, file:line, id): at
+// most StoreRefsLimit, then, when more remain, a last row StoreRefsMore says in
+// the repo column.
 func StoreRefsRows(refs []StoreRef) (rows [][]string) {
 	for i, r := range refs {
-		if i == storeRefsLimit {
+		if i == StoreRefsLimit {
 			break
 		}
 		rows = append(rows, []string{r.Repo, fmt.Sprintf("%s:%d", r.File, r.Line), r.ID})
 	}
-	if len(refs) > storeRefsLimit {
-		files := map[[2]string]bool{}
-		for _, r := range refs[storeRefsLimit:] {
-			files[[2]string{r.Repo, r.File}] = true
-		}
-		rows = append(rows, []string{fmt.Sprintf("and %d more in %d files", len(refs)-storeRefsLimit, len(files)), "", ""})
+	if len(refs) > StoreRefsLimit {
+		rows = append(rows, []string{StoreRefsMore(refs[StoreRefsLimit:]), "", ""})
 	}
 	return rows
+}
+
+// StoreRefsMore sums up the references a table leaves out: how many, and in how
+// many files (counted by repo and path).
+func StoreRefsMore(rest []StoreRef) string {
+	files := map[[2]string]bool{}
+	for _, r := range rest {
+		files[[2]string{r.Repo, r.File}] = true
+	}
+	return fmt.Sprintf("and %d more in %d files", len(rest), len(files))
+}
+
+// storeRefsNotes is the review notes' section on the store references of the
+// round the pull request ships: how many lines the change adds that name
+// something only the store holds, and where, for whoever merges to weigh. It
+// names the places and not what they cite, since the notes are public.
+func storeRefsNotes(refs []StoreRef) string {
+	var b strings.Builder
+	noun := "lines"
+	if len(refs) == 1 {
+		noun = "line"
+	}
+	fmt.Fprintf(&b, "## Store references\n\nThe change adds %d %s that name something only the jig store holds:\n\n", len(refs), noun)
+	for _, r := range refs {
+		fmt.Fprintf(&b, "- %s:%d\n", r.File, r.Line)
+	}
+	b.WriteString("\n")
+	return b.String()
 }
