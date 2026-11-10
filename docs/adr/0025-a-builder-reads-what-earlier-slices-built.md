@@ -15,7 +15,7 @@ Every build session starts cold. One measured run's builder spent its first ten 
 
 Builders in one repo run one at a time, but the lease is never reset between attempts, and other slices may run between two attempts of one slice (while it waits on a question, say). So a slice's own commits are only its attempts' ranges, never the span from its first dispatch to its verified commit. A range git cannot resolve (an older journal without dispatch bases, a commit no longer in the lease) adds no files.
 
-Sizing slices so one cohesive change is one slice, is method, not mechanism: it belongs in the intake skill.
+Sizing slices so one cohesive change is one slice is method, not mechanism: it belongs in the intake skill.
 
 ## Test seams
 
