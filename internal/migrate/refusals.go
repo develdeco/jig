@@ -114,8 +114,8 @@ func CheckNoLeases(jigHome string, repoNames, oldIDs []string) error {
 
 // BranchWarnings reports one warning line per (repo, old id) whose
 // jig/<old id> branch is still on that repo's origin: after the migration
-// the ticket is the new id and jig names its branch <new id>-<slug>
-// (brief.md#The migration step 2). The old branch still binds to the ticket,
+// the ticket is the new id and jig names its branch <new id>-<slug>.
+// The old branch still binds to the ticket,
 // through the old id the migration leaves as an alias, but it is no longer
 // the name jig offers for new work, so it is better merged or closed first.
 // A repo whose origin cannot be reached is skipped silently - this is

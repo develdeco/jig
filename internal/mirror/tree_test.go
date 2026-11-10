@@ -78,8 +78,8 @@ func writeLegacyRecord(t *testing.T, st *store.Store, what, repo string, issue i
 
 // writeAdoptedRecord writes what's record in the tracker tree with the
 // bridge's own shape (repo, issue, node_id and item - no synced: key at all),
-// the form a record jig never wrote carries until this sync adopts it
-// (brief.md#Records, #Adoption). item is the board item the bridge had
+// the form a record jig never wrote carries until this sync adopts it.
+// item is the board item the bridge had
 // already placed the issue on; "" leaves the key out, for a record that
 // names an issue never put on a board. It writes the record only: the link is
 // the sync's to make.

@@ -10,14 +10,14 @@ import (
 )
 
 // renderSyncReport prints report's user-visible outcome through w: what
-// brief.md#jig trackers sync lists - "created, updated and reopened or
-// closed issues, links added and removed, fields set, and every drift
-// line" - plus whatever a publish-safety hit skipped or a missing issue
+// `jig trackers sync` lists - created, updated and reopened or closed
+// issues, links added and removed, fields set, and every drift line - plus
+// whatever a publish-safety hit skipped or a missing issue
 // left unlinked. Both `jig trackers sync` and the checkpoint hook wired
 // into every other command (resolveStore) render the same report through
-// this one function, so the two places brief.md#Ownership and drift names
-// ("drift lines print in the output of the command whose checkpoint found
-// them, and in jig trackers sync's") print the same shape. A table with no
+// this one function, so the two places drift lines print (the output of the
+// command whose checkpoint found them, and jig trackers sync's) print the
+// same shape. A table with no
 // rows is left out, so a checkpoint whose sync changed nothing prints
 // nothing. dryRun labels the created table "would_create" rather than
 // "created", the only difference between a checkpoint's and a dry run's

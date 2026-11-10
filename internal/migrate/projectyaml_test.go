@@ -54,7 +54,7 @@ platform: platform/
 }
 
 // TestRewriteProjectYAMLKeepsAnExistingTrackersList pins "an existing
-// trackers: is kept" (brief.md#The migration step 6): a project.yaml that
+// trackers: is kept": a project.yaml that
 // already carries a trackers: list (no tracker: key) is left untouched by
 // the tracker rewrite.
 func TestRewriteProjectYAMLKeepsAnExistingTrackersList(t *testing.T) {
@@ -85,7 +85,7 @@ platform: platform/
 }
 
 // TestRewriteProjectYAMLKeepsEveryOtherKey pins "every other key kept as it
-// is" (brief.md#The migration step 6): gate: and staircase: round-trip
+// is": gate: and staircase: round-trip
 // unchanged.
 func TestRewriteProjectYAMLKeepsEveryOtherKey(t *testing.T) {
 	t.Parallel()

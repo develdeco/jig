@@ -172,8 +172,7 @@ func BuildPlan(st *store.Store, m Map, platform string) (Plan, error) {
 }
 
 // assignNewIDs numbers every ticket of each key in old-id order, by the old
-// id's own number: the lowest old id under a key becomes <key>-1
-// (brief.md#The rename map). Keys are assigned in sorted order so the
+// id's own number: the lowest old id under a key becomes <key>-1. Keys are assigned in sorted order so the
 // result (and so the plan's printed order) is deterministic.
 func assignNewIDs(oldIDs []string, m Map) ([]Rename, error) {
 	byKey := map[string][]string{}
@@ -199,8 +198,7 @@ func assignNewIDs(oldIDs []string, m Map) ([]Rename, error) {
 
 // trackerDeletedPaths are the tracker/ sub-paths (relative to a ticket
 // folder, slash-separated) `jig store migrate` deletes outright rather than
-// moving: tracker/github.yaml is the one tracker file it keeps
-// (brief.md#The migration step 5).
+// moving: tracker/github.yaml is the one tracker file it keeps.
 func trackerDeletedPrefixes(relSlash string) bool {
 	return relSlash == "tracker/ticket.md" ||
 		relSlash == "tracker/subtasks.yaml" ||
@@ -316,7 +314,7 @@ func chartAffected(entries []store.ChartEntry, renameOf map[string]string) bool 
 // newID's folder at the same relative path, except ticket.yaml itself
 // (always a rewrite, at the new path, since its title, body, aliases and
 // blocked_by all change) and the tracker files the migration deletes
-// outright (brief.md#The migration step 5).
+// outright.
 func planTicketFiles(st *store.Store, oldID, newID string) ([]FileOp, error) {
 	root := oldTicketDir(st.Root, oldID)
 	var ops []FileOp

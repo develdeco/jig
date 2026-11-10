@@ -10,7 +10,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// newDemoStore builds the store the golden (brief.md#What an issue shows)
+// newDemoStore builds the store the golden
 // is drawn from: project.yaml declares one product repo (example/demo) and
 // its issues live in a different repo (example/tracking), so bare "#N" in
 // rendered text is qualified to "example/demo#N".
@@ -39,8 +39,8 @@ platform: platform/
 	return st
 }
 
-// wantDemo7Body is the golden issue body for ticket DEMO-7
-// (brief.md#What an issue shows), its issues in a repo other than the
+// wantDemo7Body is the golden issue body for ticket DEMO-7,
+// its issues in a repo other than the
 // product one, so "#5" and "#31" (its own text) read bare and qualified
 // respectively.
 const wantDemo7Body = "A ticket in the store becomes an issue, and the issue follows the ticket from then on (see example/demo#5).\n\n" +
@@ -112,10 +112,9 @@ func setUpDemo7(t *testing.T, st *store.Store) {
 	}
 }
 
-// TestRenderTicketBodyMatchesTheGolden is the renderer seam
-// (brief.md#Seams: "The renderer: a ticket's and a chart's title and body
-// from store state, against the golden in 'What an issue shows'."): ticket
-// DEMO-7's body, exactly as brief.md's golden spells it out.
+// TestRenderTicketBodyMatchesTheGolden is the renderer seam: a
+// ticket's and a chart's title and body from store state, against the golden.
+// Ticket DEMO-7's body, exactly as wantDemo7Body spells it out.
 func TestRenderTicketBodyMatchesTheGolden(t *testing.T) {
 	st := newDemoStore(t)
 	setUpDemo7(t, st)
@@ -179,7 +178,7 @@ platform: platform/
 }
 
 // TestRenderChartBodyMatchesTheGolden is the chart half of the same seam:
-// chart "demo"'s body, exactly as brief.md's golden spells it out.
+// chart "demo"'s body, exactly as the golden spells it out.
 func TestRenderChartBodyMatchesTheGolden(t *testing.T) {
 	st := newDemoStore(t)
 	if err := os.MkdirAll(filepath.Join(st.Root, "charts", "demo"), 0o755); err != nil {
@@ -214,7 +213,7 @@ func TestRenderChartBodyMatchesTheGolden(t *testing.T) {
 }
 
 // TestRenderTicketBodyJoinsIndentedContinuationsOfListItems pins
-// brief.md#What an issue shows's unwrapping rule for the case the bridge
+// the bridge's unwrapping rule for the case the bridge
 // gets right and a naive "4+ spaces is always code" reading gets wrong: a
 // nested bullet's and a numbered step's hard-wrapped continuation, each
 // indented four or more spaces, is not an indented code block (it follows
@@ -252,7 +251,7 @@ func TestRenderTicketBodyJoinsIndentedContinuationsOfListItems(t *testing.T) {
 }
 
 // TestRenderTicketBodyKeepsBridgeRuleCorners pins the cases where the
-// bridge's own unwrapping rule (brief.md#What an issue shows) and a naive
+// bridge's own unwrapping rule and a naive
 // reading of it disagree, each found by diffing a pre-publish dry run
 // against the live store: (1) a nested bullet under a numbered item, at
 // four or more spaces of indent, still starts its own line rather than
@@ -330,8 +329,8 @@ func TestRenderTicketBodyKeepsBridgeRuleCorners(t *testing.T) {
 	}
 }
 
-// TestResolveTicketTitleBodyFallsBackToChartEntry checks fallback rank 2
-// (brief.md#What an issue shows): a ticket with no ticket.yaml title takes
+// TestResolveTicketTitleBodyFallsBackToChartEntry checks fallback rank 2:
+// a ticket with no ticket.yaml title takes
 // its title and body from its entry in a chart's tickets.yaml.
 func TestResolveTicketTitleBodyFallsBackToChartEntry(t *testing.T) {
 	st := newDemoStore(t)

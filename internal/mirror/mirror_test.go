@@ -110,18 +110,17 @@ type fakeClient struct {
 	placedItems       []fakePlacedItem
 	nextItem          int
 	// projectErr, if set, is what EnsureProject fails with - a missing
-	// project or a token without the project scope (brief.md#The board).
+	// project or a token without the project scope.
 	projectErr error
 	// private, when true, makes RepositoryIsPublic report false, as a store
-	// whose issue repo is private (brief.md#Publish safety: "A private
-	// issue repo is not scanned").
+	// whose issue repo is private (a private
+	// issue repo is not scanned).
 	private bool
 
 	// issues simulates every issue's current GitHub state, keyed by node id:
 	// CreateIssue, UpdateIssue, CloseIssueCompleted/CloseIssueNotPlanned and
 	// ReopenIssue all mutate it, FetchIssue reads it back, and a test can
-	// mutate it directly to simulate an edit made on GitHub
-	// (brief.md#Ownership and drift).
+	// mutate it directly to simulate an edit made on GitHub.
 	issues map[string]*fakeIssueState
 	// subIssuesOf maps a parent issue's node id to its sub-issues', in the
 	// order AddSubIssue added them; parentOf is its inverse.
@@ -130,8 +129,8 @@ type fakeClient struct {
 	// blockedByOf maps an issue's node id to the node ids it is blocked by.
 	blockedByOf map[string][]string
 	// goneNodeIDs are node ids FetchIssues leaves out of its answer once, as
-	// GitHub does for an issue it no longer has (brief.md#Adoption: "a
-	// recorded issue that is gone from GitHub gets a new issue").
+	// GitHub does for an issue it no longer has (a
+	// recorded issue that is gone from GitHub gets a new issue).
 	goneNodeIDs map[string]bool
 	updates     []fakeUpdate
 	closedDone  []string // node ids CloseIssueCompleted was called on
@@ -454,7 +453,7 @@ func TestSyncNoTrackerIsANoOp(t *testing.T) {
 // TestSyncCreatesAnIssuePerTicketAndChart is the tracer's own end-to-end
 // chain: a store whose origin is a bare repo, two tickets and one chart,
 // none with a record yet. Sync creates one issue each, titled and footed
-// per brief.md#What an issue shows, writes each record where the bridge
+// per the issue rendering, writes each record where the bridge
 // keeps it, and pushes each as its own commit (Store.Claim).
 func TestSyncCreatesAnIssuePerTicketAndChart(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
@@ -555,7 +554,7 @@ func TestSyncCreatesAnIssuePerTicketAndChart(t *testing.T) {
 // TestSyncDryRunTouchesNeitherGitHubNorTheStore checks --dry-run's contract:
 // it reports what it would create, without calling the client or writing
 // any record - dry run must work with no client at all, since it reads
-// everything and writes nothing (brief.md#jig trackers sync).
+// everything and writes nothing.
 func TestSyncDryRunTouchesNeitherGitHubNorTheStore(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
@@ -577,8 +576,8 @@ func TestSyncDryRunTouchesNeitherGitHubNorTheStore(t *testing.T) {
 // TestSyncDryRunPreviewsAgainstExistingRecords drives --dry-run over a
 // store whose item already has a record, against a client whose GitHub
 // state now differs from what the last sync wrote - the cutover's own gate
-// (brief.md#Cutover's "jig trackers sync --dry-run must report 0 changes
-// and no drift"). The preview must report the would-be update, its drift
+// (a dry run must report 0 changes
+// and no drift). The preview must report the would-be update, its drift
 // and the would-be board placement, while making none of the client's
 // mutating calls and writing no record.
 func TestSyncDryRunPreviewsAgainstExistingRecords(t *testing.T) {
@@ -716,8 +715,7 @@ func TestSyncUnboundedRunsPastTheBound(t *testing.T) {
 }
 
 // TestSyncAdoptsAnotherClonesIssueOnARejectedPush is the "two clones creating
-// the same ticket's issue" critical path (brief.md#Syncing at every
-// checkpoint): another clone claims DEMO-1's record and pushes it first, so
+// the same ticket's issue" critical path: another clone claims DEMO-1's record and pushes it first, so
 // this Sync's own push for the issue it just opened is rejected; the pull
 // that follows brings the other clone's record in, so this clone must close
 // its own issue as not planned (naming the other in a comment), drop its own
@@ -810,8 +808,7 @@ func adoptsAnotherClonesIssue(t *testing.T, flat bool) {
 
 	// The claim itself left nothing behind beyond the adopted record; the
 	// board placement that follows is an ordinary working-tree write (not a
-	// Claim), going in with the next checkpoint's commit
-	// (brief.md#Syncing at every checkpoint), so the only dirty file is
+	// Claim), going in with the next checkpoint's commit, so the only dirty file is
 	// DEMO-1's own record, carrying the item: the board step just set, and
 	// its link, which the other clone's record came without. A flat record
 	// moves into the entry's folder with that write.
@@ -829,7 +826,7 @@ func adoptsAnotherClonesIssue(t *testing.T, flat bool) {
 }
 
 // TestSyncSkipsAPublishSafetyHit is the "a publish-safety hit skips that
-// one ticket or chart" critical path (brief.md#Seams, #Publish safety):
+// one ticket or chart" critical path:
 // DEMO-1's title trips the built-in email pattern against its public issue
 // repo, so Sync never opens or writes a record for it, while DEMO-2
 // (clean) syncs normally.
@@ -863,8 +860,8 @@ func TestSyncSkipsAPublishSafetyHit(t *testing.T) {
 	}
 }
 
-// TestSyncDoesNotScanAPrivateIssueRepo checks brief.md#Publish safety's "A
-// private issue repo is not scanned": the same title that TestSyncSkipsA
+// TestSyncDoesNotScanAPrivateIssueRepo checks that a
+// private issue repo is not scanned: the same title that TestSyncSkipsA
 // PublishSafetyHit skips on a public repo is created as normal once the
 // fake client reports the repo private.
 func TestSyncDoesNotScanAPrivateIssueRepo(t *testing.T) {
@@ -919,7 +916,7 @@ func TestSyncScansWithPublishTermsFromHome(t *testing.T) {
 // TestSyncDryRunReportsAPublishSafetyHit checks that --dry-run previews a
 // hit as skipped (rather than would-create), without reaching the client
 // (dry run cannot learn the issue repo's visibility, so it scans
-// unconditionally - brief.md#Publish safety).
+// unconditionally).
 func TestSyncDryRunReportsAPublishSafetyHit(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "Contact "+publishSafetyTestEmail+" for this")
@@ -940,9 +937,9 @@ func TestSyncDryRunReportsAPublishSafetyHit(t *testing.T) {
 
 // TestSyncDryRunPreviewsFullBodyForANewItem is r1-f3's own gap: on a store
 // whose items are all new, the live sync's create step writes only the
-// marker as the issue body (brief.md#Syncing at every checkpoint, step 3)
+// marker as the issue body
 // and relies on updateIssues rendering the full body once claimIssue's
-// record lands it in the same run (step 4). A dry run claims nothing, so
+// record lands it in the same run. A dry run claims nothing, so
 // without this fix the new item never reaches updateIssues and its real
 // body - here, a hit in the description, which the footer-only render
 // never carries - goes neither previewed nor scanned.
@@ -1100,8 +1097,7 @@ func TestSyncRefusesACreateOnAPullRequestHitLikeUpdateIssuesWouldSkip(t *testing
 }
 
 // TestSyncSkipsAPublishSafetyHitOnUpdate is the update half of "a
-// publish-safety hit skips that one ticket or chart" (brief.md#Seams,
-// #Publish safety): DEMO-1 already has a record from an earlier sync, and
+// publish-safety hit skips that one ticket or chart": DEMO-1 already has a record from an earlier sync, and
 // its rendered body - the only text that ever reaches GitHub through
 // UpdateIssue - is edited to carry a hit its title never did. The hit must
 // be reported in Skipped, make no UpdateIssue call, write no record change,
@@ -1226,7 +1222,7 @@ func mintTestTicketWithBlockers(t *testing.T, st *store.Store, id, title string,
 	runGit(t, st.Root, "commit", "-m", id+": test ticket")
 }
 
-// TestSyncLinksChartSubIssuesAndBlockedBy is brief.md#Links's own critical
+// TestSyncLinksChartSubIssuesAndBlockedBy is the links critical
 // path: a chart's ticket becomes a sub-issue of the chart's issue, a
 // blocked_by edge whose blocker has an issue becomes a native blocked-by
 // link, and one whose blocker has none is skipped and reported as not

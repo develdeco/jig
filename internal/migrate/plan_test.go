@@ -85,7 +85,7 @@ func TestBuildPlanRefusesAMapThatDeclaresTheOldIDsKey(t *testing.T) {
 	}
 }
 
-// TestBuildPlanNumbersInOldIDOrderPerKey pins brief.md#The rename map: each
+// TestBuildPlanNumbersInOldIDOrderPerKey pins the rename map's numbering: each
 // key's tickets are numbered in old-id order, by the old id's own number,
 // not by string or map iteration order.
 func TestBuildPlanNumbersInOldIDOrderPerKey(t *testing.T) {

@@ -14,13 +14,13 @@ import (
 )
 
 // PlacedItem is one issue (ticket or chart) Sync placed on the project
-// board, with the Status it set (brief.md#The board).
+// board, with the Status it set.
 type PlacedItem struct {
 	What, Status string
 }
 
 // PlacedPR is one pull request Sync placed on the project board
-// (brief.md#The board: "each open or merged pull request... is an item").
+// (each open or merged pull request is an item).
 type PlacedPR struct {
 	Ticket      string
 	Owner, Repo string
@@ -28,8 +28,8 @@ type PlacedPR struct {
 	Status      string
 }
 
-// projectURLRE matches a trackers: github: project: URL
-// (brief.md#The trackers entry): "users/<login>" or "orgs/<org>", which says
+// projectURLRE matches a trackers: github: project: URL:
+// "users/<login>" or "orgs/<org>", which says
 // what kind of owner it has.
 var projectURLRE = regexp.MustCompile(`^https://github\.com/(users|orgs)/([^/]+)/projects/(\d+)$`)
 
@@ -47,7 +47,7 @@ func parseProjectURL(raw string) (ownerLogin string, isOrg bool, number int, err
 	return m[2], m[1] == "orgs", n, nil
 }
 
-// placeBoardItems is brief.md#The board's own work: it resolves the
+// placeBoardItems does the board's work: it resolves the
 // project, creating any missing field or option and linking the issue repo
 // when it is not linked, then places every item that already has a record
 // (every ticket and chart Sync just created or found, in items' own order)
@@ -56,10 +56,9 @@ func parseProjectURL(raw string) (ownerLogin string, isOrg bool, number int, err
 // pull requests (prsByTicket, which updateIssues already found) alongside
 // it. An item already on the board (rec.Item set from an earlier sync) has
 // its current Status and Store ID read back first, so an edit made on
-// GitHub reports as drift before jig overwrites it again
-// (brief.md#Ownership and drift); when they already match what this sync
-// would write, PlaceItem is skipped entirely - brief.md#Seams's critical
-// path, "a store whose records match GitHub syncs with no mutation" -
+// GitHub reports as drift before jig overwrites it again;
+// when they already match what this sync would write, PlaceItem is skipped
+// entirely - a store whose records match GitHub syncs with no mutation -
 // rather than re-sent on every checkpoint regardless. skip names every item
 // updateIssues took out of this sync on a publish-safety hit: it gets no
 // board write either. dryRun previews Placed/PlacedPR and the drift this
@@ -67,7 +66,7 @@ func parseProjectURL(raw string) (ownerLogin string, isOrg bool, number int, err
 // record: it resolves the project read-only (LookupProject), which cannot
 // create a missing field or link the issue repo the way EnsureProject does,
 // so a project that does not yet exist refuses the same way a live sync
-// would (brief.md#jig trackers sync, brief.md#Cutover).
+// would.
 func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, client github.Client, items []item, statusByTicket map[string]string, prsByTicket map[string][]PRRef, skip map[string]bool, report *SyncReport, dryRun bool) error {
 	ownerLogin, isOrg, number, err := parseProjectURL(cfg.GitHub.Project)
 	if err != nil {
@@ -186,8 +185,7 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 
 // placeTicketPRs places each of ticket's own prs that is open or merged on
 // the board under its Store ID, writing them into rec's prs:
-// (brief.md#Status and pull requests, brief.md#The board: "a closed one is
-// listed but not placed"). A pull request already placed with this same
+// (a closed one is listed but not placed). A pull request already placed with this same
 // Status and Store ID (rec's own prior record for it) is left alone, the
 // same no-mutation-when-matching rule placeBoardItems applies to a ticket's
 // or chart's own item. dryRun previews PlacedPRs without calling PlaceItem

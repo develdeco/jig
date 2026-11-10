@@ -21,7 +21,7 @@ var (
 )
 
 // TestScanTitleAndBodyBuiltinPatterns checks each built-in pattern
-// brief.md#Publish safety names, and its exemptions.
+// the scanner has, and its exemptions.
 func TestScanTitleAndBodyBuiltinPatterns(t *testing.T) {
 	cases := []struct {
 		name       string

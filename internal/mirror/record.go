@@ -11,7 +11,7 @@ import (
 )
 
 // recordHeader is the comment line every record file (ticket or chart)
-// starts with, saying the mirror wrote it (brief.md#Records).
+// starts with, saying the mirror wrote it.
 const recordHeader = "# This file is written by jig's GitHub mirror; edits here are overwritten.\n"
 
 // githubRecord is the GitHub mirror's part of a record of the tracker tree,
@@ -24,17 +24,15 @@ type githubRecord struct {
 	Repo   string `yaml:"repo"`
 	Issue  int    `yaml:"issue"`
 	NodeID string `yaml:"node_id"`
-	// Item is the project item id this record's own issue was placed on
-	// (brief.md#The board: "the record keeps the item id in item").
+	// Item is the project item id this record's own issue was placed on.
 	Item string `yaml:"item,omitempty"`
 	// PRs is, for a ticket's record only, each open or merged pull request
-	// findPullRequests last turned up, placed on the project
-	// (brief.md#The board: "the record keeps each in prs:").
+	// findPullRequests last turned up, placed on the project.
 	PRs    []prRecord    `yaml:"prs,omitempty"`
 	Synced *syncedFields `yaml:"synced,omitempty"`
 }
 
-// prRecord is one entry of githubRecord's prs: list (brief.md#Records).
+// prRecord is one entry of githubRecord's prs: list.
 type prRecord struct {
 	Repo   string `yaml:"repo"`
 	Number int    `yaml:"number"`
@@ -43,16 +41,16 @@ type prRecord struct {
 }
 
 // syncedFields is githubRecord's synced: key: what the last sync itself
-// wrote to every jig-owned field, under the bridge's own names
-// (brief.md#Ownership and drift), so the next sync can tell an edit made on
+// wrote to every jig-owned field, under the bridge's own names,
+// so the next sync can tell an edit made on
 // GitHub (drift, overwritten) from a change made in the store (applied with
 // no drift line, since GitHub still matches what was last written).
 type syncedFields struct {
 	// Title is the issue title the last sync wrote.
 	Title string `yaml:"title,omitempty"`
 	// BodySHA256 is the sha256 (hex) of the issue body the last sync wrote,
-	// in the form bodies compare in (brief.md#What an issue shows: "line
-	// endings become \n and outer whitespace is trimmed").
+	// in the form bodies compare in (line
+	// endings become \n and outer whitespace is trimmed).
 	BodySHA256 string `yaml:"body_sha256,omitempty"`
 	// State is "OPEN" or "CLOSED", the issue's own open/closed state the last
 	// sync wrote.
@@ -65,7 +63,7 @@ type syncedFields struct {
 }
 
 // syncedLinks is synced.links: the node ids of the parent and blocked-by
-// links this sync last wrote (brief.md#Links), so the next sync can tell
+// links this sync last wrote, so the next sync can tell
 // what it itself wrote from an edit made on GitHub.
 type syncedLinks struct {
 	// Parent is the chart issue's node id this ticket is linked under, or ""
@@ -91,7 +89,7 @@ type recordRef struct {
 }
 
 // has reports whether the item has a record: jig finds issues by their
-// records only (brief.md#Adoption), never by searching GitHub for a marker,
+// records only, never by searching GitHub for a marker,
 // so an item with one is left alone and one with none gets a new issue.
 func (r *recordRef) has() bool { return r.inTree || r.legacy != nil }
 
@@ -154,7 +152,7 @@ func decodeRecord(fields yaml.Node) (githubRecord, error) {
 // own folder for one not moved yet. Claim's write calls this after a rejected
 // push's pull
 // to see whether the record it just brought in names another clone's issue for
-// the same ticket or chart (brief.md#Syncing at every checkpoint).
+// the same ticket or chart.
 func readRecord(st *store.Store, it item) (githubRecord, error) {
 	if it.ref.legacy != nil {
 		fields, err := st.ReadLegacyTrackerRecord(*it.ref.legacy)
@@ -213,12 +211,10 @@ func writeRecord(st *store.Store, it item, rec githubRecord) error {
 }
 
 // writeRecordLinks updates item it's record's synced.links to links, leaving its
-// repo, issue and node id untouched, and writes it back (brief.md#Links: "the
-// record keeps the node ids of the links it last wrote"). The write lands in
+// repo, issue and node id untouched, and writes it back. The write lands in
 // the working tree only; the checkpoint that ran the sync commits and pushes
 // it once the sync is done (Store.RunCheckpointHook), as it does every record
-// change but a creation, which claimIssue lands itself (brief.md#Syncing at
-// every checkpoint).
+// change but a creation, which claimIssue lands itself.
 func writeRecordLinks(st *store.Store, it item, links syncedLinks) error {
 	rec, err := readRecord(st, it)
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 )
 
 // PRRef is one pull request found for a ticket's branch, or recorded in its
-// prs: that the query no longer found (brief.md#Status and pull requests).
+// prs: that the query no longer found.
 type PRRef struct {
 	Owner, Repo string
 	Number      int
@@ -39,8 +39,8 @@ type prsFound struct {
 	gone []GoneRecordedPR
 }
 
-// findPullRequests returns each lookup's ticket's pull requests
-// (brief.md#Status and pull requests): for each of cfg.Repos whose GitHub
+// findPullRequests returns each lookup's ticket's pull requests:
+// for each of cfg.Repos whose GitHub
 // owner and repo are known (repohost.OwnerRepo), every pull request in any
 // state whose head is exactly the lookup's branch, in the project's repo
 // order and by number, then each of its recorded entries that none of those
@@ -52,7 +52,7 @@ type prsFound struct {
 // never count toward Done. A sync never deletes store data it cannot check:
 // a recorded entry with no node_id
 // (hand-edited, or written by a bridge version that omitted it;
-// brief.md#Records says records the bridge wrote are adopted as they are)
+// records the bridge wrote are adopted as they are)
 // stays in the result with no State, listed in the body and kept in the
 // record exactly as before this re-check existed - it is only left out of
 // the PullRequestsByIDs lookup, rather than sent as an empty id. An entry
@@ -175,7 +175,7 @@ const (
 	StatusNotPlanned = "Not planned"
 )
 
-// TicketStatus derives ticket's Status (brief.md#Status and pull requests):
+// TicketStatus derives ticket's Status:
 // Done when it was closed as covered or any of prs merged; Not planned when it
 // was closed as superseded or not planned; In review when one of prs is open;
 // In progress when its journal is not empty or any slice has left queued;
@@ -237,8 +237,8 @@ func hasBrief(st *store.Store, ticket string) bool {
 	return err == nil
 }
 
-// ChartStatus derives a chart's Status from its own tickets' Statuses
-// (brief.md#Status and pull requests): Done when it has tickets and every
+// ChartStatus derives a chart's Status from its own tickets' Statuses:
+// Done when it has tickets and every
 // one is finished, Done or Not planned (a closed ticket is finished); In
 // progress when any is In progress, In review or Done; Backlog otherwise.
 func ChartStatus(ticketStatuses []string) string {
@@ -264,8 +264,8 @@ func ChartStatus(ticketStatuses []string) string {
 	return "Backlog"
 }
 
-// IsOpen reports whether status's issue should be open on GitHub
-// (brief.md#Status and pull requests): every status but Done and Not planned
+// IsOpen reports whether status's issue should be open on GitHub:
+// every status but Done and Not planned
 // is open.
 func IsOpen(status string) bool {
 	return status != StatusDone && status != StatusNotPlanned

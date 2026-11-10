@@ -16,8 +16,7 @@ import (
 )
 
 // addRepoToProjectYAML rewrites work's project.yaml to also declare a
-// product repo, so findPullRequests has somewhere to search
-// (brief.md#Status and pull requests).
+// product repo, so findPullRequests has somewhere to search.
 func addRepoToProjectYAML(t *testing.T, work string) {
 	t.Helper()
 	projectYAML := `schema_version: 2
@@ -40,12 +39,12 @@ platform: platform/
 	runGit(t, work, "push", "origin", "main")
 }
 
-// TestSyncPlacesIssuesAndPullRequestsOnTheBoard is brief.md#The board's own
+// TestSyncPlacesIssuesAndPullRequestsOnTheBoard is the board's own
 // critical path: a ticket and the chart it belongs to are placed on the
 // project with their Status and Store ID, and the ticket's one open pull
 // request is placed alongside it (In review) while its closed one is left
-// off the board, per brief.md#The board ("a closed one is listed but not
-// placed"). Each record keeps the item id(s) PlaceItem handed back.
+// off the board, (a closed one is listed but not
+// placed). Each record keeps the item id(s) PlaceItem handed back.
 func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	addRepoToProjectYAML(t, work)
@@ -116,7 +115,7 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rec.Item == "" {
-		t.Fatalf("DEMO-1's record = %+v, want an item id (brief.md#The board: \"the record keeps the item id in item\")", rec)
+		t.Fatalf("DEMO-1's record = %+v, want an item id (the record keeps the item id in item)", rec)
 	}
 	if len(rec.PRs) != 1 || rec.PRs[0].Repo != "example/demo" || rec.PRs[0].Number != 5 || rec.PRs[0].NodeID != "PR_5" || rec.PRs[0].Item == "" {
 		t.Fatalf("DEMO-1's record prs = %+v, want only the open pull request #5, with its own item id", rec.PRs)
@@ -135,9 +134,8 @@ func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	}
 
 	// A second Sync finds every item already carrying the Status and Store
-	// ID this sync would set, so it places nothing again: brief.md#Seams's
-	// critical path, "a store whose records match GitHub syncs with no
-	// mutation".
+	// ID this sync would set, so it places nothing again: a store
+	// whose records match GitHub syncs with no mutation.
 	placedBefore := len(client.placedItems)
 	report2, err := Sync(Deps{Store: st, Cfg: cfg, Client: client}, SyncOpts{})
 	if err != nil {
@@ -255,7 +253,7 @@ func TestSyncReadsGitHubInBatches(t *testing.T) {
 	}
 }
 
-// TestSyncRefusesMissingProjectOrTokenScope checks brief.md#The board's own
+// TestSyncRefusesMissingProjectOrTokenScope checks the board's own
 // refusal: EnsureProject failing with MIRROR_PROJECT_NOT_FOUND - the shape a
 // project that does not exist and a token without the project scope both
 // take, since GitHub answers either the same way - surfaces from Sync as
@@ -284,7 +282,7 @@ func TestSyncRefusesMissingProjectOrTokenScope(t *testing.T) {
 	}
 }
 
-// TestParseProjectURL covers brief.md#The trackers entry's two owner kinds.
+// TestParseProjectURL covers the two owner kinds of a project URL.
 func TestParseProjectURL(t *testing.T) {
 	cases := []struct {
 		url        string

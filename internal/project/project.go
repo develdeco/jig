@@ -210,7 +210,7 @@ type Config struct {
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo
 // its issues live in, and the GitHub Project they are placed on. Both are
-// required (brief.md#The trackers entry); a store names its issue home
+// required; a store names its issue home
 // explicitly rather than having jig derive it, since a derived home would
 // move every issue the day a second repo joined the project, and GitHub
 // cannot transfer an issue from a private repo to a public one.
@@ -244,8 +244,7 @@ type configRaw struct {
 // or empty means none; jig mints every id itself and no mirror shape is
 // supported yet, so any entry is refused), ticket_format and tracker: are the
 // two keys `jig store migrate` rewrites into keys: and trackers: and so are
-// refused once a project.yaml claims schema_version 2 (brief.md#Schema
-// version 2) - an older schema_version leaves both unread rather than
+// refused once a project.yaml claims schema_version 2 - an older schema_version leaves both unread rather than
 // refused, since `jig store migrate` (resolveStoreForProjectAllowingOldSchema)
 // must still Load a v1 project.yaml whole, for project.Config.
 // CheckSchemaVersion (cmd/jig's resolveStore, the one place every command
@@ -344,8 +343,8 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 // decodeGitHubTrackerEntry decodes one trackers: list entry, refusing
 // anything but a mapping with exactly one key, "github", whose value is
 // itself a mapping with only repo: and project:, both non-empty
-// (brief.md#The trackers entry: "a second, an unknown key, or a malformed
-// value is refused when the config loads").
+// (a second key, an unknown key or a malformed value is refused when the
+// config loads).
 func decodeGitHubTrackerEntry(node yaml.Node) (*GitHubTracker, error) {
 	if node.Kind != yaml.MappingNode || len(node.Content) != 2 {
 		return nil, malformedTrackerEntryError("each trackers: entry must be a mapping with exactly one key")
@@ -389,8 +388,8 @@ func malformedTrackerEntryError(why string) error {
 // with abc-1.
 var keyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
-// loadKeys resolves c.Keys from raw's keys:, refusing the shapes
-// brief.md#Keys in project.yaml names. An absent keys: leaves c.Keys nil.
+// loadKeys resolves c.Keys from raw's keys:, refusing a key that is not 2 to 10
+// uppercase letters or digits starting with a letter, and an empty meaning. An absent keys: leaves c.Keys nil.
 func (c *Config) loadKeys(raw configRaw) error {
 	if raw.Keys.Kind == 0 {
 		return nil

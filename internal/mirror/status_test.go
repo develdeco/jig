@@ -12,7 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestTicketStatus covers brief.md#Status and pull requests's precedence:
+// TestTicketStatus covers the Status precedence:
 // Done (a merged pull request) outranks In review (an open one), which
 // outranks In progress (journal activity or a slice that left queued),
 // which outranks Briefed (a brief.md), which outranks Backlog.
@@ -96,7 +96,7 @@ func TestTicketStatusInProgressFromJournalAlone(t *testing.T) {
 	}
 }
 
-// TestChartStatus covers brief.md#Status and pull requests's chart rule.
+// TestChartStatus covers the chart Status rule.
 func TestChartStatus(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -123,7 +123,7 @@ func TestChartStatus(t *testing.T) {
 	}
 }
 
-// TestIsOpen covers brief.md#Status and pull requests: a Done issue is
+// TestIsOpen covers this rule: a Done issue is
 // closed, and so is one whose ticket was closed without being built (Not
 // planned); every other status is open.
 func TestIsOpen(t *testing.T) {
@@ -204,8 +204,7 @@ func (c *prFakeClient) ItemFieldValues(context.Context, []string) (map[string]gi
 	return nil, nil
 }
 
-// TestFindPullRequestsOrdersByRepoThenNumber checks brief.md#Status and
-// pull requests's ordering: per repo in the project's own order, by number
+// TestFindPullRequestsOrdersByRepoThenNumber checks the ordering: per repo in the project's own order, by number
 // within each.
 func TestFindPullRequestsOrdersByRepoThenNumber(t *testing.T) {
 	client := &prFakeClient{byRepo: map[string][]github.PullRequest{
@@ -236,7 +235,7 @@ func TestFindPullRequestsOrdersByRepoThenNumber(t *testing.T) {
 }
 
 // TestFindPullRequestsRefetchesARecordedOneTheHeadQueryMisses checks the
-// fallback (brief.md#Status and pull requests): a pull request recorded in
+// fallback: a pull request recorded in
 // prs: that the head query no longer finds - typically a merged pull
 // request whose head branch GitHub has since deleted - is re-fetched by
 // node id for its current state and repository, rather than kept with the
@@ -285,8 +284,8 @@ func TestFindPullRequestsKeepsARecordedOneGitHubNoLongerHas(t *testing.T) {
 	}
 }
 
-// TestFindPullRequestsKeepsARecordedOneWithNoNodeID checks brief.md#Records'
-// "adopted as they are" and the human's decision: a recorded prs:
+// TestFindPullRequestsKeepsARecordedOneWithNoNodeID checks that records the bridge wrote are
+// "adopted as they are", and the human's decision: a recorded prs:
 // entry with no node_id (hand-edited, or written by a bridge version that
 // omitted it) stays listed and in the record with no State, never sent to
 // PullRequestsByIDs as an empty id - client.PullRequestsByIDs would fail

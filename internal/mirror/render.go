@@ -30,7 +30,7 @@ func ticketTitle(st *store.Store, ticket string) (string, error) {
 	return ticket, nil
 }
 
-// chartTitle is a chart's title (brief.md#What an issue shows): the first
+// chartTitle is a chart's title: the first
 // line of its map.md when that line is a "# " heading, else "Chart:
 // <name>". No title carries an id.
 func chartTitle(st *store.Store, chart string) (string, error) {
@@ -49,7 +49,7 @@ func chartTitle(st *store.Store, chart string) (string, error) {
 	return "Chart: " + chart, nil
 }
 
-// footer is the body every issue ends with (brief.md#What an issue shows).
+// footer is the body every issue ends with.
 // where is the ticket id or "charts/<name>/"; branch is the ticket's branch
 // when the footer has to name it (a chart has none, and a ticket whose branch
 // needs no naming passes ""); marker is "<!-- jig:<id> -->" or
@@ -109,8 +109,7 @@ func footerBranch(st *store.Store, cfg project.Config, ticket string, rec store.
 }
 
 // ResolveTicketTitleBody resolves ticket's title and its description
-// separately, each from the first of these that has it
-// (brief.md#What an issue shows):
+// separately, each from the first of these that has it:
 //  1. its ticket.yaml (title:, body:);
 //  2. its entry in a chart's tickets.yaml (title:, body:);
 //  3. the ticket's id, as the title, with no description.
@@ -120,7 +119,7 @@ func footerBranch(st *store.Store, cfg project.Config, ticket string, rec store.
 // commit was not publish's own: a v1 store, before every ticket's title and
 // description lived in ticket.yaml. `jig store migrate` carries that step
 // forward one last time, on the v1 store it reads before deleting
-// tracker/ticket.md (brief.md#The migration), and this function no longer
+// tracker/ticket.md, and this function no longer
 // needs it - a schema-2 store, the only kind any command but `jig store
 // migrate` ever opens, has already had it rewritten into ticket.yaml.
 func ResolveTicketTitleBody(st *store.Store, ticket string) (title, body string, err error) {
@@ -173,7 +172,7 @@ func findChartEntry(st *store.Store, ticket string) (store.ChartEntry, bool, err
 }
 
 // waitsForLine renders "**Waits for:** ..." for blockedBy, or "" when there
-// is none (brief.md#What an issue shows): for each blocked_by edge in
+// is none: for each blocked_by edge in
 // order, "<id> (#<number>, <kind>)", or "<id> (<kind>)" when the blocker
 // has no issue, joined by ", ".
 func waitsForLine(st *store.Store, blockedBy []store.TicketBlockedBy) (string, error) {
@@ -204,7 +203,7 @@ func waitsForLine(st *store.Store, blockedBy []store.TicketBlockedBy) (string, e
 var whitespaceRunRE = regexp.MustCompile(`\s+`)
 
 // collapseGoal collapses goal onto one line and cuts it to 200 runes (199
-// plus "…" when longer), per brief.md#What an issue shows's slices line.
+// plus "…" when longer), as the issue body's slices line shows it.
 func collapseGoal(goal string) string {
 	g := strings.TrimSpace(whitespaceRunRE.ReplaceAllString(goal, " "))
 	return cutRunes(g, 200)
@@ -304,8 +303,7 @@ func closedBlock(st *store.Store, c store.Closed, needQualify bool, ownerRepo st
 	return block, nil
 }
 
-// RenderTicketBody renders ticket's full issue body (brief.md#What an issue
-// shows): its description, how it was closed when it was, "Waits for",
+// RenderTicketBody renders ticket's full issue body: its description, how it was closed when it was, "Waits for",
 // "## Slices", "## Pull requests", the brief, and the footer, each part left
 // out when empty, joined by one blank line.
 func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []PRRef) (string, error) {
@@ -363,8 +361,7 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 	return strings.Join(parts, "\n\n"), nil
 }
 
-// RenderChartBody renders chart's full issue body (brief.md#What an issue
-// shows): its map.md without the heading line, unwrapped and qualified, a
+// RenderChartBody renders chart's full issue body: its map.md without the heading line, unwrapped and qualified, a
 // blank line, then the footer.
 func RenderChartBody(st *store.Store, cfg project.Config, chart string) (string, error) {
 	data, err := os.ReadFile(st.ChartMapFile(chart))
@@ -404,8 +401,7 @@ func stripHeadingLine(text string) string {
 }
 
 // qualifyRepo reports the product repo's "owner/repo" and whether bare
-// "#123" references need qualifying with it (brief.md#What an issue
-// shows): the project has exactly one repo, its GitHub owner/repo is known,
+// "#123" references need qualifying with it: the project has exactly one repo, its GitHub owner/repo is known,
 // and it differs from the issue repo.
 func qualifyRepo(cfg project.Config) (ownerRepo string, needed bool) {
 	if cfg.GitHub == nil || len(cfg.Repos) != 1 {
@@ -432,7 +428,7 @@ var codeSpanOrFenceRE = regexp.MustCompile("(?s)```.*?```|~~~.*?~~~|`[^`\n]*`")
 var bareIssueRefRE = regexp.MustCompile(`(^|[^\w/])#(\d+)`)
 
 // qualify rewrites every bare "#123" outside code spans and fenced blocks
-// to "<ownerRepo>#123", when needed (brief.md#What an issue shows).
+// to "<ownerRepo>#123", when needed.
 func qualify(text string, needed bool, ownerRepo string) string {
 	if !needed {
 		return text
@@ -457,8 +453,7 @@ func qualifyPlain(s, ownerRepo string) string {
 }
 
 // fenceLineRE, blockStartRE and listItemLineRE recognize the line shapes
-// the bridge's unwrapping rule treats specially (brief.md#What an issue
-// shows's unwrapping rule), all at any indent: blockStartRE is a list
+// the bridge's unwrapping rule treats specially, all at any indent: blockStartRE is a list
 // item, a heading, a table row, a quote, raw HTML or a rule.
 var (
 	fenceLineRE    = regexp.MustCompile("^\\s*(```|~~~)")
@@ -467,7 +462,7 @@ var (
 )
 
 // unwrap joins the hard-wrapped lines of each paragraph and list item
-// (brief.md#What an issue shows's unwrapping rule, the bridge's own).
+// (the bridge's own rule).
 // GitHub renders every newline in an issue body as a line break, so store
 // text wrapped at 72 columns would break mid-sentence. Fenced and indented
 // code, headings, tables, quotes, HTML and rules keep their lines.
@@ -505,8 +500,7 @@ func unwrap(md string) string {
 }
 
 // issueBodyByteCap is the byte budget truncateSection keeps a rendered
-// section within, short of GitHub's own 65536-character cap
-// (brief.md#What an issue shows).
+// section within, short of GitHub's own 65536-character cap.
 const issueBodyByteCap = 60000
 
 // truncateSection cuts section on a rune boundary so it (plus the
