@@ -122,7 +122,7 @@ func storePathSpellings(root string) []string {
 // slashed spells a path or a line in the slash form: a Go string literal's
 // doubled backslash and a single one both become a slash.
 func slashed(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, "/"), `\`, "/")
+	return strings.ReplaceAll(strings.ReplaceAll(s, `\\`, "/"), `\`, "/")
 }
 
 // isIDChar is a character an id runs on in: a letter, a digit, a hyphen or an
@@ -243,14 +243,24 @@ func StoreRefsMore(rest []StoreRef) string {
 // something only the store holds, and where, for whoever merges to weigh. It
 // names the places and not what they cite, since the notes are public.
 func storeRefsNotes(refs []StoreRef) string {
+	// A line that names two things is one line to look at.
+	var places []string
+	seen := map[string]bool{}
+	for _, r := range refs {
+		place := fmt.Sprintf("%s:%d", r.File, r.Line)
+		if !seen[place] {
+			seen[place] = true
+			places = append(places, place)
+		}
+	}
 	var b strings.Builder
 	noun := "lines"
-	if len(refs) == 1 {
+	if len(places) == 1 {
 		noun = "line"
 	}
-	fmt.Fprintf(&b, "## Store references\n\nThe change adds %d %s that name something only the jig store holds:\n\n", len(refs), noun)
-	for _, r := range refs {
-		fmt.Fprintf(&b, "- %s:%d\n", r.File, r.Line)
+	fmt.Fprintf(&b, "## Store references\n\nThe change adds %d %s that name something only the jig store holds:\n\n", len(places), noun)
+	for _, p := range places {
+		fmt.Fprintf(&b, "- %s\n", p)
 	}
 	b.WriteString("\n")
 	return b.String()

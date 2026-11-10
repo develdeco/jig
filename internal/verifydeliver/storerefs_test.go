@@ -87,6 +87,7 @@ func TestStoreRefsMatchTheStorePath(t *testing.T) {
 		"// kept in " + root + "/tickets",
 		"path := `" + strings.ReplaceAll(root, "/", `\`) + `\tickets` + "`",
 		`path := "` + strings.ReplaceAll(root, "/", `\`) + `\tickets"`,
+		`path := "` + strings.ReplaceAll(root, "/", `\\`) + `\\tickets"`,
 	} {
 		if got := m.find(text); !reflect.DeepEqual(got, []string{StoreRefPath}) {
 			t.Errorf("find(%q) = %v, want the store path", text, got)
@@ -181,13 +182,13 @@ func TestReviewNotesStoreRefsNameTheCountAndEachPlace(t *testing.T) {
 		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-7"},
 		{Repo: "app", File: "docs/b.md", Line: 12, ID: "zq-f1"},
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs); err != nil {
+	if err := writeReviewNotes(st, "ZQX-7", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n" +
 		"## Store references\n\nThe change adds 2 lines that name something only the jig store holds:\n\n- a.go:3\n- docs/b.md:12\n\n" +
 		"## Coverage\n\n"
-	got := readNotes(t, st, "T-1", "review-notes.md")
+	got := readNotes(t, st, "ZQX-7", "review-notes.md")
 	if got != want {
 		t.Errorf("notes =\n%q\nwant\n%q", got, want)
 	}
@@ -195,10 +196,10 @@ func TestReviewNotesStoreRefsNameTheCountAndEachPlace(t *testing.T) {
 		t.Errorf("the notes are public and name what a line cites:\n%s", got)
 	}
 
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs[:1]); err != nil {
+	if err := writeReviewNotes(st, "ZQX-7", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", refs[:1]); err != nil {
 		t.Fatal(err)
 	}
-	if got := readNotes(t, st, "T-1", "review-notes.md"); !strings.Contains(got, "adds 1 line that") {
+	if got := readNotes(t, st, "ZQX-7", "review-notes.md"); !strings.Contains(got, "adds 1 line that") {
 		t.Errorf("one reference reads %q, want a singular", got)
 	}
 }
@@ -222,5 +223,18 @@ func TestReviewNotesStoreRefsOfTheReposPullRequest(t *testing.T) {
 	one := &publishTarget{repoName: "app", covered: []string{"app"}, gateRep: reportYAML{StoreRefs: pt.gateRep.StoreRefs}}
 	if got := one.storeRefs(); len(got) != 2 {
 		t.Errorf("a ticket in one repo lists %d, want all 2", len(got))
+	}
+}
+
+// TestReviewNotesStoreRefsCountLinesNotNames: one line that names two things is
+// one line in the notes, listed once.
+func TestReviewNotesStoreRefsCountLinesNotNames(t *testing.T) {
+	t.Parallel()
+	notes := storeRefsNotes([]StoreRef{
+		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-7"},
+		{Repo: "app", File: "a.go", Line: 3, ID: "ZQX-9"},
+	})
+	if want := "adds 1 line that name something only the jig store holds:\n\n- a.go:3\n\n"; !strings.HasSuffix(notes, want) {
+		t.Errorf("notes =\n%q\nwant them to end with %q", notes, want)
 	}
 }
