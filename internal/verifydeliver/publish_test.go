@@ -202,7 +202,7 @@ func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 // since the gate, and publish still reconciles nothing, squashes nothing and
 // commits nothing: origin's branch is exactly the build lease's, commit for
 // commit, the journal holds no reconcile, revalidate, memorize or squash line,
-// and no retrieval notes were added to the branch. What a publish leaves in the
+// and nothing else was added to the branch. What a publish leaves in the
 // store - changelogs, the ledger entry, the contract index, the evidence - is
 // written once the branch is out.
 //
@@ -759,9 +759,6 @@ func TestPublishFullChain(t *testing.T) {
 		}
 		if got := run(t, fx.RepoRemote, "log", "--format=%H", fx.Branch); got != buildLog {
 			t.Fatalf("origin's history of %s is\n%s\nwant the build lease's\n%s", fx.Branch, got, buildLog)
-		}
-		if _, err := gitx.Run(publishLeaseDir(t, fx), "cat-file", "-e", buildHead+":.claude/retrieval/"+fx.Ticket+".md"); err == nil {
-			t.Fatal("the reviewed head holds retrieval notes: publish committed on the branch")
 		}
 
 		ticketDir := d.Store.TicketDir(fx.Ticket)

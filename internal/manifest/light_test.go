@@ -20,7 +20,7 @@ func TestLightMatches(t *testing.T) {
 		{"root markdown", []string{"README.md"}, true},
 		{".github markdown", []string{".github/CONTRIBUTING.md"}, true},
 		{"docs markdown", []string{"docs/readme.md"}, true},
-		{"docs nested markdown", []string{"docs/adr/0001-x.md", "docs/build-log/GATE-1.md"}, true},
+		{"docs nested markdown", []string{"docs/adr/0001-x.md", "docs/notes/example.md"}, true},
 		{"skills markdown", []string{"skills/build/SKILL.md"}, false},
 		{"testdata markdown", []string{"internal/x/testdata/in.md"}, false},
 		{"nested markdown outside docs", []string{"cmd/jig/NOTES.md"}, false},

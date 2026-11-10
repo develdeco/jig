@@ -46,7 +46,7 @@ func TestTrackersSyncNoGitHubEntryIsANoOp(t *testing.T) {
 
 // newTestOriginCloneWithGitHubTracker is newTestOriginClone, but its
 // project.yaml declares a trackers: github: entry, so Sync has work to
-// report (brief.md#The trackers entry).
+// report.
 func newTestOriginCloneWithGitHubTracker(t *testing.T, dir string) (remote string) {
 	t.Helper()
 	parent := filepath.Dir(dir)
@@ -96,7 +96,7 @@ trackers:
 // fake GraphQL server (httptest) that answers every request with a server
 // error, so a checkpoint's own sync - run by `jig ticket new` once its claim
 // lands, among others - fails fast and hermetically (never reaching gh or
-// github.com, per brief.md's test constraints) and leaves no record behind,
+// github.com, which tests never do) and leaves no record behind,
 // reported as a warning rather than failing the command.
 func stubFailingMirrorClient(t *testing.T) github.Client {
 	t.Helper()
@@ -121,7 +121,7 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
 	// jig ticket new's own checkpoint sync must not reach a real GitHub
-	// (brief.md's test constraints); pointed at a server that always fails,
+	// (tests never reach it); pointed at a server that always fails,
 	// it leaves the ticket's record unwritten, which is the state this test
 	// wants `jig trackers sync --dry-run` to see.
 	e.mirrorClient = stubFailingMirrorClient(t)
@@ -148,7 +148,7 @@ func TestTrackersSyncDryRunReportsAWouldCreateTicket(t *testing.T) {
 
 // TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit checks `jig trackers
 // sync --dry-run`'s side of the "a publish-safety hit skips that one ticket
-// or chart" critical path (brief.md#Publish safety, #jig trackers sync):
+// or chart" critical path:
 // a ticket title that trips the built-in email pattern is reported skipped,
 // and the command exits non-zero.
 func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
@@ -177,11 +177,11 @@ func TestTrackersSyncDryRunExitsNonZeroOnAPublishSafetyHit(t *testing.T) {
 
 // TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds is the "a
 // store checkpoint inside a command: it syncs, and a GitHub failure leaves
-// the command successful with a warning" seam (brief.md#Seams), exercised
+// the command successful with a warning" seam, exercised
 // at Store.Push's own checkpoint hook, which resolveStore wires.
 // env.mirrorClient points the hook's sync at a fake GraphQL server
 // (httptest) that answers every request with a server error - never gh or
-// github.com, per brief.md's test constraints - so the failure is the
+// github.com, which tests never do - so the failure is the
 // code's own doing, not a fact about the machine running the test. Push
 // must still succeed, and the warning resolveStore's Store.Warn wiring
 // reports must land in the command's own structured output, not bare
@@ -200,8 +200,8 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 	}))
 	defer server.Close()
 	client := github.New(server.URL, "test-token")
-	// A 500 is retryable, so the client spends its 4 attempts here
-	// (brief.md#The GitHub client); shrink its backoff so this test does
+	// A 500 is retryable, so the client spends its 4 attempts here;
+	// shrink its backoff so this test does
 	// not wait the production 1s, 2s, 4s out.
 	client.BackoffBase = time.Millisecond
 	client.MutationInterval = time.Millisecond
@@ -227,7 +227,7 @@ func TestCheckpointSyncFailureReportsWarningAndStorePushSucceeds(t *testing.T) {
 // package's own checkpoint test needs and records nothing: the mirror
 // package's tests own what a sync writes, and these cmd tests own only what
 // reaches the command's output. Its issue repo is public (so a title is
-// scanned, brief.md#Publish safety), every issue it is asked about carries
+// scanned), every issue it is asked about carries
 // issueTitle (a hand edit, when that differs from what the store renders),
 // and its project resolves with every field in place.
 type stubGitHub struct {
@@ -287,8 +287,8 @@ func (s *stubGitHub) ItemFieldValues(context.Context, []string) (map[string]gith
 	return nil, nil
 }
 
-// TestTicketNewRunsItsOwnCheckpointSync is the gate finding's own fix
-// (r2-f8): `jig ticket new` reaches the store through Store.Claim alone,
+// TestTicketNewRunsItsOwnCheckpointSync covers this gap:
+// `jig ticket new` reaches the store through Store.Claim alone,
 // which stays hook-free (the mirror's own claims, through claimIssue,
 // commit new records through Claim too, and hooking Claim would re-enter
 // the mirror), so the command runs the checkpoint sync itself, explicitly,
@@ -319,17 +319,16 @@ func TestTicketNewRunsItsOwnCheckpointSync(t *testing.T) {
 	}
 }
 
-// TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput is
-// brief.md#Ownership and drift's own reporting rule - "drift lines print in
-// the output of the command whose checkpoint found them, and in jig trackers
-// sync's" - plus brief.md#Publish safety's "the sync names the ticket or
-// chart, the line number and the line", at the checkpoint side of those two
-// places. The store has one ticket whose issue was edited on GitHub (drift
-// against what the last sync recorded) and one whose title trips the
-// built-in email pattern (skipped, since the issue repo is public), and the
-// one sync a checkpoint runs must report both through the writer the
-// resolving command handed resolveStore - not swallow the report, as the
-// hook did before this slice.
+// TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput is the
+// reporting rule that drift lines print in the output of the command whose
+// checkpoint found them, and in jig trackers sync's, plus the rule that a
+// publish-safety skip names the ticket or chart, the line number and the line,
+// at the checkpoint side of those two places. The store has one ticket whose
+// issue was edited on GitHub (drift against what the last sync recorded) and
+// one whose title trips the built-in email pattern (skipped, since the issue
+// repo is public), and the one sync a checkpoint runs must report both through
+// the writer the resolving command handed resolveStore - not swallow the
+// report, as the hook did before this slice.
 func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())
@@ -337,7 +336,7 @@ func TestCheckpointSyncReportsDriftAndSkippedThroughTheCommandsOutput(t *testing
 	newTestOriginCloneWithGitHubTracker(t, clone)
 
 	// jig ticket new's own checkpoint sync must not reach a real GitHub
-	// either (brief.md's test constraints); pointed at a server that always
+	// either (tests never reach it); pointed at a server that always
 	// fails, it leaves both tickets' records unwritten, which is the state
 	// this test's own manual record (for DEMO-1) and the stubGitHub sync below
 	// (for both DEMO-1 and DEMO-2) need to start from.

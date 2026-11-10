@@ -40,7 +40,7 @@ func landOnTarget(t *testing.T, fx *fixture.Fixture, name string) {
 }
 
 // TestGateCarriesACleanMergeOfTheTargetAndPublishTakesTheHead is the one chain
-// (GATE-16): a reviewed branch merges a moved main cleanly, `jig gate` records
+// of the carried round: a reviewed branch merges a moved main cleanly, `jig gate` records
 // a carried-over round with no reviewer and no round left open, `jig status`
 // says so, and `jig publish` takes the new head. A second case, a merge with a
 // hand-resolved hunk, opens a delta round over that hunk alone.

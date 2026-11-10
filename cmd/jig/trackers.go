@@ -66,8 +66,8 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 
 	// jig trackers sync runs on demand rather than from inside another
 	// command, so unlike the checkpoint hook it has no reason to share the
-	// 2-minute bound a first sync of a sizeable store cannot finish inside
-	// (gate finding r2-f5): it runs until it is done.
+	// 2-minute bound a first sync of a sizeable store cannot finish inside:
+	// it runs until it is done.
 	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
 	// What the sync wrote goes out even when it failed part-way: the records
 	// it did write are true. Together with the commit Sync made of the

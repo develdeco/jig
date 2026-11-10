@@ -7,7 +7,6 @@ A CLI that a coding agent's own session uses to take a ticket from brief to merg
 - **Why a decision was made** → `docs/adr/`
 - **Session skills** → `skills/`
 - **CLI behavior** → run the `jig` binary's help; the environment is the source
-- **Build log** → `docs/build-log/` (one file per ticket; `DECISIONS.md` is the history before it)
 - **Verification** → the touched packages while working; the full suite is CI's and the gate's (`.github/CONTRIBUTING.md`)
 - **Contribution workflow, pull request shape, testing rules** → `.github/CONTRIBUTING.md`
 - **Reporting a security issue** → `.github/SECURITY.md`

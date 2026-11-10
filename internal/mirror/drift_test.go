@@ -43,7 +43,7 @@ func readTestRecord(t *testing.T, abs string) githubRecord {
 	return rec
 }
 
-// TestSyncAdoptsBridgeRecordWithNoMutation is brief.md#Seams's own critical
+// TestSyncAdoptsBridgeRecordWithNoMutation is the adoption critical
 // path, in full: a record the bridge wrote (no synced: key) whose issue on
 // GitHub already carries exactly the title and body the store's own
 // renderer produces, already placed on a board item carrying the Status and
@@ -62,7 +62,7 @@ func TestSyncAdoptsBridgeRecordWithNoMutation(t *testing.T) {
 	client := &fakeClient{}
 	*client.issue("NODE_ADOPTED") = fakeIssueState{Title: "First ticket", Body: ticketFooter("DEMO-1"), Open: true}
 	// A ticket with no brief, no journal and no slice that has left queued
-	// is Backlog (brief.md#Status and pull requests), and its Store ID is
+	// is Backlog, and its Store ID is
 	// its own id: exactly what the bridge had already set on this item.
 	client.itemFields = map[string]fakeItemFields{"ITEM_ADOPTED": {Status: "Backlog", StoreID: "DEMO-1"}}
 
@@ -100,8 +100,8 @@ func TestSyncAdoptsBridgeRecordWithNoMutation(t *testing.T) {
 	}
 }
 
-// TestSyncRestoresTitleBodyAndStateDrift checks brief.md#Ownership and
-// drift's own mechanic: a title, body and open/closed state the last sync
+// TestSyncRestoresTitleBodyAndStateDrift checks the ownership and
+// drift mechanic: a title, body and open/closed state the last sync
 // itself wrote, now found changed on GitHub, are reported as drift and
 // overwritten with the store's value again on the next sync.
 func TestSyncRestoresTitleBodyAndStateDrift(t *testing.T) {
@@ -162,7 +162,7 @@ func TestSyncRestoresTitleBodyAndStateDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRemovesExtraChartSubIssueAsDrift checks brief.md#Links's own drift
+// TestSyncRemovesExtraChartSubIssueAsDrift checks the links drift
 // rule: a sub-issue added on GitHub to a chart's issue that is no ticket's
 // issue is taken out again, reported as drift.
 func TestSyncRemovesExtraChartSubIssueAsDrift(t *testing.T) {
@@ -214,10 +214,10 @@ func TestSyncRemovesExtraChartSubIssueAsDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRestoresRemovedParentLinkAsDrift checks brief.md#Ownership and
-// drift's own parent side: a sub-issue link to its chart that this sync
+// TestSyncRestoresRemovedParentLinkAsDrift checks the ownership and
+// drift rule's parent side: a sub-issue link to its chart that this sync
 // itself wrote, now removed on GitHub, is restored and reported as drift -
-// not silently left unlinked, the gap finding 5 of this slice closed.
+// not silently left unlinked.
 func TestSyncRestoresRemovedParentLinkAsDrift(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "Chart ticket")
@@ -271,8 +271,8 @@ func TestSyncRestoresRemovedParentLinkAsDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRestoresRemovedBlockedByLinkAsDrift checks brief.md#Ownership and
-// drift's own blocked-by side: a blocked-by edge this sync itself wrote,
+// TestSyncRestoresRemovedBlockedByLinkAsDrift checks the ownership and
+// drift rule's blocked-by side: a blocked-by edge this sync itself wrote,
 // removed on GitHub, is restored and reported as drift.
 func TestSyncRestoresRemovedBlockedByLinkAsDrift(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
@@ -314,8 +314,8 @@ func TestSyncRestoresRemovedBlockedByLinkAsDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRemovesAHandAddedBlockedByLinkAsDrift checks brief.md#Ownership
-// and drift's own blocked-by side for an edge added on GitHub rather than
+// TestSyncRemovesAHandAddedBlockedByLinkAsDrift checks the ownership and
+// drift rule's blocked-by side for an edge added on GitHub rather than
 // through jig: it is taken out again and reported as drift, the same
 // ownership rule the chart's extra sub-issue already gets.
 func TestSyncRemovesAHandAddedBlockedByLinkAsDrift(t *testing.T) {
@@ -357,8 +357,8 @@ func TestSyncRemovesAHandAddedBlockedByLinkAsDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRestoresStatusAndStoreIDDrift checks brief.md#Ownership and
-// drift's own board side: a board item's Status or Store ID edited on GitHub
+// TestSyncRestoresStatusAndStoreIDDrift checks the ownership and
+// drift rule's board side: a board item's Status or Store ID edited on GitHub
 // is reported as drift and overwritten with the store's value again.
 func TestSyncRestoresStatusAndStoreIDDrift(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
@@ -403,9 +403,9 @@ func TestSyncRestoresStatusAndStoreIDDrift(t *testing.T) {
 	}
 }
 
-// TestSyncRecreatesAnIssueGoneFromGitHub checks brief.md#Adoption: "a
+// TestSyncRecreatesAnIssueGoneFromGitHub checks that a
 // recorded issue that is gone from GitHub gets a new issue, and the sync
-// prints that it did".
+// prints that it did.
 func TestSyncRecreatesAnIssueGoneFromGitHub(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
 	mintTestTicket(t, st, "DEMO-1", "First ticket")
@@ -439,10 +439,10 @@ func TestSyncRecreatesAnIssueGoneFromGitHub(t *testing.T) {
 }
 
 // TestSyncSucceedsWithARecordedPullRequestMissingANodeID is the owner's
-// decision for gate finding r8-f2, and the human's r9-f1 decision on top of
+// decision for a gate finding, and the human's decision on top of
 // it: a prs: entry with no node_id (hand-edited, or written by a bridge
-// version that omitted it; brief.md#Records says records the bridge wrote
-// are adopted as they are) must never reach PullRequestsByIDs as an empty
+// version that omitted it; records the bridge wrote are adopted as they
+// are) must never reach PullRequestsByIDs as an empty
 // id - which the fake client here fails outright, as the real GitHub
 // client's do() does on nodes(ids: [""]) - so the sync for this one
 // malformed record, and the whole store, still succeeds. A sync never

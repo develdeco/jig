@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests of a ticket stacked on another (ticket-graph 4, A3): jig
+// End-to-end tests of a ticket stacked on another: jig
 // names where the child's branch starts and where its pull request goes, the
 // parent's branch in a repo they share and the target elsewhere, writes that
 // target into the pull request body, and tells the child's session when the

@@ -508,7 +508,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		outstanding := append(outstandingAsks(cum, reported), outstandingNotes(cum, reported)...)
 		// A pending keep on a finding this round no longer reports, at a head
 		// other than the one that raised it, is work already built: it queues
-		// no fix slice and is cleared below, read kept, then fixed (GATE-15).
+		// no fix slice and is cleared below, read kept, then fixed.
 		fixedKeeps, err := keptAndFixed(d.Store, ticket, n, outstanding, files, round.Review)
 		if err != nil {
 			return GateReport{}, err

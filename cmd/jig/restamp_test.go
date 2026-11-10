@@ -100,7 +100,7 @@ func TestValidateRestamp(t *testing.T) {
 	if got := r.state(t, "a"); got.State != "green" || got.Attempts != 2 {
 		t.Fatalf("a restamped slice's state changed: %+v", got)
 	}
-	// D5: b was stamped from Problem and Seams; Problem is unchanged, so it
+	// b was stamped from Problem and Seams; Problem is unchanged, so it
 	// keeps that hash beside Seams' new one.
 	for _, sl := range r.slices(t) {
 		if sl.ID == "b" && strings.Join(sl.FromBrief, ",") != r.sectionHash(t, "Problem")+","+r.sectionHash(t, "Seams") {
@@ -196,7 +196,7 @@ func TestValidateRestampUnresolved(t *testing.T) {
 }
 
 // TestValidateRestampOneUnresolved: a single stamp history cannot explain is
-// still listed, with the D6 error, rather than falling through to the generic
+// still listed, with the unresolved-hash error, rather than falling through to the generic
 // stale-hash failure.
 func TestValidateRestampOneUnresolved(t *testing.T) {
 	t.Parallel()
@@ -208,6 +208,6 @@ func TestValidateRestampOneUnresolved(t *testing.T) {
 	}
 	out, code := r.jig(t, "validate", "DEMO-1", "--restamp")
 	if code == 0 || !strings.Contains(out, "unresolved[1]{id,hash}") || !strings.Contains(out, "d,"+zero) || !strings.Contains(out, "no committed brief revision") {
-		t.Fatalf("exit %d, want the one unresolved row and the D6 message\n%s", code, out)
+		t.Fatalf("exit %d, want the one unresolved row and the unresolved-hash message\n%s", code, out)
 	}
 }

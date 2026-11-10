@@ -1,6 +1,6 @@
 package e2e
 
-// End-to-end tests of the tracker tree (store layout L4): the records a sync
+// End-to-end tests of the tracker tree: the records a sync
 // writes under trackers/<provider>/<scope>/<remote id>/record.yaml, the links
 // the store rebuilds from them in the same folder, named by the ticket's id,
 // what jig validate says about the tree, and the branch binding that reads it.

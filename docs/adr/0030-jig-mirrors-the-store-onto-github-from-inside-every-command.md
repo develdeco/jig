@@ -7,8 +7,8 @@ Project and its issues: one ticket or chart, one issue; the project's
 Status and Store ID fields; sub-issue and blocked-by links; pull requests.
 It could not run while jig used the store, so the board moved only between
 jig commands, and a store the bridge was never pointed at never reached a
-board at all - a design flaw, by the owner's own call (2026-10-04). L1
-(T-23, develdeco/jig#102) made the ground safe to build this on: jig mints
+board at all - a design flaw, by the owner's own call (2026-10-04). An earlier change
+(develdeco/jig#102) made the ground safe to build this on: jig mints
 and claims every ticket id itself (ADR 0028), the tracker package is gone,
 pull requests come from `internal/repohost`, and `project.yaml`'s
 `trackers:` list replaces the single `tracker:` key.
@@ -46,7 +46,7 @@ ownership promise printed in every issue footer unverifiable in practice.
 
 ## Until the store's layout moves, the mirror keeps the bridge's shape
 
-L2 to L4 bring the store-layout tickets after this one (area-key ids,
+The rest of the store layout comes after this one (area-key ids,
 `tickets/<id>/`, the tracker tree); until then, the mirror keeps its
 records exactly where the bridge kept them - `<ticket>/tracker/github.yaml`,
 `charts/<name>/github.yaml`, in the bridge's own keys - so the bridge's
@@ -93,7 +93,7 @@ its repo gone) is simply opened again, rather than failing the sync.
   command, and at one mutation per second a first sync of a sizeable store
   needs more than 2 minutes to finish - so a bounded sync that runs out of
   time names how many tickets or charts still have no issue and points at
-  `jig trackers sync` instead; the cutover and an L3 migration each run one
+  `jig trackers sync` instead; the cutover and a store migration each run one
   full `jig trackers sync` rather than waiting out the backlog.
 - A project's board and issues can now be trusted to reflect the store
   exactly, as of the last sync: any edit made directly on a jig-owned field
@@ -107,9 +107,25 @@ its repo gone) is simply opened again, rather than failing the sync.
   afterward reports zero changes and no drift when the two agree, which is
   how the operator confirms the handoff.
 
-See [DECISIONS.md](../../DECISIONS.md) for the records' exact keys, the
-renderer's golden format, the publish-safety scan, and the drift slice's
-own mechanics.
+Details the design leaves to the code:
+
+- A record is `<ticket>/tracker/github.yaml` or `charts/<name>/github.yaml`
+  with `repo`, `issue` and `node_id`, and a `synced:` block (`title`,
+  `body_sha256`, `state`, `status`, `store_id`, and the node ids of the links
+  last written) that says what the mirror last wrote.
+- The renderer unwraps hard-wrapped paragraphs and list items, leaves fenced
+  and indented code, headings, quotes, HTML and rules on their own lines,
+  qualifies a bare `#123` to `<owner>/<repo>#123` when the project's one repo
+  differs from the issue repo, and truncates a brief or map to GitHub's cap
+  with a `*(Truncated: ...)*` note.
+- When the issue repo is public, each title and body about to be created is
+  scanned (email, home-path, token-prefix and private-key patterns, plus the
+  jig home's `publish-terms.txt`) before the issue exists; a hit skips that one
+  item, is reported with its line, and makes `jig trackers sync` exit non-zero.
+  A dry run scans unconditionally, since it cannot learn the repo's visibility.
+- Drift is GitHub's current value of a field differing from both its `synced:`
+  value and what the store would write: it is reported and the store's value is
+  written anyway.
 
 ## Amendment: a checkpoint lands what its sync wrote
 

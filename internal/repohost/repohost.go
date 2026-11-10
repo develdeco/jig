@@ -135,7 +135,7 @@ func parseGitHubOwnerRepo(remote string) (string, string, error) {
 
 // OwnerRepo infers remote's GitHub owner and repo, exported for the GitHub
 // mirror's own use: finding a ticket's pull requests and qualifying a bare
-// "#123" in rendered text (brief.md#Status and pull requests). remote
+// "#123" in rendered text. remote
 // itself when it already names a GitHub URL, or - when remote is a local
 // clone's filesystem path - the GitHub remote its own "origin" names, as
 // the bridge resolves it today. ok is false for anything else: a

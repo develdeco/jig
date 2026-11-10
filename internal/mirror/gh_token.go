@@ -7,8 +7,8 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 )
 
-// ghAuthToken reads the token `gh auth token` prints, once per process
-// (brief.md#The GitHub client). No gh on PATH is refused the same way
+// ghAuthToken reads the token `gh auth token` prints, once per process.
+// No gh on PATH is refused the same way
 // internal/repohost refuses it, GH_NOT_INSTALLED with the same help, so an
 // operator sees one consistent message whichever path found gh missing.
 func ghAuthToken() (string, error) {

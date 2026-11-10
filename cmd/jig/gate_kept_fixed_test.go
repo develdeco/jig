@@ -10,7 +10,7 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// keptAskRound2 runs the life of GATE-15: round 1 asks about go.mod, a person
+// keptAskRound2 runs the life of a kept ask: round 1 asks about go.mod, a person
 // keeps the ask, and then moveHead changes the clone (or not) before round 2,
 // whose reviewer reports nothing (or, with again, reports r1-f1 again through
 // --still-present's prior). It returns round 2's exit code and output, and the
@@ -49,7 +49,7 @@ func keptAskRound2(t *testing.T, moveHead, again bool) (string, int, *fixture.Fi
 }
 
 // TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed is the repro
-// of GATE-15 and its rule: the code moved after round 1, round 2 does not
+// of the rule: the code moved after round 1, round 2 does not
 // report the kept ask again, so the keep is spent as a fix and queues no slice.
 func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.T) {
 	t.Parallel()
@@ -107,7 +107,7 @@ func TestKeptAskTheClosingRoundReportsAgainStillQueuesItsFixSlice(t *testing.T) 
 	}
 }
 
-// keptNoteRound2 runs the life of GATE-15's note case: round 1 notes
+// keptNoteRound2 runs the life of a kept note: round 1 notes
 // beta/version.go, a person keeps the note, an unrelated commit changes go.mod,
 // and round 2's reviewer reports nothing and read reviewed. It returns round
 // 2's exit code and output, and the fixture.
@@ -145,7 +145,7 @@ func keptNoteRound2(t *testing.T, reviewed []string) (string, int, *fixture.Fixt
 
 // A kept note whose file the closing round's reviewer did not read is not
 // spent as fixed: its file is in must_review, so a report that skips it is
-// refused and the round is not clean (GATE-15 round 1, r1-f1).
+// refused and the round is not clean.
 func TestKeptNoteTheClosingRoundDidNotReadIsNotSpentAsFixed(t *testing.T) {
 	t.Parallel()
 	out, code, fx := keptNoteRound2(t, []string{"go.mod"})

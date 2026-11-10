@@ -447,7 +447,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if probedIn["api/server/handler.go"] != 1 || probedIn["web/ui/page.go"] != 0 {
 		t.Errorf("round 2 hunks = %+v, want the api's hunk probed once and the web's unprobed", req2.Hunks)
 	}
-	// The reviewer reads the delta round's view (GATE-17): the stale probe as a
+	// The reviewer reads the delta round's view: the stale probe as a
 	// row, the api's current caught probe as one count, and the web's hunks as
 	// the work list.
 	ctx2 := rev.Jig("review", "context", ticket)

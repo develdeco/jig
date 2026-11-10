@@ -225,7 +225,7 @@ func TestReviewerLinesSayACarriedRoundWasNotReviewed(t *testing.T) {
 
 // TestGatePrepareHoldsAStackedTicketToItsParentsBranch: for a ticket stacked on
 // a parent that has not merged, the branch a merge must bring in is the
-// parent's, as publish reads it (D9, D10): a merge of the moved parent branch
+// parent's, as publish reads it: a merge of the moved parent branch
 // is carried over, and a merge of main, which is not where the pull request
 // goes, is read.
 func TestGatePrepareHoldsAStackedTicketToItsParentsBranch(t *testing.T) {

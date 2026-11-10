@@ -11,7 +11,7 @@ import (
 )
 
 // LegacyTrackerRecord is a record still in the folder of the ticket or chart it
-// belongs to, where A6's mirror first kept them.
+// belongs to, where the mirror first kept them.
 type LegacyTrackerRecord struct {
 	// Owner is the ticket or chart whose folder holds it.
 	Owner TrackerOwner

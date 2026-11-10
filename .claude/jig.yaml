@@ -8,7 +8,7 @@ oracles:
 # A delta of Markdown alone cannot change what the suite proves, except for the
 # tests that read it: ./lint reads the docs and skills, internal/screen reads
 # ARCHITECTURE.md. A commit whose files all match runs these in the suite's
-# place after a whole-suite pass (GATE-18).
+# place after a whole-suite pass.
 light:
   paths:
     - "*.md"

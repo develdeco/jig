@@ -30,7 +30,7 @@ func init() {
 
 // cmdInit implements `jig init [--standalone|--orchestrator] [--clone] [--yes]
 // [--key K] [<path|url>...]`: it defines the project at the working directory,
-// which must be a project's root (decision 21 of the digester chart). It
+// which must be a project's root. It
 // creates the store as a sibling repository and writes the jig.yaml marker; it
 // publishes nothing, and commits nothing in the folder.
 func cmdInit(e env, args []string, stdout io.Writer, stdin io.Reader) int {

@@ -12,7 +12,7 @@
 // links and drift are later slices' own work. The "safety" slice scans a
 // title and body for every ticket or chart Sync is about to create a new
 // issue for, before writing it, when the issue repo is public: a hit skips
-// that one ticket or chart (brief.md#Publish safety).
+// that one ticket or chart.
 package mirror
 
 import (
@@ -33,14 +33,14 @@ import (
 // for a sync that runs from inside a command (opts.Unbounded false): one
 // context, built once at the top of doSync and threaded through every call
 // it makes, so a store with many items cannot spend syncTimeout per item
-// (brief.md#Syncing at every checkpoint: "stops after 2 minutes, with a
-// warning"). `jig trackers sync` runs with opts.Unbounded true instead: a
+// (it stops after 2 minutes, with a
+// warning). `jig trackers sync` runs with opts.Unbounded true instead: a
 // first sync of a sizeable store needs more than syncTimeout at one mutation
 // per second (one per ticket is 5 or more: createIssue, updateIssue, up to
 // two link mutations, three board mutations), so a sync bounded inside every
 // command would never finish it; the owner's call is to keep the bound only
 // where it protects a command's own latency, and let the on-demand command
-// run to completion instead (gate finding r2-f5).
+// run to completion instead.
 const syncTimeout = 2 * time.Minute
 
 // Deps bundles what Sync needs beyond the store and project config, per
@@ -67,22 +67,21 @@ type Deps struct {
 type SyncOpts struct {
 	// DryRun reads everything (the store, and GitHub for anything that
 	// already has a record) and reports what would change, writing to
-	// neither (brief.md#jig trackers sync, brief.md#Cutover). A store whose
+	// neither. A store whose
 	// items are all new reaches no client, since there is nothing on GitHub
 	// yet for it to read.
 	DryRun bool
 	// Unbounded lifts syncTimeout: this sync runs until it is done rather
 	// than stopping after 2 minutes. Set by `jig trackers sync`, which is
 	// run on demand rather than from inside another command, so it has no
-	// reason to share that bound (gate finding r2-f5); a sync from inside a
+	// reason to share that bound; a sync from inside a
 	// command (the checkpoint hook) leaves this false.
 	Unbounded bool
 }
 
 // SkippedItem is one ticket or chart the publish-safety scanner skipped:
 // the first line of its title or body that hit, named by its line number
-// within that text (the title is line 1) and the line itself
-// (brief.md#Publish safety).
+// within that text (the title is line 1) and the line itself.
 type SkippedItem struct {
 	What string
 	Line int
@@ -106,40 +105,39 @@ type SyncReport struct {
 	NoTracker bool
 	Created   []CreatedIssue
 	// Updated is every issue Sync brought up to date: its title, body or
-	// open/closed state changed to match the store (brief.md#Syncing at
-	// every checkpoint, step 4).
+	// open/closed state changed to match the store.
 	Updated []UpdatedIssue
 	// Recreated is every issue Sync opened again because its recorded one was
-	// gone from GitHub (brief.md#Adoption).
+	// gone from GitHub.
 	Recreated []CreatedIssue
 	// Drift is every jig-owned field this sync found edited on GitHub and
-	// overwrote with the store's value again (brief.md#Ownership and drift).
+	// overwrote with the store's value again.
 	Drift []DriftLine
 	// LinkedParents is every ticket Sync made (or found already) a
-	// sub-issue of its chart's issue (brief.md#Links). A dry run previews
+	// sub-issue of its chart's issue. A dry run previews
 	// this the same way, without writing the link.
 	LinkedParents []LinkedParent
 	// LinkedBlockedBy is every blocked_by edge Sync turned into a native
 	// blocked-by link, previewed the same way in a dry run.
 	LinkedBlockedBy []LinkedBlockedBy
 	// NotLinked is every blocked_by edge Sync could not link because its
-	// blocker has no issue yet (brief.md#Links).
+	// blocker has no issue yet.
 	NotLinked []NotLinked
 	// Skipped is every ticket or chart Sync did not create an issue for
-	// because its title or body tripped the publish-safety scanner
-	// (brief.md#Publish safety). jig trackers sync exits non-zero when this
+	// because its title or body tripped the publish-safety scanner.
+	// jig trackers sync exits non-zero when this
 	// is non-empty.
 	Skipped []SkippedItem
 	// Placed is every issue (ticket or chart) Sync placed on the project
-	// board, with the Status it set (brief.md#The board), previewed the
+	// board, with the Status it set, previewed the
 	// same way in a dry run.
 	Placed []PlacedItem
 	// PlacedPRs is every open or merged pull request Sync placed on the
-	// project board (brief.md#The board), previewed the same way in a dry
+	// project board, previewed the same way in a dry
 	// run.
 	PlacedPRs []PlacedPR
 	// GoneRecordedPRs is every recorded pull request nodes(ids:) answered
-	// NOT_FOUND for (r9-f2): kept in the record and listed with no state,
+	// NOT_FOUND for: kept in the record and listed with no state,
 	// since NOT_FOUND can mean the token lost access rather than that the
 	// pull request is gone. One warning per entry, naming the ticket, the
 	// repo and the number, so the operator can remove it by hand if it
@@ -165,8 +163,8 @@ type MovedRecord struct {
 // Sync runs one full sync of d.Cfg's trackers: github entry against d.Store:
 // every ticket (in id order) and chart (in name order, after every ticket)
 // with no record in the tracker tree yet gets a new issue, titled and footed
-// per brief.md#What an issue shows, claimed on the store's origin like an id
-// (brief.md#Syncing at every checkpoint). A record still in a ticket's or
+// per the issue rendering, claimed on the store's origin like an id.
+// A record still in a ticket's or
 // chart's own folder is moved into the tree first, and the issue is updated in
 // place, never created again; and every sync that is not a dry run makes the
 // tree's links again from its records once it has written them. A config with
@@ -296,12 +294,12 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	// newItemPRs returns it's own pull requests, for previewCreateRender to
 	// render ahead of a create, so the create-time scan (dry run or live)
 	// covers the same `## Pull requests` block updateIssues will later
-	// render and scan (brief.md#Status and pull requests; r4-f1's narrower
+	// render and scan (the narrower
 	// seam: a term matching a pull request's repo must refuse the create
 	// too, not just updateIssues' later skip). A chart has no pull
 	// requests. When trackers: has no repos: entries, findPullRequests
 	// queries nothing, so no client is ensured either - keeping the dry
-	// run with no new items' pull requests to find needing none (r1-f3's
+	// run with no new items' pull requests to find needing none (the
 	// guarantee for a store with no repos: configured). The first call finds
 	// the pull requests of every ticket with no record at once, so a store's
 	// first sync reads them in one batch rather than a query per ticket; a
@@ -355,19 +353,18 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 			continue
 		}
 		if opts.DryRun {
-			// Creating an issue for real writes only the marker as its body
-			// (brief.md#Syncing at every checkpoint, step 3) and lets
+			// Creating an issue for real writes only the marker as its body and lets
 			// updateIssues render the full title and body once the record
-			// claimIssue wrote mid-sync lands it in the same run (step 4).
+			// claimIssue wrote mid-sync lands it in the same run.
 			// A dry run claims nothing, so an item with no record never
 			// reaches updateIssues; it previews (and scans) the full render
 			// here instead, so a store with no records yet still gets a
-			// meaningful preview and publish-safety check (r1-f3). It
+			// meaningful preview and publish-safety check. It
 			// cannot learn the issue repo's visibility without a client it
 			// otherwise has no need for yet, so it scans unconditionally,
 			// previewing every hit it might otherwise miss. Its pull
-			// requests are found the same way a live sync would (r4-f1),
-			// since a dry run reads GitHub too (brief.md#jig trackers sync).
+			// requests are found the same way a live sync would,
+			// since a dry run reads GitHub too.
 			prs, err := newItemPRs(it)
 			if err != nil {
 				return report, items, fmt.Errorf("mirror: find %s's pull requests: %w", it.what(), err)
@@ -392,14 +389,14 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 			return report, items, err
 		}
 		if public {
-			// Scan the full title and body previewCreateRender would render
-			// (brief.md#Publish safety), not just the footer-only body
+			// Scan the full title and body previewCreateRender would render,
+			// not just the footer-only body
 			// CreateIssue is about to write: a hit anywhere in the item's
 			// real body must refuse the create, not just a hit in the
-			// marker footer (r4-f1). The issue number does not exist yet
+			// marker footer. The issue number does not exist yet
 			// either way, and changes no text the scan matches, so scanning
 			// before it exists (step 3, ahead of step 4's full render) is
-			// sound. Its pull requests are included too (r4-f1's narrower
+			// sound. Its pull requests are included too (the narrower
 			// seam): a term matching a pull request's repo must refuse the
 			// create, the same as updateIssues would later skip the update
 			// on it.
@@ -440,8 +437,8 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	if opts.DryRun && !anyHasRecord {
 		// Nothing has a record to update, link or place, so a dry run that
 		// only ever previewed creations needs no further client calls
-		// (brief.md#jig trackers sync: "touching neither GitHub nor the
-		// store"); newItemPRs above already ensured one if any new ticket
+		// (a dry run touches neither GitHub nor the
+		// store); newItemPRs above already ensured one if any new ticket
 		// had pull requests to look up.
 		return report, items, nil
 	}
@@ -477,9 +474,9 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 // that pull brought in a record for the same ticket or chart, another
 // clone's push won the race first, so issue is closed as not planned with a
 // comment naming the other, and this clone drops its own record and adopts
-// the other's instead of retrying (brief.md#Syncing at every checkpoint).
-// Otherwise Claim's own retry (up to maxClaimAttempts, as L1 tries for an
-// id) runs as it does for a plain id claim. It returns the other issue's
+// the other's instead of retrying.
+// Otherwise Claim's own retry (up to maxClaimAttempts)
+// runs as it does for a plain id claim. It returns the other issue's
 // number when it adopted one, 0 when issue's own record was claimed.
 func claimIssue(ctx context.Context, st *store.Store, client github.Client, it item, repo string, issue github.Issue, rec githubRecord, msg string) (adopted int, err error) {
 	what := it.what()
@@ -533,7 +530,7 @@ func claimIssue(ctx context.Context, st *store.Store, client github.Client, it i
 
 // closeDuplicateIssue closes issue as not planned and comments naming
 // otherNumber, the issue a pull just revealed another clone pushed first for
-// the same ticket or chart (brief.md#Syncing at every checkpoint).
+// the same ticket or chart.
 func closeDuplicateIssue(ctx context.Context, client github.Client, issue github.Issue, otherNumber int) error {
 	if err := client.CloseIssueNotPlanned(ctx, issue.NodeID); err != nil {
 		return err
@@ -607,8 +604,8 @@ func (it item) render(st *store.Store) (title, body string, err error) {
 
 // previewCreateRender returns item's full title and body, as updateIssues
 // would render them once the issue exists, for a dry run's preview and
-// publish-safety scan of an item that has no record yet (r1-f3), and for the
-// live create step's own scan ahead of CreateIssue (r4-f1). prs is it's own
+// publish-safety scan of an item that has no record yet, and for the
+// live create step's own scan ahead of CreateIssue. prs is it's own
 // pull requests (newItemPRs), nil for a chart, which has none.
 func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRRef) (title, body string, err error) {
 	if it.kind == "chart" {
@@ -628,7 +625,7 @@ func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRR
 }
 
 // collectItems lists every ticket (key, then number order) then every chart
-// (name order), the order brief.md#What an issue shows syncs them in, each
+// (name order), the order a sync takes them in, each
 // with where its record is (findRecord, for the repository repo).
 func collectItems(st *store.Store, repo string) ([]item, error) {
 	tickets, err := st.Tickets()
@@ -702,7 +699,7 @@ func repoChangedError(it item, recorded, configured string) error {
 	return &axi.Error{
 		Msg:  fmt.Sprintf("%s's record names %s, but trackers: github: repo: is now %s", it.what(), recorded, configured),
 		Code: "MIRROR_REPO_CHANGED",
-		Help: []string{"moving issues to a new repo is T-30"},
+		Help: []string{"moving issues to a new repo is not built; point trackers: github: repo: back at the recorded repo"},
 	}
 }
 

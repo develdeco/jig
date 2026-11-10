@@ -625,8 +625,7 @@ type DemoRenderResult struct {
 	// ScrubbedSummary is set when the pick's summary named one of jig's own
 	// directories (any spelling jig may have handed the pick session, a WSL
 	// mount among them) and was left out of the rendered section for it,
-	// rather than published verbatim (the owner's decision on r1-f13,
-	// DECISIONS.md).
+	// rather than published verbatim (the pull request body is public).
 	ScrubbedSummary bool
 	// ScrubbedCaptions names every staged file whose own caption (or flow
 	// title) was left out of the rendered section for the same reason.
@@ -635,7 +634,7 @@ type DemoRenderResult struct {
 
 // demoCaptionRenderCap bounds a caption's length in the rendered pull
 // request body. A published, public pull request shows a short label beside a
-// file, not a paragraph (the owner's decision on r1-f13, DECISIONS.md).
+// file, not a paragraph.
 const demoCaptionRenderCap = 200
 
 // capDemoCaption truncates caption to demoCaptionRenderCap runes for the
@@ -914,7 +913,7 @@ func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDe
 			o.status = "addressed"
 			o.detail = "addressed at " + strings.Join(cleared[id], ", ")
 		case len(cleared[id]) > 0 && decisions[id].Outcome == TriageKeep && (f.Status == StatusAsked || f.Status == StatusNoted):
-			// A keep the closing round found already fixed (GATE-15): it was
+			// A keep the closing round found already fixed: it was
 			// kept, no slice was built from it, and a later round no longer
 			// reported it.
 			o.status = "fixed"
@@ -963,7 +962,7 @@ func (o findingOutcome) continuedWithChange() bool {
 
 // sortFindingOutcomes sorts outcomes by risk, high first, then by finding id
 // for a stable order within a risk: the order both review-notes' own
-// Findings section and (through DECISIONS.md's own rule) any other reader of
+// Findings section and any other reader of
 // this slice can rely on.
 func sortFindingOutcomes(outcomes []findingOutcome) {
 	sort.SliceStable(outcomes, func(i, j int) bool {
@@ -1002,7 +1001,7 @@ func reviewerLines(rounds []RoundRecord) []string {
 		label := fmt.Sprintf("Round %d", r.Round)
 		if r.CarriedFrom > 0 {
 			// No reviewer read this round: its head only merged the target
-			// into the head a reviewer read (GATE-16).
+			// into the head a reviewer read.
 			out = append(out, fmt.Sprintf("- %s: carried over from round %d (the head only merges the target into the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
 			continue
 		}
@@ -1254,7 +1253,7 @@ func checkUnrewrittenReferences(body string, mediaFiles []DemoFile) []string {
 // re-matching the line's text; or (ok=false) when body carries no such
 // line at or after byte offset from. gh appends one for a file it attached
 // but found no recognized reference to rewrite in place (a bare video path,
-// the one form "Videos" names, DECISIONS.md), never for one it already
+// the one form a real gh run left as it stood), never for one it already
 // rewrote.
 //
 // The search starts at from, never byte 0: gh always appends this link

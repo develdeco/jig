@@ -173,7 +173,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	if p.Carried != nil {
 		// Nothing to read: the round is recorded, carrying over the verdict of
-		// the round a reviewer read (GATE-16).
+		// the round a reviewer read.
 		return printGateReport(stdout, st, ticket, *p.Carried)
 	}
 	blocks := roundBlocks(p, nil, false, nil)
@@ -185,7 +185,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 
 // gateAdvice is the help of an opened round: who reviews it. A session the
 // environment names is told whether it may review the ticket itself or has a
-// subagent do it (decision 39). With no session, as when the TUI's `g` opens
+// subagent do it. With no session, as when the TUI's `g` opens
 // the round, nobody is advised: the help says only what a reviewer does and
 // who should not be one.
 func gateAdvice(e env, d verifydeliver.Deps, ticket string) []string {
@@ -332,7 +332,7 @@ func storeRefBlocks(refs []verifydeliver.StoreRef) []string {
 }
 
 // carriedVerdict is the verdict of a round, with "(carried over from round N)"
-// after a clean one no reviewer read (GATE-16).
+// after a clean one no reviewer read.
 func carriedVerdict(report verifydeliver.GateReport) string {
 	if report.CarriedFrom > 0 {
 		return report.Verdict + " (carried over from round " + strconv.Itoa(report.CarriedFrom) + ")"

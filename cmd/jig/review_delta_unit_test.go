@@ -28,7 +28,7 @@ func deltaPrepared(intent string) verifydeliver.Prepared {
 	}
 }
 
-// TestADeltaRoundDropsWhatRound1Read (GATE-17): recordings, the whole
+// TestADeltaRoundDropsWhatRound1Read: recordings, the whole
 // change's hunks count, unprobed hunks outside the delta and the intent
 // excerpt of a stated intent are not printed; the excerpt of intent none is.
 func TestADeltaRoundDropsWhatRound1Read(t *testing.T) {

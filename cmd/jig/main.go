@@ -180,8 +180,8 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 // read the mapping from, for
 // the packages that keep leases under it. stdout is the resolving command's
 // own writer: the checkpoint hook renders its sync report through it
-// (brief.md#Ownership and drift: "Drift lines print in the output of the
-// command whose checkpoint found them"), and a failed sync's warning lands
+// (drift lines print in the output of the command whose checkpoint found
+// them), and a failed sync's warning lands
 // in the command's own structured output rather than bare stderr.
 func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
 	return resolveStoreChecked(e, storeFlag, stdout, false)

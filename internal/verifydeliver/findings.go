@@ -83,7 +83,7 @@ type findingsYAML struct {
 	ReviewedPaths []string  `yaml:"reviewed_paths"`
 	Findings      []Finding `yaml:"findings"`
 	Cleared       []string  `yaml:"cleared,omitempty"`
-	// KeptFixed are the keeps this round spent as fixed (GATE-15), each with
+	// KeptFixed are the keeps this round spent as fixed, each with
 	// who kept it; their ids are in Cleared too.
 	KeptFixed []KeptFixed `yaml:"kept_fixed,omitempty"`
 	Summary   string      `yaml:"summary,omitempty"`

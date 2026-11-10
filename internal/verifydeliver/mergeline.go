@@ -30,7 +30,7 @@ const (
 )
 
 // classifyLine says how head relates to reviewed in the repository dir. A merge
-// counts only when it brings in the target (GATE-16): its second parent is
+// counts only when it brings in the target: its second parent is
 // reachable from targetRef (origin/<target>, or the branch of the parent a
 // stacked ticket goes into); a merge of any other branch is lineOther, and the
 // reviewer reads what it brought. ownTree

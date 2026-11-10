@@ -34,7 +34,7 @@ const (
 type RoundRecord struct {
 	Round int
 	// CarriedFrom is the round whose verdict a clean round carries over
-	// (GATE-16), 0 for a round a reviewer read.
+	// (the head only merged the target), 0 for a round a reviewer read.
 	CarriedFrom int
 	// StoreRefs are the lines the round's change adds that name something only
 	// the store holds, as report.yaml records them: none for a round that has

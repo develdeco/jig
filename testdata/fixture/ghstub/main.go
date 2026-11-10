@@ -30,15 +30,13 @@
 // probe, one per subcommand) print help text naming --attach, unless
 // $GH_STUB_NO_ATTACH is set, in which case it is left out of both
 // subcommands' text - a gh too old to support --attach at all. gh 2.100.0 is
-// the version whose own `pr create --help` documents --attach this way
-// ("Pinning gh's own rewrite behavior against a real gh", DECISIONS.md).
+// the version whose own `pr create --help` documents --attach this way.
 //
 // A `pr create` or `pr edit` carrying `--attach <file>` (one per file, in
 // argv order, run with the evidence directory as this process's own working
 // directory, so each is a bare name) models exactly what that same gh
 // 2.100.0 was recorded doing against a real pull request, never a guess
-// about what some gh does ("Pinning gh's own rewrite behavior against a real
-// gh", DECISIONS.md): it rewrites a recognized markdown image reference to
+// about what some gh does: it rewrites a recognized markdown image reference to
 // the file, `![alt](./<file>)` found anywhere in the body named by
 // `--body-file`, replacing the path with a minted upload URL and leaving the
 // alt text as it was; a file with no such reference in the body (a bare

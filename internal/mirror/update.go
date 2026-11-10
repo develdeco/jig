@@ -13,8 +13,8 @@ import (
 )
 
 // DriftLine is one jig-owned field this sync found edited on GitHub: GitHub's
-// current value differed from what the last sync itself wrote
-// (brief.md#Ownership and drift), so jig overwrote it with the store's value
+// current value differed from what the last sync itself wrote,
+// so jig overwrote it with the store's value
 // again.
 type DriftLine struct {
 	// What is the ticket id, or "charts/<name>" for a chart.
@@ -26,7 +26,7 @@ type DriftLine struct {
 	Field string
 }
 
-// String renders d the way brief.md#Ownership and drift says every drift
+// String renders d the way every drift
 // line prints: "jig prints `drift, overwritten: <what>` naming the ticket or
 // chart, the issue number and the field".
 func (d DriftLine) String() string {
@@ -34,16 +34,14 @@ func (d DriftLine) String() string {
 }
 
 // UpdatedIssue is one issue Sync brought up to date: its title, body or
-// open/closed state changed to match the store (brief.md#Syncing at every
-// checkpoint, step 4).
+// open/closed state changed to match the store.
 type UpdatedIssue struct {
 	What   string
 	Fields []string
 }
 
-// normalizeBody puts s in the form issue bodies compare and hash in
-// (brief.md#What an issue shows: "Bodies compare after line endings become
-// \n and outer whitespace is trimmed").
+// normalizeBody puts s in the form issue bodies compare and hash in:
+// line endings become \n and outer whitespace is trimmed.
 func normalizeBody(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -51,7 +49,7 @@ func normalizeBody(s string) string {
 }
 
 // bodyHash is the sha256 (hex) of s's normalized form, what synced.body_sha256
-// keeps (brief.md#Records).
+// keeps.
 func bodyHash(s string) string {
 	sum := sha256.Sum256([]byte(normalizeBody(s)))
 	return hex.EncodeToString(sum[:])
@@ -65,18 +63,17 @@ func openState(open bool) string {
 	return "CLOSED"
 }
 
-// updateIssues is brief.md#Syncing at every checkpoint's step 4: for every
+// updateIssues is the update step of a sync: for every
 // ticket and chart that already has a record (including one this same Sync
 // just created, with only its title and footer as a body), it renders the
 // full title and body - now that every ticket has an issue number any
 // citation of it can resolve - derives its Status, and brings GitHub's
 // title, body and open/closed state to match, reporting drift when GitHub's
-// current value differs from what the last sync itself wrote
-// (brief.md#Ownership and drift). An issue gone from GitHub is recreated
-// (brief.md#Adoption) rather than failing the sync.
+// current value differs from what the last sync itself wrote.
+// An issue gone from GitHub is recreated rather than failing the sync.
 //
 // Before any write, it scans the rendered title and body when public is true
-// or dryRun is true (brief.md#Publish safety: every title and body is
+// or dryRun is true (every title and body is
 // scanned before it is written, on every sync, not only the one that creates
 // the issue): a hit is reported in report.Skipped and that item's what() is
 // added to the returned skip set, so GitHub keeps what it had and
@@ -85,7 +82,7 @@ func openState(open bool) string {
 // dryRun withholds every mutation (UpdateIssue, CreateIssue on a recreation,
 // ReopenIssue, CloseIssueCompleted, CloseIssueNotPlanned, the record write)
 // while still reading GitHub (FetchIssues, PullRequestsByHeads) to report what
-// would change (brief.md#jig trackers sync, brief.md#Cutover).
+// would change.
 //
 // An issue whose status is Done is closed as completed and one whose status is
 // Not planned is closed as not planned (a ticket closed as covered, superseded

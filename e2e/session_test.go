@@ -163,8 +163,8 @@ func TestSessionVisibleAcrossProcesses(t *testing.T) {
 // session that was given is left as it is, and a directory outside a project
 // mints nothing.
 //
-// It needs the `jig here` verb, which D3 adds; against a binary without it
-// the test skips rather than fail on a verb this ticket does not own.
+// It needs the `jig here` verb; against an older binary without it
+// the test skips.
 func TestHereMintsSession(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -172,7 +172,7 @@ func TestHereMintsSession(t *testing.T) {
 
 	first := runJig(t, env, fx.RepoDir, "here")
 	if first.Code == 2 && strings.Contains(first.Stdout, `unknown command "here"`) {
-		t.Skip("jig here is not in this binary yet (D3 adds it); its session section is covered by the cmd/jig tests")
+		t.Skip("jig here is not in this binary; its session section is covered by the cmd/jig tests")
 	}
 	if first.Code != 0 {
 		t.Fatalf("jig here: exit %d\n%s%s", first.Code, first.Stdout, first.Stderr)

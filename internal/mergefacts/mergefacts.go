@@ -1,6 +1,6 @@
 // Package mergefacts reads whether the work of a ticket has merged: the fact a
-// ticket that waits for another is held on (decision 43 of the digester). A
-// ticket has merged in a repo when the pull request recorded for it (`jig
+// ticket that waits for another is held on. A ticket
+// has merged in a repo when the pull request recorded for it (`jig
 // publish --pr`, or a pr line in its journal) is merged, as the repo host says;
 // with none recorded, when its branch tip is an ancestor of the repo's target
 // branch on its origin. Nothing else stands for either: a patch that happens to

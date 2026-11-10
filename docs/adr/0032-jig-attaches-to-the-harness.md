@@ -4,7 +4,7 @@
 
 jig began as a dispatch loop. `jig run` and `jig solve` started a coding session for each ready slice - a `claude -p` subprocess or a herdr agent in a pooled worktree - handed it a `slice.json`, and read back a `result.json`. Around that session jig built a box: a headless permission model with a screen hook (ADR 0008), a model staircase and efforts (ADRs 0019, 0023), a prompt that taught the session to test narrowly (ADR 0018), a wait loop, and a resume turn when the oracle came back red (ADR 0020). It launched three more sessions of its own, an intent summarizer, a reviewer and a pick session for the demo. Everything jig knew about the work it knew because it had started the session that did it.
 
-The person building a ticket does not work that way. They sit in their own harness session (Claude Code today; Codex, Gemini CLI and others by the same floor) with that harness's tools, subagents, background work and model choice, and jig competed with all of it. The dispatch path and the hand-built path were a choice the person had to make, and the second one got none of jig's guarantees. The digester chart (decisions 1 to 34, confirmed 2026-10-23) settles it the other way: jig is attached to the session the person already runs, and the guarantees move to where that session leaves traces.
+The person building a ticket does not work that way. They sit in their own harness session (Claude Code today; Codex, Gemini CLI and others by the same floor) with that harness's tools, subagents, background work and model choice, and jig competed with all of it. The dispatch path and the hand-built path were a choice the person had to make, and the second one got none of jig's guarantees. The owner's design for attaching jig to the harness (confirmed 2026-10-23) settles it the other way: jig is attached to the session the person already runs, and the guarantees move to where that session leaves traces.
 
 ## Decision
 
@@ -53,7 +53,7 @@ These were named in the chart and no ticket of the build carries them:
 
 - `jig watch`, a fog item.
 - Counting the session's own run of the oracle; the `source` field on the `oracle` line stays for it.
-- Cloud sessions and Remote Control (chart decision 19: local first; `jig setup --cloud` only prints an environment script), multi-repo v2 stores in `jig store migrate`, and a live check of any harness but Claude Code (the other adapters and hook files are read from each vendor's documentation and pinned by golden files).
+- Cloud sessions and Remote Control (local first; `jig setup --cloud` only prints an environment script), multi-repo v2 stores in `jig store migrate`, and a live check of any harness but Claude Code (the other adapters and hook files are read from each vendor's documentation and pinned by golden files).
 
 ## Appendix: ADR verdict map
 
@@ -61,34 +61,34 @@ These were named in the chart and no ticket of the build carries them:
 
 | ADR | Verdict | Under attached mode |
 |---|---|---|
-| 0001 no orchestration framework | keep | Disk state and resume-by-recompute stay; the while-loop goes with `jig run` (decision 26), and the frontier becomes a read verb ("what is unverified, what is next"). |
+| 0001 no orchestration framework | keep | Disk state and resume-by-recompute stay; the while-loop goes with `jig run`, and the frontier becomes a read verb ("what is unverified, what is next"). |
 | 0002 one binary plus skills | keep | Skills become the entry point; "dispatch" and `_screen` drop from the binary's list; the git hook, the SessionStart hook, the MCP server, `init`, `share`, `setup` with `attach` as its alias, the piece verbs, `repos` and `doctor` are subcommands of the one `jig`, and the helper skills ship in it beside the project skills. |
 | 0003 store schema is the API | keep | Hooks, skills and MCP are more readers of the same subtrees under the same `schema_version`; the sessions ledger is deliberately not a store subtree. |
 | 0004 disk-only pipeline seam | keep | Becomes literally true: the verifier is a separate process started by git, sharing nothing with the session but the store and the sha. |
 | 0005 tracker is a projection | keep | Unchanged. |
 | 0006 Go packages are internal | keep | Strengthened: every new door goes through commands, flags, output and exit codes; "unmapped means silent exit" is an exit-code contract. |
 | 0007 gate owns bookkeeping, not judgment | keep | Unchanged for the gate; the deferred "files the reviewer opened" evidence becomes available wherever the harness emits PostToolUse records. |
-| 0008 headless permission model | retire | The harness owns permissions, and `_screen` retires with the box (decision 22). What survives is advice to whoever launches the review session (decision 17: not jig): capability versus instructions (no settings from the code under review, `CLAUDE.md` from HEAD's tree); the read-only guard inverts to a post-round check. The kill mechanics move to the background oracle runner as a wedge guard, never a cost cap. |
+| 0008 headless permission model | retire | The harness owns permissions, and `_screen` retires with the box. What survives is advice to whoever launches the review session (not jig): capability versus instructions (no settings from the code under review, `CLAUDE.md` from HEAD's tree); the read-only guard inverts to a post-round check. The kill mechanics move to the background oracle runner as a wedge guard, never a cost cap. |
 | 0009 review eval, structural gold | keep | The gate's default model is named outright rather than derived from the builder staircase. |
 | 0010 dependencies live on the ticket | keep | The edges feed recall and validate; "a stacked child starts only on a clean parent gate" is enforced at claim or attach time, advisory when interactive. |
 | 0011 the store runs git in process | keep | Motive strengthens: a post-commit hook must return fast, so cheap store writes matter more. |
 | 0012 intent has a provenance | keep; inference inverts | The precedence and provenance stand. Inference stops searching transcripts by file overlap: the ledger knows which session holds the ticket, and the session can state intent at claim. The ledger half is built for tickets whose sessions ran hooks, with the search kept as the fallback. |
-| 0013 a ticket's branch is recorded | keep | Adoption becomes the ordinary shape; the build-lease cases of `chooseBuiltCopy` collapse to the clone or origin; "the commits jig built" reads "the commits jig verified". The default name is `<id>-<slug>`, the id from the tracker that names branches, and `jig/<id>` goes (decision 31). |
+| 0013 a ticket's branch is recorded | keep | Adoption becomes the ordinary shape; the build-lease cases of `chooseBuiltCopy` collapse to the clone or origin; "the commits jig built" reads "the commits jig verified". The default name is `<id>-<slug>`, the id from the tracker that names branches, and `jig/<id>` goes. |
 | 0014 demo session at the gate | retire | Already superseded by 0029. |
 | 0015 fix budget and risk floor | keep | "A person at a terminal" is the attached session's owner; the fix-slice size cap loses its fresh-context rationale and stays only as a readability bound. |
 | 0016 tests at agreed seams | keep | The `Seams` section is pulled by the context verb instead of dumped into `slice.json`. |
 | 0017 the reviewer reads, the oracles test | keep | `reused_from` is fed by commit-time evidence. |
 | 0018 builders test narrowly, no background | retire | The harness keeps its shell and background behavior. The background verification answers the waiting problem; "uncommitted tracked edits at Stop" answers the lost-run problem; narrow tests become skill advice. |
-| 0019 builders open on Sonnet and climb | retire the staircase; keep the failure classification | jig chooses no model, ever (decisions 26, 27). `journal.FailedAttempts` becomes correction's input ("same failure twice"). |
+| 0019 builders open on Sonnet and climb | retire the staircase; keep the failure classification | jig chooses no model, ever. `journal.FailedAttempts` becomes correction's input ("same failure twice"). |
 | 0020 jig runs the oracle at green | invert | The trigger flips from `result.json` to an observed commit; the red run becomes a record the session reads at its next turn; the fix budget parks for a person instead of climbing; the run bound is re-derived. |
 | 0021 the gate reuses an oracle pass | keep | The same-tree condition becomes structural on a detached worktree; a counted in-session run carries its source on the line. |
 | 0022 the reviewer confirms by id | keep | Unchanged. |
-| 0023 dearest rung and efforts | keep for the reviewer; retire builder effort | The harness's model and effort are recorded in the ledger, not chosen (decision 27); the reviewer's rung is a seam of the review record that whoever launches the reviewer honors. |
+| 0023 dearest rung and efforts | keep for the reviewer; retire builder effort | The harness's model and effort are recorded in the ledger, not chosen; the reviewer's rung is a seam of the review record that whoever launches the reviewer honors. |
 | 0024 builders are told the oracle's time | invert | The background run stamps `seconds`; the context verb returns it by `LastOracleSeconds`'s rule. |
 | 0025 a builder reads earlier slices | invert | The context verb returns the same fields; a slice's files are the commits that name it, replacing attempt ranges. |
 | 0026 code graph starting points | invert | The graph runs on demand in the mapped clone; the `graph` line moves to the ledger. |
 | 0027 jig's testing method | keep | "At a builder's green" becomes "at each commit naming a slice"; the intake skill gains weight. |
-| 0028 jig mints every id | keep | Unchanged; `ticket new` and `graduate` run from inside the session; the mint lands on the claims branch (decision 12) and is authored by the person (decision 32). |
+| 0028 jig mints every id | keep | Unchanged; `ticket new` and `graduate` run from inside the session; the mint lands on the claims branch and is authored by the person. |
 | 0029 demos are recordings | invert | Recording moves to the background verification, run named per verification; a counted in-session run records nothing. |
 | 0030 mirror from inside every command | keep | Checkpoints come from verification writes and verbs; read-only verbs pay no sync. |
 

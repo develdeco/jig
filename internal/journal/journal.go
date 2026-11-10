@@ -31,7 +31,7 @@ type Line struct {
 	Effort  string `json:"effort,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
 	// Carried is a gate-clean line's number of the round whose verdict it
-	// carries over (GATE-16): the head only merged the target into the head
+	// carries over: the head only merged the target into the head
 	// that round reviewed, and no reviewer ran. It names the one round that
 	// was really reviewed, so a chain of carried rounds all name the same one.
 	// 0 for every other line.

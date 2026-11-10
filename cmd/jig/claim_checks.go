@@ -38,7 +38,7 @@ type claimProblem struct {
 
 // claimDeps are what the checks ask of the world beyond the store.
 type claimDeps struct {
-	// merges says whether the work of a blocker has merged (decision 43). nil
+	// merges says whether the work of a blocker has merged. nil
 	// judges a blocker by its journal alone: it is met once it published.
 	merges mergeSource
 }

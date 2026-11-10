@@ -108,9 +108,9 @@ func leaveOutHostPaths(s string, dirs ...hostDir) string {
 // containsHostPath reports whether s literally contains one of dirs' own
 // spellings, including every spelling jig may have handed a session
 // (hostPathSpellings' WSL mount form among them): the render-time check
-// behind the owner's decision on r1-f13 (DECISIONS.md) that a caption or a
-// summary naming one of jig's own directories is left out of a published
-// pull request body rather than rendered verbatim. Comparison is
+// behind the rule that a caption or a summary naming one of jig's own
+// directories is left out of a published pull request body, which is public,
+// rather than rendered verbatim. Comparison is
 // exact-string only, never a pattern: jig does not try to recognize a path
 // shape it did not itself hand out.
 func containsHostPath(s string, dirs ...hostDir) bool {

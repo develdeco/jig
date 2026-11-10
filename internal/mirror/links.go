@@ -8,20 +8,19 @@ import (
 )
 
 // LinkedParent is one ticket Sync made (or found already) a sub-issue of
-// its chart's issue (brief.md#Links).
+// its chart's issue.
 type LinkedParent struct {
 	Ticket, Chart string
 }
 
 // LinkedBlockedBy is one blocked_by edge Sync turned into a native
-// blocked-by link (brief.md#Links).
+// blocked-by link.
 type LinkedBlockedBy struct {
 	Ticket, Blocker string
 }
 
 // NotLinked is one blocked_by edge Sync could not link because its blocker
-// has no issue yet (brief.md#Links: "the sync prints that it was not
-// linked").
+// has no issue yet (the sync prints that it was not linked).
 type NotLinked struct {
 	Ticket, Blocker string
 }
@@ -35,26 +34,25 @@ type linkTicket struct {
 	has bool
 }
 
-// linkParentsAndBlockers wires brief.md#Links for every item that already
-// has a record (an issue to link): each chart's tickets become sub-issues
-// of the chart's issue, in the chart's own tickets.yaml order, and each
-// ticket's blocked_by edges become native blocked-by links. A blocker with
-// no issue yet is skipped and reported as not linked, rather than failing
-// the sync. What each ticket ends up linked to is written back to its own
-// record's synced.links (brief.md#Links: "the record keeps the node ids of
-// the links it last wrote"), so a later sync only repeats a mutation whose
-// link this one did not already write. curByWhat is the current GitHub state
-// updateIssues already fetched for every item with a record, this step's own
-// read of each chart's sub-issues: a sub-issue found there that is no ticket
-// of the chart's is removed again, as drift (brief.md#Links: "a sub-issue
-// added on GitHub to a chart's issue that is no ticket's issue is taken out
-// again, as drift"). skip names every item updateIssues skipped on a
-// publish-safety hit: it is left out of every write below, though it can
-// still be linked against as another ticket's blocker (its existing issue
-// is untouched, just not re-rendered this sync). dryRun previews every link
+// linkParentsAndBlockers wires the parent and blocked-by links for every item
+// that already has a record (an issue to link): each chart's tickets become
+// sub-issues of the chart's issue, in the chart's own tickets.yaml order, and
+// each ticket's blocked_by edges become native blocked-by links. A blocker with
+// no issue yet is skipped and reported as not linked, rather than failing the
+// sync. What each ticket ends up linked to is written back to its own record's
+// synced.links (the record keeps the node ids of the links it last wrote), so a
+// later sync only repeats a mutation whose link this one did not already write.
+// curByWhat is the current GitHub state updateIssues already fetched for every
+// item with a record, this step's own read of each chart's sub-issues: a
+// sub-issue found there that is no ticket of the chart's is removed again, as
+// drift (a sub-issue added on GitHub to a chart's issue that is no ticket's
+// issue is taken out again). skip names every item updateIssues skipped on a
+// publish-safety hit: it is left out of every write below, though it can still
+// be linked against as another ticket's blocker (its existing issue is
+// untouched, just not re-rendered this sync). dryRun previews every link
 // (LinkedParents, LinkedBlockedBy, NotLinked, Drift) without calling
 // AddSubIssue, RemoveSubIssue, AddBlockedBy, RemoveBlockedBy or writing a
-// record (brief.md#jig trackers sync, brief.md#Cutover).
+// record.
 func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.Client, items []item, curByWhat map[string]github.IssueState, skip map[string]bool, report *SyncReport, dryRun bool) error {
 	tickets := map[string]*linkTicket{}
 	charts := map[string]githubRecord{}
@@ -156,9 +154,9 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 // linkParent makes lt's ticket a sub-issue of chartRec's issue, unless
 // GitHub already shows it as one (cur.ParentID, when haveCur: either this
 // sync's own earlier write, or - for a record adopted from the bridge, no
-// mutation at all, the critical path brief.md#Seams names). A parent link
+// mutation at all). A parent link
 // jig wrote (lt.rec's own synced.links.parent) that GitHub no longer shows
-// is restored and reported as drift (brief.md#Ownership and drift);
+// is restored and reported as drift;
 // otherwise it is a plain new link, reported in LinkedParents. dryRun
 // previews the Drift/LinkedParents line without calling AddSubIssue or
 // writing the record.
@@ -205,7 +203,7 @@ func linkParent(ctx context.Context, st *store.Store, client github.Client, lt *
 // linkBlockedBy brings lt's ticket's blocked-by edges to match blockedBy,
 // in order: a blocker with a recorded issue not yet linked on GitHub gets
 // AddBlockedBy (reported as drift when lt's own record already named it
-// linked - brief.md#Ownership and drift - or as a plain new link in
+// linked - or as a plain new link in
 // LinkedBlockedBy otherwise); a blocker with no recorded issue is skipped
 // and reported in NotLinked; and, when haveCur, any blocked-by edge GitHub
 // shows that blockedBy does not - added by hand, or a blocker the store no

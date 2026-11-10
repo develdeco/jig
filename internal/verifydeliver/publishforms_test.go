@@ -882,7 +882,7 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 
 // TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody: --body renders
 // the notes after one round; a second round then closes at the same head (a
-// triage decision after a clean round makes the gate run one, GATE-8); --pr
+// triage decision after a clean round makes the gate run one); --pr
 // then posts the second round's notes, not the earlier round's the store
 // still holds.
 func TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody(t *testing.T) {
@@ -1163,7 +1163,7 @@ func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
 
 // TestPublishBodyNamesTheCommandTheGateRanItself: an oracle the gate ran
 // itself, with no slice's pass to reuse, is listed with the command it ran,
-// like one it reused (r2-f2). The fixture journals no oracle line, so the
+// like one it reused. The fixture journals no oracle line, so the
 // gate's own run is the only source of the command.
 func TestPublishBodyNamesTheCommandTheGateRanItself(t *testing.T) {
 	t.Parallel()

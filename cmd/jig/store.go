@@ -53,8 +53,7 @@ func cmdStore(e env, args []string, stdout io.Writer) int {
 // command that may open a store older than the current schema
 // (resolveStoreForProjectAllowingOldSchema, unlike every other command's
 // resolveStore, lets an older schema_version through), since moving one up is
-// its whole job. A v1 store takes the rename map (brief.md#The rename map,
-// brief.md#The migration); a v2 store takes none.
+// its whole job. A v1 store takes the rename map; a v2 store takes none.
 func cmdStoreMigrate(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "store migrate")
 	mapFlag := fs.String("map", "", "the rename map file (old id to new key); the v1 to v2 step only")

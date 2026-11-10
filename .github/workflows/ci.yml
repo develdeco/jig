@@ -23,7 +23,7 @@ concurrency:
   # always finishes: main is where Windows tests each merge, so a merge's run
   # is its only Windows verdict. A group shared by main's pushes cancels it at
   # the next merge, and one that waits instead keeps a single run pending and
-  # drops it at the merge after (DECISIONS.md, "Every run on main finishes").
+  # drops it at the merge after.
   group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
@@ -38,8 +38,7 @@ jobs:
   # schedule, a dispatch, a release's call - runs everything on all three.
   # The Windows legs take 15 to 18 minutes, Linux and macOS 2 to 4, so a
   # Windows-only failure is found on main within the half hour after its
-  # merge and fixed forward (DECISIONS.md, "Pull requests test on Linux and
-  # macOS"). lint/workflow_test.go runs this job's step with synthetic
+  # merge and fixed forward. lint/workflow_test.go runs this job's step with synthetic
   # changes.
   plan:
     runs-on: ubuntu-latest
@@ -236,8 +235,7 @@ jobs:
       # its tests open or stat, and go test checks that log path by path
       # after the binary exits, for a result no run here reuses (setup-go
       # saves its cache once per go.sum, and no Windows run on main reused
-      # one). That check was 110-210 s of windows-verifydeliver's step
-      # (DECISIONS.md, "No go test in CI caches its result").
+      # one). That check was 110-210 s of windows-verifydeliver's step.
       - name: go test
         env:
           GITBUDGET_DIR: ${{ runner.os == 'Linux' && format('{0}/gitcount', runner.temp) || '' }}

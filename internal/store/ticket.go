@@ -60,8 +60,8 @@ type Ticket struct {
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
 	// Aliases is every earlier id this ticket has carried. Every rewrite of
-	// the record keeps them; nothing but L3's migration (out of scope here)
-	// writes them for real - in this ticket only tests set them. Store.
+	// the record keeps them; nothing but the v1-to-v2 migration
+	// writes them for real; tests set them directly. Store.
 	// ResolveTicket is the one place an alias turns back into this ticket's
 	// current id.
 	Aliases []string
@@ -555,7 +555,7 @@ func (s *Store) branchNameFault(branch, target string) *branchFault {
 // "<id>:" that heading may lead with (briefSlug). Tickets minted through jig
 // have a title, so this is a ticket whose folder was made by hand. A ticket
 // with no slug from either is named by the bare id: the "jig/<id>" prefix
-// went with the branches named for their titles (decision 31), and a
+// went with the branches named for their titles, and a
 // jig/<id> branch still binds to its ticket (TicketForBranch).
 func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 	slug := rec.Slug

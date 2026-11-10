@@ -210,7 +210,7 @@ type Config struct {
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo
 // its issues live in, and the GitHub Project they are placed on. Both are
-// required (brief.md#The trackers entry); a store names its issue home
+// required; a store names its issue home
 // explicitly rather than having jig derive it, since a derived home would
 // move every issue the day a second repo joined the project, and GitHub
 // cannot transfer an issue from a private repo to a public one.
@@ -240,18 +240,17 @@ type configRaw struct {
 	BuilderEffort BuilderEffort `yaml:"builder_effort,omitempty"`
 }
 
-// UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent
-// or empty means none; jig mints every id itself and no mirror shape is
-// supported yet, so any entry is refused), ticket_format and tracker: are the
-// two keys `jig store migrate` rewrites into keys: and trackers: and so are
-// refused once a project.yaml claims schema_version 2 (brief.md#Schema
-// version 2) - an older schema_version leaves both unread rather than
-// refused, since `jig store migrate` (resolveStoreForProjectAllowingOldSchema)
-// must still Load a v1 project.yaml whole, for project.Config.
-// CheckSchemaVersion (cmd/jig's resolveStore, the one place every command
-// checks it) to be the thing that refuses it for every other command -
-// and routes: (which only ever fed publish's now-gone route step) is refused
-// outright regardless of schema_version.
+// UnmarshalYAML decodes project.yaml: trackers: is a list of mirrors (absent or
+// empty means none; jig mints every id itself and no mirror shape is supported
+// yet, so any entry is refused), ticket_format and tracker: are the two keys
+// `jig store migrate` rewrites into keys: and trackers: and so are refused once
+// a project.yaml claims schema_version 2 - an older schema_version leaves both
+// unread rather than refused, since `jig store migrate`
+// (resolveStoreForProjectAllowingOldSchema) must still Load a v1 project.yaml
+// whole, for project.Config. CheckSchemaVersion (cmd/jig's resolveStore, the
+// one place every command checks it) to be the thing that refuses it for every
+// other command - and routes: (which only ever fed publish's now-gone route
+// step) is refused outright regardless of schema_version.
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	var raw configRaw
 	if err := value.Decode(&raw); err != nil {
@@ -344,8 +343,8 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 // decodeGitHubTrackerEntry decodes one trackers: list entry, refusing
 // anything but a mapping with exactly one key, "github", whose value is
 // itself a mapping with only repo: and project:, both non-empty
-// (brief.md#The trackers entry: "a second, an unknown key, or a malformed
-// value is refused when the config loads").
+// (a second key, an unknown key or a malformed value is refused when the
+// config loads).
 func decodeGitHubTrackerEntry(node yaml.Node) (*GitHubTracker, error) {
 	if node.Kind != yaml.MappingNode || len(node.Content) != 2 {
 		return nil, malformedTrackerEntryError("each trackers: entry must be a mapping with exactly one key")
@@ -385,12 +384,13 @@ func malformedTrackerEntryError(why string) error {
 
 // keyRE matches a key: entry's own key: 2 to 10 uppercase ASCII letters and
 // digits, starting with a letter. Keys are uppercase so that a filesystem
-// that ignores case, the Windows and macOS default, never confuses STORE-1
-// with store-1.
+// that ignores case, the Windows and macOS default, never confuses ABC-1
+// with abc-1.
 var keyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,9}$`)
 
-// loadKeys resolves c.Keys from raw's keys:, refusing the shapes
-// brief.md#Keys in project.yaml names. An absent keys: leaves c.Keys nil.
+// loadKeys resolves c.Keys from raw's keys:, refusing a key that is not 2 to 10
+// uppercase letters or digits starting with a letter, and an empty meaning. An
+// absent keys: leaves c.Keys nil.
 func (c *Config) loadKeys(raw configRaw) error {
 	if raw.Keys.Kind == 0 {
 		return nil
