@@ -357,7 +357,7 @@ func TestCheckUnrewrittenReferences(t *testing.T) {
 // Verification): gh's own appended link always lands after every section a
 // real body has, never inside ## Demo's own bounds, which is what lets the
 // scoping below tell it apart from an unrelated link of the same name
-// somewhere earlier in the body (r2-f5, DECISIONS.md).
+// somewhere earlier in the body.
 func TestRewriteUnrewrittenReferences(t *testing.T) {
 	t.Parallel()
 

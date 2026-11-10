@@ -32,8 +32,8 @@ func renderPickWords(t *testing.T, id, summary, caption string, dirs ...hostDir)
 	return renderPicksSection(p, "/stage", []DemoFile{{Name: name}}, dirs), name
 }
 
-// TestRenderPicksSectionLeavesOutASummaryNamingTheJigHome: the owner's
-// decision on r1-f13 (DECISIONS.md) - a summary is the session's own words,
+// TestRenderPicksSectionLeavesOutASummaryNamingTheJigHome: a pull
+// request body never names a jig directory - a summary is the session's own words,
 // and a published pull request body is public, so one that repeats the jig
 // home back is left out of the rendered section whole, not merely edited, and
 // reported in ScrubbedSummary. The file beside it, whose own caption names no

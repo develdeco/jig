@@ -1166,8 +1166,8 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 
 	// Report any summary or caption left out of the rendered section because
-	// it named one of jig's own directories (the owner's decision on r1-f13,
-	// DECISIONS.md): independent of whether a pick stands, since a section can
+	// it named one of jig's own directories (a body is public, so it never
+	// names one): independent of whether a pick stands, since a section can
 	// be otherwise rendered in full.
 	if demoResult.ScrubbedSummary {
 		in.warn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
@@ -1376,8 +1376,8 @@ func checkMediaReferences(d Deps, host repohost.Host, ticket, prURL string, r pu
 	// read-back is a warning, not silence: media were just uploaded, and the
 	// read-back is the one signal that says whether the references actually
 	// point at them now. gh rewrites an image reference in place but leaves
-	// other forms as they were - a bare video path among them, "Videos",
-	// DECISIONS.md - so a reference still unrewritten is patched here, not
+	// other forms as they were - a bare video path among them, as a real gh run
+	// showed - so a reference still unrewritten is patched here, not
 	// merely reported: the URL gh appended for that file (recorded in the very
 	// body just read back) moves to where the reference stands, and the pull
 	// request gets a second edit with the fix. Only a name gh appended no URL

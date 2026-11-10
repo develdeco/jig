@@ -117,8 +117,8 @@ func TestLeaveOutHostPathsNamesTheGoQuotedSpelling(t *testing.T) {
 }
 
 // TestContainsHostPathMatchesEveryHandedSpelling: containsHostPath is the
-// render-time check behind the owner's decision on r1-f13 (DECISIONS.md),
-// and so - unlike leaveOutHostPaths, which composes jig's own reasons - it
+// render-time check that keeps jig's directories out of a public pull
+// request body, and so - unlike leaveOutHostPaths, which composes jig's own reasons - it
 // must also catch a directory's WSL mount spelling, the one a session that
 // runs in WSL on a Windows checkout sees: that is a spelling of the
 // session's, not jig's own text, so its caption or summary can repeat it

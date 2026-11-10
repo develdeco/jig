@@ -647,7 +647,9 @@ func (s *Store) Push(msg string) error {
 // that stopped on a conflict leaves a rebase in progress (Sync and Push
 // refused any rebase or merge that was already there, so this one is jig's
 // own, unless another process working on the same store started one in
-// between, a race recorded in DECISIONS.md): the conflicting paths are read
+// between - Sync and Push do not serialize against each other across
+// processes, so the abort can end a rebase the other is resolving): the
+// conflicting paths are read
 // structurally (`git ls-files -u`, before anything else touches the index)
 // so the report can name them, then the rebase is aborted with a best-effort
 // `rebase --abort`, and the result reported as STORE_CONFLICT either way,
