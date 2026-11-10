@@ -8,8 +8,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// A v1 store's real tickets sit directly at the store root (every ticket folder sits
-// at the store root), not under tickets/ -
+// A v1 store's real tickets sit directly at the store root, not under tickets/ -
 // the layout Store.TicketDir and every other store method after it assume.
 // `jig store migrate` is the one reader of that older shape, since turning
 // it into the new one is its whole job; everywhere else in this package, an

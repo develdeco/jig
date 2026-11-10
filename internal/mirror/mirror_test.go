@@ -576,9 +576,9 @@ func TestSyncDryRunTouchesNeitherGitHubNorTheStore(t *testing.T) {
 // TestSyncDryRunPreviewsAgainstExistingRecords drives --dry-run over a
 // store whose item already has a record, against a client whose GitHub
 // state now differs from what the last sync wrote - the cutover's own gate
-// (a dry run must report 0 changes
-// and no drift). The preview must report the would-be update, its drift
-// and the would-be board placement, while making none of the client's
+// (before the cutover, a dry run must report 0 changes and no drift). The
+// preview must report the would-be update, its drift and the would-be board
+// placement, while making none of the client's
 // mutating calls and writing no record.
 func TestSyncDryRunPreviewsAgainstExistingRecords(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)

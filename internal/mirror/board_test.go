@@ -43,7 +43,7 @@ platform: platform/
 // critical path: a ticket and the chart it belongs to are placed on the
 // project with their Status and Store ID, and the ticket's one open pull
 // request is placed alongside it (In review) while its closed one is left
-// off the board, (a closed one is listed but not
+// off the board (a closed one is listed but not
 // placed). Each record keeps the item id(s) PlaceItem handed back.
 func TestSyncPlacesIssuesAndPullRequestsOnTheBoard(t *testing.T) {
 	st, work, _ := newTestRemoteStore(t)
