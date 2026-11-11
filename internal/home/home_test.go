@@ -243,3 +243,12 @@ func TestBaselinePathIsOneFileUnderTheHomePerRepoWorkspaceAndCommand(t *testing.
 		}
 	}
 }
+
+// TestSlotDirIsOneDirectoryPerProjectUnderTheRoot: a project's suite slots
+// are lock files in slots/<project> under the jig home root.
+func TestSlotDirIsOneDirectoryPerProjectUnderTheRoot(t *testing.T) {
+	root := filepath.Join("r", "home")
+	if got, want := SlotDir(root, "p"), filepath.Join(root, "slots", "p"); got != want {
+		t.Errorf("SlotDir = %q, want %q", got, want)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,15 @@ type Manifest struct {
 	// Light declares the delta that reuses a whole-suite pass; the zero value
 	// declares none, so a repo that says nothing never reuses.
 	Light Light `yaml:"light,omitempty"`
+	// Heavy names the oracles that take the project's suite slot when a slice
+	// or the gate runs them by that name; a literal command takes none, and a
+	// manifest that names none takes no slot.
+	Heavy []string `yaml:"heavy,omitempty"`
+}
+
+// IsHeavy reports whether the oracle named name takes the suite slot.
+func (m Manifest) IsHeavy(name string) bool {
+	return name != "" && slices.Contains(m.Heavy, name)
 }
 
 // Light is the rule for a delta that cannot change what the slice's oracle
@@ -218,6 +228,12 @@ func Resolve(repoDir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("manifest: timeout %s is negative", declared.Timeout)
 	}
 	m.Timeout = declared.Timeout
+	for _, name := range declared.Heavy {
+		if strings.TrimSpace(name) == "" {
+			return Manifest{}, fmt.Errorf("manifest: heavy names an empty oracle in %s", declFile)
+		}
+	}
+	m.Heavy = declared.Heavy
 	if len(declared.Light.Paths) > 0 || declared.Light.Oracle != "" {
 		if err := validateLight(declared.Light); err != nil {
 			return Manifest{}, fmt.Errorf("manifest: validate light: %w", err)

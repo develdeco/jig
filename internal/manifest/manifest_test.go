@@ -386,3 +386,28 @@ func TestResolveTimeout(t *testing.T) {
 		}
 	})
 }
+
+// TestHeavyNamesTheOraclesThatTakeTheSlot: heavy lists oracle names; a name
+// listed is heavy, a literal command or an unlisted name is not, and a
+// manifest that says nothing has none.
+func TestHeavyNamesTheOraclesThatTakeTheSlot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	none, err := Resolve(dir)
+	if err != nil || none.IsHeavy("test") {
+		t.Fatalf("no declaration: heavy = %v, err %v", none.IsHeavy("test"), err)
+	}
+	decl := "oracles:\n  test: go test ./...\n  lint: golint\nheavy: [test]\n"
+	if err := os.WriteFile(filepath.Join(dir, ".claude", "jig.yaml"), []byte(decl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Resolve(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.IsHeavy("test") || m.IsHeavy("lint") || m.IsHeavy("go test ./...") || m.IsHeavy("") {
+		t.Errorf("IsHeavy wrong for heavy %v", m.Heavy)
+	}
+}
