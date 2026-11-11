@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -398,7 +400,7 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 		}
 	}
 	if coversSuite(man, reused) {
-		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
+		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle(), d.slotHolder(ticket))
 		if err != nil {
 			return nil, err
 		}
@@ -445,7 +447,7 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 		handles = append(handles, h)
 	}
 
-	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle())
+	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle(), d.slotHolder(ticket))
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +647,11 @@ func coversSuite(man manifest.Manifest, reused map[string]reusedPass) bool {
 // oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
 // taken from there instead of run again, and each other run made by run and
 // timed.
-func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc) ([]OracleRun, error) {
+//
+// hold, when not nil, takes the project's suite slot for an oracle the
+// manifest marks heavy and returns its release; the run starts, and its bound
+// and its seconds count, after the slot is taken.
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc, hold slotHolder) ([]OracleRun, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
@@ -654,8 +660,18 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: pass.Origin, Ran: ranOf(man, pass), Seconds: pass.Seconds})
 				continue
 			}
+			release := func() {}
+			if hold != nil && man.IsHeavy(name) {
+				rel, err := hold(name, cmd)
+				if err != nil {
+					return nil, err
+				}
+				release = rel
+			}
 			start := time.Now()
-			if err := runOracle(run, cmd, dir); err != nil {
+			err := runOracle(run, cmd, dir)
+			release()
+			if err != nil {
 				return nil, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
 			}
 			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start))})
@@ -702,6 +718,24 @@ func wholeSeconds(d time.Duration) int {
 // own run at a slice's green, so a hung oracle cannot hold the gate.
 const oracleLimit = 30 * time.Minute
 
+// slotHolder takes the project's suite slot for the heavy oracle name run as
+// cmd and returns the release that lets it go.
+type slotHolder = func(name, cmd string) (release func(), err error)
+
+// slotHolder is the gate's hold on the project's suite slot for ticket, or nil
+// when d names no project to hold one of. It journals slot-wait and
+// slot-taken on the ticket.
+func (d Deps) slotHolder(ticket string) slotHolder {
+	if d.Cfg.Name == "" || d.Home == "" || d.Store == nil {
+		return nil
+	}
+	return func(name, cmd string) (func(), error) {
+		return slot.Hold(context.Background(), d.Home, d.Cfg.Name, d.Cfg.Slots(), func(event string) error {
+			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Source: "gate"})
+		})
+	}
+}
+
 // oracleFunc runs one oracle command in a directory and returns its
 // combined output: Deps.Oracle's type.
 type oracleFunc = func(cmd, dir string) (string, error)
@@ -745,7 +779,7 @@ func oracleError(failed string, err error) *axi.Error {
 // means every returned run passed. Exported for internal/revieweval, whose
 // reviewer gets the runs the way Gate's does.
 func RunOracleSuite(dir string, man manifest.Manifest) ([]OracleRun, error) {
-	return oracleSuiteRuns(dir, man, nil, shellOracle)
+	return oracleSuiteRuns(dir, man, nil, shellOracle, nil)
 }
 
 // writeNoRound writes the files for a round that never ran while something

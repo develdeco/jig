@@ -16,6 +16,7 @@ import (
 
 	"github.com/develdeco/jig/internal/filelock"
 	"github.com/develdeco/jig/internal/home"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // pollInterval is the pause between rounds over the project's slots while
@@ -62,4 +63,24 @@ func Take(ctx context.Context, root, project string, n int, onWait func()) (rele
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// Hold is Take for an oracle run: it records journal.EventSlotWait when the
+// run has to wait and journal.EventSlotTaken when it gets the slot, through
+// record, which writes the line for the event it is handed. A record that
+// fails gives the slot back and returns its error.
+func Hold(ctx context.Context, root, project string, n int, record func(event string) error) (release func(), err error) {
+	var werr error
+	rel, err := Take(ctx, root, project, n, func() { werr = record(journal.EventSlotWait) })
+	if err != nil {
+		return nil, err
+	}
+	if werr == nil {
+		werr = record(journal.EventSlotTaken)
+	}
+	if werr != nil {
+		rel()
+		return nil, werr
+	}
+	return rel, nil
 }
