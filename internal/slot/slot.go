@@ -209,16 +209,14 @@ func Read(root, project string) (Status, error) {
 }
 
 // Line is the one line that says a run waits: who is running its suite and how
-// many wait.
+// many wait, or just that it waits when no holder is known.
 func Line(s Status) string {
-	holder := "another run"
 	for _, h := range s.Holders {
 		if h != "" {
-			holder = h
-			break
+			return fmt.Sprintf("waiting for the suite slot: %s is running its suite (%d waiting)", h, max(len(s.Waiters), 1))
 		}
 	}
-	return fmt.Sprintf("waiting for the suite slot: %s is running its suite (%d waiting)", holder, max(len(s.Waiters), 1))
+	return "waiting for the suite slot"
 }
 
 // Wait is one run of a ticket that waits for the suite slot now: the slice it

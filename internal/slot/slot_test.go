@@ -236,3 +236,17 @@ func TestWaitsAreTheJournalsOpenWaitsThatStillWait(t *testing.T) {
 		t.Errorf("a waiter that gave up still shows: %+v", got)
 	}
 }
+
+// TestLineSaysOnlyThatARunWaitsWhenNoHolderIsKnown: the holder and the count
+// are named when a holder left its name, and the line is just "waiting for the
+// suite slot" when none did.
+func TestLineSaysOnlyThatARunWaitsWhenNoHolderIsKnown(t *testing.T) {
+	if got, want := Line(Status{Holders: []string{"A/x"}, Waiters: []string{"B/y", "C/z"}}), "waiting for the suite slot: A/x is running its suite (2 waiting)"; got != want {
+		t.Errorf("Line = %q, want %q", got, want)
+	}
+	for _, s := range []Status{{}, {Holders: []string{""}, Waiters: []string{"B/y"}}} {
+		if got := Line(s); got != "waiting for the suite slot" {
+			t.Errorf("Line(%+v) = %q, want the bare line", s, got)
+		}
+	}
+}
