@@ -537,7 +537,7 @@ type sliceRow struct {
 
 // relevantSliceEvents are the lines worth showing as a slice's latest.
 var relevantSliceEvents = []string{
-	journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventOracle,
+	journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventSlotWait, journal.EventSlotTaken, journal.EventOracle,
 	journal.EventVerified, journal.EventVerifyError, journal.EventQuestion, journal.EventAnswer,
 	journal.EventStall, journal.EventRequeue, journal.EventNote,
 }
@@ -609,6 +609,10 @@ func describe(l events.Envelope) string {
 		return "released" + by(l.Session)
 	case journal.EventVerifyPending:
 		return "verify pending " + short(l.Commit)
+	case journal.EventSlotWait:
+		return firstOf(l.Summary, "waiting for the suite slot")
+	case journal.EventSlotTaken:
+		return "took the suite slot"
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return "oracle pass " + short(l.Commit)
@@ -670,7 +674,7 @@ func eventState(l events.Envelope) string {
 	switch l.Event {
 	case journal.EventClaim, journal.EventDispatch, journal.EventRequeue, journal.EventFixSlice:
 		return StateBuilding
-	case journal.EventVerifyPending:
+	case journal.EventVerifyPending, journal.EventSlotWait, journal.EventSlotTaken:
 		return StateVerifying
 	case journal.EventOracle:
 		if l.Outcome == "pass" {

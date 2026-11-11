@@ -1,6 +1,9 @@
 package envrun
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // The oracles a jig process has running, so that stopping jig ends them. A
 // process that is told to stop (SIGINT, SIGTERM or SIGHUP, or on Windows any
@@ -22,6 +25,23 @@ var live struct {
 	ends  map[int]func()
 	ended bool
 }
+
+// StopContext returns a context that ends when jig is stopped (EndAll), for a
+// wait that is not an oracle, such as the wait for a suite slot, to end with
+// the process instead of being cut off mid-wait. cancel releases it. Stopped
+// says what the caller returns when the wait ended that way.
+func StopContext(parent context.Context) (ctx context.Context, cancel func()) {
+	ctx, c := context.WithCancel(parent)
+	forget := register(c)
+	return ctx, func() {
+		forget()
+		c()
+	}
+}
+
+// Stopped is the error of a wait that ended because jig was stopped: it
+// matches ErrStopped, as the error of a stopped oracle does.
+func Stopped(what string) error { return &StoppedError{Cmd: what} }
 
 // register records an end function for a running oracle and returns the call
 // that forgets it. Once EndAll has run, a new oracle is ended at once: jig is

@@ -206,6 +206,18 @@ type Config struct {
 	// render reads the reviewed head's own jig.yaml first and uses this only
 	// when the head has none, or a member marker.
 	PublishTrailer string
+	// SuiteSlots is how many whole-suite oracles of the project may run at once
+	// on a machine: the jig.yaml marker's slots:. 0, as for a v2 store or a
+	// marker that sets none, is one (Slots).
+	SuiteSlots int
+}
+
+// Slots is the number of suite slots the project has: SuiteSlots, or one.
+func (c Config) Slots() int {
+	if c.SuiteSlots < 1 {
+		return 1
+	}
+	return c.SuiteSlots
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo

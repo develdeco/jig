@@ -54,6 +54,9 @@ type Marker struct {
 	Branches *BranchRule `yaml:"branches,omitempty"`
 	// Budget is the default spend limit for a ticket.
 	Budget *Budget `yaml:"budget,omitempty"`
+	// Slots is how many whole-suite oracles of the project may run at once on
+	// a machine; unset means one. Zero or negative is refused when read.
+	Slots *int `yaml:"slots,omitempty"`
 	// Publish is how the project's pull requests are written.
 	Publish *Publish `yaml:"publish,omitempty"`
 	// Distribution says how the project's repos are shared among people.
@@ -101,6 +104,15 @@ type Budget struct {
 	USD    float64 `yaml:"usd,omitempty"`
 }
 
+// SuiteSlots is how many whole-suite oracles of the project may run at once:
+// the marker's slots, or one when it sets none.
+func (m Marker) SuiteSlots() int {
+	if m.Slots == nil {
+		return 1
+	}
+	return *m.Slots
+}
+
 // FindMarker looks for a marker walking up from start, one directory at a
 // time to the filesystem root, and returns the directory of the nearest one
 // with its decoded Marker. A marker nearer start wins over one above it, so a
@@ -146,6 +158,9 @@ func LoadMarker(path string) (Marker, error) {
 	m, err := ParseMarker(data)
 	if err != nil {
 		return Marker{}, fmt.Errorf("project: parse marker %s: %w", path, err)
+	}
+	if m.Slots != nil && *m.Slots < 1 {
+		return Marker{}, fmt.Errorf("project: marker %s: slots is %d, want a positive integer", path, *m.Slots)
 	}
 	return m, nil
 }

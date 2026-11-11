@@ -69,6 +69,13 @@ func PoolDir(root string) string {
 	return filepath.Join(root, "pool")
 }
 
+// SlotDir returns where a project's suite slot lock files live under the jig
+// home root: <root>/slots/<project>, one <n>.lock per slot. It is machine
+// state, never the store or a repo.
+func SlotDir(root, project string) string {
+	return filepath.Join(root, "slots", project)
+}
+
 // MachinePath returns the per-machine project mapping file path under the
 // jig home root.
 func MachinePath(root string) string {

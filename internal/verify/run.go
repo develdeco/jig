@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/scopebase"
+	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -32,6 +34,12 @@ type Deps struct {
 	// worktree is added from it, so the commit is guaranteed present and no
 	// fetch is made.
 	Clone string
+	// Project and Slots are the project's name and how many suite slots it has
+	// on this machine (project.Config's Name and Slots). An oracle the
+	// manifest marks heavy takes a slot of the project before it starts; with
+	// no Project it takes none.
+	Project string
+	Slots   int
 	// Repo is the repo's name in the project and Target its target branch.
 	// They find the sha the commit must descend from: the ticket's
 	// start.<Repo>.sha, else the merge base with origin/<Target>. Either may
@@ -637,12 +645,32 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
 
 	limit := m.OracleLimit()
-	started := d.now()
 	runs := cmd
 	if isLight {
 		runs = light.ran
 		x.logf("the delta from the last pass of %q is light: running %q in its place", cmd, runs)
 	}
+	// A heavy oracle takes the project's suite slot before it starts, so its
+	// bound (set when the command starts) and its recorded seconds count from
+	// the slot. The light oracle of a light delta takes none.
+	if !isLight && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
+		stopCtx, endStopCtx := envrun.StopContext(context.Background())
+		defer endStopCtx()
+		release, err := slot.Hold(stopCtx, d.JigHome, d.Project, max(d.Slots, 1), slot.Who(x.r.Ticket, x.r.Slice), func(event, summary string) error {
+			if event == journal.EventSlotWait {
+				x.logf("%s", summary)
+			}
+			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
+		})
+		if err != nil {
+			if stopCtx.Err() != nil {
+				return envrun.Stopped("the wait for the suite slot")
+			}
+			return err
+		}
+		defer release()
+	}
+	started := d.now()
 	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	if errors.Is(oerr, envrun.ErrStopped) {
 		return oerr

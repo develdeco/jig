@@ -5,6 +5,9 @@
 # oracle run, so a hung test still fails with go test's own message naming it.
 oracles:
   test: go test -timeout 25m ./...
+# The whole-suite oracle takes the project's one suite slot, so two suites do
+# not run at once on one machine.
+heavy: [test]
 # A delta of Markdown alone cannot change what the suite proves, except for the
 # tests that read it: ./lint reads the docs and skills, internal/screen reads
 # ARCHITECTURE.md. A commit whose files all match runs these in the suite's

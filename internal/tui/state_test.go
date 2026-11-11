@@ -259,6 +259,7 @@ func TestDescribeAndEventStateCoverEveryJournalEvent(t *testing.T) {
 		journal.EventVerifyError, journal.EventQuestion, journal.EventAnswer, journal.EventCall, journal.EventNote, journal.EventStall,
 		journal.EventGateOpen, journal.EventGateRound, journal.EventGateClean, journal.EventTriage, journal.EventPrBody,
 		journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
+		journal.EventSlotWait, journal.EventSlotTaken,
 	} {
 		l := jl(at(0, 1), "T", "a", ev, with("s", sha('d'), "pass", "text", "q-001", "person"))
 		if d := describe(l); d == "" || d == ev && ev != journal.EventNote {
@@ -267,6 +268,13 @@ func TestDescribeAndEventStateCoverEveryJournalEvent(t *testing.T) {
 		if eventState(l) == "" && ev != journal.EventRelease && ev != journal.EventNote {
 			t.Errorf("event %s has no state to be drawn in", ev)
 		}
+	}
+	wait := "waiting for the suite slot: T-1/a is running its suite (1 waiting)"
+	if got := describe(jl(at(0, 1), "T", "a", journal.EventSlotWait, with("", "", "", wait, "", ""))); got != wait {
+		t.Errorf("a slot-wait line = %q, want its own summary", got)
+	}
+	if got := describe(jl(at(0, 2), "T", "a", journal.EventSlotTaken, with("", "", "", "", "", ""))); got != "took the suite slot" {
+		t.Errorf("a slot-taken line = %q", got)
 	}
 	if got := describe(jl(at(0, 1), "T", "a", journal.EventOracle, with("", sha('e'), "fail", "boom", "", ""))); got != "oracle fail boom" {
 		t.Errorf("a failed oracle = %q", got)
