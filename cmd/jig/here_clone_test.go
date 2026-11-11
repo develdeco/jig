@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,13 +101,20 @@ func TestHereNamesTheCloneAsTheMachineMapSpellsIt(t *testing.T) {
 	f.originMoves(t, "main", "x.txt")
 	want := "git -C " + clonebehind.Quote(link) + " pull --ff-only origin main"
 	for name, dir := range dirs {
+		// The text block quotes its values, so the pull is checked by its
+		// parts there and whole in the json.
 		out, _ := runMain(t, ie.env.inDir(dir), "", "here")
-		if !strings.Contains(out, want) {
-			t.Errorf("here from %s:\n%s\nwant the map's spelling %q", name, out, want)
+		if !strings.Contains(out, "via-link") || !strings.Contains(out, "pull --ff-only origin main") {
+			t.Errorf("here from %s:\n%s\nwant the map's spelling %q", name, out, link)
 		}
 		out, _ = runMain(t, ie.env.inDir(dir), "", "here", "--json")
-		if !strings.Contains(out, strings.ReplaceAll(want, `\`, `\`)) && !strings.Contains(out, want) {
-			t.Errorf("here --json from %s:\n%s\nwant the map's spelling %q", name, out, want)
+		var got struct {
+			Sections struct {
+				Clone hereCloneJSON `json:"clone"`
+			} `json:"sections"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil || got.Sections.Clone.Pull != want {
+			t.Errorf("here --json from %s: pull %q (err %v), want %q", name, got.Sections.Clone.Pull, err, want)
 		}
 		out, _ = runMain(t, ie.env.inDir(dir), "", "doctor")
 		if !strings.Contains(out, want) {
@@ -119,7 +127,7 @@ func TestHereNamesTheCloneAsTheMachineMapSpellsIt(t *testing.T) {
 	f.git(f.repo, "commit", "-q", "-m", "local")
 	for name, dir := range dirs {
 		out, _ := runMain(t, ie.env.inDir(dir), "", "here")
-		if !strings.Contains(out, "a fast-forward pull will refuse") || !strings.Contains(out, clonebehind.Quote(link)) {
+		if !strings.Contains(out, "a fast-forward pull will refuse") || !strings.Contains(out, "clone "+link+" has diverged") {
 			t.Errorf("diverged note from %s:\n%s\nwant the map's %q", name, out, link)
 		}
 	}
