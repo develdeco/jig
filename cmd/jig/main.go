@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
@@ -27,14 +29,34 @@ import (
 
 func main() {
 	gitx.ClearRepoEnv()
-	// The first interrupt cancels e.ctx, so a command that waits or streams
-	// can wind down; endAfterInterrupt makes sure one that does not watch it
-	// still ends, as it did when an interrupt simply killed the process.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	go endAfterInterrupt(ctx, stop, interruptGrace, os.Exit)
+	// The first interrupt, SIGTERM or SIGHUP (the signals a builder's shell, a
+	// closing terminal or a harness send) cancels e.ctx, so a command that
+	// waits or streams can wind down; endAfterInterrupt first ends every oracle
+	// this process is running, then makes sure a command that does not watch
+	// the context still ends, as it did when an interrupt simply killed the
+	// process. A SIGKILL cannot be handled: on Unix it leaves a running oracle
+	// behind (see `jig gate --help`); on Windows the oracle's job object ends
+	// it with jig.
+	ctx, stop := signal.NotifyContext(context.Background(), stopSignals(signal.Ignored)...)
+	go endAfterInterrupt(ctx, stop, interruptGrace, envrun.EndAll, os.Exit)
 	e := processEnv()
 	e.ctx = ctx
 	os.Exit(run(e, os.Args[1:], os.Stdout, os.Stdin))
+}
+
+// stopSignals are the signals that stop jig: SIGTERM always, and SIGINT and
+// SIGHUP unless the process was started ignoring them (nohup ignores SIGHUP,
+// a background job of a non-interactive shell ignores SIGINT). Notifying a
+// signal installs a handler for it and so ends its being ignored; jig leaves
+// an ignored signal as it found it, and a run protected that way keeps going.
+func stopSignals(ignored func(os.Signal) bool) []os.Signal {
+	sigs := []os.Signal{syscall.SIGTERM}
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGHUP} {
+		if !ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	return sigs
 }
 
 const (
@@ -46,12 +68,14 @@ const (
 	exitInterrupted = 130
 )
 
-// endAfterInterrupt waits for ctx to be cancelled by the first interrupt,
-// gives the signal back its default action (stop), so a second interrupt
-// ends the process at once, and ends the process itself through exit if the
-// run has not returned within grace.
-func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, exit func(int)) {
+// endAfterInterrupt waits for ctx to be cancelled by the first stop signal,
+// ends the oracles the process is running (endOracles) before anything else,
+// so the stop never waits on grace to end them, gives the signal back its
+// default action (stop), so a second one ends the process at once, and ends
+// the process itself through exit if the run has not returned within grace.
+func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, endOracles func(), exit func(int)) {
 	<-ctx.Done()
+	endOracles()
 	stop()
 	time.Sleep(grace)
 	exit(exitInterrupted)

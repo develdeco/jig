@@ -86,7 +86,11 @@ func flagsBlockFor(fsName string) []string {
 			}
 			frows = append(frows, []string{"--" + f.Name, f.Usage})
 		}
-		return []string{usage, axi.Table(fmt.Sprintf("flags{%s}", c.Name), []string{"flag", "usage"}, frows)}
+		blocks := []string{usage, axi.Table(fmt.Sprintf("flags{%s}", c.Name), []string{"flag", "usage"}, frows)}
+		if v, ok := verbNamed(c.Name); ok && v.Note != "" {
+			blocks = append(blocks, "note: "+v.Note)
+		}
+		return blocks
 	}
 	return []string{usage}
 }

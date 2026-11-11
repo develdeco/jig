@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/develdeco/jig/internal/manifest"
@@ -147,7 +148,8 @@ next:
 // stderr, which a failed oracle run hands back to the session that must fix
 // it. A run longer than limit is killed and reported as failed, and Wait
 // stops waiting on its pipes shortly after, so a hung command cannot hold
-// the caller. The kill ends the shell's whole process tree (KillTree).
+// the caller. The kill ends the shell's whole process tree, and so does the
+// end of the jig process that ran it (live.go).
 func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 	return ShellOutputEnv(cmd, dir, limit, nil)
 }
@@ -156,6 +158,24 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 // matches under errors.Is. A kill is read from this, never from the error's
 // text, which embeds the command and so can hold any words.
 var ErrTimedOut = errors.New("did not finish within its limit")
+
+// ErrStopped is what a command ended because the jig process running it was
+// stopped (EndAll) matches under errors.Is. It is a run that reached no
+// verdict, so a caller must not read it as the command failing.
+var ErrStopped = errors.New("was ended because jig was stopped")
+
+// StoppedError is the error of a command ended by EndAll.
+type StoppedError struct{ Cmd string }
+
+func (e *StoppedError) Error() string {
+	return fmt.Sprintf("shell %q: %s", e.Cmd, "was ended because jig was stopped")
+}
+
+// Is reports a StoppedError as ErrStopped.
+func (e *StoppedError) Is(target error) bool { return target == ErrStopped }
+
+// stopFlag records that EndAll ended a run; the guards embed it.
+type stopFlag struct{ stopped atomic.Bool }
 
 // TimedOutError is the error of a command killed for outliving Limit.
 type TimedOutError struct {
@@ -188,10 +208,19 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 	if err != nil {
 		return "", err
 	}
-	NewProcessGroup(c)
-	c.Cancel = func() error { return KillTree(c) }
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	g := newGuard(c)
 	c.WaitDelay = 10 * time.Second
-	out, err := c.CombinedOutput()
+	err = g.start()
+	if err == nil {
+		err = c.Wait()
+		g.release()
+	}
+	out := buf.Bytes()
+	if g.stopped.Load() {
+		return string(out), &StoppedError{Cmd: cmd}
+	}
 	if ctx.Err() != nil {
 		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
 	}

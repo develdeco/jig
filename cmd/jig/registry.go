@@ -35,6 +35,9 @@ type verb struct {
 	// NoFlagSet marks a hidden verb that never builds a FlagSet (it reads a
 	// hook payload on stdin, say). Its Spec.Flags must be nil.
 	NoFlagSet bool
+	// Note is a line of the verb's own help (`jig <verb> -h`), under its flags,
+	// for a limit the flags do not say.
+	Note string
 }
 
 // verbRegistry is a set of verbs by name. The binary has exactly one,

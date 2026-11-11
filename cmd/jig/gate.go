@@ -26,6 +26,11 @@ const (
 	gateProjectUsage  = "project name, resolved via the machine mapping"
 )
 
+// gateNote is the limit of the gate's oracle runs that its help states: jig
+// ends the oracle it runs when it is stopped, but a Unix process cannot catch
+// SIGKILL.
+const gateNote = "the oracles a gate runs end with it when it is interrupted or terminated (SIGINT, SIGTERM, SIGHUP; on Windows, any end); on Unix a SIGKILL of jig cannot be caught and leaves a running oracle behind"
+
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
@@ -40,6 +45,7 @@ func init() {
 			{"project", gateProjectUsage, false},
 		}, false},
 		Order: 160,
+		Note:  gateNote,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return cmdGate(e, args, stdout, stdin)
 		},
