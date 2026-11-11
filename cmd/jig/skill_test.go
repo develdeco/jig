@@ -256,3 +256,51 @@ func TestSkillsStubLeavesAPersonsOwnJigSkill(t *testing.T) {
 		t.Error("the uninstall took the person's skill or left the stub")
 	}
 }
+
+// TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons: a
+// fresh install lays references out stamped and doctor says installed; an old
+// jig's install (SKILL.md only) reads stale and a reinstall fixes it; an
+// uninstall takes jig's references and keeps a person's own, with its directory.
+func TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons(t *testing.T) {
+	t.Parallel()
+	ie := newInstallerEnv(t)
+	ie.env = ie.env.inDir(ie.root)
+	if out, code := runMain(t, ie.env, "", "skills", "--global"); code != 0 {
+		t.Fatalf("install: exit %d\n%s", code, out)
+	}
+	refDir := filepath.Join(ie.userHome, ".claude", "skills", "build", "references")
+	ref := filepath.Join(refDir, "handing-off.md")
+	if v, ok := setup.SkillStamp([]byte(readFileOrFail(t, ref))); !ok || v != binaryVersion() {
+		t.Errorf("reference stamp %q, %v", v, ok)
+	}
+	skillsRow := func() map[string]string {
+		out, _ := runMain(t, ie.env, "", "doctor")
+		return findRow(doctorRows(t, out), "skills", "claude")
+	}
+	if r := skillsRow(); r == nil || r["state"] != "installed" {
+		t.Fatalf("fresh install row = %v", r)
+	}
+	if err := os.RemoveAll(refDir); err != nil {
+		t.Fatal(err)
+	}
+	if r := skillsRow(); r == nil || r["state"] != "stale" {
+		t.Fatalf("an install without references row = %v", r)
+	}
+	if out, code := runMain(t, ie.env, "", "skills", "--global"); code != 0 || !strings.Contains(out, "result: installed") {
+		t.Fatalf("reinstall: exit %d\n%s", code, out)
+	}
+	if r := skillsRow(); r == nil || r["state"] != "installed" {
+		t.Fatalf("after reinstall row = %v", r)
+	}
+	mine := filepath.Join(refDir, "mine.md")
+	writeTestFile(t, mine, "my notes\n")
+	if out, code := runMain(t, ie.env, "", "skills", "--global", "--uninstall"); code != 0 {
+		t.Fatalf("uninstall: exit %d\n%s", code, out)
+	}
+	if got := readFileOrFail(t, mine); got != "my notes\n" {
+		t.Errorf("the person's reference: %q", got)
+	}
+	if exists(ref) || exists(filepath.Join(ie.userHome, ".claude", "skills", "build", "SKILL.md")) {
+		t.Error("jig's files stayed")
+	}
+}

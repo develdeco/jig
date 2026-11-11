@@ -129,8 +129,19 @@ func TestCmdSkillsInstallIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read dest dir for %s: %v", name, err)
 		}
-		if len(entries) != 1 {
-			t.Errorf("%s: dest dir has %d entries after two installs, want 1", name, len(entries))
+		want := 1
+		if len(embeddedRefs(name)) > 0 {
+			want = 2 // SKILL.md and references/
+		}
+		if len(entries) != want {
+			t.Errorf("%s: dest dir has %d entries after two installs, want %d", name, len(entries), want)
+		}
+		for _, ref := range embeddedRefs(name) {
+			text, _ := embeddedRef(name, ref)
+			got, err := os.ReadFile(filepath.Join(dest, name, "references", ref+".md"))
+			if err != nil || !bytes.Equal(got, text) {
+				t.Errorf("%s/%s: installed reference differs from the embedded one: %v", name, ref, err)
+			}
 		}
 	}
 }

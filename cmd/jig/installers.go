@@ -186,13 +186,28 @@ func embeddedRef(name, ref string) ([]byte, bool) {
 	return data, err == nil
 }
 
-// embeddedBodies maps every embedded skill to its text, for telling the files
-// `jig skills install` wrote from a person's own.
-func embeddedBodies() map[string][]byte {
-	out := map[string][]byte{}
+// embeddedSkill is the embedded skill called name with its references.
+func embeddedSkill(name string) (setup.Skill, bool) {
+	body, ok := embeddedBody(name)
+	if !ok {
+		return setup.Skill{}, false
+	}
+	sk := setup.Skill{Name: name, Body: body}
+	for _, ref := range embeddedRefs(name) {
+		if b, ok := embeddedRef(name, ref); ok {
+			sk.Refs = append(sk.Refs, setup.Ref{Name: ref, Body: b})
+		}
+	}
+	return sk, true
+}
+
+// embeddedSkills maps every embedded skill to its text and references, for
+// telling the files `jig skills install` wrote from a person's own.
+func embeddedSkills() map[string]setup.Skill {
+	out := map[string]setup.Skill{}
 	for _, n := range embeddedNames() {
-		if b, ok := embeddedBody(n); ok {
-			out[n] = b
+		if sk, ok := embeddedSkill(n); ok {
+			out[n] = sk
 		}
 	}
 	return out
@@ -218,10 +233,10 @@ func (s skillSelection) resolve() (have []setup.Skill, lacking []string, err err
 			return nil
 		}
 		seen[name] = true
-		body, ok := embeddedBody(name)
+		sk, ok := embeddedSkill(name)
 		switch {
 		case ok:
-			have = append(have, setup.Skill{Name: name, Body: body})
+			have = append(have, sk)
 		case required:
 			return &axi.Error{
 				Msg:  fmt.Sprintf("jig has no skill named %q", name),
@@ -350,7 +365,7 @@ func skillsSteps(e env, req installReq, sel skillSelection) ([]step, error) {
 				} else if len(sel.extras) > 0 {
 					names = sel.extras
 				}
-				removed, err := setup.RemoveSkills(root, names, embeddedBodies())
+				removed, err := setup.RemoveSkills(root, names, embeddedSkills())
 				if err != nil {
 					return "", err
 				}

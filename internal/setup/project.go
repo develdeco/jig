@@ -16,11 +16,36 @@ import (
 // so what is jig's is found again after an upgrade, a move or a restore, and
 // nothing else is touched.
 
-// A Skill is a skill to put on disk: the directory it lives in and the text
-// of its SKILL.md as the binary embeds it.
+// A Skill is a skill to put on disk: the directory it lives in, the text of
+// its SKILL.md as the binary embeds it, and the reference files that sit
+// beside it (references/<name>.md).
 type Skill struct {
 	Name string
 	Body []byte
+	Refs []Ref
+}
+
+// A Ref is one reference file of a skill: its name without the .md, and its
+// text as the binary embeds it.
+type Ref struct {
+	Name string
+	Body []byte
+}
+
+// refBody is the text of the reference called ref, nil when the skill has none
+// by that name.
+func (s Skill) refBody(ref string) []byte {
+	for _, r := range s.Refs {
+		if r.Name == ref {
+			return r.Body
+		}
+	}
+	return nil
+}
+
+// refFile is the reference called ref of the skill called name under root.
+func refFile(root, name, ref string) string {
+	return filepath.Join(root, name, "references", ref+".md")
 }
 
 const (
@@ -61,24 +86,44 @@ func skillFile(root, name string) string { return filepath.Join(root, name, "SKI
 // stub whose name is no skill of jig's, it is left alone and its name comes
 // back in kept.
 func InstallSkills(root string, skills []Skill, version string, replace bool) (written, kept []string, err error) {
+	type file struct {
+		path string
+		body []byte
+	}
 	for _, s := range skills {
-		want := StampSkill(s.Body, version)
-		path := skillFile(root, s.Name)
-		have, exists, err := readIfExists(path)
-		if err != nil {
-			return written, kept, err
+		files := []file{{skillFile(root, s.Name), s.Body}}
+		for _, r := range s.Refs {
+			files = append(files, file{refFile(root, s.Name, r.Name), r.Body})
 		}
-		if exists && bytes.Equal(have, want) {
-			continue
+		var wrote, isKept bool
+		for i, f := range files {
+			want := StampSkill(f.body, version)
+			have, exists, err := readIfExists(f.path)
+			if err != nil {
+				return written, kept, err
+			}
+			if exists && bytes.Equal(have, want) {
+				continue
+			}
+			if _, stamped := SkillStamp(have); exists && !stamped && !replace {
+				// The SKILL.md decides whose the skill is; a reference of
+				// the person's own beside a jig skill is left as it is.
+				if i == 0 {
+					isKept = true
+					break
+				}
+				continue
+			}
+			if err := writeFile(f.path, want, 0o644, true); err != nil {
+				return written, kept, err
+			}
+			wrote = true
 		}
-		if _, stamped := SkillStamp(have); exists && !stamped && !replace {
+		if isKept {
 			kept = append(kept, s.Name)
-			continue
+		} else if wrote {
+			written = append(written, s.Name)
 		}
-		if err := writeFile(path, want, 0o644, true); err != nil {
-			return written, kept, err
-		}
-		written = append(written, s.Name)
 	}
 	return written, kept, nil
 }
@@ -87,9 +132,11 @@ func InstallSkills(root string, skills []Skill, version string, replace bool) (w
 // With names it removes those, without it every skill under root that carries
 // jig's stamp. A skill is jig's when it carries the stamp or is, byte for byte,
 // one of embedded (the files `jig skills install` wrote before there were
-// stamps); one that is neither is the person's and stays. An emptied skill
-// directory goes with it.
-func RemoveSkills(root string, names []string, embedded map[string][]byte) (removed []string, err error) {
+// stamps); one that is neither is the person's and stays. The same goes for
+// each file under references/. An emptied references directory and an emptied
+// skill directory go with them; one that still holds a file of the person's
+// stays.
+func RemoveSkills(root string, names []string, embedded map[string]Skill) (removed []string, err error) {
 	if names == nil {
 		entries, err := os.ReadDir(root)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -106,22 +153,51 @@ func RemoveSkills(root string, names []string, embedded map[string][]byte) (remo
 	}
 	for _, name := range names {
 		path := skillFile(root, name)
+		took := false
+		refEntries, err := os.ReadDir(filepath.Join(root, name, "references"))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, err
+		}
+		for _, e := range refEntries {
+			ref, ok := strings.CutSuffix(e.Name(), ".md")
+			if !ok || e.IsDir() {
+				continue
+			}
+			rpath := refFile(root, name, ref)
+			rdata, rexists, err := readIfExists(rpath)
+			if err != nil {
+				return removed, err
+			}
+			if !rexists {
+				continue
+			}
+			_, rstamped := SkillStamp(rdata)
+			if !rstamped && !bytes.Equal(rdata, embedded[name].refBody(ref)) {
+				continue
+			}
+			if err := os.Remove(rpath); err != nil {
+				return removed, err
+			}
+			took = true
+		}
+		_ = os.Remove(filepath.Join(root, name, "references")) // only if nothing else is in it
 		data, exists, err := readIfExists(path)
 		if err != nil {
 			return removed, err
 		}
-		if !exists {
-			continue
-		}
-		_, stamped := SkillStamp(data)
-		if !stamped && !bytes.Equal(data, embedded[name]) {
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return removed, err
+		if exists {
+			_, stamped := SkillStamp(data)
+			if stamped || bytes.Equal(data, embedded[name].Body) {
+				if err := os.Remove(path); err != nil {
+					return removed, err
+				}
+				took = true
+			}
 		}
 		_ = os.Remove(filepath.Dir(path)) // only if nothing else is in it
-		removed = append(removed, name)
+		if took {
+			removed = append(removed, name)
+		}
 	}
 	return removed, nil
 }
@@ -166,6 +242,17 @@ func InspectSkills(root string, skills []Skill, version string) ([]SkillStatus, 
 				st.State = StateInstalled
 			default:
 				st.State = StateStale
+			}
+			// A reference missing or differing makes the skill stale: the
+			// install of a jig from before the reference existed.
+			for _, r := range s.Refs {
+				rdata, rexists, err := readIfExists(refFile(root, s.Name, r.Name))
+				if err != nil {
+					return nil, err
+				}
+				if !rexists || (!bytes.Equal(rdata, StampSkill(r.Body, version)) && !bytes.Equal(rdata, r.Body)) {
+					st.State = StateStale
+				}
 			}
 		}
 		out = append(out, st)
