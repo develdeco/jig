@@ -64,7 +64,7 @@ func TestSkillPrintsAReference(t *testing.T) {
 		t.Fatal("no embedded references to test")
 	}
 	out, code := runMain(t, e, "", "skill", "build", "nonesuch")
-	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "handing-off") {
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "handoff") {
 		t.Errorf("an unknown reference: exit %d\n%s", code, out)
 	}
 	if out, code := runMain(t, e, "", "skill", "build", "../x"); code != 2 {
@@ -269,7 +269,7 @@ func TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons(t *tes
 		t.Fatalf("install: exit %d\n%s", code, out)
 	}
 	refDir := filepath.Join(ie.userHome, ".claude", "skills", "build", "references")
-	ref := filepath.Join(refDir, "handing-off.md")
+	ref := filepath.Join(refDir, "handoff.md")
 	if v, ok := setup.SkillStamp([]byte(readFileOrFail(t, ref))); !ok || v != binaryVersion() {
 		t.Errorf("reference stamp %q, %v", v, ok)
 	}
