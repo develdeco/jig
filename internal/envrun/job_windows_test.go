@@ -4,6 +4,8 @@ package envrun
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,4 +49,31 @@ func TestClosingTheJobEndsTheOracleTree(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the shell outlived its job")
 	}
+}
+
+// TestTimeoutEndsTheOracleTree: a run that outlives its limit has its whole
+// tree ended by the job (the shell's child included), and returns well inside
+// the wait delay that would otherwise end only the shell.
+func TestTimeoutEndsTheOracleTree(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "pid")
+	done := make(chan error, 1)
+	go func() {
+		_, err := ShellOutputEnv(sleeperCommand(file), t.TempDir(), 5*time.Second, nil)
+		done <- err
+	}()
+	pid := waitForPID(t, file)
+	t.Cleanup(func() {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	})
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTimedOut) {
+			t.Errorf("error = %v, want a timeout", err)
+		}
+	case <-time.After(9 * time.Second):
+		t.Fatal("the run did not return soon after its limit")
+	}
+	waitGone(t, pid)
 }
