@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -437,5 +439,24 @@ func TestEndAfterInterrupt(t *testing.T) {
 	case <-oraclesEnded:
 	default:
 		t.Errorf("the running oracles were not ended before exiting")
+	}
+}
+
+// TestStopSignalsLeaveIgnoredSignalsIgnored: a jig started with SIGHUP or
+// SIGINT ignored (nohup, a background job) keeps ignoring it; SIGTERM always
+// stops.
+func TestStopSignalsLeaveIgnoredSignalsIgnored(t *testing.T) {
+	t.Parallel()
+	got := func(ignore ...os.Signal) []os.Signal {
+		return stopSignals(func(s os.Signal) bool { return slices.Contains(ignore, s) })
+	}
+	if want := []os.Signal{syscall.SIGTERM, os.Interrupt, syscall.SIGHUP}; !slices.Equal(got(), want) {
+		t.Errorf("stop signals = %v, want %v", got(), want)
+	}
+	if want := []os.Signal{syscall.SIGTERM, os.Interrupt}; !slices.Equal(got(syscall.SIGHUP), want) {
+		t.Errorf("with SIGHUP ignored = %v, want %v", got(syscall.SIGHUP), want)
+	}
+	if want := []os.Signal{syscall.SIGTERM, syscall.SIGHUP}; !slices.Equal(got(os.Interrupt), want) {
+		t.Errorf("with SIGINT ignored = %v, want %v", got(os.Interrupt), want)
 	}
 }

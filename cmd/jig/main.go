@@ -37,11 +37,26 @@ func main() {
 	// process. A SIGKILL cannot be handled: on Unix it leaves a running oracle
 	// behind (see `jig gate --help`); on Windows the oracle's job object ends
 	// it with jig.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(context.Background(), stopSignals(signal.Ignored)...)
 	go endAfterInterrupt(ctx, stop, interruptGrace, envrun.EndAll, os.Exit)
 	e := processEnv()
 	e.ctx = ctx
 	os.Exit(run(e, os.Args[1:], os.Stdout, os.Stdin))
+}
+
+// stopSignals are the signals that stop jig: SIGTERM always, and SIGINT and
+// SIGHUP unless the process was started ignoring them (nohup ignores SIGHUP,
+// a background job of a non-interactive shell ignores SIGINT). Notifying a
+// signal installs a handler for it and so ends its being ignored; jig leaves
+// an ignored signal as it found it, and a run protected that way keeps going.
+func stopSignals(ignored func(os.Signal) bool) []os.Signal {
+	sigs := []os.Signal{syscall.SIGTERM}
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGHUP} {
+		if !ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	return sigs
 }
 
 const (
