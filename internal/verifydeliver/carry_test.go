@@ -324,3 +324,41 @@ func TestGateCarriesATwoRepoRoundWhenTheTargetMovedInOne(t *testing.T) {
 		t.Errorf("reviewed_sha = %v, want fixture-repo unchanged (%s) and second-repo the merge %s", rep.ReviewedSHA, first.ReviewedSHA["fixture-repo"], merged)
 	}
 }
+
+// TestGateCarriesARoundWhoseStackedRepoMergedNothing: a two-repo ticket stacked
+// on a parent in one repo, whose parent branch is not on origin, still carries
+// over when the target moved and merged in the other repo only. The repo that
+// merged nothing has no merge ref to resolve.
+func TestGateCarriesARoundWhoseStackedRepoMergedNothing(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTwoRepos(t)
+	d.Stack = stackedOnJIG0
+	first := readReport(t, d, fx.Ticket, 1)
+
+	run(t, fx.SecondRepoDir, "checkout", "main")
+	writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
+	run(t, fx.SecondRepoDir, "push", "origin", "main")
+	run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
+	run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
+	merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried == nil || p.Round != 2 || p.Carried.CarriedFrom != 1 {
+		t.Fatalf("Prepared = %+v, want round 2 carried over from round 1", p)
+	}
+	md, err := os.ReadFile(filepath.Join(gateRoundDir(d.Store, fx.Ticket, 2), "findings.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"fixture-repo: head " + first.ReviewedSHA["fixture-repo"] + " is unchanged since round 1",
+		"second-repo: head " + merged + " merges origin/main",
+	} {
+		if !strings.Contains(string(md), want) {
+			t.Errorf("findings.md = %q, want it to contain %q", md, want)
+		}
+	}
+}
