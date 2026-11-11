@@ -17,11 +17,24 @@ func TestWaitRowsSayWhichRunWaitsForTheSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer holder()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	waiting := make(chan struct{})
-	go func() { _, _ = slot.Take(ctx, root, "demo", 1, slot.Who("DEMO-2", ""), func() { close(waiting) }) }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Whatever the waiter takes, it lets go: a slot taken between the
+		// cancel and the holder's release must not outlive the test.
+		if rel, err := slot.Take(ctx, root, "demo", 1, slot.Who("DEMO-2", ""), func() { close(waiting) }); err == nil {
+			rel()
+		}
+	}()
+	// The waiter returns while the slot is still held, so it can only see the
+	// cancel, never take the slot.
+	defer func() {
+		cancel()
+		<-done
+		holder()
+	}()
 	<-waiting
 
 	lines := []journal.Line{{Event: journal.EventSlotWait}}
