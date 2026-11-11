@@ -343,6 +343,10 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return "jig started a builder"
 	case journal.EventVerifyPending:
 		return "verifying " + commitWords(t, l.Commit)
+	case journal.EventSlotWait:
+		return firstOf(l.Summary, "waiting for the suite slot")
+	case journal.EventSlotTaken:
+		return "took the suite slot"
 	case journal.EventOracle:
 		cmd := "its oracle"
 		if l.Command != "" {

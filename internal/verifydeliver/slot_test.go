@@ -17,7 +17,7 @@ import (
 func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 	root := t.TempDir()
 	hold := func(name, cmd string) (func(), error) {
-		return slot.Hold(context.Background(), root, "proj", 1, func(string) error { return nil })
+		return slot.Hold(context.Background(), root, "proj", 1, "", func(string, string) error { return nil })
 	}
 	suite := func(heavy []string, wantOverlap bool) int32 {
 		man := manifest.Manifest{

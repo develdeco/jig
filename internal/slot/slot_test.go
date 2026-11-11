@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/develdeco/jig/internal/journal"
 	"os"
 	"os/exec"
 	"testing"
@@ -12,7 +13,7 @@ import (
 
 func take(t *testing.T, root string, n int) func() {
 	t.Helper()
-	rel, err := Take(context.Background(), root, "p", n, nil)
+	rel, err := Take(context.Background(), root, "p", n, "", nil)
 	if err != nil {
 		t.Fatalf("Take: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestTwoHoldersOfOneSlotAreOrdered(t *testing.T) {
 	waits := make(chan struct{}, 4)
 	got := make(chan func(), 1)
 	go func() {
-		rel, err := Take(context.Background(), root, "p", 1, func() { waits <- struct{}{} })
+		rel, err := Take(context.Background(), root, "p", 1, "", func() { waits <- struct{}{} })
 		if err != nil {
 			t.Error(err)
 		}
@@ -63,7 +64,7 @@ func TestTwoSlotsLetTwoHold(t *testing.T) {
 	b := take(t, root, 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := Take(ctx, root, "p", 2, nil); err == nil {
+	if _, err := Take(ctx, root, "p", 2, "", nil); err == nil {
 		t.Fatal("a third holder took a slot of two")
 	}
 	a()
@@ -77,7 +78,7 @@ func TestTwoSlotsLetTwoHold(t *testing.T) {
 func TestAReleasedSlotIsFree(t *testing.T) {
 	root := t.TempDir()
 	rel := take(t, root, 1)
-	other, err := Take(context.Background(), root, "q", 1, nil)
+	other, err := Take(context.Background(), root, "q", 1, "", nil)
 	if err != nil {
 		t.Fatalf("another project's slot: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestCancelEndsTheWait(t *testing.T) {
 	defer take(t, root, 1)()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { _, err := Take(ctx, root, "p", 1, nil); done <- err }()
+	go func() { _, err := Take(ctx, root, "p", 1, "", nil); done <- err }()
 	time.Sleep(150 * time.Millisecond)
 	cancel()
 	select {
@@ -109,11 +110,11 @@ func TestCancelEndsTheWait(t *testing.T) {
 // TestBadArgumentsAreRefused: no slots, or a project name that is a path.
 func TestBadArgumentsAreRefused(t *testing.T) {
 	root := t.TempDir()
-	if _, err := Take(context.Background(), root, "p", 0, nil); err == nil {
+	if _, err := Take(context.Background(), root, "p", 0, "", nil); err == nil {
 		t.Error("zero slots accepted")
 	}
 	for _, name := range []string{"", "..", "a/b", `a\b`} {
-		if _, err := Take(context.Background(), root, name, 1, nil); err == nil {
+		if _, err := Take(context.Background(), root, name, 1, "", nil); err == nil {
 			t.Errorf("project name %q accepted", name)
 		}
 	}
@@ -123,7 +124,7 @@ func TestBadArgumentsAreRefused(t *testing.T) {
 // outright leaves it free for the next taker.
 func TestAKilledHolderFreesTheSlot(t *testing.T) {
 	if root := os.Getenv("SLOT_TEST_HOLD"); root != "" {
-		if _, err := Take(context.Background(), root, "p", 1, nil); err != nil {
+		if _, err := Take(context.Background(), root, "p", 1, "", nil); err != nil {
 			os.Exit(2)
 		}
 		fmt.Println("held")
@@ -146,7 +147,7 @@ func TestAKilledHolderFreesTheSlot(t *testing.T) {
 		t.Fatalf("holder said %q, want held", line)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	if _, err := Take(ctx, root, "p", 1, nil); err == nil {
+	if _, err := Take(ctx, root, "p", 1, "", nil); err == nil {
 		t.Fatal("took the slot while a live process held it")
 	}
 	cancel()
@@ -154,9 +155,84 @@ func TestAKilledHolderFreesTheSlot(t *testing.T) {
 	_ = cmd.Wait()
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	rel, err := Take(ctx, root, "p", 1, nil)
+	rel, err := Take(ctx, root, "p", 1, "", nil)
 	if err != nil {
 		t.Fatalf("the killed holder's slot stayed taken: %v", err)
 	}
 	rel()
+}
+
+// TestReadSaysWhoHoldsAndWhoWaits: a held slot shows its holder's name, a
+// live waiter shows too, and both vanish when the holder lets go and the
+// waiter takes the slot.
+func TestReadSaysWhoHoldsAndWhoWaits(t *testing.T) {
+	root := t.TempDir()
+	if s, err := Read(root, "p"); err != nil || len(s.Holders)+len(s.Waiters) != 0 {
+		t.Fatalf("Read of an unused project = %+v, %v", s, err)
+	}
+	rel, err := Take(context.Background(), root, "p", 1, Who("T-1", "a"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := make(chan struct{})
+	got := make(chan func(), 1)
+	go func() {
+		r, err := Take(context.Background(), root, "p", 1, Who("T-2", ""), func() { close(waiting) })
+		if err != nil {
+			t.Error(err)
+		}
+		got <- r
+	}()
+	<-waiting
+	s, err := Read(root, "p")
+	if err != nil || len(s.Holders) != 1 || s.Holders[0] != "T-1/a" || len(s.Waiters) != 1 || s.Waiters[0] != "T-2/gate" {
+		t.Fatalf("Read = %+v, %v; want T-1/a holding and T-2/gate waiting", s, err)
+	}
+	rel()
+	r2 := <-got
+	s, err = Read(root, "p")
+	if err != nil || len(s.Holders) != 1 || s.Holders[0] != "T-2/gate" || len(s.Waiters) != 0 {
+		t.Fatalf("Read after the hand-over = %+v, %v", s, err)
+	}
+	r2()
+	if s, _ := Read(root, "p"); len(s.Holders)+len(s.Waiters) != 0 {
+		t.Fatalf("Read after every release = %+v", s)
+	}
+}
+
+// TestWaitsAreTheJournalsOpenWaitsThatStillWait: a slot-wait line with a live
+// waiter behind it is a wait, said in the one line; once slot-taken follows,
+// or when the waiter is gone, it is not.
+func TestWaitsAreTheJournalsOpenWaitsThatStillWait(t *testing.T) {
+	root := t.TempDir()
+	holder, err := Take(context.Background(), root, "p", 1, Who("T-1", "x"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder()
+	waiting := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = Take(ctx, root, "p", 1, Who("T-2", "a"), func() { close(waiting) })
+	}()
+	<-waiting
+	wait := []journal.Line{{Event: journal.EventSlotWait, Slice: "a"}}
+	got, err := Waits(root, "p", "T-2", wait)
+	want := "waiting for the suite slot: T-1/x is running its suite (1 waiting)"
+	if err != nil || len(got) != 1 || got[0].Slice != "a" || got[0].Line != want {
+		t.Fatalf("Waits = %+v, %v; want slice a with %q", got, err, want)
+	}
+	if got, _ := Waits(root, "p", "T-2", append(wait, journal.Line{Event: journal.EventSlotTaken, Slice: "a"})); len(got) != 0 {
+		t.Errorf("a wait followed by slot-taken still shows: %+v", got)
+	}
+	if got, _ := Waits(root, "p", "T-2", []journal.Line{{Event: journal.EventSlotWait, Slice: "b"}}); len(got) != 0 {
+		t.Errorf("a wait nobody is in shows: %+v", got)
+	}
+	cancel()
+	<-done
+	if got, _ := Waits(root, "p", "T-2", wait); len(got) != 0 {
+		t.Errorf("a waiter that gave up still shows: %+v", got)
+	}
 }

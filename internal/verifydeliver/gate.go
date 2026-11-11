@@ -730,8 +730,8 @@ func (d Deps) slotHolder(ticket string) slotHolder {
 		return nil
 	}
 	return func(name, cmd string) (func(), error) {
-		return slot.Hold(context.Background(), d.Home, d.Cfg.Name, d.Cfg.Slots(), func(event string) error {
-			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Source: "gate"})
+		return slot.Hold(context.Background(), d.Home, d.Cfg.Name, d.Cfg.Slots(), slot.Who(ticket, ""), func(event, summary string) error {
+			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Summary: summary, Source: "gate"})
 		})
 	}
 }
