@@ -391,3 +391,44 @@ func TestAdviceJudgesAPublishedTicketByItsLatestPullRequest(t *testing.T) {
 		t.Errorf("pairs = %v, want %v: T-2's latest pull request is merged, T-3's is open", got, want)
 	}
 }
+
+// TestStoreOverlapsMarkAnUntriedPairUntested: two open tickets' branches share
+// a file but git cannot try their merge, so the row says untested, never clean.
+func TestStoreOverlapsMarkAnUntriedPairUntested(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	real := testPairWith
+	testPairWith = func(dir, a, b string) (string, []string) {
+		// The merge fails as a merge-tree call that errors does.
+		return real(dir, a, "no-such-ref")
+	}
+	t.Cleanup(func() { testPairWith = real })
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].File != "f.txt" {
+		t.Fatalf("rows = %+v, want f.txt only", rows)
+	}
+	if rows[0].Conflict != pairUntested || len(rows[0].Files) != 0 {
+		t.Errorf("row = %+v, want untested with no files: git cannot try the merge", rows[0])
+	}
+}
+
+// TestStoreOverlapsLeaveOutTicketsThatAreNotOpen: findOverlaps given an open
+// filter leaves out the branches of a ticket the filter rejects, so a file only
+// that ticket shares with another has no row.
+func TestStoreOverlapsLeaveOutTicketsThatAreNotOpen(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2", "T-3")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	r.branch("T-3-c", topChangedNew)
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, func(id string) bool { return id != "T-3" })
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Tickets, []string{"T-1", "T-2"}) {
+		t.Fatalf("rows = %+v, want one row for T-1 and T-2 alone", rows)
+	}
+	rows = findOverlaps(r.st, r.cfg, r.mp, func(id string) bool { return id == "T-1" })
+	if len(rows) != 0 {
+		t.Errorf("rows = %+v, want none: one open ticket shares with nobody", rows)
+	}
+}
