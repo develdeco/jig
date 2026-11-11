@@ -138,3 +138,16 @@ func TestGateHelpSaysItReadsLocalSessions(t *testing.T) {
 		}
 	}
 }
+
+// TestGateHelpStatesWhatEndsItsOracles: a gate that is stopped ends the
+// oracles it runs, except on Unix when it is killed with SIGKILL, and its
+// help says so.
+func TestGateHelpStatesWhatEndsItsOracles(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(flagsBlockFor("gate"), "|")
+	for _, want := range []string{"SIGTERM", "SIGKILL"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("jig gate's help does not mention %q: %s", want, got)
+		}
+	}
+}

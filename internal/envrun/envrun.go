@@ -147,7 +147,8 @@ next:
 // stderr, which a failed oracle run hands back to the session that must fix
 // it. A run longer than limit is killed and reported as failed, and Wait
 // stops waiting on its pipes shortly after, so a hung command cannot hold
-// the caller. The kill ends the shell's whole process tree (KillTree).
+// the caller. The kill ends the shell's whole process tree, and so does the
+// end of the jig process that ran it (live.go).
 func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 	return ShellOutputEnv(cmd, dir, limit, nil)
 }
@@ -188,10 +189,16 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 	if err != nil {
 		return "", err
 	}
-	NewProcessGroup(c)
-	c.Cancel = func() error { return KillTree(c) }
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	g := newGuard(c)
 	c.WaitDelay = 10 * time.Second
-	out, err := c.CombinedOutput()
+	err = g.start()
+	if err == nil {
+		err = c.Wait()
+		g.release()
+	}
+	out := buf.Bytes()
 	if ctx.Err() != nil {
 		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
 	}

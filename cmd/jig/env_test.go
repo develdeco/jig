@@ -411,7 +411,8 @@ func TestEndAfterInterrupt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	exited := make(chan int, 1)
-	go endAfterInterrupt(ctx, func() { close(stopped) }, 10*time.Millisecond, func(code int) { exited <- code })
+	oraclesEnded := make(chan struct{})
+	go endAfterInterrupt(ctx, func() { close(stopped) }, 10*time.Millisecond, func() { close(oraclesEnded) }, func(code int) { exited <- code })
 
 	select {
 	case code := <-exited:
@@ -431,5 +432,10 @@ func TestEndAfterInterrupt(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Errorf("stop was not called before exiting")
+	}
+	select {
+	case <-oraclesEnded:
+	default:
+		t.Errorf("the running oracles were not ended before exiting")
 	}
 }
