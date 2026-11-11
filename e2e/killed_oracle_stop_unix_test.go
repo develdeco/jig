@@ -13,6 +13,7 @@ import (
 // leader's parent, so jig does not cover it (the limit its gate help states);
 // that case is listed to say so, and skipped.
 var stopCases = []stopCase{
+	{name: "SIGINT", stop: func(p *os.Process) error { return p.Signal(os.Interrupt) }},
 	{name: "SIGTERM", stop: func(p *os.Process) error { return p.Signal(syscall.SIGTERM) }},
 	{name: "SIGHUP", stop: func(p *os.Process) error { return p.Signal(syscall.SIGHUP) }},
 	{name: "SIGKILL", skip: "a SIGKILL of jig cannot be caught, and the oracle's process group outlives its parent: not covered on Unix (see jig gate --help)"},
