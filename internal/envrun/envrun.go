@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/develdeco/jig/internal/manifest"
@@ -158,6 +159,24 @@ func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
 // text, which embeds the command and so can hold any words.
 var ErrTimedOut = errors.New("did not finish within its limit")
 
+// ErrStopped is what a command ended because the jig process running it was
+// stopped (EndAll) matches under errors.Is. It is a run that reached no
+// verdict, so a caller must not read it as the command failing.
+var ErrStopped = errors.New("was ended because jig was stopped")
+
+// StoppedError is the error of a command ended by EndAll.
+type StoppedError struct{ Cmd string }
+
+func (e *StoppedError) Error() string {
+	return fmt.Sprintf("shell %q: %s", e.Cmd, "was ended because jig was stopped")
+}
+
+// Is reports a StoppedError as ErrStopped.
+func (e *StoppedError) Is(target error) bool { return target == ErrStopped }
+
+// stopFlag records that EndAll ended a run; the guards embed it.
+type stopFlag struct{ stopped atomic.Bool }
+
 // TimedOutError is the error of a command killed for outliving Limit.
 type TimedOutError struct {
 	Cmd   string
@@ -199,6 +218,9 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 		g.release()
 	}
 	out := buf.Bytes()
+	if g.stopped.Load() {
+		return string(out), &StoppedError{Cmd: cmd}
+	}
 	if ctx.Err() != nil {
 		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
 	}

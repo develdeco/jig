@@ -394,10 +394,7 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 		// The reused pass is of an earlier tree: the light oracle runs on this
 		// head, so it is never admitted with nothing run on it.
 		if err := runOracle(d.oracle(), man.Light.Oracle, dir); err != nil {
-			return nil, &axi.Error{
-				Msg:  fmt.Sprintf("the light oracle failed on the head: %v", err),
-				Code: "GATE_ORACLE_FAILED",
-			}
+			return nil, oracleError(fmt.Sprintf("the light oracle failed on the head: %v", err), err)
 		}
 	}
 	if coversSuite(man, reused) {
@@ -659,10 +656,7 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 			}
 			start := time.Now()
 			if err := runOracle(run, cmd, dir); err != nil {
-				return nil, &axi.Error{
-					Msg:  fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err),
-					Code: "GATE_ORACLE_FAILED",
-				}
+				return nil, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
 			}
 			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start))})
 		}
@@ -733,6 +727,16 @@ func runOracle(run oracleFunc, cmd, dir string) error {
 		return err
 	}
 	return fmt.Errorf("%w\n%s", err, out)
+}
+
+// oracleError is the gate's refusal for an oracle run that err ended: a failed
+// oracle, or, when jig was stopped while it ran (envrun.ErrStopped), a run that
+// reached no verdict and says so.
+func oracleError(failed string, err error) *axi.Error {
+	if errors.Is(err, envrun.ErrStopped) {
+		return &axi.Error{Msg: "the gate was stopped while an oracle ran; the oracle was ended and gave no verdict: " + err.Error(), Code: "GATE_STOPPED"}
+	}
+	return &axi.Error{Msg: failed, Code: "GATE_ORACLE_FAILED"}
 }
 
 // RunOracleSuite runs every manifest oracle across every manifest

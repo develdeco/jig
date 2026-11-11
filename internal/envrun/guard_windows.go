@@ -16,6 +16,7 @@ import (
 // terminated. With no job (it could not be made, or the shell could not be
 // put in it) the tree is ended by taskkill (KillTree) on a timeout, as it was.
 type guard struct {
+	stopFlag
 	c      *exec.Cmd
 	job    windows.Handle // 0: no job, KillTree is the end
 	forget func()
@@ -83,6 +84,7 @@ func (g *guard) start() error {
 		resumeProcess(uint32(g.c.Process.Pid))
 	}
 	g.forget = register(func() {
+		g.stopped.Store(true)
 		if g.job != 0 {
 			_ = windows.TerminateJobObject(g.job, 1)
 		} else {

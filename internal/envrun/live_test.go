@@ -65,8 +65,11 @@ func TestEndLiveEndsARunningOracle(t *testing.T) {
 	endLive(false)
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Error("an oracle that was ended reported success")
+		if !errors.Is(err, ErrStopped) {
+			t.Errorf("an oracle that was ended reported %v, want ErrStopped", err)
+		}
+		if errors.Is(err, ErrTimedOut) {
+			t.Error("an oracle that was ended reported a timeout")
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("the run did not return after its oracle was ended")

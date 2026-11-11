@@ -497,7 +497,13 @@ func (x *run) execute() (why string, err error) {
 		}()
 	}
 	light, isLight := x.lightFor(m, cmd)
-	return "", x.runOracle(m, cmd, light, isLight)
+	if err := x.runOracle(m, cmd, light, isLight); errors.Is(err, envrun.ErrStopped) {
+		// jig was stopped mid-run: no verdict, and never the commit's failure.
+		return "the verification was stopped before the oracle finished", nil
+	} else if err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // checkCheckout holds the fresh checkout to what an oracle run needs of it to
@@ -638,6 +644,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		x.logf("the delta from the last pass of %q is light: running %q in its place", cmd, runs)
 	}
 	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
+	if errors.Is(oerr, envrun.ErrStopped) {
+		return oerr
+	}
 	// Rounded up, so every run records at least a second and 0 keeps meaning
 	// "never ran".
 	seconds := int((d.now().Sub(started) + time.Second - 1) / time.Second)

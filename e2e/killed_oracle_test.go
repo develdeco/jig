@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // stopCase is one way to end a running jig process: stop does it, skip (when
@@ -100,6 +101,13 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 				case <-p.done:
 				case <-time.After(30 * time.Second):
 					t.Fatalf("jig %s was still running 30s after %s", how, sc.name)
+				}
+				// The stop is no verdict on the commit: the journal holds no
+				// failed oracle line for it, whatever the stopped jig wrote.
+				for _, l := range readJournal(t, fx, fx.Ticket) {
+					if l.Event == journal.EventOracle && l.Outcome == "fail" {
+						t.Errorf("the journal holds a failed oracle line after jig %s was stopped: %+v", how, l)
+					}
 				}
 				for _, pid := range oraclePIDs {
 					pid := pid

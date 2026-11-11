@@ -8,6 +8,7 @@ import "os/exec"
 // the process group, ended by KillTree on a timeout and by EndAll when jig is
 // stopped.
 type guard struct {
+	stopFlag
 	c      *exec.Cmd
 	forget func()
 }
@@ -25,7 +26,7 @@ func (g *guard) start() error {
 	if err := g.c.Start(); err != nil {
 		return err
 	}
-	g.forget = register(func() { _ = KillTree(g.c) })
+	g.forget = register(func() { g.stopped.Store(true); _ = KillTree(g.c) })
 	return nil
 }
 
