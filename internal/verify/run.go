@@ -654,13 +654,18 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	// bound (set when the command starts) and its recorded seconds count from
 	// the slot. The light oracle of a light delta takes none.
 	if !isLight && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
-		release, err := slot.Hold(context.Background(), d.JigHome, d.Project, max(d.Slots, 1), slot.Who(x.r.Ticket, x.r.Slice), func(event, summary string) error {
+		stopCtx, endStopCtx := envrun.StopContext(context.Background())
+		defer endStopCtx()
+		release, err := slot.Hold(stopCtx, d.JigHome, d.Project, max(d.Slots, 1), slot.Who(x.r.Ticket, x.r.Slice), func(event, summary string) error {
 			if event == journal.EventSlotWait {
 				x.logf("%s", summary)
 			}
 			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
 		})
 		if err != nil {
+			if stopCtx.Err() != nil {
+				return envrun.Stopped("the wait for the suite slot")
+			}
 			return err
 		}
 		defer release()

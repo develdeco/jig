@@ -55,6 +55,11 @@ func stepOfLine(l events.Envelope) int {
 		return stepPublish
 	case journal.EventSpend:
 		return -1
+	case journal.EventSlotWait, journal.EventSlotTaken:
+		// A wait with no slice is the gate's, for its round's oracles.
+		if l.Slice == "" {
+			return stepReview
+		}
 	}
 	return stepBuild
 }
@@ -235,6 +240,11 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "slices"
 	case journal.EventGateOpen, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return "round:" + strconv.Itoa(t.roundOf(l))
+	case journal.EventSlotWait, journal.EventSlotTaken:
+		if l.Slice == "" {
+			return "round:" + strconv.Itoa(t.roundOf(l))
+		}
+		return ""
 	case journal.EventTriage:
 		return "asks"
 	case journal.EventFixSlice:

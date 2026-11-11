@@ -664,6 +664,9 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 			if hold != nil && man.IsHeavy(name) {
 				rel, err := hold(name, cmd)
 				if err != nil {
+					if errors.Is(err, envrun.ErrStopped) {
+						return nil, oracleError("", err)
+					}
 					return nil, err
 				}
 				release = rel
@@ -730,9 +733,15 @@ func (d Deps) slotHolder(ticket string) slotHolder {
 		return nil
 	}
 	return func(name, cmd string) (func(), error) {
-		return slot.Hold(context.Background(), d.Home, d.Cfg.Name, d.Cfg.Slots(), slot.Who(ticket, ""), func(event, summary string) error {
+		stopCtx, end := envrun.StopContext(context.Background())
+		defer end()
+		rel, err := slot.Hold(stopCtx, d.Home, d.Cfg.Name, d.Cfg.Slots(), slot.Who(ticket, ""), func(event, summary string) error {
 			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Summary: summary, Source: "gate"})
 		})
+		if err != nil && stopCtx.Err() != nil {
+			return nil, envrun.Stopped("the wait for the suite slot")
+		}
+		return rel, err
 	}
 }
 

@@ -2,11 +2,14 @@ package verifydeliver
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/slot"
 )
@@ -72,5 +75,93 @@ func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 func TestTheGateHoldsNoSlotWithoutAProject(t *testing.T) {
 	if (Deps{Home: t.TempDir()}).slotHolder("T-1") != nil {
 		t.Error("a gate with no project holds a slot")
+	}
+}
+
+// TestTheGatesSuiteWaitsForTheSlotAndSaysSo: runGateOracles with a project
+// whose manifest marks the oracle heavy waits while another run holds the
+// project's slot, journals the gate's slot-wait (no slice, the waiting line)
+// and, once the slot is free, runs the oracle and journals slot-taken; while
+// it waits slot.Waits reports the gate round.
+func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	if d.Cfg.Name == "" {
+		t.Fatal("test setup: the fixture project has no name")
+	}
+	var ran atomic.Bool
+	d.Oracle = func(cmd, dir string) (string, error) {
+		ran.Store(true)
+		return "", nil
+	}
+	release, err := slot.Take(context.Background(), d.Home, d.Cfg.Name, 1, slot.Who("OTHER", "x"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	man := manifest.Manifest{
+		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+		Oracles:    map[string]string{"test": "echo suite"},
+		Heavy:      []string{"test"},
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := runGateOracles(d, fx.Ticket, "fixture-repo", fx.RepoDir, man, nil)
+		done <- err
+	}()
+
+	count := func(event string) int {
+		lines, err := journal.Read(d.Store, fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, l := range lines {
+			if l.Event == event {
+				n++
+			}
+		}
+		return n
+	}
+	for deadline := time.Now().Add(60 * time.Second); count(journal.EventSlotWait) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the gate never journaled that it waits")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if ran.Load() {
+		t.Fatal("the gate's oracle ran while another run held the slot")
+	}
+	lines, _ := journal.Read(d.Store, fx.Ticket)
+	waits, err := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines)
+	if err != nil || len(waits) != 1 || waits[0].Slice != "" || !strings.Contains(waits[0].Line, "OTHER/x is running its suite") {
+		t.Fatalf("Waits = %+v, %v; want the gate round behind OTHER/x", waits, err)
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatalf("runGateOracles: %v", err)
+	}
+	if !ran.Load() {
+		t.Error("the gate's oracle never ran after the slot was free")
+	}
+	lines, _ = journal.Read(d.Store, fx.Ticket)
+	var wait, taken *journal.Line
+	for i, l := range lines {
+		switch l.Event {
+		case journal.EventSlotWait:
+			wait = &lines[i]
+		case journal.EventSlotTaken:
+			taken = &lines[i]
+		}
+	}
+	if wait == nil || wait.Slice != "" || wait.Source != "gate" || wait.Oracle != "test" || !strings.HasPrefix(wait.Summary, "waiting for the suite slot: OTHER/x") {
+		t.Errorf("slot-wait line = %+v", wait)
+	}
+	if taken == nil || taken.Slice != "" || taken.Source != "gate" {
+		t.Errorf("slot-taken line = %+v", taken)
+	}
+	if got, _ := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines); len(got) != 0 {
+		t.Errorf("the gate still shows as waiting after it took the slot: %+v", got)
 	}
 }

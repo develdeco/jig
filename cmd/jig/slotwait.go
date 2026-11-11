@@ -46,7 +46,7 @@ func waitRows(waits []slot.Wait) [][]string {
 // slice's verification or the ticket's gate round waits for the suite slot.
 //
 //	waiting[1]{slice,line}:
-//	  a,waiting for the suite slot: GATE-23/gate is running its suite (1 waiting)
+//	  a,waiting for the suite slot: T-1/gate is running its suite (1 waiting)
 func waitingBlocks(st *store.Store, ticket string) ([]string, error) {
 	cfg, err := project.LoadStoreConfig(st.Root)
 	if err != nil {
