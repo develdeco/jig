@@ -10,6 +10,8 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // targetMoves lands a commit on the target (origin's main, which the gate's
@@ -257,5 +259,68 @@ func TestGatePrepareHoldsAStackedTicketToItsParentsBranch(t *testing.T) {
 	}
 	if p.Carried != nil || p.Round != 3 {
 		t.Fatalf("Prepared = %+v, want an open round 3: a merge of main is read for a ticket stacked on a parent", p)
+	}
+}
+
+// reviewedInTwoRepos is a two-repo ticket taken through one clean round: the
+// ticket's branch is cut in both clones with a scenario patch each, every
+// slice is green, and round 1 reviewed both heads.
+func reviewedInTwoRepos(t *testing.T) (*fixture.Fixture, Deps, ReviewResult) {
+	t.Helper()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir(), SecondRepo: true})
+	d := newDeps(t, fx)
+	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir, "second-repo": fx.SecondRepoDir}}
+	branch := ticketBranch(fx.Ticket)
+	run(t, fx.RepoDir, "checkout", "-b", branch)
+	applyScenarioPatch(t, fx, fx.RepoDir, fx.Ticket, "a", 1)
+	run(t, fx.SecondRepoDir, "checkout", "-b", branch)
+	applyScenarioPatch(t, fx, fx.SecondRepoDir, fx.Ticket, "e", 1)
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		if err := d.Store.WriteSliceState(fx.Ticket, id, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatalf("write slice state %s: %v", id, err)
+		}
+	}
+	if err := d.Store.Push(fx.Ticket + ": every slice green"); err != nil {
+		t.Fatalf("push the slice states: %v", err)
+	}
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare round 1: %v", err)
+	}
+	res := cleanReport(p)
+	if _, err := GateFinish(d, p, res, Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish round 1: %v", err)
+	}
+	return fx, d, res
+}
+
+// TestGateCarriesATwoRepoRoundWhenTheTargetMovedInOne: the target moves in one
+// repo only and merges cleanly there; the round carries over, naming the head
+// of each repo.
+func TestGateCarriesATwoRepoRoundWhenTheTargetMovedInOne(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTwoRepos(t)
+	first := readReport(t, d, fx.Ticket, 1)
+	if first.ReviewedSHA["fixture-repo"] == "" || first.ReviewedSHA["second-repo"] == "" {
+		t.Fatalf("round 1 reviewed_sha = %v, want both repos", first.ReviewedSHA)
+	}
+
+	run(t, fx.SecondRepoDir, "checkout", "main")
+	writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
+	run(t, fx.SecondRepoDir, "push", "origin", "main")
+	run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
+	run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
+	merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried == nil || p.Round != 2 || p.Carried.CarriedFrom != 1 {
+		t.Fatalf("Prepared = %+v, want round 2 carried over from round 1", p)
+	}
+	rep := readReport(t, d, fx.Ticket, 2)
+	if rep.ReviewedSHA["fixture-repo"] != first.ReviewedSHA["fixture-repo"] || rep.ReviewedSHA["second-repo"] != merged {
+		t.Errorf("reviewed_sha = %v, want fixture-repo unchanged (%s) and second-repo the merge %s", rep.ReviewedSHA, first.ReviewedSHA["fixture-repo"], merged)
 	}
 }
