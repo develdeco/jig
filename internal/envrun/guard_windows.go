@@ -4,6 +4,7 @@ package envrun
 
 import (
 	"os/exec"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -18,8 +19,15 @@ import (
 type guard struct {
 	stopFlag
 	c      *exec.Cmd
-	job    windows.Handle // 0: no job, KillTree is the end
 	forget func()
+
+	// mu guards job and done: the end functions run from jig's signal
+	// handler while the run may be finishing, and release closes the job.
+	// An end after release does nothing: its handle and pid are no longer
+	// the run's.
+	mu   sync.Mutex
+	job  windows.Handle // 0: no job, KillTree is the end
+	done bool
 }
 
 // newGuard prepares c, before it starts, to start suspended and be put in a
@@ -30,13 +38,22 @@ func newGuard(c *exec.Cmd) *guard {
 		g.job = job
 		c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	}
-	c.Cancel = func() error {
-		if g.job != 0 {
-			return windows.TerminateJobObject(g.job, 1)
-		}
-		return KillTree(c)
-	}
+	c.Cancel = g.end
 	return g
+}
+
+// end ends the run's tree: the job's processes, or with no job the tree under
+// the shell. After release it does nothing.
+func (g *guard) end() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.done {
+		return nil
+	}
+	if g.job != 0 {
+		return windows.TerminateJobObject(g.job, 1)
+	}
+	return KillTree(g.c)
 }
 
 // newKillOnCloseJob makes a job object that terminates its processes when its
@@ -69,11 +86,13 @@ func setKillOnClose(job windows.Handle, kill bool) error {
 // start a child that escapes the job. A process that cannot be put in the job
 // runs without one.
 func (g *guard) start() error {
+	g.mu.Lock()
 	if err := g.c.Start(); err != nil {
 		if g.job != 0 {
 			windows.CloseHandle(g.job)
 			g.job = 0
 		}
+		g.mu.Unlock()
 		return err
 	}
 	if g.job != 0 {
@@ -83,13 +102,10 @@ func (g *guard) start() error {
 		}
 		resumeProcess(uint32(g.c.Process.Pid))
 	}
+	g.mu.Unlock()
 	g.forget = register(func() {
 		g.stopped.Store(true)
-		if g.job != 0 {
-			_ = windows.TerminateJobObject(g.job, 1)
-		} else {
-			_ = KillTree(g.c)
-		}
+		_ = g.end()
 	})
 	return nil
 }
@@ -132,6 +148,9 @@ func (g *guard) release() {
 	if g.forget != nil {
 		g.forget()
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.done = true
 	if g.job != 0 {
 		_ = setKillOnClose(g.job, false)
 		windows.CloseHandle(g.job)
