@@ -155,6 +155,37 @@ func embeddedBody(name string) ([]byte, bool) {
 	return data, err == nil
 }
 
+var refNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// embeddedRefs lists the reference names of the embedded skill called name
+// (skills/<name>/references/<ref>.md), sorted; none for a skill without any.
+func embeddedRefs(name string) []string {
+	if !skillNameRe.MatchString(name) {
+		return nil
+	}
+	entries, err := skillspkg.FS.ReadDir(name + "/references")
+	if err != nil {
+		return nil
+	}
+	var refs []string
+	for _, e := range entries {
+		if r, ok := strings.CutSuffix(e.Name(), ".md"); ok && !e.IsDir() {
+			refs = append(refs, r)
+		}
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+// embeddedRef is the text of reference ref of the embedded skill called name.
+func embeddedRef(name, ref string) ([]byte, bool) {
+	if !skillNameRe.MatchString(name) || !refNameRe.MatchString(ref) {
+		return nil, false
+	}
+	data, err := skillspkg.FS.ReadFile(name + "/references/" + ref + ".md")
+	return data, err == nil
+}
+
 // embeddedBodies maps every embedded skill to its text, for telling the files
 // `jig skills install` wrote from a person's own.
 func embeddedBodies() map[string][]byte {

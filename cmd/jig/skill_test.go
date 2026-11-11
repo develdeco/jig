@@ -22,7 +22,7 @@ func TestSkillPrintsTheEmbeddedBody(t *testing.T) {
 		}
 	}
 	out, code := runMain(t, e, "", "skill")
-	if code != 0 || !strings.Contains(out, "skills["+strconv.Itoa(len(embeddedNames()))+"]{name,use it when}:") || !strings.Contains(out, "jig skill <name>") {
+	if code != 0 || !strings.Contains(out, "skills["+strconv.Itoa(len(embeddedNames()))+"]{name,use it when,references}:") || !strings.Contains(out, "jig skill <name>") {
 		t.Errorf("jig skill: exit %d\n%s", code, out)
 	}
 	out, code = runMain(t, e, "", "skill", "nonesuch")
@@ -34,8 +34,41 @@ func TestSkillPrintsTheEmbeddedBody(t *testing.T) {
 			t.Errorf("jig skill %q: exit %d\n%s", bad, code, out)
 		}
 	}
-	if out, code := runMain(t, e, "", "skill", "here", "intake"); code != 2 || !strings.Contains(out, "at most one") {
-		t.Errorf("two names: exit %d\n%s", code, out)
+	if out, code := runMain(t, e, "", "skill", "here", "intake"); code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "has no references") {
+		t.Errorf("an unknown reference of a skill with none: exit %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "skill", "here", "a", "b"); code != 2 || !strings.Contains(out, "at most one") {
+		t.Errorf("three words: exit %d\n%s", code, out)
+	}
+}
+
+func TestSkillPrintsAReference(t *testing.T) {
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	n := 0
+	list, _ := runMain(t, e, "", "skill")
+	for _, name := range embeddedNames() {
+		for _, ref := range embeddedRefs(name) {
+			n++
+			want, ok := embeddedRef(name, ref)
+			out, code := runMain(t, e, "", "skill", name, ref)
+			if !ok || code != 0 || out != string(want) {
+				t.Errorf("jig skill %s %s: exit %d, output differs from the embedded text", name, ref, code)
+			}
+			if !strings.Contains(list, ref) {
+				t.Errorf("jig skill does not list reference %s", ref)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no embedded references to test")
+	}
+	out, code := runMain(t, e, "", "skill", "build", "nonesuch")
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "handing-off") {
+		t.Errorf("an unknown reference: exit %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "skill", "build", "../x"); code != 2 {
+		t.Errorf("a path as reference: exit %d\n%s", code, out)
 	}
 }
 
