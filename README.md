@@ -85,7 +85,7 @@ records.
 ## Getting started
 
 No release carries this design yet (v0.1.x is the earlier one, which ran its own
-builder sessions), so install from `main`, with Go 1.27.3 or newer:
+builder sessions), so install from `main`, with Go 1.27.4 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main
