@@ -72,7 +72,7 @@ jig claim <ticket> --slice <slice> --release   # queued again, unless it is gree
 
 ## Handing a slice to another agent
 
-Read `jig skill build handoff` when you have a subagent or another session build a slice: it holds the rules to give it in its prompt.
+To have a subagent or another session build a slice, read `jig skill build handoff` and give it that prompt.
 
 With `--unattended`, jig holds the session back from stopping while a verification runs, tracked changes are uncommitted, every slice is green and no round is open (open the gate and review it), or an approved ticket is not yet published.
 

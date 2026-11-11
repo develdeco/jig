@@ -34,7 +34,7 @@ func TestSkillPrintsTheEmbeddedBody(t *testing.T) {
 			t.Errorf("jig skill %q: exit %d\n%s", bad, code, out)
 		}
 	}
-	if out, code := runMain(t, e, "", "skill", "here", "intake"); code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "has no references") {
+	if out, code := runMain(t, e, "", "skill", "jig-init", "intake"); code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "has no references") {
 		t.Errorf("an unknown reference of a skill with none: exit %d\n%s", code, out)
 	}
 	if out, code := runMain(t, e, "", "skill", "here", "a", "b"); code != 2 || !strings.Contains(out, "at most one") {
