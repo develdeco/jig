@@ -87,8 +87,7 @@ func TestReplaceRidesOutAnotherProcessHoldingTheFile(t *testing.T) {
 		if err != nil {
 			os.Exit(2)
 		}
-		os.Stdout.WriteString("held
-")
+		os.Stdout.WriteString("held\n")
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		f.Close()
 		os.Exit(0)
@@ -123,8 +122,7 @@ func TestReplaceRidesOutAnotherProcessHoldingTheFile(t *testing.T) {
 		release()
 		_ = cmd.Wait()
 	}()
-	if line, err := bufio.NewReader(stdout).ReadString('
-'); err != nil || strings.TrimSpace(line) != "held" {
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || strings.TrimSpace(line) != "held" {
 		t.Fatalf("holder said %q, %v, want held", line, err)
 	}
 
