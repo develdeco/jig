@@ -1,6 +1,6 @@
 // Package gittest runs a test binary's git hermetically: no background
 // maintenance outlives a test, and no host git config leaks into one. It is
-// a leaf package, importing nothing else from this module.
+// a leaf package, importing only internal/gitenv from this module.
 package gittest
 
 import (
@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/develdeco/jig/internal/gitenv"
 )
 
 var (
 	mu       sync.Mutex
 	cleanups []func()
+	pinned   bool
 )
 
 // Run writes a git config with maintenance.auto=false, receive.autogc=false
@@ -24,10 +27,15 @@ var (
 // GIT_CONFIG_NOSYSTEM=1, and runs m. Every git process the binary spawns,
 // including git-receive-pack on the far side of a local push, then runs
 // without detached maintenance or host config. After m.Run() it runs the
-// AtExit funcs in LIFO order and returns the exit code:
+// AtExit funcs in LIFO order and returns the exit code. Before m runs it also
+// removes from the binary's environment every variable in gitenv.HookOnly,
+// plus EMAIL, which git reads as an identity: a person's shell exports them,
+// and no test should depend on whose shell runs it. What PinIdentity pinned
+// is kept:
 //
 //	func TestMain(m *testing.M) { os.Exit(gittest.Run(m)) }
 func Run(m *testing.M) int {
+	dropShellEnv()
 	dir, err := os.MkdirTemp("", "jig-gittest")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gittest: create temp dir: %v\n", err)
@@ -59,6 +67,22 @@ func Run(m *testing.M) int {
 	return code
 }
 
+// dropShellEnv unsets the shell's git identity and hook variables, except the
+// ones PinIdentity set on purpose.
+func dropShellEnv() {
+	keep := map[string]bool{}
+	if pinned {
+		for _, kv := range pinnedIdentity {
+			keep[kv[0]] = true
+		}
+	}
+	for _, name := range append(append([]string{}, gitenv.HookOnly...), "EMAIL") {
+		if !keep[name] {
+			_ = os.Unsetenv(name)
+		}
+	}
+}
+
 // pinnedIdentity is the fixture identity and date PinIdentity sets, matching
 // internal/fixture and the fake session backend so shas stay comparable
 // across all three.
@@ -81,6 +105,7 @@ var pinnedIdentity = [][2]string{
 //	    os.Exit(gittest.Run(m))
 //	}
 func PinIdentity() {
+	pinned = true
 	for _, kv := range pinnedIdentity {
 		_ = os.Setenv(kv[0], kv[1])
 	}

@@ -562,6 +562,11 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 		}
 		switch l.Outcome {
 		case "fail":
+			// A run that never judged the code (a kill or a stop) is neither
+			// a veto nor a reason to drop an earlier light pass.
+			if l.Cause != "" {
+				continue
+			}
 			if exact {
 				failed[l.Command] = true
 			}

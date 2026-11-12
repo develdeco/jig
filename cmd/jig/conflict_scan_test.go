@@ -432,3 +432,141 @@ func TestStoreOverlapsLeaveOutTicketsThatAreNotOpen(t *testing.T) {
 		t.Errorf("rows = %+v, want none: one open ticket shares with nobody", rows)
 	}
 }
+
+// TestAdviceTestsEachBranchOfATicketThatHasSeveral: a ticket whose first branch
+// merges cleanly but whose second conflicts is told it conflicts, naming the
+// second branch.
+func TestAdviceTestsEachBranchOfATicketThatHasSeveral(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].File != "f.txt" || rows[0].Conflict != pairConflict {
+		t.Fatalf("rows = %+v, want one conflicting row naming f.txt", rows)
+	}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	found := false
+	for _, p := range pairs {
+		if p.State == pairConflict && p.BranchA == "T-1-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pairs = %+v, want a conflicting pair on T-1-b", pairs)
+	}
+	var out bytes.Buffer
+	printConflicts(&out, r.st, r.cfg, r.mp, nil, "T-2")
+	if !strings.Contains(out.String(), "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice for T-2 does not list T-1-b:\n%s", out.String())
+	}
+}
+
+// TestAdviceMergesNoBranchThatLacksTheSharedFile: a branch that changes only
+// another file is not merged against the other ticket.
+func TestAdviceMergesNoBranchThatLacksTheSharedFile(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	gitIn(t, r.dir, "switch", "-c", "T-1-other", "main")
+	if err := os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("g\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, "add", "-A")
+	gitIn(t, r.dir, "commit", "-m", "other file")
+	gitIn(t, r.dir, "switch", "main")
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	if len(pairs) != 1 {
+		t.Errorf("pairs = %+v, want one pair", pairs)
+	}
+	for _, p := range pairs {
+		if p.BranchA == "T-1-other" || p.BranchB == "T-1-other" {
+			t.Errorf("pair %+v merges a branch that lacks the shared file", p)
+		}
+	}
+}
+
+// TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch: when one branch
+// pair of two tickets merges cleanly and another conflicts, the advice with
+// clean shares shows the conflict and no "merges cleanly" line for the ticket.
+func TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-2")
+	text := strings.Join(conflictBlocks(adviceFromPairs(r.st, pairs, "T-2"), true), "\n")
+	if !strings.Contains(text, "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice lacks the conflict row:\n%s", text)
+	}
+	if strings.Contains(text, "merges cleanly") {
+		t.Errorf("the advice calls T-1 clean though one of its branches conflicts:\n%s", text)
+	}
+}
+
+// TestAdviceNamesAConflictingBranchOnceWhenTwoBranchesHitIt: two branches of
+// the ticket in hand that conflict with the same branch of another ticket give
+// one conflict entry, not two.
+func TestAdviceNamesAConflictingBranchOnceWhenTwoBranchesHitIt(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-x", topChanged)
+	r.branch("T-2-a", topChangedAlt)
+	r.branch("T-2-b", topChangedNew)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-2")
+	a := adviceFromPairs(r.st, pairs, "T-2")
+	if len(a.Conflicts) != 1 || a.Conflicts[0].Ticket != "T-1" || a.Conflicts[0].Branch != "T-1-x" {
+		t.Errorf("conflicts = %+v, want T-1-x once", a.Conflicts)
+	}
+}
+
+// TestAdviceTestsEachBranchOfTheSecondTicket: the several branches may belong to
+// the ticket that sorts second; its conflicting branch is named in the other
+// ticket's advice.
+func TestAdviceTestsEachBranchOfTheSecondTicket(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-x", topChanged)
+	r.branch("T-2-a", bottomChanged)
+	r.branch("T-2-b", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	found := false
+	for _, p := range pairs {
+		if p.State == pairConflict && p.BranchB == "T-2-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pairs = %+v, want a conflicting pair on T-2-b", pairs)
+	}
+	var out bytes.Buffer
+	printConflicts(&out, r.st, r.cfg, r.mp, nil, "T-1")
+	if !strings.Contains(out.String(), "app,T-2,f.txt,T-2-b") {
+		t.Errorf("the advice for T-1 does not list T-2-b:\n%s", out.String())
+	}
+}
+
+// TestStoreOverlapsRankAConflictingPairOverALaterUntestedOne: a row with a
+// conflicting branch pair and a later untested one reads conflict.
+func TestStoreOverlapsRankAConflictingPairOverALaterUntestedOne(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-1-b", topChangedNew)
+	r.branch("T-2-x", topChangedAlt)
+	real := testPairWith
+	testPairWith = func(dir, a, b string) (string, []string) {
+		if a == "T-1-a" {
+			return pairConflict, []string{"f.txt"}
+		}
+		return pairUntested, nil
+	}
+	t.Cleanup(func() { testPairWith = real })
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].Conflict != pairConflict {
+		t.Errorf("rows = %+v, want one conflict row", rows)
+	}
+}

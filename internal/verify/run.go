@@ -639,10 +639,17 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 // cmd, and the oracle line, which still carries cmd so slice state and the gate
 // read it as ever, names the light command (Ran) and the full run it stands on
 // (ReusedFrom).
-func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) error {
+func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) (err error) {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
+	// A run that jig's stop ended (in the oracle or in the wait for the slot)
+	// has nothing to record: its directory goes as a failed run's does.
+	defer func() {
+		if errors.Is(err, envrun.ErrStopped) {
+			_ = rec.finish(x.r.Slice, x.attempt, x.sha, target, false)
+		}
+	}()
 
 	limit := m.OracleLimit()
 	runs := cmd
@@ -673,6 +680,16 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	started := d.now()
 	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	if errors.Is(oerr, envrun.ErrStopped) {
+		// No verdict: the line says the run ended without judging the code,
+		// and the slice's state stays as it was.
+		line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
+			Outcome: "fail", Cause: journal.CauseStopped, Summary: oneLine(oerr.Error())}
+		if isLight {
+			line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
+		}
+		if jerr := x.journal(line); jerr != nil {
+			return jerr
+		}
 		return oerr
 	}
 	// Rounded up, so every run records at least a second and 0 keeps meaning
@@ -697,6 +714,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		x.res.Signature = failureSignature(x.r.Slice, x.res.Summary, oerr)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
+		line.Cause = failureCause(oerr)
 		x.logf("the oracle failed after %ds (limit %s); the lines a passing run did not print (when it kept a baseline), then the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
 	}
 	if err := x.journal(line); err != nil {
@@ -741,7 +759,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	// TUI, the hooks), and a reader it wakes must find the slice green, not
 	// the state from before. A run that stops in between leaves the oracle
 	// line, which already stands as the commit's pass (VerificationState).
-	err := x.setState(func(st *store.SliceState) bool {
+	err = x.setState(func(st *store.SliceState) bool {
 		st.Attempts = max(st.Attempts, x.attempt)
 		if newer {
 			return true
