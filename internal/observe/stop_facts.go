@@ -3,6 +3,7 @@ package observe
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -10,7 +11,10 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // unattended reports whether nobody is watching the agent: it holds a claim
@@ -134,38 +138,35 @@ func (h *handler) markerUnattended() bool {
 	return false
 }
 
-// verification is a verification of a commit for a slice that has no
-// outcome yet.
-type verification struct{ commit, slice string }
-
 // inFlightWindow is how long a worker the ledger says was started is taken
-// to be running when the journal has no outcome of it: a worker that died
-// leaves that, and `jig verify --wait` on the commit runs it again.
+// to be running when the journal has no outcome of it: the worker has not
+// yet written its first line.
 const inFlightWindow = 10 * time.Minute
 
-// pendingMaxAge is how old a verify-pending line may be and still count as a
-// verification under way: an oracle is bound by the manifest timeout (30
-// minutes unless it says otherwise), so a record older than this is a worker
-// that died.
-const pendingMaxAge = 2 * time.Hour
-
-// inFlight lists the verifications of the ticket still running: those the
-// journal shows pending, and those whose worker the ledger shows started
-// (the machine started it a moment ago) before the worker wrote its first
-// line.
-func (h *handler) inFlight() []verification {
+// verificationFindings tells the state of the ticket's verifications as the
+// agent is about to stop. A verification under way (a pending line whose
+// worker is alive, or a worker the ledger started a moment ago that has not
+// yet written to the journal) holds an unattended session as it always did. A
+// commit that is not verified, or whose verification is stale, holds it too,
+// since no one is judging it and the clearing command runs the oracle. A
+// failed, stopped or timed-out verification is told and holds nobody back:
+// the builder may stop, and the slice stays building.
+func (h *handler) verificationFindings() []finding {
 	lines, err := h.journal()
 	if err != nil {
 		h.fail(err)
 		return nil
 	}
-	var out []verification
-	oldest := h.d.Now().Add(-pendingMaxAge)
-	for _, p := range journal.Pending(lines) {
-		if at, err := time.Parse(time.RFC3339Nano, p.TS); err == nil && at.Before(oldest) {
-			continue
+	truth := h.verifyTruth(lines)
+	rows := truth.Derive()
+
+	var out []finding
+	underWay := map[phase.CommitRef]bool{}
+	for _, r := range rows {
+		if r.State == phase.VerifyRunning {
+			underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] = true
+			out = append(out, h.runningFinding(r.Commit, r.Slice))
 		}
-		out = append(out, verification{p.Commit, p.Slice})
 	}
 	cutoff := h.d.Now().Add(-inFlightWindow)
 	h.fail(ledger.ReadBackward(h.d.JigHome, spawnWindow, func(l journal.Line) bool {
@@ -175,13 +176,70 @@ func (h *handler) inFlight() []verification {
 		if l.Event != journal.EventVerifySpawned || l.Ticket != h.w.Ticket || l.Commit == "" {
 			return true
 		}
-		v := verification{l.Commit, l.Slice}
-		if journal.VerificationState(lines, v.commit, v.slice).State == journal.VerifyNone && !slices.Contains(out, v) {
-			out = append(out, v)
+		p := phase.CommitRef{SHA: l.Commit, Slice: l.Slice}
+		if journal.VerificationState(lines, l.Commit, l.Slice).State == journal.VerifyNone && !underWay[p] {
+			underWay[p] = true
+			out = append(out, h.runningFinding(l.Commit, l.Slice))
 		}
 		return true
 	}))
+
+	for _, r := range rows {
+		if underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] || r.State == phase.VerifyRunning || !r.State.Unclear() {
+			continue
+		}
+		sha := short12(r.Commit)
+		f := finding{ref: string(r.State) + ":" + sha + ":" + r.Slice, blocking: r.State.Holds()}
+		switch r.State {
+		case phase.VerifyNotVerified:
+			f.text = fmt.Sprintf("commit %s for slice %s is not verified", sha, r.Slice)
+			f.hint = fmt.Sprintf("verify it with `%s`", r.Clear)
+		case phase.VerifyStale:
+			f.text = fmt.Sprintf("verification of %s for slice %s is stale: its worker is gone", sha, r.Slice)
+			f.hint = fmt.Sprintf("run it again with `%s`", r.Clear)
+		case phase.VerifyFailed:
+			f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
+		default:
+			f.text = fmt.Sprintf("verification of %s for slice %s %s; run it again with `%s`", sha, r.Slice, r.State.Told(), r.Clear)
+		}
+		out = append(out, f)
+	}
 	return out
+}
+
+func (h *handler) runningFinding(commit, slice string) finding {
+	sha := short12(commit)
+	return finding{
+		ref:      "pending:" + sha + ":" + slice,
+		text:     fmt.Sprintf("verification of %s for slice %s is still running", sha, slice),
+		hint:     fmt.Sprintf("wait for it with `jig verify %s %s --slice %s --wait`", h.w.Ticket, sha, slice),
+		blocking: true,
+	}
+}
+
+// verifyTruth gathers what the derivation of the ticket's verifications reads.
+// The branch is read, with one git log, only when the ticket was found by the
+// branch the work is on and has a start sha; the commits are then those of that
+// branch.
+func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
+	t := verify.Truth{JigHome: h.d.JigHome, Ticket: h.w.Ticket, Lines: lines, Now: h.d.Now()}
+	if sl, err := h.st.ReadSlices(h.w.Ticket); err == nil {
+		for _, s := range sl {
+			t.Slices = append(t.Slices, s.ID)
+		}
+	}
+	if h.w.TicketHow == locate.HowBranch || h.w.TicketHow == locate.HowBranchAlias {
+		dir := h.w.Root
+		if dir == "" {
+			dir = h.w.RepoDir
+		}
+		if start := verify.StartSHA(h.st, h.w.Ticket, h.w.Repo); start != "" && dir != "" {
+			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
+				t.Commits, t.BranchKnown = c, true
+			}
+		}
+	}
+	return t
 }
 
 // dirtyTracked lists the tracked files of the session directory that have

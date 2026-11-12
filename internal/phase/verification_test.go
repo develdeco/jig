@@ -118,3 +118,11 @@ func TestWithNoBranchTheJournalsPairsAreJudged(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestAPendingLineOffTheBranchIsStillJudged(t *testing.T) {
+	lines := []journal.Line{{Event: journal.EventVerifyPending, Slice: "s", Commit: shaB, TS: vts(time.Minute)}}
+	got := derive(VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}}})
+	if got["a"].State != VerifyNotVerified || got["b"].State != VerifyRunning {
+		t.Fatalf("%+v", got)
+	}
+}

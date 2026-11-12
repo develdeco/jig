@@ -127,6 +127,10 @@ func DeriveVerifications(in VerifyInput) []CommitVerification {
 	pairs := in.Commits
 	if !in.BranchKnown {
 		pairs = journalPairs(in.Lines)
+	} else {
+		// A verification the journal shows under way is judged whether or not
+		// its commit is on the branch read: the worker is running either way.
+		pairs = append(append([]CommitRef(nil), pairs...), pendingPairs(in.Lines)...)
 	}
 	seen := map[CommitRef]bool{}
 	var out []CommitVerification
@@ -267,4 +271,14 @@ func clip(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// pendingPairs are the (commit, slice) pairs whose latest journal record is a
+// verify-pending line.
+func pendingPairs(lines []journal.Line) []CommitRef {
+	var out []CommitRef
+	for _, p := range journal.Pending(lines) {
+		out = append(out, CommitRef{p.Commit, p.Slice})
+	}
+	return out
 }
