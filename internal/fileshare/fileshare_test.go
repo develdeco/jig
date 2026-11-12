@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,17 +81,18 @@ func TestAMissingFileIsNotExist(t *testing.T) {
 // file open the way os.Open does on Windows (no delete sharing). The bare
 // Rename over it fails with an error Replacing reports (Windows only); Replace
 // returns nil once the holder lets go within the window, with the new bytes in
-// place.
+// place. The holder child returns from the test rather than exiting, so the
+// test binary's cleanup runs.
 func TestReplaceRidesOutAnotherProcessHoldingTheFile(t *testing.T) {
 	if held := os.Getenv("FILESHARE_HOLD"); held != "" {
 		f, err := os.Open(held)
 		if err != nil {
-			os.Exit(2)
+			t.Fatal(err)
 		}
 		os.Stdout.WriteString("held\n")
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		f.Close()
-		os.Exit(0)
+		return
 	}
 
 	dir := t.TempDir()
@@ -111,13 +113,8 @@ func TestReplaceRidesOutAnotherProcessHoldingTheFile(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	released := false
-	release := func() {
-		if !released {
-			released = true
-			stdin.Close()
-		}
-	}
+	var once sync.Once
+	release := func() { once.Do(func() { stdin.Close() }) }
 	defer func() {
 		release()
 		_ = cmd.Wait()

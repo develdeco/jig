@@ -425,8 +425,8 @@ func TestLooseObjectsPastAutoGC(t *testing.T) {
 
 // TestWriteBlobWhileTheFileIsReplaced: a scan looping on writeBlob never makes
 // a replacement of the file (a store file swapped in by rename) fail, because
-// it reads with delete sharing. Read with os.ReadFile on Windows, a rename (no
-// retry here) is refused whenever it lands mid-read.
+// it reads with delete sharing. Read with os.ReadFile on Windows, a rename is
+// refused whenever it lands mid-read.
 // The replacer loop retries a transient holder (see fileshare.Replacing).
 func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
 	repo, err := git.PlainInit(t.TempDir(), false)
@@ -459,6 +459,10 @@ func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
 	}()
 	defer func() { close(stop); <-done }()
 
+	// maxRetriedReplacements is how many of the replacements may meet a
+	// transient holder (a scanner, a loaded machine) before it is the reader.
+	const maxRetriedReplacements = 15
+	retried := 0
 	for i := 0; i < 300; i++ {
 		tmp := path + ".tmp"
 		if err := os.WriteFile(tmp, body, 0o644); err != nil {
@@ -466,14 +470,23 @@ func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
 		}
 		// A holder under load can keep the file for a moment: retry that
 		// transient failure within the replace window, fail on anything else.
+		// A reader that did not share deletion would collide on nearly every
+		// iteration, so the retries are counted and bounded.
 		deadline := time.Now().Add(fileshare.ReplaceWindow)
-		for {
+		for tried := false; ; {
 			err := fileshare.Rename(tmp, path)
 			if err == nil {
 				break
 			}
 			if !fileshare.Replacing(err) || time.Now().After(deadline) {
 				t.Fatalf("replacement %d while writeBlob loops: %v", i, err)
+			}
+			if !tried {
+				tried = true
+				retried++
+				if retried > maxRetriedReplacements {
+					t.Fatalf("%d of %d replacements needed a retry while writeBlob loops: the reader does not share deletion", retried, i+1)
+				}
 			}
 			time.Sleep(fileshare.ReplaceBackoff)
 		}

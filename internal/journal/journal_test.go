@@ -494,6 +494,10 @@ func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 	}()
 	defer func() { close(stop); <-done }()
 
+	// maxRetriedReplacements is how many of the replacements may meet a
+	// transient holder (a scanner, a loaded machine) before it is the reader.
+	const maxRetriedReplacements = 15
+	retried := 0
 	for i := 0; i < 300; i++ {
 		tmp := path + ".tmp"
 		if err := os.WriteFile(tmp, body, 0o644); err != nil {
@@ -501,14 +505,23 @@ func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 		}
 		// A holder under load can keep the file for a moment: retry that
 		// transient failure within the replace window, fail on anything else.
+		// A reader that did not share deletion would collide on nearly every
+		// iteration, so the retries are counted and bounded.
 		deadline := time.Now().Add(fileshare.ReplaceWindow)
-		for {
+		for tried := false; ; {
 			err := fileshare.Rename(tmp, path)
 			if err == nil {
 				break
 			}
 			if !fileshare.Replacing(err) || time.Now().After(deadline) {
 				t.Fatalf("replacement %d while Read loops: %v", i, err)
+			}
+			if !tried {
+				tried = true
+				retried++
+				if retried > maxRetriedReplacements {
+					t.Fatalf("%d of %d replacements needed a retry while Read loops: the reader does not share deletion", retried, i+1)
+				}
 			}
 			time.Sleep(fileshare.ReplaceBackoff)
 		}
