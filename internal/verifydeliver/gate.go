@@ -224,6 +224,9 @@ type GateReport struct {
 	// never a reason it is not clean. nil for a scripted round and for a round
 	// with none.
 	StoreRefs []StoreRef
+	// CarriedMerge is repo -> the merge of the target a delta round carried
+	// rather than read: nil for a round that carried none.
+	CarriedMerge map[string]CarriedMerge
 }
 
 // reportYAML is gate/round-<n>/report.yaml's exact on-disk shape.
@@ -255,6 +258,9 @@ type reportYAML struct {
 	// in diff order, every one of them; absent when there are none and in a
 	// report an older jig wrote.
 	StoreRefs []StoreRef `yaml:"store_refs,omitempty"`
+	// CarriedMerge is the merge of the target each repo's round carried, not
+	// read; absent when there is none and in a report an older jig wrote.
+	CarriedMerge map[string]CarriedMerge `yaml:"carried_merge,omitempty"`
 	// Reviewer is who reported the round, as the reviewer's session and
 	// agent ids and how jig learned them.
 	Reviewer *Provenance `yaml:"reviewer,omitempty"`
@@ -949,6 +955,7 @@ func writeReportYAML(dir string, report GateReport) error {
 		CarriedFrom:  report.CarriedFrom,
 		OracleNames:  report.OracleNames,
 		StoreRefs:    report.StoreRefs,
+		CarriedMerge: report.CarriedMerge,
 	}
 	if report.Independent != "" {
 		reviewer := report.Reviewer
