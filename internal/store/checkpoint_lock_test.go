@@ -38,6 +38,17 @@ func checkpointLockFile(work string) string {
 	return filepath.Join(work, ".git", checkpointLockName)
 }
 
+// namesPath reports whether text names path as given or in its resolved
+// spelling. A Windows temp dir can reach a test in its 8.3 short form
+// (RUNNER~1) while jig names the file by its long one.
+func namesPath(text, path string) bool {
+	if strings.Contains(text, path) {
+		return true
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	return err == nil && strings.Contains(text, filepath.Join(dir, filepath.Base(path)))
+}
+
 // heldElsewhere reports whether something else holds the lock on path,
 // trying with a second file handle that never waits.
 func heldElsewhere(t *testing.T, path string) bool {
@@ -292,7 +303,7 @@ func TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder(t *testing.T) {
 	if !strings.Contains(err.Error(), fmt.Sprint(pid)) {
 		t.Errorf("error %q does not name holder pid %d", err, pid)
 	}
-	if !strings.Contains(err.Error(), checkpointLockFile(work)) {
+	if !namesPath(err.Error(), checkpointLockFile(work)) {
 		t.Errorf("error %q does not name the lock file %s", err, checkpointLockFile(work))
 	}
 	if release == nil {

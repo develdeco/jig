@@ -63,7 +63,16 @@ func runBoth(t *testing.T, r *rig, shas [2]string, wantOverlap bool) int32 {
 				}
 			}
 		} else {
-			time.Sleep(400 * time.Millisecond)
+			// Hold the slot until the other run is seen waiting for it, so the
+			// order is proven however late the second run reaches the slot.
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				lines, err := journal.Read(r.st, r.fx.Ticket)
+				if err == nil && count(lines, journal.EventSlotWait) > 0 {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 		running.Add(-1)
 		return "", nil
