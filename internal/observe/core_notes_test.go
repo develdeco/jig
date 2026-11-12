@@ -220,3 +220,20 @@ func TestAFailureOfAnOlderCommitJournaledAfterTheFixIsHistory(t *testing.T) {
 		t.Errorf("prompt context = %q, want only the newer commit's pass", res.Context)
 	}
 }
+
+// TestAStoppedRunIsNotToldAsAFailure: jig's stop ended the oracle, so the
+// session hears of the run once, as one that could not run, and not as FAILED.
+func TestAStoppedRunIsNotToldAsAFailure(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	sha := r.commit("b", "b.txt")
+	r.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: sha, Attempt: 1, Outcome: "fail", Cause: journal.CauseStopped, Summary: "was ended because jig was stopped"})
+	r.add(journal.Line{Event: journal.EventVerifyError, Slice: "b", Commit: sha, Attempt: 1, Summary: "the verification was stopped before the oracle finished"})
+
+	res := r.handle(r.ev(KindPrompt))
+	if strings.Contains(res.Context, "FAILED") || strings.Count(res.Context, "could not run") != 1 {
+		t.Errorf("context = %q, want one could-not-run note and no FAILED", res.Context)
+	}
+}

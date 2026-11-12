@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/envrun"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/outcome"
 )
 
@@ -142,6 +143,17 @@ func killedReason(err error) string {
 	var t *envrun.TimedOutError
 	if errors.As(err, &t) {
 		return t.Reason()
+	}
+	return ""
+}
+
+// failureCause is the journal cause of a run that ended with err: timeout for
+// the wedge guard's kill, "" for a run that ended with the test's own result.
+// A stopped run is journaled where it is seen. Read from the typed error, never
+// from text.
+func failureCause(err error) string {
+	if killedReason(err) != "" {
+		return journal.CauseTimeout
 	}
 	return ""
 }

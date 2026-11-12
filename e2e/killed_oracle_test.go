@@ -103,9 +103,10 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 					t.Fatalf("jig %s was still running 30s after %s", how, sc.name)
 				}
 				// The stop is no verdict on the commit: the journal holds no
-				// failed oracle line for it, whatever the stopped jig wrote.
+				// failed oracle line for it, whatever the stopped jig wrote,
+				// except one that says jig's stop ended the run.
 				for _, l := range readJournal(t, fx, fx.Ticket) {
-					if l.Event == journal.EventOracle && l.Outcome == "fail" {
+					if l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped {
 						t.Errorf("the journal holds a failed oracle line after jig %s was stopped: %+v", how, l)
 					}
 				}

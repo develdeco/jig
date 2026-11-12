@@ -40,6 +40,9 @@ type hereVerifyHeadInfo struct {
 	// Light says a pass stood on an earlier whole-suite run: "lint only,
 	// reusing <sha>".
 	Light string `json:"light,omitempty"`
+	// NotCounted says a failed run never judged the code: "timed out, not
+	// counted" or "stopped, not counted".
+	NotCounted string `json:"not_counted,omitempty"`
 }
 
 // hereVerifyHead reads how HEAD of the located repo stands for the located
@@ -63,7 +66,7 @@ func hereVerifyHead(c hereCtx) (*hereVerifyHeadInfo, error) {
 	if v.State == journal.VerifyNone {
 		return nil, nil
 	}
-	return &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords()}, nil
+	return &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords(), NotCounted: v.NotCounted()}, nil
 }
 
 // hereVerifyBlocks renders the section: one verification block for HEAD.
@@ -81,6 +84,9 @@ func hereVerifyBlocks(c hereCtx) ([]string, error) {
 	}
 	if h.Light != "" {
 		kv = append(kv, [2]string{"pass", h.Light})
+	}
+	if h.NotCounted != "" {
+		kv = append(kv, [2]string{"run", h.NotCounted})
 	}
 	if h.Summary != "" {
 		kv = append(kv, [2]string{"summary", h.Summary})
