@@ -19,15 +19,20 @@ import (
 func TestChartVerdictIntent(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
-	skill := func(name string) string {
+	skill := func(name ...string) string {
 		t.Helper()
-		r := runJig(t, env, fx.RepoDir, "skill", name)
+		r := runJig(t, env, fx.RepoDir, append([]string{"skill"}, name...)...)
 		if r.Code != 0 {
-			t.Fatalf("jig skill %s exit = %d\nstdout:\n%s\nstderr:\n%s", name, r.Code, r.Stdout, r.Stderr)
+			t.Fatalf("jig skill %v exit = %d\nstdout:\n%s\nstderr:\n%s", name, r.Code, r.Stdout, r.Stderr)
 		}
 		return r.Stdout
 	}
-	intake, chart, here := skill("intake"), skill("chart"), skill("here")
+	intakeCore, chart, here := skill("intake"), skill("chart"), skill("here")
+	// The chart verdict's outcomes are the reference the core points to.
+	if !strings.Contains(intakeCore, "Read `jig skill intake chart-verdict` when the verdict is a chart") {
+		t.Errorf("jig skill intake does not point to chart-verdict:\n%s", intakeCore)
+	}
+	intake := intakeCore + skill("intake", "chart-verdict")
 
 	for _, want := range []string{
 		"**No intent**", "**Intent, not fully explicit**", "**Fully explicit**",
@@ -48,10 +53,10 @@ func TestChartVerdictIntent(t *testing.T) {
 			t.Errorf("jig skill chart lacks %q", want)
 		}
 	}
-	if want := "what follows depends on the prompt's intent to launch: `jig skill intake`, \"Then\""; !strings.Contains(here, want) {
+	if want := "what follows depends on the prompt's intent to launch: `jig skill intake chart-verdict`"; !strings.Contains(here, want) {
 		t.Errorf("jig skill here lacks %q", want)
 	}
-	for name, text := range map[string]string{"intake": intake, "chart": chart, "here": here} {
+	for name, text := range map[string]string{"intake": intakeCore, "chart": chart, "here": here} {
 		if strings.Contains(text, "ask whether to take") {
 			t.Errorf("jig skill %s still asks whether to take the chart's tickets on", name)
 		}
@@ -70,7 +75,7 @@ func TestChartVerdictIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"What follows a chart verdict depends on the prompt's intent to launch", "a fully explicit one starts the chart run", "read `jig skill intake`"} {
+	for _, want := range []string{"What follows a chart verdict depends on the prompt's intent to launch", "a fully explicit one starts the chart run", "read `jig skill intake chart-verdict`"} {
 		if !bytes.Contains(stub, []byte(want)) {
 			t.Errorf("the stub lacks %q:\n%s", want, stub)
 		}
