@@ -211,6 +211,12 @@ type trackerState struct {
 	// idx is the memoized index of the records, nil until built.
 	idx *trackerIndex
 
+	// pmu guards pend.
+	pmu sync.Mutex
+	// pend is the sync's changes to the working tree while a sync holds its
+	// writes (HoldTrackerWrites), nil otherwise (trackerpending.go).
+	pend *pendingTree
+
 	// symOnce guards symOn, git's core.symlinks for this clone.
 	symOnce sync.Once
 	symOn   bool
@@ -393,7 +399,7 @@ func (s *Store) scanTracker() (trackerScan, error) {
 	var out trackerScan
 	var walk func(dir, rel string) error
 	walk = func(dir, rel string) error {
-		ents, err := os.ReadDir(dir)
+		ents, err := s.tReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) && rel == trackersDirName {
 				return nil
@@ -468,7 +474,7 @@ func entryOfRecordPath(rel string) (e TrackerEntry, flat bool) {
 func (s *Store) readTrackerRecord(rel string) TrackerRecord {
 	entry, flat := entryOfRecordPath(rel)
 	rec := TrackerRecord{Entry: entry, Rel: rel, Flat: flat}
-	data, err := ReadFile(filepath.Join(s.Root, filepath.FromSlash(rel)))
+	data, err := s.tReadFile(filepath.Join(s.Root, filepath.FromSlash(rel)))
 	if err != nil {
 		rec.Err = err
 		return rec
@@ -570,7 +576,7 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 	// own folder.
 	same := false
 	if s.entryIsFolder(e) {
-		have, rerr := ReadFile(s.TrackerRecordPath(e))
+		have, rerr := s.tReadFile(s.TrackerRecordPath(e))
 		same = rerr == nil && bytes.Equal(have, data)
 	}
 	if !same {
@@ -578,14 +584,14 @@ func (s *Store) WriteTrackerRecord(e TrackerEntry, o TrackerOwner, fields *yaml.
 			s.invalidateTrackerIndex()
 			return err
 		}
-		if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
+		if err := s.tWriteFile(s.TrackerRecordPath(e), data); err != nil {
 			s.invalidateTrackerIndex()
 			return err
 		}
 		s.noteTrackerWrite(s.TrackerRecordRelPath(e))
 	}
 	flat := s.flatRecordRelPath(e)
-	if err := os.Remove(filepath.Join(s.Root, flat)); err == nil {
+	if err := s.tRemove(filepath.Join(s.Root, flat)); err == nil {
 		s.noteTrackerWrite(flat)
 	} else if !os.IsNotExist(err) {
 		s.invalidateTrackerIndex()
@@ -629,7 +635,7 @@ func (s *Store) checkEntryFree(e TrackerEntry, o TrackerOwner) error {
 // entry's: a stat of <entry>/record.yaml would follow the link and read, or a
 // remove would delete, a file of the ticket's or chart's own.
 func (s *Store) entryIsFolder(e TrackerEntry) bool {
-	fi, err := os.Lstat(s.TrackerPath(e))
+	fi, err := s.tLstat(s.TrackerPath(e))
 	return err == nil && fi.IsDir()
 }
 
@@ -638,7 +644,7 @@ func (s *Store) hasFolderRecord(e TrackerEntry) bool {
 	if !s.entryIsFolder(e) {
 		return false
 	}
-	_, err := os.Stat(s.TrackerRecordPath(e))
+	_, err := s.tStat(s.TrackerRecordPath(e))
 	return err == nil
 }
 
@@ -648,13 +654,13 @@ func (s *Store) hasFolderRecord(e TrackerEntry) bool {
 // ticket's or chart's own folder.
 func (s *Store) makeEntryFolder(e TrackerEntry) error {
 	dir := s.TrackerPath(e)
-	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
-		if err := os.Remove(dir); err != nil {
+	if fi, err := s.tLstat(dir); err == nil && !fi.IsDir() {
+		if err := s.tRemove(dir); err != nil {
 			return err
 		}
 		s.noteTrackerWrite(s.TrackerRelPath(e))
 	}
-	return os.MkdirAll(dir, 0o755)
+	return s.tMkdirAll(dir, 0o755)
 }
 
 // pruneTrackerDirs removes dir and then each folder above it that the removal
@@ -663,7 +669,7 @@ func (s *Store) makeEntryFolder(e TrackerEntry) error {
 func (s *Store) pruneTrackerDirs(dir string) {
 	root := filepath.Join(s.Root, trackersDirName)
 	for ; dir != root && strings.HasPrefix(dir, root); dir = filepath.Dir(dir) {
-		if os.Remove(dir) != nil {
+		if s.tRemove(dir) != nil {
 			return
 		}
 	}
@@ -685,7 +691,7 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 		rels = append(rels, s.TrackerRecordRelPath(e))
 	}
 	for _, rel := range rels {
-		if err := os.Remove(filepath.Join(s.Root, rel)); err == nil {
+		if err := s.tRemove(filepath.Join(s.Root, rel)); err == nil {
 			s.noteTrackerWrite(rel)
 		} else if !os.IsNotExist(err) {
 			return fail(err)
@@ -693,19 +699,19 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 	}
 	s.dropTrackerRecord(e)
 	dir := s.TrackerPath(e)
-	fi, err := os.Lstat(dir)
+	fi, err := s.tLstat(dir)
 	switch {
 	case err != nil:
 		return nil
 	case fi.Mode()&os.ModeSymlink != 0:
 		// The link of the flat layout.
-		if err := os.Remove(dir); err != nil {
+		if err := s.tRemove(dir); err != nil {
 			return err
 		}
 		s.noteTrackerWrite(s.TrackerRelPath(e))
 		dir = filepath.Dir(dir)
 	case fi.IsDir():
-		ents, err := os.ReadDir(dir)
+		ents, err := s.tReadDir(dir)
 		if err != nil {
 			return err
 		}
@@ -713,7 +719,7 @@ func (s *Store) RemoveTrackerRecord(e TrackerEntry) error {
 			if ent.Type()&os.ModeSymlink == 0 {
 				continue
 			}
-			if err := os.Remove(filepath.Join(dir, ent.Name())); err != nil {
+			if err := s.tRemove(filepath.Join(dir, ent.Name())); err != nil {
 				return err
 			}
 			s.noteTrackerWrite(filepath.Join(s.TrackerRelPath(e), ent.Name()))

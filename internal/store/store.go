@@ -118,6 +118,7 @@ func (s *Store) RunCheckpointHook() {
 	if s.AfterCheckpoint == nil {
 		return
 	}
+	s.HoldTrackerWrites()
 	hookErr := s.AfterCheckpoint(s)
 	landErr := s.landTrackerWrites(false)
 	if hookErr != nil {

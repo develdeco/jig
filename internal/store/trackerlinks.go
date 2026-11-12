@@ -99,13 +99,13 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		return "", err
 	}
 	result := LinkMade
-	fi, err := os.Lstat(link)
+	fi, err := s.tLstat(link)
 	switch {
 	case err == nil && fi.Mode()&os.ModeSymlink != 0:
-		if got, rerr := os.Readlink(link); rerr == nil && sameTarget(link, got, want) {
+		if got, rerr := s.tReadlink(link); rerr == nil && sameTarget(link, got, want) {
 			return LinkKept, nil
 		}
-		if err := os.Remove(link); err != nil {
+		if err := s.tRemove(link); err != nil {
 			return "", err
 		}
 		result = LinkReplaced
@@ -115,14 +115,14 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		// A plain file: the stand-in git left while this clone, or the one that
 		// made the checkout, had no symlinks. Never the record itself, which a
 		// file system that folds case or trailing dots can name the link as.
-		if rfi, rerr := os.Stat(s.TrackerRecordPath(e)); rerr == nil && os.SameFile(fi, rfi) {
+		if rfi, rerr := s.tStat(s.TrackerRecordPath(e)); rerr == nil && os.SameFile(fi, rfi) {
 			return "", &axi.Error{
 				Msg:  fmt.Sprintf("%q cannot be the name of a link in the tracker tree: it is the entry's record", o.linkName()),
 				Code: "TRACKER_ENTRY_INVALID",
 				Help: []string{"A link is named by its ticket's id or its chart's name, one plain name that is not record.yaml"},
 			}
 		}
-		if err := os.Remove(link); err != nil {
+		if err := s.tRemove(link); err != nil {
 			return "", err
 		}
 		result = LinkReplaced
@@ -130,7 +130,7 @@ func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error)
 		return "", err
 	}
 	s.noteTrackerWrite(s.TrackerLinkRelPath(e, o))
-	if err := os.Symlink(want, link); err != nil {
+	if err := s.tSymlink(want, link); err != nil {
 		s.tracker.symFailed.Store(true)
 		s.warnNoLinks(fmt.Sprintf("the file system refused one: %v", err))
 		return LinkOff, nil
@@ -232,10 +232,10 @@ func (s *Store) RebuildTrackerLinks() (TrackerLinks, error) {
 			continue
 		}
 		abs := filepath.Join(s.Root, filepath.FromSlash(rel))
-		if fi, err := os.Lstat(abs); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		if fi, err := s.tLstat(abs); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 			continue
 		}
-		if err := os.Remove(abs); err != nil {
+		if err := s.tRemove(abs); err != nil {
 			return out, err
 		}
 		s.noteTrackerWrite(rel)

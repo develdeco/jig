@@ -468,13 +468,20 @@ func TestLandTrackerWritesKeepsItsCommitWhenThePushFails(t *testing.T) {
 }
 
 // TestCheckpointHookPushesWritesAnotherProcessesSyncCommitted: another
-// process's Sync commits the working tree, the hook's record writes with it,
-// and never pushes. The landing then finds nothing of its own to commit, and
-// pushes because the branch is ahead of origin.
+// process wrote the same record the hook did and committed it, and never
+// pushed. The landing then finds nothing of its own to commit, and pushes
+// because the branch is ahead of origin.
 func TestCheckpointHookPushesWritesAnotherProcessesSyncCommitted(t *testing.T) {
 	st, work, remote, warnings := newLandStore(t)
 	st.AfterCheckpoint = func(s *Store) error {
-		putRecord(t, s, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+		e := putRecord(t, s, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+		data, err := s.tReadFile(s.TrackerRecordPath(e))
+		if err != nil {
+			return err
+		}
+		if err := AtomicWrite(s.TrackerRecordPath(e), data); err != nil {
+			return err
+		}
 		runGit(t, work, "add", "-A")
 		runGit(t, work, "commit", "-m", leftoversMessage)
 		return nil

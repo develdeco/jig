@@ -58,8 +58,10 @@ func (s *Store) LandTrackerWrites() error {
 
 // landTrackerWrites is the end of a checkpoint's mirror sync. The sync's
 // record writes (an issue's prs: entry, its synced: fields, a board item, a
-// link) land in the working tree only, as every record write but a
-// creation's claim does (ADR 0030), and this commits exactly those paths, as
+// link) are pending while the sync runs (HoldTrackerWrites), so the working
+// tree holds none of them outside this function, and a claim that rebases
+// meanwhile finds it clean. Here they reach the working tree, inside the
+// checkpoint lock, and this commits exactly those paths, as
 // the person, so the next checkpoint's commit is not the only thing that
 // carries them. It pushes when it committed, when always is set, or when the
 // branch is ahead of origin anyway (another process's Sync swept the sync's
@@ -74,7 +76,8 @@ func (s *Store) LandTrackerWrites() error {
 // checkpoint's push.
 func (s *Store) landTrackerWrites(always bool) error {
 	paths := s.takeTrackerWrites()
-	if len(paths) == 0 && !always {
+	pend := s.takePending()
+	if len(paths) == 0 && pend.empty() && !always {
 		return nil
 	}
 	release, err := s.LockCheckpoint()
@@ -82,6 +85,9 @@ func (s *Store) landTrackerWrites(always bool) error {
 		return err
 	}
 	defer release()
+	if err := pend.apply(); err != nil {
+		return err
+	}
 	cp, err := s.begin()
 	if err != nil {
 		return err
@@ -185,4 +191,12 @@ func (s *Store) changedPaths(paths []string) ([]string, error) {
 		changed = append(changed, p)
 	}
 	return changed, nil
+}
+
+// linkRefused is what applying a pending link does when the file system
+// refuses it: the same answer LinkTrackerEntry gives when it is not holding
+// writes, a warning once and no more links for this Store.
+func (s *Store) linkRefused(rel string, err error) {
+	s.tracker.symFailed.Store(true)
+	s.warnNoLinks("the file system refused one: " + err.Error())
 }
