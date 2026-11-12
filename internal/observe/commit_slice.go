@@ -33,10 +33,22 @@ func (h *handler) sliceOf(sha string) (string, error) {
 	if t, err := gitx.Trailer(h.w.RepoDir, sha, sliceTrailer); err == nil && has(t) {
 		return t, nil
 	}
-	if has(h.w.Slice) {
+	if has(h.w.Slice) && !h.claimFinished(h.w.Slice) {
 		return h.w.Slice, nil
 	}
 	return "", nil
+}
+
+// claimFinished says whether a commit that names no slice should leave the
+// session's claimed slice alone: the slice is green, or the ticket has
+// published. Such a commit is follow-up work, not the slice's; verifying it
+// would reopen a finished slice. Only store files are read, no git process.
+func (h *handler) claimFinished(slice string) bool {
+	if st, err := h.st.ReadSliceState(h.w.Ticket, slice); err == nil && st.State == "green" {
+		return true
+	}
+	published, err := journal.HasEvent(h.st, h.w.Ticket, journal.EventPublishDone)
+	return err == nil && published
 }
 
 // buildsHere says whether a slice of slices builds in the repo the event is in.

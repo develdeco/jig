@@ -94,6 +94,11 @@ type Line struct {
 	// at most 600 bytes; the full tail lives in a machine-local log.
 	Signature string `json:"signature,omitempty"`
 	Summary   string `json:"summary,omitempty"`
+	// Cause is why a failed oracle line's run never judged the code: CauseTimeout
+	// (the wedge guard's kill) or CauseStopped (jig was told to stop). It is
+	// omitted for a run that ended with the test's own result, and on every line
+	// written before the field existed.
+	Cause string `json:"cause,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
 	// Approval is the publish approval a pr line's head had when the pull
@@ -515,3 +520,9 @@ func PRURLs(st *store.Store, ticket string) ([]string, error) {
 	}
 	return urls, nil
 }
+
+// The causes of a failed oracle line (Line.Cause).
+const (
+	CauseTimeout = "timeout"
+	CauseStopped = "stopped"
+)
