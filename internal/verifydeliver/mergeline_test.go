@@ -129,13 +129,18 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 
 	// A merge, then an ordinary commit on top of it.
 	onTop := r.commit("top.txt", "after the merge\n")
-	cases = append(cases, lineCase{name: "a merge and an ordinary commit", reviewed: reviewed, head: onTop, kind: lineOther})
+	cases = append(cases, lineCase{name: "a merge and an ordinary commit", reviewed: reviewed, head: onTop, kind: lineMergedThenOwn, ownTreeOf: m2})
 	reviewed2 := onTop
 
 	// A hand-resolved tip: the merge also edits shared.txt.
 	r.onMain("main3.txt", "from main, third time\n")
 	resolved := r.handMerge(func() { r.write("shared.txt", "one\ntwo\nthree\nand a hand edit\n") })
 	cases = append(cases, lineCase{name: "a hand-resolved tip", reviewed: reviewed2, head: resolved, kind: lineResolved, ownTreeOf: resolved})
+	// A hand-resolved merge, then an ordinary commit: the hand edits and the
+	// commit are the round's, the target's files are not.
+	handThenOwn := r.commit("after-hand.txt", "after the hand-resolved merge\n")
+	cases = append(cases, lineCase{name: "a hand-resolved merge and an ordinary commit", reviewed: reviewed2, head: handThenOwn, kind: lineMergedThenOwn, ownTreeOf: resolved})
+	r.git("reset", "--hard", resolved)
 
 	// A hand-resolved merge that is not the tip: a clean merge follows it.
 	r.onMain("main4.txt", "from main, fourth time\n")
@@ -191,6 +196,32 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 	r.git("commit", "-m", "merge unrelated, by hand")
 	unrelatedResolved := r.git("rev-parse", "HEAD")
 	cases = append(cases, lineCase{name: "a hand-resolved merge of an unrelated branch", reviewed: octopus, head: unrelatedResolved, kind: lineOther})
+
+	// A merge after an ordinary commit is the reviewer's to read in full.
+	r.git("reset", "--hard", reviewed)
+	r.commit("before.txt", "an ordinary commit first\n")
+	r.onMain("main6.txt", "from main, sixth time\n")
+	ordinaryThenMerge := r.merge()
+	cases = append(cases, lineCase{name: "a merge after an ordinary commit", reviewed: reviewed, head: ordinaryThenMerge, kind: lineOther})
+
+	// A merge or an octopus after the branch's own commit, behind a carried
+	// merge, is the reviewer's to read in full.
+	r.git("reset", "--hard", reviewed)
+	r.onMain("main7.txt", "from main, seventh time\n")
+	r.merge()
+	r.commit("own1.txt", "the branch's own commit\n")
+	r.onMain("main8.txt", "from main, eighth time\n")
+	r.merge()
+	mergeCommitMerge := r.commit("own2.txt", "another of its own\n")
+	cases = append(cases, lineCase{name: "a clean merge, a commit, a merge and a commit", reviewed: reviewed, head: mergeCommitMerge, kind: lineOther})
+	r.git("reset", "--hard", reviewed)
+	r.onMain("main9.txt", "from main, ninth time\n")
+	r.merge()
+	r.commit("own3.txt", "the branch's own commit\n")
+	r.onMain("main10.txt", "from main, tenth time\n")
+	r.git("merge", "--no-ff", "--no-edit", "main", side)
+	octopusAfter := r.commit("own4.txt", "after the octopus\n")
+	cases = append(cases, lineCase{name: "a clean merge, a commit, an octopus and a commit", reviewed: reviewed, head: octopusAfter, kind: lineOther})
 	return r.dir, cases
 }
 
@@ -225,6 +256,20 @@ func TestClassifyLine(t *testing.T) {
 		}
 		if kind != c.kind {
 			t.Errorf("%s: kind = %d, want %d", c.name, kind, c.kind)
+		}
+		if c.kind == lineMergedThenOwn {
+			// The base: the carried merge itself when it is clean, git's own merge
+			// of its parents (a tree) when it was resolved by hand.
+			tree, _, merr := gitx.MergeTree(dir, c.ownTreeOf+"^1", c.ownTreeOf+"^2")
+			mergeTree, _ := gitx.RevParse(dir, c.ownTreeOf+"^{tree}")
+			want := c.ownTreeOf
+			if merr != nil || tree != mergeTree {
+				want = tree
+			}
+			if own != want {
+				t.Errorf("%s: base = %q, want %q (%v)", c.name, own, want, merr)
+			}
+			continue
 		}
 		if c.kind != lineResolved {
 			if own != "" {
@@ -336,9 +381,9 @@ func TestClassifyLineOldGitHelper(t *testing.T) {
 }
 
 // TestClassifyLineAsksAnOldGitOnlyForALineOfMerges: with a git before 2.38 a line
-// of merges is refused with GIT_TOO_OLD, as it was, but a line with an ordinary
-// commit in it never reaches git's merge: it is lineOther with no error, whether
-// the merge or the ordinary commit comes first. The git is the child's: the
+// of merges only is refused with GIT_TOO_OLD, but a line with an ordinary commit
+// in it, whether it comes before or after the merges, is lineOther with no error:
+// it was before, on any git. The git is the child's: the
 // package's tests do not edit the environment they share.
 func TestClassifyLineAsksAnOldGitOnlyForALineOfMerges(t *testing.T) {
 	t.Parallel()
