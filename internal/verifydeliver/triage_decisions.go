@@ -31,9 +31,10 @@ type TriageDecision struct {
 	// keep is queued at once, a dismiss when the next round closes). An older
 	// line is spent, a decision some earlier round already took.
 	Pending bool
-	// Queued is whether a gate queued the keep's fix slice since the line: the
-	// slice is the decision applied, so nothing queues it again, and the round
-	// that closes next reads the finding fixed when its code moved.
+	// Queued is whether a gate queued the keep's fix slice since the line and
+	// before the round it was queued for closed: the slice is the decision
+	// applied, so nothing queues it again, and the round that closes next reads
+	// the finding fixed when its code moved.
 	Queued bool
 }
 
@@ -61,8 +62,10 @@ func TriageDecisions(lines []journal.Line) map[string]TriageDecision {
 				Workspace: ws, Oracle: oracle, Pending: i > closed,
 			}
 		case journal.EventKeepQueued:
+			// Bounded like Pending: a keep queued for a round that has since
+			// closed is spent, and no round or gate applies it again.
 			if d, ok := decisions[l.Ref]; ok {
-				d.Pending, d.Queued = false, true
+				d.Pending, d.Queued = false, i > closed
 				decisions[l.Ref] = d
 			}
 		}

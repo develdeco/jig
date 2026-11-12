@@ -379,3 +379,40 @@ func TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice(t *testing.T) {
 		}
 	}
 }
+
+// TestAQueuedKeepIsSpentOnceItsRoundCloses: while the round a keep was queued
+// for is open, the request's open row for the note carries the keep; after the
+// round closes with the note still reported, the keep is spent: `jig status`
+// no longer lists it as a decided note.
+func TestAQueuedKeepIsSpentOnceItsRoundCloses(t *testing.T) {
+	t.Parallel()
+	fx, e := keptNoteAfterRound1(t)
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig gate: exit = %d\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "beta/beta.go")
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig gate (round 2 opens): exit = %d\n%s", code, out)
+	}
+	ctx, code := runMain(t, e, "", "review", "context", fx.Ticket, "--json", "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(ctx, `"decision": "keep"`) && !strings.Contains(ctx, `"decision":"keep"`) {
+		t.Fatalf("review context: exit = %d, want the queued keep on the note's open row\n%s", code, ctx)
+	}
+	// Round 2 reports the note again and closes; the keep is spent.
+	round2 := filepath.Join(t.TempDir(), "round-2.json")
+	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{
+		ReviewedPaths: []string{"beta/beta.go"},
+		StillPresent:  []verifydeliver.StillPresentEntry{{Prior: "r1-f1", Line: 6}},
+		Summary:       "round 2: the note still stands",
+	})
+	if out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", round2, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("round 2 exit = %d\n%s", code, out)
+	}
+	status, code := runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
+	if code != 0 || strings.Contains(status, "decided_notes") {
+		t.Fatalf("status after round 2: exit = %d, want no decided_notes for a spent keep\n%s", code, status)
+	}
+}
