@@ -57,7 +57,7 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
 	}
-	if strings.Contains(out, "fix-2-root-test") {
+	if strings.Contains(out, "fix-2-alpha-test") {
 		t.Fatalf("round 2 queued a fix slice for an ask the closing round no longer reports at a moved head:\n%s", out)
 	}
 	e := testEnv(fx.Home).atTerminal()
@@ -93,8 +93,8 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 func TestKeptAskAtTheSameHeadStillQueuesItsFixSlice(t *testing.T) {
 	t.Parallel()
 	out, code, _ := keptAskRound2(t, false, false)
-	if code != 0 || !strings.Contains(out, "fix-2-root-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-root-test\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
+		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
 	}
 }
 
@@ -102,8 +102,8 @@ func TestKeptAskAtTheSameHeadStillQueuesItsFixSlice(t *testing.T) {
 func TestKeptAskTheClosingRoundReportsAgainStillQueuesItsFixSlice(t *testing.T) {
 	t.Parallel()
 	out, code, _ := keptAskRound2(t, true, true)
-	if code != 0 || !strings.Contains(out, "fix-2-root-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-root-test\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
+		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestKeptNoteTheClosingRoundDidNotReadIsNotSpentAsFixed(t *testing.T) {
 func TestKeptNoteTheClosingRoundReadAndNoLongerReportsReadsFixed(t *testing.T) {
 	t.Parallel()
 	out, code, _ := keptNoteRound2(t, []string{"go.mod", "beta/version.go"})
-	if code != 0 || strings.Contains(out, "fix-2-root-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and no fix-2-root-test\n%s", code, out)
+	if code != 0 || strings.Contains(out, "fix-2-alpha-test") {
+		t.Fatalf("round 2: exit = %d, want 0 and no fix-2-alpha-test\n%s", code, out)
 	}
 }

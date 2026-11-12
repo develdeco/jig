@@ -62,8 +62,8 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	// The kept note's file is in must_review, so the reviewer reads it.
 	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code = roundThroughMain(t, e, fx, round2Path)
-	if code != 0 || !strings.Contains(out, "fix-2-root-test") {
-		t.Fatalf("round 2 exit = %d, want 0 and the fix slice fix-2-root-test built from the kept note\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-beta-test") {
+		t.Fatalf("round 2 exit = %d, want 0 and the fix slice fix-2-beta-test built from the kept note\n%s", code, out)
 	}
 	if strings.Contains(out, "fix-2-r1-f2") {
 		t.Fatalf("round 2 queued a slice for the dismissed note:\n%s", out)
@@ -79,7 +79,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	}
 	var goal string
 	for _, s := range slices {
-		if s.ID == "fix-2-root-test" {
+		if s.ID == "fix-2-beta-test" {
 			goal = s.Goal
 			if s.FromGate != 2 || len(s.Findings) != 1 || s.Findings[0] != "r1-f1" {
 				t.Errorf("slice = %+v, want a fix slice of round 2 for r1-f1", s)
@@ -87,7 +87,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 		}
 	}
 	if !strings.Contains(goal, "Worth doing now.") || !strings.Contains(goal, "kept by the human") {
-		t.Errorf("fix-2-root-test goal = %q, want the person's reason and who kept it", goal)
+		t.Errorf("fix-2-beta-test goal = %q, want the person's reason and who kept it", goal)
 	}
 	if used, _ := verifydeliver.UsedFixBudget(st, ticket, 3); used != 1 {
 		t.Errorf("fix budget used = %d, want 1: the round that queued the kept note's slice counts", used)
@@ -102,5 +102,70 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	notesFile := filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2", "findings.yaml")
 	if triage, decision, found := findingsYAMLEntry(t, notesFile, "r1-f1"); !found || triage != verifydeliver.TriageHuman || decision != "Worth doing now." {
 		t.Errorf("round 2 findings.yaml r1-f1 = (%q, %q, %v), want a human's decision recorded", triage, decision, found)
+	}
+}
+
+// TestTwoKeptNotesInOneWorkspaceAreOneFixSlice pins the grouping through the
+// binary: two notes of one workspace and oracle, both kept with `jig triage`,
+// are built as the one fix slice of the next round, which lists both findings
+// and carries each person's reason in its goal.
+func TestTwoKeptNotesInOneWorkspaceAreOneFixSlice(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
+	e := testEnv(fx.Home).atTerminal()
+	ticket := fx.Ticket
+	buildFixtureTicket(t, fx)
+
+	round1 := reviewResultAt(t, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json"))
+	round1.Findings = []verifydeliver.ResultFinding{
+		{File: "alpha/alpha.go", Line: 5, Title: "Add could say what overflow does", Detail: "The comment is silent.", Action: "fix", Risk: "low", RiskRationale: "cosmetic", Oracle: "test"},
+		{File: "alpha/percent.go", Line: 3, Title: "Clamp helpers could share a check", Detail: "Later.", Action: "fix", Risk: "low", RiskRationale: "maintainability", Oracle: "test"},
+	}
+	round1Path := filepath.Join(t.TempDir(), "round-1.json")
+	writeReviewResultAt(t, round1Path, round1)
+	out, code := roundThroughMain(t, e, fx, round1Path)
+	if code != 0 || !strings.Contains(out, "verdict: clean") {
+		t.Fatalf("round 1 exit = %d, want 0 and a clean verdict (both fixes are below the floor)\n%s", code, out)
+	}
+
+	for id, reason := range map[string]string{"r1-f1": "Say it now.", "r1-f2": "Share the check now."} {
+		out, code = runMain(t, e, "", "triage", ticket, id, "keep", "--reason", reason, "--store", fx.StoreDir)
+		if code != 0 {
+			t.Fatalf("jig triage keep %s: exit = %d, want 0\n%s", id, code, out)
+		}
+	}
+
+	round2Path := filepath.Join(t.TempDir(), "round-2.json")
+	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"alpha/alpha.go", "alpha/percent.go"}, Summary: "round 2: nothing new"})
+	out, code = roundThroughMain(t, e, fx, round2Path)
+	if code != 0 || !strings.Contains(out, "fix_slices[1]") || !strings.Contains(out, "fix-2-alpha-test") {
+		t.Fatalf("round 2 exit = %d, want 0 and the one fix slice fix-2-alpha-test\n%s", code, out)
+	}
+
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found int
+	for _, s := range slices {
+		if s.FromGate != 2 {
+			continue
+		}
+		found++
+		if s.ID != "fix-2-alpha-test" || len(s.Findings) != 2 || s.Findings[0] != "r1-f1" || s.Findings[1] != "r1-f2" {
+			t.Errorf("round 2 slice = %+v, want fix-2-alpha-test listing r1-f1 and r1-f2", s)
+		}
+		for _, want := range []string{"Say it now.", "Share the check now.", "Gate finding r1-f1, kept by the human:", "Gate finding r1-f2, kept by the human:"} {
+			if !strings.Contains(s.Goal, want) {
+				t.Errorf("goal missing %q:\n%s", want, s.Goal)
+			}
+		}
+	}
+	if found != 1 {
+		t.Errorf("round 2 appended %d slices, want 1", found)
 	}
 }
