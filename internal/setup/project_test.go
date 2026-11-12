@@ -475,3 +475,18 @@ func TestRemoveSkillsReportsASkillWhoseOnlyJigFilesAreReferences(t *testing.T) {
 		t.Errorf("jig's references stayed: %v", err)
 	}
 }
+
+func TestRemoveSkillsKeepsAPersonsEditedCopyOfAReferenceJigShips(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	writeOrFail(t, filepath.Join(root, "build", "SKILL.md"), "# build\n", 0o644)
+	edited := filepath.Join(root, "build", "references", "deep.md")
+	writeOrFail(t, edited, "my own edit of deep\n", 0o644)
+	if removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]}); err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want build (its SKILL.md is jig's)", removed, err)
+	}
+	if got := readOrFail(t, edited); got != "my own edit of deep\n" {
+		t.Errorf("the person's edited reference: %q", got)
+	}
+}
