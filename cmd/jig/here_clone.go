@@ -6,6 +6,8 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/clonebehind"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 )
 
@@ -48,13 +50,31 @@ func hereCloneInfo(r clonebehind.Result) hereCloneJSON {
 	return info
 }
 
+// cloneNamedByMap is the path jig here and jig doctor name the clone dir
+// belongs to by: the machine map's spelling of the clone, found with symlinks
+// resolved on both sides (git reports /private/var where the map holds /var),
+// else the clone root itself. A linked worktree is named as its clone.
+func cloneNamedByMap(jigHome, dir string) string {
+	root := locate.CloneRoot(dir)
+	if machine, err := project.LoadMachine(jigHome); err == nil {
+		for _, mp := range machine {
+			for _, mapped := range mp.Clones {
+				if gitx.SameDir(mapped, root) {
+					return mapped
+				}
+			}
+		}
+	}
+	return root
+}
+
 // hereCloneJudged is the judgment of the located clone, and whether it is
 // one to name (behind or diverged).
 func hereCloneJudged(c hereCtx) (clonebehind.Result, bool) {
 	if c.Where.RepoDir == "" {
 		return clonebehind.Result{}, false
 	}
-	r := clonebehind.Check(c.Where.RepoDir, hereCloneTarget(c))
+	r := clonebehind.Check(cloneNamedByMap(c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
 	return r, r.State == clonebehind.Behind || r.State == clonebehind.Diverged
 }
 
