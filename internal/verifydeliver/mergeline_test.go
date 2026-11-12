@@ -362,9 +362,9 @@ func TestClassifyLineOldGitHelper(t *testing.T) {
 }
 
 // TestClassifyLineAsksAnOldGitOnlyForALineOfMerges: with a git before 2.38 a line
-// that starts with merges, with or without ordinary commits after them, is
-// refused with GIT_TOO_OLD, but a line that starts with an ordinary commit never
-// reaches git's merge: it is lineOther with no error. The git is the child's: the
+// of merges only is refused with GIT_TOO_OLD, but a line with an ordinary commit
+// in it, whether it comes before or after the merges, is lineOther with no error:
+// it was before, on any git. The git is the child's: the
 // package's tests do not edit the environment they share.
 func TestClassifyLineAsksAnOldGitOnlyForALineOfMerges(t *testing.T) {
 	t.Parallel()
@@ -391,7 +391,7 @@ func TestClassifyLineAsksAnOldGitOnlyForALineOfMerges(t *testing.T) {
 	for _, want := range []string{
 		"merge-tree: " + gitx.CodeGitTooOld,
 		fmt.Sprintf("head[0]: kind=%d own=\"\" err=none", lineOther),
-		fmt.Sprintf("head[1]: kind=%d own=\"\" err=%s", lineOther, gitx.CodeGitTooOld),
+		fmt.Sprintf("head[1]: kind=%d own=\"\" err=none", lineOther),
 		fmt.Sprintf("head[2]: kind=%d own=\"\" err=none", lineOther),
 		fmt.Sprintf("head[3]: kind=%d own=\"\" err=%s", lineOther, gitx.CodeGitTooOld),
 	} {

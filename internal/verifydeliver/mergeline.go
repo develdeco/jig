@@ -89,7 +89,9 @@ func classifyLineCarried(dir, reviewed, head, targetRef string) (kind lineKind, 
 	for i, c := range line[:merges] {
 		tree, clean, merr := gitx.MergeTree(dir, c.Parents[0], c.Parents[1])
 		if merr != nil {
-			if tooOld(merr) {
+			// A line with the branch's own commits after its merges was lineOther
+			// on any git; it stays so on one that cannot merge.
+			if tooOld(merr) && !own {
 				return lineOther, "", "", merr
 			}
 			return lineOther, "", "", nil

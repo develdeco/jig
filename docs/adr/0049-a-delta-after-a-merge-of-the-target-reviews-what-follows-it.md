@@ -16,6 +16,6 @@
 
 ## Consequences
 
-- Like the line of merges ADR 0038 covers, this kind asks git to merge, so an older git than 2.38 stops it with `GIT_TOO_OLD`. A line that starts with an ordinary commit still never reaches git's merge.
+- Judging a merge needs git 2.38 or later. On an older git a line of merges only stops with `GIT_TOO_OLD`, as in ADR 0038, but a line with the branch's own commits after its merges stays `lineOther` with no error, as it was on any git, so the reviewer reads everything since the reviewed head.
 - `base_sha` in a delta round's `review.json` and open record is a commit or a tree, as it already could be.
 - The reviewer's prompt, the carry-over and the publish checks are unchanged.
