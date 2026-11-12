@@ -334,6 +334,83 @@ func TestCheckpointHookLandingRebasesOntoAMovedOrigin(t *testing.T) {
 	}
 }
 
+// TestClaimBetweenASyncsWritesAndItsLandingFindsACleanTree: the records a
+// sync writes are not in the working tree before the landing takes the
+// checkpoint lock, so a claim that runs in between (another builder on the
+// same clone) has nothing unstaged for its rebase to refuse. The order is the
+// test's own: origin moves, the hook writes a record and claims a ticket, and
+// only then does the hook return and the records land, in one commit that
+// holds only the tracker path.
+func TestClaimBetweenASyncsWritesAndItsLandingFindsACleanTree(t *testing.T) {
+	st, work, remote, warnings := newLandStore(t)
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, "", "clone", remote, other)
+	runGit(t, other, "config", "user.name", "other")
+	runGit(t, other, "config", "user.email", "other@example.invalid")
+	if err := os.WriteFile(filepath.Join(other, "note.txt"), []byte("theirs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "-A")
+	runGit(t, other, "commit", "-m", "theirs")
+	runGit(t, other, "push", "origin", "main")
+	// A commit of this clone's own that origin lacks: with both sides ahead
+	// the claim's pull is a rebase, which refuses a dirty tree (a pull that
+	// is only behind fast-forwards over one).
+	if err := os.WriteFile(filepath.Join(work, "mine.txt"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "mine")
+
+	// The record is in the store already, so the sync's write is a change of a
+	// tracked file, which is what a rebase refuses (a new file it does not).
+	entry := putRecord(t, st, TrackerOwner{Ticket: "JIG-1"}, "acme/tracking", 7)
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "the record")
+	var claimErr error
+	var claimed string
+	st.AfterCheckpoint = func(s *Store) error {
+		if err := s.WriteTrackerRecord(entry, TrackerOwner{Ticket: "JIG-1"}, githubFields(t, "acme/tracking", 7), "# synced\n"); err != nil {
+			return err
+		}
+		claimed, claimErr = s.Claim(
+			func() (string, []string, error) {
+				id, err := s.Mint("JIG", Ticket{Title: "raced"})
+				if err != nil {
+					return "", nil, err
+				}
+				return id, []string{s.TicketRelDir(id)}, nil
+			},
+			func(id string) string { return id + ": new ticket" },
+		)
+		return nil
+	}
+	st.RunCheckpointHook()
+
+	if claimErr != nil {
+		t.Fatalf("a claim between the sync's writes and its landing failed: %v", claimErr)
+	}
+	if claimed == "" {
+		t.Fatal("the claim returned no id")
+	}
+	if len(*warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", *warnings)
+	}
+	rel := filepath.ToSlash(st.TrackerRecordRelPath(entry))
+	if subject := strings.TrimSpace(runGit(t, work, "log", "-1", "--pretty=%s")); subject != trackerLandMessage {
+		t.Fatalf("last commit = %q, want the landing's %q", subject, trackerLandMessage)
+	}
+	if files := strings.Fields(runGit(t, work, "show", "--name-only", "--pretty=format:", "HEAD")); len(files) != 1 || files[0] != rel {
+		t.Fatalf("the landing holds %v, want only %s", files, rel)
+	}
+	if local, origin := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")), strings.TrimSpace(runGit(t, remote, "rev-parse", "main")); local != origin {
+		t.Fatalf("origin is at %s, want it level with the store at %s", origin, local)
+	}
+	if got := porcelain(t, work); got != "" {
+		t.Fatalf("working tree = %q, want clean", got)
+	}
+}
+
 // TestLandTrackerWritesPushesWhatSyncCommittedAndNothingWroteSince: `jig
 // trackers sync` calls Sync, which commits the leftovers without pushing,
 // then the mirror, then LandTrackerWrites: the leftovers' commit reaches
