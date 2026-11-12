@@ -14,9 +14,9 @@ import (
 // TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice is the path
 // of a note a person takes up, through real jig subprocesses: a round whose
 // only finding is a low fix is clean (the risk floor routes it to a note),
-// `jig triage keep` takes the note, and the next `jig gate` closes with the
-// fix slice queued, the note an open finding rather than a record.
-func TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice(t *testing.T) {
+// `jig triage keep` takes the note, and the next `jig gate` queues the fix
+// slice at once and opens no round.
+func TestTriageKeepsANoteTheFloorRoutedAndTheNextGateQueuesItsSlice(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
 	ticket := fx.Ticket
@@ -57,14 +57,15 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice(t *testing.
 		t.Fatalf("status exit = %d, want decided_notes listing the kept note\n%s", status.Code, status.Stdout)
 	}
 
-	round2 := filepath.Join(t.TempDir(), "round-2.json")
-	writeJSON(t, round2, map[string]any{"findings": []any{}, "still_present": []any{}, "reviewed_paths": []any{"beta/beta.go"}, "summary": "round 2: nothing new"})
-	if open := runJig(t, env, fx.StoreDir, "gate", ticket); open.Code != 0 {
-		t.Fatalf("gate (round 2) exit = %d, want 0\n%s%s", open.Code, open.Stdout, open.Stderr)
+	queue := runJig(t, env, fx.StoreDir, "gate", ticket)
+	if queue.Code != 0 || !strings.Contains(queue.Stdout, "fix_slices") || !strings.Contains(queue.Stdout, "fix-2-r1-f1") {
+		t.Fatalf("gate after the keep exit = %d, want 0 and the slice fix-2-r1-f1 in fix_slices\nstdout:\n%s\nstderr:\n%s", queue.Code, queue.Stdout, queue.Stderr)
 	}
-	done = runJig(t, env, fx.StoreDir, "review", "done", ticket, "--result", round2)
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: fix-slices") || !strings.Contains(done.Stdout, "fix-2-r1-f1") {
-		t.Fatalf("review done (round 2) exit = %d, want 0, fix-slices and the slice fix-2-r1-f1\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2")); err == nil {
+		t.Fatal("the gate that queued the keep recorded a round")
+	}
+	if again := runJig(t, env, fx.StoreDir, "gate", ticket); again.Code == 0 || !strings.Contains(again.Stdout, "GATE_NOT_GREEN") {
+		t.Fatalf("gate with the kept slice unbuilt exit = %d, want GATE_NOT_GREEN\n%s", again.Code, again.Stdout)
 	}
 
 	st, err := store.Open(fx.StoreDir)

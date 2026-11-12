@@ -11,15 +11,24 @@ import (
 )
 
 // deltaContext opens round 2 over a one-file change (beta.go) after round 1
-// filed a note on that file and a person kept it, and prints round 2's review
-// context.
+// filed a note on that file and a person kept it (the gate queues the keep's
+// slice, which is built, empty, beside the change), and prints round 2's
+// review context.
 func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) (*fixture.Fixture, string) {
 	t.Helper()
 	fx, e := floorNoteRound1(t)
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
+	}
 	change(t, fx)
+	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-r1-f1: done with the change", "-m", "Jig-Slice: fix-2-r1-f1")
+	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
+	if out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "fix-2-r1-f1", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "state: pass") {
+		t.Fatalf("jig verify of the kept note's slice: exit = %d\n%s", code, out)
+	}
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (round 2 opens)\n%s", code, out)
 	}
