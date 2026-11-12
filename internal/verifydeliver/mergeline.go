@@ -49,15 +49,22 @@ const (
 // through merges reaches git's merge, and a git too old to make it is an error
 // for that line alone.
 func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree string, err error) {
+	kind, ownTree, _, err = classifyLineCarried(dir, reviewed, head, targetRef)
+	return kind, ownTree, err
+}
+
+// classifyLineCarried is classifyLine and, for lineMergedThenOwn, the carried
+// merge: the last merge of the line.
+func classifyLineCarried(dir, reviewed, head, targetRef string) (kind lineKind, ownTree, carried string, err error) {
 	if reviewed != "" && head == reviewed {
-		return lineSame, "", nil
+		return lineSame, "", "", nil
 	}
 	if dir == "" || reviewed == "" || head == "" {
-		return lineOther, "", nil
+		return lineOther, "", "", nil
 	}
 	line, lerr := gitx.FirstParentLine(dir, reviewed, head)
 	if lerr != nil || len(line) == 0 || len(line[0].Parents) == 0 || line[0].Parents[0] != reviewed {
-		return lineOther, "", nil
+		return lineOther, "", "", nil
 	}
 	// The merges are the leading commits with two parents; what follows must be
 	// ordinary single-parent commits.
@@ -66,16 +73,16 @@ func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree
 		merges++
 	}
 	if merges == 0 || targetRef == "" {
-		return lineOther, "", nil
+		return lineOther, "", "", nil
 	}
 	for _, c := range line[merges:] {
 		if len(c.Parents) != 1 {
-			return lineOther, "", nil
+			return lineOther, "", "", nil
 		}
 	}
 	for _, c := range line[:merges] {
 		if in, aerr := gitx.IsAncestor(dir, c.Parents[1], targetRef); aerr != nil || !in {
-			return lineOther, "", nil
+			return lineOther, "", "", nil
 		}
 	}
 	own := merges < len(line)
@@ -83,30 +90,30 @@ func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree
 		tree, clean, merr := gitx.MergeTree(dir, c.Parents[0], c.Parents[1])
 		if merr != nil {
 			if tooOld(merr) {
-				return lineOther, "", merr
+				return lineOther, "", "", merr
 			}
-			return lineOther, "", nil
+			return lineOther, "", "", nil
 		}
 		last := i == merges-1
 		switch {
 		case tree == c.Tree && clean:
 			// git's own merge. Carried, it is its own base: the commit.
 			if own && last {
-				return lineMergedThenOwn, c.SHA, nil
+				return lineMergedThenOwn, c.SHA, c.SHA, nil
 			}
 		case last && tree != c.Tree:
 			// The last merge, resolved by hand (or a conflict resolved).
 			if own {
-				return lineMergedThenOwn, tree, nil
+				return lineMergedThenOwn, tree, c.SHA, nil
 			}
-			return lineResolved, tree, nil
+			return lineResolved, tree, "", nil
 		default:
 			// A hand-resolved merge that is not the last, or a conflict committed
 			// with its markers: the reviewer reads it all.
-			return lineOther, "", nil
+			return lineOther, "", "", nil
 		}
 	}
-	return lineClean, "", nil
+	return lineClean, "", "", nil
 }
 
 // tooOld says err is the one error classifyLine passes on: git cannot make a

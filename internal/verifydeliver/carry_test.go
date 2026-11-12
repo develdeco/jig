@@ -3,6 +3,7 @@ package verifydeliver
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -360,5 +361,84 @@ func TestGateCarriesARoundWhoseStackedRepoMergedNothing(t *testing.T) {
 		if !strings.Contains(string(md), want) {
 			t.Errorf("findings.md = %q, want it to contain %q", md, want)
 		}
+	}
+}
+
+// TestReviewerLinesNameTheCarriedMerge: a round that carried a merge of the
+// target and read what followed it says which merge; a round over several repos
+// puts the repo first; a round without the record, and a carried round, read as
+// before.
+func TestReviewerLinesNameTheCarriedMerge(t *testing.T) {
+	t.Parallel()
+	who := Provenance{Session: "s-rev"}
+	one := reviewerLines([]RoundRecord{
+		{Round: 2, Scope: "delta", Base: "bbbbbbb2", Head: "ccccccc3", Reviewer: who, Independent: IndependentYes,
+			CarriedMerge: map[string]CarriedMerge{"app": {SHA: "1234567890abcdef", Ref: "origin/main"}}},
+		{Round: 3, Scope: "delta", Base: "bbbbbbb2", Head: "ddddddd4", Reviewer: who, Independent: IndependentYes},
+		{Round: 4, Scope: "delta", Base: "bbbbbbb2", Head: "eeeeeee5", Reviewer: who, Independent: IndependentYes, CarriedFrom: 1,
+			CarriedMerge: map[string]CarriedMerge{"app": {SHA: "1234567890abcdef", Ref: "origin/main"}}},
+	})
+	if len(one) != 3 || !strings.HasSuffix(one[0], "none of the builders; the merge of origin/main at 1234567 was carried, not read.") {
+		t.Errorf("round 2 line = %q, want it to end naming the carried merge", one)
+	}
+	if strings.Contains(one[1], "carried") || !strings.HasSuffix(one[1], "none of the builders.") {
+		t.Errorf("round 3 line = %q, want it unchanged without the record", one[1])
+	}
+	if strings.Contains(one[2], "was carried, not read") {
+		t.Errorf("round 4 line = %q, want the carried-over wording alone", one[2])
+	}
+
+	several := reviewerLines([]RoundRecord{{
+		Round: 2, Scope: "delta", Head: "app:ccccccc3+lib:ddddddd4", Reviewer: who, Independent: IndependentYes,
+		CarriedMerge: map[string]CarriedMerge{
+			"lib": {SHA: "abcdef1234567890", Ref: "origin/trunk"},
+			"app": {SHA: "1234567890abcdef", Ref: "origin/main"},
+		},
+	}})
+	want := "none of the builders; app: the merge of origin/main at 1234567 was carried, not read; lib: the merge of origin/trunk at abcdef1 was carried, not read."
+	if len(several) != 1 || !strings.HasSuffix(several[0], want) {
+		t.Errorf("lines = %q, want them to end %q", several, want)
+	}
+}
+
+// TestGateFinishRecordsTheMergeADeltaCarried: a clean merge of the target and
+// then a commit of the branch's own is a round a reviewer reads, from the
+// merge; its report.yaml names the merge and the ref it brought in, and the
+// review notes say it was carried, not read.
+func TestGateFinishRecordsTheMergeADeltaCarried(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	merged := targetMoves(t, fx, "main1.txt")
+	writeAndCommit(t, fx.RepoDir, "fix.txt", "a fix of its own", "a fix after the merge")
+
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried != nil || p.Round != 2 || p.Base != merged || p.CarriedMerge != merged {
+		t.Fatalf("Prepared = round %d, base %s, carried merge %s, carried round %v, want a round a reviewer reads from the merge %s", p.Round, p.Base, p.CarriedMerge, p.Carried, merged)
+	}
+	if want := []string{"fix.txt"}; !reflect.DeepEqual(p.Request.MustReview, want) {
+		t.Fatalf("must_review = %v, want only the fix's file %v", p.Request.MustReview, want)
+	}
+	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish: %v", err)
+	}
+
+	rep := readReport(t, d, fx.Ticket, 2)
+	if got := rep.CarriedMerge["fixture-repo"]; got != (CarriedMerge{SHA: merged, Ref: "origin/main"}) {
+		t.Errorf("report.yaml carried_merge = %+v, want the merge %s of origin/main", rep.CarriedMerge, merged)
+	}
+	rounds, err := ReadRounds(d.Store, fx.Ticket)
+	if err != nil || len(rounds) != 2 {
+		t.Fatalf("ReadRounds = %d rounds, %v, want 2", len(rounds), err)
+	}
+	if len(rounds[0].CarriedMerge) != 0 {
+		t.Errorf("round 1 carried merge = %+v, want none", rounds[0].CarriedMerge)
+	}
+	lines := reviewerLines(rounds)
+	want := "; the merge of origin/main at " + merged[:7] + " was carried, not read."
+	if len(lines) != 2 || !strings.HasSuffix(lines[1], want) || strings.Contains(lines[0], "carried") {
+		t.Errorf("review notes lines = %q, want round 2's to end %q", lines, want)
 	}
 }
