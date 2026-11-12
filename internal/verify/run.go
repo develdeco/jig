@@ -673,6 +673,13 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	started := d.now()
 	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	if errors.Is(oerr, envrun.ErrStopped) {
+		// No verdict: the line says the run ended without judging the code,
+		// and the slice's state stays as it was.
+		line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
+			Outcome: "fail", Cause: journal.CauseStopped, Summary: oneLine(oerr.Error())}
+		if jerr := x.journal(line); jerr != nil {
+			return jerr
+		}
 		return oerr
 	}
 	// Rounded up, so every run records at least a second and 0 keeps meaning
@@ -697,6 +704,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		x.res.Signature = failureSignature(x.r.Slice, x.res.Summary, oerr)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
+		line.Cause = failureCause(oerr)
 		x.logf("the oracle failed after %ds (limit %s); the lines a passing run did not print (when it kept a baseline), then the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
 	}
 	if err := x.journal(line); err != nil {
