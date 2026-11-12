@@ -131,3 +131,33 @@ func TestSessionStartHookWorkStaysUnderItsCeiling(t *testing.T) {
 	}
 	checkWork(t, "SessionStart hook", processes, reads, sessionStartMaxProcesses, sessionStartMaxReads)
 }
+
+// observeMaxProcesses and observeMaxReads bound what the call that runs after
+// every tool (jig observe --harness claude, PostToolUse Bash) costs on the
+// startPathRig fixture: git programs started (trace files) and in-process
+// reads (gitx.InProcessReads). Each is the count measured on main plus 2; a
+// change that adds work on purpose raises it.
+const (
+	observeMaxProcesses       = 2
+	observeMaxReads     int64 = 4
+)
+
+func TestObserveWorkStaysUnderItsCeiling(t *testing.T) {
+	fx, e := startPathRig(t)
+	payload := hookPayload(t, fx, "PostToolUse", map[string]any{
+		"tool_name":     "Bash",
+		"tool_input":    map[string]any{"command": "echo hi"},
+		"tool_response": map[string]any{"stdout": "hi", "stderr": ""},
+		"tool_use_id":   "tu1",
+	})
+	var out string
+	var code int
+	processes, reads := measureWork(t, func() { out, code = runMain(t, e, payload, "observe", "--harness", "claude") })
+	if code != 0 {
+		t.Fatalf("jig observe: exit %d, output %q", code, out)
+	}
+	if out != "" {
+		t.Errorf("jig observe printed %q, want nothing", out)
+	}
+	checkWork(t, "jig observe", processes, reads, observeMaxProcesses, observeMaxReads)
+}
