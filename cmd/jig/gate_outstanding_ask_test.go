@@ -117,7 +117,7 @@ func TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound(t *testing
 	if !strings.Contains(out, "r1-f1") {
 		t.Fatalf("round 2 report never mentioned r1-f1:\n%s", out)
 	}
-	if !strings.Contains(out, "fix-2-r1-f1") {
+	if !strings.Contains(out, "fix-2-alpha-test") {
 		t.Fatalf("round 2 output missing the fix slice built from the kept ask:\n%s", out)
 	}
 

@@ -72,7 +72,7 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSlices: %v", err)
 	}
-	for _, want := range []string{"fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3"} {
+	for _, want := range []string{"fix-1-alpha-test", "fix-1-beta-test"} {
 		if !hasSlice(slices, want) {
 			t.Fatalf("expected slice %s from default (unprompted) triage; got %+v", want, slices)
 		}
@@ -81,12 +81,12 @@ func TestGateReviewerNonTerminalTriage(t *testing.T) {
 	// The documented default path keeps every fix, so fix-1-beta-test is not
 	// merely appended to slices.yaml, it is the ticket's own queued work: the
 	// builder must actually be able to take it to green through this
-	// fixture, the same as fix-1-alpha-test and fix-1-r1-f3. Without a
+	// fixture, the same as fix-1-alpha-test. Without a
 	// scripted attempt for it the slice could only fail every verification
 	// and wedge the ticket - a clean gate is then unreachable no matter how
 	// many more rounds run.
-	b.buildFix(t, "fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3")
-	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test", "fix-1-r1-f3"} {
+	b.buildFix(t, "fix-1-alpha-test", "fix-1-beta-test")
+	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test"} {
 		state, err := st.ReadSliceState(ticket, s)
 		if err != nil {
 			t.Fatalf("read slice state %s: %v", s, err)

@@ -104,7 +104,7 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 	}
 
 	driveFixSlice(t, fx, "rung-a", "fix-1-alpha-test")
-	driveFixSlice(t, fx, "rung-a", "fix-1-r1-f3")
+	driveFixSlice(t, fx, "rung-a", "fix-1-beta-test")
 
 	round2Triage := func(TriageInput) TriageResult {
 		return TriageResult{FixHuman: true, Asks: map[string]AskOutcome{}}
@@ -192,7 +192,7 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
 - d (%[4]s): Smoke-test the rig environment class.
 - fix-1-alpha-test (%[5]s): Fix these gate findings
   - Add's doc comment still omits overflow behavior
-- fix-1-r1-f3 (%[6]s): Gate finding r1-f3, kept by the human
+- fix-1-beta-test (%[6]s): Fix these gate findings
   - Greeting formality beyond casual is not decided
 - fix-2-alpha-test (%[7]s): Fix these gate findings
   - Add's doc comment still omits overflow behavior
@@ -205,7 +205,7 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
   - Oracle: test
 
 - **Greeting formality beyond casual is not decided** (medium): the wrong formality reaches every caller of Greet
-  - Status: fixed by slice fix-1-r1-f3 and cleared at round 2
+  - Status: fixed by slice fix-1-beta-test and cleared at round 2
   - Oracle: test
 
 - **Greet does not trim surrounding whitespace from name** (low): cosmetic only, no functional or safety impact
@@ -250,7 +250,8 @@ Hunks no probe or skip covers:
 
 - alpha/alpha.go:5-7
 - alpha/alpha.go:17-19
-- beta/beta.go:4-6
+- beta/beta.go:4-8
+- beta/beta.go:10-10
 - beta/version.go:1-5
 
 `,
@@ -259,7 +260,7 @@ Hunks no probe or skip covers:
 		greenShortSHA(t, d, fx.Ticket, "c"),
 		greenShortSHA(t, d, fx.Ticket, "d"),
 		greenShortSHA(t, d, fx.Ticket, "fix-1-alpha-test"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1-r1-f3"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1-beta-test"),
 		greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"),
 	)
 	if notes != wantNotes {

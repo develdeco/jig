@@ -1783,10 +1783,9 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	// target, so DefaultTriage - unattended, no terminal - auto-keeps the
 	// forced ask rather than leaving it for a human: that is what proves
 	// the bound actually fired here, distinctly from an ordinary fix. A
-	// fix routes into the round's grouped fix-<n>-<workspace>-<oracle>
-	// slice; only a (kept) ask gets its own per-finding
-	// fix-<n>-<finding-id> slice (route.go's Q9 id scheme), and
-	// routed_as/recurrences on the persisted finding confirm it directly.
+	// fix and a kept ask both route into the round's grouped
+	// fix-<n>-<workspace>-<oracle> slice, and routed_as/recurrences on the
+	// persisted finding confirm it directly.
 	if len(report3.Findings) != 1 || report3.Findings[0].ID != "r1-f1" {
 		t.Fatalf("round 3 Findings = %+v, want exactly [r1-f1]", report3.Findings)
 	}
@@ -1794,8 +1793,8 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	if f.RoutedAs != ActionAsk || f.Recurrences != 2 {
 		t.Fatalf("round 3 finding = %+v, want routed_as ask, 2 recurrences (the bound reached)", f)
 	}
-	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-r1-f1" {
-		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-r1-f1] (the ask's own per-finding slice)", report3.FixSlices)
+	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-alpha-test" {
+		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-alpha-test] (the ask grouped into the workspace slice)", report3.FixSlices)
 	}
 }
 

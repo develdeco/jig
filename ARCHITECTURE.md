@@ -554,7 +554,7 @@ below-floor fix in a file outside every declared workspace is a note, not an
 ask. An ask finding keeps its routing at any risk.
 
 **`fix_slice_findings`** is the maximum number of findings one fix slice can
-carry. A round's kept fixes, grouped by (workspace, oracle), are packed into
+carry. A round's kept fixes, kept asks and kept notes, grouped together by (workspace, oracle), are packed into
 slices greedily by file, taken in path order: findings in the same file
 always share a slice, and a file with more findings than the bound gets one
 slice of its own, over the bound, rather than being split itself. A group

@@ -63,8 +63,8 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice(t *testing.
 		t.Fatalf("gate (round 2) exit = %d, want 0\n%s%s", open.Code, open.Stdout, open.Stderr)
 	}
 	done = runJig(t, env, fx.StoreDir, "review", "done", ticket, "--result", round2)
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: fix-slices") || !strings.Contains(done.Stdout, "fix-2-r1-f1") {
-		t.Fatalf("review done (round 2) exit = %d, want 0, fix-slices and the slice fix-2-r1-f1\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: fix-slices") || !strings.Contains(done.Stdout, "fix-2-root-test") {
+		t.Fatalf("review done (round 2) exit = %d, want 0, fix-slices and the slice fix-2-root-test\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
 
 	st, err := store.Open(fx.StoreDir)
@@ -75,7 +75,7 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextRoundQueuesItsSlice(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasSlice(slices, "fix-2-r1-f1") {
+	if !hasSlice(slices, "fix-2-root-test") {
 		t.Fatalf("slices = %+v, want the fix slice of the kept note", slices)
 	}
 }

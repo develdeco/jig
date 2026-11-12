@@ -215,8 +215,7 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 	}
 }
 
-// TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder pins "Fix
-// slices sized to one session": a (workspace, oracle) group over the
+// TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder pins "Fix\n// slices sized to one session": a (workspace, oracle) group over the
 // fix_slice_findings bound splits into several slices, same-file findings
 // always sharing one, files packed greedily in path order (not finding id
 // order), a file over the bound getting a slice of its own, and the
@@ -330,8 +329,8 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if len(slices) != 1 || slices[0].ID != "fix-2-r2-f3" {
-		t.Fatalf("slices = %v, want [fix-2-r2-f3]", sliceIDs(slices))
+	if len(slices) != 1 || slices[0].ID != "fix-2-root-test" {
+		t.Fatalf("slices = %v, want [fix-2-root-test]", sliceIDs(slices))
 	}
 	if !contains(slices[0].Goal, "go ahead with plan B") {
 		t.Errorf("goal missing the human's decision:\n%s", slices[0].Goal)
@@ -389,13 +388,11 @@ func TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle(t *testin
 		"Gate finding r1-f4, kept with no human decision (--yes or no terminal):", "decision for note four",
 	} {
 		if !contains(alpha.Goal, want) {
-			t.Errorf("alpha goal missing %q:
-%s", want, alpha.Goal)
+			t.Errorf("alpha goal missing %q:\n%s", want, alpha.Goal)
 		}
 	}
 	if contains(alpha.Goal, "other workspace note") {
-		t.Errorf("alpha goal carries the beta note:
-%s", alpha.Goal)
+		t.Errorf("alpha goal carries the beta note:\n%s", alpha.Goal)
 	}
 	beta := sliceByID(t, slices, "fix-1-beta-test")
 	if !equalStrings(beta.Findings, []string{"r1-f5"}) {
@@ -470,8 +467,7 @@ func TestRouteRoundGroupedKeptRecurrenceNamesItsPreviousSlice(t *testing.T) {
 	}
 	for _, want := range []string{"Previous fix slice fix-1-root-test: tightened both", "Gate finding r1-f2, kept by the human:"} {
 		if !contains(slices[0].Goal, want) {
-			t.Errorf("goal missing %q:
-%s", want, slices[0].Goal)
+			t.Errorf("goal missing %q:\n%s", want, slices[0].Goal)
 		}
 	}
 }

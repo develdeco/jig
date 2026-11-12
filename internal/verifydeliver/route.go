@@ -112,8 +112,7 @@ func DefaultTriage(in TriageInput) TriageResult {
 }
 
 // noOracleError is GATE_NO_ORACLE for a finding whose repo's manifest declares
-// no oracle: a fix slice for it could never be proven. "The manifest has no
-// oracles" is reserved for exactly this case.
+// no oracle: a fix slice for it could never be proven. "The manifest has no\n// oracles" is reserved for exactly this case.
 func noOracleError(files roundFiles, file string) error {
 	where := "the manifest"
 	if repo, _, ok := files.of(file); ok && files.qualified {
@@ -551,10 +550,11 @@ func splitFixGroupIntoSlices(group []Finding, fixSliceFindings int) [][]Finding 
 	return out
 }
 
-// buildFixSlices turns this round's kept findings into fix slices:
-// keptFixes group by (workspace, oracle), each group then split into one
-// or more slices bounded by fixSliceFindings (splitFixGroupIntoSlices);
-// keptAsks each become their own slice, carrying the human's decision.
+// buildFixSlices turns this round's kept findings into fix slices: kept
+// fixes, kept asks and kept notes group together by (workspace, oracle),
+// each group then split into one or more slices bounded by fixSliceFindings
+// (splitFixGroupIntoSlices). A kept ask or note keeps its own header and
+// the person's decision inside the slice's goal; a kept fix has no header.
 // existingSlices is the ticket's slices.yaml as of before this round, used
 // only to look up a recurrence's previous fix slice. files gives each
 // finding's oracle names, those of its repo's manifest (the zero-oracle check
@@ -563,16 +563,29 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}
 	var order []groupKey
-	for _, f := range keptFixes {
+	asked := map[string]bool{}
+	add := func(f Finding) error {
 		oracle, err := oracleForFinding(f, files.oracles(f.File))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		key := groupKey{f.Workspace, oracle}
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}
 		groups[key] = append(groups[key], f)
+		return nil
+	}
+	for _, f := range keptFixes {
+		if err := add(f); err != nil {
+			return nil, err
+		}
+	}
+	for _, f := range keptAsks {
+		asked[f.ID] = true
+		if err := add(f); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if order[i].workspace != order[j].workspace {
@@ -591,7 +604,11 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 			var blocks []string
 			var ids []string
 			for _, f := range part {
-				blocks = append(blocks, findingGoalBlock(f, st, ticket, existingSlices))
+				block := findingGoalBlock(f, st, ticket, existingSlices)
+				if asked[f.ID] {
+					block = fmt.Sprintf("Gate finding %s, %s:\n\n%s", f.ID, keptAskHeader(f.Triage), block)
+				}
+				blocks = append(blocks, block)
 				ids = append(ids, f.ID)
 			}
 			goal := "Fix these gate findings:\n\n" + strings.Join(blocks, "\n\n")
@@ -608,23 +625,6 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 				Findings:  ids,
 			})
 		}
-	}
-
-	sort.Slice(keptAsks, func(i, j int) bool { return keptAsks[i].ID < keptAsks[j].ID })
-	for _, f := range keptAsks {
-		oracle, err := oracleForFinding(f, files.oracles(f.File))
-		if err != nil {
-			return nil, err
-		}
-		goal := fmt.Sprintf("Gate finding %s, %s:\n\n%s", f.ID, keptAskHeader(f.Triage), findingGoalBlock(f, st, ticket, existingSlices))
-		out = append(out, store.Slice{
-			ID:        sanitizeSliceID(fmt.Sprintf("fix-%d-%s", round, f.ID)),
-			Workspace: f.Workspace,
-			Goal:      goal,
-			Oracle:    oracle,
-			FromGate:  round,
-			Findings:  []string{f.ID},
-		})
 	}
 
 	disambiguateFixSliceIDs(out, existingSlices)

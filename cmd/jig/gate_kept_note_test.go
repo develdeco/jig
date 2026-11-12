@@ -62,8 +62,8 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	// The kept note's file is in must_review, so the reviewer reads it.
 	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code = roundThroughMain(t, e, fx, round2Path)
-	if code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
-		t.Fatalf("round 2 exit = %d, want 0 and the fix slice fix-2-r1-f1 built from the kept note\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-root-test") {
+		t.Fatalf("round 2 exit = %d, want 0 and the fix slice fix-2-root-test built from the kept note\n%s", code, out)
 	}
 	if strings.Contains(out, "fix-2-r1-f2") {
 		t.Fatalf("round 2 queued a slice for the dismissed note:\n%s", out)
@@ -79,7 +79,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	}
 	var goal string
 	for _, s := range slices {
-		if s.ID == "fix-2-r1-f1" {
+		if s.ID == "fix-2-root-test" {
 			goal = s.Goal
 			if s.FromGate != 2 || len(s.Findings) != 1 || s.Findings[0] != "r1-f1" {
 				t.Errorf("slice = %+v, want a fix slice of round 2 for r1-f1", s)
@@ -87,7 +87,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 		}
 	}
 	if !strings.Contains(goal, "Worth doing now.") || !strings.Contains(goal, "kept by the human") {
-		t.Errorf("fix-2-r1-f1 goal = %q, want the person's reason and who kept it", goal)
+		t.Errorf("fix-2-root-test goal = %q, want the person's reason and who kept it", goal)
 	}
 	if used, _ := verifydeliver.UsedFixBudget(st, ticket, 3); used != 1 {
 		t.Errorf("fix budget used = %d, want 1: the round that queued the kept note's slice counts", used)
