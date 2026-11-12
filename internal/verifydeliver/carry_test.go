@@ -3,6 +3,7 @@ package verifydeliver
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -361,4 +362,200 @@ func TestGateCarriesARoundWhoseStackedRepoMergedNothing(t *testing.T) {
 			t.Errorf("findings.md = %q, want it to contain %q", md, want)
 		}
 	}
+}
+
+// TestReviewerLinesNameTheCarriedMerge: a round that carried a merge of the
+// target and read what followed it says which merge; a round over several repos
+// puts the repo first; a round without the record, and a carried round, read as
+// before.
+func TestReviewerLinesNameTheCarriedMerge(t *testing.T) {
+	t.Parallel()
+	who := Provenance{Session: "s-rev"}
+	one := reviewerLines([]RoundRecord{
+		{Round: 2, Scope: "delta", Base: "bbbbbbb2", Head: "ccccccc3", Reviewer: who, Independent: IndependentYes,
+			CarriedMerge: map[string]CarriedMerge{"app": {SHA: "1234567890abcdef", Ref: "origin/main"}}},
+		{Round: 3, Scope: "delta", Base: "bbbbbbb2", Head: "ddddddd4", Reviewer: who, Independent: IndependentYes},
+		{Round: 4, Scope: "delta", Base: "bbbbbbb2", Head: "eeeeeee5", Reviewer: who, Independent: IndependentYes, CarriedFrom: 1,
+			CarriedMerge: map[string]CarriedMerge{"app": {SHA: "1234567890abcdef", Ref: "origin/main"}}},
+	})
+	if len(one) != 3 || !strings.HasSuffix(one[0], "none of the builders; the merge of origin/main at 1234567 was carried, not read.") {
+		t.Errorf("round 2 line = %q, want it to end naming the carried merge", one)
+	}
+	if strings.Contains(one[1], "carried") || !strings.HasSuffix(one[1], "none of the builders.") {
+		t.Errorf("round 3 line = %q, want it unchanged without the record", one[1])
+	}
+	if strings.Contains(one[2], "was carried, not read") {
+		t.Errorf("round 4 line = %q, want the carried-over wording alone", one[2])
+	}
+
+	several := reviewerLines([]RoundRecord{{
+		Round: 2, Scope: "delta", Head: "app:ccccccc3+lib:ddddddd4", Reviewer: who, Independent: IndependentYes,
+		CarriedMerge: map[string]CarriedMerge{
+			"lib": {SHA: "abcdef1234567890", Ref: "origin/trunk"},
+			"app": {SHA: "1234567890abcdef", Ref: "origin/main"},
+		},
+	}})
+	want := "none of the builders; app: the merge of origin/main at 1234567 was carried, not read; lib: the merge of origin/trunk at abcdef1 was carried, not read."
+	if len(several) != 1 || !strings.HasSuffix(several[0], want) {
+		t.Errorf("lines = %q, want them to end %q", several, want)
+	}
+}
+
+// TestGateFinishRecordsTheMergeADeltaCarried: a clean merge of the target and
+// then a commit of the branch's own is a round a reviewer reads, from the
+// merge; its report.yaml names the merge and the ref it brought in, and the
+// review notes say it was carried, not read.
+func TestGateFinishRecordsTheMergeADeltaCarried(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := reviewedInTheClone(t)
+	merged := targetMoves(t, fx, "main1.txt")
+	writeAndCommit(t, fx.RepoDir, "fix.txt", "a fix of its own", "a fix after the merge")
+
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried != nil || p.Round != 2 || p.Base != merged || p.CarriedMerge != merged {
+		t.Fatalf("Prepared = round %d, base %s, carried merge %s, carried round %v, want a round a reviewer reads from the merge %s", p.Round, p.Base, p.CarriedMerge, p.Carried, merged)
+	}
+	if want := []string{"fix.txt"}; !reflect.DeepEqual(p.Request.MustReview, want) {
+		t.Fatalf("must_review = %v, want only the fix's file %v", p.Request.MustReview, want)
+	}
+	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish: %v", err)
+	}
+
+	rep := readReport(t, d, fx.Ticket, 2)
+	if got := rep.CarriedMerge["fixture-repo"]; got != (CarriedMerge{SHA: merged, Ref: "origin/main"}) {
+		t.Errorf("report.yaml carried_merge = %+v, want the merge %s of origin/main", rep.CarriedMerge, merged)
+	}
+	rounds, err := ReadRounds(d.Store, fx.Ticket)
+	if err != nil || len(rounds) != 2 {
+		t.Fatalf("ReadRounds = %d rounds, %v, want 2", len(rounds), err)
+	}
+	if len(rounds[0].CarriedMerge) != 0 {
+		t.Errorf("round 1 carried merge = %+v, want none", rounds[0].CarriedMerge)
+	}
+	lines := reviewerLines(rounds)
+	want := "; the merge of origin/main at " + merged[:7] + " was carried, not read."
+	if len(lines) != 2 || !strings.HasSuffix(lines[1], want) || strings.Contains(lines[0], "carried") {
+		t.Errorf("review notes lines = %q, want round 2's to end %q", lines, want)
+	}
+}
+
+// TestRoundsRecordTheMergeADeltaCarriedInEachShape: the carried-merge record
+// holds for a merge resolved by hand, for a stacked ticket's parent branch, for
+// one repo of a round over two, and for a round no merge led, which names no ref.
+func TestRoundsRecordTheMergeADeltaCarriedInEachShape(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a merge resolved by hand then a commit", func(t *testing.T) {
+		t.Parallel()
+		fx, d, _ := reviewedInTheClone(t)
+		run(t, fx.RepoDir, "checkout", "main")
+		writeAndCommit(t, fx.RepoDir, "main1.txt", "from the target", "the target moves")
+		run(t, fx.RepoDir, "push", "origin", "main")
+		run(t, fx.RepoDir, "checkout", ticketBranch(fx.Ticket))
+		run(t, fx.RepoDir, "merge", "--no-ff", "--no-commit", "main")
+		merged := writeAndCommit(t, fx.RepoDir, "hand.txt", "a hand edit", "merge main, by hand")
+		writeAndCommit(t, fx.RepoDir, "fix.txt", "a fix", "a fix after the merge")
+
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		if p.CarriedMerge != merged || p.CarriedRef != "origin/main" {
+			t.Fatalf("carried = %q of %q, want the hand-resolved merge %s of origin/main", p.CarriedMerge, p.CarriedRef, merged)
+		}
+		if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+			t.Fatalf("GateFinish: %v", err)
+		}
+		if got := readReport(t, d, fx.Ticket, 2).CarriedMerge["fixture-repo"]; got != (CarriedMerge{SHA: merged, Ref: "origin/main"}) {
+			t.Errorf("carried_merge = %+v, want the merge %s", got, merged)
+		}
+	})
+
+	t.Run("a stacked ticket's parent branch", func(t *testing.T) {
+		t.Parallel()
+		fx, d, _ := reviewedInTheClone(t)
+		d.Stack = stackedOnJIG0
+		branch := ticketBranch(fx.Ticket)
+		run(t, fx.RepoDir, "checkout", "-b", "jig/JIG-0", "main")
+		writeAndCommit(t, fx.RepoDir, "parent.txt", "from the parent", "the parent moves")
+		run(t, fx.RepoDir, "push", "origin", "jig/JIG-0")
+		run(t, fx.RepoDir, "checkout", branch)
+		run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "jig/JIG-0")
+		merged := run(t, fx.RepoDir, "rev-parse", "HEAD")
+		writeAndCommit(t, fx.RepoDir, "fix.txt", "a fix", "a fix after the merge")
+
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		if p.CarriedMerge != merged || p.CarriedRef != "origin/jig/JIG-0" {
+			t.Fatalf("carried = %q of %q, want the merge %s of the parent's branch origin/jig/JIG-0", p.CarriedMerge, p.CarriedRef, merged)
+		}
+		if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+			t.Fatalf("GateFinish: %v", err)
+		}
+		if got := readReport(t, d, fx.Ticket, 2).CarriedMerge["fixture-repo"]; got != (CarriedMerge{SHA: merged, Ref: "origin/jig/JIG-0"}) {
+			t.Errorf("carried_merge = %+v, want the merge %s of the parent's branch", got, merged)
+		}
+	})
+
+	t.Run("one repo of a round over two", func(t *testing.T) {
+		t.Parallel()
+		fx, d, _ := reviewedInTwoRepos(t)
+		run(t, fx.SecondRepoDir, "checkout", "main")
+		writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
+		run(t, fx.SecondRepoDir, "push", "origin", "main")
+		run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
+		run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
+		merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+		writeAndCommit(t, fx.SecondRepoDir, "fix.txt", "a fix", "a fix after the merge")
+
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		for _, r := range p.Repos {
+			if want := r.Repo == "second-repo"; (r.Carried == merged) != want || (r.Carried != "") != want {
+				t.Errorf("repo %s carried %q, want the merge %s in second-repo only", r.Repo, r.Carried, merged)
+			}
+		}
+		if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+			t.Fatalf("GateFinish: %v", err)
+		}
+		want := map[string]CarriedMerge{"second-repo": {SHA: merged, Ref: "origin/main"}}
+		if got := readReport(t, d, fx.Ticket, 2).CarriedMerge; !reflect.DeepEqual(got, want) {
+			t.Errorf("carried_merge = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a round no merge led names no ref", func(t *testing.T) {
+		t.Parallel()
+		fx, d, _ := cloneBuilt(t)
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		if p.CarriedMerge != "" || p.CarriedRef != "" {
+			t.Errorf("carried = %q of %q, want neither", p.CarriedMerge, p.CarriedRef)
+		}
+		data, err := os.ReadFile(p.OpenPath)
+		if err != nil || strings.Contains(string(data), "carried") {
+			t.Errorf("open record = %q (%v), want no carried field", data, err)
+		}
+	})
+
+	t.Run("a launched round", func(t *testing.T) {
+		t.Parallel()
+		got := carriedOf([]RepoPrep{{Repo: "a"}, {Repo: "b", Carried: "abc", CarriedRef: "origin/main"}})
+		if want := map[string]CarriedMerge{"b": {SHA: "abc", Ref: "origin/main"}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("carriedOf = %+v, want %+v", got, want)
+		}
+		if got := carriedOf([]RepoPrep{{Repo: "a"}}); got != nil {
+			t.Errorf("carriedOf with none = %+v, want nil", got)
+		}
+	})
 }

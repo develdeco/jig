@@ -38,6 +38,17 @@ func checkpointLockFile(work string) string {
 	return filepath.Join(work, ".git", checkpointLockName)
 }
 
+// namesPath reports whether text names path as given or in its resolved
+// spelling. A Windows temp dir can reach a test in its 8.3 short form
+// (RUNNER~1) while jig names the file by its long one.
+func namesPath(text, path string) bool {
+	if strings.Contains(text, path) {
+		return true
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	return err == nil && strings.Contains(text, filepath.Join(dir, filepath.Base(path)))
+}
+
 // heldElsewhere reports whether something else holds the lock on path,
 // trying with a second file handle that never waits.
 func heldElsewhere(t *testing.T, path string) bool {
@@ -242,10 +253,29 @@ func TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder(t *testing.T) 
 		}
 		got <- err
 	}()
+	// Wait for the notice rather than a fixed window, so a slow runner that
+	// reaches the notice late still sees it; the waiter must not return
+	// meanwhile.
+	warned := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(warnings)
+	}
+	deadline := time.After(10 * time.Second)
+	for warned() == 0 {
+		select {
+		case err := <-got:
+			t.Fatalf("LockCheckpoint returned (%v) past the notice while another process held the lock", err)
+		case <-deadline:
+			t.Fatal("no notice 10s past the notice bound while another process held the lock")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	// One more stretch past the notice: still waiting, still one notice.
 	select {
 	case err := <-got:
 		t.Fatalf("LockCheckpoint returned (%v) past the notice while another process held the lock", err)
-	case <-time.After(700 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond):
 	}
 	mu.Lock()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], fmt.Sprint(pid)) {
@@ -292,8 +322,8 @@ func TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder(t *testing.T) {
 	if !strings.Contains(err.Error(), fmt.Sprint(pid)) {
 		t.Errorf("error %q does not name holder pid %d", err, pid)
 	}
-	if !strings.Contains(err.Error(), checkpointLockFile(work)) {
-		t.Errorf("error %q does not name the lock file %s", err, checkpointLockFile(work))
+	if lockFile := checkpointLockFile(work) + ".lock"; !namesPath(err.Error(), lockFile) {
+		t.Errorf("error %q does not name the lock file %s", err, lockFile)
 	}
 	if release == nil {
 		t.Fatal("release is nil")
