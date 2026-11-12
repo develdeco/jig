@@ -1686,7 +1686,11 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
 		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.LeaseDir, Head: head, Man: r.Manifest})
-		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base, Line: kind, Prior: prior, Carried: carried, CarriedRef: mergeRefOf(r.MergeRef, r.Target)})
+		carriedRef := ""
+		if carried != "" {
+			carriedRef = mergeRefOf(r.MergeRef, r.Target)
+		}
+		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base, Line: kind, Prior: prior, Carried: carried, CarriedRef: carriedRef})
 	}
 	// in.Open (findings.go's openAndNotedFindingsList) carries a noted
 	// finding too, so it stays a citable prior target, but a noted finding

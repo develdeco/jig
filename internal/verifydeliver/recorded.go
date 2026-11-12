@@ -127,8 +127,8 @@ type Prepared struct {
 	// against.
 	Head, Base, Scope string
 	Target, TargetSHA string
-	// Carried and CarriedRef are the merge the round carried and the ref it brought
-	// in, of the one repo of a project of one.
+	// CarriedMerge and CarriedRef are the merge the round carried and the ref it
+	// brought in, of the one repo of a project of one; "" when it carried none.
 	CarriedMerge, CarriedRef string
 	// Lease is the pristine worktree of Head the reviewer reads.
 	Lease string

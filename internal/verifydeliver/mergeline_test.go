@@ -203,6 +203,25 @@ func lineCases(t *testing.T) (dir string, cases []lineCase) {
 	r.onMain("main6.txt", "from main, sixth time\n")
 	ordinaryThenMerge := r.merge()
 	cases = append(cases, lineCase{name: "a merge after an ordinary commit", reviewed: reviewed, head: ordinaryThenMerge, kind: lineOther})
+
+	// A merge or an octopus after the branch's own commit, behind a carried
+	// merge, is the reviewer's to read in full.
+	r.git("reset", "--hard", reviewed)
+	r.onMain("main7.txt", "from main, seventh time\n")
+	r.merge()
+	r.commit("own1.txt", "the branch's own commit\n")
+	r.onMain("main8.txt", "from main, eighth time\n")
+	r.merge()
+	mergeCommitMerge := r.commit("own2.txt", "another of its own\n")
+	cases = append(cases, lineCase{name: "a clean merge, a commit, a merge and a commit", reviewed: reviewed, head: mergeCommitMerge, kind: lineOther})
+	r.git("reset", "--hard", reviewed)
+	r.onMain("main9.txt", "from main, ninth time\n")
+	r.merge()
+	r.commit("own3.txt", "the branch's own commit\n")
+	r.onMain("main10.txt", "from main, tenth time\n")
+	r.git("merge", "--no-ff", "--no-edit", "main", side)
+	octopusAfter := r.commit("own4.txt", "after the octopus\n")
+	cases = append(cases, lineCase{name: "a clean merge, a commit, an octopus and a commit", reviewed: reviewed, head: octopusAfter, kind: lineOther})
 	return r.dir, cases
 }
 
