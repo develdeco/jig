@@ -1,13 +1,17 @@
 package fileshare_test
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
@@ -69,5 +73,81 @@ func TestAMissingFileIsNotExist(t *testing.T) {
 		if _, err := fileshare.ReadFile(p); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("ReadFile(%s) = %v, want fs.ErrNotExist", p, err)
 		}
+	}
+}
+
+// TestReplaceRidesOutAnotherProcessHoldingTheFile: another process holds the
+// file open the way os.Open does on Windows (no delete sharing). The bare
+// Rename over it fails with an error Replacing reports (Windows only); Replace
+// returns nil once the holder lets go within the window, with the new bytes in
+// place.
+func TestReplaceRidesOutAnotherProcessHoldingTheFile(t *testing.T) {
+	if held := os.Getenv("FILESHARE_HOLD"); held != "" {
+		f, err := os.Open(held)
+		if err != nil {
+			os.Exit(2)
+		}
+		os.Stdout.WriteString("held
+")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		f.Close()
+		os.Exit(0)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "held.txt")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestReplaceRidesOutAnotherProcessHoldingTheFile$")
+	cmd.Env = append(os.Environ(), "FILESHARE_HOLD="+path)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			stdin.Close()
+		}
+	}
+	defer func() {
+		release()
+		_ = cmd.Wait()
+	}()
+	if line, err := bufio.NewReader(stdout).ReadString('
+'); err != nil || strings.TrimSpace(line) != "held" {
+		t.Fatalf("holder said %q, %v, want held", line, err)
+	}
+
+	tmp := filepath.Join(dir, "held.txt.tmp")
+	if err := os.WriteFile(tmp, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		err := fileshare.Rename(tmp, path)
+		if err == nil || !fileshare.Replacing(err) {
+			t.Fatalf("Rename over a held file = %v, want an error Replacing reports", err)
+		}
+	}
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		release()
+	}()
+	if err := fileshare.Replace(tmp, path); err != nil {
+		t.Fatalf("Replace over a file released within the window = %v, want nil", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "new" {
+		t.Fatalf("file after Replace = %q, %v, want new", got, err)
 	}
 }

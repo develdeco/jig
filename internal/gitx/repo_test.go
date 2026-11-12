@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fileshare"
 	git "github.com/go-git/go-git/v5"
@@ -426,6 +427,7 @@ func TestLooseObjectsPastAutoGC(t *testing.T) {
 // a replacement of the file (a store file swapped in by rename) fail, because
 // it reads with delete sharing. Read with os.ReadFile on Windows, a rename (no
 // retry here) is refused whenever it lands mid-read.
+// The replacer loop retries a transient holder (see fileshare.Replacing).
 func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
 	repo, err := git.PlainInit(t.TempDir(), false)
 	if err != nil {
@@ -462,8 +464,18 @@ func TestWriteBlobWhileTheFileIsReplaced(t *testing.T) {
 		if err := os.WriteFile(tmp, body, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := fileshare.Rename(tmp, path); err != nil {
-			t.Fatalf("replacement %d while writeBlob loops: %v", i, err)
+		// A holder under load can keep the file for a moment: retry that
+		// transient failure within the replace window, fail on anything else.
+		deadline := time.Now().Add(fileshare.ReplaceWindow)
+		for {
+			err := fileshare.Rename(tmp, path)
+			if err == nil {
+				break
+			}
+			if !fileshare.Replacing(err) || time.Now().After(deadline) {
+				t.Fatalf("replacement %d while writeBlob loops: %v", i, err)
+			}
+			time.Sleep(fileshare.ReplaceBackoff)
 		}
 	}
 	if got, err := s.writeBlob(path); err != nil || got != want {

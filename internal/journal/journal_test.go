@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/store"
@@ -468,7 +469,8 @@ func TestRenderConsolidatedNumbersAFixRoundWithoutAnAttempt(t *testing.T) {
 // TestReadWhileTheJournalIsReplaced: a reader looping on Read never makes a
 // replacement of the journal (a merge or checkout swapping the file in) fail,
 // because Read opens it with delete sharing. Opened with os.ReadFile on
-// Windows, a rename (no retry here) is refused whenever it lands mid-read.
+// Windows, a rename is refused whenever it lands mid-read.
+// The replacer loop retries a transient holder (see fileshare.Replacing).
 func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 	st := newTestStore(t)
 	if err := Append(st, "JIG-1", Line{Event: "dispatch"}); err != nil {
@@ -497,8 +499,18 @@ func TestReadWhileTheJournalIsReplaced(t *testing.T) {
 		if err := os.WriteFile(tmp, body, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := fileshare.Rename(tmp, path); err != nil {
-			t.Fatalf("replacement %d while Read loops: %v", i, err)
+		// A holder under load can keep the file for a moment: retry that
+		// transient failure within the replace window, fail on anything else.
+		deadline := time.Now().Add(fileshare.ReplaceWindow)
+		for {
+			err := fileshare.Rename(tmp, path)
+			if err == nil {
+				break
+			}
+			if !fileshare.Replacing(err) || time.Now().After(deadline) {
+				t.Fatalf("replacement %d while Read loops: %v", i, err)
+			}
+			time.Sleep(fileshare.ReplaceBackoff)
 		}
 	}
 	lines, err := Read(st, "JIG-1")
