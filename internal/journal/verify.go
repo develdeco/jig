@@ -46,6 +46,25 @@ type Verification struct {
 	// command that ran in the place of the slice's oracle, and the commit of
 	// the full run the pass stands on.
 	Ran, ReusedFrom string
+	// Cause is a failed run's cause (Line.Cause): set when the run never
+	// judged the code.
+	Cause string
+}
+
+// NotCounted says how a failed run stood when it never judged the code:
+// "timed out, not counted" or "stopped, not counted", and "" for any other
+// verification.
+func (v Verification) NotCounted() string {
+	if v.State != VerifyFail {
+		return ""
+	}
+	switch v.Cause {
+	case CauseTimeout:
+		return "timed out, not counted"
+	case CauseStopped:
+		return "stopped, not counted"
+	}
+	return ""
 }
 
 // LightWords says how a light pass stood: "lint only, reusing <sha>" with the
@@ -105,7 +124,7 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 		if !ok {
 			continue
 		}
-		next := Verification{State: state, Attempt: l.Attempt, TS: l.TS, Session: l.Session, Agent: l.Agent, Ran: l.Ran, ReusedFrom: l.ReusedFrom}
+		next := Verification{State: state, Attempt: l.Attempt, TS: l.TS, Session: l.Session, Agent: l.Agent, Ran: l.Ran, ReusedFrom: l.ReusedFrom, Cause: l.Cause}
 		switch {
 		case l.Event == EventVerified && v.State == VerifyPass && v.Attempt == l.Attempt:
 			// The verified line that follows its own attempt's oracle line

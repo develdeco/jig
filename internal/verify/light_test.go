@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -255,5 +256,44 @@ func TestLightBaseTakesOnlyThePassOfTheSameCommand(t *testing.T) {
 	lines := []journal.Line{{Event: journal.EventOracle, Outcome: "pass", Commit: "anc", Command: "go vet ./..."}}
 	if _, ok := lightBase(lines, "go test ./...", "", "head", func(string, string) bool { return true }); ok {
 		t.Error("a pass of another command was taken as a base")
+	}
+}
+
+// TestLightDeltaStandsPastARunThatNeverJudgedTheCode: a stopped run and a
+// timed-out run since the pass do not stop the next light delta reusing it.
+func TestLightDeltaStandsPastARunThatNeverJudgedTheCode(t *testing.T) {
+	t.Parallel()
+	r, first := lightRig(t)
+	for i, err := range []error{envrun.Stopped("echo lint"), timedOut("echo full alpha")} {
+		r.oracle.err = err
+		cut := r.commit("a", "cut short", map[string]string{"README.md": "x" + string(rune('a'+i))})
+		_, _ = Run(r.deps, r.request("a", cut))
+	}
+	r.oracle.err = nil
+	md := r.commit("a", "notes", map[string]string{"README.md": "after"})
+	if res, err := Run(r.deps, r.request("a", md)); err != nil || res.State != journal.VerifyPass {
+		t.Fatalf("Run = %+v, %v", res, err)
+	}
+	if l := lastOracle(t, r); l.Ran != "echo lint" || l.ReusedFrom != first || l.Commit != md {
+		t.Errorf("oracle line = %+v, want the light oracle reusing %s", l, first)
+	}
+}
+
+// TestLightBaseSkipsAFullFailWithACause: a full run that timed out or was
+// stopped since the pass does not stand between it and a light delta.
+func TestLightBaseSkipsAFullFailWithACause(t *testing.T) {
+	t.Parallel()
+	ancestor := func(string, string) bool { return true }
+	lines := []journal.Line{
+		{Event: journal.EventOracle, Command: "c", Outcome: "pass", Commit: "p"},
+		{Event: journal.EventOracle, Command: "c", Outcome: "fail", Commit: "q", Cause: journal.CauseTimeout},
+		{Event: journal.EventOracle, Command: "c", Outcome: "fail", Commit: "r", Cause: journal.CauseStopped},
+	}
+	if base, ok := lightBase(lines, "c", "", "s", ancestor); !ok || base.Commit != "p" {
+		t.Errorf("lightBase = %+v, %v, want the pass", base, ok)
+	}
+	lines = append(lines, journal.Line{Event: journal.EventOracle, Command: "c", Outcome: "fail", Commit: "t"})
+	if _, ok := lightBase(lines, "c", "", "s", ancestor); ok {
+		t.Error("a test failure still stands between the pass and the delta")
 	}
 }

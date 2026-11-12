@@ -1,9 +1,13 @@
 package store
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -162,4 +166,119 @@ func TestClaimHoldsTheCheckpointLockWhileItWrites(t *testing.T) {
 	if heldElsewhere(t, lockFile) {
 		t.Error("the checkpoint lock is still held after Claim returned")
 	}
+}
+
+// runCheckpointWriter is one of the writer processes in
+// TestFiveWritersUnderAHeldCheckpointLock: it mints a ticket in the store at
+// root through Claim with the bounds the parent set, printing the id, or the
+// error on standard error.
+func runCheckpointWriter(root string) int {
+	notice, _ := time.ParseDuration(os.Getenv("JIG_CHECKPOINT_NOTICE"))
+	bound, _ := time.ParseDuration(os.Getenv("JIG_CHECKPOINT_BOUND"))
+	st, err := Open(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	setCheckpointBounds(st, notice, bound)
+	st.Warn = func(string, ...any) {}
+	id, err := st.Claim(
+		func() (string, []string, error) {
+			id, err := st.Mint("JIG", Ticket{Title: "x"})
+			if err != nil {
+				return "", nil, err
+			}
+			return id, []string{st.TicketRelDir(id)}, nil
+		},
+		func(id string) string { return id + ": new ticket" },
+	)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(id)
+	return 0
+}
+
+// TestFiveWritersUnderAHeldCheckpointLock: five writer processes in one clone
+// while another process holds the checkpoint lock never fetch without it.
+// Past the longer bound all five fail naming the holder with nothing written;
+// when the holder lets go in time, all five finish with distinct ids.
+func TestFiveWritersUnderAHeldCheckpointLock(t *testing.T) {
+	type outcome struct {
+		out string
+		err error
+	}
+	runFive := func(t *testing.T, work string, notice, bound time.Duration) []outcome {
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		results := make([]outcome, 5)
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cmd := exec.Command(self)
+				cmd.Env = append(os.Environ(), "JIG_CHECKPOINT_WRITER="+work,
+					"JIG_CHECKPOINT_NOTICE="+notice.String(), "JIG_CHECKPOINT_BOUND="+bound.String())
+				var out, errOut bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &out, &errOut
+				err := cmd.Run()
+				if err != nil {
+					err = fmt.Errorf("%w: %s", err, strings.TrimSpace(errOut.String()))
+				}
+				results[i] = outcome{strings.TrimSpace(out.String()), err}
+			}()
+		}
+		wg.Wait()
+		return results
+	}
+
+	t.Run("past the longer bound", func(t *testing.T) {
+		_, work, _ := newTestRemoteStore(t)
+		pid, _ := startCheckpointChild(t, work)
+		head := runGit(t, work, "rev-parse", "HEAD")
+		fetchHead := filepath.Join(work, ".git", "FETCH_HEAD")
+		_, statBefore := os.Stat(fetchHead)
+
+		for i, r := range runFive(t, work, 50*time.Millisecond, time.Second) {
+			if r.err == nil {
+				t.Errorf("writer %d finished while another process held the lock", i)
+			} else if !strings.Contains(r.err.Error(), fmt.Sprint(pid)) {
+				t.Errorf("writer %d: error %q does not name holder pid %d", i, r.err, pid)
+			}
+		}
+		if _, err := os.Stat(fetchHead); (err == nil) != (statBefore == nil) {
+			t.Error("a writer fetched without the checkpoint lock: FETCH_HEAD appeared")
+		}
+		if got := runGit(t, work, "rev-parse", "HEAD"); got != head {
+			t.Errorf("HEAD moved from %s to %s without the lock", head, got)
+		}
+		if entries, _ := os.ReadDir(filepath.Join(work, "tickets")); len(entries) != 0 {
+			t.Errorf("tickets/ holds %d entries after every writer failed", len(entries))
+		}
+	})
+
+	t.Run("holder lets go in time", func(t *testing.T) {
+		_, work, _ := newTestRemoteStore(t)
+		_, letGo := startCheckpointChild(t, work)
+		time.AfterFunc(500*time.Millisecond, letGo)
+
+		seen := map[string]bool{}
+		for i, r := range runFive(t, work, 50*time.Millisecond, 60*time.Second) {
+			if r.err != nil {
+				t.Errorf("writer %d: %v", i, r.err)
+				continue
+			}
+			if seen[r.out] {
+				t.Errorf("id %s minted twice", r.out)
+			}
+			seen[r.out] = true
+		}
+		if len(seen) != 5 {
+			t.Errorf("minted %d distinct ids, want 5", len(seen))
+		}
+	})
 }

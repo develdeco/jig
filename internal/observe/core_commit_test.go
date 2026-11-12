@@ -6,6 +6,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 )
 
 func TestPostCommitRecordsTheCommitAndStartsItsVerification(t *testing.T) {
@@ -112,5 +113,70 @@ func TestPostCommitInADirectoryThatIsNoRepositoryIsAnError(t *testing.T) {
 	}
 	if _, err := Handle(r.d, Event{Kind: KindPostCommit}); err == nil {
 		t.Error("Handle with no directory succeeded, want an error")
+	}
+}
+
+// claimed makes the session s9 the holder of slice c and the commit's session.
+func (r *rig) claimed() {
+	r.t.Helper()
+	r.add(journal.Line{Event: journal.EventClaim, Slice: "c", Session: "s9"})
+	r.d.Getenv = func(k string) string {
+		if k == "JIG_SESSION" {
+			return "s9"
+		}
+		return ""
+	}
+}
+
+func TestPostCommitAfterAGreenSliceStartsNoVerification(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.claimed()
+	if err := r.st.WriteSliceState(r.fx.Ticket, "c", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	r.commit("", "after.txt")
+	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
+	if got := r.started(); len(got) != 0 {
+		t.Errorf("started %+v, want no worker for a trailer-less commit after the slice is green", got)
+	}
+	if got := len(r.ledgerOf(journal.EventGitCommit)); got != 1 {
+		t.Errorf("git-commit lines = %d, want the commit recorded", got)
+	}
+	if st, err := r.st.ReadSliceState(r.fx.Ticket, "c"); err != nil || st.State != "green" {
+		t.Errorf("slice state = %+v, %v, want still green", st, err)
+	}
+}
+
+func TestPostCommitAfterPublishStartsNoVerification(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.claimed()
+	r.add(journal.Line{Event: journal.EventPublishDone})
+	r.commit("", "after.txt")
+	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
+	if got := r.started(); len(got) != 0 {
+		t.Errorf("started %+v, want no worker for a trailer-less commit on a published ticket", got)
+	}
+	if got := len(r.ledgerOf(journal.EventGitCommit)); got != 1 {
+		t.Errorf("git-commit lines = %d, want the commit recorded", got)
+	}
+}
+
+func TestPostCommitTrailerStillVerifiesAGreenSlice(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.claimed()
+	if err := r.st.WriteSliceState(r.fx.Ticket, "c", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	r.commit("c", "named.txt")
+	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
+	got := r.started()
+	if len(got) != 1 || !strings.Contains(strings.Join(got[0].Args, " "), "--slice c") {
+		t.Errorf("started %+v, want one worker for slice c named by the trailer", got)
 	}
 }

@@ -86,3 +86,28 @@ func TestJigEnvDropsTheClaudeConfigDir(t *testing.T) {
 		t.Errorf("with a %s set by the test, environFrom holds %q, want %q", claudeConfigDirEnv, got, want)
 	}
 }
+
+// TestJigEnvKeepsTheHookMarkerSetThroughExtra: the marker the global git hook
+// wrapper exports, which the suite's own process may carry, never reaches the
+// jig under test; one a test sets through with does, once.
+func TestJigEnvKeepsTheHookMarkerSetThroughExtra(t *testing.T) {
+	t.Parallel()
+	const marker = "JIG_GITHOOK_WRAPPED"
+	base := []string{"PATH=/bin", marker + "=1", "HOME=/real"}
+	env := jigEnv{home: "/h", userHome: "/u"}
+	for _, kv := range env.environFrom(base) {
+		if sameEnvName(envName(kv), marker) {
+			t.Errorf("environFrom holds %q, want no %s from the process", kv, marker)
+		}
+	}
+
+	var got []string
+	for _, kv := range env.with(marker + "=test").environFrom(base) {
+		if sameEnvName(envName(kv), marker) {
+			got = append(got, kv)
+		}
+	}
+	if want := []string{marker + "=test"}; !slices.Equal(got, want) {
+		t.Errorf("with a %s set by the test, environFrom holds %q, want %q", marker, got, want)
+	}
+}

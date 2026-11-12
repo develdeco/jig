@@ -45,6 +45,11 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", repos[i].Target, err))
 		}
 		targetSHA[rp.Repo] = tip
+		// Only a repo that merged has a merge ref to name; a repo that merged
+		// nothing may be stacked on a parent branch that is not on origin.
+		if rp.Line != lineClean {
+			continue
+		}
 		ref := mergeRefOf(repos[i].MergeRef, repos[i].Target)
 		mergeRefs[rp.Repo] = ref
 		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].LeaseDir, ref); err != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
-	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/setup"
 )
@@ -478,22 +477,8 @@ func (d *doctorCtx) cloneNotes() {
 	}
 }
 
-// cloneName is the path jig here names the clone dir belongs to by: the
-// machine map's spelling of the clone, found with symlinks resolved on both
-// sides (git reports /private/var where the map holds /var), else the clone
-// root itself.
 func (d *doctorCtx) cloneName(dir string) string {
-	root := locate.CloneRoot(dir)
-	if machine, err := project.LoadMachine(d.jigHome); err == nil {
-		for _, mp := range machine {
-			for _, mapped := range mp.Clones {
-				if gitx.SameDir(mapped, root) {
-					return mapped
-				}
-			}
-		}
-	}
-	return root
+	return cloneNamedByMap(d.jigHome, dir)
 }
 
 // cloneTarget is the branch the marker's repo for clone lands work on:

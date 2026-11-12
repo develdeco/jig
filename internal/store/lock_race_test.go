@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 	if root := os.Getenv("JIG_CHECKPOINT_CHILD"); root != "" {
 		os.Exit(runCheckpointChild(root))
 	}
+	if root := os.Getenv("JIG_CHECKPOINT_WRITER"); root != "" {
+		os.Exit(runCheckpointWriter(root))
+	}
 	os.Exit(gittest.Run(m))
 }
 
