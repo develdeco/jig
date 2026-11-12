@@ -16,11 +16,36 @@ import (
 // so what is jig's is found again after an upgrade, a move or a restore, and
 // nothing else is touched.
 
-// A Skill is a skill to put on disk: the directory it lives in and the text
-// of its SKILL.md as the binary embeds it.
+// A Skill is a skill to put on disk: the directory it lives in, the text of
+// its SKILL.md as the binary embeds it, and the reference files that sit
+// beside it (references/<name>.md).
 type Skill struct {
 	Name string
 	Body []byte
+	Refs []Ref
+}
+
+// A Ref is one reference file of a skill: its name without the .md, and its
+// text as the binary embeds it.
+type Ref struct {
+	Name string
+	Body []byte
+}
+
+// refBody is the text of the reference called ref, nil when the skill has none
+// by that name.
+func (s Skill) refBody(ref string) []byte {
+	for _, r := range s.Refs {
+		if r.Name == ref {
+			return r.Body
+		}
+	}
+	return nil
+}
+
+// refFile is the reference called ref of the skill called name under root.
+func refFile(root, name, ref string) string {
+	return filepath.Join(root, name, "references", ref+".md")
 }
 
 const (
@@ -61,24 +86,44 @@ func skillFile(root, name string) string { return filepath.Join(root, name, "SKI
 // stub whose name is no skill of jig's, it is left alone and its name comes
 // back in kept.
 func InstallSkills(root string, skills []Skill, version string, replace bool) (written, kept []string, err error) {
+	type file struct {
+		path string
+		body []byte
+	}
 	for _, s := range skills {
-		want := StampSkill(s.Body, version)
-		path := skillFile(root, s.Name)
-		have, exists, err := readIfExists(path)
-		if err != nil {
-			return written, kept, err
+		files := []file{{skillFile(root, s.Name), s.Body}}
+		for _, r := range s.Refs {
+			files = append(files, file{refFile(root, s.Name, r.Name), r.Body})
 		}
-		if exists && bytes.Equal(have, want) {
-			continue
+		var wrote, isKept bool
+		for i, f := range files {
+			want := StampSkill(f.body, version)
+			have, exists, err := readIfExists(f.path)
+			if err != nil {
+				return written, kept, err
+			}
+			if exists && bytes.Equal(have, want) {
+				continue
+			}
+			if _, stamped := SkillStamp(have); exists && !stamped && !replace {
+				// The SKILL.md decides whose the skill is; a reference of
+				// the person's own beside a jig skill is left as it is.
+				if i == 0 {
+					isKept = true
+					break
+				}
+				continue
+			}
+			if err := writeFile(f.path, want, 0o644, true); err != nil {
+				return written, kept, err
+			}
+			wrote = true
 		}
-		if _, stamped := SkillStamp(have); exists && !stamped && !replace {
+		if isKept {
 			kept = append(kept, s.Name)
-			continue
+		} else if wrote {
+			written = append(written, s.Name)
 		}
-		if err := writeFile(path, want, 0o644, true); err != nil {
-			return written, kept, err
-		}
-		written = append(written, s.Name)
 	}
 	return written, kept, nil
 }
@@ -87,9 +132,11 @@ func InstallSkills(root string, skills []Skill, version string, replace bool) (w
 // With names it removes those, without it every skill under root that carries
 // jig's stamp. A skill is jig's when it carries the stamp or is, byte for byte,
 // one of embedded (the files `jig skills install` wrote before there were
-// stamps); one that is neither is the person's and stays. An emptied skill
-// directory goes with it.
-func RemoveSkills(root string, names []string, embedded map[string][]byte) (removed []string, err error) {
+// stamps); one that is neither is the person's and stays. The same goes for
+// each file under references/. An emptied references directory and an emptied
+// skill directory go with them; one that still holds a file of the person's
+// stays.
+func RemoveSkills(root string, names []string, embedded map[string]Skill) (removed []string, err error) {
 	if names == nil {
 		entries, err := os.ReadDir(root)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -106,22 +153,58 @@ func RemoveSkills(root string, names []string, embedded map[string][]byte) (remo
 	}
 	for _, name := range names {
 		path := skillFile(root, name)
+		took, tookRef := false, false
+		refEntries, err := os.ReadDir(filepath.Join(root, name, "references"))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return removed, err
+		}
+		for _, e := range refEntries {
+			ref, ok := strings.CutSuffix(e.Name(), ".md")
+			if !ok || e.IsDir() {
+				continue
+			}
+			rpath := refFile(root, name, ref)
+			rdata, rexists, err := readIfExists(rpath)
+			if err != nil {
+				return removed, err
+			}
+			if !rexists {
+				continue
+			}
+			_, rstamped := SkillStamp(rdata)
+			// A file is jig's when it is stamped or is the text of a
+			// reference jig ships under that name: a skill or reference jig
+			// does not ship has no text, and an empty file of the person's
+			// must not equal it.
+			if want := embedded[name].refBody(ref); !rstamped && (want == nil || !bytes.Equal(rdata, want)) {
+				continue
+			}
+			if err := os.Remove(rpath); err != nil {
+				return removed, err
+			}
+			took = true
+			tookRef = true
+		}
+		if tookRef {
+			_ = os.Remove(filepath.Join(root, name, "references")) // only if nothing else is in it
+		}
 		data, exists, err := readIfExists(path)
 		if err != nil {
 			return removed, err
 		}
-		if !exists {
-			continue
+		if exists {
+			_, stamped := SkillStamp(data)
+			if emb, ok := embedded[name]; stamped || (ok && emb.Body != nil && bytes.Equal(data, emb.Body)) {
+				if err := os.Remove(path); err != nil {
+					return removed, err
+				}
+				took = true
+			}
 		}
-		_, stamped := SkillStamp(data)
-		if !stamped && !bytes.Equal(data, embedded[name]) {
-			continue
+		if took {
+			_ = os.Remove(filepath.Dir(path)) // only if nothing else is in it
+			removed = append(removed, name)
 		}
-		if err := os.Remove(path); err != nil {
-			return removed, err
-		}
-		_ = os.Remove(filepath.Dir(path)) // only if nothing else is in it
-		removed = append(removed, name)
 	}
 	return removed, nil
 }
@@ -145,6 +228,12 @@ type SkillStatus struct {
 	// Version is the version in the stamp of the file that is there ("" for
 	// none, or for one with no stamp).
 	Version string
+	// BodyStale is true when SKILL.md itself is out of date, not only a
+	// reference.
+	BodyStale bool
+	// Refs says which references are missing or differ, as "references/<ref>.md
+	// missing" or "references/<ref>.md differs".
+	Refs []string
 }
 
 // InspectSkills reads how skills stand under root against what a jig of the
@@ -166,6 +255,23 @@ func InspectSkills(root string, skills []Skill, version string) ([]SkillStatus, 
 				st.State = StateInstalled
 			default:
 				st.State = StateStale
+				st.BodyStale = true
+			}
+			// A reference missing or differing makes the skill stale: the
+			// install of a jig from before the reference existed.
+			for _, r := range s.Refs {
+				rdata, rexists, err := readIfExists(refFile(root, s.Name, r.Name))
+				if err != nil {
+					return nil, err
+				}
+				switch {
+				case !rexists:
+					st.State = StateStale
+					st.Refs = append(st.Refs, "references/"+r.Name+".md missing")
+				case !bytes.Equal(rdata, StampSkill(r.Body, version)) && !bytes.Equal(rdata, r.Body):
+					st.State = StateStale
+					st.Refs = append(st.Refs, "references/"+r.Name+".md differs")
+				}
 			}
 		}
 		out = append(out, st)
@@ -238,7 +344,7 @@ func StubBody(entries []StubEntry) []byte {
 	b.WriteString("Read a skill's instructions with `jig skill <name>`. The binary holds the current text; do not copy it here.\n\n")
 	b.WriteString("A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`). `jig next <ticket>` names the phase it is at and the prompt that asks for it (\"Build SHOP-1\"); each skill starts there and ends by relaying that prompt to the person.\n\n")
 	b.WriteString("Work a person asks for in this project goes through a ticket. A request that names none (\"Fix this bug: ...\") is fresh work: its brief comes first, with the `intake` skill, which decides brief or chart and mints a ticket for a brief with `jig ticket new`. Slices are the brief's parts (`slices.yaml`), each built and verified on its own, so \"make it two slices\" asks for two of them.\n\n")
-	b.WriteString("A prompt that names several phases (\"Take SHOP-1 from brief to PR\", or a request that goes on \"then build it, review it and publish it\") is a start-to-finish run: go on to each next phase with its skill without waiting for a prompt to start it, and end the run at a refusal or a chart verdict (a chart is not a ticket). What follows a chart verdict depends on the prompt's intent to launch: none reports and names the prompts that launch it, some asks once to confirm, a fully explicit one starts the chart run; read `jig skill intake`, \"Then\". A prompt aimed at a chart (\"Take checkout to PR\", \"Continue checkout\"), or at several tickets of one chart (\"Take SHOP-1 and SHOP-2 to PR\"), runs the chart, over those tickets only, with the `chart` skill. Start the review's reviewer and wait for it as `jig gate` says: a top-level session waits for the verdict, while a subagent hands back with the round open, since its turn's end is its hand-back; never schedule a wakeup or call another tool to stall.\n\n")
+	b.WriteString("A prompt that names several phases (\"Take SHOP-1 from brief to PR\", or a request that goes on \"then build it, review it and publish it\") is a start-to-finish run: go on to each next phase with its skill without waiting for a prompt to start it, and end the run at a refusal or a chart verdict (a chart is not a ticket). What follows a chart verdict depends on the prompt's intent to launch: none reports and names the prompts that launch it, some asks once to confirm, a fully explicit one starts the chart run; read `jig skill intake chart-verdict`. A prompt aimed at a chart (\"Take checkout to PR\", \"Continue checkout\"), or at several tickets of one chart (\"Take SHOP-1 and SHOP-2 to PR\"), runs the chart, over those tickets only, with the `chart` skill. Start the review's reviewer and wait for it as `jig gate` says: a top-level session waits for the verdict, while a subagent hands back with the round open, since its turn's end is its hand-back; never schedule a wakeup or call another tool to stall.\n\n")
 	b.WriteString("A start-to-finish run hands over no decision: the brief's questions and its approval, the asks a review leaves and the publish approval stay the person's, so ask and wait for each answer. A prompt that tells you to go with your recommendations hands those decisions over, in one phase or a run: answer them with your recommendations, recorded as yours (a brief approval with agent provenance; a publish the publish skill's first way, which asks for no approval). A run can be either or both; both is a run with nobody to ask.\n\n")
 	if len(entries) > 0 {
 		b.WriteString("| Skill | Use it when |\n|---|---|\n")

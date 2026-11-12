@@ -9,7 +9,14 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 )
 
+// pinChildEnvVar makes a re-run of this test binary pin the fixture identity
+// before Run, as the packages that call PinIdentity do.
+const pinChildEnvVar = "GITTEST_CHILD_PIN"
+
 func TestMain(m *testing.M) {
+	if os.Getenv(pinChildEnvVar) != "" {
+		gittest.PinIdentity()
+	}
 	os.Exit(gittest.Run(m))
 }
 

@@ -1008,7 +1008,7 @@ func reviewerLines(rounds []RoundRecord) []string {
 		if len(what) > 0 {
 			label += " (" + strings.Join(what, ", ") + ")"
 		}
-		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+".")
+		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+carriedWords(r)+".")
 	}
 	return out
 }
@@ -1410,4 +1410,30 @@ func decidedWording(verb, outcome string, d TriageDecision, fallbackReason, lega
 		return verb + " by " + who + ": " + reason
 	}
 	return verb + " by " + who
+}
+
+// carriedWords says, for a round that carried a merge of the target rather than
+// read it, which one: "; the merge of <ref> at <short sha> was carried, not
+// read", each repo's prefixed by its name when the round spans several. "" for
+// a round without the record.
+func carriedWords(r RoundRecord) string {
+	if len(r.CarriedMerge) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(r.CarriedMerge))
+	for name := range r.CarriedMerge {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	qualified := strings.Contains(r.Head, ":")
+	var b strings.Builder
+	for _, name := range names {
+		m := r.CarriedMerge[name]
+		b.WriteString("; ")
+		if qualified {
+			b.WriteString(name + ": ")
+		}
+		fmt.Fprintf(&b, "the merge of %s at %s was carried, not read", m.Ref, shortSHA(m.SHA))
+	}
+	return b.String()
 }

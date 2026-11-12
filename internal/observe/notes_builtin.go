@@ -49,7 +49,7 @@ func verificationNotes(c NoteCtx) ([]Note, error) {
 			continue
 		}
 		sha := short12(l.Commit)
-		failed := l.Event == journal.EventVerifyError || (l.Event == journal.EventOracle && l.Outcome == "fail")
+		failed := l.Event == journal.EventVerifyError || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped)
 		switch {
 		case l.Event == journal.EventVerified:
 			v := journal.VerificationState(lines[:i+1], l.Commit, l.Slice)
