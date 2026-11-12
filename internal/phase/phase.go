@@ -719,6 +719,9 @@ func (d *digest) decisionOf(a Ask) Ask {
 	if a.Decision == "" {
 		for i := len(d.lines) - 1; i > d.lastClosed; i-- {
 			l := d.lines[i]
+			if l.Event == journal.EventKeepQueued && l.Ref == a.ID {
+				break // a gate queued the keep's slice: the decision is spent
+			}
 			if l.Event == journal.EventTriage && l.Ref == a.ID && (l.Outcome == "keep" || l.Outcome == "dismiss") {
 				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, true
 				break

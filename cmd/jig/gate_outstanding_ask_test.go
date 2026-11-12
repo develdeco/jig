@@ -15,15 +15,16 @@ import (
 // TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound pins the
 // life of an ask the reviewer left for a person: a round records it undecided
 // and exits 2, `jig status` lists it with the command that decides it, `jig
-// triage` journals the decision (refusing an id that is no ask), and the next
-// round - whose reviewer reports nothing new there - applies it: the kept ask
-// becomes the fix slice, carrying the person's reason and the workspace they
-// chose, and the ask is no longer outstanding.
+// triage` journals the decision (refusing an id that is no ask), the next
+// `jig gate` queues the kept ask as the fix slice, carrying the person's
+// reason and the workspace they chose, before any round opens, and the round
+// that follows the built slice - whose reviewer reports nothing new there -
+// reads the ask fixed: it is no longer outstanding.
 //
 // The ask is on go.mod, which lies in no declared workspace, so keeping it
 // needs the person's workspace; its oracle resolved to the manifest's sole
 // oracle in round 1.
-func TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound(t *testing.T) {
+func TestOutstandingAskIsDecidedWithJigTriageAndQueuedByTheNextGate(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
 	e := testEnv(fx.Home).atTerminal() // the person at their terminal
@@ -100,12 +101,35 @@ func TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound(t *testing
 		t.Fatalf("jig triage opened a round: the decision is applied by the next one")
 	}
 
+	// The next gate queues the kept ask's slice and opens no round.
+	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the fix slice built from the kept ask\n%s", code, out)
+	}
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var goal string
+	for _, s := range slices {
+		if s.ID == "fix-2-r1-f1" {
+			goal = s.Goal
+			if s.Workspace != "alpha" {
+				t.Errorf("fix-2-r1-f1 workspace = %q, want the one the person chose", s.Workspace)
+			}
+		}
+	}
+	if !strings.Contains(goal, "Bumping the toolchain is intentional.") {
+		t.Errorf("fix-2-r1-f1 goal = %q, want the person's reason", goal)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "alpha/alpha.go")
+
 	// Round 2's reviewer covers go.mod (must_review, since r1-f1 is still
-	// outstanding) but reports nothing new there - it does not re-report r1-f1
-	// at all. The recorded decision is applied all the same.
+	// outstanding) and the built change, but reports nothing new there - it
+	// does not re-report r1-f1 at all.
 	round2 := verifydeliver.ReviewResult{
 		Findings:      []verifydeliver.ResultFinding{},
-		ReviewedPaths: []string{"go.mod"},
+		ReviewedPaths: []string{"go.mod", "alpha/alpha.go"},
 		Summary:       "round 2: nothing new to report",
 	}
 	round2Path := filepath.Join(t.TempDir(), "round-2.json")
@@ -117,19 +141,8 @@ func TestOutstandingAskIsDecidedWithJigTriageAndAppliedByTheNextRound(t *testing
 	if !strings.Contains(out, "r1-f1") {
 		t.Fatalf("round 2 report never mentioned r1-f1:\n%s", out)
 	}
-	if !strings.Contains(out, "fix-2-r1-f1") {
-		t.Fatalf("round 2 output missing the fix slice built from the kept ask:\n%s", out)
-	}
-
-	triage, decision, found := findingsYAMLEntry(t, filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2", "findings.yaml"), "r1-f1")
-	if !found {
-		t.Fatalf("round 2 findings.yaml has no entry for r1-f1 (the decided outstanding ask was never recorded)")
-	}
-	if triage != verifydeliver.TriageHuman {
-		t.Errorf("r1-f1 triage = %q, want %q", triage, verifydeliver.TriageHuman)
-	}
-	if decision != "Bumping the toolchain is intentional." {
-		t.Errorf("r1-f1 decision = %q, want the reason given to jig triage", decision)
+	if !strings.Contains(out, "kept_fixed") {
+		t.Fatalf("round 2 does not list the kept ask as built:\n%s", out)
 	}
 
 	statusOut, code = runMain(t, e, "", "status", ticket, "--store", fx.StoreDir)

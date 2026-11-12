@@ -1705,7 +1705,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	for _, f := range in.Open {
 		// A noted finding a person kept (the keep still pending) is work the
 		// closing round may spend as fixed: its file must be read.
-		if d, ok := decisions[f.ID]; ok && f.Status == StatusNoted && d.Pending && d.Outcome == TriageKeep {
+		if d, ok := decisions[f.ID]; ok && f.Status == StatusNoted && (d.Pending || d.Queued) && d.Outcome == TriageKeep {
 			openFiles = append(openFiles, f.File)
 			continue
 		}

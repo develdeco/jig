@@ -27,9 +27,14 @@ type TriageDecision struct {
 	// ask that lacked part of one ("" for each they did not choose).
 	Workspace, Oracle string
 	// Pending is whether the line comes after the last gate-round or
-	// gate-clean line: the next round that closes applies it. An older line
-	// is spent, a decision some earlier round already took.
+	// gate-clean line and no gate has queued it: the next gate applies it (a
+	// keep is queued at once, a dismiss when the next round closes). An older
+	// line is spent, a decision some earlier round already took.
 	Pending bool
+	// Queued is whether a gate queued the keep's fix slice since the line: the
+	// slice is the decision applied, so nothing queues it again, and the round
+	// that closes next reads the finding fixed when its code moved.
+	Queued bool
 }
 
 // TriageDecisions folds a ticket's journal lines into the latest triage line
@@ -45,13 +50,21 @@ func TriageDecisions(lines []journal.Line) map[string]TriageDecision {
 	}
 	decisions := map[string]TriageDecision{}
 	for i, l := range lines {
-		if l.Event != journal.EventTriage || l.Ref == "" {
+		if l.Ref == "" {
 			continue
 		}
-		ws, oracle := triageTarget(l.Command)
-		decisions[l.Ref] = TriageDecision{
-			Ref: l.Ref, Outcome: l.Outcome, Provenance: l.Provenance, Reason: l.Summary,
-			Workspace: ws, Oracle: oracle, Pending: i > closed,
+		switch l.Event {
+		case journal.EventTriage:
+			ws, oracle := triageTarget(l.Command)
+			decisions[l.Ref] = TriageDecision{
+				Ref: l.Ref, Outcome: l.Outcome, Provenance: l.Provenance, Reason: l.Summary,
+				Workspace: ws, Oracle: oracle, Pending: i > closed,
+			}
+		case journal.EventKeepQueued:
+			if d, ok := decisions[l.Ref]; ok {
+				d.Pending, d.Queued = false, true
+				decisions[l.Ref] = d
+			}
 		}
 	}
 	return decisions

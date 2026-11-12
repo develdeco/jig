@@ -294,11 +294,21 @@ type reportIntentYAML struct {
 // round. Gate and `jig status` share this one reading, so neither can
 // disagree with the other about how much of the budget is used.
 func UsedFixBudget(st *store.Store, ticket string, round int) (used int, unreadable []int) {
+	// A fix slice a gate queued for a keep before its round opened belongs to
+	// that round (FromGate), though the round may record none of its own.
+	queued := map[int]bool{}
+	if slices, err := st.ReadSlices(ticket); err == nil {
+		for _, s := range slices {
+			queued[s.FromGate] = true
+		}
+	}
 	for r := 1; r < round; r++ {
 		data, err := os.ReadFile(filepath.Join(gateRoundDir(st, ticket, r), "report.yaml"))
 		if err != nil {
 			if !os.IsNotExist(err) {
 				unreadable = append(unreadable, r)
+			} else if queued[r] {
+				used++ // queued for a round that has not been recorded yet
 			}
 			continue
 		}
@@ -307,7 +317,7 @@ func UsedFixBudget(st *store.Store, ticket string, round int) (used int, unreada
 			unreadable = append(unreadable, r)
 			continue
 		}
-		if len(rep.FixSlices) > 0 {
+		if len(rep.FixSlices) > 0 || queued[r] {
 			used++
 		}
 	}

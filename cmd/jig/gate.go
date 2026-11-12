@@ -177,6 +177,15 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if len(p.Queued) > 0 {
+		// A pending keep was queued as a fix slice and no round opened.
+		axi.Render(stdout,
+			axi.KV("gate", [][2]string{{"ticket", ticket}, {"round", "none opened"}}),
+			axi.Table("fix_slices", []string{"id"}, idRows(p.Queued)),
+			axi.Help(fmt.Sprintf("A kept finding is built with the fixes: build the fix slices (`jig next %s`), then run `jig gate %s` again to open the round", ticket, ticket)),
+		)
+		return 0
+	}
 	if p.Carried != nil {
 		// Nothing to read: the round is recorded, carrying over the verdict of
 		// the round a reviewer read.
