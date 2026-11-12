@@ -432,3 +432,58 @@ func TestStoreOverlapsLeaveOutTicketsThatAreNotOpen(t *testing.T) {
 		t.Errorf("rows = %+v, want none: one open ticket shares with nobody", rows)
 	}
 }
+
+// TestAdviceTestsEachBranchOfATicketThatHasSeveral: a ticket whose first branch
+// merges cleanly but whose second conflicts is told it conflicts, naming the
+// second branch.
+func TestAdviceTestsEachBranchOfATicketThatHasSeveral(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].File != "f.txt" || rows[0].Conflict != pairConflict {
+		t.Fatalf("rows = %+v, want one conflicting row naming f.txt", rows)
+	}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	found := false
+	for _, p := range pairs {
+		if p.State == pairConflict && p.BranchA == "T-1-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pairs = %+v, want a conflicting pair on T-1-b", pairs)
+	}
+	var out bytes.Buffer
+	printConflicts(&out, r.st, r.cfg, r.mp, nil, "T-2")
+	if !strings.Contains(out.String(), "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice for T-2 does not list T-1-b:\n%s", out.String())
+	}
+}
+
+// TestAdviceMergesNoBranchThatLacksTheSharedFile: a branch that changes only
+// another file is not merged against the other ticket.
+func TestAdviceMergesNoBranchThatLacksTheSharedFile(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	gitIn(t, r.dir, "switch", "-c", "T-1-other", "main")
+	if err := os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("g\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, "add", "-A")
+	gitIn(t, r.dir, "commit", "-m", "other file")
+	gitIn(t, r.dir, "switch", "main")
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	if len(pairs) != 1 {
+		t.Errorf("pairs = %+v, want one pair", pairs)
+	}
+	for _, p := range pairs {
+		if p.BranchA == "T-1-other" || p.BranchB == "T-1-other" {
+			t.Errorf("pair %+v merges a branch that lacks the shared file", p)
+		}
+	}
+}
