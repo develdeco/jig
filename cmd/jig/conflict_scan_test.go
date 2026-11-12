@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -312,6 +316,68 @@ func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
 	}
 }
 
+// slowGitEnv, when set to a number of seconds, puts a git on PATH that sleeps
+// that long before every call, to show how the scan behaves on a slow machine.
+// A plain run never sets it.
+const slowGitEnv = "JIG_TEST_SLOW_GIT_SECONDS"
+
+// slowGit puts the slow git shim on PATH for the rest of the test when
+// slowGitEnv asks for it.
+func slowGit(t *testing.T) {
+	t.Helper()
+	secs := os.Getenv(slowGitEnv)
+	if secs == "" {
+		return
+	}
+	n, err := strconv.Atoi(secs)
+	if err != nil || n < 1 {
+		t.Fatalf("%s = %q, want whole seconds", slowGitEnv, secs)
+	}
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A built program, not a script: a Windows batch file mangles arguments
+	// such as main^{commit}.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "shim.go")
+	prog := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"os/exec"
+	"time"
+)
+
+func main() {
+	time.Sleep(%d * time.Second)
+	cmd := exec.Command(%q, os.Args[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+`, n, real)
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "bin")
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(bin, name), src)
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the slow git: %v: %s", err, out)
+	}
+	dir = bin
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestScanWithMoreBranchesThanDiffSlots: nine bound branches against four diff
 // slots, and against one: every branch's files arrive, the rows and pairs come
 // out in the same order each time, and the scan finishes. A slot that is never
@@ -323,6 +389,7 @@ func TestScanWithMoreBranchesThanDiffSlots(t *testing.T) {
 	for i, id := range ids {
 		r.branch(id+"-b", strings.Repeat("x", i+1)+"\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
 	}
+	slowGit(t)
 	real := diffConcurrency
 	defer func() { diffConcurrency = real }()
 
