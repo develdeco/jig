@@ -1141,7 +1141,8 @@ type testedPair struct {
 }
 
 // scanOverlaps is findOverlaps with, besides, each pair of tickets that
-// shares a file, merged once however many files it shares.
+// shares a file, each pair of their branches that both change it merged once
+// however many files the pair shares.
 //
 // Only the branches of tickets open says are open are paired. A ticket named
 // in only limits the work to the pairs that hold it: the other tickets' files
@@ -1214,6 +1215,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		type touch struct {
 			tickets, branches map[string]bool
+			byTicket          map[string]map[string]bool
 		}
 		files := map[string]*touch{}
 		// One git process for each branch, started together: a session start
@@ -1235,27 +1237,27 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			for _, f := range changed[i] {
 				t := files[f]
 				if t == nil {
-					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}}
+					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}, byTicket: map[string]map[string]bool{}}
 					files[f] = t
 				}
 				t.tickets[b.ticket] = true
 				t.branches[b.branch] = true
+				if t.byTicket[b.ticket] == nil {
+					t.byTicket[b.ticket] = map[string]bool{}
+				}
+				t.byTicket[b.ticket][b.branch] = true
 			}
 		}
-		// A pair of tickets that shares a file is merged once, however many
-		// files it shares.
-		branchOf := map[string]string{}
-		for _, b := range bounds {
-			if _, ok := branchOf[b.ticket]; !ok {
-				branchOf[b.ticket] = b.branch
-			}
-		}
+		// A pair of branches of two tickets that both change a file is merged
+		// once, however many files the pair shares. A branch that lacks the
+		// file is not merged for it.
 		type verdict struct {
 			state string
 			files []string
 		}
-		tested := map[[2]string]verdict{}
-		pairAt := map[[2]string]int{}
+		type branchPair struct{ a, b string }
+		tested := map[branchPair]verdict{}
+		pairAt := map[branchPair]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
 			if len(t.tickets) < 2 || (only != "" && !t.tickets[only]) {
@@ -1269,21 +1271,25 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 					if only != "" && ids[i] != only && ids[j] != only {
 						continue
 					}
-					key := [2]string{ids[i], ids[j]}
-					v, ok := tested[key]
-					if !ok {
-						v.state, v.files = testPair(dir, branchOf[ids[i]], branchOf[ids[j]])
-						tested[key] = v
-						pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: branchOf[ids[i]], BranchB: branchOf[ids[j]], State: v.state, Files: v.files})
-						pairAt[key] = len(pairs) - 1
-					}
-					pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
-					switch {
-					case v.state == pairConflict:
-						state = pairConflict
-						conflicted = append(conflicted, v.files...)
-					case v.state == pairUntested && state == pairClean:
-						state = pairUntested
+					for _, ba := range sortedStrings(mapKeys(t.byTicket[ids[i]])) {
+						for _, bb := range sortedStrings(mapKeys(t.byTicket[ids[j]])) {
+							key := branchPair{ba, bb}
+							v, ok := tested[key]
+							if !ok {
+								v.state, v.files = testPair(dir, ba, bb)
+								tested[key] = v
+								pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: ba, BranchB: bb, State: v.state, Files: v.files})
+								pairAt[key] = len(pairs) - 1
+							}
+							pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
+							switch {
+							case v.state == pairConflict:
+								state = pairConflict
+								conflicted = append(conflicted, v.files...)
+							case v.state == pairUntested && state == pairClean:
+								state = pairUntested
+							}
+						}
 					}
 				}
 			}

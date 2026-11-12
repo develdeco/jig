@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -88,7 +89,10 @@ func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflic
 			}
 		case pairClean:
 			if len(p.Shared) > 0 {
-				a.Clean = append(a.Clean, cleanShare{Repo: p.Repo, Ticket: other, File: p.Shared[0]})
+				c := cleanShare{Repo: p.Repo, Ticket: other, File: p.Shared[0]}
+				if !slices.Contains(a.Clean, c) {
+					a.Clean = append(a.Clean, c)
+				}
 			}
 		}
 	}
