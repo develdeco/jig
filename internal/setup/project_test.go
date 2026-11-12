@@ -437,6 +437,7 @@ func TestRemoveSkillsLeavesAPersonsEmptyFilesAndDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeOrFail(t, filepath.Join(root, "build", "references", "empty.md"), "", 0o644)
+	writeOrFail(t, filepath.Join(root, "mine", "SKILL.md"), "", 0o644)
 
 	removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]})
 	if err != nil || !slices.Equal(removed, []string{"build"}) {
@@ -444,6 +445,7 @@ func TestRemoveSkillsLeavesAPersonsEmptyFilesAndDirectories(t *testing.T) {
 	}
 	for _, kept := range []string{
 		filepath.Join(root, "mine", "references", "empty.md"),
+		filepath.Join(root, "mine", "SKILL.md"),
 		filepath.Join(root, "build", "references", "empty.md"),
 		filepath.Join(root, "drafts", "references"),
 		filepath.Join(root, "bare"),
