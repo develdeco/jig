@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/spawn"
@@ -55,6 +56,10 @@ type Deps struct {
 	Sh func() (string, error)
 	// Now is the clock the run's lines and its timing read; nil is time.Now.
 	Now func() time.Time
+	// Alive says whether a verification worker with the pid, started at the
+	// time, is still running; nil is the operating system's answer
+	// (workerlive.Alive).
+	Alive func(pid int, notBefore time.Time) bool
 	// Log, when set, is where the run writes what it did and the tail of a
 	// failed oracle's output; a detached worker's is its own stdout, which is
 	// the machine-local log. nil discards.
@@ -226,7 +231,7 @@ func (d Deps) prepare(r Request) (*run, error) {
 // is one, and reports whether the request stops there: it does unless Rerun.
 func (x *run) existing(lines []journal.Line) bool {
 	cur := journal.VerificationState(lines, x.sha, x.r.Slice)
-	if cur.State == journal.VerifyNone || x.r.Rerun {
+	if cur.State == journal.VerifyNone || x.r.Rerun || x.standsAside(lines, cur) {
 		return false
 	}
 	x.res.Existing = true
@@ -235,6 +240,26 @@ func (x *run) existing(lines []journal.Line) bool {
 	x.res.Seconds = cur.Seconds
 	x.res.Summary = cur.Summary
 	return true
+}
+
+// standsAside reports whether the latest record cur judged nothing about the
+// code, so the request runs the oracle instead of repeating it: a pending line
+// whose worker is gone, a stopped run, a verification that could not start.
+// The ledger is read only for a pending line, to find its worker.
+func (x *run) standsAside(lines []journal.Line, cur journal.Verification) bool {
+	ref := phase.CommitRef{SHA: x.sha, Slice: x.r.Slice}
+	in := phase.VerifyInput{
+		Ticket: x.r.Ticket, Lines: lines, Commits: []phase.CommitRef{ref}, BranchKnown: true,
+		Now: x.d.now(), Alive: x.d.Alive,
+	}
+	if in.Alive == nil {
+		in.Alive = Alive
+	}
+	if cur.State == journal.VerifyPending {
+		in.Spawned, _ = LatestSpawned(x.d.JigHome, x.r.Ticket, in.Commits)
+	}
+	rows := phase.DeriveVerifications(in)
+	return len(rows) == 1 && rows[0].State.StandsAside()
 }
 
 // subject is the first line of the commit's message, as the clone has it: the
