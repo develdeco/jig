@@ -88,7 +88,12 @@ func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflic
 			conflicting[tk{p.Repo, other}] = true
 			first := firstInNextOrder(st, p.A, p.B)
 			for _, f := range p.Files {
-				a.Conflicts = append(a.Conflicts, ticketConflict{Repo: p.Repo, Ticket: other, File: f, Branch: otherBranch, First: first})
+				c := ticketConflict{Repo: p.Repo, Ticket: other, File: f, Branch: otherBranch, First: first}
+				// Two branches of the ticket in hand that conflict with the
+				// same branch of another ticket give one entry.
+				if !slices.Contains(a.Conflicts, c) {
+					a.Conflicts = append(a.Conflicts, c)
+				}
 			}
 		case pairClean:
 			if len(p.Shared) > 0 {
