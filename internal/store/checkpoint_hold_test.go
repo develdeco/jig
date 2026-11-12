@@ -175,12 +175,12 @@ func TestClaimHoldsTheCheckpointLockWhileItWrites(t *testing.T) {
 func runCheckpointWriter(root string) int {
 	notice, _ := time.ParseDuration(os.Getenv("JIG_CHECKPOINT_NOTICE"))
 	bound, _ := time.ParseDuration(os.Getenv("JIG_CHECKPOINT_BOUND"))
-	checkpointLockNotice, checkpointLockBound = notice, bound
 	st, err := Open(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	setCheckpointBounds(st, notice, bound)
 	st.Warn = func(string, ...any) {}
 	id, err := st.Claim(
 		func() (string, []string, error) {

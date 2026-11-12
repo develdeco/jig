@@ -211,11 +211,8 @@ func startCheckpointChild(t *testing.T, work string) (pid int, release func()) {
 	}
 }
 
-func setCheckpointBounds(t *testing.T, notice, bound time.Duration) {
-	t.Helper()
-	oldNotice, oldBound := checkpointLockNotice, checkpointLockBound
-	checkpointLockNotice, checkpointLockBound = notice, bound
-	t.Cleanup(func() { checkpointLockNotice, checkpointLockBound = oldNotice, oldBound })
+func setCheckpointBounds(st *Store, notice, bound time.Duration) {
+	st.checkpointNotice, st.checkpointBound = notice, bound
 }
 
 // TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder: past the
@@ -224,7 +221,7 @@ func setCheckpointBounds(t *testing.T, notice, bound time.Duration) {
 func TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder(t *testing.T) {
 	st, work := newTestStandaloneStore(t)
 	pid, letGo := startCheckpointChild(t, work)
-	setCheckpointBounds(t, 200*time.Millisecond, 20*time.Second)
+	setCheckpointBounds(st, 200*time.Millisecond, 20*time.Second)
 
 	var mu sync.Mutex
 	var warnings []string
@@ -280,7 +277,7 @@ func TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder(t *testing.T) 
 func TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder(t *testing.T) {
 	st, work := newTestStandaloneStore(t)
 	pid, _ := startCheckpointChild(t, work)
-	setCheckpointBounds(t, 100*time.Millisecond, 400*time.Millisecond)
+	setCheckpointBounds(st, 100*time.Millisecond, 400*time.Millisecond)
 	st.Warn = func(string, ...any) {}
 
 	begin := time.Now()

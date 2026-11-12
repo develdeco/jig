@@ -16,7 +16,7 @@ import (
 // checkpointLockBound in all it fails, naming the holder, and holds nothing.
 // Fifteen minutes covers a push over a slow network behind a busy queue and
 // still ends a wedged holder in a clear failure. They are variables so a test
-// can shorten them.
+// can shorten them on a Store (see checkpointWaits).
 var (
 	checkpointLockNotice = 2 * time.Minute
 	checkpointLockBound  = 15 * time.Minute
@@ -96,13 +96,14 @@ func (s *Store) lockCheckpoint() (func(), error) {
 // holder and returns what removes that record and lets the lock go.
 func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 	holderPath := filepath.Join(filepath.Dir(lockPath), checkpointHolderName)
-	unlock, held, err := TryLock(lockPath, checkpointLockNotice)
+	notice, bound := s.checkpointWaits()
+	unlock, held, err := TryLock(lockPath, notice)
 	if err != nil {
 		return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 	}
 	if !held {
 		s.warn("waiting for the checkpoint lock on %s, held by %s", lockPath+".lock", readCheckpointHolder(holderPath))
-		rest := checkpointLockBound - checkpointLockNotice
+		rest := bound - notice
 		if rest < 0 {
 			rest = 0
 		}
@@ -111,7 +112,7 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 			return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 		}
 		if !held {
-			return nil, fmt.Errorf("store: the checkpoint lock on %s is still held by %s after %s", lockPath+".lock", readCheckpointHolder(holderPath), checkpointLockBound)
+			return nil, fmt.Errorf("store: the checkpoint lock on %s is still held by %s after %s", lockPath+".lock", readCheckpointHolder(holderPath), bound)
 		}
 	}
 	name := "jig"
@@ -124,6 +125,15 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 		_ = os.Remove(holderPath)
 		unlock()
 	}, nil
+}
+
+// checkpointWaits returns the notice and the bound this store waits by.
+func (s *Store) checkpointWaits() (notice, bound time.Duration) {
+	notice, bound = checkpointLockNotice, checkpointLockBound
+	if s.checkpointNotice > 0 || s.checkpointBound > 0 {
+		notice, bound = s.checkpointNotice, s.checkpointBound
+	}
+	return notice, bound
 }
 
 // readCheckpointHolder describes the holder the file at path names, best

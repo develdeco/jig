@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -21,6 +22,10 @@ import (
 // Store is a truth-repo checkout rooted at Root.
 type Store struct {
 	Root string
+
+	// checkpointNotice and checkpointBound, when set, replace the package
+	// defaults of the checkpoint lock's wait (a test shortens them).
+	checkpointNotice, checkpointBound time.Duration
 
 	// AfterCheckpoint, when set, runs once after every Push that actually
 	// lands (committed, and pushed when the store has an origin): the
