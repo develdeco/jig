@@ -10,6 +10,8 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gatelock"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // lockedBuffer is a writer a test reads while a command still writes to it.
@@ -94,5 +96,75 @@ func TestSecondGateWaitsForTheFirstAndSaysSo(t *testing.T) {
 	}
 	if _, ok := gatelock.Holder(jigHome, "fixture", fx.Ticket); ok {
 		t.Error("the gate left its holder file after it returned")
+	}
+}
+
+// TestSecondGateReportsTheRoundStandingAtItsHead: a gate that waited for
+// another, whose round stands at the branch's head, opens no round and runs no
+// suite; it reports that round. A gate that did not wait still opens one.
+func TestSecondGateReportsTheRoundStandingAtItsHead(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	var stderr lockedBuffer
+	e.stderr = &stderr
+
+	// The first gate opens round 1 (no wait).
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || strings.Contains(out, "stands at its head") {
+		t.Fatalf("first gate: exit = %d, want 0 and an ordinary report\n%s", code, out)
+	}
+	opens := func() int {
+		st, err := store.Open(fx.StoreDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines, err := journal.Read(st, fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, l := range lines {
+			if l.Event == journal.EventGateOpen {
+				n++
+			}
+		}
+		return n
+	}
+	before := opens()
+
+	release, err := gatelock.Take(context.Background(), jigHome, "fixture", fx.Ticket, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		out  string
+		code int
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+		done <- result{out, code}
+	}()
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(stderr.String(), "waits for the gate") {
+		if time.Now().After(deadline) {
+			release()
+			t.Fatal("the second gate never waited")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	release()
+	select {
+	case r := <-done:
+		if r.code != 0 || !strings.Contains(r.out, "round: 1 stands at its head (not opened again)") || !strings.Contains(r.out, "verdict: open") {
+			t.Fatalf("second gate: exit = %d, want 0 and the standing round\n%s", r.code, r.out)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("the second gate did not finish")
+	}
+	if after := opens(); after != before {
+		t.Errorf("gate-open lines = %d, want %d: the waiting gate ran a gate of its own", after, before)
 	}
 }

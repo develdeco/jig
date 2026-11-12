@@ -160,7 +160,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 
 	// A ticket's gates go one at a time: a second one waits here, before the
 	// sync and the suite, instead of running them beside the first.
-	releaseLock, _, err := takeGateLock(e, jigHome, cfg.Name, ticket)
+	releaseLock, waited, err := takeGateLock(e, jigHome, cfg.Name, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -183,6 +183,20 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return renderErr(stdout, err)
 		}
 		return printGateReport(stdout, st, ticket, report)
+	}
+
+	// A gate that waited for another has most likely been overtaken by it: the
+	// round that gate opened stands at the head, and a second one over it
+	// would only repeat the suite. A gate that did not wait is a person asking
+	// again, and gets a round.
+	if waited {
+		standing, err := verifydeliver.StandingRound(deps, ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		if standing != nil {
+			return printStandingRound(e, deps, stdout, ticket, standing)
+		}
 	}
 
 	p, err := verifydeliver.GatePrepare(deps, opts)
@@ -233,6 +247,37 @@ func takeGateLock(e env, jigHome, project, ticket string) (release func(), waite
 		fmt.Fprintf(e.stderr, "jig: gate %s took the lock after %ds\n", ticket, int(time.Since(started).Seconds()))
 	}
 	return release, waited, nil
+}
+
+// printStandingRound prints the round a waiting gate found at the branch's
+// head instead of opening another: the fields of a gate report, saying the
+// round was not opened again. An open round points at its review, a recorded
+// one shows its verdict.
+func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket string, st *verifydeliver.Standing) int {
+	verdict := "open"
+	if !st.Open {
+		verdict = st.Verdict
+		if st.CarriedFrom > 0 {
+			verdict += " (carried over from round " + strconv.Itoa(st.CarriedFrom) + ")"
+		}
+	}
+	var shaRows [][]string
+	for _, repo := range slices.Sorted(maps.Keys(st.Heads)) {
+		shaRows = append(shaRows, []string{repo, st.Heads[repo]})
+	}
+	blocks := []string{
+		axi.KV("gate", [][2]string{
+			{"ticket", ticket},
+			{"round", strconv.Itoa(st.Round) + " stands at its head (not opened again)"},
+			{"verdict", verdict},
+		}),
+		axi.Table("head", []string{"repo", "sha"}, shaRows),
+	}
+	if st.Open {
+		blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
+	}
+	axi.Render(stdout, blocks...)
+	return 0
 }
 
 // printQueuedKeeps prints what a gate did instead of opening a round: it queued
