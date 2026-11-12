@@ -153,7 +153,7 @@ func RemoveSkills(root string, names []string, embedded map[string]Skill) (remov
 	}
 	for _, name := range names {
 		path := skillFile(root, name)
-		took := false
+		took, tookRef := false, false
 		refEntries, err := os.ReadDir(filepath.Join(root, name, "references"))
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return removed, err
@@ -172,30 +172,37 @@ func RemoveSkills(root string, names []string, embedded map[string]Skill) (remov
 				continue
 			}
 			_, rstamped := SkillStamp(rdata)
-			if !rstamped && !bytes.Equal(rdata, embedded[name].refBody(ref)) {
+			// A file is jig's when it is stamped or is the text of a
+			// reference jig ships under that name: a skill or reference jig
+			// does not ship has no text, and an empty file of the person's
+			// must not equal it.
+			if want := embedded[name].refBody(ref); !rstamped && (want == nil || !bytes.Equal(rdata, want)) {
 				continue
 			}
 			if err := os.Remove(rpath); err != nil {
 				return removed, err
 			}
 			took = true
+			tookRef = true
 		}
-		_ = os.Remove(filepath.Join(root, name, "references")) // only if nothing else is in it
+		if tookRef {
+			_ = os.Remove(filepath.Join(root, name, "references")) // only if nothing else is in it
+		}
 		data, exists, err := readIfExists(path)
 		if err != nil {
 			return removed, err
 		}
 		if exists {
 			_, stamped := SkillStamp(data)
-			if stamped || bytes.Equal(data, embedded[name].Body) {
+			if emb, ok := embedded[name]; stamped || (ok && emb.Body != nil && bytes.Equal(data, emb.Body)) {
 				if err := os.Remove(path); err != nil {
 					return removed, err
 				}
 				took = true
 			}
 		}
-		_ = os.Remove(filepath.Dir(path)) // only if nothing else is in it
 		if took {
+			_ = os.Remove(filepath.Dir(path)) // only if nothing else is in it
 			removed = append(removed, name)
 		}
 	}

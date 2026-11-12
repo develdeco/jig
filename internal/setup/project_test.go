@@ -418,3 +418,38 @@ func TestRemoveSkillsTakesJigsReferencesAndKeepsAPersons(t *testing.T) {
 		t.Errorf("unstamped install left %v", err)
 	}
 }
+
+func TestRemoveSkillsLeavesAPersonsEmptyFilesAndDirectories(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	// A skill of the person's own with an empty reference, an empty
+	// references directory, an empty skill directory, and an empty file
+	// named like a reference of jig's in a skill jig does not ship.
+	writeOrFail(t, filepath.Join(root, "mine", "references", "empty.md"), "", 0o644)
+	if err := os.MkdirAll(filepath.Join(root, "drafts", "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "bare"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOrFail(t, filepath.Join(root, "build", "references", "empty.md"), "", 0o644)
+
+	removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]})
+	if err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want only build", removed, err)
+	}
+	for _, kept := range []string{
+		filepath.Join(root, "mine", "references", "empty.md"),
+		filepath.Join(root, "build", "references", "empty.md"),
+		filepath.Join(root, "drafts", "references"),
+		filepath.Join(root, "bare"),
+	} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+}
