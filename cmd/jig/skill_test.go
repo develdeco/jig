@@ -283,7 +283,7 @@ func TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons(t *tes
 	if err := os.RemoveAll(refDir); err != nil {
 		t.Fatal(err)
 	}
-	if r := skillsRow(); r == nil || r["state"] != "stale" {
+	if r := skillsRow(); r == nil || r["state"] != "stale" || !strings.Contains(r["detail"], "build (references/handoff.md missing)") {
 		t.Fatalf("an install without references row = %v", r)
 	}
 	if out, code := runMain(t, ie.env, "", "skills", "--global"); code != 0 || !strings.Contains(out, "result: installed") {

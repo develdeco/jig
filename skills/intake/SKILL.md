@@ -36,6 +36,8 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 ## Chart output
 
+A batch spanning areas takes a chart verdict; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
+
 Read `jig skill intake chart-verdict` when the verdict is a chart, or after a chart verdict ended the run.
 
 ## Done when

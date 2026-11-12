@@ -228,6 +228,12 @@ type SkillStatus struct {
 	// Version is the version in the stamp of the file that is there ("" for
 	// none, or for one with no stamp).
 	Version string
+	// BodyStale is true when SKILL.md itself is out of date, not only a
+	// reference.
+	BodyStale bool
+	// Refs says which references are missing or differ, as "references/<ref>.md
+	// missing" or "references/<ref>.md differs".
+	Refs []string
 }
 
 // InspectSkills reads how skills stand under root against what a jig of the
@@ -249,6 +255,7 @@ func InspectSkills(root string, skills []Skill, version string) ([]SkillStatus, 
 				st.State = StateInstalled
 			default:
 				st.State = StateStale
+				st.BodyStale = true
 			}
 			// A reference missing or differing makes the skill stale: the
 			// install of a jig from before the reference existed.
@@ -257,8 +264,13 @@ func InspectSkills(root string, skills []Skill, version string) ([]SkillStatus, 
 				if err != nil {
 					return nil, err
 				}
-				if !rexists || (!bytes.Equal(rdata, StampSkill(r.Body, version)) && !bytes.Equal(rdata, r.Body)) {
+				switch {
+				case !rexists:
 					st.State = StateStale
+					st.Refs = append(st.Refs, "references/"+r.Name+".md missing")
+				case !bytes.Equal(rdata, StampSkill(r.Body, version)) && !bytes.Equal(rdata, r.Body):
+					st.State = StateStale
+					st.Refs = append(st.Refs, "references/"+r.Name+".md differs")
 				}
 			}
 		}

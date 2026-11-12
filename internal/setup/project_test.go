@@ -351,8 +351,8 @@ func TestSkillReferencesAreInstalledStampedAndInspected(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "build", "references")); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale {
-		t.Errorf("missing reference = %v, want stale", st)
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale || st[0].BodyStale || !slices.Equal(st[0].Refs, []string{"references/deep.md missing"}) {
+		t.Errorf("missing reference = %v, want stale and naming the reference", st)
 	}
 	if written, _, err := InstallSkills(root, skills, "v1", true); err != nil || !slices.Equal(written, []string{"build"}) {
 		t.Errorf("reinstall = %v, %v", written, err)
@@ -361,7 +361,7 @@ func TestSkillReferencesAreInstalledStampedAndInspected(t *testing.T) {
 		t.Errorf("after reinstall = %v", st)
 	}
 	writeOrFail(t, ref, "edited\n", 0o644)
-	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale {
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale || !slices.Equal(st[0].Refs, []string{"references/deep.md differs"}) {
 		t.Errorf("differing reference = %v, want stale", st)
 	}
 
@@ -451,5 +451,27 @@ func TestRemoveSkillsLeavesAPersonsEmptyFilesAndDirectories(t *testing.T) {
 		if _, err := os.Stat(kept); err != nil {
 			t.Errorf("%s was removed: %v", kept, err)
 		}
+	}
+}
+
+func TestRemoveSkillsReportsASkillWhoseOnlyJigFilesAreReferences(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	// The person's own SKILL.md replaced jig's; the references are still jig's.
+	mine := filepath.Join(root, "build", "SKILL.md")
+	writeOrFail(t, mine, "my own build skill\n", 0o644)
+	removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]})
+	if err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want build reported", removed, err)
+	}
+	if got := readOrFail(t, mine); got != "my own build skill\n" {
+		t.Errorf("the person's SKILL.md: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "build", "references")); !os.IsNotExist(err) {
+		t.Errorf("jig's references stayed: %v", err)
 	}
 }
