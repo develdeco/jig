@@ -16,6 +16,8 @@ import (
 // the lock's file handle somehow kept open.
 const checkpointLockTimeout = 2 * time.Minute
 
+var checkpointLockNotice, checkpointLockBound = 2*time.Minute, 15*time.Minute
+
 // checkpointLockName is the file in the store's git common directory the
 // checkpoint lock is held on (Lock adds its ".lock" sidecar suffix). It is in
 // git's own directory so it is never part of the store's tree and is shared

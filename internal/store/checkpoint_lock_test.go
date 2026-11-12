@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -201,5 +202,135 @@ func TestLockCheckpointOnAStoreWithNoGit(t *testing.T) {
 	a()
 	if entries, _ := os.ReadDir(root); len(entries) != 0 {
 		t.Errorf("a store with no git holds %d entries after LockCheckpoint, want none", len(entries))
+	}
+}
+
+// startCheckpointChild starts the other process that takes the checkpoint lock
+// of the store at work and keeps it until release is called (the returned
+// func, also run at cleanup). It returns the child's pid.
+func startCheckpointChild(t *testing.T, work string) (pid int, release func()) {
+	t.Helper()
+	signals := t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self)
+	cmd.Env = append(os.Environ(), "JIG_CHECKPOINT_CHILD="+work, "JIG_CHECKPOINT_SIGNALS="+signals)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			_ = writeMarker(signals, "release")
+			<-done
+		})
+	}
+	t.Cleanup(release)
+	if !waitMarker(signals, "held", time.Now().Add(30*time.Second)) {
+		t.Fatal("the child never took the lock")
+	}
+	return cmd.Process.Pid, func() {
+		_ = writeMarker(signals, "release")
+	}
+}
+
+func setCheckpointBounds(t *testing.T, notice, bound time.Duration) {
+	t.Helper()
+	oldNotice, oldBound := checkpointLockNotice, checkpointLockBound
+	checkpointLockNotice, checkpointLockBound = notice, bound
+	t.Cleanup(func() { checkpointLockNotice, checkpointLockBound = oldNotice, oldBound })
+}
+
+// TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder: past the
+// notice bound a waiter has not given up; it says once who holds the lock,
+// and takes the lock when the holder lets go, never having proceeded without.
+func TestLockCheckpointKeepsWaitingPastTheNoticeAndNamesTheHolder(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	pid, letGo := startCheckpointChild(t, work)
+	setCheckpointBounds(t, 200*time.Millisecond, 20*time.Second)
+
+	var mu sync.Mutex
+	var warnings []string
+	st.Warn = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
+
+	got := make(chan error, 1)
+	go func() {
+		release, err := st.LockCheckpoint()
+		if err == nil {
+			defer release()
+			if !heldElsewhere(t, checkpointLockFile(work)) {
+				err = fmt.Errorf("the waiter returned without holding the file lock")
+			}
+		}
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		t.Fatalf("LockCheckpoint returned (%v) past the notice while another process held the lock", err)
+	case <-time.After(700 * time.Millisecond):
+	}
+	mu.Lock()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], fmt.Sprint(pid)) {
+		t.Errorf("warnings = %q, want one naming holder pid %d", warnings, pid)
+	}
+	mu.Unlock()
+
+	letGo()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("LockCheckpoint never got the lock after the other process released it")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, w := range warnings {
+		if strings.Contains(w, "without the checkpoint lock") {
+			t.Errorf("a warning said the work proceeds without the lock: %q", w)
+		}
+	}
+}
+
+// TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder: a holder that never
+// lets go ends the wait in an error that names it and the lock file; the
+// lock is not held and the other process keeps it.
+func TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	pid, _ := startCheckpointChild(t, work)
+	setCheckpointBounds(t, 100*time.Millisecond, 400*time.Millisecond)
+	st.Warn = func(string, ...any) {}
+
+	begin := time.Now()
+	release, err := st.LockCheckpoint()
+	if err == nil {
+		release()
+		t.Fatal("LockCheckpoint returned no error while another process held the lock past the bound")
+	}
+	if waited := time.Since(begin); waited < 350*time.Millisecond {
+		t.Errorf("failed after %s, before the bound", waited)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprint(pid)) {
+		t.Errorf("error %q does not name holder pid %d", err, pid)
+	}
+	if !strings.Contains(err.Error(), checkpointLockFile(work)) {
+		t.Errorf("error %q does not name the lock file %s", err, checkpointLockFile(work))
+	}
+	if release == nil {
+		t.Fatal("release is nil")
+	}
+	release()
+	if !heldElsewhere(t, checkpointLockFile(work)) {
+		t.Fatal("the failed waiter's release let go of the other process's lock")
 	}
 }
