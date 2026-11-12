@@ -18,10 +18,12 @@ Before round one run `jig recall <the work, briefly>`. It lists open tickets and
 | Shape | Digs | Opening slice | Gate leans on |
 |---|---|---|---|
 | feature | behavior, acceptance, out-of-scope, seams | first tracer bullet | spec axis |
-| bug | repro, expected-vs-actual, regression window, seams | REPRO slice: oracle red before any fix | the regression test, unchanged |
+| bug | repro, expected-vs-actual, regression window, seams | the fix slice, its first commit the repro test, red on the base | the repro test, unchanged |
 | refactor | behavior contract, current coverage, seams | GUARDRAIL slice: missing coverage lands green first | guardrails staying green |
 
 A test diet is a refactor: its PR names each removed test's seam test and `go test -cover` before/after.
+
+A bug has no REPRO slice: jig verifies a slice only when its oracle passes, so one red before any fix could never go green. The fix slice's first commit adds the repro test, red on the base; the fix commit turns it green, and the slice's oracle runs that test.
 
 ## Seams
 
@@ -31,7 +33,7 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 - Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
 - `brief.md`: `## `-sectioned behavioral spec.
-- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (e.g. `test`) so the gate reuses its pass; a narrower one, a literal command. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
+- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (e.g. `test`) so the gate reuses its pass; a narrower one, a literal command. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
 - `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, `jig validate <T> --restamp`, or `jig requeue <T> --from-brief-diff` first to rebuild.
 
 ## Chart output
