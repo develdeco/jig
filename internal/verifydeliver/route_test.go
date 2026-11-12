@@ -215,7 +215,8 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 	}
 }
 
-// TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder pins "Fix\n// slices sized to one session": a (workspace, oracle) group over the
+// TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder pins "Fix
+// slices sized to one session": a (workspace, oracle) group over the
 // fix_slice_findings bound splits into several slices, same-file findings
 // always sharing one, files packed greedily in path order (not finding id
 // order), a file over the bound getting a slice of its own, and the
@@ -393,6 +394,9 @@ func TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle(t *testin
 	}
 	if contains(alpha.Goal, "other workspace note") {
 		t.Errorf("alpha goal carries the beta note:\n%s", alpha.Goal)
+	}
+	if contains(alpha.Goal, "Gate finding r1-f1") {
+		t.Errorf("a kept fix carries no kept-by header:\n%s", alpha.Goal)
 	}
 	beta := sliceByID(t, slices, "fix-1-beta-test")
 	if !equalStrings(beta.Findings, []string{"r1-f5"}) {

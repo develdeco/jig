@@ -1,5 +1,7 @@
 # Gate fix budget and risk floor: bound the fix loop, size fix slices to one session
 
+**Amended by grouping kept asks and notes:** a kept ask or note no longer gets a slice of its own; it joins the kept fixes of its workspace and oracle, and the group is split under the same bound.
+
 The gate's fix loop has no budget. Every finding the reviewer routes as a fix
 becomes fix work, whatever its risk. The gate repeats until a round comes back
 clean, and one round's fixes for a workspace and oracle go into a single slice.

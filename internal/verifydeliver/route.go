@@ -112,7 +112,8 @@ func DefaultTriage(in TriageInput) TriageResult {
 }
 
 // noOracleError is GATE_NO_ORACLE for a finding whose repo's manifest declares
-// no oracle: a fix slice for it could never be proven. "The manifest has no\n// oracles" is reserved for exactly this case.
+// no oracle: a fix slice for it could never be proven. "The manifest has no
+// oracles" is reserved for exactly this case.
 func noOracleError(files roundFiles, file string) error {
 	where := "the manifest"
 	if repo, _, ok := files.of(file); ok && files.qualified {
@@ -540,7 +541,7 @@ func disambiguateFixSliceIDs(slices []store.Slice, existingSlices []store.Slice)
 }
 
 // splitFixGroupIntoSlices packs one (workspace, oracle) group's kept
-// fixes, already sorted by id, into one or more fix slices bounded by
+// findings, already sorted by id, into one or more fix slices bounded by
 // fixSliceFindings findings each ("Fix slices sized to one session"):
 // findings in the same file always share a slice; files are taken in path
 // order and packed greedily, each slice filled as full as the bound
