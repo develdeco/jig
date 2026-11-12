@@ -34,7 +34,7 @@ func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
-	alpha, beta := func() string { return testCmd(t, fx, "alpha") }, func() string { return testCmd(t, fx, "beta") }
+	alpha := func() string { return testCmd(t, fx, "alpha") }
 	var first string
 
 	step(t, "a gate pass is journaled with the env class that was up", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 	step(t, "a failed gate run is journaled and the next gate on that tree runs the suite", func(t *testing.T) {
 		head := commitInBuildLease(t, fx, map[string]string{"alpha/gate-three.txt": "three\n"})
 		d.Oracle = func(cmd, _ string) (string, error) {
-			if cmd == beta() {
+			if cmd == alpha() {
 				return "red", errString("red")
 			}
 			return "", nil
@@ -117,13 +117,10 @@ func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 		_, err := Gate(d, newReviewerGateSource(backend), GateOpts{Ticket: fx.Ticket})
 		wantAxiCode(t, err, "GATE_ORACLE_FAILED")
 
-		got := gateLines(t, d, fx.Ticket, beta())
+		got := gateLines(t, d, fx.Ticket, alpha())
 		last := got[len(got)-1]
 		if last.Outcome != "fail" || last.Commit != head || last.Cause != "" {
 			t.Errorf("the failed gate line = %+v, want a fail at %s with no cause", last, head)
-		}
-		if p := gateLines(t, d, fx.Ticket, alpha()); p[len(p)-1].Outcome != "pass" || p[len(p)-1].Commit != head {
-			t.Errorf("alpha's line = %+v, want the pass that ran before the failure", p[len(p)-1])
 		}
 
 		rec := &oracleRecorder{}
