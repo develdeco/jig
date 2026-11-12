@@ -784,3 +784,29 @@ func checkBlobAt(t *testing.T, fx *readFixture) {
 		}
 	}
 }
+
+// TestBlobAtErrorsWhenTheTreeCannotBeRead: a commit that resolves but whose
+// tree object is missing has no readable file at any path, so BlobAt says so as
+// an error and never as "no file".
+func TestBlobAtErrorsWhenTheTreeCannotBeRead(t *testing.T) {
+	dir := initRepo(t, "")
+	const fakeTreeID = "1234567890abcdef1234567890abcdef12345678"
+	if _, err := Run(dir, "cat-file", "-e", fakeTreeID); err == nil {
+		t.Fatal("the fixture tree id exists")
+	}
+	commit, err := RunInput(dir, []byte("tree "+fakeTreeID+"\nauthor "+fiIdent+"\ncommitter "+fiIdent+"\n\nno tree\n"), "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := ResolveCommit(dir, commit); err != nil || !ok {
+		t.Fatalf("ResolveCommit(%s) = %v, %v; the fixture needs a commit that resolves", commit, ok, err)
+	}
+	if _, werr := RunRaw(dir, "cat-file", "blob", commit+":f.txt"); werr == nil {
+		t.Fatal("git read a file from the commit whose tree is missing")
+	}
+	for _, path := range []string{"f.txt", "nope"} {
+		if got, found, err := BlobAt(dir, commit, path); err == nil || found || got != nil {
+			t.Errorf("BlobAt(%s) = %q, %v, %v; want an error: the commit's tree cannot be read", path, got, found, err)
+		}
+	}
+}
