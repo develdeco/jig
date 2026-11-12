@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitenv"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
@@ -508,7 +509,19 @@ func keysOf(m map[string]bool) []string {
 
 // identityEnvNames are the variables that give git an author and committer
 // name and email; the dates are left alone.
-var identityEnvNames = []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"}
+var identityEnvNames = identityNames()
+
+// identityNames takes the author and committer variables from the one list
+// of git's hook variables, minus the dates.
+func identityNames() []string {
+	var out []string
+	for _, name := range gitenv.HookOnly {
+		if (strings.HasPrefix(name, "GIT_AUTHOR_") || strings.HasPrefix(name, "GIT_COMMITTER_")) && !strings.HasSuffix(name, "_DATE") {
+			out = append(out, name)
+		}
+	}
+	return out
+}
 
 // withoutIdentity returns e without the GIT_AUTHOR_* and GIT_COMMITTER_* name
 // and email the test binary pinned (gittest.PinIdentity), keeping the dates,
