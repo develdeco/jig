@@ -37,8 +37,9 @@ func slotRig(t *testing.T, heavy bool) (*rig, [2]string) {
 }
 
 // runBoth verifies slices a and b at once and returns the most oracles that
-// ran at the same time. Each oracle lingers (or, when overlap is wanted, waits
-// for the other to arrive).
+// ran at the same time. When overlap is not wanted, each oracle holds the slot
+// until the other run has journaled its wait, and a while after; when it is
+// wanted, each waits for the other to arrive.
 func runBoth(t *testing.T, r *rig, shas [2]string, wantOverlap bool) int32 {
 	t.Helper()
 	var running, peak atomic.Int32
@@ -73,6 +74,9 @@ func runBoth(t *testing.T, r *rig, shas [2]string, wantOverlap bool) int32 {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
+			// Keep holding past the wait line, so a run that journals its wait
+			// and then starts without the slot would overlap this one.
+			time.Sleep(250 * time.Millisecond)
 		}
 		running.Add(-1)
 		return "", nil
