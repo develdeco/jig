@@ -202,3 +202,10 @@ func singleDirName(name string) bool {
 	}
 	return !strings.ContainsAny(name, `/\:`) && filepath.IsLocal(name)
 }
+
+// GateDir returns where a project's per-ticket gate lock files live under the jig
+// home root: <root>/gates/<project>, one <ticket>.lock per ticket. It is
+// machine state, never the store or a repo.
+func GateDir(root, project string) string {
+	return filepath.Join(root, "gates", project)
+}
