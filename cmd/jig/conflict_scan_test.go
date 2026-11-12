@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -312,45 +315,96 @@ func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
 	}
 }
 
+// slowGitEnv, when set to a number of seconds, puts a git on PATH that sleeps
+// that long before every call, to show how the scan behaves on a slow machine.
+// A plain run never sets it.
+const slowGitEnv = "JIG_TEST_SLOW_GIT_SECONDS"
+
+// slowGit puts the slow git shim on PATH for the rest of the test when
+// slowGitEnv asks for it.
+func slowGit(t *testing.T) {
+	t.Helper()
+	secs := os.Getenv(slowGitEnv)
+	if secs == "" {
+		return
+	}
+	n, err := strconv.Atoi(secs)
+	if err != nil || n < 1 {
+		t.Fatalf("%s = %q, want whole seconds", slowGitEnv, secs)
+	}
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A built program, not a script: a Windows batch file mangles arguments
+	// such as main^{commit}.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "shim.go")
+	prog := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"os/exec"
+	"time"
+)
+
+func main() {
+	time.Sleep(%d * time.Second)
+	cmd := exec.Command(%q, os.Args[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+`, n, real)
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "bin")
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(bin, name), src)
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the slow git: %v: %s", err, out)
+	}
+	dir = bin
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestScanWithMoreBranchesThanDiffSlots: nine bound branches against four diff
 // slots, and against one: every branch's files arrive, the rows and pairs come
 // out in the same order each time, and the scan finishes. A slot that is never
-// released would hang the fifth branch (or the second, with one slot), so the
-// scan runs under a timeout and fails instead of hanging.
+// released would hang the fifth branch (or the second, with one slot). The test
+// sets no deadline of its own, which would measure how slow the machine is, not
+// whether a slot was lost: go test's -timeout ends a hung scan with a panic that
+// names this test.
 func TestScanWithMoreBranchesThanDiffSlots(t *testing.T) {
 	ids := []string{"T-1", "T-2", "T-3", "T-4", "T-5", "T-6", "T-7", "T-8", "T-9"}
 	r := newConflictRig(t, ids...)
 	for i, id := range ids {
 		r.branch(id+"-b", strings.Repeat("x", i+1)+"\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
 	}
+	slowGit(t)
 	real := diffConcurrency
 	defer func() { diffConcurrency = real }()
 
 	var first []string
 	for _, slots := range []int{4, 1, 4} {
 		diffConcurrency = func() int { return slots }
-		type result struct {
-			rows  []nextOverlap
-			pairs []testedPair
+		rows, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+		if len(rows) != 1 || len(rows[0].Tickets) != 9 || len(rows[0].Branches) != 9 {
+			t.Fatalf("slots %d: rows = %+v, want one row of f.txt holding all nine tickets and branches", slots, rows)
 		}
-		done := make(chan result, 1)
-		go func() {
-			rows, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
-			done <- result{rows, pairs}
-		}()
-		var got result
-		select {
-		case got = <-done:
-		case <-time.After(60 * time.Second):
-			t.Fatalf("the scan with %d diff slots and nine branches did not finish: a slot is never released", slots)
+		if len(pairs) != 36 {
+			t.Fatalf("slots %d: %d pairs, want all 36", slots, len(pairs))
 		}
-		if len(got.rows) != 1 || len(got.rows[0].Tickets) != 9 || len(got.rows[0].Branches) != 9 {
-			t.Fatalf("slots %d: rows = %+v, want one row of f.txt holding all nine tickets and branches", slots, got.rows)
-		}
-		if len(got.pairs) != 36 {
-			t.Fatalf("slots %d: %d pairs, want all 36", slots, len(got.pairs))
-		}
-		order := pairsOf(got.pairs)
+		order := pairsOf(pairs)
 		if first == nil {
 			first = order
 		} else if !reflect.DeepEqual(order, first) {
