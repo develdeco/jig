@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -158,5 +159,65 @@ func TestPrintConflictsNamesARealConflictOnly(t *testing.T) {
 	printConflicts(&out, st, cfg, mp, nil, "T-3")
 	if out.Len() != 0 {
 		t.Errorf("a clean pair printed:\n%s", out.String())
+	}
+}
+
+// TestNextTicketJSONCarriesConflicts: jig next <T> --json names the files the
+// ticket's branch cannot merge with another open ticket's, in a conflicts array
+// (repo, ticket, file, branch, first); a ticket whose branch merges cleanly has
+// no such key.
+func TestNextTicketJSONCarriesConflicts(t *testing.T) {
+	jig, storeRoot := setupGraduateStore(t)
+	repo := filepath.Join(filepath.Dir(storeRoot), "demo")
+	st, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"T-1", "T-2", "T-3"} {
+		if err := st.CreateTicketRecord(id, store.Ticket{Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	gitIn(t, repo, "add", "-A")
+	gitIn(t, repo, "commit", "-m", "base")
+	branch := func(name, body string) {
+		gitIn(t, repo, "switch", "-c", name, "main")
+		write(body)
+		gitIn(t, repo, "commit", "-am", name)
+		gitIn(t, repo, "switch", "main")
+	}
+	branch("T-1-one", "ONE\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	branch("T-2-two", "TWO\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+	branch("T-3-three", "1\n2\n3\n4\n5\n6\n7\n8\n9\nTHREE\n")
+
+	read := func(id string) map[string]json.RawMessage {
+		t.Helper()
+		code, out := jig("next", id, "--json")
+		if code != 0 {
+			t.Fatalf("jig next %s --json: exit %d\n%s", id, code, out)
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(out), &obj); err != nil {
+			t.Fatalf("jig next %s --json is not JSON: %v\n%s", id, err, out)
+		}
+		return obj
+	}
+	obj := read("T-2")
+	var got []map[string]string
+	if err := json.Unmarshal(obj["conflicts"], &got); err != nil {
+		t.Fatalf("conflicts = %s: %v", obj["conflicts"], err)
+	}
+	want := []map[string]string{{"repo": "demo", "ticket": "T-1", "file": "f.txt", "branch": "T-1-one", "first": "T-1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("conflicts = %v, want %v", got, want)
+	}
+	if _, has := read("T-3")["conflicts"]; has {
+		t.Errorf("T-3 merges cleanly with both, yet its JSON has a conflicts key")
 	}
 }
