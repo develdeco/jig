@@ -52,6 +52,9 @@ type gateRun struct {
 
 	n    int
 	fold Fold
+	// queued are the fix slices queueKeptFindings queued for pending keeps; a
+	// run that queued any opens no round.
+	queued []string
 
 	// journaled is true once the round has put a tracked change in the
 	// store's working copy that a failure would otherwise leave uncommitted
@@ -120,7 +123,7 @@ func (r *gateRun) acquire(gr *gateRepo) error {
 // a ticket short of green refuses with GATE_NOT_GREEN, and that refusal must
 // leave no trace - not a pushed intent.md, not a journal line - for a plain
 // rerun to be the whole recovery.
-func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
+func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	r := &gateRun{d: d, o: o, ticket: o.Ticket, qualified: len(d.Cfg.Repos) > 1}
 	ticket := o.Ticket
 
@@ -183,6 +186,15 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 	for _, gr := range repos {
 		if err := r.acquire(gr); err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
+		}
+	}
+
+	// A keep a person recorded is built with the fixes already queued, so it
+	// is queued here, before the suite and a reviewer, and the round waits for
+	// its slice (queueKeptFindings).
+	if queueKept {
+		if err := r.queueKeptFindings(); err != nil || len(r.queued) > 0 {
+			return r, err
 		}
 	}
 
@@ -287,6 +299,64 @@ func gatePrepare(d Deps, o GateOpts) (*gateRun, error) {
 	return r, nil
 }
 
+// queueKeptFindings queues the fix slices of the pending keeps (queueKeeps)
+// and says so in the journal, so a keep is spent once its slice exists: the
+// next round neither queues it again nor lists it as pending. It uses the
+// number of the round that would open next for the slices' ids, and the round
+// is not opened.
+func (r *gateRun) queueKeptFindings() error {
+	d, ticket := r.d, r.ticket
+	decisions, err := ReadTriageDecisions(d.Store, ticket)
+	if err != nil {
+		return err
+	}
+	pending := false
+	for _, dec := range decisions {
+		pending = pending || (dec.Pending && dec.Outcome == TriageKeep)
+	}
+	if !pending {
+		return nil
+	}
+	n, err := existingGateRounds(d.Store, ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: gate: count rounds: %w", err)
+	}
+	r.n = n + 1
+	cum, err := cumulativeFindings(d.Store, ticket, r.n)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: gate: fold findings: %w", err)
+	}
+	files := roundFiles{qualified: r.qualified}
+	for _, gr := range r.repos {
+		man, err := manifest.Resolve(gr.lease.Dir)
+		if err != nil {
+			return inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
+		}
+		files.repos = append(files.repos, roundRepo{Name: gr.name, Dir: gr.lease.Dir, Man: man})
+	}
+	fixSliceFindings := *d.Cfg.ResolvedGateConfig().FixSliceFindings
+	slices, kept, err := queueKeeps(r.n, d.Store, ticket, r.slices, cum, decisions, files, fixSliceFindings)
+	if err != nil || len(slices) == 0 {
+		return err
+	}
+	r.journaled = true
+	if err := appendFixSlices(d, ticket, r.n, slices); err != nil {
+		return err
+	}
+	for _, id := range kept {
+		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventKeepQueued, Ref: id}); err != nil {
+			return fmt.Errorf("verifydeliver: gate: journal keep-queued: %w", err)
+		}
+	}
+	if err := d.Store.Push(fmt.Sprintf("%s: gate queued %d kept finding(s)", ticket, len(kept))); err != nil {
+		return fmt.Errorf("verifydeliver: gate: push store: %w", err)
+	}
+	for _, s := range slices {
+		r.queued = append(r.queued, s.ID)
+	}
+	return nil
+}
+
 // roundInput is what the review of this round is handed: the request is built
 // from it (PrepareReviewRequest), and a launched or scripted source reads it.
 func (r *gateRun) roundInput() RoundInput {
@@ -359,7 +429,7 @@ func (r *gateRun) copies() string {
 func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
-	if run, err = gatePrepare(d, o); err != nil {
+	if run, err = gatePrepare(d, o, false); err != nil {
 		return GateReport{}, err
 	}
 	round, ok, err := src.Round(run.roundInput())

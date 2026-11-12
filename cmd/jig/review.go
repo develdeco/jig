@@ -300,6 +300,11 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		if p, err = verifydeliver.GatePrepare(deps, verifydeliver.GateOpts{Ticket: ticket}); err != nil {
 			return renderErr(stdout, err)
 		}
+		if len(p.Queued) > 0 {
+			// No round opened: a kept finding was queued, and there is nothing
+			// to review until its slice is built.
+			return printQueuedKeeps(stdout, ticket, p.Queued)
+		}
 		if p.Carried != nil {
 			return renderErr(stdout, &axi.Error{
 				Msg:  fmt.Sprintf("round %d of %s needs no reviewer: the head only merges the target into the head round %d reviewed, so the gate recorded it as carried over", p.Round, ticket, p.Carried.CarriedFrom),

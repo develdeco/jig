@@ -147,6 +147,9 @@ type Prepared struct {
 	// that carries that verdict over, and this is its report. The
 	// other fields hold only the ticket, the round and the branch.
 	Carried *GateReport
+	// Queued names the fix slices a gate queued for pending keeps instead of
+	// opening a round: set alone, with no round open.
+	Queued []string
 	// Request is the review.json at RequestPath.
 	Request ReviewRequest
 	// RequestPath is the reviewer's copy of the request, under the jig home:
@@ -324,8 +327,13 @@ func (p Prepared) roundInput(d Deps) RoundInput {
 func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
-	if run, err = gatePrepare(d, o); err != nil {
+	if run, err = gatePrepare(d, o, true); err != nil {
 		return Prepared{}, err
+	}
+	if len(run.queued) > 0 {
+		// A pending keep was queued as a fix slice: no suite ran and no round
+		// opened, and the next gate opens one once the slice is built.
+		return Prepared{Ticket: run.ticket, Branch: run.branch, Queued: run.queued}, nil
 	}
 	in := run.roundInput()
 	in.Recorded = true
