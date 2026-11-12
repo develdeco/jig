@@ -55,8 +55,7 @@ func heldElsewhere(t *testing.T, path string) bool {
 // TestLockCheckpointReentrantAndExclusive: within a process the lock nests
 // (a second take does not wait, and the file lock lasts until the last
 // release, however many times a release is called); across processes it
-// excludes, a waiter getting it as soon as the holder lets go, and a waiter
-// that times out proceeds and warns.
+// excludes, a waiter getting it as soon as the holder lets go.
 func TestLockCheckpointReentrantAndExclusive(t *testing.T) {
 	st, work := newTestStandaloneStore(t)
 	lockFile := checkpointLockFile(work)
@@ -127,33 +126,6 @@ func TestLockCheckpointReentrantAndExclusive(t *testing.T) {
 		}()
 		if !waitMarker(signals, "held", time.Now().Add(30*time.Second)) {
 			t.Fatal("the child never took the lock")
-		}
-
-		// A waiter with a short patience proceeds and says so.
-		var mu sync.Mutex
-		var warnings []string
-		st.Warn = func(format string, args ...any) {
-			mu.Lock()
-			defer mu.Unlock()
-			warnings = append(warnings, format)
-		}
-		begin := time.Now()
-		release, err := st.lockCheckpoint(200 * time.Millisecond)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if waited := time.Since(begin); waited < 150*time.Millisecond {
-			t.Errorf("lockCheckpoint returned after %s while another process held the lock", waited)
-		}
-		mu.Lock()
-		if len(warnings) != 1 || !strings.Contains(warnings[0], "without the checkpoint lock") {
-			t.Errorf("warnings = %q, want one saying it proceeds without the checkpoint lock", warnings)
-		}
-		mu.Unlock()
-		release()
-		st.Warn = nil
-		if !heldElsewhere(t, lockFile) {
-			t.Fatal("a timed-out waiter's release let go of the other process's lock")
 		}
 
 		// A patient waiter gets it once the holder lets go, and not before.

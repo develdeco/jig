@@ -4,19 +4,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
 )
 
-// checkpointLockTimeout is how long LockCheckpoint waits for another process
-// to finish its checkpoint before it proceeds without the lock: two minutes
-// covers a push over a slow network and still ends if the holder died with
-// the lock's file handle somehow kept open.
-const checkpointLockTimeout = 2 * time.Minute
+// The checkpoint lock never lets a command run without it. A waiter says once,
+// after checkpointLockNotice, who holds the lock and keeps waiting; at
+// checkpointLockBound in all it fails, naming the holder, and holds nothing.
+// Fifteen minutes covers a push over a slow network behind a busy queue and
+// still ends a wedged holder in a clear failure. They are variables so a test
+// can shorten them.
+var (
+	checkpointLockNotice = 2 * time.Minute
+	checkpointLockBound  = 15 * time.Minute
+)
 
-var checkpointLockNotice, checkpointLockBound = 2*time.Minute, 15*time.Minute
+// checkpointHolderName is the sidecar file, beside the lock, in which the
+// process holding the lock says who it is. It is a separate file because a
+// Windows byte-range lock can block reads of the locked file itself.
+const checkpointHolderName = "jig-checkpoint.holder"
 
 // checkpointLockName is the file in the store's git common directory the
 // checkpoint lock is held on (Lock adds its ".lock" sidecar suffix). It is in
@@ -32,11 +41,17 @@ const checkpointLockName = "jig-checkpoint"
 //
 // The lock is a file lock on <git common dir>/jig-checkpoint.lock, so every
 // process that has the clone open, and every linked worktree of it, contends
-// for the same one. It waits up to two minutes; on timeout it proceeds
-// without the lock and says so through Warn (or, when none is set, on
-// standard error), because a checkpoint must not hang on a holder that is
-// stuck. A store that is not a git clone has no common directory and so no
-// file to lock: its lock is the in-process one alone.
+// for the same one. It waits: after two minutes it says once, through Warn (or,
+// when none is set, on standard error), who holds the lock and keeps waiting,
+// and at fifteen minutes in all it returns an error naming the holder and the
+// lock file, holding nothing. It never returns without the lock and a nil
+// error, since work that runs unlocked can corrupt the clone. The holder is
+// read from <git common dir>/jig-checkpoint.holder, which the process that
+// takes the file lock writes (pid, command name, start time) and removes when
+// its last hold is released; a missing or unreadable file reads as "holder
+// unknown". The lock itself is the OS file lock, so a dead holder never needs
+// a person to release it. A store that is not a git clone has no common
+// directory and so no file to lock: its lock is the in-process one alone.
 //
 // The lock is re-entrant per Root within a process: a caller that already
 // holds it (a Push that nests a Claim, a journal append inside a command that
@@ -49,12 +64,12 @@ const checkpointLockName = "jig-checkpoint"
 // reaches the store through Claim, which takes the lock itself. The release
 // func is idempotent, so a caller that releases early can still defer it.
 func (s *Store) LockCheckpoint() (release func(), err error) {
-	return s.lockCheckpoint(checkpointLockTimeout)
+	return s.lockCheckpoint()
 }
 
-// lockCheckpoint is LockCheckpoint with the wait given, so a test can see
-// the timeout without waiting two minutes.
-func (s *Store) lockCheckpoint(timeout time.Duration) (func(), error) {
+// lockCheckpoint is LockCheckpoint; it reads the notice and the bound from the
+// package variables, so a test can see both without waiting minutes.
+func (s *Store) lockCheckpoint() (func(), error) {
 	key, lockPath := s.checkpointLockTarget()
 	h := checkpointHoldFor(key)
 
@@ -63,21 +78,66 @@ func (s *Store) lockCheckpoint(timeout time.Duration) (func(), error) {
 	if h.depth == 0 {
 		h.unlock = nil
 		if lockPath != "" {
-			unlock, held, err := TryLock(lockPath, timeout)
+			unlock, err := s.takeCheckpointFileLock(lockPath)
 			if err != nil {
-				return func() {}, fmt.Errorf("store: lock %s: %w", lockPath, err)
+				return func() {}, err
 			}
-			if held {
-				h.unlock = unlock
-			} else {
-				s.warn("proceeding without the checkpoint lock on %s (timeout after %s)", lockPath+".lock", timeout)
-			}
+			h.unlock = unlock
 		}
 	}
 	h.depth++
 
 	var once sync.Once
 	return func() { once.Do(h.release) }, nil
+}
+
+// takeCheckpointFileLock waits for the file lock at lockPath: to the notice,
+// then, after saying who holds it, to the bound. On success it records the
+// holder and returns what removes that record and lets the lock go.
+func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
+	holderPath := filepath.Join(filepath.Dir(lockPath), checkpointHolderName)
+	unlock, held, err := TryLock(lockPath, checkpointLockNotice)
+	if err != nil {
+		return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
+	}
+	if !held {
+		s.warn("waiting for the checkpoint lock on %s, held by %s", lockPath+".lock", readCheckpointHolder(holderPath))
+		rest := checkpointLockBound - checkpointLockNotice
+		if rest < 0 {
+			rest = 0
+		}
+		unlock, held, err = TryLock(lockPath, rest)
+		if err != nil {
+			return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
+		}
+		if !held {
+			return nil, fmt.Errorf("store: the checkpoint lock on %s is still held by %s after %s", lockPath+".lock", readCheckpointHolder(holderPath), checkpointLockBound)
+		}
+	}
+	name := "jig"
+	if len(os.Args) > 0 {
+		name = filepath.Base(os.Args[0])
+	}
+	record := fmt.Sprintf("%d %s %s\n", os.Getpid(), name, time.Now().Format(time.RFC3339))
+	_ = os.WriteFile(holderPath, []byte(record), 0o644)
+	return func() {
+		_ = os.Remove(holderPath)
+		unlock()
+	}, nil
+}
+
+// readCheckpointHolder describes the holder the file at path names, best
+// effort: "holder unknown" when it is missing or unreadable.
+func readCheckpointHolder(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "holder unknown"
+	}
+	f := strings.Fields(string(data))
+	if len(f) != 3 {
+		return "holder unknown"
+	}
+	return fmt.Sprintf("pid %s (%s) since %s", f[0], f[1], f[2])
 }
 
 // warn reports a problem that does not stop the command: through Warn when
