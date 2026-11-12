@@ -717,13 +717,15 @@ func (d *digest) readAsks() {
 // decisionOf is a with its pending decision laid over it.
 func (d *digest) decisionOf(a Ask) Ask {
 	if a.Decision == "" {
+		queued := false
 		for i := len(d.lines) - 1; i > d.lastClosed; i-- {
 			l := d.lines[i]
 			if l.Event == journal.EventKeepQueued && l.Ref == a.ID {
-				break // a gate queued the keep's slice: the decision is spent
+				queued = true // a gate queued the keep's slice: still decided, no longer pending
+				continue
 			}
 			if l.Event == journal.EventTriage && l.Ref == a.ID && (l.Outcome == "keep" || l.Outcome == "dismiss") {
-				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, true
+				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, !queued
 				break
 			}
 		}
@@ -1147,7 +1149,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 	if len(d.asks) > 0 {
 		sub := Sub{Key: "asks", Label: "asks", State: SubNeedsYou, Detail: fmt.Sprintf("%d to decide", len(undecided))}
 		if len(undecided) == 0 {
-			sub.State, sub.Detail = SubWaiting, fmt.Sprintf("%d decided, applied at the next round", len(d.asks))
+			sub.State, sub.Detail = SubWaiting, fmt.Sprintf("%d decided, queued or applied at the next gate", len(d.asks))
 		}
 		p.Subs = append(p.Subs, sub)
 	}
@@ -1156,7 +1158,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 			Detail: fmt.Sprintf("%d of %d green", fixesTotal-fixesOpen, fixesTotal)})
 	}
 	if len(d.notes) > 0 {
-		p.Subs = append(p.Subs, Sub{Key: "notes", Label: "notes", State: SubWaiting, Detail: fmt.Sprintf("%d decided, applied at the next round", len(d.notes))})
+		p.Subs = append(p.Subs, Sub{Key: "notes", Label: "notes", State: SubWaiting, Detail: fmt.Sprintf("%d decided, queued or applied at the next gate", len(d.notes))})
 	}
 	clean := hasRound && last.Clean && !d.builtSince && open == nil && len(d.notes) == 0
 	if open == nil && !clean {

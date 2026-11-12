@@ -82,10 +82,11 @@ func ReadTriageDecisions(st *store.Store, ticket string) (map[string]TriageDecis
 // Human reports whether a person at a terminal decided, as opposed to an agent.
 func (d TriageDecision) Human() bool { return d.Provenance == "person" }
 
-// Decided reports whether d is a pending keep or dismiss: a decision the next
-// round applies, for an ask shown while it waits.
+// Decided reports whether d is a pending keep or dismiss, or a keep a gate has
+// queued: a decision not yet taken by a round that closed, for an ask shown
+// while it waits.
 func (d TriageDecision) Decided() bool {
-	return d.Pending && (d.Outcome == TriageKeep || d.Outcome == TriageDismiss)
+	return (d.Pending || d.Queued) && (d.Outcome == TriageKeep || d.Outcome == TriageDismiss)
 }
 
 // KeepLacksTarget reports whether d keeps f without the build target a fix

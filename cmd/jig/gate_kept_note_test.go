@@ -245,3 +245,137 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 		t.Errorf("round 2 findings.yaml r1-f2 = (%q, %v), want a human's dismissal recorded", triage, found)
 	}
 }
+
+// TestReviewContextAfterAKeepNamesTheQueuedSlice: the route a session takes
+// after a keep (jig next says review, the review skill reads the round with
+// `jig review context`) must not queue the slice and then fail: it names the
+// slice and says no round is open.
+func TestReviewContextAfterAKeepNamesTheQueuedSlice(t *testing.T) {
+	t.Parallel()
+	fx, e := keptNoteAfterRound1(t)
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	out, code := runMain(t, e, "", "review", "context", fx.Ticket, "--model", "m", "--store", fx.StoreDir)
+	if code != 0 || strings.Contains(out, "REVIEW_NOT_OPEN") || !strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("jig review context after a keep: exit = %d, want 0 naming the queued slice fix-2-r1-f1\n%s", code, out)
+	}
+}
+
+// TestAKeptAskQueuedByTheGateIsStillDecided: once the gate queued a kept ask's
+// slice, the ask is decided work, not a decision still owed: `jig next` does
+// not stop at undecided asks and `jig status` does not ask for the decision
+// again.
+func TestAKeptAskQueuedByTheGateIsStillDecided(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
+	e := testEnv(fx.Home).atTerminal()
+	buildFixtureTicket(t, fx)
+	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
+		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("jig gate: exit = %d, want the slice queued\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "alpha/alpha.go")
+	next, _ := runMain(t, e, "", "next", fx.Ticket, "--store", fx.StoreDir)
+	if strings.Contains(next, "PHASE_ASKS_UNDECIDED") {
+		t.Fatalf("jig next stops at an undecided ask after the keep was queued:\n%s", next)
+	}
+	status, _ := runMain(t, e, "", "status", fx.Ticket, "--store", fx.StoreDir)
+	if strings.Contains(status, "undecided ask") {
+		t.Fatalf("jig status asks for a decision again after the keep was queued:\n%s", status)
+	}
+}
+
+// TestALaterGateLeavesASpentKeepAloneWhileItQueuesAnother: a keep a gate
+// queued is spent. Keeping a second note later queues only the second note's
+// slice; the first keep, still a note until a round closes, is not queued again.
+func TestALaterGateLeavesASpentKeepAloneWhileItQueuesAnother(t *testing.T) {
+	t.Parallel()
+	fx, e := keptNoteAfterRound1(t)
+	ticket := fx.Ticket
+	keep := func(id string) {
+		t.Helper()
+		if out, code := runMain(t, e, "", "triage", ticket, id, "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
+			t.Fatalf("jig triage keep %s: exit = %d\n%s", id, code, out)
+		}
+	}
+	keep("r1-f1")
+	if out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("first gate: exit = %d, want fix-2-r1-f1 queued\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "beta/beta.go")
+	keep("r1-f2")
+	out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "fix-2-r1-f2") {
+		t.Fatalf("second gate: exit = %d, want fix-2-r1-f2 queued\n%s", code, out)
+	}
+	if strings.Contains(out, "fix-2-r1-f1") {
+		t.Fatalf("second gate queued the spent keep again:\n%s", out)
+	}
+}
+
+// TestTheFixBudgetCountsTheRoundAKeepWasQueuedForAfterItCloses: the keep queued
+// before round 2 opened counts as that round's fix, and still does once round
+// 2 is recorded with no fix slice of its own.
+func TestTheFixBudgetCountsTheRoundAKeepWasQueuedForAfterItCloses(t *testing.T) {
+	t.Parallel()
+	fx, e := keptNoteAfterRound1(t)
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig gate: exit = %d\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "beta/beta.go")
+	round2 := filepath.Join(t.TempDir(), "round-2.json")
+	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
+	if out, code := roundThroughMain(t, e, fx, round2); code != 0 {
+		t.Fatalf("round 2 exit = %d\n%s", code, out)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used, _ := verifydeliver.UsedFixBudget(st, fx.Ticket, 3); used != 1 {
+		t.Errorf("fix budget used after round 2 = %d, want 1", used)
+	}
+}
+
+// TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice: the built slice
+// changed a file other than the note's, so the note's own file is still read
+// (must_review) and the keep reads as built, not as a note to queue again.
+func TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice(t *testing.T) {
+	t.Parallel()
+	fx, e := keptNoteAfterRound1(t)
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig gate: exit = %d\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-r1-f1", "alpha/alpha.go")
+	round2 := filepath.Join(t.TempDir(), "round-2.json")
+	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{ReviewedPaths: []string{"alpha/alpha.go", "beta/beta.go"}, Summary: "round 2: nothing new"})
+	out, code := roundThroughMain(t, e, fx, round2)
+	if code != 0 || strings.Contains(out, "fix-2-r1-f1-2") || strings.Contains(out, "fix-3-r1-f1") {
+		t.Fatalf("round 2 exit = %d, want 0 and no second slice for r1-f1\n%s", code, out)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, notes, _, err := verifydeliver.OutstandingFindings(st, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range notes {
+		if n.ID == "r1-f1" {
+			t.Errorf("r1-f1 is still a note after its slice was built and round 2 read its file")
+		}
+	}
+}

@@ -674,13 +674,8 @@ func toOpenFindingList(fs []Finding, decisions map[string]TriageDecision) []Open
 			ID: f.ID, Status: f.Status, File: f.File, Line: f.Line, Title: f.Title, Detail: f.Detail, Action: f.Action,
 			Risk: f.Risk, RiskRationale: f.RiskRationale, Oracle: f.Oracle, Recurrences: f.Recurrences,
 		}
-		// A keep a gate already queued is shown too: its slice is built, and the
-		// reviewer reads the finding as asked for.
-		if d, ok := decisions[f.ID]; ok && (f.Status == StatusAsked || f.Status == StatusNoted) && (d.Decided() || d.Queued) {
+		if d, ok := decisions[f.ID]; ok && (f.Status == StatusAsked || f.Status == StatusNoted) && d.Decided() {
 			row.Decision, row.DecidedBy, row.DecisionReason = d.Label(f), d.Provenance, d.Reason
-			if d.Queued {
-				row.Decision = d.Outcome
-			}
 		}
 		out = append(out, row)
 	}
