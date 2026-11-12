@@ -191,7 +191,8 @@ func TestSaveMachineWaitsOutAHeldLock(t *testing.T) {
 // TestLoadMachineWhileTheMappingIsReplaced: a reader looping on LoadMachine
 // never makes a replacement of the mapping fail, because it reads through the
 // store's read, which opens with delete sharing. Read with os.ReadFile on
-// Windows, a rename (no retry here) is refused whenever it lands mid-read.
+// Windows, a rename is refused whenever it lands mid-read.
+// The replacer loop retries a transient holder (see fileshare.Replacing).
 func TestLoadMachineWhileTheMappingIsReplaced(t *testing.T) {
 	jigHome := t.TempDir()
 	want := map[string]MachineProject{"p": {Store: "/s", Clones: map[string]string{"k": "/c"}}}
@@ -219,13 +220,36 @@ func TestLoadMachineWhileTheMappingIsReplaced(t *testing.T) {
 	}()
 	defer func() { close(stop); <-done }()
 
+	// maxRetriedReplacements is how many of the replacements may meet a
+	// transient holder (a scanner, a loaded machine) before it is the reader.
+	const maxRetriedReplacements = 15
+	retried := 0
 	for i := 0; i < 300; i++ {
 		tmp := path + ".tmp"
 		if err := os.WriteFile(tmp, body, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := fileshare.Rename(tmp, path); err != nil {
-			t.Fatalf("replacement %d while LoadMachine loops: %v", i, err)
+		// A holder under load can keep the file for a moment: retry that
+		// transient failure within the replace window, fail on anything else.
+		// A reader that did not share deletion would collide on nearly every
+		// iteration, so the retries are counted and bounded.
+		deadline := time.Now().Add(fileshare.ReplaceWindow)
+		for tried := false; ; {
+			err := fileshare.Rename(tmp, path)
+			if err == nil {
+				break
+			}
+			if !fileshare.Replacing(err) || time.Now().After(deadline) {
+				t.Fatalf("replacement %d while LoadMachine loops: %v", i, err)
+			}
+			if !tried {
+				tried = true
+				retried++
+				if retried > maxRetriedReplacements {
+					t.Fatalf("%d of %d replacements needed a retry while LoadMachine loops: the reader does not share deletion", retried, i+1)
+				}
+			}
+			time.Sleep(fileshare.ReplaceBackoff)
 		}
 	}
 	if got, err := LoadMachine(jigHome); err != nil || !reflect.DeepEqual(got, want) {
