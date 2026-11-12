@@ -206,7 +206,7 @@ flowchart TB
     gate["Round opens<br/>jig gate or review context"] --> round["Fresh reviewer<br/>findings, review done"]
     round --> route{"Route findings"}
     route -->|ask| triage{{"Person triages<br/>keep or dismiss"}}
-    triage -.->|"next round applies it"| gate
+    triage -.->|"next gate queues a keep"| gate
   end
   subgraph publish ["Publish"]
     pbody["jig publish --body<br/>renders the PR body"] --> approve{{"Person approves<br/>the reviewed head"}}

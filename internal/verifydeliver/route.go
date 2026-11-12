@@ -334,6 +334,39 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	return reported, slices, nil
 }
 
+// queueKeeps turns the pending keeps among cum's asked and noted findings
+// into fix slices of round, before any round opens: the same slice a round's
+// close would build for the keep (decideFinding, buildFixSlices), so a person's
+// keep is built with the fixes already queued instead of costing a round.
+// kept names the findings that got one, in id order. A keep that lacks part of
+// its build target is left as it is, offered again, and a dismiss is not
+// touched: the round that closes decides it.
+func queueKeeps(round int, st *store.Store, ticket string, existingSlices []store.Slice, cum map[string]Finding, decisions map[string]TriageDecision, files roundFiles, fixSliceFindings int) (slices []store.Slice, kept []string, err error) {
+	var keeps []Finding
+	for _, f := range cum {
+		if f.Status != StatusAsked && f.Status != StatusNoted {
+			continue
+		}
+		if d, ok := decisions[f.ID]; !ok || !d.Pending || d.Outcome != TriageKeep {
+			continue
+		}
+		if len(files.oracles(f.File)) == 0 {
+			return nil, nil, noOracleError(files, f.File)
+		}
+		d := decisions[f.ID]
+		wf, isKept, applied := decideFinding(f, AskOutcome{Keep: true, Decision: d.Reason, Workspace: d.Workspace, Oracle: d.Oracle, Human: d.Human()}, files)
+		if applied && isKept {
+			keeps = append(keeps, wf)
+		}
+	}
+	sort.Slice(keeps, func(i, j int) bool { return keeps[i].ID < keeps[j].ID })
+	slices, err = buildFixSlices(round, st, ticket, existingSlices, nil, keeps, files, fixSliceFindings)
+	for _, f := range keeps {
+		kept = append(kept, f.ID)
+	}
+	return slices, kept, err
+}
+
 // validOracle reports whether oracle is one of the manifest's own oracle
 // names, so a manifest change between rounds (an oracle renamed or removed)
 // is caught the same way an unset oracle is.

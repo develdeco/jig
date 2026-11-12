@@ -234,11 +234,16 @@ func (d *doctorCtx) skills() []setup.Finding {
 		for _, s := range st {
 			switch s.State {
 			case setup.StateStale:
-				v := s.Version
-				if v == "" {
-					v = "no stamp"
+				var why []string
+				if s.BodyStale {
+					v := s.Version
+					if v == "" {
+						v = "no stamp"
+					}
+					why = append(why, v)
 				}
-				off = append(off, fmt.Sprintf("%s (%s)", s.Name, v))
+				why = append(why, s.Refs...)
+				off = append(off, fmt.Sprintf("%s (%s)", s.Name, strings.Join(why, ", ")))
 			case setup.StateMissing:
 				absent = append(absent, s.Name)
 			}

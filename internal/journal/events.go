@@ -61,6 +61,7 @@ const (
 	EventSpend           = "spend"
 	EventApproval        = "approval"
 	EventTriage          = "triage"
+	EventKeepQueued      = "keep-queued"
 	EventPrBody          = "pr-body"
 	EventPublishApproved = "publish-approved"
 )

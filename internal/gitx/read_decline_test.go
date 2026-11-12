@@ -452,3 +452,37 @@ func TestNegativeObjectAnswersAreConfirmedByGit(t *testing.T) {
 		t.Errorf("Missing = %v, %v", missing, err)
 	}
 }
+
+// TestInProcessAnswersAreTallied checks the counter the session-start
+// ceilings read: each in-process read of a plain repository raises it, and a
+// repository gitx declines (here, one with an extension) raises it by none.
+func TestInProcessAnswersAreTallied(t *testing.T) {
+	work, _ := fakeRepo(t)
+	raises := func(t *testing.T, dir string, call func(dir string)) int64 {
+		t.Helper()
+		before := InProcessReads()
+		call(dir)
+		return InProcessReads() - before
+	}
+	calls := map[string]func(dir string){
+		"RevParse":    func(d string) { _, _ = RevParse(d, "HEAD") },
+		"BlobAt":      func(d string) { _, _, _ = BlobAt(d, "HEAD", "x") },
+		"HeadBranch":  func(d string) { _, _ = HeadBranch(d) },
+		"RefTip":      func(d string) { _, _ = RefTip(d, "refs/heads/main") },
+		"Subject":     func(d string) { _, _ = Subject(d, "HEAD") },
+		"HasUnmerged": func(d string) { _, _ = HasUnmerged(d) },
+		"GitPaths":    func(d string) { _, _ = GitPaths(d, "config") },
+	}
+	for name, call := range calls {
+		if got := raises(t, work, call); got < 1 {
+			t.Errorf("%s on a plain repository raised the tally by %d, want at least 1", name, got)
+		}
+	}
+	declined, gitDir := fakeRepo(t)
+	setConfig("[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n")(t, declined, gitDir)
+	for name, call := range calls {
+		if got := raises(t, declined, func(d string) { defer func() { _ = recover() }(); call(d) }); got != 0 {
+			t.Errorf("%s on a declined repository raised the tally by %d, want 0", name, got)
+		}
+	}
+}

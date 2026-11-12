@@ -11,11 +11,11 @@ import (
 )
 
 // keptAskRound2 runs the life of a kept ask: round 1 asks about go.mod, a person
-// keeps the ask, and then moveHead changes the clone (or not) before round 2,
-// whose reviewer reports nothing (or, with again, reports r1-f1 again through
-// --still-present's prior). It returns round 2's exit code and output, and the
-// fixture.
-func keptAskRound2(t *testing.T, moveHead, again bool) (string, int, *fixture.Fixture) {
+// keeps the ask, the next gate queues its slice and the work is built, and then
+// round 2's reviewer reports nothing (or, with again, reports r1-f1 again
+// through --still-present's prior). It returns round 2's exit code and output,
+// and the fixture.
+func keptAskRound2(t *testing.T, again bool) (string, int, *fixture.Fixture) {
 	t.Helper()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
 	e := testEnv(fx.Home).atTerminal()
@@ -26,17 +26,21 @@ func keptAskRound2(t *testing.T, moveHead, again bool) (string, int, *fixture.Fi
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if moveHead {
-		// The work the ask wanted, committed on the ticket's branch.
-		if err := os.WriteFile(filepath.Join(fx.RepoDir, "go.mod"), []byte("module example.com/fixture\n\ngo 1.22\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitMust(t, fx.RepoDir, "add", "-A")
-		gitMust(t, fx.RepoDir, "commit", "-m", "bump the toolchain")
+	// The next gate queues the keep's slice, and the work it asks for is
+	// committed under it on the ticket's branch.
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept ask's slice queued\n%s", code, out)
 	}
+	buildQueuedSlice(t, fx, "fix-2-alpha-test", "alpha/alpha.go")
+	// The work the ask wanted, committed on the ticket's branch.
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "go.mod"), []byte("module example.com/fixture\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitMust(t, fx.RepoDir, "add", "-A")
+	gitMust(t, fx.RepoDir, "commit", "-m", "bump the toolchain")
 	round2 := verifydeliver.ReviewResult{
 		Findings:      []verifydeliver.ResultFinding{},
-		ReviewedPaths: []string{"go.mod"},
+		ReviewedPaths: []string{"go.mod", "alpha/alpha.go"},
 		Summary:       "round 2",
 	}
 	if again {
@@ -53,7 +57,7 @@ func keptAskRound2(t *testing.T, moveHead, again bool) (string, int, *fixture.Fi
 // report the kept ask again, so the keep is spent as a fix and queues no slice.
 func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.T) {
 	t.Parallel()
-	out, code, fx := keptAskRound2(t, true, false)
+	out, code, fx := keptAskRound2(t, false)
 	if code != 0 {
 		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
 	}
@@ -89,27 +93,43 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	}
 }
 
-// At the same head nothing can have fixed the ask, so the keep applies.
-func TestKeptAskAtTheSameHeadStillQueuesItsFixSlice(t *testing.T) {
+// A keep recorded while a round is open is applied when that round closes, as
+// it always was: the gate queued nothing, since the round was already open.
+func TestKeptAskRecordedInAnOpenRoundIsQueuedByItsClose(t *testing.T) {
 	t.Parallel()
-	out, code, _ := keptAskRound2(t, false, false)
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
+	e := testEnv(fx.Home).atTerminal()
+	buildFixtureTicket(t, fx)
+	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
+		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig gate: exit = %d, want 0 (the round opens)\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	path := filepath.Join(t.TempDir(), "round-2.json")
+	writeReviewResultAt(t, path, verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{}, ReviewedPaths: []string{"go.mod"}, Summary: "round 2"})
+	out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", path, "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
 		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
 	}
 }
 
-// A round that reports the ask again keeps it alive: the keep applies.
+// A round that reports the ask again after its slice was built keeps it alive:
+// the old keep applies to the recurrence, as a new slice beside the first.
 func TestKeptAskTheClosingRoundReportsAgainStillQueuesItsFixSlice(t *testing.T) {
 	t.Parallel()
-	out, code, _ := keptAskRound2(t, true, true)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
+	out, code, _ := keptAskRound2(t, true)
+	if code != 0 || !strings.Contains(out, "fix-2-alpha-test-2") {
+		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test-2\n%s", code, out)
 	}
 }
 
 // keptNoteRound2 runs the life of a kept note: round 1 notes
-// beta/version.go, a person keeps the note, an unrelated commit changes go.mod,
-// and round 2's reviewer reports nothing and read reviewed. It returns round
+// beta/version.go, a person keeps the note, the next gate queues its slice and
+// the work is built, and round 2's reviewer reports nothing and read reviewed. It returns round
 // 2's exit code and output, and the fixture.
 func keptNoteRound2(t *testing.T, reviewed []string) (string, int, *fixture.Fixture) {
 	t.Helper()
@@ -132,11 +152,10 @@ func keptNoteRound2(t *testing.T, reviewed []string) (string, int, *fixture.Fixt
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Look at it.", "--workspace", "beta", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if err := os.WriteFile(filepath.Join(fx.RepoDir, "go.mod"), []byte("module example.com/fixture\n\ngo 1.22\n"), 0o644); err != nil {
-		t.Fatal(err)
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-beta-test") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", "bump the toolchain")
+	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/version.go")
 	path2 := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, path2, verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{}, ReviewedPaths: reviewed, Summary: "round 2"})
 	out, code := roundThroughMain(t, e, fx, path2)
@@ -162,7 +181,7 @@ func TestKeptNoteTheClosingRoundDidNotReadIsNotSpentAsFixed(t *testing.T) {
 func TestKeptNoteTheClosingRoundReadAndNoLongerReportsReadsFixed(t *testing.T) {
 	t.Parallel()
 	out, code, _ := keptNoteRound2(t, []string{"go.mod", "beta/version.go"})
-	if code != 0 || strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and no fix-2-alpha-test\n%s", code, out)
+	if code != 0 || strings.Contains(out, "fix-2-beta-test") {
+		t.Fatalf("round 2: exit = %d, want 0 and no fix-2-beta-test\n%s", code, out)
 	}
 }

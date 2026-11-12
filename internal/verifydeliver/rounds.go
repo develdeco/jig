@@ -40,6 +40,10 @@ type RoundRecord struct {
 	// the store holds, as report.yaml records them: none for a round that has
 	// none and for one an older jig recorded.
 	StoreRefs []StoreRef
+	// CarriedMerge is repo -> the merge of the target a delta round carried
+	// rather than read, as report.yaml records it: nil for a round with none and
+	// for one an older jig recorded.
+	CarriedMerge map[string]CarriedMerge
 	// Verdict is RoundClean, RoundFindings or VerdictNotIndependent.
 	Verdict string
 	// Reviewer is who reported the round: the report's own record of them, else
@@ -153,6 +157,7 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 		rec.Model, rec.Effort = rep.Model, rep.Effort
 		rec.CarriedFrom = rep.CarriedFrom
 		rec.StoreRefs = rep.StoreRefs
+		rec.CarriedMerge = rep.CarriedMerge
 		if rep.Reviewer != nil {
 			rec.Reviewer = *rep.Reviewer
 		}

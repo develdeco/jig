@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-git/go-git/v5/plumbing"
 )
@@ -99,12 +100,23 @@ type reader struct {
 	dbDone bool
 }
 
+// inProcessReads counts the questions taken in process instead of by the
+// git program: newReader (every in-process read but the work-tree probe) and
+// workTreeProbeInProcess add one once the repository is discovered, so a
+// repository gitx declines adds none.
+var inProcessReads atomic.Int64
+
+// InProcessReads is the number of in-process read answers so far. Its one
+// consumer is the test that bounds what a session-start call costs.
+func InProcessReads() int64 { return inProcessReads.Load() }
+
 // newReader discovers the repository dir is in, or returns nil.
 func newReader(dir string, env envLookup) *reader {
 	loc, ok := discover(dir, env)
 	if !ok {
 		return nil
 	}
+	inProcessReads.Add(1)
 	return &reader{loc: loc}
 }
 
@@ -628,6 +640,7 @@ func workTreeProbeInProcess(dir string, env envLookup) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	inProcessReads.Add(1)
 	if loc.prefix == "" {
 		return "true", true
 	}

@@ -41,6 +41,10 @@ type openRepoFile struct {
 	Target    string `yaml:"target"`
 	TargetSHA string `yaml:"target_sha"`
 	Lease     string `yaml:"lease"`
+	// Carried is the merge a delta round carried rather than read, and
+	// CarriedRef the ref it brought in; absent when there is none.
+	Carried    string `yaml:"carried,omitempty"`
+	CarriedRef string `yaml:"carried_ref,omitempty"`
 }
 
 // openRoundFile is work/gate.round-N.open.yaml: what jig settled when it
@@ -66,10 +70,13 @@ type openRoundFile struct {
 	// pristine worktree the reviewer reads. It, IntentExcerpt and Recordings
 	// are paths under the jig home, written relative to it: the record is in
 	// the store, which is shared and must not name this machine's directories.
-	Lease   string           `yaml:"lease,omitempty"`
-	Repos   []openRepoFile   `yaml:"repos,omitempty"`
-	Adopted bool             `yaml:"adopted,omitempty"`
-	Intent  reportIntentYAML `yaml:"intent"`
+	Lease string `yaml:"lease,omitempty"`
+	// Carried and CarriedRef are openRepoFile's, of the one repo.
+	Carried    string           `yaml:"carried,omitempty"`
+	CarriedRef string           `yaml:"carried_ref,omitempty"`
+	Repos      []openRepoFile   `yaml:"repos,omitempty"`
+	Adopted    bool             `yaml:"adopted,omitempty"`
+	Intent     reportIntentYAML `yaml:"intent"`
 	// IntentExcerpt is the excerpt of the author's own agent session the
 	// request points the reviewer at, when it does; IntentNote is why it does
 	// not when no intent is stated either.
@@ -96,6 +103,9 @@ type PreparedRepo struct {
 	Head, Base, Scope string
 	Target, TargetSHA string
 	Lease             string
+	// Carried and CarriedRef are the merge the round carried, and the ref it
+	// brought in, "" when there is none.
+	Carried, CarriedRef string
 }
 
 // Prepared is an open round: what GatePrepare settled, and the request a
@@ -117,6 +127,9 @@ type Prepared struct {
 	// against.
 	Head, Base, Scope string
 	Target, TargetSHA string
+	// CarriedMerge and CarriedRef are the merge the round carried and the ref it
+	// brought in, of the one repo of a project of one; "" when it carried none.
+	CarriedMerge, CarriedRef string
 	// Lease is the pristine worktree of Head the reviewer reads.
 	Lease string
 	// Repos are the repos of a round in a project of several.
@@ -134,6 +147,9 @@ type Prepared struct {
 	// that carries that verdict over, and this is its report. The
 	// other fields hold only the ticket, the round and the branch.
 	Carried *GateReport
+	// Queued names the fix slices a gate queued for pending keeps instead of
+	// opening a round: set alone, with no round open.
+	Queued []string
 	// Request is the review.json at RequestPath.
 	Request ReviewRequest
 	// RequestPath is the reviewer's copy of the request, under the jig home:
@@ -233,6 +249,7 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 			repos = append(repos, PreparedRepo{
 				Repo: r.Repo, Copy: r.Copy, Head: r.Head, Base: r.Base, Scope: r.Scope,
 				Target: r.Target, TargetSHA: r.TargetSHA, Lease: lease,
+				Carried: r.Carried, CarriedRef: r.CarriedRef,
 			})
 		}
 		for i := range req.Repos {
@@ -242,6 +259,7 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 	return Prepared{
 		Ticket: of.Ticket, Round: of.Round, Repo: of.Repo, Branch: of.Branch, Copy: of.Copy,
 		Head: of.Head, Base: of.Base, Scope: of.Scope, Target: of.Target, TargetSHA: of.TargetSHA,
+		CarriedMerge: of.Carried, CarriedRef: of.CarriedRef,
 		Lease: req.Worktree, Repos: repos, Adopted: of.Adopted,
 		Intent: req.Intent, IntentSHA256: of.Intent.SHA256, IntentNote: of.IntentNote,
 		Yes: of.Yes, Opened: opened, Reviewer: of.Reviewer, Request: req,
@@ -277,6 +295,7 @@ func (p Prepared) Covered() []PreparedRepo {
 	return []PreparedRepo{{
 		Repo: p.Repo, Copy: p.Copy, Head: p.Head, Base: p.Base, Scope: p.Scope,
 		Target: p.Target, TargetSHA: p.TargetSHA, Lease: p.Lease,
+		Carried: p.CarriedMerge, CarriedRef: p.CarriedRef,
 	}}
 }
 
@@ -308,8 +327,13 @@ func (p Prepared) roundInput(d Deps) RoundInput {
 func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
-	if run, err = gatePrepare(d, o); err != nil {
+	if run, err = gatePrepare(d, o, true); err != nil {
 		return Prepared{}, err
+	}
+	if len(run.queued) > 0 {
+		// A pending keep was queued as a fix slice: no suite ran and no round
+		// opened, and the next gate opens one once the slice is built.
+		return Prepared{Ticket: run.ticket, Branch: run.branch, Queued: run.queued}, nil
 	}
 	in := run.roundInput()
 	in.Recorded = true
@@ -349,6 +373,7 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		repo := openRepoFile{
 			Repo: gr.name, Copy: string(gr.copy), Head: rp.Head, Base: rp.Base, Scope: rp.Scope,
 			Target: gr.target, TargetSHA: tip, Lease: homeRel(d.Home, absPath(gr.lease.Dir)),
+			Carried: rp.Carried, CarriedRef: rp.CarriedRef,
 		}
 		if run.qualified {
 			of.Repos = append(of.Repos, repo)
@@ -356,6 +381,7 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		}
 		of.Repo, of.Copy, of.Head, of.Base, of.Scope = repo.Repo, repo.Copy, repo.Head, repo.Base, repo.Scope
 		of.Target, of.TargetSHA, of.Lease = repo.Target, repo.TargetSHA, repo.Lease
+		of.Carried, of.CarriedRef = repo.Carried, repo.CarriedRef
 	}
 	if hadPrev && maps.Equal(prev.heads(), of.heads()) {
 		// The round is the same and so is its reviewer, which the journal
@@ -874,6 +900,7 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
 		Effort: prov.Effort, Hunks: p.Request.Hunks, StoreRefs: p.Request.StoreRefs,
+		Carried: carriedOfCovered(covered),
 	}
 	if qualified {
 		for _, r := range covered {
@@ -980,4 +1007,19 @@ func triageTarget(command string) (workspace, oracle string) {
 		}
 	}
 	return workspace, oracle
+}
+
+// carriedOfCovered is the carried merge of each covered repo that had one.
+func carriedOfCovered(covered []PreparedRepo) map[string]CarriedMerge {
+	var out map[string]CarriedMerge
+	for _, r := range covered {
+		if r.Carried == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]CarriedMerge{}
+		}
+		out[r.Repo] = CarriedMerge{SHA: r.Carried, Ref: r.CarriedRef}
+	}
+	return out
 }

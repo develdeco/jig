@@ -27,9 +27,15 @@ type TriageDecision struct {
 	// ask that lacked part of one ("" for each they did not choose).
 	Workspace, Oracle string
 	// Pending is whether the line comes after the last gate-round or
-	// gate-clean line: the next round that closes applies it. An older line
-	// is spent, a decision some earlier round already took.
+	// gate-clean line and no gate has queued it: the next gate applies it (a
+	// keep is queued at once, a dismiss when the next round closes). An older
+	// line is spent, a decision some earlier round already took.
 	Pending bool
+	// Queued is whether a gate queued the keep's fix slice since the line and
+	// before the round it was queued for closed: the slice is the decision
+	// applied, so nothing queues it again, and the round that closes next reads
+	// the finding fixed when its code moved.
+	Queued bool
 }
 
 // TriageDecisions folds a ticket's journal lines into the latest triage line
@@ -45,13 +51,23 @@ func TriageDecisions(lines []journal.Line) map[string]TriageDecision {
 	}
 	decisions := map[string]TriageDecision{}
 	for i, l := range lines {
-		if l.Event != journal.EventTriage || l.Ref == "" {
+		if l.Ref == "" {
 			continue
 		}
-		ws, oracle := triageTarget(l.Command)
-		decisions[l.Ref] = TriageDecision{
-			Ref: l.Ref, Outcome: l.Outcome, Provenance: l.Provenance, Reason: l.Summary,
-			Workspace: ws, Oracle: oracle, Pending: i > closed,
+		switch l.Event {
+		case journal.EventTriage:
+			ws, oracle := triageTarget(l.Command)
+			decisions[l.Ref] = TriageDecision{
+				Ref: l.Ref, Outcome: l.Outcome, Provenance: l.Provenance, Reason: l.Summary,
+				Workspace: ws, Oracle: oracle, Pending: i > closed,
+			}
+		case journal.EventKeepQueued:
+			// Bounded like Pending: a keep queued for a round that has since
+			// closed is spent, and no round or gate applies it again.
+			if d, ok := decisions[l.Ref]; ok {
+				d.Pending, d.Queued = false, i > closed
+				decisions[l.Ref] = d
+			}
 		}
 	}
 	return decisions
@@ -69,10 +85,11 @@ func ReadTriageDecisions(st *store.Store, ticket string) (map[string]TriageDecis
 // Human reports whether a person at a terminal decided, as opposed to an agent.
 func (d TriageDecision) Human() bool { return d.Provenance == "person" }
 
-// Decided reports whether d is a pending keep or dismiss: a decision the next
-// round applies, for an ask shown while it waits.
+// Decided reports whether d is a pending keep or dismiss, or a keep a gate has
+// queued: a decision not yet taken by a round that closed, for an ask shown
+// while it waits.
 func (d TriageDecision) Decided() bool {
-	return d.Pending && (d.Outcome == TriageKeep || d.Outcome == TriageDismiss)
+	return (d.Pending || d.Queued) && (d.Outcome == TriageKeep || d.Outcome == TriageDismiss)
 }
 
 // KeepLacksTarget reports whether d keeps f without the build target a fix

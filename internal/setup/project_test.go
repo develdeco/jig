@@ -139,7 +139,7 @@ func TestRemoveSkillsTakesOnlyJigs(t *testing.T) {
 	writeOrFail(t, filepath.Join(root, "retro", "SKILL.md"), "retro body\n", 0o644)
 	// One named like jig's that the person wrote.
 	writeOrFail(t, filepath.Join(root, "other", "SKILL.md"), "mine too\n", 0o644)
-	embedded := map[string][]byte{"retro": []byte("retro body\n"), "other": []byte("not the same\n")}
+	embedded := map[string]Skill{"retro": {Body: []byte("retro body\n")}, "other": {Body: []byte("not the same\n")}}
 
 	removed, err := RemoveSkills(root, nil, embedded)
 	if err != nil {
@@ -182,7 +182,7 @@ func TestStubBodyListsTheSkillsAndSendsToTheBinary(t *testing.T) {
 		"`jig next <ticket>` names the phase it is at", "is a start-to-finish run", "hands over no decision", "go with your recommendations hands those decisions over", "either or both",
 		"Start the review's reviewer and wait for it as `jig gate` says", "a subagent hands back with the round open", "never schedule a wakeup or call another tool to stall",
 		"A request that names none", "is fresh work: its brief comes first, with the `intake` skill", "asks for two of them",
-		"\"then build it, review it and publish it\"", "or a chart verdict (a chart is not a ticket)", "What follows a chart verdict depends on the prompt's intent to launch", "a fully explicit one starts the chart run", "read `jig skill intake`, \"Then\"", "or at several tickets of one chart (\"Take SHOP-1 and SHOP-2 to PR\"), runs the chart, over those tickets only, with the `chart` skill", "decides brief or chart and mints a ticket for a brief"} {
+		"\"then build it, review it and publish it\"", "or a chart verdict (a chart is not a ticket)", "What follows a chart verdict depends on the prompt's intent to launch", "a fully explicit one starts the chart run", "read `jig skill intake chart-verdict`", "or at several tickets of one chart (\"Take SHOP-1 and SHOP-2 to PR\"), runs the chart, over those tickets only, with the `chart` skill", "decides brief or chart and mints a ticket for a brief"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stub lacks %q:\n%s", want, body)
 		}
@@ -322,5 +322,173 @@ func TestHintFiles(t *testing.T) {
 	}
 	if got := filepath.ToSlash(ProjectHintFile("w", true)); got != "w/AGENTS.md" {
 		t.Errorf("tracked = %s", got)
+	}
+}
+
+func refSkills() []Skill {
+	return []Skill{{Name: "build", Body: []byte("# build\n"), Refs: []Ref{{Name: "deep", Body: []byte("deep text\n")}}}}
+}
+
+func TestSkillReferencesAreInstalledStampedAndInspected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if written, _, err := InstallSkills(root, skills, "v1", true); err != nil || !slices.Equal(written, []string{"build"}) {
+		t.Fatalf("install = %v, %v", written, err)
+	}
+	ref := filepath.Join(root, "build", "references", "deep.md")
+	if got := readOrFail(t, ref); got != "deep text\n<!-- jig-skill v=v1 -->\n" {
+		t.Errorf("reference:\n%s", got)
+	}
+	if written, _, err := InstallSkills(root, skills, "v1", true); err != nil || len(written) != 0 {
+		t.Errorf("a second install wrote %v, %v", written, err)
+	}
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateInstalled {
+		t.Errorf("fresh install = %v", st)
+	}
+
+	// An old jig's install laid out SKILL.md only: stale, and a reinstall fixes it.
+	if err := os.RemoveAll(filepath.Join(root, "build", "references")); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale || st[0].BodyStale || !slices.Equal(st[0].Refs, []string{"references/deep.md missing"}) {
+		t.Errorf("missing reference = %v, want stale and naming the reference", st)
+	}
+	if written, _, err := InstallSkills(root, skills, "v1", true); err != nil || !slices.Equal(written, []string{"build"}) {
+		t.Errorf("reinstall = %v, %v", written, err)
+	}
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateInstalled {
+		t.Errorf("after reinstall = %v", st)
+	}
+	writeOrFail(t, ref, "edited\n", 0o644)
+	if st, _ := InspectSkills(root, skills, "v1"); st[0].State != StateStale || !slices.Equal(st[0].Refs, []string{"references/deep.md differs"}) {
+		t.Errorf("differing reference = %v, want stale", st)
+	}
+
+	// The unstamped form `skills install` writes reads as installed.
+	plain := t.TempDir()
+	writeOrFail(t, filepath.Join(plain, "build", "SKILL.md"), "# build\n", 0o644)
+	writeOrFail(t, filepath.Join(plain, "build", "references", "deep.md"), "deep text\n", 0o644)
+	if st, _ := InspectSkills(plain, skills, "v1"); st[0].State != StateInstalled {
+		t.Errorf("unstamped = %v", st)
+	}
+}
+
+func TestRemoveSkillsTakesJigsReferencesAndKeepsAPersons(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	embedded := map[string]Skill{"build": skills[0]}
+	if removed, err := RemoveSkills(root, nil, embedded); err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "build")); !os.IsNotExist(err) {
+		t.Errorf("the emptied skill directory is still there: %v", err)
+	}
+
+	// A reference of the person's stays, and so does its directory.
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	mine := filepath.Join(root, "build", "references", "mine.md")
+	writeOrFail(t, mine, "my notes\n", 0o644)
+	if removed, err := RemoveSkills(root, []string{"build"}, embedded); err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v", removed, err)
+	}
+	if got := readOrFail(t, mine); got != "my notes\n" {
+		t.Errorf("the person's reference: %q", got)
+	}
+	for _, gone := range []string{filepath.Join(root, "build", "SKILL.md"), filepath.Join(root, "build", "references", "deep.md")} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s is still there: %v", gone, err)
+		}
+	}
+
+	// An unstamped reference equal to the embedded text is jig's.
+	plain := t.TempDir()
+	writeOrFail(t, filepath.Join(plain, "build", "SKILL.md"), "# build\n", 0o644)
+	writeOrFail(t, filepath.Join(plain, "build", "references", "deep.md"), "deep text\n", 0o644)
+	if removed, err := RemoveSkills(plain, nil, embedded); err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Errorf("unstamped: %v, %v", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(plain, "build")); !os.IsNotExist(err) {
+		t.Errorf("unstamped install left %v", err)
+	}
+}
+
+func TestRemoveSkillsLeavesAPersonsEmptyFilesAndDirectories(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	// A skill of the person's own with an empty reference, an empty
+	// references directory, an empty skill directory, and an empty file
+	// named like a reference of jig's in a skill jig does not ship.
+	writeOrFail(t, filepath.Join(root, "mine", "references", "empty.md"), "", 0o644)
+	if err := os.MkdirAll(filepath.Join(root, "drafts", "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "bare"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOrFail(t, filepath.Join(root, "build", "references", "empty.md"), "", 0o644)
+	writeOrFail(t, filepath.Join(root, "mine", "SKILL.md"), "", 0o644)
+
+	removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]})
+	if err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want only build", removed, err)
+	}
+	for _, kept := range []string{
+		filepath.Join(root, "mine", "references", "empty.md"),
+		filepath.Join(root, "mine", "SKILL.md"),
+		filepath.Join(root, "build", "references", "empty.md"),
+		filepath.Join(root, "drafts", "references"),
+		filepath.Join(root, "bare"),
+	} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+}
+
+func TestRemoveSkillsReportsASkillWhoseOnlyJigFilesAreReferences(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	if _, _, err := InstallSkills(root, skills, "v1", true); err != nil {
+		t.Fatal(err)
+	}
+	// The person's own SKILL.md replaced jig's; the references are still jig's.
+	mine := filepath.Join(root, "build", "SKILL.md")
+	writeOrFail(t, mine, "my own build skill\n", 0o644)
+	removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]})
+	if err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want build reported", removed, err)
+	}
+	if got := readOrFail(t, mine); got != "my own build skill\n" {
+		t.Errorf("the person's SKILL.md: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "build", "references")); !os.IsNotExist(err) {
+		t.Errorf("jig's references stayed: %v", err)
+	}
+}
+
+func TestRemoveSkillsKeepsAPersonsEditedCopyOfAReferenceJigShips(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	skills := refSkills()
+	writeOrFail(t, filepath.Join(root, "build", "SKILL.md"), "# build\n", 0o644)
+	edited := filepath.Join(root, "build", "references", "deep.md")
+	writeOrFail(t, edited, "my own edit of deep\n", 0o644)
+	if removed, err := RemoveSkills(root, nil, map[string]Skill{"build": skills[0]}); err != nil || !slices.Equal(removed, []string{"build"}) {
+		t.Fatalf("removed %v, %v, want build (its SKILL.md is jig's)", removed, err)
+	}
+	if got := readOrFail(t, edited); got != "my own edit of deep\n" {
+		t.Errorf("the person's edited reference: %q", got)
 	}
 }

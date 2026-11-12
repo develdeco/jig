@@ -116,13 +116,19 @@ func TestAGateRoundClearsAFloorRoutedNoteAsAddressed(t *testing.T) {
 // TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain: the review
 // skill tells a reviewer to report a standing note again, so the round that
 // applies a kept note usually has its reviewer reporting it too. The note must
-// become one fix slice and one entry in the round's findings.yaml, not two.
+// stay one fix slice (the one the gate queued when the keep was recorded) and
+// one entry in the round's findings.yaml, not two.
 func TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain(t *testing.T) {
 	t.Parallel()
 	fx, e := floorNoteRound1(t)
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
+
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-beta-test") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
+	}
+	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
 
 	round2 := reviewRoundResult(t, e, fx, verifydeliver.ReviewResult{
 		Summary:      "round 2: the note still stands",

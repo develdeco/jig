@@ -1,8 +1,10 @@
 package verifydeliver
 
 // A keep the closing round finds already fixed. `jig triage <T> <f>
-// keep` is applied by the next round that closes (recordedTriage), which turns
-// the kept ask or note into a fix slice. When the code moved since the round
+// keep` is queued as a fix slice by the next `jig gate` (queueKeeps), or by the
+// round that closes (recordedTriage) when it was recorded while that round was
+// open; either way the keep is built, and a closing round that reads it fixed
+// spends it. When the code moved since the round
 // that raised the finding, and the closing round's reviewer no longer reports
 // it (neither --still-present nor --prior), the work it asked for was built in
 // between: the keep is spent as a fix, not queued again. Recorded and shown,
@@ -41,7 +43,7 @@ func keptAndFixed(st *store.Store, ticket string, round int, outstanding []Findi
 	var out []KeptFixed
 	for _, f := range outstanding {
 		d, ok := decisions[f.ID]
-		if !ok || !d.Pending || d.Outcome != TriageKeep {
+		if !ok || !(d.Pending || d.Queued) || d.Outcome != TriageKeep {
 			continue
 		}
 		// A keep is spent as fixed only on code the round read: the finding's

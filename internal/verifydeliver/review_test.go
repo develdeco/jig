@@ -819,16 +819,33 @@ func TestResolveScopeBaseAfterAMerge(t *testing.T) {
 
 	t.Run("a commit of the session's own", func(t *testing.T) {
 		t.Parallel()
-		dir, st, run, round1 := setup(t)
+		dir, st, run, _ := setup(t)
 		run("merge", "--no-ff", "--no-edit", "main")
+		merge := run("rev-parse", "HEAD")
+		writeReviewFile(t, dir, "own.go", "2")
+		head := commitReviewLease(t, dir, "a commit of its own")
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
+		if err != nil || scope != "delta" || base != merge {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the carried merge %s", scope, base, err, merge)
+		}
+		if got, want := changed(t, dir, base, head), []string{"own.go"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the scope diff = %v, want only the commit's file %v", got, want)
+		}
+	})
+
+	t.Run("a commit after a merge of a branch that is not the target", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, round1 := setup(t)
+		run("switch", "-c", "other", round1)
+		writeReviewFile(t, dir, "other.go", "x")
+		commitReviewLease(t, dir, "other work")
+		run("switch", "work")
+		run("merge", "--no-ff", "--no-edit", "other")
 		writeReviewFile(t, dir, "own.go", "2")
 		head := commitReviewLease(t, dir, "a commit of its own")
 		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
 		if err != nil || scope != "delta" || base != round1 {
 			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the reviewed head: the reviewer sees more, never less", scope, base, err)
-		}
-		if got := changed(t, dir, base, head); len(got) != 3 {
-			t.Errorf("the scope diff = %v, want the merge's files and the commit's", got)
 		}
 	})
 }
@@ -1633,4 +1650,93 @@ func TestReviewerGateSourceRoundReadsStatusNotTheReviewersLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrepareReviewRequestAfterACleanMergeListsOnlyWhatFollowsIt: a merge of
+// the target that carries over, then a commit of the branch's own, reviews the
+// commit alone - not every file the target brought in.
+func TestPrepareReviewRequestAfterACleanMergeListsOnlyWhatFollowsIt(t *testing.T) {
+	t.Parallel()
+
+	setup := func(t *testing.T) (in RoundInput, run func(args ...string) string) {
+		t.Helper()
+		dir := newReviewLease(t, "main")
+		run = func(args ...string) string {
+			t.Helper()
+			out, err := gitx.RunEnv(dir, reviewGitEnv, args...)
+			if err != nil {
+				t.Fatalf("git %v: %v", args, err)
+			}
+			return out
+		}
+		run("config", "core.autocrlf", "false")
+		run("switch", "-c", "work")
+		writeReviewFile(t, dir, "work.go", "1")
+		round1 := commitReviewLease(t, dir, "round 1")
+		st := newReviewStore(t)
+		if err := os.MkdirAll(gateRoundDir(st, "JIG-1", 1), 0o755); err != nil {
+			t.Fatalf("mkdir round 1 dir: %v", err)
+		}
+		if err := writeReportYAML(gateRoundDir(st, "JIG-1", 1), GateReport{Round: 1, ReviewedSHA: map[string]string{"fixture-repo": round1}}); err != nil {
+			t.Fatalf("write round 1 report.yaml: %v", err)
+		}
+		// The target moves, by several files the branch never touched.
+		run("switch", "main")
+		for _, f := range []string{"target-a.go", "target-b.go", "target-c.go", "target-d.go"} {
+			writeReviewFile(t, dir, f, f)
+		}
+		moved := commitReviewLease(t, dir, "the target moves")
+		run("update-ref", "refs/remotes/origin/main", moved)
+		run("switch", "work")
+		in = RoundInput{
+			Store: st, Ticket: "JIG-1", Round: 2, LeaseDir: dir,
+			RepoName: "fixture-repo", Target: "main", Intent: Intent{Source: IntentSourceNone},
+		}
+		return in, run
+	}
+	prepare := func(t *testing.T, in RoundInput) RepoPrep {
+		t.Helper()
+		prep, err := PrepareReviewRequest(in)
+		if err != nil {
+			t.Fatalf("PrepareReviewRequest: %v", err)
+		}
+		if len(prep.Repos) != 1 {
+			t.Fatalf("Repos = %d, want 1", len(prep.Repos))
+		}
+		return prep.Repos[0]
+	}
+
+	t.Run("a clean merge then a commit", func(t *testing.T) {
+		t.Parallel()
+		in, run := setup(t)
+		run("merge", "--no-ff", "--no-edit", "main")
+		merge := run("rev-parse", "HEAD")
+		writeReviewFile(t, in.LeaseDir, "work.go", "2")
+		writeReviewFile(t, in.LeaseDir, "target-a.go", "edited")
+		commitReviewLease(t, in.LeaseDir, "a commit of its own")
+		rp := prepare(t, in)
+		if rp.Base != merge {
+			t.Errorf("Base = %s, want the merge commit %s", rp.Base, merge)
+		}
+		if want := []string{"target-a.go", "work.go"}; !reflect.DeepEqual(rp.MustReview, want) {
+			t.Errorf("MustReview = %v, want only the commit's files %v", rp.MustReview, want)
+		}
+	})
+
+	t.Run("a merge resolved by hand then a commit", func(t *testing.T) {
+		t.Parallel()
+		in, run := setup(t)
+		run("merge", "--no-ff", "--no-commit", "main")
+		writeReviewFile(t, in.LeaseDir, "hand.go", "the hand edit")
+		commitReviewLease(t, in.LeaseDir, "merge main, by hand")
+		writeReviewFile(t, in.LeaseDir, "work.go", "2")
+		commitReviewLease(t, in.LeaseDir, "a commit of its own")
+		rp := prepare(t, in)
+		if kind := run("cat-file", "-t", rp.Base); kind != "tree" {
+			t.Errorf("Base %s is a %s, want a tree", rp.Base, kind)
+		}
+		if want := []string{"hand.go", "work.go"}; !reflect.DeepEqual(rp.MustReview, want) {
+			t.Errorf("MustReview = %v, want the hand edit and the commit's file %v", rp.MustReview, want)
+		}
+	})
 }

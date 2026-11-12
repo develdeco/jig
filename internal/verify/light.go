@@ -48,7 +48,7 @@ func (x *run) lightFor(m manifest.Manifest, cmd string) (lightRun, bool) {
 // of sha (and not sha itself), unless a failed full run of cmd and env was
 // written after it. A failed light run says nothing of the whole suite, so it
 // does not stop a later delta from reusing the pass; any other failure of the
-// command does, on whatever commit it ran.
+// command does, except one that never judged the code (a cause), on whatever commit it ran.
 func lightBase(lines []journal.Line, cmd, env, sha string, isAncestor func(ancestor, descendant string) bool) (journal.Line, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := lines[i]
@@ -57,7 +57,9 @@ func lightBase(lines []journal.Line, cmd, env, sha string, isAncestor func(ances
 		}
 		switch l.Outcome {
 		case "fail":
-			if l.Ran == "" {
+			// A run that never judged the code (a kill or a stop) says nothing
+			// of the suite either.
+			if l.Cause == "" && l.Ran == "" {
 				return journal.Line{}, false
 			}
 		case "pass":
