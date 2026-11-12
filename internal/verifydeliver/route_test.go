@@ -330,8 +330,8 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if len(slices) != 1 || slices[0].ID != "fix-2-r2-f3" {
-		t.Fatalf("slices = %v, want [fix-2-r2-f3]", sliceIDs(slices))
+	if len(slices) != 1 || slices[0].ID != "fix-2-root-test" {
+		t.Fatalf("slices = %v, want [fix-2-root-test]", sliceIDs(slices))
 	}
 	if !contains(slices[0].Goal, "go ahead with plan B") {
 		t.Errorf("goal missing the human's decision:\n%s", slices[0].Goal)
@@ -343,6 +343,136 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	}
 	if f.Decision != "go ahead with plan B" || f.Triage != TriageHuman {
 		t.Errorf("kept ask = %+v, want the decision and triage recorded", f)
+	}
+}
+
+// TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle: a
+// round's kept fix, ask and notes of one workspace and oracle are built as
+// one slice, each finding keeping its own block and its kept-by header.
+func TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle(t *testing.T) {
+	t.Parallel()
+
+	st := newReviewStore(t)
+	man := twoWorkspaceManifest()
+	reported := []Finding{
+		{ID: "r1-f1", File: "alpha/a.go", Title: "a fix", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "alpha", Status: StatusOpen},
+		{ID: "r1-f2", File: "alpha/b.go", Title: "an ask", RiskRationale: "r", Action: ActionAsk, Oracle: "test", Workspace: "alpha", Status: StatusAsked},
+		{ID: "r1-f3", File: "alpha/c.go", Title: "first note", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "alpha", Status: StatusNoted},
+		{ID: "r1-f4", File: "alpha/d.go", Title: "second note", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "alpha", Status: StatusNoted},
+		{ID: "r1-f5", File: "beta/e.go", Title: "other workspace note", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "beta", Status: StatusNoted},
+	}
+	triage := func(in TriageInput) TriageResult {
+		return TriageResult{
+			Asks: map[string]AskOutcome{"r1-f2": {Keep: true, Decision: "decision for the ask", Human: true}},
+			Notes: map[string]AskOutcome{
+				"r1-f3": {Keep: true, Decision: "decision for note three", Human: true},
+				"r1-f4": {Keep: true, Decision: "decision for note four"},
+				"r1-f5": {Keep: true, Decision: "decision for note five", Human: true},
+			},
+		}
+	}
+	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 2 {
+		t.Fatalf("slices = %v, want 2 (one per workspace)", sliceIDs(slices))
+	}
+	alpha := sliceByID(t, slices, "fix-1-alpha-test")
+	if !equalStrings(alpha.Findings, []string{"r1-f1", "r1-f2", "r1-f3", "r1-f4"}) {
+		t.Errorf("alpha Findings = %v, want [r1-f1 r1-f2 r1-f3 r1-f4]", alpha.Findings)
+	}
+	for _, want := range []string{
+		"a fix", "an ask", "first note", "second note",
+		"Gate finding r1-f2, kept by the human:", "decision for the ask",
+		"Gate finding r1-f3, kept by the human:", "decision for note three",
+		"Gate finding r1-f4, kept with no human decision (--yes or no terminal):", "decision for note four",
+	} {
+		if !contains(alpha.Goal, want) {
+			t.Errorf("alpha goal missing %q:\n%s", want, alpha.Goal)
+		}
+	}
+	if contains(alpha.Goal, "other workspace note") {
+		t.Errorf("alpha goal carries the beta note:\n%s", alpha.Goal)
+	}
+	if contains(alpha.Goal, "Gate finding r1-f1") {
+		t.Errorf("a kept fix carries no kept-by header:\n%s", alpha.Goal)
+	}
+	beta := sliceByID(t, slices, "fix-1-beta-test")
+	if !equalStrings(beta.Findings, []string{"r1-f5"}) {
+		t.Errorf("beta Findings = %v, want [r1-f5]", beta.Findings)
+	}
+}
+
+// TestRouteRoundSplitsKeptAsksAndNotesUnderTheCap: kept notes pack under
+// fixSliceFindings like kept fixes, one file always in one slice.
+func TestRouteRoundSplitsKeptAsksAndNotesUnderTheCap(t *testing.T) {
+	t.Parallel()
+
+	st := newReviewStore(t)
+	man := oneOracleManifest()
+	reported := []Finding{
+		{ID: "r1-f1", File: "a.go", Title: "n1", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
+		{ID: "r1-f2", File: "b.go", Title: "n2", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
+		{ID: "r1-f3", File: "a.go", Title: "n3", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
+	}
+	triage := func(in TriageInput) TriageResult {
+		notes := map[string]AskOutcome{}
+		for _, n := range in.Notes {
+			notes[n.ID] = AskOutcome{Keep: true, Decision: "keep " + n.ID, Human: true}
+		}
+		return TriageResult{Notes: notes}
+	}
+	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 2)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 2 {
+		t.Fatalf("slices = %v, want 2", sliceIDs(slices))
+	}
+	if first := sliceByID(t, slices, "fix-1-root-test-1"); !equalStrings(first.Findings, []string{"r1-f1", "r1-f3"}) {
+		t.Errorf("slice 1 Findings = %v, want [r1-f1 r1-f3] (same file together)", first.Findings)
+	}
+	if second := sliceByID(t, slices, "fix-1-root-test-2"); !equalStrings(second.Findings, []string{"r1-f2"}) {
+		t.Errorf("slice 2 Findings = %v, want [r1-f2]", second.Findings)
+	}
+}
+
+// TestRouteRoundGroupedKeptRecurrenceNamesItsPreviousSlice: a kept note that
+// recurs finds its earlier slice by finding id, though that slice carried
+// two findings and its id names neither.
+func TestRouteRoundGroupedKeptRecurrenceNamesItsPreviousSlice(t *testing.T) {
+	t.Parallel()
+
+	st := newReviewStore(t)
+	ticket := "T-1"
+	man := oneOracleManifest()
+	existing := []store.Slice{
+		{ID: "fix-1-root-test", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1", "r1-f2"}},
+	}
+	if err := st.WriteSliceState(ticket, "fix-1-root-test", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatalf("write slice state: %v", err)
+	}
+	if err := writeAttemptResult(t, gateWorkDir(st, ticket), "fix-1-root-test", 1, "tightened both"); err != nil {
+		t.Fatalf("write attempt result: %v", err)
+	}
+	reported := []Finding{
+		{ID: "r1-f2", File: "a.go", Title: "back again", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted, Recurrences: 1},
+	}
+	triage := func(in TriageInput) TriageResult {
+		return TriageResult{Notes: map[string]AskOutcome{"r1-f2": {Keep: true, Decision: "again", Human: true}}}
+	}
+	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
+	}
+	if len(slices) != 1 {
+		t.Fatalf("slices = %v, want 1", sliceIDs(slices))
+	}
+	for _, want := range []string{"Previous fix slice fix-1-root-test: tightened both", "Gate finding r1-f2, kept by the human:"} {
+		if !contains(slices[0].Goal, want) {
+			t.Errorf("goal missing %q:\n%s", want, slices[0].Goal)
+		}
 	}
 }
 

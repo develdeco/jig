@@ -36,8 +36,8 @@ func TestRouteRoundAppliesAPersonsDecisionOnANote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if len(slices) != 1 || slices[0].ID != "fix-2-r1-f1" || slices[0].FromGate != 2 || !equalStrings(slices[0].Findings, []string{"r1-f1"}) {
-		t.Fatalf("slices = %+v, want the one fix-2-r1-f1 of round 2", slices)
+	if len(slices) != 1 || slices[0].ID != "fix-2-root-test" || slices[0].FromGate != 2 || !equalStrings(slices[0].Findings, []string{"r1-f1"}) {
+		t.Fatalf("slices = %+v, want the one fix-2-root-test of round 2", slices)
 	}
 	if !contains(slices[0].Goal, "do it now") || !contains(slices[0].Goal, "kept by the human") {
 		t.Errorf("goal = %q, want the reason and who kept it", slices[0].Goal)

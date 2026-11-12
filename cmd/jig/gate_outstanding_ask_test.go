@@ -103,7 +103,7 @@ func TestOutstandingAskIsDecidedWithJigTriageAndQueuedByTheNextGate(t *testing.T
 
 	// The next gate queues the kept ask's slice and opens no round.
 	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix-2-r1-f1") {
+	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the fix slice built from the kept ask\n%s", code, out)
 	}
 	slices, err := st.ReadSlices(ticket)
@@ -112,17 +112,17 @@ func TestOutstandingAskIsDecidedWithJigTriageAndQueuedByTheNextGate(t *testing.T
 	}
 	var goal string
 	for _, s := range slices {
-		if s.ID == "fix-2-r1-f1" {
+		if s.ID == "fix-2-alpha-test" {
 			goal = s.Goal
 			if s.Workspace != "alpha" {
-				t.Errorf("fix-2-r1-f1 workspace = %q, want the one the person chose", s.Workspace)
+				t.Errorf("fix-2-alpha-test workspace = %q, want the one the person chose", s.Workspace)
 			}
 		}
 	}
 	if !strings.Contains(goal, "Bumping the toolchain is intentional.") {
-		t.Errorf("fix-2-r1-f1 goal = %q, want the person's reason", goal)
+		t.Errorf("fix-2-alpha-test goal = %q, want the person's reason", goal)
 	}
-	buildQueuedSlice(t, fx, "fix-2-r1-f1", "alpha/alpha.go")
+	buildQueuedSlice(t, fx, "fix-2-alpha-test", "alpha/alpha.go")
 
 	// Round 2's reviewer covers go.mod (must_review, since r1-f1 is still
 	// outstanding) and the built change, but reports nothing new there - it

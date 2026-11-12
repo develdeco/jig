@@ -252,8 +252,8 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	if !strings.Contains(out, "fix-1-alpha-test") {
 		t.Fatalf("round 1 report missing the kept fix's slice fix-1-alpha-test:\n%s", out)
 	}
-	if !strings.Contains(out, "fix-1-r1-f3") {
-		t.Fatalf("round 1 report missing the kept ask's slice fix-1-r1-f3:\n%s", out)
+	if !strings.Contains(out, "fix-1-beta-test") {
+		t.Fatalf("round 1 report missing the kept ask's slice fix-1-beta-test:\n%s", out)
 	}
 	if strings.Contains(out, "needs_a_human[") && !strings.Contains(out, "needs_a_human[0]") {
 		t.Fatalf("round 1 must leave nothing needing a human (the ask was kept):\n%s", out)
@@ -275,18 +275,20 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSlices after round 1: %v", err)
 	}
-	if !hasSlice(slices1, "fix-1-alpha-test") || !hasSlice(slices1, "fix-1-r1-f3") {
-		t.Fatalf("expected slices fix-1-alpha-test and fix-1-r1-f3; got %+v", slices1)
+	if !hasSlice(slices1, "fix-1-alpha-test") || !hasSlice(slices1, "fix-1-beta-test") {
+		t.Fatalf("expected slices fix-1-alpha-test and fix-1-beta-test; got %+v", slices1)
 	}
-	if hasSlice(slices1, "fix-1-beta-test") {
-		t.Fatalf("the noted (below-floor) fix (beta workspace) must not build its own slice; got %+v", slices1)
+	for _, sl := range slices1 {
+		if sl.ID == "fix-1-beta-test" && (len(sl.Findings) != 1 || sl.Findings[0] != "r1-f3") {
+			t.Fatalf("the noted (below-floor) beta fix must not ride the beta slice; got %+v", sl)
+		}
 	}
 
 	// --- build both round 1 fix slices to green.
-	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
+	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test"} {
 		buildScenarioSlice(t, fx, s, 1)
 	}
-	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
+	for _, s := range []string{"fix-1-alpha-test", "fix-1-beta-test"} {
 		state, err := st.ReadSliceState(ticket, s)
 		if err != nil {
 			t.Fatalf("read slice state %s: %v", s, err)

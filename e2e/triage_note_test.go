@@ -58,8 +58,8 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextGateQueuesItsSlice(t *testing.T
 	}
 
 	queue := runJig(t, env, fx.StoreDir, "gate", ticket)
-	if queue.Code != 0 || !strings.Contains(queue.Stdout, "fix_slices") || !strings.Contains(queue.Stdout, "fix-2-r1-f1") {
-		t.Fatalf("gate after the keep exit = %d, want 0 and the slice fix-2-r1-f1 in fix_slices\nstdout:\n%s\nstderr:\n%s", queue.Code, queue.Stdout, queue.Stderr)
+	if queue.Code != 0 || !strings.Contains(queue.Stdout, "fix_slices") || !strings.Contains(queue.Stdout, "fix-2-beta-test") {
+		t.Fatalf("gate after the keep exit = %d, want 0 and the slice fix-2-beta-test in fix_slices\nstdout:\n%s\nstderr:\n%s", queue.Code, queue.Stdout, queue.Stderr)
 	}
 	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2")); err == nil {
 		t.Fatal("the gate that queued the keep recorded a round")
@@ -76,7 +76,7 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextGateQueuesItsSlice(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasSlice(slices, "fix-2-r1-f1") {
+	if !hasSlice(slices, "fix-2-beta-test") {
 		t.Fatalf("slices = %+v, want the fix slice of the kept note", slices)
 	}
 }
