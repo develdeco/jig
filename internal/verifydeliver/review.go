@@ -1159,7 +1159,7 @@ func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target
 				switch kind {
 				case lineSame, lineClean:
 					return "delta", head, kind, prior, nil
-				case lineResolved:
+				case lineResolved, lineMergedThenOwn:
 					return "delta", ownTree, kind, prior, nil
 				}
 				return "delta", prior, kind, prior, nil

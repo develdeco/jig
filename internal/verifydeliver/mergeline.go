@@ -27,6 +27,12 @@ const (
 	// resolved by hand. Its ownTree is git's own merge of the tip's parents; the
 	// hand edits are the tip's tree against it.
 	lineResolved
+	// lineMergedThenOwn: merges of the target (every one but the last clean, the
+	// last clean or resolved by hand), then ordinary commits only. The merges
+	// are carried, not read: the round reviews what follows the last one. For
+	// this kind ownTree is the base of that review: the last merge's commit when
+	// it is clean, git's own merge of its parents (a tree) when hand-resolved.
+	lineMergedThenOwn
 )
 
 // classifyLine says how head relates to reviewed in the repository dir. A merge
@@ -53,18 +59,27 @@ func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree
 	if lerr != nil || len(line) == 0 || len(line[0].Parents) == 0 || line[0].Parents[0] != reviewed {
 		return lineOther, "", nil
 	}
-	for _, c := range line {
-		if len(c.Parents) != 2 {
+	// The merges are the leading commits with two parents; what follows must be
+	// ordinary single-parent commits.
+	merges := 0
+	for merges < len(line) && len(line[merges].Parents) == 2 {
+		merges++
+	}
+	if merges == 0 || targetRef == "" {
+		return lineOther, "", nil
+	}
+	for _, c := range line[merges:] {
+		if len(c.Parents) != 1 {
 			return lineOther, "", nil
 		}
-		if targetRef == "" {
-			return lineOther, "", nil
-		}
+	}
+	for _, c := range line[:merges] {
 		if in, aerr := gitx.IsAncestor(dir, c.Parents[1], targetRef); aerr != nil || !in {
 			return lineOther, "", nil
 		}
 	}
-	for i, c := range line {
+	own := merges < len(line)
+	for i, c := range line[:merges] {
 		tree, clean, merr := gitx.MergeTree(dir, c.Parents[0], c.Parents[1])
 		if merr != nil {
 			if tooOld(merr) {
@@ -72,14 +87,21 @@ func classifyLine(dir, reviewed, head, targetRef string) (kind lineKind, ownTree
 			}
 			return lineOther, "", nil
 		}
+		last := i == merges-1
 		switch {
 		case tree == c.Tree && clean:
-			// git's own merge.
-		case i == len(line)-1 && tree != c.Tree:
-			// The tip, resolved by hand (or a conflict resolved).
+			// git's own merge. Carried, it is its own base: the commit.
+			if own && last {
+				return lineMergedThenOwn, c.SHA, nil
+			}
+		case last && tree != c.Tree:
+			// The last merge, resolved by hand (or a conflict resolved).
+			if own {
+				return lineMergedThenOwn, tree, nil
+			}
 			return lineResolved, tree, nil
 		default:
-			// A hand-resolved merge that is not the tip, or a conflict committed
+			// A hand-resolved merge that is not the last, or a conflict committed
 			// with its markers: the reviewer reads it all.
 			return lineOther, "", nil
 		}

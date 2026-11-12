@@ -819,16 +819,33 @@ func TestResolveScopeBaseAfterAMerge(t *testing.T) {
 
 	t.Run("a commit of the session's own", func(t *testing.T) {
 		t.Parallel()
-		dir, st, run, round1 := setup(t)
+		dir, st, run, _ := setup(t)
 		run("merge", "--no-ff", "--no-edit", "main")
+		merge := run("rev-parse", "HEAD")
+		writeReviewFile(t, dir, "own.go", "2")
+		head := commitReviewLease(t, dir, "a commit of its own")
+		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
+		if err != nil || scope != "delta" || base != merge {
+			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the carried merge %s", scope, base, err, merge)
+		}
+		if got, want := changed(t, dir, base, head), []string{"own.go"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the scope diff = %v, want only the commit's file %v", got, want)
+		}
+	})
+
+	t.Run("a commit after a merge of a branch that is not the target", func(t *testing.T) {
+		t.Parallel()
+		dir, st, run, round1 := setup(t)
+		run("switch", "-c", "other", round1)
+		writeReviewFile(t, dir, "other.go", "x")
+		commitReviewLease(t, dir, "other work")
+		run("switch", "work")
+		run("merge", "--no-ff", "--no-edit", "other")
 		writeReviewFile(t, dir, "own.go", "2")
 		head := commitReviewLease(t, dir, "a commit of its own")
 		scope, base, err := resolveScopeBase(st, "JIG-1", dir, "fixture-repo", "main", 2, head)
 		if err != nil || scope != "delta" || base != round1 {
 			t.Fatalf("resolveScopeBase = %q, %q, %v, want a delta from the reviewed head: the reviewer sees more, never less", scope, base, err)
-		}
-		if got := changed(t, dir, base, head); len(got) != 3 {
-			t.Errorf("the scope diff = %v, want the merge's files and the commit's", got)
 		}
 	})
 }
