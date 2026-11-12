@@ -1129,8 +1129,9 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 	return out
 }
 
-// testedPair is a pair of tickets of one repo whose branches share a changed
-// file, with what merging the two in memory gave (testPair).
+// testedPair is a pair of branches, one of each of two tickets of one repo,
+// that share a changed file, with what merging the two in memory gave
+// (testPair). Two tickets with several branches give several pairs.
 type testedPair struct {
 	Repo             string
 	A, B             string // ticket ids, A before B

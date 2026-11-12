@@ -72,6 +72,8 @@ func ticketConflictAdvice(st *store.Store, cfg project.Config, mp project.Machin
 
 func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflictAdvice {
 	a := conflictAdvice{Ticket: ticket}
+	type tk struct{ repo, ticket string }
+	conflicting := map[tk]bool{}
 	for _, p := range pairs {
 		other, otherBranch := p.A, p.BranchA
 		switch ticket {
@@ -83,6 +85,7 @@ func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflic
 		}
 		switch p.State {
 		case pairConflict:
+			conflicting[tk{p.Repo, other}] = true
 			first := firstInNextOrder(st, p.A, p.B)
 			for _, f := range p.Files {
 				a.Conflicts = append(a.Conflicts, ticketConflict{Repo: p.Repo, Ticket: other, File: f, Branch: otherBranch, First: first})
@@ -96,6 +99,9 @@ func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflic
 			}
 		}
 	}
+	// A ticket with any branch pair that conflicts is not also said to merge
+	// cleanly: conflict outranks clean.
+	a.Clean = slices.DeleteFunc(a.Clean, func(c cleanShare) bool { return conflicting[tk{c.Repo, c.Ticket}] })
 	return a
 }
 

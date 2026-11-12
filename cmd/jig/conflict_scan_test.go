@@ -487,3 +487,22 @@ func TestAdviceMergesNoBranchThatLacksTheSharedFile(t *testing.T) {
 		}
 	}
 }
+
+// TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch: when one branch
+// pair of two tickets merges cleanly and another conflicts, the advice with
+// clean shares shows the conflict and no "merges cleanly" line for the ticket.
+func TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-2")
+	text := strings.Join(conflictBlocks(adviceFromPairs(r.st, pairs, "T-2"), true), "\n")
+	if !strings.Contains(text, "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice lacks the conflict row:\n%s", text)
+	}
+	if strings.Contains(text, "merges cleanly") {
+		t.Errorf("the advice calls T-1 clean though one of its branches conflicts:\n%s", text)
+	}
+}
