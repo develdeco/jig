@@ -684,6 +684,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		// and the slice's state stays as it was.
 		line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
 			Outcome: "fail", Cause: journal.CauseStopped, Summary: oneLine(oerr.Error())}
+		if isLight {
+			line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
+		}
 		if jerr := x.journal(line); jerr != nil {
 			return jerr
 		}
