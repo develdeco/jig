@@ -19,6 +19,9 @@ const (
 	triageOracleUsage    = "the oracle that proves the fix, for a kept finding the reviewer named none for"
 )
 
+// triageNote is the note of `jig triage -h`: when a decision takes effect.
+const triageNote = "the next `jig gate` queues a keep as a fix slice before it opens a round; a dismiss is decided by the round that closes next"
+
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
@@ -30,6 +33,7 @@ func init() {
 			{"project", reviewProjectUsage, false},
 		}, false},
 		Order: 333,
+		Note:  triageNote,
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return cmdTriage(e, args, stdout, stdin)
 		},
@@ -121,8 +125,9 @@ func defaultTriageWithNote(in verifydeliver.TriageInput, stdout io.Writer, why s
 // [--workspace W] [--oracle O]`: a person's decision on an ask a gate round
 // left undecided, or on a note (a finding below the risk floor, or a reviewer's
 // own note) a person takes up, journaled as a triage line. Nothing is prompted
-// and no round is opened: the next round applies the decision, turning a kept
-// ask or note into a fix slice and a dismissed one into a dismissed finding. Who decided is
+// and no round is opened: the next `jig gate` queues a kept ask or note as a fix
+// slice before it opens a round, and the round that closes next turns a
+// dismissed one into a dismissed finding. Who decided is
 // recorded: a person at a terminal, or an agent.
 func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	fs := newFlagSet(e, "triage")
@@ -229,7 +234,7 @@ func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	axi.Render(stdout,
 		axi.KV("triage", [][2]string{{"ticket", ticket}, {"finding", id}, {"decision", decision}, {"provenance", provenance}}),
-		axi.Help(fmt.Sprintf("The next round applies it: run `jig gate %s`", ticket)),
+		axi.Help(fmt.Sprintf("The next `jig gate %s` queues a keep as a fix slice before it opens a round; a dismiss is decided by the round that closes next", ticket)),
 	)
 	return 0
 }

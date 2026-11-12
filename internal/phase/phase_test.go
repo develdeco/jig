@@ -450,7 +450,7 @@ func TestReviewSubSteps(t *testing.T) {
 	f.Slices[len(f.Slices)-1].State = "green"
 	decided := append(append([]journal.Line{}, lines...), ln(journal.EventTriage, ref("r1-f2"), outcome("dismiss"), provenance("person")))
 	got = pending(f, decided)
-	if s := sub(t, got, "asks"); s.State != SubWaiting || s.Detail != "1 decided, applied at the next round" {
+	if s := sub(t, got, "asks"); s.State != SubWaiting || s.Detail != "1 decided, queued or applied at the next gate" {
 		t.Errorf("a decided ask = %+v", s)
 	}
 	if len(got.Subs) != 3 {
