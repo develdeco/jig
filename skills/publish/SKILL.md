@@ -30,7 +30,7 @@ jig publish T-1            # asks before it pushes; --yes stands in for the answ
 
 It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` when origin moved past it), opens the pull request or updates the branch's open one, and posts the review notes as a comment unless these exact notes are already on it.
 
-A ticket built in several repos publishes one pull request for each, from one branch name; each body names the others under `## Part of T-1` (`pending` until recorded). `--body` renders them all, or one with `--repo <r>`; push, open and record each with `jig publish T-1 --pr <url> --repo <r>`. When the last is recorded, render the bodies again and update the pull requests with the urls. Bare `jig publish` does it all, and `--approve` approves every repo's head.
+Read `jig skill publish multi-repo` when the ticket was built in several repos.
 
 A start-to-finish run that names the publish asks the person to approve it (the reviewed head and the body's first lines) and, on their yes, publishes the first way; a prompt that told you to go with your recommendations needs no yes. In a chart run (`jig skill chart`) the main session asks once for every ticket reviewed clean. A run that names no publish stops after the review and relays the publish prompt.
 
@@ -48,17 +48,11 @@ The body is `## What`, `## Demo` (when picked) and `## Verification`, then the t
 
 ## Recordings for the demo
 
-When the ticket's own tests recorded scenarios and nobody picked, `--body` and `jig publish` report `picks: pending` and name a `picks_request` file: the candidates, each with an id, and the intent. Pick the recordings that show the change, compose them into flows, and write the answer:
-
-```
-{"flows": [{"title": "...", "items": [{"id": "r2"}, {"id": "r3", "caption": "..."}]}], "summary": "..."}
-```
-
-then run `jig publish T-1 --body --picks answer.json` (or the bare publish with `--picks`). Pick a few; an id is used once; flows keep their step order. A refused pick publishes with no demo and says why; a pick that stood is reused for the same head and recordings.
+Read `jig skill publish demo` when `--body` or `jig publish` reports `picks: pending`.
 
 ## A published ticket that is behind
 
-`jig next T-1` says `state: behind` for a published ticket stacked on a parent that has since moved or merged. In a checkout of its branch run the `merge` its `stack` row names, then bare `jig publish T-1`: it pushes the merge and points the branch's open pull request at its base, opening no second one. A merge git made by itself needs no new round; a hand-resolved merge or any other commit needs `jig gate T-1` first (`PUBLISH_UNREVIEWED_HEAD`), which reviews your resolution alone.
+Read `jig skill publish stacked` when `jig next` says `state: behind`.
 
 ## Then
 

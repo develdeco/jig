@@ -1,5 +1,7 @@
 # jig's testing method, and what a project owns
 
+**Amended by the intake skill's bug shape:** a bug has no REPRO slice of its own. jig verifies a slice only when its oracle passes, so a slice red before any fix could never go green; the repro test is the fix slice's first commit, red on the base, and the fix turns it green. GUARDRAIL and prefactoring slices still stay their own, as below.
+
 jig shapes the tests of every repo it builds through its intake skill, which writes the briefs, its build and review prompts, and its own oracle runs. Each piece has its own ADR. Two principles the owner settled on 2026-10-05 had no home, and neither did the question of where testing knowledge lives.
 
 ## The method

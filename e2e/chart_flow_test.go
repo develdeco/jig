@@ -311,6 +311,15 @@ func TestChartSkillNesting(t *testing.T) {
 	if r.Code != 0 {
 		t.Fatalf("jig skill chart exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
+	// The several-repos rule is a reference the core points to.
+	if !strings.Contains(r.Stdout, "Read `jig skill chart multi-repo` when") {
+		t.Errorf("jig skill chart does not point to its multi-repo reference:\n%s", r.Stdout)
+	}
+	ref := runJig(t, env, fx.RepoDir, "skill", "chart", "multi-repo")
+	if ref.Code != 0 {
+		t.Fatalf("jig skill chart multi-repo exit = %d\nstderr:\n%s", ref.Code, ref.Stderr)
+	}
+	r.Stdout += ref.Stdout
 	for _, want := range []string{"nested builder", "in the background", "only its repo's slices, never gate or nest", "a hold saying to gate is yours", "wait for them before the gate", "the question, its id and default", "No Agent tool", "if you have the Agent tool", "A hand-back at green with no reviewer"} {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig skill chart lacks %q:\n%s", want, r.Stdout)

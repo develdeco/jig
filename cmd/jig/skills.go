@@ -218,6 +218,16 @@ func installSkills(root string) ([]installedSkill, error) {
 		if err := os.WriteFile(dest, data, 0o644); err != nil {
 			return nil, err
 		}
+		for _, ref := range embeddedRefs(name) {
+			text, _ := embeddedRef(name, ref)
+			rdest := filepath.Join(dir, "references", ref+".md")
+			if err := os.MkdirAll(filepath.Dir(rdest), 0o755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(rdest, text, 0o644); err != nil {
+				return nil, err
+			}
+		}
 		installed = append(installed, installedSkill{Name: name, Path: dest})
 	}
 	return installed, nil

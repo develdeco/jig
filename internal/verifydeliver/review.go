@@ -1137,41 +1137,41 @@ func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, err
 // is then not always a commit: every reader of it gives it to git diff, which
 // takes a tree. A git too old to tell is an error.
 func resolveScopeBase(st *store.Store, ticket, leaseDir, repoName, target string, round int, head string) (scope, base string, err error) {
-	scope, base, _, _, err = resolveScope(st, ticket, leaseDir, repoName, "origin/"+target, target, round, head)
+	scope, base, _, _, _, err = resolveScope(st, ticket, leaseDir, repoName, "origin/"+target, target, round, head)
 	return scope, base, err
 }
 
 // resolveScope is resolveScopeBase and, beside them, how the head relates to
 // the head the delta starts from (kind) and that head (prior): lineOther and ""
 // for a full scope.
-func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior string, err error) {
+func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
-			return "", "", lineOther, "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
+			return "", "", lineOther, "", "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
 		}
 		if prior != "" {
 			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
-				kind, ownTree, lerr := classifyLine(leaseDir, prior, head, targetRef)
+				kind, ownTree, merge, lerr := classifyLineCarried(leaseDir, prior, head, targetRef)
 				if lerr != nil {
-					return "", "", lineOther, "", lerr
+					return "", "", lineOther, "", "", lerr
 				}
 				switch kind {
 				case lineSame, lineClean:
-					return "delta", head, kind, prior, nil
-				case lineResolved:
-					return "delta", ownTree, kind, prior, nil
+					return "delta", head, kind, prior, "", nil
+				case lineResolved, lineMergedThenOwn:
+					return "delta", ownTree, kind, prior, merge, nil
 				}
-				return "delta", prior, kind, prior, nil
+				return "delta", prior, kind, prior, "", nil
 			}
 		}
 	}
 
 	base, err = scopebase.Resolve(st, ticket, leaseDir, repoName, target, head)
 	if err != nil {
-		return "", "", lineOther, "", err
+		return "", "", lineOther, "", "", err
 	}
-	return "full", base, lineOther, "", nil
+	return "full", base, lineOther, "", "", nil
 }
 
 // leaseChanged is the read-only guard a session that must never edit is held
@@ -1296,6 +1296,10 @@ type Review struct {
 	Hunks []HunkEntry
 	// StoreRefs are the request's store references, which the round records.
 	StoreRefs []StoreRef
+	// Carried is repo -> the merge of the target a delta round carried rather
+	// than read (a line of merges, then the branch's own commits): nil when no
+	// repo had one.
+	Carried map[string]CarriedMerge
 }
 
 // headOf is the commit the review read repo at: the one HeadSHA of a round over
@@ -1603,6 +1607,9 @@ type RepoPrep struct {
 	// lineOther, and Prior "", for a full scope.
 	Line  lineKind
 	Prior string
+	// Carried is the merge a lineMergedThenOwn round carried rather than read, and
+	// CarriedRef the ref it brought in; both "" for any other line.
+	Carried, CarriedRef string
 }
 
 // forRepo is the input of a round over one repo, r, made from the input of a
@@ -1674,12 +1681,16 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err))
 		}
-		scope, base, kind, prior, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
+		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
 		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.LeaseDir, Head: head, Man: r.Manifest})
-		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base, Line: kind, Prior: prior})
+		carriedRef := ""
+		if carried != "" {
+			carriedRef = mergeRefOf(r.MergeRef, r.Target)
+		}
+		prep.Repos = append(prep.Repos, RepoPrep{Repo: r.Name, Head: head, Scope: scope, Base: base, Line: kind, Prior: prior, Carried: carried, CarriedRef: carriedRef})
 	}
 	// in.Open (findings.go's openAndNotedFindingsList) carries a noted
 	// finding too, so it stays a citable prior target, but a noted finding
@@ -2086,5 +2097,31 @@ func (r *launchedGateSource) Round(in RoundInput) (rnd Round, ok bool, err error
 		Effort:     effort,
 		Hunks:      prep.Request.Hunks,
 		StoreRefs:  prep.StoreRefs,
+		Carried:    carriedOf(prep.Repos),
 	}}, true, nil
+}
+
+// CarriedMerge is the merge a delta round did not read: the last merge of the
+// target on the line from the reviewed head, which brought in what the target
+// moved by, and the ref (origin/<target>, or a stacked parent's branch) it
+// brought in. The round read what follows it.
+type CarriedMerge struct {
+	SHA string `yaml:"sha"`
+	Ref string `yaml:"ref"`
+}
+
+// carriedOf is the carried merge of each repo of a round that had one, nil when
+// none did.
+func carriedOf(repos []RepoPrep) map[string]CarriedMerge {
+	var out map[string]CarriedMerge
+	for _, r := range repos {
+		if r.Carried == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]CarriedMerge{}
+		}
+		out[r.Repo] = CarriedMerge{SHA: r.Carried, Ref: r.CarriedRef}
+	}
+	return out
 }

@@ -22,7 +22,7 @@ func TestSkillPrintsTheEmbeddedBody(t *testing.T) {
 		}
 	}
 	out, code := runMain(t, e, "", "skill")
-	if code != 0 || !strings.Contains(out, "skills["+strconv.Itoa(len(embeddedNames()))+"]{name,use it when}:") || !strings.Contains(out, "jig skill <name>") {
+	if code != 0 || !strings.Contains(out, "skills["+strconv.Itoa(len(embeddedNames()))+"]{name,use it when,references}:") || !strings.Contains(out, "jig skill <name>") {
 		t.Errorf("jig skill: exit %d\n%s", code, out)
 	}
 	out, code = runMain(t, e, "", "skill", "nonesuch")
@@ -34,8 +34,41 @@ func TestSkillPrintsTheEmbeddedBody(t *testing.T) {
 			t.Errorf("jig skill %q: exit %d\n%s", bad, code, out)
 		}
 	}
-	if out, code := runMain(t, e, "", "skill", "here", "intake"); code != 2 || !strings.Contains(out, "at most one") {
-		t.Errorf("two names: exit %d\n%s", code, out)
+	if out, code := runMain(t, e, "", "skill", "jig-init", "intake"); code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "has no references") {
+		t.Errorf("an unknown reference of a skill with none: exit %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "skill", "here", "a", "b"); code != 2 || !strings.Contains(out, "at most one") {
+		t.Errorf("three words: exit %d\n%s", code, out)
+	}
+}
+
+func TestSkillPrintsAReference(t *testing.T) {
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	n := 0
+	list, _ := runMain(t, e, "", "skill")
+	for _, name := range embeddedNames() {
+		for _, ref := range embeddedRefs(name) {
+			n++
+			want, ok := embeddedRef(name, ref)
+			out, code := runMain(t, e, "", "skill", name, ref)
+			if !ok || code != 0 || out != string(want) {
+				t.Errorf("jig skill %s %s: exit %d, output differs from the embedded text", name, ref, code)
+			}
+			if !strings.Contains(list, ref) {
+				t.Errorf("jig skill does not list reference %s", ref)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no embedded references to test")
+	}
+	out, code := runMain(t, e, "", "skill", "build", "nonesuch")
+	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") || !strings.Contains(out, "handoff") {
+		t.Errorf("an unknown reference: exit %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "skill", "build", "../x"); code != 2 {
+		t.Errorf("a path as reference: exit %d\n%s", code, out)
 	}
 }
 
@@ -221,5 +254,53 @@ func TestSkillsStubLeavesAPersonsOwnJigSkill(t *testing.T) {
 	}
 	if !exists(mine) || exists(filepath.Join(repo, ".agents")) {
 		t.Error("the uninstall took the person's skill or left the stub")
+	}
+}
+
+// TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons: a
+// fresh install lays references out stamped and doctor says installed; an old
+// jig's install (SKILL.md only) reads stale and a reinstall fixes it; an
+// uninstall takes jig's references and keeps a person's own, with its directory.
+func TestSkillReferencesInstallGoStaleWithoutThemAndUninstallKeepAPersons(t *testing.T) {
+	t.Parallel()
+	ie := newInstallerEnv(t)
+	ie.env = ie.env.inDir(ie.root)
+	if out, code := runMain(t, ie.env, "", "skills", "--global"); code != 0 {
+		t.Fatalf("install: exit %d\n%s", code, out)
+	}
+	refDir := filepath.Join(ie.userHome, ".claude", "skills", "build", "references")
+	ref := filepath.Join(refDir, "handoff.md")
+	if v, ok := setup.SkillStamp([]byte(readFileOrFail(t, ref))); !ok || v != binaryVersion() {
+		t.Errorf("reference stamp %q, %v", v, ok)
+	}
+	skillsRow := func() map[string]string {
+		out, _ := runMain(t, ie.env, "", "doctor")
+		return findRow(doctorRows(t, out), "skills", "claude")
+	}
+	if r := skillsRow(); r == nil || r["state"] != "installed" {
+		t.Fatalf("fresh install row = %v", r)
+	}
+	if err := os.RemoveAll(refDir); err != nil {
+		t.Fatal(err)
+	}
+	if r := skillsRow(); r == nil || r["state"] != "stale" || !strings.Contains(r["detail"], "build (references/handoff.md missing)") {
+		t.Fatalf("an install without references row = %v", r)
+	}
+	if out, code := runMain(t, ie.env, "", "skills", "--global"); code != 0 || !strings.Contains(out, "result: installed") {
+		t.Fatalf("reinstall: exit %d\n%s", code, out)
+	}
+	if r := skillsRow(); r == nil || r["state"] != "installed" {
+		t.Fatalf("after reinstall row = %v", r)
+	}
+	mine := filepath.Join(refDir, "mine.md")
+	writeTestFile(t, mine, "my notes\n")
+	if out, code := runMain(t, ie.env, "", "skills", "--global", "--uninstall"); code != 0 {
+		t.Fatalf("uninstall: exit %d\n%s", code, out)
+	}
+	if got := readFileOrFail(t, mine); got != "my notes\n" {
+		t.Errorf("the person's reference: %q", got)
+	}
+	if exists(ref) || exists(filepath.Join(ie.userHome, ".claude", "skills", "build", "SKILL.md")) {
+		t.Error("jig's files stayed")
 	}
 }
