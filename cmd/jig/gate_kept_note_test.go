@@ -447,11 +447,9 @@ func TestTwoKeptNotesInOneWorkspaceAreOneFixSlice(t *testing.T) {
 		}
 	}
 
-	round2Path := filepath.Join(t.TempDir(), "round-2.json")
-	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"alpha/alpha.go", "alpha/percent.go"}, Summary: "round 2: nothing new"})
-	out, code = roundThroughMain(t, e, fx, round2Path)
+	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix_slices[1]") || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2 exit = %d, want 0 and the one fix slice fix-2-alpha-test\n%s", code, out)
+		t.Fatalf("jig gate exit = %d, want 0 and the one fix slice fix-2-alpha-test\n%s", code, out)
 	}
 
 	st, err := store.Open(fx.StoreDir)
