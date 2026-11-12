@@ -1,0 +1,91 @@
+package verify
+
+import (
+	"os"
+	"os/exec"
+	"testing"
+	"time"
+
+	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
+)
+
+// exitedPID is the pid of a process that ran and ended: a worker that died.
+func exitedPID(t *testing.T) int {
+	t.Helper()
+	c := exec.Command(os.Args[0], "-test.run=^$")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return c.Process.Pid
+}
+
+// TestStaleVerificationStandsAside: a pending line whose worker is gone is not
+// an answer. The request runs the oracle again with no rerun, and the line
+// then reads as the run's outcome.
+func TestStaleVerificationStandsAside(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	spawnedAt := time.Now().Add(-20 * time.Minute)
+	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1, TS: spawnedAt.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Append(r.deps.JigHome, journal.Line{Ticket: r.fx.Ticket, Slice: "a", Event: journal.EventVerifySpawned, Commit: sha, PID: exitedPID(t), TS: spawnedAt.Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(r.deps, r.request("a", sha))
+	if err != nil || res.Existing || res.State != journal.VerifyPass {
+		t.Fatalf("Run = %+v, %v, want the oracle to run again and pass", res, err)
+	}
+	if len(r.oracle.seen()) != 1 {
+		t.Errorf("oracle calls = %d, want 1", len(r.oracle.seen()))
+	}
+}
+
+// TestStoppedVerificationStandsAside: a run jig was told to stop, and a run
+// that could not start its oracle, never judged the code: the request runs it.
+func TestStoppedVerificationStandsAside(t *testing.T) {
+	t.Parallel()
+	cases := map[string]journal.Line{
+		"stopped oracle": {Event: journal.EventOracle, Outcome: "fail", Cause: journal.CauseStopped, Summary: "stopped"},
+		"verify error":   {Event: journal.EventVerifyError, Outcome: "error", Summary: "no worktree"},
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := newRig(t, fixture.Opts{})
+			sha := r.fixClamp()
+			line.Slice, line.Commit, line.Attempt = "a", sha, 1
+			if err := journal.Append(r.st, r.fx.Ticket, line); err != nil {
+				t.Fatal(err)
+			}
+			res, err := Run(r.deps, r.request("a", sha))
+			if err != nil || res.Existing || res.State != journal.VerifyPass {
+				t.Fatalf("Run = %+v, %v, want the oracle to run again and pass", res, err)
+			}
+			if len(r.oracle.seen()) != 1 {
+				t.Errorf("oracle calls = %d, want 1", len(r.oracle.seen()))
+			}
+		})
+	}
+}
+
+// TestFailedVerificationStillStands: an oracle that failed on the code is an
+// answer; only a rerun asks again.
+func TestFailedVerificationStillStands(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Commit: sha, Attempt: 1, Summary: "--- FAIL: TestX"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(r.deps, r.request("a", sha))
+	if err != nil || !res.Existing || res.State != journal.VerifyFail {
+		t.Fatalf("Run = %+v, %v, want the failure to stand", res, err)
+	}
+	if len(r.oracle.seen()) != 0 {
+		t.Errorf("a failed record was run over: oracle calls %d", len(r.oracle.seen()))
+	}
+}
