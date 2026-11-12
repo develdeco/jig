@@ -639,10 +639,17 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 // cmd, and the oracle line, which still carries cmd so slice state and the gate
 // read it as ever, names the light command (Ran) and the full run it stands on
 // (ReusedFrom).
-func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) error {
+func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) (err error) {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	target := rec.start(x.r.Slice, x.attempt, x.sha)
+	// A run that jig's stop ended (in the oracle or in the wait for the slot)
+	// has nothing to record: its directory goes as a failed run's does.
+	defer func() {
+		if errors.Is(err, envrun.ErrStopped) {
+			_ = rec.finish(x.r.Slice, x.attempt, x.sha, target, false)
+		}
+	}()
 
 	limit := m.OracleLimit()
 	runs := cmd
@@ -749,7 +756,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	// TUI, the hooks), and a reader it wakes must find the slice green, not
 	// the state from before. A run that stops in between leaves the oracle
 	// line, which already stands as the commit's pass (VerificationState).
-	err := x.setState(func(st *store.SliceState) bool {
+	err = x.setState(func(st *store.SliceState) bool {
 		st.Attempts = max(st.Attempts, x.attempt)
 		if newer {
 			return true
