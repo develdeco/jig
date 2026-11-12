@@ -328,7 +328,7 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	}
 	reported = append(reported, decidedOutstanding...)
 
-	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, files, fixSliceFindings)
+	slices, err := buildFixSlices(round, st, ticket, existingSlices, keptFixes, keptAsks, files, fixSliceFindings, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -361,7 +361,7 @@ func queueKeeps(round int, st *store.Store, ticket string, existingSlices []stor
 		}
 	}
 	sort.Slice(keeps, func(i, j int) bool { return keeps[i].ID < keeps[j].ID })
-	slices, err = buildFixSlices(round, st, ticket, existingSlices, nil, keeps, files, fixSliceFindings)
+	slices, err = buildFixSlices(round, st, ticket, existingSlices, nil, keeps, files, fixSliceFindings, true)
 	for _, f := range keeps {
 		kept = append(kept, f.ID)
 	}
@@ -592,8 +592,11 @@ func splitFixGroupIntoSlices(group []Finding, fixSliceFindings int) [][]Finding 
 // existingSlices is the ticket's slices.yaml as of before this round, used
 // only to look up a recurrence's previous fix slice. files gives each
 // finding's oracle names, those of its repo's manifest (the zero-oracle check
-// already ran on them before triage).
-func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, files roundFiles, fixSliceFindings int) ([]store.Slice, error) {
+// already ran on them before triage). queued says the slices are a person's
+// keeps queued before the round opened: their ids carry a "q" marker, so the
+// round's own findings of the same workspace and oracle keep the plain id
+// instead of taking a "-2" suffix from the queued slice.
+func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []store.Slice, keptFixes, keptAsks []Finding, files roundFiles, fixSliceFindings int, queued bool) ([]store.Slice, error) {
 	type groupKey struct{ workspace, oracle string }
 	groups := map[groupKey][]Finding{}
 	var order []groupKey
@@ -634,6 +637,9 @@ func buildFixSlices(round int, st *store.Store, ticket string, existingSlices []
 		sort.Slice(group, func(i, j int) bool { return group[i].ID < group[j].ID })
 		parts := splitFixGroupIntoSlices(group, fixSliceFindings)
 		baseID := fmt.Sprintf("fix-%d-%s-%s", round, key.workspace, key.oracle)
+		if queued {
+			baseID = fmt.Sprintf("fix-%d-q-%s-%s", round, key.workspace, key.oracle)
+		}
 		for i, part := range parts {
 			var blocks []string
 			var ids []string
