@@ -122,6 +122,13 @@ matching the directory name and a `description:` of at most 50 words.
   serial: the one that checks `Main` reads the process's `JIG_HOME`, and the
   one that sets git's commit dates in the environment, which the `git
   commit` child reads from it.
+- A setup that several tests repeat, and that only reads or is changed in a
+  copy of its own, is built once per test binary and copied, not rebuilt: a
+  fixture shape (`fixture.Build`) is a template, and a state only the test's
+  own package can build (a built ticket, a repository's history) is a named
+  scenario (`fixture.Scenario`) with an equivalence test that builds it both
+  ways and compares them. Write a history as one `git fast-import` stream
+  rather than a command per commit.
 - Each package's git process count is compared with main's. CI's Linux leg
   runs every test binary through `internal/gitbudget`, which counts the
   processes git's own trace sees; the push run on main saves those counts as

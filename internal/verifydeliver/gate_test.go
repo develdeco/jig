@@ -66,8 +66,7 @@ func (alwaysCleanSource) Round(RoundInput) (Round, bool, error) { return Round{}
 func TestGateCleanRound2(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
 	d.Oracle = nil // the real oracle run is what this test is about
@@ -308,8 +307,7 @@ func (duplicateFixSliceSource) Round(in RoundInput) (Round, bool, error) {
 func TestGateSurfacesDuplicateFixSliceID(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
 	_, err := Gate(d, duplicateFixSliceSource{}, GateOpts{Ticket: fx.Ticket})
@@ -530,8 +528,7 @@ func TestGateRefusalsLeaveNoTrace(t *testing.T) {
 func TestGateIntentFlagReplacesExistingIntentMD(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	removeBrief(t, d, fx.Ticket)
 	wantExplicit := func(t *testing.T, report GateReport) string {
@@ -686,8 +683,7 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	addSecondOracle(t, buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
 	d := newDeps(t, fx)
 	rec := &oracleRecorder{}
@@ -742,8 +738,7 @@ func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
 
 	// One build serves the three files, each tried in turn: the way out of each
 	// refusal leaves a good intent.md, which the next bad file replaces.
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	removeBrief(t, d, fx.Ticket)
 
@@ -888,8 +883,7 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
 	d.Oracle = nil // the real oracle run is what this test is about
@@ -1063,9 +1057,8 @@ func TestGateUsesRecordedBranch(t *testing.T) {
 func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
-	driveBuild(t, fx, "rung-a")
 
 	for _, tc := range []struct {
 		name     string
@@ -1133,8 +1126,7 @@ func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	round := 0
@@ -1301,8 +1293,7 @@ func TestGateReviewerFindingsBookkeepingAcrossRounds(t *testing.T) {
 func TestGateFixBudgetParksAfterRoundsUsed(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	fr := 1
 	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
@@ -1387,8 +1378,7 @@ func TestGateFixBudgetParksAfterRoundsUsed(t *testing.T) {
 func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	fr := 0
 	d.Cfg.Gate = &project.GateConfig{FixRounds: &fr}
@@ -1466,8 +1456,7 @@ func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testin
 func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	fsf := 2
 	d.Cfg.Gate = &project.GateConfig{FixSliceFindings: &fsf}
@@ -1535,8 +1524,7 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	attempt := 0
@@ -1664,8 +1652,7 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	round := 0
@@ -1809,8 +1796,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := ticketBranch(fx.Ticket)
 
@@ -2059,8 +2045,7 @@ func renameOracle(t *testing.T, buildDir, branch, from, to string) {
 // ready for the caller to run round 3 through Gate.
 func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest) ReviewResult) (Deps, *fixture.Fixture, GateSource) {
 	t.Helper()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	buildDir := buildLeaseDir(t, fx)
 	branch := ticketBranch(fx.Ticket)
 	addSecondOracle(t, buildDir, branch)
@@ -2234,8 +2219,7 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 func TestGateNoRoundKeepsAnOutstandingAskFromGoingClean(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
 	// Round 1 is recorded directly: an ask nobody decided, exactly the

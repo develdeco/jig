@@ -92,8 +92,7 @@ func reusedByWorkspace(runs []OracleRun) map[string]string {
 // gate runs nothing. The last runs the real oracles over the same red tests.
 func TestGateReusesAnOraclePassOnTheSameTree(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	failing := map[string]string{
 		"alpha/zz_red_test.go": "package alpha\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"red on purpose\") }\n",

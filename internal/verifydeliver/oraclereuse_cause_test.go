@@ -3,7 +3,6 @@ package verifydeliver
 import (
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -22,8 +21,7 @@ func recordFail(t *testing.T, d Deps, ticket, commit, command, cause string) {
 // light pass followed by such a run.
 func TestGateReusesAPassBesideAnUncountedFail(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	alpha, beta := func() string { return testCmd(t, fx, "alpha") }, func() string { return testCmd(t, fx, "beta") }
 
@@ -72,8 +70,7 @@ func TestGateReusesAPassBesideAnUncountedFail(t *testing.T) {
 // the same tree is not reused; the gate runs the oracle again.
 func TestGateRerunsAfterATestFailure(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	rec := &oracleRecorder{}
 	d.Oracle = rec.run

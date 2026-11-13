@@ -441,7 +441,7 @@ func refShapes(t *testing.T, dir string, memo map[string]string) map[string]stri
 // classifyLine and headReviewed answer alike for every case, the base a
 // carried merge names included. The ids of the commits themselves are not
 // compared: a merge's message names a commit by id, which the stream cannot.
-// And a copy starts no git process: with git off the PATH, one is still made.
+// That a copy starts no git process is what the package's git count shows.
 func TestLineHistoryCopyIsTheGitBuiltHistory(t *testing.T) {
 	copied, got := lineCases(t)
 	byGit, want := lineCasesByGit(t)
@@ -501,14 +501,6 @@ func TestLineHistoryCopyIsTheGitBuiltHistory(t *testing.T) {
 	}
 	if head, err := os.ReadFile(filepath.Join(copied, ".git", "HEAD")); err != nil || !strings.Contains(string(head), "refs/heads/work") {
 		t.Errorf("HEAD = %q, %v, want the branch work", head, err)
-	}
-
-	t.Setenv("PATH", t.TempDir())
-	if _, err := gitx.Run(copied, "rev-parse", "HEAD"); err == nil {
-		t.Fatalf("git still runs with an empty PATH, so a copy that starts it would pass")
-	}
-	if _, cases := lineCases(t); len(cases) != len(want) {
-		t.Errorf("a copy without git made %d cases", len(cases))
 	}
 }
 
