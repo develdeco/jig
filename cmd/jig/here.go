@@ -148,6 +148,7 @@ func openLocatedStore(m *gitx.Memo, where locate.Where) (*store.Store, project.C
 	if err != nil {
 		return nil, project.Config{}, err
 	}
+	st.Memo = m
 	return st, cfg, nil
 }
 

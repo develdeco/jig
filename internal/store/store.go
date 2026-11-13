@@ -226,7 +226,7 @@ func (s *Store) TrackerLinkPath(e TrackerEntry, o TrackerOwner) string {
 
 // HasRemote reports whether the store has a git remote named "origin".
 func (s *Store) HasRemote() bool {
-	_, err := gitx.Run(s.Root, "remote", "get-url", "origin")
+	_, err := s.Memo.OriginURL(s.Root, "origin")
 	return err == nil
 }
 

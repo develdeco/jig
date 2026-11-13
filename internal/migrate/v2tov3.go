@@ -121,7 +121,7 @@ func planV2toV3(in Input) (Plan, error) {
 // target other than main, and a remote that is a URL but not the clone's origin.
 func markerFor(in Input, cfg project.Config, repo project.Repo, repoName, clone string) project.Marker {
 	m := project.Marker{Jig: "1", Project: cfg.Name, Kind: project.KindProject}
-	if origin := project.OriginOf(nil, in.Store.Root); origin != "" && !gitx.IsLocalRemote(origin) {
+	if origin := project.OriginOf(in.Store.Memo, in.Store.Root); origin != "" && !gitx.IsLocalRemote(origin) {
 		m.Store = origin
 	}
 	var entry project.MarkerRepo
@@ -132,7 +132,7 @@ func markerFor(in Input, cfg project.Config, repo project.Repo, repoName, clone 
 		entry.Target = repo.Target
 	}
 	if repo.Remote != "" && !gitx.IsLocalRemote(repo.Remote) {
-		if origin := project.OriginOf(nil, clone); origin == "" || filepath.ToSlash(origin) != filepath.ToSlash(repo.Remote) {
+		if origin := project.OriginOf(in.Store.Memo, clone); origin == "" || filepath.ToSlash(origin) != filepath.ToSlash(repo.Remote) {
 			entry.Remote = repo.Remote
 		}
 	}

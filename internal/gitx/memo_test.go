@@ -194,3 +194,30 @@ func TestMemoIsSafeForConcurrentUse(t *testing.T) {
 		t.Errorf("Asked = %d, want 2", got)
 	}
 }
+
+// TestMemoDoesNotKeepAFailedIdentity: a repository with no identity is
+// refused every time it is asked, so the person who sets one is believed at
+// the next ask.
+func TestMemoDoesNotKeepAFailedIdentity(t *testing.T) {
+	dir := memoRepo(t, "https://example.invalid/a.git")
+	cfg := "[core]\n\trepositoryformatversion = 0\n\tuseConfigOnly = true\n[user]\n\tuseConfigOnly = true\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveIdentity(dir); err == nil {
+		t.Skip("this machine resolves an identity with none configured")
+	}
+	m := NewMemo()
+	for i := 0; i < 2; i++ {
+		if _, err := m.Identity(dir); err == nil {
+			t.Fatal("Identity succeeded with none configured")
+		}
+	}
+	if got := m.Asked(); got != 2 {
+		t.Errorf("Asked = %d, want 2: a failed lookup is asked again", got)
+	}
+	setMemoOrigin(t, dir, "https://example.invalid/a.git")
+	if got, err := m.Identity(dir); err != nil || got.Email != "memo@example.invalid" {
+		t.Errorf("Identity after the config was set = %+v, %v", got, err)
+	}
+}

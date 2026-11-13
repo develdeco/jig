@@ -74,7 +74,7 @@ func hereCloneJudged(c hereCtx) (clonebehind.Result, bool) {
 	if c.Where.RepoDir == "" {
 		return clonebehind.Result{}, false
 	}
-	r := clonebehind.Check(cloneNamedByMap(c.e.memo, c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
+	r := clonebehind.Check(c.e.memo, cloneNamedByMap(c.e.memo, c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
 	return r, r.State == clonebehind.Behind || r.State == clonebehind.Diverged
 }
 

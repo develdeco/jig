@@ -166,7 +166,12 @@ func (m *Memo) Identity(dir string) (Identity, error) {
 	}
 	m.asked.Add(1)
 	val, err := ResolveIdentity(dir)
-	r.ident = &memoAnswer[Identity]{val: val, err: err, stat: now}
+	if err != nil {
+		// A failed lookup is not kept: the person may fix it and ask again.
+		r.ident = nil
+		return val, err
+	}
+	r.ident = &memoAnswer[Identity]{val: val, stat: now}
 	return val, err
 }
 
