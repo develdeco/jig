@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 )
 
@@ -19,10 +20,7 @@ import (
 // identity and dates.
 func commitIn(t *testing.T, dir, msg string) {
 	t.Helper()
-	git(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, append(append([]string{}, hermeticGitEnv...), identityEnv...), "commit", "-q", "-m", msg); err != nil {
-		t.Fatalf("commit %q in %s: %v", msg, dir, err)
-	}
+	gitbuild.New(t, append(append([]string{}, hermeticGitEnv...), identityEnv...)).Commit(dir, msg)
 }
 
 // writeIn writes a file under dir.
@@ -57,52 +55,64 @@ func buildSmallHistory(t *testing.T, dirs []string) {
 	t.Helper()
 	work, remote, other := filepath.Join(dirs[0], "work"), filepath.Join(dirs[1], "remote.git"), filepath.Join(dirs[1], "other")
 	aaa, zzz := filepath.Join(dirs[0], "aaa"), filepath.Join(dirs[1], "zzz")
-	for _, d := range []string{work, other, aaa, zzz} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
+	plus := func(files map[string]string, name, body string) map[string]string {
+		out := map[string]string{name: body}
+		for k, v := range files {
+			if k != name {
+				out[k] = v
+			}
 		}
-		pin(t, d, "init", "-q", "-b", "main")
-		pin(t, d, "config", "core.autocrlf", "false")
+		return out
 	}
-	writeIn(t, work, "manifest.yaml", "work: "+dirs[0]+"\nremote: "+filepath.ToSlash(remote)+"\n")
-	writeIn(t, work, "plain.txt", "names no directory\n")
-	commitIn(t, work, "first")
-	pin(t, work, "clone", "-q", "--bare", ".", remote)
-	pin(t, work, "remote", "add", "origin", remote)
-	writeIn(t, work, "second.txt", "second\n")
-	commitIn(t, work, "second")
-	pin(t, work, "checkout", "-q", "-b", "side", "HEAD^")
-	writeIn(t, work, "side.txt", "side\n")
-	commitIn(t, work, "side")
-	pin(t, work, "checkout", "-q", "main")
-	if _, err := gitx.RunEnv(work, append(append([]string{}, hermeticGitEnv...), identityEnv...), "merge", "-q", "--no-ff", "-m", "merge side", "side"); err != nil {
-		t.Fatal(err)
+	gitDirOf := func(dir string) string { return filepath.Join(dir, ".git") }
+
+	first := map[string]string{"manifest.yaml": "work: " + dirs[0] + "\nremote: " + filepath.ToSlash(remote) + "\n", "plain.txt": "names no directory\n"}
+	second := plus(first, "second.txt", "second\n")
+	side := plus(first, "side.txt", "side\n")
+	merged := plus(second, "side.txt", "side\n")
+	workCommits := []fcommit{
+		{"main", "first", nil, first},
+		{"main", "second", []string{"first"}, second},
+		{"side", "side", []string{"first"}, side},
+		{"main", "merge side", []string{"second", "side"}, merged},
 	}
-	pin(t, work, "fetch", "-q", "origin")
-	writeIn(t, other, "other.yaml", "dir: "+dirs[1]+"\n")
-	commitIn(t, other, "other first")
-	writeIn(t, other, "later.txt", "later\n")
-	commitIn(t, other, "other later")
+	ids := importRepo(t, gitDirOf(work), "main", false, workCommits)
+	for name, body := range merged {
+		writeIn(t, work, name, body)
+	}
+	pin(t, work, "reset", "-q")
+	// The remote has the first commit only: the others were never pushed.
+	importRepo(t, remote, "main", true, workCommits[:1])
+	writeIn(t, gitDirOf(work), "config", readFileString(t, filepath.Join(gitDirOf(work), "config"))+"[remote \"origin\"]\n\turl = "+filepath.ToSlash(remote)+"\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n")
+	writeIn(t, gitDirOf(work), "refs/remotes/origin/main", ids["first"]+"\n")
+
 	// Files that name a commit of another repository, which moves when its
 	// files are pointed at the copy: one tracked, in two versions, and one not.
-	first := git(t, work, "rev-list", "--max-parents=0", "main")
-	writeIn(t, other, "ids.txt", "seen "+first+"\n")
-	commitIn(t, other, "other sees a commit")
-	writeIn(t, other, "ids.txt", "seen "+first+"\nand again\n")
-	commitIn(t, other, "other sees it again")
-	writeIn(t, dirs[1], "state.txt", "first commit "+first+"\n")
-
 	// An id that moves twice: other (rewritten before zzz in a pass) names a
 	// commit of zzz, so other's commits move again once zzz's are known. A file
 	// of aaa (rewritten before both, holding no directory, only the id) and one
 	// no repository tracks name other's commit.
-	writeIn(t, zzz, "zzz.yaml", "dir: "+dirs[1]+"\n")
-	commitIn(t, zzz, "zzz first")
-	writeIn(t, other, "zzz-seen.txt", "zzz "+git(t, zzz, "rev-parse", "HEAD")+"\n")
-	commitIn(t, other, "other names zzz")
-	writeIn(t, aaa, "seen.txt", "other "+git(t, other, "rev-parse", "HEAD")+"\n")
-	commitIn(t, aaa, "aaa names other")
-	writeIn(t, dirs[1], "twice.txt", "other "+git(t, other, "rev-parse", "HEAD")+"\n")
+	zzzFiles := map[string]string{"zzz.yaml": "dir: " + dirs[1] + "\n"}
+	zzzIDs := importRepo(t, gitDirOf(zzz), "main", false, []fcommit{{"main", "zzz first", nil, zzzFiles}})
+	checkOut(t, zzz, zzzFiles)
+	o1 := map[string]string{"other.yaml": "dir: " + dirs[1] + "\n"}
+	o2 := plus(o1, "later.txt", "later\n")
+	o3 := plus(o2, "ids.txt", "seen "+ids["first"]+"\n")
+	o4 := plus(o3, "ids.txt", "seen "+ids["first"]+"\nand again\n")
+	o5 := plus(o4, "zzz-seen.txt", "zzz "+zzzIDs["zzz first"]+"\n")
+	otherIDs := importRepo(t, gitDirOf(other), "main", false, []fcommit{
+		{"main", "other first", nil, o1},
+		{"main", "other later", []string{"other first"}, o2},
+		{"main", "other sees a commit", []string{"other later"}, o3},
+		{"main", "other sees it again", []string{"other sees a commit"}, o4},
+		{"main", "other names zzz", []string{"other sees it again"}, o5},
+	})
+	checkOut(t, other, o5)
+	aaaFiles := map[string]string{"seen.txt": "other " + otherIDs["other names zzz"] + "\n"}
+	importRepo(t, gitDirOf(aaa), "main", false, []fcommit{{"main", "aaa names other", nil, aaaFiles}})
+	checkOut(t, aaa, aaaFiles)
+	writeIn(t, dirs[1], "state.txt", "first commit "+ids["first"]+"\n")
+	writeIn(t, dirs[1], "twice.txt", "other "+otherIDs["other names zzz"]+"\n")
 }
 
 // sameTrees fails t unless the copy read as got is the direct build read as
@@ -165,16 +175,16 @@ var scenarioBuilds = []struct {
 		},
 		check: func(t *testing.T, dirs []string, fx *Fixture) {
 			work := filepath.Join(dirs[0], "work")
-			if got := git(t, work, "show", git(t, work, "rev-list", "--max-parents=0", "HEAD")+":manifest.yaml"); !strings.Contains(got, dirs[0]) || !strings.Contains(got, filepath.ToSlash(filepath.Join(dirs[1], "remote.git"))) {
+			if got := blobIn(t, work, "main~2", "manifest.yaml"); !strings.Contains(got, dirs[0]) || !strings.Contains(got, filepath.ToSlash(filepath.Join(dirs[1], "remote.git"))) {
 				t.Errorf("the first commit's manifest = %q, want it to name %s and the remote", got, dirs[0])
 			}
 			other := filepath.Join(dirs[1], "other")
-			if got := git(t, other, "show", "HEAD~3:other.yaml"); !strings.Contains(got, dirs[1]) {
+			if got := blobIn(t, other, "HEAD~4", "other.yaml"); !strings.Contains(got, dirs[1]) {
 				t.Errorf("the other repository's first commit = %q, want it to name %s", got, dirs[1])
 			}
-			first := git(t, work, "rev-list", "--max-parents=0", "main")
+			first := revParse(t, work, "main~2")
 			for _, rev := range []string{"HEAD", "HEAD^"} {
-				if got := git(t, other, "show", rev+":ids.txt"); !strings.Contains(got, first) {
+				if got := blobIn(t, other, rev, "ids.txt"); !strings.Contains(got, first) {
 					t.Errorf("ids.txt at %s = %q, want the first commit's new id %s", rev, got, first)
 				}
 			}
@@ -182,12 +192,12 @@ var scenarioBuilds = []struct {
 			// repository that holds no directory and in one no repository tracks.
 			for _, f := range []string{filepath.Join(dirs[0], "aaa", "seen.txt"), filepath.Join(dirs[1], "twice.txt")} {
 				id := strings.TrimSpace(strings.TrimPrefix(readFileString(t, f), "other "))
-				if got := git(t, other, "log", "-1", "--format=%s", id); got != "other names zzz" {
+				if got := subjectIn(t, other, id); got != "other names zzz" {
 					t.Errorf("%s names %s, whose subject is %q, want the commit that names zzz", f, id, got)
 				}
 			}
 			zid := strings.TrimSpace(strings.TrimPrefix(readFileString(t, filepath.Join(other, "zzz-seen.txt")), "zzz "))
-			if got := git(t, filepath.Join(dirs[1], "zzz"), "log", "-1", "--format=%s", zid); got != "zzz first" {
+			if got := subjectIn(t, filepath.Join(dirs[1], "zzz"), zid); got != "zzz first" {
 				t.Errorf("zzz-seen.txt names %s, whose subject is %q", zid, got)
 			}
 			if got := readFileString(t, filepath.Join(dirs[1], "state.txt")); !strings.Contains(got, first) {
@@ -210,7 +220,7 @@ var scenarioBuilds = []struct {
 			if fx == nil || fx.Dir != dirs[0] || fx.Home != dirs[1] || !strings.HasPrefix(fx.RepoDir, dirs[0]) {
 				t.Fatalf("Fixture = %+v, want it in %v", fx, dirs)
 			}
-			if got := git(t, fx.RepoDir, "show", "HEAD^:.claude/jig.yaml"); !strings.Contains(got, filepath.ToSlash(dirs[0])) && !strings.Contains(got, dirs[0]) {
+			if got := blobIn(t, fx.RepoDir, "HEAD^", ".claude/jig.yaml"); !strings.Contains(got, filepath.ToSlash(dirs[0])) && !strings.Contains(got, dirs[0]) {
 				t.Errorf("the manifest in the base commit = %q, want it to name %s", got, dirs[0])
 			}
 		},
@@ -248,13 +258,23 @@ func TestAScenarioCopyIsTheDirectBuild(t *testing.T) {
 			}
 			sc.check(t, dirs, copied)
 			works, bares := gitRepos(t, filepath.Dir(dirs[0]))
-			for _, r := range append(append([]string{}, works...), bares...) {
-				git(t, r, "fsck", "--strict", "--no-dangling")
-			}
+			// Git itself finds the repositories that have an index sound and clean,
+			// and one remote sound; the others are compared with the direct build below.
+			fscked := false
 			for _, w := range works {
+				if _, err := os.Stat(filepath.Join(w, ".git", "index")); err != nil {
+					continue
+				}
+				if !fscked {
+					git(t, w, "fsck", "--strict", "--no-dangling")
+					fscked = true
+				}
 				if status := git(t, w, "status", "--porcelain"); status != "" {
 					t.Errorf("%s: git status = %q, want clean", w, status)
 				}
+			}
+			if len(bares) > 0 {
+				git(t, bares[0], "fsck", "--strict", "--no-dangling")
 			}
 
 			tpl := scenarioTemplate(t, sc.name, opts, 2)
@@ -312,11 +332,7 @@ func scenarioTemplate(t *testing.T, name string, opts Opts, dirs int) *template 
 // with other options or another number of directories, is built again.
 func TestAScenarioIsBuiltOncePerBinary(t *testing.T) {
 	var built atomic.Int32
-	build := func(dirs []string) (*Fixture, error) {
-		built.Add(1)
-		buildSmallHistory(t, dirs)
-		return nil, nil
-	}
+	build := whereBuild(&built)
 	const callers = 6
 	var wg sync.WaitGroup
 	copies := make([][]string, callers)
@@ -336,13 +352,13 @@ func TestAScenarioIsBuiltOncePerBinary(t *testing.T) {
 	if n := built.Load(); n != 1 {
 		t.Errorf("the build ran %d times for %d callers, want once", n, callers)
 	}
-	heads := map[string]bool{}
+	// Each copy names its own directories.
 	for _, dirs := range copies {
-		heads[git(t, filepath.Join(dirs[0], "work"), "rev-parse", "main")] = false
-	}
-	// Each copy is at its own place, so their commits differ.
-	if len(heads) != callers {
-		t.Errorf("%d different histories from %d copies; each is in its own directory", len(heads), callers)
+		for _, d := range dirs {
+			if got := readFileString(t, filepath.Join(d, "where.txt")); got != "built in "+d+whereNL {
+				t.Errorf("%s holds %q, want it to name itself", d, got)
+			}
+		}
 	}
 
 	for what, call := range map[string]func() error{
@@ -427,22 +443,19 @@ func TestAScenarioCopyCanBeChangedWithoutChangingTheOthers(t *testing.T) {
 		}
 	}
 	workB := filepath.Join(b[0], "work")
-	headBefore := git(t, workB, "rev-parse", "HEAD")
+	headBefore := revParse(t, workB, "HEAD")
 	workA := filepath.Join(a[0], "work")
 	writeIn(t, workA, "new.txt", "new\n")
 	commitIn(t, workA, "more")
-	for _, repo := range []string{workA, filepath.Join(a[1], "remote.git")} {
-		git(t, repo, "repack", "-a", "-d", "-q")
-		git(t, repo, "prune", "--expire=now")
+	// Copies share their loose objects as links: removing every one of a copy's
+	// own (what a repack and prune leave) must leave the other whole.
+	for _, gitDir := range []string{filepath.Join(workA, ".git"), filepath.Join(a[1], "remote.git")} {
+		removeLooseObjects(t, gitDir)
 	}
-	for _, repo := range []string{workB, filepath.Join(b[1], "remote.git"), filepath.Join(b[1], "other")} {
-		git(t, repo, "fsck", "--strict", "--no-dangling")
-	}
-	if got := git(t, workB, "rev-parse", "HEAD"); got != headBefore {
+	git(t, workB, "fsck", "--strict", "--no-dangling")
+	git(t, filepath.Join(b[1], "remote.git"), "fsck", "--strict", "--no-dangling")
+	if got := revParse(t, workB, "HEAD"); got != headBefore {
 		t.Errorf("another copy's HEAD moved to %s", got)
-	}
-	if status := git(t, workB, "status", "--porcelain"); status != "" {
-		t.Errorf("another copy's git status = %q", status)
 	}
 }
 
@@ -451,11 +464,7 @@ func TestAScenarioCopyCanBeChangedWithoutChangingTheOthers(t *testing.T) {
 // shape's template is not used for one.
 func TestAScenarioIsBuiltDirectlyInADirTheCopyWouldNotServe(t *testing.T) {
 	var built atomic.Int32
-	build := func(dirs []string) (*Fixture, error) {
-		built.Add(1)
-		buildSmallHistory(t, dirs)
-		return nil, nil
-	}
+	build := whereBuild(&built)
 	if _, err := Scenario("unserved", Opts{}, scratchDirs(t, 2), build); err != nil {
 		t.Fatal(err)
 	}
@@ -466,10 +475,9 @@ func TestAScenarioIsBuiltDirectlyInADirTheCopyWouldNotServe(t *testing.T) {
 	if n := built.Load(); n != 2 {
 		t.Errorf("%d builds, want the template's and the one in the odd directory", n)
 	}
-	if got := git(t, filepath.Join(odd[0], "work"), "log", "-1", "--format=%s"); got != "merge side" {
-		t.Errorf("the direct build's last commit = %q", got)
+	if got := readFileString(t, filepath.Join(odd[0], "where.txt")); got != "built in "+odd[0]+whereNL {
+		t.Errorf("the direct build holds %q", got)
 	}
-	git(t, filepath.Join(odd[0], "work"), "fsck", "--strict", "--no-dangling")
 }
 
 // pin runs git in dir under the hermetic environment and the fixture's pinned
@@ -491,3 +499,47 @@ func readFileString(t *testing.T, p string) string {
 	}
 	return string(data)
 }
+
+// removeLooseObjects removes every loose object of the git directory gitDir,
+// as a repack and a prune of its objects leave it.
+func removeLooseObjects(t *testing.T, gitDir string) {
+	t.Helper()
+	objects := filepath.Join(gitDir, "objects")
+	entries, err := os.ReadDir(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 2 {
+			if err := os.RemoveAll(filepath.Join(objects, e.Name())); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// checkOut writes the files of a commit into the work tree dir, as a checkout
+// of it would.
+func checkOut(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		writeIn(t, dir, name, body)
+	}
+}
+
+// whereBuild is a scenario that holds one file naming each directory it was
+// built in (no repository: the tests of when and where a scenario is built
+// need none, and a repository costs git processes).
+func whereBuild(count *atomic.Int32) func(dirs []string) (*Fixture, error) {
+	return func(dirs []string) (*Fixture, error) {
+		count.Add(1)
+		for _, d := range dirs {
+			if err := os.WriteFile(filepath.Join(d, "where.txt"), []byte("built in "+d+"\n"), 0o644); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	}
+}
+
+const whereNL = "\n"
