@@ -59,11 +59,48 @@ func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
 // commit that needs it. When who fails, so does CommitAllAs, having changed
 // nothing a reader sees: the objects it wrote stay unreferenced.
 func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, error) {
-	authorTime, err := signatureTime("AUTHOR")
+	return r.commitAll(msg, who, os.LookupEnv)
+}
+
+// CommitAllEnv is the commit CommitAll makes with its author, committer and
+// both dates read from env (KEY=VALUE entries, the last of a key winning, as
+// RunEnv takes them) before the process environment, so a test pins them
+// without editing the process's own. It writes what the git program writes
+// under the same environment, hash included, and returns ErrUseCLI for the
+// reasons CommitAll does, and when neither env nor the process environment
+// names the author and committer, which the git program would read from
+// configuration.
+func (r *Repo) CommitAllEnv(msg string, env []string) (bool, error) {
+	lookup := envEntries(env)
+	return r.commitAll(msg, func() (Identity, error) {
+		for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+			if v, _ := lookup(k); v == "" {
+				return Identity{}, ErrUseCLI
+			}
+		}
+		return Identity{}, nil
+	}, lookup)
+}
+
+// envEntries answers lookups from KEY=VALUE entries, then the process
+// environment.
+func envEntries(env []string) envLookup {
+	return func(key string) (string, bool) {
+		for i := len(env) - 1; i >= 0; i-- {
+			if k, v, ok := strings.Cut(env[i], "="); ok && k == key {
+				return v, true
+			}
+		}
+		return os.LookupEnv(key)
+	}
+}
+
+func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup) (bool, error) {
+	authorTime, err := signatureTime("AUTHOR", env)
 	if err != nil {
 		return false, err
 	}
-	committerTime, err := signatureTime("COMMITTER")
+	committerTime, err := signatureTime("COMMITTER", env)
 	if err != nil {
 		return false, err
 	}
@@ -157,8 +194,8 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 		return false, err
 	}
 	c := &object.Commit{
-		Author:    *signature("AUTHOR", id, authorTime),
-		Committer: *signature("COMMITTER", id, committerTime),
+		Author:    *signature("AUTHOR", id, authorTime, env),
+		Committer: *signature("COMMITTER", id, committerTime, env),
 		Message:   strings.TrimRight(msg, "\n") + "\n",
 		TreeHash:  tree,
 	}
@@ -659,8 +696,8 @@ func persistTree(repo *git.Repository, node *treeNode, known plumbing.Hash) erro
 // "COMMITTER"): GIT_<role>_DATE when set, else now. A pinned date that does
 // not parse is ErrUseCLI, which CommitAllAs reports before it changes
 // anything.
-func signatureTime(role string) (time.Time, error) {
-	if v := os.Getenv("GIT_" + role + "_DATE"); v != "" {
+func signatureTime(role string, env envLookup) (time.Time, error) {
+	if v, _ := env("GIT_" + role + "_DATE"); v != "" {
 		t, ok := parseGitDate(v)
 		if !ok {
 			return time.Time{}, ErrUseCLI
@@ -672,12 +709,12 @@ func signatureTime(role string) (time.Time, error) {
 
 // signature is the git program's identity for role ("AUTHOR" or
 // "COMMITTER"): GIT_<role>_NAME and _EMAIL when set, else id, stamped when.
-func signature(role string, id Identity, when time.Time) *object.Signature {
+func signature(role string, id Identity, when time.Time, env envLookup) *object.Signature {
 	name, email := id.Name, id.Email
-	if v := os.Getenv("GIT_" + role + "_NAME"); v != "" {
+	if v, _ := env("GIT_" + role + "_NAME"); v != "" {
 		name = v
 	}
-	if v := os.Getenv("GIT_" + role + "_EMAIL"); v != "" {
+	if v, _ := env("GIT_" + role + "_EMAIL"); v != "" {
 		email = v
 	}
 	return &object.Signature{Name: name, Email: email, When: when}
