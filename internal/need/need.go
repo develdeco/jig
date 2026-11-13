@@ -61,9 +61,9 @@ type record struct {
 	// record written before them has no wall time and is not read by it.
 	WallSeconds float64 `json:"wall_s,omitempty"`
 	Shared      bool    `json:"shared,omitempty"`
-	// Cmd names the command the run ran (a hash): one oracle name runs as
-	// several commands (one per workspace, one per repo), and the share rule
-	// compares a run only with runs of the same command.
+	// Cmd names what the run ran (a hash of the key the caller gave): one
+	// oracle name runs as several commands (one per workspace, one per repo),
+	// and the share rule compares a run only with runs of the same one.
 	Cmd string `json:"cmd,omitempty"`
 }
 

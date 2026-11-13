@@ -717,7 +717,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	if !isLight && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
 		stopCtx, endStopCtx := envrun.StopContext(context.Background())
 		defer endStopCtx()
-		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Pinned: d.Slots}, func(event, summary string) error {
+		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Repo: d.Repo, Pinned: d.Slots}, func(event, summary string) error {
 			if event == journal.EventSlotWait {
 				x.logf("%s", summary)
 			}

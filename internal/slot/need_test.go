@@ -17,6 +17,12 @@ import (
 // has 9 cores and 85 GiB.
 var testMachine = machine.Reading{CPUs: 10, MemoryBytes: 100 << 30}
 
+// testCommand is the command every test run asks with, and testRunKey the key
+// its runs are recorded under.
+const testCommand = "go test ./..."
+
+var testRunKey = Request{Command: testCommand}.runKey()
+
 // measure records a run of project's oracle test that kept cores busy and
 // peaked at peak bytes, so the next run of it asks for that.
 func measure(root, project string, cores int, peak uint64) {
@@ -24,11 +30,11 @@ func measure(root, project string, cores int, peak uint64) {
 	if peak > 0 {
 		use.Basis = envrun.BasisJob
 	}
-	need.Record(root, project, "test", "", testMachine, time.Now(), 10*time.Second, use, false)
+	need.Record(root, project, "test", testRunKey, testMachine, time.Now(), 10*time.Second, use, false)
 }
 
 func ask1(project, who string) Request {
-	return Request{Project: project, Who: who, Oracle: "test", machine: func() machine.Reading { return testMachine }}
+	return Request{Project: project, Who: who, Oracle: "test", Command: testCommand, machine: func() machine.Reading { return testMachine }}
 }
 
 func takeNow(t *testing.T, root string, r Request) func() {
@@ -256,7 +262,7 @@ func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
 	a.Record(25*time.Second, use)
 	a.Release()
 	b.Release()
-	runs := need.Runs(root, "p", "test", "", time.Now())
+	runs := need.Runs(root, "p", "test", testRunKey, time.Now())
 	if len(runs) != 2 || runs[0].Shared || !runs[1].Shared || runs[1].Wall != 25*time.Second {
 		t.Errorf("recorded runs = %+v, want one alone of 10s and one shared of 25s", runs)
 	}
@@ -268,7 +274,7 @@ func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
 func seed(root, project string, runs ...seededRun) {
 	for _, r := range runs {
 		wall := time.Duration(r.secs) * time.Second
-		need.Record(root, project, "test", "", testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, r.shared)
+		need.Record(root, project, "test", testRunKey, testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, r.shared)
 	}
 }
 
@@ -415,30 +421,72 @@ func TestTheEventsNameTheLevelWhenAProjectAsksForMore(t *testing.T) {
 	}
 }
 
+// recordRun records a run of project p's oracle test of the given command in
+// the given repo, kept 4 cores busy.
+func recordRun(root string, repo, command string, secs int, shared bool) {
+	wall := time.Duration(secs) * time.Second
+	key := Request{Repo: repo, Command: command}.runKey()
+	need.Record(root, "p", "test", key, testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, shared)
+}
+
+// askAs is a request of project p's oracle test in repo with command.
+func askAs(repo, command string) Request {
+	r := ask1("p", "P/a")
+	r.Repo, r.Command = repo, command
+	return r
+}
+
 // TestRunsOfAnotherCommandUnderTheSameOracleNameAreNotCompared: one oracle name
 // runs as several commands (a suite per workspace); a long suite's shared runs
 // are judged against its own alone time, not against a short suite's.
 func TestRunsOfAnotherCommandUnderTheSameOracleNameAreNotCompared(t *testing.T) {
 	root := t.TempDir()
-	record := func(command string, secs int, shared bool) {
-		wall := time.Duration(secs) * time.Second
-		need.Record(root, "p", "test", command, testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, shared)
-	}
-	for _, c := range []struct {
-		command string
-		secs    int
-	}{{"short", 30}, {"short", 30}, {"long", 300}} {
-		record(c.command, c.secs, false)
-	}
-	// The long suite's shared runs take about its own alone time, which is
-	// ten times the short suite's: contention would show in them only if they
-	// ran past 1.5 times 300s.
-	record("long", 310, true)
-	record("long", 320, true)
+	recordRun(root, "", "short", 30, false)
+	recordRun(root, "", "short", 30, false)
+	recordRun(root, "", "long", 300, false)
+	// The long suite's shared runs take about its own alone time, ten times
+	// the short suite's: contention would show in them only past 1.5 times
+	// 300s.
+	recordRun(root, "", "long", 310, true)
+	recordRun(root, "", "long", 320, true)
 	measure(root, "other", 4, 0)
 	other := takeNow(t, root, ask1("other", "O/a"))
 	defer other()
-	long := ask1("p", "P/a")
-	long.Command = "long"
-	takeNow(t, root, long)()
+	takeNow(t, root, askAs("", "long"))()
+}
+
+// TestRunsOfAnotherRepoWithTheSameCommandAreNotCompared: two repos of a project
+// whose manifests name the same command are told apart by repo.
+func TestRunsOfAnotherRepoWithTheSameCommandAreNotCompared(t *testing.T) {
+	root := t.TempDir()
+	recordRun(root, "web", "go test ./...", 30, false)
+	recordRun(root, "web", "go test ./...", 30, false)
+	recordRun(root, "api", "go test ./...", 300, false)
+	recordRun(root, "api", "go test ./...", 310, true)
+	recordRun(root, "api", "go test ./...", 320, true)
+	measure(root, "other", 4, 0)
+	other := takeNow(t, root, ask1("other", "O/a"))
+	defer other()
+	takeNow(t, root, askAs("api", "go test ./..."))()
+}
+
+// TestARunOfTheSameCommandThatRanSlowSharedIsRaised: the positive half, through
+// the command a real run carries: a command whose own shared runs ran slow is
+// raised, whatever other commands under the name did.
+func TestARunOfTheSameCommandThatRanSlowSharedIsRaised(t *testing.T) {
+	root := t.TempDir()
+	recordRun(root, "api", "go test ./...", 100, false)
+	recordRun(root, "api", "go test ./...", 100, false)
+	recordRun(root, "api", "go test ./...", 100, false)
+	recordRun(root, "api", "go test ./...", 300, true)
+	recordRun(root, "api", "go test ./...", 300, true)
+	recordRun(root, "web", "go test ./...", 5, false)
+	measure(root, "other", 4, 0)
+	other := takeNow(t, root, ask1("other", "O/a"))
+	defer other()
+	waiting, got := ask(t, root, askAs("api", "go test ./..."))
+	recv(t, waiting, "a command whose shared runs ran slow waits beside a 4-core run")
+	notYet(t, got, "the raised need fits beside the 4-core run")
+	other()
+	recv(t, got, "the run is admitted when the machine is free")()
 }

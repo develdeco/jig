@@ -96,12 +96,20 @@ type Request struct {
 	Who string
 	// Oracle and Command are the oracle's name and the command it runs.
 	Oracle, Command string
+	// Repo is the repo the run is in, "" for a project of one. One oracle name
+	// runs as several commands, and two repos of a project may name the same
+	// command text, so the share rule tells runs apart by repo and command.
+	Repo string
 	// Pinned is the count the marker pinned, 0 when it pinned none.
 	Pinned int
 	// machine reads what the machine has: machine.Read when nil. It is the
 	// seam tests replace.
 	machine func() machine.Reading
 }
+
+// runKey names what the run ran, for the share rule to compare it only with
+// runs of the same repo and command.
+func (r Request) runKey() string { return r.Repo + "\x00" + r.Command }
 
 // reading is what the machine has now.
 func (r Request) reading() machine.Reading {
@@ -162,7 +170,7 @@ func shareVerdict(root string, req Request, m machine.Reading, at time.Time) Ver
 		return Verdict{}
 	}
 	var runs []Run
-	for _, r := range need.Runs(root, req.Project, req.Oracle, req.Command, at) {
+	for _, r := range need.Runs(root, req.Project, req.Oracle, req.runKey(), at) {
 		runs = append(runs, Run(r))
 	}
 	return Judge(runs, m)
@@ -474,7 +482,7 @@ func (s *Share) Release() { s.release() }
 // fail, never for one jig stopped. Best effort: without a figure the next run
 // asks for the whole machine.
 func (s *Share) Record(wall time.Duration, use envrun.Usage) {
-	need.Record(s.root, s.req.Project, s.req.Oracle, s.req.Command, s.req.reading(), time.Now(), wall, use, s.Shared())
+	need.Record(s.root, s.req.Project, s.req.Oracle, s.req.runKey(), s.req.reading(), time.Now(), wall, use, s.Shared())
 }
 
 // Hold is Take for an oracle run: it records journal.EventSlotWait when the

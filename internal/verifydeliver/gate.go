@@ -470,7 +470,7 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 // slice's. env is the env class set that was up for the runs the gate made
 // ("" for none).
 func runAndJournal(d Deps, ticket, repo, dir string, man manifest.Manifest, slices []store.Slice, reused map[string]reusedPass, env string) ([]OracleRun, error) {
-	runs, failed, err := runSuite(dir, man, reused, d.oracle(), d.slotHolder(ticket))
+	runs, failed, err := runSuite(dir, man, reused, d.oracle(), d.slotHolder(ticket, repo))
 	if jerr := journalGateRuns(d, ticket, dir, env, reused, runs, failed); jerr != nil {
 		return nil, jerr
 	}
@@ -821,14 +821,14 @@ type slotHolder = func(name, cmd string) (*slot.Share, error)
 // slotHolder is the gate's hold on the project's suite slot for ticket, or nil
 // when d names no project to hold one of. It journals slot-wait and
 // slot-taken on the ticket.
-func (d Deps) slotHolder(ticket string) slotHolder {
+func (d Deps) slotHolder(ticket, repo string) slotHolder {
 	if d.Cfg.Name == "" || d.Home == "" || d.Store == nil {
 		return nil
 	}
 	return func(name, cmd string) (*slot.Share, error) {
 		stopCtx, end := envrun.StopContext(context.Background())
 		defer end()
-		share, err := slot.Hold(stopCtx, d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who(ticket, ""), Oracle: name, Command: cmd, Pinned: d.Cfg.PinnedSlots()}, func(event, summary string) error {
+		share, err := slot.Hold(stopCtx, d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who(ticket, ""), Oracle: name, Command: cmd, Repo: repo, Pinned: d.Cfg.PinnedSlots()}, func(event, summary string) error {
 			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Summary: summary, Source: "gate"})
 		})
 		if err != nil && stopCtx.Err() != nil {

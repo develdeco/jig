@@ -108,7 +108,7 @@ func TestTheGatesHeavyRunRecordsWhatItUsedUnlessJigStoppedIt(t *testing.T) {
 // TestTheGateHoldsNoSlotWithoutAProject: Deps that name no project take no
 // slot.
 func TestTheGateHoldsNoSlotWithoutAProject(t *testing.T) {
-	if (Deps{Home: t.TempDir()}).slotHolder("T-1") != nil {
+	if (Deps{Home: t.TempDir()}).slotHolder("T-1", "") != nil {
 		t.Error("a gate with no project holds a slot")
 	}
 }
@@ -222,7 +222,7 @@ func TestTheGatePassesTheMarkersPinnedCountToTheHold(t *testing.T) {
 			defer release()
 			got := make(chan *slot.Share, 1)
 			go func() {
-				share, err := d.slotHolder(fx.Ticket)("test", "echo suite")
+				share, err := d.slotHolder(fx.Ticket, "")("test", "echo suite")
 				if err != nil {
 					t.Error(err)
 				}
