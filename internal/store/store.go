@@ -110,7 +110,8 @@ func (s *Store) invalidateAliasClaims() {
 // explicitly once the claim lands.
 //
 // What the hook wrote to the tracker tree goes out with it: the sync's
-// record writes land in the working tree, and this commits and pushes them
+// record writes are pending while it runs (HoldTrackerWrites), so no claim on
+// the clone meets them unstaged, and this applies, commits and pushes them
 // once the hook is done (landTrackerWrites), a sync that failed part-way
 // included, since the records it did write are true. A ticket's last
 // checkpoint is a checkpoint like any other, with no next one to carry them.

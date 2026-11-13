@@ -72,9 +72,9 @@ const (
 // (the Link constants). The link of the flat layout, where the folder goes, is
 // replaced by the folder. A link under another store id (the ticket was
 // renamed) is RebuildTrackerLinks' to take out. A clone without symlinks gets
-// LinkOff, and a warning once. The write goes in the working tree; Claim's
-// paths and the landing of the checkpoint's sync (landTrackerWrites) take it
-// from there.
+// LinkOff, and a warning once. While a sync holds its writes (HoldTrackerWrites) the link is pending, and
+// the landing of the checkpoint's sync (landTrackerWrites) makes it; otherwise it
+// goes in the working tree, where Claim's paths take it.
 func (s *Store) LinkTrackerEntry(e TrackerEntry, o TrackerOwner) (string, error) {
 	if err := e.check(); err != nil {
 		return "", err
