@@ -183,10 +183,10 @@ func TestMarkerRoundTripAndLenientRead(t *testing.T) {
 	}
 }
 
-// TestSlotsDefaultsToOneAndRefusesANonPositiveValue: a marker without slots
-// has one suite slot; a positive value is kept; zero or negative is an error
+// TestSlotsAreNoneUnlessPinnedAndRefuseANonPositiveValue: a marker without
+// slots pins none (0, which is not the same as one); a positive value is kept; zero or negative is an error
 // naming the file.
-func TestSlotsDefaultsToOneAndRefusesANonPositiveValue(t *testing.T) {
+func TestSlotsAreNoneUnlessPinnedAndRefuseANonPositiveValue(t *testing.T) {
 	dir := t.TempDir()
 	write := func(body string) string {
 		path := filepath.Join(dir, MarkerFile)

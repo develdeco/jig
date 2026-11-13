@@ -2,6 +2,7 @@ package verifydeliver
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,7 +12,9 @@ import (
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/machine"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/need"
 	"github.com/develdeco/jig/internal/slot"
 )
 
@@ -68,6 +71,37 @@ func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 	}
 	if peak := suite(nil, true); peak != 2 {
 		t.Errorf("%d suites with no heavy oracle ran at once, want 2", peak)
+	}
+}
+
+// TestTheGatesHeavyRunRecordsWhatItUsedUnlessJigStoppedIt: a heavy oracle the
+// gate ran to a verdict, pass or fail, leaves its project's figure for the next
+// run to be admitted by; one jig stopped leaves none.
+func TestTheGatesHeavyRunRecordsWhatItUsedUnlessJigStoppedIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{"a pass": {nil, true}, "a failure": {errors.New("boom"), true}, "a stop": {envrun.ErrStopped, false}} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			hold := func(name, cmd string) (*slot.Share, error) {
+				return slot.Hold(context.Background(), root, slot.Request{Project: "proj", Oracle: name, Command: cmd}, func(string, string) error { return nil })
+			}
+			man := manifest.Manifest{
+				Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+				Oracles:    map[string]string{"test": "go test"},
+				Heavy:      []string{"test"},
+			}
+			run := func(cmd, dir string) (string, envrun.Usage, error) {
+				time.Sleep(20 * time.Millisecond)
+				return "", envrun.Usage{CPU: time.Second}, tc.err
+			}
+			_, _, _ = runSuite(t.TempDir(), man, nil, run, hold)
+			_, ok := need.Read(root, "proj", "test", machine.Read(), time.Now())
+			if ok != tc.want {
+				t.Errorf("a figure kept = %v, want %v", ok, tc.want)
+			}
+		})
 	}
 }
 

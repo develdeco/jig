@@ -151,3 +151,19 @@ func TestAHeldRunsMeasurementChangesTheNextAsk(t *testing.T) {
 	defer takeNow(t, root, ask1("p", "T/b"))()
 	defer takeNow(t, root, ask1("p", "T/c"))()
 }
+
+// TestAMemoryNeedPastTheMachineAsksForTheWholeMachine: a run that measured one
+// core but more memory than the budget has is clamped to the whole machine, so
+// it is admitted when the machine is free and holds it against a small run,
+// instead of waiting forever and blocking the queue behind it.
+func TestAMemoryNeedPastTheMachineAsksForTheWholeMachine(t *testing.T) {
+	root := t.TempDir()
+	measure(root, "bigmem", 1, 90<<30)
+	measure(root, "small", 1, 1<<30)
+	big := takeNow(t, root, ask1("bigmem", "B/a"))
+	waiting, got := ask(t, root, ask1("small", "S/a"))
+	recv(t, waiting, "a small run waits beside a run that needs more memory than the machine has")
+	notYet(t, got, "a small run shares the machine with a run clamped to all of it")
+	big()
+	recv(t, got, "the small run is admitted after")()
+}
