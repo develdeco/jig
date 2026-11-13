@@ -137,6 +137,9 @@ type OracleRun struct {
 	// Usage is what the gate's own run of the oracle used; it stays out of
 	// review.json and is journalled on the gate-oracle line.
 	Usage envrun.Usage `json:"-"`
+	// Shared is whether the gate's own run shared the machine with another
+	// heavy run; journalled on the gate-oracle line, not in review.json.
+	Shared bool `json:"-"`
 }
 
 // Probe outcomes (ADR 0036): caught when the test command failed or timed out
