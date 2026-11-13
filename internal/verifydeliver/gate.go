@@ -491,6 +491,7 @@ func journalGateRuns(d Deps, ticket, dir string, runs []OracleRun) error {
 			}
 		}
 		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Seconds: run.Seconds, Source: "gate"}
+		line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
 		}
@@ -693,12 +694,12 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 				release = rel
 			}
 			start := time.Now()
-			err := runOracle(run, cmd, dir)
+			use, err := runOracleUsage(run, cmd, dir)
 			release()
 			if err != nil {
 				return nil, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
 			}
-			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start))})
+			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start)), Usage: use})
 		}
 	}
 	return runs, nil
@@ -767,30 +768,38 @@ func (d Deps) slotHolder(ticket string) slotHolder {
 }
 
 // oracleFunc runs one oracle command in a directory and returns its
-// combined output: Deps.Oracle's type.
-type oracleFunc = func(cmd, dir string) (string, error)
+// combined output and what its process tree used (zero when nothing measured
+// it): Deps.Oracle's type, with the usage a real run measures.
+type oracleFunc = func(cmd, dir string) (string, envrun.Usage, error)
 
 // shellOracle is the real oracle run: cmd through sh in dir within
 // oracleLimit, its process tree killed past it.
-func shellOracle(cmd, dir string) (string, error) {
-	return envrun.ShellOutput(cmd, dir, oracleLimit)
+func shellOracle(cmd, dir string) (string, envrun.Usage, error) {
+	return envrun.ShellOutputUsage(cmd, dir, oracleLimit, nil)
 }
 
 // runOracle runs one oracle command in dir through run. A failure carries
 // the end of the command's output, as the stderr Shell reported once did.
 func runOracle(run oracleFunc, cmd, dir string) error {
-	out, err := run(cmd, dir)
+	_, err := runOracleUsage(run, cmd, dir)
+	return err
+}
+
+// runOracleUsage is runOracle that also returns what the run's tree used,
+// which is set on a failure too.
+func runOracleUsage(run oracleFunc, cmd, dir string) (envrun.Usage, error) {
+	out, use, err := run(cmd, dir)
 	if err == nil {
-		return nil
+		return use, nil
 	}
 	out = strings.TrimSpace(out)
 	if len(out) > 4000 {
 		out = out[len(out)-4000:]
 	}
 	if out == "" {
-		return err
+		return use, err
 	}
-	return fmt.Errorf("%w\n%s", err, out)
+	return use, fmt.Errorf("%w\n%s", err, out)
 }
 
 // oracleError is the gate's refusal for an oracle run that err ended: a failed
