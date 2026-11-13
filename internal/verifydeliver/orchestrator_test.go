@@ -358,10 +358,16 @@ func TestPublishOverOneRepoOfSeveral(t *testing.T) {
 	if got := originRef(t, remotes["api"], "refs/heads/"+o.branch); got != "" {
 		t.Errorf("origin of api has %s at %s: publish shipped a repo the ticket does not build in", o.branch, got)
 	}
-	// The fake gh serves every repo from one host; the one pull request it was
-	// asked to open is the web's.
-	if n := ghCalls(loggedGh(t, logFile), "pr", "create"); n != 1 {
-		t.Errorf("pr create calls = %d, want the web's alone", n)
+	// The fake gh serves every repo from one host, so a call for the api would
+	// look like the web's: the whole log is held to the web's publish alone, one
+	// lookup of the branch's open pull request, one pull request opened, one
+	// comment with the review notes.
+	var verbs []string
+	for _, argv := range loggedGh(t, logFile) {
+		verbs = append(verbs, strings.Join(argv[:min(2, len(argv))], " "))
+	}
+	if want := []string{"api repos/owner/fixture-repo/pulls", "pr create", "pr comment"}; !reflect.DeepEqual(verbs, want) {
+		t.Errorf("gh calls = %v, want %v: the web's alone", verbs, want)
 	}
 	body, err := os.ReadFile(filepath.Join(o.d.Store.TicketDir(o.ticket), "pr", "web.md"))
 	if err != nil || strings.Contains(string(body), "Part of") {
@@ -373,5 +379,92 @@ func TestPublishOverOneRepoOfSeveral(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(o.d.Home, "pool", "api", o.ticket+"-publish")); err == nil {
 		t.Errorf("publish made a lease for the api, which the ticket does not build in")
+	}
+}
+
+// TestPublishNotesTellEachRepoItsOwnFindings: a ticket built in both repos
+// whose first round finds one problem in each repo, both fixed, and a clean
+// second round. Each repo's review notes tell its own finding in full and hold
+// none of the other repo's title in that block; the other's is one line under
+// "## Findings in other repos". The split is publish's own, so a publish that
+// handed every repo all the findings fails here.
+func TestPublishNotesTellEachRepoItsOwnFindings(t *testing.T) {
+	t.Parallel()
+	o := orchestratorTicket(t, "api", "web")
+	o.build(t, "api")
+	o.build(t, "web")
+	const webTitle, apiTitle = "The page shows cents, not dollars", "The handler drops the currency"
+
+	p, err := GatePrepare(o.d, GateOpts{Ticket: o.ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	found := func(file, title string) ResultFinding {
+		return ResultFinding{File: file, Line: 4, Title: title, Detail: "It is wrong.", Action: ActionFix, Risk: RiskHigh, RiskRationale: "The shop shows a wrong total.", Oracle: "test"}
+	}
+	result := ReviewResult{
+		Findings:      []ResultFinding{found("web/ui/page.go", webTitle), found("api/server/handler.go", apiTitle)},
+		StillPresent:  []StillPresentEntry{},
+		ReviewedPaths: p.Request.MustReview,
+		Summary:       "one problem in each repo",
+	}
+	report, err := GateFinish(o.d, p, result, Provenance{Session: "s-reviewer", How: ReviewerByFlag})
+	if err != nil {
+		t.Fatalf("GateFinish round 1: %v", err)
+	}
+	if report.Verdict != "fix-slices" || len(report.FixSlices) != 2 {
+		t.Fatalf("round 1 = %q with fix slices %v, want fix-slices with one in each repo", report.Verdict, report.FixSlices)
+	}
+
+	// Each fix slice builds in the repo of its finding.
+	slices, err := o.d.Store.ReadSlices(o.ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := map[string]string{"api": "package server\n\n// Handler names what the api serves, with the currency.\nfunc Handler() string { return \"total in USD\" }\n", "web": "package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"}
+	file := map[string]string{"api": "server/handler.go", "web": "ui/page.go"}
+	for _, s := range slices {
+		if s.FromGate != 1 {
+			continue
+		}
+		repo := strings.SplitN(s.Workspace, "/", 2)[0]
+		writeAndCommit(t, o.d.Machine.Clones[repo], file[repo], fixed[repo], "fix: "+repo)
+		if err := o.d.Store.WriteSliceState(o.ticket, s.ID, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatalf("write slice state %s: %v", s.ID, err)
+		}
+		delete(fixed, repo)
+	}
+	if len(fixed) != 0 {
+		t.Fatalf("no fix slice built in %v", fixed)
+	}
+	if err := o.d.Store.Push(o.ticket + ": fixes green"); err != nil {
+		t.Fatal(err)
+	}
+	o.reviewedClean(t)
+
+	if _, err := PublishBody(o.d, PublishOpts{Ticket: o.ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	prDir := filepath.Join(o.d.Store.TicketDir(o.ticket), "pr")
+	for _, c := range []struct{ repo, own, other, otherLine string }{
+		{"web", webTitle, apiTitle, "- api: server/handler.go: " + apiTitle},
+		{"api", apiTitle, webTitle, "- web: ui/page.go: " + webTitle},
+	} {
+		data, err := os.ReadFile(filepath.Join(prDir, "review-notes-"+c.repo+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		notes := strings.ReplaceAll(string(data), "\r\n", "\n")
+		round, findings, others, coverage := strings.Index(notes, "## Round 2"), strings.Index(notes, "## Findings\n"), strings.Index(notes, "## Findings in other repos\n"), strings.Index(notes, "## Coverage\n")
+		if !(round >= 0 && round < findings && findings < others && others < coverage) {
+			t.Fatalf("review-notes-%s.md sections out of order (Round %d, Findings %d, Findings in other repos %d, Coverage %d):\n%s", c.repo, round, findings, others, coverage, notes)
+		}
+		own, rest := notes[findings:others], notes[others:coverage]
+		if !strings.Contains(own, c.own) || !strings.Contains(own, "Status: fixed") || strings.Contains(own, c.other) {
+			t.Errorf("review-notes-%s.md Findings block lacks its own finding in full, or holds the other repo's:\n%s", c.repo, own)
+		}
+		if want := "## Findings in other repos\n\n" + c.otherLine + "\n\n"; rest != want {
+			t.Errorf("review-notes-%s.md other repos block =\n%q\nwant\n%q", c.repo, rest, want)
+		}
 	}
 }
