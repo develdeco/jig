@@ -54,11 +54,21 @@ func TestCallerNameStripsClosuresAndSkipsTheStandardLibrary(t *testing.T) {
 		}
 	}
 	for name, std := range map[string]bool{
-		"testing.tRunner": true, "runtime.goexit": true, "os/exec.(*Cmd).Run": true,
+		"testing.tRunner": true, "runtime.goexit": true, "main.run": false, "os/exec.(*Cmd).Run": true,
 		"a.example/m/pkg.F": false, "github.com/x/y.Z": false,
 	} {
 		if isStdlib(name) != std {
 			t.Errorf("isStdlib(%q) = %v, want %v", name, !std, std)
 		}
+	}
+}
+
+// Called straight from a test of this package, the only frames are gitx's
+// own, the testing package's and the runtime's: all skipped, so the caller is
+// named by an empty value rather than by one of them.
+func TestCallerIsEmptyWhenOnlyOwnAndStandardFramesAreOnTheStack(t *testing.T) {
+	got := withCaller([]string{"GIT_TRACE2_EVENT=/x"}, "")
+	if !slices.Contains(got, "JIG_GIT_CALLER=") {
+		t.Errorf("want JIG_GIT_CALLER with an empty value: %v", got)
 	}
 }

@@ -434,27 +434,37 @@ func TestCheckOmitsPackagesWithoutTraces(t *testing.T) {
 // keeps every row.
 func TestReportCutsAreAppliedAndTheTSVKeepsEverything(t *testing.T) {
 	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
-	var procs [][2]string
-	for i := range 25 {
-		procs = append(procs, [2]string{fmt.Sprintf("x.F%02d", i), "/tmp/TestA1"})
+	// One past each cut: topPackage+1 callers in one package, and with the
+	// other package's distinct callers topOverall+1 across both.
+	var big, small [][2]string
+	for i := range topPackage + 1 {
+		big = append(big, [2]string{fmt.Sprintf("x.Big%02d", i), "/tmp/TestA1"})
 	}
-	counts := traced(t, map[string][][2]string{"internal/big": procs})
+	for i := range topOverall + 1 - (topPackage + 1) {
+		small = append(small, [2]string{fmt.Sprintf("x.Small%02d", i), "/tmp/TestB1"})
+	}
+	counts := traced(t, map[string][][2]string{"internal/big": big, "internal/small": small})
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"check", cfg, "-", counts, testModule + "/internal/big"}, func(string) string { return "" }, &stdout, &stderr); code != 0 {
+	if code := run([]string{"check", cfg, "-", counts, testModule + "/internal/big", testModule + "/internal/small"}, func(string) string { return "" }, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s%s", code, stdout.String(), stderr.String())
 	}
 	out := stdout.String()
-	overall, perPkg, _ := strings.Cut(out, "internal/big: top callers")
-	if n := strings.Count(overall, "x.F"); n != topOverall {
+	overall, rest, _ := strings.Cut(out, "internal/big: top callers")
+	if n := strings.Count(overall, "x."); n != topOverall {
 		t.Errorf("%d callers in the overall section, want %d:\n%s", n, topOverall, out)
 	}
-	callers, _, _ := strings.Cut(perPkg, "internal/big: top tests")
-	if n := strings.Count(callers, "x.F"); n != topPackage {
-		t.Errorf("%d callers in the package section, want %d", n, topPackage)
+	bigCallers, rest, _ := strings.Cut(rest, "internal/big: top tests")
+	if n := strings.Count(bigCallers, "x.Big"); n != topPackage {
+		t.Errorf("%d callers in the big package's section, want %d (of %d)", n, topPackage, topPackage+1)
+	}
+	_, rest, _ = strings.Cut(rest, "internal/small: top callers")
+	smallCallers, _, _ := strings.Cut(rest, "internal/small: top tests")
+	if n := strings.Count(smallCallers, "x.Small"); n != topOverall-topPackage {
+		t.Errorf("%d callers in the small package's section, want all %d", n, topOverall-topPackage)
 	}
 	tsv, err := os.ReadFile(filepath.Join(counts, callersFile))
-	if err != nil || strings.Count(string(tsv), "\tcaller\t") != 25 {
-		t.Errorf("callers.tsv should hold all 25 callers (%v):\n%s", err, tsv)
+	if err != nil || strings.Count(string(tsv), "\tcaller\t") != topOverall+1 {
+		t.Errorf("callers.tsv should hold all %d callers (%v):\n%s", topOverall+1, err, tsv)
 	}
 }
 

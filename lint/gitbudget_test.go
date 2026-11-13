@@ -126,8 +126,22 @@ func TestCIWorkflowCountsGitProcesses(t *testing.T) {
 		}
 	}
 	// check leaves callers.tsv in the count directory; the leg uploads it for
-	// a week, after the check and even when the check or a test failed.
-	if upload := requireStepIf(t, steps, "upload who started the git processes", "actions/upload-artifact@v7", "always() && runner.os == 'Linux'"); upload != nil {
+	// a week, after the check and even when the check or a test failed. The
+	// report never fails a run, so unlike the budget steps this one is
+	// allowed to fail without failing the job: an artifact service error must
+	// not fail the leg.
+	if upload, ok := stepNamed(steps, "upload who started the git processes"); !ok {
+		t.Errorf("ci.yml: the test job has no step named %q", "upload who started the git processes")
+	} else {
+		if got, _ := yamlString(upload["if"]); got != "always() && runner.os == 'Linux'" {
+			t.Errorf("ci.yml: the callers upload's if = %q, want exactly %q", got, "always() && runner.os == 'Linux'")
+		}
+		if got, _ := yamlString(upload["uses"]); got != "actions/upload-artifact@v7" {
+			t.Errorf("ci.yml: the callers upload uses %q, want actions/upload-artifact@v7", got)
+		}
+		if v, ok := upload["continue-on-error"].(bool); !ok || !v {
+			t.Errorf("ci.yml: the callers upload's continue-on-error = %v, want true, since the report never fails a run", upload["continue-on-error"])
+		}
 		with, _ := yamlMap(upload["with"])
 		if p, _ := yamlString(with["path"]); p != "${{ runner.temp }}/gitcount/callers.tsv" {
 			t.Errorf("ci.yml: the callers upload's path = %q, want the callers.tsv check writes into the count directory", p)
