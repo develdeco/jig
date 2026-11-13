@@ -417,18 +417,16 @@ func Compare(dir, branch string) (Standing, error) {
 	if local == remote {
 		return InStep, nil
 	}
-	behind, err := gitx.IsAncestor(dir, local, remote)
+	ahead, behind, err := gitx.Standing(dir, local, remote)
 	if err != nil {
 		return 0, fmt.Errorf("pool: compare %s with %s: %w", localRef, remoteRef, err)
 	}
-	if behind {
+	switch {
+	case ahead == 0 && behind == 0:
+		return InStep, nil
+	case ahead == 0:
 		return Behind, nil
-	}
-	ahead, err := gitx.IsAncestor(dir, remote, local)
-	if err != nil {
-		return 0, fmt.Errorf("pool: compare %s with %s: %w", remoteRef, localRef, err)
-	}
-	if ahead {
+	case behind == 0:
 		return Ahead, nil
 	}
 	return Diverged, nil

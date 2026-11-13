@@ -921,3 +921,28 @@ func GuardedPush(dir, remote, refspec string, confirmed bool) error {
 	}
 	return nil
 }
+
+// Standing says how a stands against b with one process: "git rev-list
+// --left-right --count a...b". ahead is the number of commits reachable from
+// a and not from b, behind the number reachable from b and not from a. Equal
+// tips are 0 and 0, a behind b 0 and N, a ahead of b N and 0, and histories
+// that forked, or share no commit at all, both nonzero. It answers what two
+// "merge-base --is-ancestor" calls do, in one process, and an unknown
+// revision is an error as it is there.
+func Standing(dir, a, b string) (ahead, behind int, err error) {
+	out, err := Run(dir, "rev-list", "--left-right", "--count", a+"..."+b)
+	if err != nil {
+		return 0, 0, err
+	}
+	l, r, ok := strings.Cut(strings.TrimSpace(out), "\t")
+	if !ok {
+		return 0, 0, fmt.Errorf("gitx: unexpected rev-list --count output %q", out)
+	}
+	if ahead, err = strconv.Atoi(l); err == nil {
+		behind, err = strconv.Atoi(r)
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("gitx: unexpected rev-list --count output %q: %w", out, err)
+	}
+	return ahead, behind, nil
+}
