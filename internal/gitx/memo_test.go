@@ -7,14 +7,17 @@ import (
 	"testing"
 )
 
-// memoRepo makes a repository whose origin is url, writing its config by
-// hand so the test starts one git process, not several.
+// memoRepo makes a repository whose origin is url: a copy of one that was
+// initialised once, with its config written by hand, so the test starts no git
+// process for it.
 func memoRepo(t *testing.T, url string) string {
 	t.Helper()
-	dir := t.TempDir()
-	if _, err := Run(dir, "init", "-q", "-b", "main"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
+	empty := sharedRepo(t, "memo-empty", func(t *testing.T, dir string) {
+		if _, err := Run(dir, "init", "-q", "-b", "main"); err != nil {
+			t.Fatalf("git init: %v", err)
+		}
+	})
+	dir := copyRepo(t, empty)
 	setMemoOrigin(t, dir, url)
 	return dir
 }

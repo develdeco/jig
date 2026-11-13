@@ -77,29 +77,21 @@ func byCounts(ahead, behind int) string {
 	return "diverged"
 }
 
-func standingRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	if _, err := Run(dir, "init", "-q", "-b", "base"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RunInput(dir, []byte(standingStream), "fast-import", "--quiet"); err != nil {
-		t.Fatalf("fast-import: %v", err)
-	}
-	return dir
-}
-
 // TestStandingMatchesTheTwoAncestryCalls: for tips that are equal, behind,
 // ahead, forked and unrelated, the counts say what merge-base --is-ancestor
-// asked both ways does.
+// asked both ways does, and are the commits each side has the other lacks. An
+// unknown revision is an error.
 func TestStandingMatchesTheTwoAncestryCalls(t *testing.T) {
-	dir := standingRepo(t)
-	for _, c := range []struct{ name, a, b, want string }{
-		{"equal", "base", "base", "equal"},
-		{"behind", "base", "ahead", "behind"},
-		{"ahead", "ahead", "base", "ahead"},
-		{"forked", "ahead", "side", "diverged"},
-		{"unrelated", "base", "other", "diverged"},
+	dir := streamRepo(t, "standing", standingStream)
+	for _, c := range []struct {
+		name, a, b, want string
+		ahead, behind    int
+	}{
+		{"equal", "base", "base", "equal", 0, 0},
+		{"behind", "base", "ahead", "behind", 0, 1},
+		{"ahead", "ahead", "base", "ahead", 1, 0},
+		{"forked", "ahead", "side", "diverged", 1, 1},
+		{"unrelated", "base", "other", "diverged", 1, 1},
 	} {
 		if got := byAncestry(t, dir, c.a, c.b); got != c.want {
 			t.Fatalf("%s: the two ancestry calls say %s, the case says %s", c.name, got, c.want)
@@ -111,18 +103,9 @@ func TestStandingMatchesTheTwoAncestryCalls(t *testing.T) {
 		if got := byCounts(ahead, behind); got != c.want {
 			t.Errorf("%s: Standing = %d ahead, %d behind, which is %s; the two ancestry calls say %s", c.name, ahead, behind, got, c.want)
 		}
-	}
-}
-
-// TestStandingCountsTheCommitsOfEachSide: the numbers are the commits each
-// side has and the other lacks, and an unknown revision is an error.
-func TestStandingCountsTheCommitsOfEachSide(t *testing.T) {
-	dir := standingRepo(t)
-	if ahead, behind, err := Standing(dir, "ahead", "side"); err != nil || ahead != 1 || behind != 1 {
-		t.Errorf("Standing(ahead, side) = %d, %d, %v; want 1, 1", ahead, behind, err)
-	}
-	if ahead, behind, err := Standing(dir, "base", "ahead"); err != nil || ahead != 0 || behind != 1 {
-		t.Errorf("Standing(base, ahead) = %d, %d, %v; want 0, 1", ahead, behind, err)
+		if ahead != c.ahead || behind != c.behind {
+			t.Errorf("%s: Standing = %d, %d; want %d, %d", c.name, ahead, behind, c.ahead, c.behind)
+		}
 	}
 	if _, _, err := Standing(dir, "base", "no-such-rev"); err == nil {
 		t.Error("an unknown revision was not an error")

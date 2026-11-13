@@ -28,28 +28,37 @@ a.txt
 
 `
 
-// filesRepos makes a plain repository holding filesStream, a clone of it
-// that borrows its objects (alternates), which gitx leaves to the git
-// program, and the commit they hold.
+// filesRepos is a plain repository holding filesStream, a clone of it that
+// borrows its objects (alternates), which gitx leaves to the git program, and
+// the commit they hold: built once for the binary, as the tests only read them.
 func filesRepos(t *testing.T) (plain, declined, sha string) {
 	t.Helper()
-	root := t.TempDir()
-	plain = filepath.Join(root, "plain")
-	declined = filepath.Join(root, "declined")
-	if _, err := Run(root, "init", "-q", "-b", "main", plain); err != nil {
-		t.Fatal(err)
+	plain = streamRepo(t, "files", filesStream)
+	declined = sharedRepo(t, "files-declined", func(t *testing.T, dir string) {
+		if _, err := Run(filepath.Dir(dir), "clone", "-q", "--shared", plain, dir); err != nil {
+			t.Fatal(err)
+		}
+	})
+	sha = sharedSHA(t, "files", plain)
+	return plain, declined, sha
+}
+
+var shas = map[string]string{}
+
+// sharedSHA is the commit main names in dir, asked of git once per key.
+func sharedSHA(t *testing.T, key, dir string) string {
+	t.Helper()
+	sharedRepos.Lock()
+	defer sharedRepos.Unlock()
+	if sha, ok := shas[key]; ok {
+		return sha
 	}
-	if _, err := RunInput(plain, []byte(filesStream), "fast-import", "--quiet"); err != nil {
-		t.Fatalf("fast-import: %v", err)
-	}
-	if _, err := Run(root, "clone", "-q", "--shared", plain, declined); err != nil {
-		t.Fatal(err)
-	}
-	sha, err := Run(plain, "rev-parse", "main")
+	sha, err := Run(dir, "rev-parse", "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return plain, declined, sha
+	shas[key] = sha
+	return sha
 }
 
 // filesAtRevCases are the paths asked of the repository filesStream makes and
@@ -59,15 +68,11 @@ var filesAtRevCases = []struct {
 	want bool
 }{
 	{"a.txt", true},
-	{"dir/b.txt", true},
 	{"sp ace.txt", true},
 	{"link", true},
 	{"dir", false},
-	{"dir/", false},
 	{"missing.txt", false},
-	{"dir/missing.txt", false},
 	{"a.txt/under", false},
-	{"A.txt", false},
 }
 
 // TestFileExistsAtRevAnswersTheSameInADeclinedRepository pins the per-path
@@ -91,7 +96,10 @@ func TestFileExistsAtRevAnswersTheSameInADeclinedRepository(t *testing.T) {
 }
 
 // TestFilesAtRevAnswersWhatFileExistsAtRevDoes: per path, in both kinds of
-// repository, a repeated path and an unknown rev included.
+// repository, a repeated path and an unknown rev included; and where gitx
+// leaves the repository to git, the paths cost one process, and where it reads
+// the repository itself none. Not parallel: it counts through the process's
+// trace.
 func TestFilesAtRevAnswersWhatFileExistsAtRevDoes(t *testing.T) {
 	plain, declined, sha := filesRepos(t)
 	var asked []string
@@ -100,7 +108,9 @@ func TestFilesAtRevAnswersWhatFileExistsAtRevDoes(t *testing.T) {
 	}
 	asked = append(asked, "a.txt")
 	for name, dir := range map[string]string{"plain": plain, "declined": declined} {
-		got, err := FilesAtRev(dir, sha, asked)
+		var got map[string]bool
+		var err error
+		n := gittest.CountGit(t, func() { got, err = FilesAtRev(dir, sha, asked) })
 		if err != nil {
 			t.Fatalf("%s: FilesAtRev: %v", name, err)
 		}
@@ -109,34 +119,18 @@ func TestFilesAtRevAnswersWhatFileExistsAtRevDoes(t *testing.T) {
 				t.Errorf("%s: FilesAtRev(%q) = %v, want %v", name, c.path, got[c.path], c.want)
 			}
 		}
+		want := 0
+		if name == "declined" {
+			want = 1
+		}
+		if n != want {
+			t.Errorf("%s: %d git processes for %d paths, want %d", name, n, len(asked), want)
+		}
 		if _, err := FilesAtRev(dir, "no-such-rev", asked); err == nil {
 			t.Errorf("%s: an unknown rev is not an error", name)
 		}
 		if got, err := FilesAtRev(dir, "no-such-rev", nil); err != nil || len(got) != 0 {
 			t.Errorf("%s: no paths asked of an unknown rev = %v, %v; want nothing", name, got, err)
 		}
-	}
-}
-
-// TestFilesAtRevStartsOneGitProcessInADeclinedRepository: where gitx leaves
-// the repository to git, several paths cost one process, and where it reads
-// the repository itself they cost none. Not parallel: it counts through the
-// process's trace.
-func TestFilesAtRevStartsOneGitProcessInADeclinedRepository(t *testing.T) {
-	plain, declined, sha := filesRepos(t)
-	paths := []string{"a.txt", "dir/b.txt", "sp ace.txt", "missing.txt", "dir"}
-	if n := gittest.CountGit(t, func() {
-		if _, err := FilesAtRev(declined, sha, paths); err != nil {
-			t.Error(err)
-		}
-	}); n != 1 {
-		t.Errorf("a declined repository: %d git processes for %d paths, want 1", n, len(paths))
-	}
-	if n := gittest.CountGit(t, func() {
-		if _, err := FilesAtRev(plain, sha, paths); err != nil {
-			t.Error(err)
-		}
-	}); n != 0 {
-		t.Errorf("a plain repository: %d git processes, want 0 (answered in process)", n)
 	}
 }

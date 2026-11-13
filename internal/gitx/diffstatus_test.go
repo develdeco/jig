@@ -57,19 +57,16 @@ renamed
 
 // TestDiffNameStatusGivesWhatTheTwoNameOnlyCallsGave: the changed and the
 // deleted paths of one diff, in git's order, are what DiffNameOnly with "AMT"
-// and with "D" returned.
+// and with "D" returned, both ways round (a path added one way is deleted the
+// other).
 func TestDiffNameStatusGivesWhatTheTwoNameOnlyCallsGave(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := Run(dir, "init", "-q", "-b", "main"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := RunInput(dir, []byte(diffStatusStream), "fast-import", "--quiet"); err != nil {
-		t.Fatalf("fast-import: %v", err)
-	}
-	for _, c := range []struct{ name, base, head string }{
-		{"the whole change", "main~1", "main"},
-		{"no change", "main", "main"},
-		{"the other way", "main", "main~1"},
+	dir := streamRepo(t, "diffstatus", diffStatusStream)
+	for _, c := range []struct {
+		name, base, head string
+		changed, deleted int
+	}{
+		{"the whole change", "main~1", "main", 5, 3}, // a rename is both
+		{"the other way", "main", "main~1", 5, 3},
 	} {
 		wantChanged, err := DiffNameOnly(dir, c.base, c.head, "AMT")
 		if err != nil {
@@ -86,9 +83,11 @@ func TestDiffNameStatusGivesWhatTheTwoNameOnlyCallsGave(t *testing.T) {
 		if !reflect.DeepEqual(changed, wantChanged) || !reflect.DeepEqual(deleted, wantDeleted) {
 			t.Errorf("%s: changed %q deleted %q, want %q and %q", c.name, changed, deleted, wantChanged, wantDeleted)
 		}
+		if len(changed) != c.changed || len(deleted) != c.deleted {
+			t.Errorf("%s: %d changed and %d deleted, want %d and %d", c.name, len(changed), len(deleted), c.changed, c.deleted)
+		}
 	}
-	changed, deleted, err := DiffNameStatus(dir, "main~1", "main")
-	if err != nil || len(changed) != 5 || len(deleted) != 3 {
-		t.Errorf("the whole change = %q and %q, %v; want five changed and three deleted (a rename is both)", changed, deleted, err)
+	if changed, deleted, err := DiffNameStatus(dir, "main", "main"); err != nil || changed != nil || deleted != nil {
+		t.Errorf("no change = %q and %q, %v; want nothing", changed, deleted, err)
 	}
 }
