@@ -84,6 +84,19 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 	if !(f >= 0 && f < o && o < c) {
 		t.Errorf("sections out of order (Findings %d, other repos %d, Coverage %d):\n%s", f, o, c, got)
 	}
+	// The repo's own finding is told in full in its Findings block, and the
+	// other repos' titles are only in the section of their own.
+	if f >= 0 && o > f {
+		block := got[f:o]
+		if !strings.Contains(block, "- **Own** (high): why\n  - Status: fixed\n") {
+			t.Errorf("Findings block lacks the repo's own finding in full:\n%s", block)
+		}
+		for _, other := range others {
+			if strings.Contains(block, other.title) {
+				t.Errorf("Findings block holds the other repo's finding %q:\n%s", other.title, block)
+			}
+		}
+	}
 
 	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", "", 2, nil, "Round summary.", nil, others, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)

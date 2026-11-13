@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -105,8 +107,11 @@ func TestGateCarriesACleanMergeOfTheTargetAndPublishTakesTheHead(t *testing.T) {
 }
 
 // TestGateOpensADeltaRoundForAHandResolvedMerge: the merge with a hand edit is
-// not carried over; the round opens and a reviewer is asked to read the hand
-// edit alone, none of what the target brought in.
+// not carried over. A publish refuses the merged head as unreviewed and pushes
+// nothing; the gate opens a delta round at the merge whose base is a tree (git's
+// own merge of the merge's parents) and whose reviewer is asked to read the
+// hand-edited file alone, none of what the target brought in; once that round
+// is clean the publish pushes the merge commit.
 func TestGateOpensADeltaRoundForAHandResolvedMerge(t *testing.T) {
 	t.Parallel()
 	jigHome := t.TempDir()
@@ -114,21 +119,78 @@ func TestGateOpensADeltaRoundForAHandResolvedMerge(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
 	buildFixtureTicket(t, fx)
 	gateCleanThroughMain(t, e, fx)
+	flags := []string{"--store", fx.StoreDir}
 
 	landOnTarget(t, fx, "moved.txt")
+	landOnTarget(t, fx, "brought.txt")
 	gitIn(t, fx.RepoDir, "merge", "--no-ff", "--no-commit", "main")
-	if err := os.WriteFile(filepath.Join(fx.RepoDir, "hand.txt"), []byte("a hand edit\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "moved.txt"), []byte("from the target\nand a hand edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, fx.RepoDir, "add", "-A")
 	gitIn(t, fx.RepoDir, "commit", "-m", "merge main, by hand")
+	merge := gitIn(t, fx.RepoDir, "rev-parse", "HEAD")
 
-	out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	originBranch := func() string {
+		out, err := gitx.Run(fx.RepoRemote, "rev-parse", "--verify", "-q", "refs/heads/"+fx.Branch)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(out)
+	}
+	before := originBranch()
+	out, code := runMain(t, e, "", append([]string{"publish", fx.Ticket, "--yes"}, flags...)...)
+	if code == 0 || !strings.Contains(out, "PUBLISH_UNREVIEWED_HEAD") {
+		t.Fatalf("publish of a hand-resolved merge: exit = %d, want PUBLISH_UNREVIEWED_HEAD\n%s", code, out)
+	}
+	if got := originBranch(); got != before {
+		t.Fatalf("the refused publish moved origin's %s from %q to %q", fx.Branch, before, got)
+	}
+
+	out, code = runMain(t, e, "", append([]string{"gate", fx.Ticket}, flags...)...)
 	if code != 0 || strings.Contains(out, "verdict: clean") {
 		t.Fatalf("gate after a hand-resolved merge: exit = %d, want 0 and an open round\n%s", code, out)
 	}
-	ctx, code := runMain(t, e, "", "review", "context", fx.Ticket, "--json", "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(ctx, "hand.txt") || strings.Contains(ctx, "moved.txt\"") {
-		t.Errorf("review context: exit = %d, want a request for hand.txt alone\n%s", code, ctx)
+	ctx, code := runMain(t, e, "", append([]string{"review", "context", fx.Ticket, "--json"}, flags...)...)
+	if code != 0 {
+		t.Fatalf("review context: exit = %d\n%s", code, ctx)
+	}
+	var req struct {
+		Scope      string   `json:"scope"`
+		HeadSHA    string   `json:"head_sha"`
+		BaseSHA    string   `json:"base_sha"`
+		MustReview []string `json:"must_review"`
+	}
+	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
+		t.Fatalf("review context --json is not the request: %v\n%s", err, ctx)
+	}
+	if req.Scope != "delta" || req.HeadSHA != merge {
+		t.Errorf("round = scope %q head %s, want a delta at the merge %s", req.Scope, req.HeadSHA, merge)
+	}
+	if kind := gitIn(t, fx.RepoDir, "cat-file", "-t", req.BaseSHA); kind != "tree" {
+		t.Errorf("base_sha %s is a %s, want a tree: git's own merge of the merge's parents", req.BaseSHA, kind)
+	}
+	if want := []string{"moved.txt"}; !reflect.DeepEqual(req.MustReview, want) {
+		t.Errorf("must_review = %v, want the hand-edited file alone, %v", req.MustReview, want)
+	}
+
+	result, err := json.Marshal(map[string]any{
+		"findings": []any{}, "still_present": []any{}, "reviewed_paths": req.MustReview, "summary": "nothing found",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "clean.json")
+	if err := os.WriteFile(path, result, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, code = runMain(t, e, "", append([]string{"review", "done", fx.Ticket, "--result", path}, flags...)...); code != 0 || !strings.Contains(out, "verdict: clean") {
+		t.Fatalf("review done: exit = %d, want a clean verdict\n%s", code, out)
+	}
+	if out, code = runMain(t, e, "", append([]string{"publish", fx.Ticket, "--yes"}, flags...)...); code != 0 {
+		t.Fatalf("publish after the clean round: exit = %d\n%s", code, out)
+	}
+	if got := originBranch(); got != merge {
+		t.Errorf("origin's %s = %s, want the merge commit %s", fx.Branch, got, merge)
 	}
 }
