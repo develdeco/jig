@@ -53,3 +53,16 @@ func TestRunSetsHermeticConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestRunConfigRecordsCallerVariables proves the hermetic config lists the
+// variables gitx sets when git traces, so every git process of a test binary
+// can record who started it.
+func TestRunConfigRecordsCallerVariables(t *testing.T) {
+	got, err := gitx.Run(t.TempDir(), "config", "--get", "trace2.envVars")
+	if err != nil {
+		t.Fatalf("git config --get trace2.envVars: %v", err)
+	}
+	if want := "JIG_GIT_CALLER,JIG_GIT_DIR"; got != want {
+		t.Errorf("trace2.envVars = %q, want %q", got, want)
+	}
+}

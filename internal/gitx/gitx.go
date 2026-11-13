@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -104,9 +105,87 @@ func runOnce(dir string, env []string, exact bool, stdout, stderr io.Writer, arg
 	} else {
 		cmd.Env = append(inheritedEnv(), env...)
 	}
+	cmd.Env = withCaller(cmd.Env, dir)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// traceEnv is the variable git's trace2 event target is set by; gitbudget sets
+// it per package to count the git processes a test binary starts.
+const traceEnv = "GIT_TRACE2_EVENT"
+
+// withCaller names the Go function that asked for a git process, and the
+// directory it ran in, in the child's environment - only when env holds a
+// trace target, so an untraced call walks no stack and its environment is
+// exactly what it was. Git records them when its config lists them under
+// trace2.envVars (internal/gittest writes that line for test binaries), which
+// is how a trace file says who started the process.
+func withCaller(env []string, dir string) []string {
+	if !tracing(env) {
+		return env
+	}
+	abs := ""
+	if dir != "" {
+		abs = dir
+		if a, err := filepath.Abs(dir); err == nil {
+			abs = a
+		}
+	}
+	return append(env, "JIG_GIT_CALLER="+callerName(), "JIG_GIT_DIR="+abs)
+}
+
+// tracing reports whether env sets a trace target. The last entry of a name
+// wins, as in the child, and an empty value is git's "off".
+func tracing(env []string) bool {
+	on := false
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, traceEnv+"="); ok {
+			on = v != ""
+		}
+	}
+	return on
+}
+
+// ownFramePrefix is the function-name prefix of every frame in this package;
+// the dot keeps an external test package (gitx_test) out of it.
+const ownFramePrefix = "github.com/develdeco/jig/internal/gitx."
+
+// closureSuffix matches the suffix Go appends to a function literal's
+// name (".func1", ".func1.2"), so a closure is reported as its enclosing
+// function.
+var closureSuffix = regexp.MustCompile(`(\.func\d+(\.\d+)*)+$`)
+
+// callerName returns the package-qualified name of the first function on the
+// stack outside this package and outside the standard library, or "" when
+// there is none.
+func callerName() string {
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		name := f.Function
+		if name != "" && !strings.HasPrefix(name, ownFramePrefix) && !isStdlib(name) {
+			return closureSuffix.ReplaceAllString(name, "")
+		}
+		if !more {
+			return ""
+		}
+	}
+}
+
+// isStdlib reports whether a function name belongs to the standard library
+// or runtime: its import path's first element has no dot (os/exec.Command), or
+// it has no slash at all (testing.tRunner) and is not package main, which a
+// built command's own functions are named under (main.run).
+func isStdlib(name string) bool {
+	first, _, found := strings.Cut(name, "/")
+	if !found {
+		pkg, _, _ := strings.Cut(name, ".")
+		return pkg != "main"
+	}
+	return !strings.Contains(first, ".")
 }
 
 // gitCommand returns exec.Command("git", args...) with the PATH search

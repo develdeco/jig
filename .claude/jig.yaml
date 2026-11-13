@@ -3,8 +3,13 @@
 # timeout: on a loaded machine, cmd/jig and internal/frontier run past
 # go test's 10-minute default. 25m stays under jig's 30-minute bound on an
 # oracle run, so a hung test still fails with go test's own message naming it.
+# -count=1 because jig runs an oracle in a fresh worktree of the commit, where
+# go test's cached result is never reused, while a cacheable run still has each
+# test binary log every file its tests open or stat and checks that log path by
+# path after the binary exits. That check cost more than some packages' tests;
+# CI runs every go test with -count=1 for the same reason.
 oracles:
-  test: go test -timeout 25m ./...
+  test: go test -count=1 -timeout 25m ./...
 # The whole-suite oracle takes the project's one suite slot, so two suites do
 # not run at once on one machine.
 heavy: [test]
