@@ -180,7 +180,7 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		other := cloneFrom(t, fx.RepoRemote)
 		run(t, other, "checkout", branch)
 		pushed = writeAndCommit(t, other, "more.txt", "pushed after the round", "a commit pushed to the ticket's branch")
-		run(t, other, "push", "origin", branch)
+		builder(t).Push(other, "origin", branch)
 
 		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
 		if got := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; got != pushed {
@@ -196,7 +196,7 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		writeAndCommit(t, other, "side.txt", "work that is not on the target", "a side branch")
 		run(t, other, "checkout", branch)
 		run(t, other, "merge", "--no-ff", "--no-edit", "side")
-		run(t, other, "push", "origin", branch)
+		builder(t).Push(other, "origin", branch)
 
 		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
 

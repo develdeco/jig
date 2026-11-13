@@ -10,7 +10,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/session"
 )
 
@@ -30,15 +29,8 @@ func TestStoreRefsSurviveIntoADeltaRound(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(build, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := gitx.Run(build, "add", "-A"); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := gitx.RunEnv(build, buildGitEnv, "commit", "-m", msg); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := gitx.Run(build, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
-			t.Fatal(err)
-		}
+		builder(t).Commit(build, msg)
+		builder(t).Push(build, "origin", ticketBranch(fx.Ticket))
 	}
 	var reqs []ReviewRequest
 	src := newReviewerGateSource(stubBackend{run: func(sd session.Dispatch) error {

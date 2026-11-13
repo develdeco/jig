@@ -144,25 +144,25 @@ func TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins(t *testing.T) {
 		wantHead func(clone, origin string) string
 	}{
 		{"clone ahead of origin", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			writeAndCommit(t, clone, "more.txt", "only the clone", "a commit only the clone has")
 		}, string(clonesCopy), func(clone, _ string) string { return clone }},
 		{"origin ahead of the clone", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			other := cloneFrom(t, fx.RepoRemote)
 			run(t, other, "checkout", branch)
 			writeAndCommit(t, other, "more.txt", "only origin", "a commit only origin has")
-			run(t, other, "push", "origin", branch)
+			builder(t).Push(other, "origin", branch)
 		}, string(originsCopy), func(_, origin string) string { return origin }},
 		{"in step", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 		}, string(clonesCopy), func(clone, _ string) string { return clone }},
 		{"diverged", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			other := cloneFrom(t, fx.RepoRemote)
 			run(t, other, "checkout", branch)
 			writeAndCommit(t, other, "origin.txt", "only origin", "a commit only origin has")
-			run(t, other, "push", "origin", branch)
+			builder(t).Push(other, "origin", branch)
 			writeAndCommit(t, clone, "clone.txt", "only the clone", "a commit only the clone has")
 		}, "", nil},
 	}

@@ -908,12 +908,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		if err := os.WriteFile(bp, append(bdata, []byte("\n// "+note+"\n")...), 0o644); err != nil {
 			t.Fatalf("write build alpha.go: %v", err)
 		}
-		if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-			t.Fatalf("git add: %v", err)
-		}
-		if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", note); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
+		builder(t).Commit(buildDir, note)
 	}
 	wantPristine := func(t *testing.T, what string) {
 		t.Helper()
@@ -1593,16 +1588,9 @@ func TestGateFailedRoundCommitsAndPushesStore(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(claudeDir, "jig.yaml"), []byte("workspaces: [this is not valid yaml"), 0o644); err != nil {
 			t.Fatalf("write broken jig.yaml: %v", err)
 		}
-		if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-			t.Fatalf("git add jig.yaml: %v", err)
-		}
-		if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "break manifest"); err != nil {
-			t.Fatalf("commit jig.yaml: %v", err)
-		}
+		builder(t).Commit(buildDir, "break manifest")
 		branch := ticketBranch(fx.Ticket)
-		if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-			t.Fatalf("push branch: %v", err)
-		}
+		builder(t).Push(buildDir, "origin", branch)
 
 		gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
 		if err != nil {
@@ -1752,15 +1740,8 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(buildDir, "beta", "unrelated.txt"), []byte("unrelated\n"), 0o644); err != nil {
 		t.Fatalf("write unrelated.txt: %v", err)
 	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add unrelated.txt: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add unrelated.txt"); err != nil {
-		t.Fatalf("commit unrelated.txt: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	builder(t).Commit(buildDir, "add unrelated.txt")
+	builder(t).Push(buildDir, "origin", branch)
 
 	report3, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -1804,15 +1785,8 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "gen.txt"), []byte("committed\n"), 0o644); err != nil {
 		t.Fatalf("write gen.txt: %v", err)
 	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add gen.txt: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add tracked gen.txt"); err != nil {
-		t.Fatalf("commit gen.txt: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	builder(t).Commit(buildDir, "add tracked gen.txt")
+	builder(t).Push(buildDir, "origin", branch)
 
 	d := newDeps(t, fx)
 	d.Oracle = nil // the real oracle run is what this test is about
@@ -1896,15 +1870,8 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	if err := os.WriteFile(filepath.Join(buildDir, "alpha", "alpha_test.go"), []byte(regen), 0o644); err != nil {
 		t.Fatalf("write regenerating alpha_test.go: %v", err)
 	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "untrack and regenerate gen.txt"); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	builder(t).Commit(buildDir, "untrack and regenerate gen.txt")
+	builder(t).Push(buildDir, "origin", branch)
 
 	// The fix slice routed from round 1 is still queued; this round only
 	// exercises the reviewer path, not frontier's own build loop.
@@ -1976,15 +1943,8 @@ func addSecondOracle(t *testing.T, buildDir, branch string) {
 	if err := os.WriteFile(yamlPath, out, 0o644); err != nil {
 		t.Fatalf("write jig.yaml: %v", err)
 	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add jig.yaml: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "add a second manifest oracle"); err != nil {
-		t.Fatalf("commit jig.yaml: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	builder(t).Commit(buildDir, "add a second manifest oracle")
+	builder(t).Push(buildDir, "origin", branch)
 }
 
 // renameOracle renames a manifest oracle (its declared name, not its
@@ -2019,15 +1979,8 @@ func renameOracle(t *testing.T, buildDir, branch, from, to string) {
 	if err := os.WriteFile(yamlPath, out, 0o644); err != nil {
 		t.Fatalf("write jig.yaml: %v", err)
 	}
-	if _, err := gitx.Run(buildDir, "add", "-A"); err != nil {
-		t.Fatalf("git add jig.yaml: %v", err)
-	}
-	if _, err := gitx.RunEnv(buildDir, buildGitEnv, "commit", "-m", "rename a manifest oracle"); err != nil {
-		t.Fatalf("commit jig.yaml: %v", err)
-	}
-	if _, err := gitx.Run(buildDir, "push", "origin", branch); err != nil {
-		t.Fatalf("push branch: %v", err)
-	}
+	builder(t).Commit(buildDir, "rename a manifest oracle")
+	builder(t).Push(buildDir, "origin", branch)
 }
 
 // setupStaleOracleThroughRoundTwo drives a fixture through two green gate

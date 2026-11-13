@@ -19,12 +19,7 @@ func commitOneFile(t *testing.T, dir, name, content string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "seed"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
+	builder(t).Commit(dir, "seed")
 }
 
 // TestGateBrokenLeaseNeverResetsEnclosingRepo reproduces the data-loss path

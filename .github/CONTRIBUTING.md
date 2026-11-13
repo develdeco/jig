@@ -99,6 +99,15 @@ matching the directory name and a `description:` of at most 50 words.
   `lint.TestNoGitSpawnOutsideGitx` parses every other package and fails the
   build if one calls `os/exec` on a program that resolves to `git`, and
   `lint.TestNoGoGitOutsideGitx` if one imports go-git.
+- The code under test runs real git on real repositories. Only a test's own
+  setup and builder moves (add and commit everything, push a branch, fetch
+  one) run in process, and only through gitx: `internal/gitbuild` makes the
+  move with `gitx.Repo` where gitx accepts the repository, and runs the git
+  program where it declines (a hook, a non-bare remote, the first push of a
+  branch, a merge in progress). A fixture's code repository declares no
+  conversion in its root `.gitattributes`, as the store does, so gitx accepts
+  it. Moves gitx does not do (apply, checkout, merge, switch, reset, branch)
+  stay `gitx.RunEnv` at the call site.
 - No test in `internal/` edits process-global state: the environment
   (`t.Setenv`, `os.Setenv`, `os.Unsetenv`), the working directory
   (`t.Chdir`, `os.Chdir`), or a package-level variable declared in the
