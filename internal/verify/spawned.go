@@ -14,12 +14,12 @@ import (
 // and is judged by its age.
 const SpawnWindow = 1 << 20
 
-// LatestSpawned reads the ledger once, backward, and returns the latest
-// verify-spawned line of the ticket for each of the wanted (commit, slice)
-// pairs that has one. The walk stops as soon as every pair is found; with
-// none wanted it reads nothing.
-func LatestSpawned(jigHome, ticket string, want []phase.CommitRef) (map[phase.CommitRef]phase.Spawned, error) {
-	out := map[phase.CommitRef]phase.Spawned{}
+// LatestSpawned reads the ledger once, backward, and returns the
+// verify-spawned lines of the ticket for each of the wanted (commit, slice)
+// pairs, newest first; the derivation picks the one that started the worker of
+// the pending line it judges. With none wanted it reads nothing.
+func LatestSpawned(jigHome, ticket string, want []phase.CommitRef) (map[phase.CommitRef][]phase.Spawned, error) {
+	out := map[phase.CommitRef][]phase.Spawned{}
 	if len(want) == 0 {
 		return out, nil
 	}
@@ -32,15 +32,15 @@ func LatestSpawned(jigHome, ticket string, want []phase.CommitRef) (map[phase.Co
 			return true
 		}
 		ref := phase.CommitRef{SHA: l.Commit, Slice: l.Slice}
-		if _, done := out[ref]; !wanted[ref] || done {
+		if !wanted[ref] {
 			return true
 		}
 		at, err := time.Parse(time.RFC3339Nano, l.TS)
 		if err != nil {
 			return true
 		}
-		out[ref] = phase.Spawned{PID: l.PID, At: at}
-		return len(out) < len(wanted)
+		out[ref] = append(out[ref], phase.Spawned{PID: l.PID, At: at})
+		return true
 	})
 	return out, err
 }

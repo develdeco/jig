@@ -89,3 +89,30 @@ func TestFailedVerificationStillStands(t *testing.T) {
 		t.Errorf("a failed record was run over: oracle calls %d", len(r.oracle.seen()))
 	}
 }
+
+// TestAWorkerSpawnedForAStaleVerificationRunsTheOracle: the worker Spawn starts
+// for a stale pending line finds its own spawned line in the ledger, and must
+// not read the old line as one a live worker is on.
+func TestAWorkerSpawnedForAStaleVerificationRunsTheOracle(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	old := time.Now().Add(-20 * time.Minute).Format(time.RFC3339Nano)
+	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1, TS: old}); err != nil {
+		t.Fatal(err)
+	}
+	spawned := func(pid int, ts string) journal.Line {
+		return journal.Line{Ticket: r.fx.Ticket, Slice: "a", Event: journal.EventVerifySpawned, Commit: sha, PID: pid, TS: ts}
+	}
+	if err := ledger.Append(r.deps.JigHome, spawned(exitedPID(t), old)); err != nil {
+		t.Fatal(err)
+	}
+	// What Spawn writes for the worker it starts, which then runs.
+	if err := ledger.Append(r.deps.JigHome, spawned(os.Getpid(), time.Now().Format(time.RFC3339Nano))); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(r.deps, r.request("a", sha))
+	if err != nil || res.Existing || res.State != journal.VerifyPass || len(r.oracle.seen()) != 1 {
+		t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run and pass", res, err, len(r.oracle.seen()))
+	}
+}

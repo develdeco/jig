@@ -48,7 +48,7 @@ func TestPendingWithDeadWorkerIsStaleAndLiveIsRunning(t *testing.T) {
 	lines := []journal.Line{{Event: journal.EventVerifyPending, Slice: "s", Commit: shaA, TS: vts(time.Minute)}}
 	at := vNow.Add(-time.Minute)
 	in := VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}},
-		Spawned: map[CommitRef]Spawned{{shaA, "s"}: {PID: 7, At: at}}}
+		Spawned: map[CommitRef][]Spawned{{shaA, "s"}: {{PID: 7, At: at}}}}
 	in.Alive = func(pid int, nb time.Time) bool { return false }
 	if r := derive(in)["a"]; r.State != VerifyStale || r.Clear == "" {
 		t.Fatalf("%+v", r)
@@ -124,5 +124,17 @@ func TestAPendingLineOffTheBranchIsStillJudged(t *testing.T) {
 	got := derive(VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}}})
 	if got["a"].State != VerifyNotVerified || got["b"].State != VerifyRunning {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnEarlierRunsSpawnedLineDoesNotJudgeALaterPendingLine(t *testing.T) {
+	// A run in process leaves no spawned line: the dead worker of an earlier
+	// run of the commit must not make its pending line stale.
+	lines := []journal.Line{{Event: journal.EventVerifyPending, Slice: "s", Commit: shaA, TS: vts(time.Minute), Attempt: 2}}
+	in := VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}},
+		Spawned: map[CommitRef][]Spawned{{shaA, "s"}: {{PID: 7, At: vNow.Add(-20 * time.Minute)}}},
+		Alive:   func(int, time.Time) bool { return false }}
+	if r := derive(in)["a"]; r.State != VerifyRunning {
+		t.Fatalf("%+v", r)
 	}
 }

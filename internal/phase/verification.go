@@ -95,9 +95,10 @@ type VerifyInput struct {
 	// no clone still tells what the journal shows.
 	Commits     []CommitRef
 	BranchKnown bool
-	// Spawned is the latest spawned line of each (commit, slice) the journal
-	// shows pending.
-	Spawned map[CommitRef]Spawned
+	// Spawned are the spawned lines of each (commit, slice) the journal shows
+	// pending, any order. Only one that started the pending line's worker
+	// counts (spawnTie).
+	Spawned map[CommitRef][]Spawned
 	Now     time.Time
 	// Alive says whether a process with the pid exists and was created no
 	// later than the time; nil counts every worker alive.
@@ -200,15 +201,41 @@ func (in VerifyInput) judge(p CommitRef) CommitVerification {
 // the spawned line's process is gone or was created after the line, and with
 // no spawned line, the pending line is older than PendingMaxAge.
 func (in VerifyInput) workerGone(p CommitRef, v journal.Verification) bool {
-	if sp, ok := in.Spawned[p]; ok && sp.PID > 0 {
-		return in.Alive != nil && !in.Alive(sp.PID, sp.At)
-	}
 	ts, err := time.Parse(time.RFC3339Nano, v.TS)
 	if err != nil {
 		return false
 	}
+	// The latest spawned line that started this pending line's worker. A
+	// worker that ran in process (jig verify --wait) leaves none, and a line
+	// of an earlier or later run is not its worker: the age rule judges it.
+	var tied *Spawned
+	for i, sp := range in.Spawned[p] {
+		if sp.PID > 0 && spawnTie(sp.At, ts) && (tied == nil || sp.At.After(tied.At)) {
+			tied = &in.Spawned[p][i]
+		}
+	}
+	if tied != nil {
+		return in.Alive != nil && !in.Alive(tied.PID, tied.At)
+	}
 	return in.Now.Sub(ts) > PendingMaxAge
 }
+
+// spawnTie says whether a spawned line written at spawned started the worker
+// that wrote the pending line at pending: the line is written right after the
+// process starts and the worker writes its pending line first thing, so the
+// two are close, the spawned line usually the earlier. A line far from the
+// pending line belongs to another run of the same commit.
+func spawnTie(spawned, pending time.Time) bool {
+	gap := pending.Sub(spawned)
+	return gap >= -spawnLead && gap <= spawnLag
+}
+
+const (
+	// spawnLead is how long after the pending line its worker's spawned line
+	// may be written; spawnLag how long before it.
+	spawnLead = 10 * time.Second
+	spawnLag  = 5 * time.Minute
+)
 
 func shortSHA(sha string) string {
 	if len(sha) > 12 {
