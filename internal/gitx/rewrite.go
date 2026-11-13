@@ -465,10 +465,10 @@ func replaceFile(path string, data []byte) error {
 // merges are rewritten as any other commit.
 //
 // Everything RewriteHeadCommit moves is moved here for every rewritten
-// commit: refs, reflog lines, packed-refs, the mirrors' refs (each mirror
-// must hold the checked-out branch at the tip's old commit), the index
-// entries of the paths, and the loose objects the rewrite replaced and no new
-// commit uses are removed. With nothing to change nothing is touched, and for
+// commit: refs, reflog lines, packed-refs, the mirrors' refs (a mirror gets
+// the new objects its own refs reach, and need not hold the branch), the index
+// entries of the paths, and the loose objects the rewrite replaced and nothing
+// reaches any more are removed. With nothing to change nothing is touched, and for
 // a repository whose only changed commit is its tip the result is
 // RewriteHeadCommit's. A signed commit that would change, a ref naming an
 // annotated tag, a HEAD that is not on a branch and an index go-git cannot
@@ -562,7 +562,7 @@ func RewriteHistory(dir string, paths []string, mirrors ...string) error {
 		}
 	}
 	for _, m := range mirrors {
-		if err := rewriteMirrorHistory(m, branch, tipID, newTip, w, keep); err != nil {
+		if err := rewriteMirrorHistory(m, repo, w); err != nil {
 			return fail("mirror %s: %w", m, err)
 		}
 	}
@@ -720,25 +720,61 @@ func keepCommits(repo *git.Repository, id plumbing.Hash, keep map[plumbing.Hash]
 	return nil
 }
 
-// rewriteMirrorHistory is rewriteMirror for a history: the mirror gets the
-// new objects and every moved commit in its refs.
-func rewriteMirrorHistory(mirror string, branch plumbing.ReferenceName, tipID, newTip plumbing.Hash, w *historyRewrite, keep map[plumbing.Hash]bool) error {
+// rewriteMirrorHistory is rewriteMirror for a history. A mirror need not
+// hold the work tree's branch (the work tree may have commits it never
+// pushed): it gets the new objects its own refs come to reach, its refs move
+// to the new ids of the commits that moved, and the replaced loose objects
+// nothing of its own reaches are removed. A mirror that holds a commit
+// descending from a rewritten one that the work tree does not know would be
+// left half rewritten, so it is an error.
+func rewriteMirrorHistory(mirror string, src *git.Repository, w *historyRewrite) error {
 	repo, done, err := openStorage(mirror)
 	if err != nil {
 		return err
 	}
 	defer done()
-	if got, err := refValue(repo, branch); err != nil || got != tipID {
-		return fmt.Errorf("%s is %s, not the rewritten commit %s", branch, got, tipID)
+	tips, err := refTips(repo)
+	if err != nil {
+		return err
 	}
-	if err := storeAll(repo, w.objs); err != nil {
+	// What the mirror's refs will reach once repointed, as far as the work
+	// tree holds it, tells which of the new objects the mirror needs.
+	need := map[plumbing.Hash]bool{}
+	for _, id := range tips {
+		if n, ok := w.moved[id]; ok {
+			id = n
+		}
+		if _, err := src.CommitObject(id); err == nil {
+			if err := keepCommits(src, id, need); err != nil {
+				return err
+			}
+		}
+	}
+	var objs []plumbing.EncodedObject
+	for _, o := range w.objs {
+		if need[o.Hash()] {
+			objs = append(objs, o)
+		}
+	}
+	if err := storeAll(repo, objs); err != nil {
 		return err
 	}
 	if err := repointRefsMap(mirror, w.moved); err != nil {
 		return err
 	}
-	if got, err := refValue(repo, branch); err != nil || got != newTip {
-		return fmt.Errorf("%s is %s after the rewrite, want %s", branch, got, newTip)
+	keep := map[plumbing.Hash]bool{}
+	for _, id := range tips {
+		if n, ok := w.moved[id]; ok {
+			id = n
+		}
+		if err := keepCommits(repo, id, keep); err != nil {
+			return err
+		}
+	}
+	for old := range w.moved {
+		if keep[old] {
+			return fmt.Errorf("a commit of the mirror descends from %s, which the rewrite replaced", old)
+		}
 	}
 	return pruneLoose(mirror, w.stale, keep)
 }

@@ -243,12 +243,50 @@ func TestRewriteHistoryRefusals(t *testing.T) {
 			t.Errorf("err = %v, want a refusal", err)
 		}
 	})
-	t.Run("a mirror off the tip", func(t *testing.T) {
+	t.Run("a mirror commit the work tree does not know", func(t *testing.T) {
 		work, bare := historyWithRoot(t, "/old")
-		pinnedGit(t, bare, "update-ref", "refs/heads/main", "HEAD~1")
+		other := t.TempDir()
+		pinnedGit(t, other, "clone", "-q", bare, ".")
+		pinnedGit(t, other, "checkout", "-q", "-b", "extra", rootCommit(t, other))
+		writeFileT(t, other, "extra.txt", "x\n")
+		pinnedGit(t, other, "add", "-A")
+		pinnedGit(t, other, "commit", "-q", "-m", "extra")
+		pinnedGit(t, other, "push", "-q", "origin", "extra")
 		writeFileT(t, work, "a.txt", "path: /new\n")
-		if err := RewriteHistory(work, []string{"a.txt"}, bare); err == nil {
-			t.Errorf("a mirror that does not hold the tip was accepted")
+		err := RewriteHistory(work, []string{"a.txt"}, bare)
+		if err == nil || !strings.Contains(err.Error(), "descends") {
+			t.Errorf("err = %v, want a refusal for the half-rewritable mirror", err)
 		}
 	})
+}
+
+// TestRewriteHistoryGivesAMirrorOnlyWhatItsRefsReach: a mirror that holds just
+// main, while the work tree has a side branch and a merge it never pushed,
+// ends with the objects a fresh remote of main has, and keeps its other ref
+// where it was.
+func TestRewriteHistoryGivesAMirrorOnlyWhatItsRefsReach(t *testing.T) {
+	const oldRoot, newRoot = "/old/root", "/new/place/longer"
+	build := func(root string) (work, bare string) {
+		work = newRewriteRepo(t, map[string]string{"a.txt": "path: " + root + "\n"}, "first")
+		bare = bareCloneOf(t, work)
+		pinnedGit(t, work, "checkout", "-q", "-b", "local")
+		writeFileT(t, work, "local.txt", "never pushed\n")
+		pinnedGit(t, work, "add", "-A")
+		pinnedGit(t, work, "commit", "-q", "-m", "local only")
+		return work, bare
+	}
+	work, bare := build(oldRoot)
+	writeFileT(t, work, "a.txt", "path: "+newRoot+"\n")
+	_, freshBare := build(newRoot)
+
+	if err := RewriteHistory(work, []string{"a.txt"}, bare); err != nil {
+		t.Fatal(err)
+	}
+	mustBeSound(t, bare)
+	if got, want := strings.Join(objectIDs(t, bare), "\n"), strings.Join(objectIDs(t, freshBare), "\n"); got != want {
+		t.Errorf("objects of the remote:\n%s\nwant:\n%s", got, want)
+	}
+	if got, want := refList(t, bare), refList(t, freshBare); got != want {
+		t.Errorf("refs of the remote:\n%s\nwant:\n%s", got, want)
+	}
 }
