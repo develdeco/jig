@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,6 +123,22 @@ func TestCIWorkflowCountsGitProcesses(t *testing.T) {
 		}
 		if p, _ := yamlString(with["path"]); p != baselinePath {
 			t.Errorf("ci.yml: the baseline save's path = %q, want %q", p, baselinePath)
+		}
+	}
+	// check leaves callers.tsv in the count directory; the leg uploads it for
+	// a week, after the check and even when the check or a test failed.
+	if upload := requireStepIf(t, steps, "upload who started the git processes", "actions/upload-artifact@v7", "always() && runner.os == 'Linux'"); upload != nil {
+		with, _ := yamlMap(upload["with"])
+		if p, _ := yamlString(with["path"]); p != "${{ runner.temp }}/gitcount/callers.tsv" {
+			t.Errorf("ci.yml: the callers upload's path = %q, want the callers.tsv check writes into the count directory", p)
+		}
+		if d := fmt.Sprint(with["retention-days"]); d != "7" {
+			t.Errorf("ci.yml: the callers upload's retention-days = %q, want 7", d)
+		}
+		for i, sv := range steps {
+			if step, _ := yamlMap(sv); step["name"] == "upload who started the git processes" && i < at {
+				t.Errorf("ci.yml: the callers upload runs before the git budget check, so callers.tsv is not there yet")
+			}
 		}
 	}
 	perms, _ := yamlMap(test["permissions"])

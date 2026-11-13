@@ -122,7 +122,7 @@ const traceEnv = "GIT_TRACE2_EVENT"
 // trace2.envVars (internal/gittest writes that line for test binaries), which
 // is how a trace file says who started the process.
 func withCaller(env []string, dir string) []string {
-	if !slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, traceEnv+"=") }) {
+	if !tracing(env) {
 		return env
 	}
 	abs := ""
@@ -133,6 +133,18 @@ func withCaller(env []string, dir string) []string {
 		}
 	}
 	return append(env, "JIG_GIT_CALLER="+callerName(), "JIG_GIT_DIR="+abs)
+}
+
+// tracing reports whether env sets a trace target. The last entry of a name
+// wins, as in the child, and an empty value is git's "off".
+func tracing(env []string) bool {
+	on := false
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, traceEnv+"="); ok {
+			on = v != ""
+		}
+	}
+	return on
 }
 
 // ownFramePrefix is the function-name prefix of every frame in this package;

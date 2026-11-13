@@ -7,20 +7,14 @@ import (
 )
 
 func TestNoCallerWithoutATrace(t *testing.T) {
-	env := []string{"A=1", "GIT_TRACE2=1", "B=2"}
-	if got := withCaller(slices.Clone(env), "."); !slices.Equal(got, env) {
-		t.Errorf("env changed without a trace target: %v", got)
-	}
-	if got := withCaller(nil, "."); got != nil {
-		t.Errorf("nil env became %v", got)
-	}
-
-	// Each path builds its child environment through runOnce; neither adds
-	// the variables when nothing traces.
-	t.Setenv("GIT_TRACE2_EVENT", "")
-	for _, kv := range inheritedEnv() {
-		if strings.HasPrefix(kv, "JIG_GIT_") {
-			t.Errorf("inherited env carries %s", kv)
+	for _, env := range [][]string{
+		{"A=1", "GIT_TRACE2=1", "B=2"},
+		{"GIT_TRACE2_EVENT=", "A=1"},
+		{"GIT_TRACE2_EVENT=/x", "GIT_TRACE2_EVENT="},
+		nil,
+	} {
+		if got := withCaller(slices.Clone(env), "."); !slices.Equal(got, env) {
+			t.Errorf("withCaller(%v) = %v; the environment must be unchanged", env, got)
 		}
 	}
 }

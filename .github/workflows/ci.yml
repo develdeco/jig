@@ -254,6 +254,18 @@ jobs:
             flags+=("$ACCEPTED")
           fi
           "$RUNNER_TEMP/gitbudget" check "${flags[@]}" .github/git-budget.yaml "$baseline" "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
+      # check writes callers.tsv beside the counts: every package's git
+      # processes by the Go function and the test that started them, which
+      # the job summary cuts to the top ones. Kept a week; the report never
+      # fails the leg, and neither does a missing file.
+      - name: upload who started the git processes
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: git-callers
+          path: ${{ runner.temp }}/gitcount/callers.tsv
+          retention-days: 7
+          if-no-files-found: ignore
       # Only the push to main saves: it tests every package, so the baseline
       # holds them all. Not a pull request, the schedule, a dispatch, or a
       # release's call (whose push is of a tag, not main).

@@ -132,7 +132,18 @@ matching the directory name and a `description:` of at most 50 words.
   request label and a re-run of the failed job; nothing is committed. With
   no baseline (the cache entry is evicted after 7 unused days) the leg
   passes and says so. Counts differ by OS, so read them from CI's Linux
-  summary, not a local run.
+  summary, not a local run. Under the hermetic config every test binary runs
+  with (`internal/gittest` lists `trace2.envVars = JIG_GIT_CALLER,JIG_GIT_DIR`),
+  each trace file also names the Go function that asked `gitx` for the process
+  and the directory it ran in, from which the test is derived (the nearest
+  `Test`, `Fuzz`, `Example` or `Benchmark` path component, so two tests that
+  agree in their first 40 characters share a row). `check` prints the top 20
+  callers across the packages and each package's top 10 callers and tests
+  after the table, in the job summary too, and CI uploads every count as
+  `callers.tsv` (the `git-callers` artifact, kept 7 days: package, `caller` or
+  `test`, name, count). A process started under a config of its own records
+  no caller and counts as `(unattributed)`. The report never changes a
+  verdict.
 - `e2e` records each jig run it makes, as an SVG with a tag beside it, into
   the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
   for the oracle run at a builder's green; ADR 0029). Unset, it records
