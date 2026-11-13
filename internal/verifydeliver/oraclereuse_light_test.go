@@ -41,8 +41,7 @@ func runsByWorkspace(runs []OracleRun) map[string]OracleRun {
 // or a verify light line at the head's own tree each behave as the rule says.
 func TestGateReusesThePassOfALightDelta(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	alpha, beta := func() string { return testCmd(t, fx, "alpha") }, func() string { return testCmd(t, fx, "beta") }
 	var base string
