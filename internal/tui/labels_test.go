@@ -224,3 +224,33 @@ func TestTheGatesSlotWaitLandsUnderTheGatesStep(t *testing.T) {
 		t.Errorf("a slice's slot-wait is in step %d, want the Build step", got)
 	}
 }
+
+// TestAFailedOrReusedGateOracleLineSaysSo: the gate journals the run that
+// failed and the pass it reused, as it journals a run it made; the first is
+// drawn stalled with why, the second names what it stands on, never "passed".
+func TestAFailedOrReusedGateOracleLineSaysSo(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-6")
+	tk := ticketOf("JIG-6")
+	g.m.w.tickets["JIG-6"] = tk
+	failed := jl(at(3, 1), "JIG-6", "", journal.EventGateOracle, with("", sha('a'), "fail", "", "", ""), func(l *journal.Line) {
+		l.Command, l.Seconds, l.Summary = "go test ./alpha/...", 4, "red on purpose"
+	})
+	reused := jl(at(3, 2), "JIG-6", "", journal.EventGateOracle, with("", sha('b'), "pass", "", "", ""), func(l *journal.Line) {
+		l.Command, l.ReusedFrom = "go test ./alpha/...", sha('a')
+	})
+	tk.lines = append(tk.lines, failed, reused)
+
+	if got := g.m.say(tk, failed); got != "`go test ./alpha/...` failed in 4s: red on purpose" {
+		t.Errorf("a failed gate-oracle line says %q", got)
+	}
+	if got := eventState(failed); got != StateStalled {
+		t.Errorf("a failed gate-oracle line is drawn %q, want %q", got, StateStalled)
+	}
+	if got := g.m.say(tk, reused); got != "`go test ./alpha/...` reused the pass of "+short(sha('a')) {
+		t.Errorf("a reused gate-oracle line says %q", got)
+	}
+	if got := eventState(reused); got != StateGreen {
+		t.Errorf("a reused gate-oracle line is drawn %q, want %q", got, StateGreen)
+	}
+}

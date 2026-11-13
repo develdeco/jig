@@ -36,6 +36,11 @@ type Verification struct {
 	TS string
 	// Seconds is the oracle's wall time, for a pass or fail.
 	Seconds int
+	// CPUMs, PeakBytes and PeakBasis are what the oracle's process tree used
+	// (Line.CPUMs): 0 and "" when the line carries none.
+	CPUMs     int64
+	PeakBytes uint64
+	PeakBasis string
 	// Summary is the failure's flattened tail for a fail, or the reason for
 	// an error.
 	Summary string
@@ -130,11 +135,13 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 			// The verified line that follows its own attempt's oracle line
 			// carries no time of its own: keep the oracle line's.
 			next.Seconds, next.Ran, next.ReusedFrom = v.Seconds, v.Ran, v.ReusedFrom
+			next.CPUMs, next.PeakBytes, next.PeakBasis = v.CPUMs, v.PeakBytes, v.PeakBasis
 		case state == VerifyPending:
 			// A pending line's summary is the commit's subject, which says
 			// what is verified, not how a run came out.
 		default:
 			next.Seconds, next.Summary = l.Seconds, l.Summary
+			next.CPUMs, next.PeakBytes, next.PeakBasis = l.CPUMs, l.PeakBytes, l.PeakBasis
 		}
 		v = next
 	}

@@ -6,11 +6,12 @@ no-mistakes keeps evidence over confidence and refuses a skipped check, and a pa
 
 ## The rule
 
-- **A recorded pass stands for the gate's own run only when it is the same run.** Before each run of the suite (a manifest oracle in a workspace), the gate looks in the ticket's journal for an `oracle` pass line, written by frontier at a slice's green (ADR 0020). It reuses the line, instead of running the oracle again, only when all of these hold:
+- **A recorded pass stands for the gate's own run only when it is the same run.** Before each run of the suite (a manifest oracle in a workspace), the gate looks in the ticket's journal for an `oracle` pass line, written by frontier at a slice's green (ADR 0020), or a `gate-oracle` pass line, written by an earlier round of this gate. It reuses the line, instead of running the oracle again, only when all of these hold:
   - **the same command,** exactly, as the manifest at the gate's head resolves it. frontier records the command it ran on the line, since a slice can change `.claude/jig.yaml`, and every oracle runs from the repo root, so the command names the run.
   - **the same tree:** the line's commit has the gate head's tree. frontier records a commit only when the lease's tracked and untracked files were exactly that commit before the run.
   - **the same env classes:** the env class that was up for the pass, as recorded on the line, is the whole set the gate brings up for the ticket's slices. A pass with no env class stands only when the gate brings up none.
-  - **no failure beside it:** no failed run of that command is recorded on the same tree, so a flaky oracle is sampled again rather than trusted on its pass.
+  - **no failure beside it:** no failed run of that command, in an `oracle` or a `gate-oracle` line, is recorded on the same tree, so a flaky oracle is sampled again rather than trusted on its pass. A run that never judged the code (a kill or a stop, a line with a `cause`) neither vetoes nor counts.
+- **The gate journals what it did.** Each run the gate makes is a `gate-oracle` line with the commit, the command and the env class set that was up; so is a run that failed (`outcome` fail, with `cause` when it never judged the code), and so is a run it reused: a pass line naming the commit it stands on (`reused_from`) and, when the delta was light, the light command that ran (`ran`), with the env class of the pass it stands on. The next round chains from that line as from any pass, so a ticket whose slice oracles are narrow pays for the suite once, not once per round. The same light rule applies to these lines: a pass on a commit whose tree differs from the head's only in the manifest's light paths stands, and the gate runs the light oracle on the head.
 - **Only what is not covered runs.** The gate brings up the env classes only when some run is left to do.
 - **The reviewer sees the evidence.** `review.json`'s `oracles_passed` lists reused runs too, each with `reused_from`, the commit whose pass it reuses. This amends ADR 0017: the prompt now says every command in `oracles_passed` passed on this head's tree, run by jig or reused from a pass on a commit with the same tree.
 - **Failures keep their output, and runs are bounded.** The gate's own runs and publish's revalidation run within the same 30-minute bound as jig's run at green, kill the process tree past it, and carry the end of the output in `GATE_ORACLE_FAILED`.
@@ -25,5 +26,6 @@ Publish's revalidation never reuses: it runs only after the target moved, and th
   - every run reused, while failing tests are committed at the head, so a rerun would have stopped the round;
   - a partial pass that runs the rest;
   - no reuse for a pass on another tree, under another env class set, of another command, or beside a failed run on the same tree;
+  - a pass the gate journaled itself, through `TestGateReusesItsOwnEarlierPass`: carries the env class that was up, stands for a later round on a light delta (running only the light oracle) and for the round after that (chained from the reuse line), does not stand across a non-light file, and a failed gate run is journaled and makes the next gate on that tree run the suite;
   - a failed gate run whose `GATE_ORACLE_FAILED` carries the failing test's output.
 - **The review prompt,** through `TestRenderReviewPromptMatchesDesignGolden`.
