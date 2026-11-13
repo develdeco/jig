@@ -161,8 +161,14 @@ func TestShellOutputUsageSurvivesAFailureAndAKill(t *testing.T) {
 	if (use.PeakBytes == 0) != (use.Basis == "") {
 		t.Errorf("peak %d and basis %q disagree", use.PeakBytes, use.Basis)
 	}
-	if runtime.GOOS == "windows" && use.CPU < burned {
-		t.Errorf("a killed run has CPU %v, want at least %v", use.CPU, burned)
+	if runtime.GOOS == "windows" {
+		if use.CPU < burned {
+			t.Errorf("a killed run has CPU %v, want at least %v", use.CPU, burned)
+		}
+	} else if use.CPU != 0 {
+		// Killing the group reaps nothing: the shell alone would be read, and
+		// near-zero told as measured is wrong, so no figure is the honest one.
+		t.Errorf("a killed run has CPU %v, want it not measured", use.CPU)
 	}
 }
 
