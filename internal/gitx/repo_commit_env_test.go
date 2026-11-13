@@ -68,3 +68,26 @@ func TestCommitAllEnvDeclinesLikeCommitAll(t *testing.T) {
 		t.Fatalf("HEAD moved to %s, want %s", got, head)
 	}
 }
+
+// TestCommitAllDeclinesDuringAMerge: a merge in progress (its conflicts
+// resolved by hand) is committed as a merge commit by the git program; an
+// in-process commit would drop the second parent.
+func TestCommitAllDeclinesDuringAMerge(t *testing.T) {
+	dir := newStoreRepo(t)
+	mustRun(t, dir, "switch", "-q", "-c", "side")
+	writeFileT(t, dir, "side.txt", "side\n")
+	mustRun(t, dir, "add", "-A")
+	mustRun(t, dir, "commit", "-q", "-m", "side")
+	mustRun(t, dir, "switch", "-q", "main")
+	writeFileT(t, dir, "main.txt", "main\n")
+	mustRun(t, dir, "add", "-A")
+	mustRun(t, dir, "commit", "-q", "-m", "main")
+	mustRun(t, dir, "merge", "--no-commit", "--no-ff", "side")
+
+	if _, err := openRepo(t, dir).CommitAllEnv("merge", pinnedEnv()); !errors.Is(err, ErrUseCLI) {
+		t.Fatalf("CommitAllEnv during a merge = %v, want ErrUseCLI", err)
+	}
+	if _, err := openRepo(t, dir).CommitAll("merge", "t", "t@example.invalid"); !errors.Is(err, ErrUseCLI) {
+		t.Fatalf("CommitAll during a merge = %v, want ErrUseCLI", err)
+	}
+}

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -57,10 +57,7 @@ func commitAuthored(t *testing.T, dir string, c authorCommit) {
 			t.Fatalf("commitAuthored: write %s: %v", rel, err)
 		}
 	}
-	gitLog(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, pinnedIdentityEnv, "commit", "-m", c.message); err != nil {
-		t.Fatalf("commitAuthored: commit %q: %v", c.message, err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Commit(dir, c.message)
 }
 
 const retrySource = `package alpha
@@ -191,8 +188,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatalf("jig claim fix-1 exit = %d, want 0 on the adopted branch %s\nstdout:\n%s\nstderr:\n%s", claim.Code, branch, claim.Stdout, claim.Stderr)
 	}
 	h.git("apply", filepath.Join(fx.ScenarioDir, "slices", "fix-1", "attempt-1", "patch.diff"))
-	h.git("add", "-A")
-	h.git("commit", "-m", ticket+" fix-1: document Add", "-m", "Jig-Slice: fix-1")
+	h.builder().Commit(h.Clone, ticket+" fix-1: document Add\n\nJig-Slice: fix-1")
 	jigFix := h.git("rev-parse", "HEAD")
 	if got := h.git("rev-parse", "HEAD~1"); got != authorNext {
 		t.Fatalf("the fix commit's parent is %s, want the author's latest tip %s: the fix was not built on top of the author's commits, the mid-loop push included", got, authorNext)

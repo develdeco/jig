@@ -39,7 +39,8 @@ import (
 // reader never sees half of one.
 //
 // It returns ErrUseCLI, having changed nothing, when a git process holds
-// either lock, HEAD is not on a branch, a pinned date does not parse, the
+// either lock, HEAD is not on a branch, a merge, cherry-pick or revert is
+// in progress, a pinned date does not parse, the
 // index cannot be read or written back as it was, tracks anything but
 // plain files or marks one assume-unchanged, or the work tree has what the
 // git program would stage differently: a symbolic link, an executable file
@@ -122,6 +123,13 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 	}
 	branch := head.Target()
 	gitDir := r.gitDir()
+	// A merge, cherry-pick or revert in progress makes the commit a merge
+	// commit or a pick's: the git program's to write.
+	for _, state := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
+		if _, err := os.Lstat(filepath.Join(gitDir, state)); err == nil {
+			return false, ErrUseCLI
+		}
+	}
 	indexLock, err := lock(filepath.Join(gitDir, "index"))
 	if err != nil {
 		return false, err

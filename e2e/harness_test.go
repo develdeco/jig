@@ -27,6 +27,7 @@ import (
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
@@ -90,6 +91,18 @@ func (h *fakeHarness) gitEnv() []string {
 	return replaceEnv(h.env.environ(), pinnedIdentityEnv)
 }
 
+// builder is the harness's own commits and pushes in the clone: in process
+// where gitx serves the clone, the git program (in the harness's whole
+// environment) where it declines, under the pinned identity and dates.
+func (h *fakeHarness) builder() *gitbuild.Builder {
+	h.t.Helper()
+	b := gitbuild.New(h.t, pinnedIdentityEnv)
+	b.Fallback = func(dir string, _ []string, args ...string) (string, error) {
+		return gitx.RunReplaceEnv(dir, h.gitEnv(), args...)
+	}
+	return b
+}
+
 // git runs git in the clone and fails the test on an error.
 func (h *fakeHarness) git(args ...string) string {
 	h.t.Helper()
@@ -126,8 +139,7 @@ func (h *fakeHarness) CommitScenario(slice string, attempt int) string {
 	}
 	msg := fmt.Sprintf("%s %s: %s", h.fx.Ticket, slice, firstLine(scenarioResultSummary(h.t, h.fx.ScenarioDir, slice, strconv.Itoa(attempt))))
 	h.git("apply", patch)
-	h.git("add", "-A")
-	h.git("commit", "-m", msg, "-m", sliceTrailerKey+": "+slice)
+	h.builder().Commit(h.Clone, msg+"\n\n"+sliceTrailerKey+": "+slice)
 	return h.git("rev-parse", "HEAD")
 }
 
@@ -397,7 +409,7 @@ func (h *fakeHarness) Jig(args ...string) jigResult {
 // Push pushes branch from the clone to its origin.
 func (h *fakeHarness) Push(branch string) {
 	h.t.Helper()
-	h.git("push", "origin", branch)
+	h.builder().Push(h.Clone, "origin", branch)
 }
 
 // verifierPIDs lists the pids of the detached verification workers the ledger
