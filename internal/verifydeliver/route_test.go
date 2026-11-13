@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -829,6 +830,36 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 }
 
 // --- disambiguation ----------------------------------------------------
+
+// TestAQueuedKeepsFixSliceCarriesItsOwnMarker: a keep queued before round n
+// and the round's own finding of the same workspace and oracle are two slices
+// with two ids, neither of them a "-2" of the other.
+func TestAQueuedKeepsFixSliceCarriesItsOwnMarker(t *testing.T) {
+	t.Parallel()
+
+	st := newReviewStore(t)
+	man := oneOracleManifest()
+	files := oneRepoFiles(man)
+	keep := Finding{ID: "r1-f1", File: "a.go", Title: "kept", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Oracle: "test", Status: StatusOpen}
+	own := Finding{ID: "r2-f1", File: "b.go", Title: "own", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen}
+
+	queued, err := buildFixSlices(2, st, "T-1", nil, nil, []Finding{keep}, files, 5, true)
+	if err != nil {
+		t.Fatalf("buildFixSlices (queued): %v", err)
+	}
+	round, err := buildFixSlices(2, st, "T-1", queued, []Finding{own}, nil, files, 5, false)
+	if err != nil {
+		t.Fatalf("buildFixSlices (round): %v", err)
+	}
+	if len(queued) != 1 || len(round) != 1 || queued[0].ID == round[0].ID {
+		t.Fatalf("ids = %v and %v, want two different ids", sliceIDs(queued), sliceIDs(round))
+	}
+	for _, id := range append(sliceIDs(queued), sliceIDs(round)...) {
+		if strings.HasSuffix(id, "-2") {
+			t.Errorf("id %q ends in -2, want each slice to keep its own id", id)
+		}
+	}
+}
 
 func TestDisambiguateFixSliceIDsBreaksTies(t *testing.T) {
 	t.Parallel()

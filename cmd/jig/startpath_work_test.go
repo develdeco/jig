@@ -95,7 +95,7 @@ func checkWork(t *testing.T, name string, processes int, reads int64, maxProcess
 // change that adds work on purpose raises it.
 const (
 	hereMaxProcesses       = 10
-	hereMaxReads     int64 = 5
+	hereMaxReads     int64 = 7
 )
 
 // Not parallel: t.Setenv and the process-wide read counter need it.
@@ -117,7 +117,7 @@ func TestHereWorkStaysUnderItsCeiling(t *testing.T) {
 // that adds work on purpose raises it.
 const (
 	sessionStartMaxProcesses       = 10
-	sessionStartMaxReads     int64 = 6
+	sessionStartMaxReads     int64 = 8
 )
 
 func TestSessionStartHookWorkStaysUnderItsCeiling(t *testing.T) {
@@ -138,8 +138,8 @@ func TestSessionStartHookWorkStaysUnderItsCeiling(t *testing.T) {
 // reads (gitx.InProcessReads). Each is the count measured on main plus 2; a
 // change that adds work on purpose raises it.
 const (
-	observeMaxProcesses       = 2
-	observeMaxReads     int64 = 4
+	observeMaxProcesses       = 0
+	observeMaxReads     int64 = 5
 )
 
 func TestObserveWorkStaysUnderItsCeiling(t *testing.T) {

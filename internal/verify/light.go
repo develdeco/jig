@@ -14,11 +14,13 @@ type lightRun struct {
 
 // lightFor decides whether the commit's delta is light. The base is the newest
 // passing oracle line of cmd and env on an ancestor of the commit with no
-// later failed full run of the same command; when the files that base changed
-// into the commit all match the manifest's light rule, the light oracle stands
-// in for the slice's. Anything jig cannot prove (no light rule, no earlier
-// pass, a failed run since, a file outside the rule, a journal or diff it
-// cannot read) returns false and the slice's own oracle runs, as before.
+// later failed full run of the same command; only a failed full run with no
+// cause stops a light delta (a stop, a kill or a failed light run does not).
+// When the files that base changed into the commit all match the manifest's
+// light rule, the light oracle stands in for the slice's. Anything jig cannot
+// prove (no light rule, no earlier pass, a failed full run since, a file
+// outside the rule, a journal or diff it cannot read) returns false and the
+// slice's own oracle runs, as before.
 func (x *run) lightFor(m manifest.Manifest, cmd string) (lightRun, bool) {
 	if !m.Light.Declared() {
 		return lightRun{}, false

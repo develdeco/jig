@@ -8,7 +8,7 @@ import (
 )
 
 // childEnvVar makes a re-run of this test binary report what it sees instead
-// of testing; the value names what the child reports on.
+// of testing; any non-empty value turns the child on, the value names nothing.
 const childEnvVar = "GITTEST_CHILD_REPORT"
 
 // shellVars is a person's shell exporting git state, as seen by a test run.
