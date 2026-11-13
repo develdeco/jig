@@ -24,6 +24,16 @@
 // fails, and -accepted turns the overs into passes. It prints a table and
 // appends it as Markdown to $GITHUB_STEP_SUMMARY. write records the counts
 // as the baseline. Packages are import paths, as go list prints them.
+//
+// Each trace file also says who started its git process, when the process
+// ran under a git config that lists trace2.envVars = JIG_GIT_CALLER,
+// JIG_GIT_DIR (internal/gittest writes it for test binaries; internal/gitx
+// sets both variables while git traces): the Go function that called gitx,
+// and the directory it ran in, from which the test is derived. check reads
+// only the head of each file and, after the table, prints and summarizes the
+// top callers across the packages and each package's top callers and tests,
+// and writes every count to callers.tsv in the count directory. That report
+// is never part of the verdict.
 package main
 
 import (
@@ -159,6 +169,27 @@ func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout,
 		var rows []row
 		rows, ok = c.check(b.Packages, counts, accepted)
 		plain, md = formatRows(rows, c), markdownRows(rows, c)
+	}
+	// Who started the processes is reported, never enforced: nothing below
+	// changes the verdict or the exit code, and a failure to read or write it
+	// is a warning.
+	as := attributions{}
+	for rel := range counts {
+		a, err := attribute(filepath.Join(countDir, countDirName(rel)))
+		if err != nil {
+			fmt.Fprintf(stderr, "gitbudget: attribution of %s: %v\n", rel, err)
+			continue
+		}
+		if a.total > 0 {
+			as[rel] = a
+		}
+	}
+	plain += formatAttribution(as, false)
+	md += formatAttribution(as, true)
+	if len(as) > 0 {
+		if err := writeCallers(countDir, as); err != nil {
+			fmt.Fprintf(stderr, "gitbudget: %v\n", err)
+		}
 	}
 	fmt.Fprint(stdout, plain)
 	if path := getenv("GITHUB_STEP_SUMMARY"); path != "" {

@@ -47,6 +47,9 @@ func Run(m *testing.M) int {
 	// The files need not exist: git reads a missing one as empty. Forward
 	// slashes, since a backslash escapes in a config value.
 	body := "[maintenance]\n\tauto = false\n[receive]\n\tautogc = false\n[gc]\n\tautoDetach = false\n" +
+		// Lists the variables gitx sets when git is tracing, so a trace file
+		// names the Go function and directory behind each git process.
+		"[trace2]\n\tenvVars = JIG_GIT_CALLER,JIG_GIT_DIR\n" +
 		fmt.Sprintf("[core]\n\texcludesFile = %q\n\tattributesFile = %q\n",
 			filepath.ToSlash(filepath.Join(dir, "ignore")), filepath.ToSlash(filepath.Join(dir, "attributes")))
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
