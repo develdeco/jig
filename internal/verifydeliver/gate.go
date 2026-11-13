@@ -819,7 +819,7 @@ func (d Deps) slotHolder(ticket string) slotHolder {
 	return func(name, cmd string) (func(), error) {
 		stopCtx, end := envrun.StopContext(context.Background())
 		defer end()
-		rel, err := slot.Hold(stopCtx, d.Home, d.Cfg.Name, d.Cfg.Slots(), slot.Who(ticket, ""), func(event, summary string) error {
+		rel, err := slot.Hold(stopCtx, d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who(ticket, ""), Oracle: name, Command: cmd, Pinned: d.Cfg.PinnedSlots()}, func(event, summary string) error {
 			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Summary: summary, Source: "gate"})
 		})
 		if err != nil && stopCtx.Err() != nil {

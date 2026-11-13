@@ -196,8 +196,8 @@ func TestSlotsDefaultsToOneAndRefusesANonPositiveValue(t *testing.T) {
 		return path
 	}
 	m, err := LoadMarker(write("project: p\n"))
-	if err != nil || m.SuiteSlots() != 1 {
-		t.Fatalf("no slots: %d, %v; want 1", m.SuiteSlots(), err)
+	if err != nil || m.SuiteSlots() != 0 {
+		t.Fatalf("no slots: %d, %v; want 0", m.SuiteSlots(), err)
 	}
 	m, err = LoadMarker(write("project: p\nslots: 3\n"))
 	if err != nil || m.SuiteSlots() != 3 {

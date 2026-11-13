@@ -117,14 +117,27 @@ func startWaiting(dir, who string) func() {
 	}
 }
 
+// Request is what a heavy oracle run asks the machine for: whose it is, which
+// oracle and command it runs, and the count the project's marker pinned.
+type Request struct {
+	Project string
+	// Who is the run's name (Who).
+	Who string
+	// Oracle and Command are the oracle's name and the command it runs.
+	Oracle, Command string
+	// Pinned is the count the marker pinned, 0 when it pinned none.
+	Pinned int
+}
+
 // Hold is Take for an oracle run: it records journal.EventSlotWait when the
 // run has to wait and journal.EventSlotTaken when it gets the slot, through
 // record, which writes the line for the event it is handed, with the summary
 // a wait carries (Line). A record that
 // fails gives the slot back and returns its error.
-func Hold(ctx context.Context, root, project string, n int, who string, record func(event, summary string) error) (release func(), err error) {
+func Hold(ctx context.Context, root string, req Request, record func(event, summary string) error) (release func(), err error) {
 	var werr error
-	rel, err := Take(ctx, root, project, n, who, func() {
+	project := req.Project
+	rel, err := Take(ctx, root, project, max(req.Pinned, 1), req.Who, func() {
 		summary := ""
 		if st, rerr := Read(root, project); rerr == nil {
 			summary = Line(st)
