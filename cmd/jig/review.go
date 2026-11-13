@@ -226,7 +226,7 @@ func reviewTicket(e env, st *store.Store, jigHome string, positionals []string, 
 	if err != nil {
 		return "", err
 	}
-	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: st.Root, Getenv: e.getenv, NoMap: true})
+	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: st.Root, Getenv: e.getenv, NoMap: true, Memo: e.memo})
 	if err != nil {
 		return "", err
 	}

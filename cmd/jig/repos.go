@@ -129,10 +129,10 @@ func cmdRepos(e env, args []string, stdout io.Writer) int {
 	var rows [][]string
 	if kind == project.KindOrchestrator {
 		for _, s := range project.Statuses(p.root, p.marker.Repos) {
-			rows = append(rows, []string{project.RepoName(s.Repo), s.Repo.Path, repoRemoteOf(s), s.State})
+			rows = append(rows, []string{project.RepoName(s.Repo), s.Repo.Path, repoRemoteOf(e, s), s.State})
 		}
 	} else {
-		cfg := project.WithMarkerRepos(project.Config{}, p.root, p.marker)
+		cfg := project.WithMarkerRepos(e.memo, project.Config{}, p.root, p.marker)
 		for _, r := range cfg.Repos {
 			remote := r.Remote
 			if remote == p.root {
@@ -168,12 +168,12 @@ func cmdRepos(e env, args []string, stdout io.Writer) int {
 
 // repoRemoteOf is the remote a listed repo is known by: the one jig.yaml
 // lists, else its clone's origin or its submodule URL, "" when it has none.
-func repoRemoteOf(s project.RepoStatus) string {
+func repoRemoteOf(e env, s project.RepoStatus) string {
 	if s.Repo.Remote != "" {
 		return s.Repo.Remote
 	}
 	if s.State == project.RepoCheckedOut {
-		return project.OriginOf(s.Dir)
+		return project.OriginOf(e.memo, s.Dir)
 	}
 	return ""
 }

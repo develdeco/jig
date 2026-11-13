@@ -478,7 +478,7 @@ func (d *doctorCtx) cloneNotes() {
 }
 
 func (d *doctorCtx) cloneName(dir string) string {
-	return cloneNamedByMap(d.jigHome, dir)
+	return cloneNamedByMap(d.e.memo, d.jigHome, dir)
 }
 
 // cloneTarget is the branch the marker's repo for clone lands work on:

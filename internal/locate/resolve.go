@@ -107,7 +107,7 @@ func (l *locator) byMarker(dir string, m project.Marker) error {
 
 	var cfgRepos []project.Repo
 	if storePath != "" {
-		if cfg, err := project.LoadConfig(l.jigHome, storePath, name, dir); err == nil {
+		if cfg, err := project.LoadConfigWith(l.o.Memo, l.jigHome, storePath, name, dir); err == nil {
 			cfgRepos = cfg.Repos
 		}
 	}
@@ -142,7 +142,7 @@ func (l *locator) byMarker(dir string, m project.Marker) error {
 			l.explain("repo: %s is inside %s, repo %s of the orchestrator", l.cwd, w.RepoDir, w.Repo)
 		}
 	} else {
-		repoDir := cloneRootOf(dir)
+		repoDir := cloneRootOf(l.o.Memo, dir)
 		w.Repo, w.RepoDir = l.repoNameAt(repoDir, cfgRepos, mp, m), repoDir
 		clones[w.Repo] = repoDir
 		l.explain("repo: %s at %s", w.Repo, repoDir)
@@ -221,7 +221,7 @@ func (l *locator) repoNameAt(dir string, cfgRepos []project.Repo, mp project.Mac
 			return name
 		}
 	}
-	if name := repoOfDir(dir, cfgRepos); name != "" {
+	if name := repoOfDir(l.o.Memo, dir, cfgRepos); name != "" {
 		return name
 	}
 	if len(m.Repos) == 1 && m.Repos[0].Name != "" {
@@ -234,11 +234,11 @@ func (l *locator) repoNameAt(dir string, cfgRepos []project.Repo, mp project.Mac
 // there is, else the one whose remote is dir's origin. It is "" when there are
 // several and none is told by its remote: no repo owns a directory by being
 // listed first.
-func repoOfDir(dir string, repos []project.Repo) string {
+func repoOfDir(m *gitx.Memo, dir string, repos []project.Repo) string {
 	if len(repos) == 1 {
 		return repos[0].Name()
 	}
-	if origin := originOf(dir); origin != "" && len(repos) > 1 {
+	if origin := originOf(m, dir); origin != "" && len(repos) > 1 {
 		norm := NormalizeRemote(origin)
 		for _, r := range repos {
 			if NormalizeRemote(r.Remote) == norm {
@@ -347,7 +347,7 @@ func (l *locator) byMapRemote() bool {
 		l.explain("map-remote: %s is not in a git work tree", l.cwd)
 		return false
 	}
-	origin := originOf(top)
+	origin := originOf(l.o.Memo, top)
 	if origin == "" {
 		l.explain("map-remote: %s has no origin remote", top)
 		return false
@@ -358,7 +358,7 @@ func (l *locator) byMapRemote() bool {
 		if mp.Store == "" {
 			continue
 		}
-		cfg, err := project.LoadConfig(l.jigHome, mp.Store, p, mp.Root)
+		cfg, err := project.LoadConfigWith(l.o.Memo, l.jigHome, mp.Store, p, mp.Root)
 		if err != nil {
 			continue
 		}
@@ -366,7 +366,7 @@ func (l *locator) byMapRemote() bool {
 			if NormalizeRemote(r.Remote) != norm {
 				continue
 			}
-			clone := cloneRootOf(top)
+			clone := cloneRootOf(l.o.Memo, top)
 			w := &l.w
 			w.How, w.Project, w.Kind = HowMapRemote, p, project.KindProject
 			w.StorePath, w.Repo, w.RepoDir, w.Root = mp.Store, r.Name(), clone, clone
@@ -404,8 +404,8 @@ func (l *locator) byStoreDir() bool {
 		}
 		l.setStore(sibling)
 		w.RepoDir = d
-		if cfg, err := project.LoadConfig(l.jigHome, sibling, "", d); err == nil {
-			w.Repo = repoOfDir(d, cfg.Repos)
+		if cfg, err := project.LoadConfigWith(l.o.Memo, l.jigHome, sibling, "", d); err == nil {
+			w.Repo = repoOfDir(l.o.Memo, d, cfg.Repos)
 		}
 		w.Root = d
 		w.Kind = project.KindProject
@@ -490,7 +490,7 @@ func (l *locator) cwdInRepo() bool {
 func (l *locator) toplevel() string {
 	if !l.topDone {
 		l.topDone = true
-		if top, err := gitx.TopLevel(l.cwd); err == nil {
+		if top, err := l.o.Memo.TopLevel(l.cwd); err == nil {
 			l.top = top
 		}
 	}
@@ -503,7 +503,7 @@ func (l *locator) cloneRoot() string {
 	if !l.rootDone {
 		l.rootDone = true
 		if top := l.toplevel(); top != "" {
-			l.root = cloneRootOf(top)
+			l.root = cloneRootOf(l.o.Memo, top)
 		}
 	}
 	return l.root
@@ -511,17 +511,17 @@ func (l *locator) cloneRoot() string {
 
 // CloneRoot is the clone dir belongs to: dir itself when it is a clone's top
 // level, and for a linked worktree the clone it was added from.
-func CloneRoot(dir string) string { return cloneRootOf(dir) }
+func CloneRoot(m *gitx.Memo, dir string) string { return cloneRootOf(m, dir) }
 
 // cloneRootOf is the clone dir belongs to: dir itself when it is a clone's
 // top level (or not a repo at all), and for a linked worktree, whose .git is
 // a file, the directory holding the common .git.
-func cloneRootOf(dir string) string {
+func cloneRootOf(m *gitx.Memo, dir string) string {
 	fi, err := os.Stat(filepath.Join(dir, ".git"))
 	if err != nil || fi.IsDir() {
 		return dir
 	}
-	common, err := gitx.CommonDir(dir)
+	common, err := m.CommonDir(dir)
 	if err != nil || filepath.Base(common) != ".git" {
 		return dir
 	}
@@ -529,8 +529,8 @@ func cloneRootOf(dir string) string {
 }
 
 // originOf is the URL of dir's origin remote, "" when it has none.
-func originOf(dir string) string {
-	out, err := gitx.Run(dir, "remote", "get-url", "origin")
+func originOf(m *gitx.Memo, dir string) string {
+	out, err := m.OriginURL(dir, "origin")
 	if err != nil {
 		return ""
 	}
