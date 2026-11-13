@@ -251,7 +251,9 @@ func TestFiveWritersUnderAHeldCheckpointLock(t *testing.T) {
 			}
 		}
 		if _, err := os.Stat(fetchHead); (err == nil) != (statBefore == nil) {
-			t.Error("a writer fetched without the checkpoint lock: FETCH_HEAD appeared")
+			// The in-process fetch moves only refs/remotes/origin/<branch>, so
+			// FETCH_HEAD can show just a fallback to the git program.
+			t.Error("a writer fell back to the git program without the checkpoint lock: FETCH_HEAD appeared")
 		}
 		if got := runGit(t, work, "rev-parse", "HEAD"); got != head {
 			t.Errorf("HEAD moved from %s to %s without the lock", head, got)

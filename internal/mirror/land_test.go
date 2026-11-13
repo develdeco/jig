@@ -1,6 +1,7 @@
 package mirror
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func TestTheLastCheckpointOfATicketLeavesOriginWithItsPullRequestsRecord(t *test
 	cfg := loadCfg(t, st)
 	client := &fakeClient{prs: map[string][]github.PullRequest{}}
 	var warnings []string
-	st.Warn = func(format string, args ...any) { warnings = append(warnings, format) }
+	st.Warn = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 	st.AfterCheckpoint = func(s *store.Store) error {
 		_, err := Sync(Deps{Store: s, Cfg: cfg, Client: client}, SyncOpts{})
 		return err

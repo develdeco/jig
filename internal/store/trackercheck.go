@@ -197,14 +197,14 @@ func (s *Store) linkFault(e TrackerEntry, o TrackerOwner) string {
 	link := s.TrackerLinkPath(e, o)
 	rel := filepath.ToSlash(s.TrackerLinkRelPath(e, o))
 	want := filepath.ToSlash(s.ownerRelDir(o))
-	fi, err := os.Lstat(link)
+	fi, err := s.tLstat(link)
 	switch {
 	case err != nil:
 		return fmt.Sprintf("%s is missing: it should be a link to %s", rel, want)
 	case fi.Mode()&os.ModeSymlink == 0:
 		return fmt.Sprintf("%s is not a link: it should be a link to %s", rel, want)
 	}
-	got, err := os.Readlink(link)
+	got, err := s.tReadlink(link)
 	if err != nil {
 		return fmt.Sprintf("%s cannot be read as a link: %v", rel, err)
 	}

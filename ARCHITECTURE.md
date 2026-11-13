@@ -628,15 +628,21 @@ claims (`claimIssue`, landing a new issue's record) reach the store through
 `Claim` too, and hooking `Claim` itself would re-enter the mirror. Either
 way it runs `mirror.Sync` in the same process, best-effort - a failure
 prints one warning naming the cause and never fails the command, and the
-next checkpoint retries - and then lands what the sync wrote: the tracker
-tree's writers note the paths they change in the working tree, and
-`RunCheckpointHook` ends (`internal/store/trackerland.go`, `landTrackerWrites`)
+next checkpoint retries - and then lands what the sync wrote. While the sync
+runs (`HoldTrackerWrites`) the tracker tree's writers keep their changes in a
+pending tree the readers see through (`internal/store/trackerpending.go`) and
+note the paths they change, so the working tree is clean for a claim on the same
+clone, and the sync holds no lock across its reads of the tracker; a new tracker
+writer must go through the `s.t*` file operations, never `os`, or its change
+reaches the working tree early and that claim's rebase refuses it. The one
+exception is `Claim`'s write callback, whose writes go straight to disk
+(`DirectTrackerWrites`) because it commits them itself. `RunCheckpointHook` ends (`internal/store/trackerland.go`, `landTrackerWrites`)
 by committing exactly those paths as the person and pushing, so a ticket's
 last checkpoint (`jig publish`) leaves its pull request's record on origin
 without a next checkpoint to carry it. A sync that finds the store up to date
 rewrites no record, notes nothing and so costs no commit and no push; the
-landing also pushes a branch that is ahead of origin when another process's
-`Sync` already committed the writes, and a push origin rejected first records
+landing also pushes a branch that is ahead of origin when another process
+committed the same records first, and a push origin rejected first records
 the other uncommitted changes (as `Sync` does) so the rebase onto what moved
 has a clean tree. A landing that fails is one warning: its commit waits for
 the next checkpoint's push. The observe hooks' own journal lines (a session's `spend`
@@ -702,8 +708,8 @@ completing the Status field's options, when missing, and linking the issue
 repo when it is not linked) and place every issue and every open or merged
 pull request on it, with its Status and Store ID - skipping the placement
 entirely when the item already carries both, so an up-to-date store sends
-no board mutation; write every record (into the working tree: the landing
-above takes it from there). A record naming an issue repo other
+no board mutation; write every record (pending until the landing
+above applies and commits it). A record naming an issue repo other
 than the `trackers:` entry's own `repo:` refuses the sync as
 `MIRROR_REPO_CHANGED` (moving issues to a new repo is not built) rather than
 opening a second issue elsewhere. The renderer (`internal/mirror/render.go`) and the

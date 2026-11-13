@@ -31,7 +31,7 @@ func (s *Store) legacyRecordRel(o TrackerOwner) string {
 // LegacyTrackerRecord returns o's record in its old place, when it has one.
 func (s *Store) LegacyTrackerRecord(o TrackerOwner) (LegacyTrackerRecord, bool, error) {
 	rel := s.legacyRecordRel(o)
-	if _, err := os.Stat(filepath.Join(s.Root, rel)); err != nil {
+	if _, err := s.tStat(filepath.Join(s.Root, rel)); err != nil {
 		if os.IsNotExist(err) {
 			return LegacyTrackerRecord{}, false, nil
 		}
@@ -79,7 +79,7 @@ func ownersOf(tickets, charts []string) []TrackerOwner {
 // ReadLegacyTrackerRecord reads a record in its old place as the mapping it
 // is: every key, in file order.
 func (s *Store) ReadLegacyTrackerRecord(l LegacyTrackerRecord) (yaml.Node, error) {
-	data, err := ReadFile(filepath.Join(s.Root, l.Rel))
+	data, err := s.tReadFile(filepath.Join(s.Root, l.Rel))
 	if err != nil {
 		return yaml.Node{}, err
 	}
@@ -109,7 +109,7 @@ func (s *Store) MoveLegacyTrackerRecord(l LegacyTrackerRecord, e TrackerEntry, h
 		rels = []string{s.TrackerRecordRelPath(e), s.flatRecordRelPath(e)}
 	}
 	for _, rel := range rels {
-		if _, err := os.Stat(filepath.Join(s.Root, rel)); err != nil {
+		if _, err := s.tStat(filepath.Join(s.Root, rel)); err != nil {
 			continue
 		}
 		have := s.readTrackerRecord(filepath.ToSlash(rel))
@@ -132,12 +132,12 @@ func (s *Store) MoveLegacyTrackerRecord(l LegacyTrackerRecord, e TrackerEntry, h
 // it leaves empty.
 func (s *Store) DropLegacyTrackerRecord(l LegacyTrackerRecord) error {
 	abs := filepath.Join(s.Root, l.Rel)
-	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+	if err := s.tRemove(abs); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	s.noteTrackerWrite(l.Rel)
 	if l.Owner.Chart == "" {
-		_ = os.Remove(filepath.Dir(abs))
+		_ = s.tRemove(filepath.Dir(abs))
 	}
 	return nil
 }

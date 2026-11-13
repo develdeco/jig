@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -331,5 +332,128 @@ func TestLockCheckpointFailsAtTheLongerBoundNamingTheHolder(t *testing.T) {
 	release()
 	if !heldElsewhere(t, checkpointLockFile(work)) {
 		t.Fatal("the failed waiter's release let go of the other process's lock")
+	}
+}
+
+// holderRE matches a "pid N (name) since T" holder description: its pid, name
+// and start time.
+var holderRE = regexp.MustCompile(`pid (\d+) \(([^)]+)\) since (\S+)`)
+
+// TestLockCheckpointNoticeAndFailureNameTheHoldersCommandAndStart: the notice
+// and the failure say which command holds the lock (the base name of its
+// executable) and when it started, as RFC 3339 within this test's run.
+func TestLockCheckpointNoticeAndFailureNameTheHoldersCommandAndStart(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Add(-time.Second).Truncate(time.Second)
+	pid, _ := startCheckpointChild(t, work)
+	after := time.Now().Add(time.Second)
+	setCheckpointBounds(st, 100*time.Millisecond, 400*time.Millisecond)
+	var notice string
+	st.Warn = func(format string, args ...any) { notice = fmt.Sprintf(format, args...) }
+
+	release, err := st.LockCheckpoint()
+	if err == nil {
+		release()
+		t.Fatal("LockCheckpoint returned no error while another process held the lock past the bound")
+	}
+	for what, text := range map[string]string{"notice": notice, "failure": err.Error()} {
+		m := holderRE.FindStringSubmatch(text)
+		if m == nil {
+			t.Errorf("%s %q does not describe the holder as pid, command and start", what, text)
+			continue
+		}
+		if m[1] != fmt.Sprint(pid) {
+			t.Errorf("%s names pid %s, want %d", what, m[1], pid)
+		}
+		if m[2] != filepath.Base(self) {
+			t.Errorf("%s names command %q, want %q", what, m[2], filepath.Base(self))
+		}
+		started, perr := time.Parse(time.RFC3339, m[3])
+		if perr != nil {
+			t.Errorf("%s start %q is not RFC 3339: %v", what, m[3], perr)
+		} else if started.Before(before) || started.After(after) {
+			t.Errorf("%s start %s is outside this test's run (%s to %s)", what, started, before, after)
+		}
+	}
+}
+
+// TestLockCheckpointReadsAMissingHolderFileAsUnknown: a holder that left no
+// file is still named in the notice and the failure, as unknown.
+func TestLockCheckpointReadsAMissingHolderFileAsUnknown(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	startCheckpointChild(t, work)
+	if err := os.Remove(filepath.Join(work, ".git", checkpointHolderName)); err != nil {
+		t.Fatal(err)
+	}
+	setCheckpointBounds(st, 100*time.Millisecond, 400*time.Millisecond)
+	var notice string
+	st.Warn = func(format string, args ...any) { notice = fmt.Sprintf(format, args...) }
+
+	release, err := st.LockCheckpoint()
+	if err == nil {
+		release()
+		t.Fatal("LockCheckpoint returned no error while another process held the lock past the bound")
+	}
+	for what, text := range map[string]string{"notice": notice, "failure": err.Error()} {
+		if !strings.Contains(text, "holder unknown") {
+			t.Errorf("%s %q does not say the holder is unknown", what, text)
+		}
+	}
+}
+
+// TestLockCheckpointKeepsAHolderFileWhileHeld: <git dir>/jig-checkpoint.holder
+// names this process while the lock is held, a nested hold included, and is
+// gone after the last release.
+func TestLockCheckpointKeepsAHolderFileWhileHeld(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	holder := filepath.Join(work, ".git", "jig-checkpoint.holder")
+	named := func(when string) {
+		t.Helper()
+		data, err := os.ReadFile(holder)
+		if err != nil {
+			t.Fatalf("%s: no holder file: %v", when, err)
+		}
+		if f := strings.Fields(string(data)); len(f) == 0 || f[0] != fmt.Sprint(os.Getpid()) {
+			t.Errorf("%s: holder file %q does not name pid %d", when, data, os.Getpid())
+		}
+	}
+	outer, err := st.LockCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	named("held")
+	inner, err := st.LockCheckpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	named("nested")
+	inner()
+	named("after the nested release")
+	outer()
+	if _, err := os.Stat(holder); !os.IsNotExist(err) {
+		t.Errorf("holder file after the last release: stat error %v, want it gone", err)
+	}
+}
+
+// TestLockCheckpointFailsAtTheBoundNotLater: with a notice of 1s and a bound
+// of 1.2s the wait ends close to 1.2s, not a notice and a bound apart.
+func TestLockCheckpointFailsAtTheBoundNotLater(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	startCheckpointChild(t, work)
+	setCheckpointBounds(st, time.Second, 1200*time.Millisecond)
+	st.Warn = func(string, ...any) {}
+
+	begin := time.Now()
+	release, err := st.LockCheckpoint()
+	if err == nil {
+		release()
+		t.Fatal("LockCheckpoint returned no error while another process held the lock past the bound")
+	}
+	if waited := time.Since(begin); waited >= 2*time.Second {
+		t.Errorf("failed after %s, want it near the 1.2s bound", waited)
 	}
 }
