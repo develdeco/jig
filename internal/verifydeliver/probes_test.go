@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
@@ -88,8 +87,7 @@ func TestParseReviewResultProbeRules(t *testing.T) {
 func TestGateHandsTheNextRoundItsProbeLedger(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	var reqs []ReviewRequest
@@ -225,8 +223,7 @@ func TestGateHandsTheNextRoundItsProbeLedger(t *testing.T) {
 func TestGateTimesTheOraclesItRunsAndNamesTheirSlices(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	slices, err := d.Store.ReadSlices(fx.Ticket)
 	if err != nil {

@@ -79,8 +79,7 @@ func TestGateBrokenLeaseNeverResetsEnclosingRepo(t *testing.T) {
 func TestGateRecoversFromUnbornLease(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 
 	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
 	if err != nil {

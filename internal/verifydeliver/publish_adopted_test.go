@@ -284,9 +284,8 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 
 	t.Run("a ticket's own branch", func(t *testing.T) {
 		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		fx := generateBuilt(t, "rung-a")
 		d := newDeps(t, fx)
-		driveBuild(t, fx, "rung-a")
 		br, buildDir := ticketBranch(fx.Ticket), buildLeaseDir(t, fx)
 		// pushedOn adds a commit to origin's copy of br from another clone.
 		pushedOn := func(t *testing.T) {

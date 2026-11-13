@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -481,8 +480,7 @@ func TestReviewerRoundLeavesTheMachinesPathsOutOfWhatTheReviewerWrote(t *testing
 // commits and pushes) names the jig home.
 func TestGateCommitsNoPathOfTheJigHomeWhenAFindingCitesARecording(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	tip, err := gitx.RevParse(buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
 	if err != nil {

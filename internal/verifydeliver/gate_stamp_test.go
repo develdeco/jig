@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,8 +15,7 @@ import (
 // report.yaml carry the build stamp of the jig that closed the round.
 func TestGateRoundNamesTheBuild(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	d.Oracle = nil
 	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})

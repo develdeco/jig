@@ -5,7 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
@@ -19,8 +18,7 @@ import (
 func TestGateDispatchesTheLaunchedReviewerWithEffortByScope(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-b")
+	fx := generateBuilt(t, "rung-b")
 	d := newDeps(t, fx)
 
 	type seen struct{ model, effort, scope string }
