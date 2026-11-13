@@ -2,10 +2,13 @@ package slot
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/machine"
 	"github.com/develdeco/jig/internal/need"
 )
@@ -256,5 +259,158 @@ func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
 	runs := need.Runs(root, "p", "test", time.Now())
 	if len(runs) != 2 || runs[0].Shared || !runs[1].Shared || runs[1].Wall != 25*time.Second {
 		t.Errorf("recorded runs = %+v, want one alone of 10s and one shared of 25s", runs)
+	}
+}
+
+// seed records runs of project's oracle test that each kept 4 cores busy, with
+// the wall times given, the ones that shared marked: the history the share rule
+// reads, with no real contention.
+func seed(root, project string, runs ...seededRun) {
+	for _, r := range runs {
+		wall := time.Duration(r.secs) * time.Second
+		need.Record(root, project, "test", testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, r.shared)
+	}
+}
+
+type seededRun struct {
+	secs   int
+	shared bool
+}
+
+var (
+	aloneRuns  = []seededRun{{10, false}, {10, false}, {10, false}}
+	slowShared = []seededRun{{30, true}, {30, true}}
+	fastShared = []seededRun{{12, true}, {14, true}}
+)
+
+// TestAProjectWhoseSharedRunsRanSlowAsksForMoreAtAdmission: two 4-core runs fit
+// the 9 cores, but after shared runs that ran past the factor the project's
+// next run asks for more than that, and waits where the measured need would
+// not have; one whose shared runs stayed within the factor is admitted as
+// before.
+func TestAProjectWhoseSharedRunsRanSlowAsksForMoreAtAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		shared []seededRun
+		waits  bool
+	}{
+		{"slow shared runs", slowShared, true},
+		{"shared runs within the factor", fastShared, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seed(root, "p", append(append([]seededRun{}, aloneRuns...), tc.shared...)...)
+			measure(root, "other", 4, 0)
+			other := takeNow(t, root, ask1("other", "O/a"))
+			defer other()
+			if !tc.waits {
+				takeNow(t, root, ask1("p", "P/a"))()
+				return
+			}
+			waiting, got := ask(t, root, ask1("p", "P/a"))
+			recv(t, waiting, "a project whose shared runs ran slow waits beside a 4-core run")
+			notYet(t, got, "the raised need fits beside the 4-core run")
+			other()
+			recv(t, got, "the run is admitted when the machine is free")()
+		})
+	}
+}
+
+// TestAProjectAtTheTopLevelRunsAlone: a raised need that reaches the whole
+// machine follows the alone path and holds everything else off.
+func TestAProjectAtTheTopLevelRunsAlone(t *testing.T) {
+	root := t.TempDir()
+	runs := append([]seededRun{}, aloneRuns...)
+	for range MaxLevel {
+		runs = append(runs, seededRun{30, true})
+	}
+	seed(root, "p", runs...)
+	measure(root, "small", 1, 0)
+	whole := takeNow(t, root, ask1("p", "P/a"))
+	waiting, got := ask(t, root, ask1("small", "S/a"))
+	recv(t, waiting, "a small run waits while the project holds the whole machine")
+	notYet(t, got, "a small run shares a machine held whole")
+	whole()
+	recv(t, got, "the small run is admitted after")()
+}
+
+// TestAPinnedProjectIsNotRaisedWhateverItsRunsShow.
+func TestAPinnedProjectIsNotRaisedWhateverItsRunsShow(t *testing.T) {
+	root := t.TempDir()
+	runs := append([]seededRun{}, aloneRuns...)
+	for range MaxLevel {
+		runs = append(runs, seededRun{30, true})
+	}
+	seed(root, "p", runs...)
+	measure(root, "other", 4, 0)
+	defer takeNow(t, root, ask1("other", "O/a"))()
+	r := pin("p", "P/a")
+	defer takeNow(t, root, r)()
+}
+
+// TestTheEventsNameTheLevelWhenAProjectAsksForMore: both lines carry the plain
+// reason when the need was raised, and neither when it was not.
+func TestTheEventsNameTheLevelWhenAProjectAsksForMore(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		shared []seededRun
+		reason string
+	}{
+		{"slow shared runs", slowShared, "asks for more of the machine because 2 of its last 2 shared runs ran over 1.5 times the alone time"},
+		{"shared runs within the factor", fastShared, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seed(root, "p", append(append([]seededRun{}, aloneRuns...), tc.shared...)...)
+			measure(root, "other", 4, 0)
+			other := holdShare(t, root, ask1("other", "O/a"))
+			events := map[string]string{}
+			var mu sync.Mutex
+			done := make(chan *Share, 1)
+			go func() {
+				s, err := Hold(context.Background(), root, ask1("p", "P/a"), func(event, summary string) error {
+					mu.Lock()
+					defer mu.Unlock()
+					events[event] = summary
+					return nil
+				})
+				if err != nil {
+					t.Error(err)
+				}
+				done <- s
+			}()
+			if tc.reason != "" {
+				// The raised need waits beside the 4-core run.
+				for deadline := time.Now().Add(patience); ; time.Sleep(10 * time.Millisecond) {
+					mu.Lock()
+					_, waited := events[journal.EventSlotWait]
+					mu.Unlock()
+					if waited {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("the raised run never waited")
+					}
+				}
+				other.Release()
+			}
+			share := recv(t, done, "the run is admitted")
+			defer share.Release()
+			defer other.Release()
+			mu.Lock()
+			defer mu.Unlock()
+			if got := events[journal.EventSlotTaken]; got != tc.reason {
+				t.Errorf("slot-taken summary = %q, want %q", got, tc.reason)
+			}
+			if tc.reason == "" {
+				if _, waited := events[journal.EventSlotWait]; waited {
+					t.Errorf("a run that fits waited: %v", events)
+				}
+				return
+			}
+			if got := events[journal.EventSlotWait]; !strings.HasSuffix(got, "; "+tc.reason) {
+				t.Errorf("slot-wait summary = %q, want it to end with the reason", got)
+			}
+		})
 	}
 }

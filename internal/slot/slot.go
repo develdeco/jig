@@ -24,6 +24,11 @@
 // machine: it fits only when nothing else holds a share, and while it holds
 // one nothing else fits. A need past the machine is clamped the same way.
 //
+// A run records whether it shared the machine: the queue marks both runs of an
+// overlap when the later one is admitted, whichever came first. The share rule
+// (Judge, Raise) reads how a project's shared runs fared against its runs
+// alone and, when they ran slow, raises what its next run asks for.
+//
 // A run of a project whose marker pins a count (Request.Pinned) is the
 // person's own number: it waits for its project's count, not for the budget,
 // and does not hold up the runs that wait on the budget.
@@ -125,18 +130,42 @@ type entryInfo struct {
 // project's count, and what it uses counts against the other projects.
 func needOf(root string, req Request, m machine.Reading) entryInfo {
 	info := entryInfo{Project: req.Project, Who: req.Who, Pinned: req.Pinned}
-	n, ok := need.Read(root, req.Project, req.Oracle, m, time.Now())
+	now := time.Now()
+	n, ok := need.Read(root, req.Project, req.Oracle, m, now)
 	if ok {
 		info.Cores, info.Mem = n.Cores, n.PeakBytes
 	}
 	if req.Pinned > 0 {
 		return info
 	}
+	if ok {
+		if level := shareVerdict(root, req, m, now).Level; level > 0 {
+			var whole bool
+			info.Cores, info.Mem, whole = Raise(info.Cores, info.Mem, level, m)
+			if whole {
+				return entryInfo{Project: req.Project, Who: req.Who, Whole: true}
+			}
+		}
+	}
 	capCores, capMem := capacity(m)
 	if !ok || info.Cores > capCores || (capMem > 0 && info.Mem > capMem) {
 		return entryInfo{Project: req.Project, Who: req.Who, Whole: true}
 	}
 	return info
+}
+
+// shareVerdict is what the share rule finds in the recorded runs of the
+// request's oracle on machine m. A pinned run is the person's own count and is
+// not judged.
+func shareVerdict(root string, req Request, m machine.Reading, at time.Time) Verdict {
+	if req.Pinned > 0 {
+		return Verdict{}
+	}
+	var runs []Run
+	for _, r := range need.Runs(root, req.Project, req.Oracle, at) {
+		runs = append(runs, Run(r))
+	}
+	return Judge(runs, m)
 }
 
 // entry is one live run of the queue.
@@ -455,6 +484,9 @@ func (s *Share) Record(wall time.Duration, use envrun.Usage) {
 // its error.
 func Hold(ctx context.Context, root string, req Request, record func(event, summary string) error) (*Share, error) {
 	var werr error
+	// Why a run asks for more than it measured shows on both lines, so a
+	// person can see what raised it.
+	why := shareVerdict(root, req, req.reading(), time.Now()).Why()
 	rel, shared, err := takeShare(ctx, root, req, func() {
 		summary := ""
 		if st, rerr := Read(root); rerr == nil {
@@ -464,13 +496,16 @@ func Hold(ctx context.Context, root string, req Request, record func(event, summ
 			}
 			summary = Line(st)
 		}
+		if why != "" {
+			summary += "; " + why
+		}
 		werr = record(journal.EventSlotWait, summary)
 	})
 	if err != nil {
 		return nil, err
 	}
 	if werr == nil {
-		werr = record(journal.EventSlotTaken, "")
+		werr = record(journal.EventSlotTaken, why)
 	}
 	if werr != nil {
 		rel()
