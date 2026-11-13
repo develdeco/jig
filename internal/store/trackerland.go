@@ -64,8 +64,8 @@ func (s *Store) LandTrackerWrites() error {
 // checkpoint lock, and this commits exactly those paths, as
 // the person, so the next checkpoint's commit is not the only thing that
 // carries them. It pushes when it committed, when always is set, or when the
-// branch is ahead of origin anyway (another process's Sync swept the sync's
-// writes into a commit of its own, which never pushes). The commit is scoped
+// branch is ahead of origin anyway (another process committed the same records first, and a commit
+// made outside a landing never pushes). The commit is scoped
 // to the noted paths the way Claim's is: any other dirty state in the store,
 // a journal line another process just wrote, stays where it is. It holds the
 // checkpoint lock (LockCheckpoint) from the commit through the push, and does

@@ -639,8 +639,8 @@ by committing exactly those paths as the person and pushing, so a ticket's
 last checkpoint (`jig publish`) leaves its pull request's record on origin
 without a next checkpoint to carry it. A sync that finds the store up to date
 rewrites no record, notes nothing and so costs no commit and no push; the
-landing also pushes a branch that is ahead of origin when another process's
-`Sync` already committed the writes, and a push origin rejected first records
+landing also pushes a branch that is ahead of origin when another process
+committed the same records first, and a push origin rejected first records
 the other uncommitted changes (as `Sync` does) so the rebase onto what moved
 has a clean tree. A landing that fails is one warning: its commit waits for
 the next checkpoint's push. The observe hooks' own journal lines (a session's `spend`
