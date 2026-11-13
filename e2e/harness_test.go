@@ -97,6 +97,7 @@ func (h *fakeHarness) gitEnv() []string {
 func (h *fakeHarness) builder() *gitbuild.Builder {
 	h.t.Helper()
 	b := gitbuild.New(h.t, pinnedIdentityEnv)
+	b.ChildEnv = h.gitEnv
 	b.Fallback = func(dir string, _ []string, args ...string) (string, error) {
 		return gitx.RunReplaceEnv(dir, h.gitEnv(), args...)
 	}

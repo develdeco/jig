@@ -180,3 +180,34 @@ func TestRejectedPushFails(t *testing.T) {
 		t.Fatalf("remote main = %s, want it untouched at %s", got, moved)
 	}
 }
+
+// TestAGlobalHooksPathFallsBack: a core.hooksPath in the global config the git
+// program would read is a hook gitx never sees, so the commit and the push go
+// to the git program and the hook runs, as it does for a repository with
+// hooks of its own.
+func TestAGlobalHooksPathFallsBack(t *testing.T) {
+	work, _ := newPair(t)
+	hooks := t.TempDir()
+	ran := filepath.Join(t.TempDir(), "ran")
+	write(t, hooks, "pre-commit", "#!/bin/sh\necho commit >> \""+filepath.ToSlash(ran)+"\"\n")
+	write(t, hooks, "pre-push", "#!/bin/sh\necho push >> \""+filepath.ToSlash(ran)+"\"\n")
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	write(t, filepath.Dir(global), filepath.Base(global), "[core]\n\thooksPath = "+filepath.ToSlash(hooks)+"\n")
+
+	b := New(t, append(pinned(), "GIT_CONFIG_GLOBAL="+global))
+	var calls [][]string
+	b.Fallback = func(dir string, env []string, args ...string) (string, error) {
+		calls = append(calls, args)
+		return gitx.RunEnv(dir, env, args...)
+	}
+	write(t, work, "g.txt", "g\n")
+	b.Commit(work, "hooked")
+	b.Push(work, "origin", "main")
+	if len(calls) != 3 {
+		t.Fatalf("Fallback ran %v, want add, commit and push", calls)
+	}
+	got, err := os.ReadFile(ran)
+	if err != nil || strings.TrimSpace(strings.ReplaceAll(string(got), "\r\n", "\n")) != "commit\npush" {
+		t.Fatalf("hooks ran %q (%v), want the commit and the push hook", got, err)
+	}
+}

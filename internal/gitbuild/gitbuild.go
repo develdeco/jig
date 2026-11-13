@@ -13,6 +13,7 @@ package gitbuild
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -27,6 +28,10 @@ type Builder struct {
 	// Fallback runs the git program for a move gitx declines (ErrUseCLI);
 	// gitx.RunEnv unless a test replaces it, to count the declines.
 	Fallback func(dir string, env []string, args ...string) (string, error)
+
+	// ChildEnv is the whole environment Fallback runs the git program in,
+	// when it is not the process's with env laid over it (the default).
+	ChildEnv func() []string
 }
 
 // New returns a Builder for t whose commits carry the identity and dates in
@@ -43,6 +48,11 @@ func New(t testing.TB, env []string) *Builder {
 // does.
 func (b *Builder) Commit(dir, msg string) {
 	b.t.Helper()
+	if b.hooked(dir) {
+		b.run(dir, "add", "-A")
+		b.run(dir, "commit", "-q", "-m", msg)
+		return
+	}
 	if repo, err := gitx.OpenRepo(dir); err == nil {
 		committed, err := repo.CommitAllEnv(msg, b.env)
 		if err == nil {
@@ -66,6 +76,10 @@ func (b *Builder) Commit(dir, msg string) {
 // does.
 func (b *Builder) Push(dir, remote, branch string) {
 	b.t.Helper()
+	if b.hooked(dir) {
+		b.run(dir, "push", "-q", remote, branch)
+		return
+	}
 	// A refspec (HEAD~1:refs/heads/x) is no branch name gitx knows.
 	if strings.ContainsAny(branch, ":~^") {
 		b.run(dir, "push", "-q", remote, branch)
@@ -105,6 +119,22 @@ func (b *Builder) Fetch(dir, remote, branch string) {
 		b.t.Fatalf("gitbuild: open %s: %v", dir, err)
 	}
 	b.run(dir, "fetch", "-q", remote, branch)
+}
+
+// hooked reports whether the git program would run a hook the repository's own
+// hooks directory does not show (core.hooksPath in the repository's or the
+// global config the child sees), which gitx cannot run: the move is then the
+// git program's, as it is for a repository with hooks of its own, since a hook
+// may be the very behavior under test (a global hook that starts a
+// verification at each commit).
+func (b *Builder) hooked(dir string) bool {
+	var env []string
+	if b.ChildEnv != nil {
+		env = b.ChildEnv()
+	} else {
+		env = append(os.Environ(), b.env...)
+	}
+	return gitx.HooksConfigured(dir, env)
 }
 
 func (b *Builder) run(dir string, args ...string) {
