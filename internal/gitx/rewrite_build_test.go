@@ -117,10 +117,31 @@ func buildHist(t *testing.T, dir, head string, commits []hcommit, noIndex ...boo
 			t.Fatalf("reset: %v", err)
 		}
 	}
-	// What git would have logged for the tip's branch and HEAD.
-	reflog := "0000000000000000000000000000000000000000 " + h[tip.msg] + " " + histIdent + "\tcommit: " + tip.msg + "\n"
-	writeFileT(t, gitDir, "logs/HEAD", reflog)
-	writeFileT(t, gitDir, "logs/refs/heads/"+head, reflog)
+	// What git would have logged: a line for each commit made on a branch
+	// (the previous commit of the branch to this one, as a commit moves it),
+	// in each branch's reflog, and in HEAD's for the branch it is on. A rewrite
+	// must repoint every one of them, not the tip's alone, before it prunes
+	// the commits they name.
+	zero := "0000000000000000000000000000000000000000"
+	prev := map[string]string{}
+	var headLog string
+	branchLog := map[string]string{}
+	for _, c := range commits {
+		from := prev[c.branch]
+		if from == "" {
+			from = zero
+		}
+		line := from + " " + h[c.msg] + " " + histIdent + "\tcommit: " + c.msg + "\n"
+		branchLog[c.branch] += line
+		if c.branch == head {
+			headLog += line
+		}
+		prev[c.branch] = h[c.msg]
+	}
+	writeFileT(t, gitDir, "logs/HEAD", headLog)
+	for branch, log := range branchLog {
+		writeFileT(t, gitDir, "logs/refs/heads/"+branch, log)
+	}
 	return h
 }
 

@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -238,7 +239,10 @@ func TestRewriteHistoryGivesAMirrorOnlyWhatItsRefsReach(t *testing.T) {
 			{"main", "first", nil, first},
 			{"local", "local only", []string{"first"}, plus(first, "local.txt", "never pushed\n")},
 		}, true)
-		return work, bareOf(t, work)
+		// The mirror holds main alone, as a remote the work tree pushed main to.
+		pushed := t.TempDir()
+		buildHist(t, pushed, "main", []hcommit{{"main", "first", nil, first}}, true)
+		return work, bareOf(t, pushed)
 	}
 	work, bare := build("/old/root")
 	writeFileT(t, work, "a.txt", "path: /new/place/longer\n")
@@ -251,7 +255,7 @@ func TestRewriteHistoryGivesAMirrorOnlyWhatItsRefsReach(t *testing.T) {
 	if strings.Join(g.objects, "\n") != strings.Join(w.objects, "\n") {
 		t.Errorf("objects of the remote:\n%v\nwant:\n%v", g.objects, w.objects)
 	}
-	if len(g.refs) != len(w.refs) {
+	if fmt.Sprint(g.refs) != fmt.Sprint(w.refs) {
 		t.Errorf("refs of the remote: %v, want %v", g.refs, w.refs)
 	}
 }
@@ -286,8 +290,8 @@ func TestRewriteHistoryKeepsEachPathsOwnNewBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range idx.Entries {
-		if got := blobAt(t, work, "HEAD", e.Name); got != readFileT(t, work, e.Name) {
-			t.Errorf("%s: the tip holds %q, the work tree %q", e.Name, got, readFileT(t, work, e.Name))
+		if want := blobHash([]byte(readFileT(t, work, e.Name))); e.Hash != want {
+			t.Errorf("%s: the index holds blob %s, the work tree file is %s", e.Name, e.Hash, want)
 		}
 	}
 }

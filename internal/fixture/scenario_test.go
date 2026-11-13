@@ -230,9 +230,11 @@ var scenarioBuilds = []struct {
 // TestAScenarioCopyIsTheDirectBuild: a scenario copied into directories and
 // the build function run directly in the same directories are the same state,
 // file for file: the same files, refs, reflogs and objects (so the same commit
-// ids, whose files hold the directories), indexes and history; git finds each
-// repository sound and clean; the Fixture is the direct build's; and no file
-// names a path of the template.
+// ids, whose files hold the directories), indexes and history; the Fixture is
+// the direct build's; and no file names a path of the template. Git itself finds
+// every work tree that has an index clean (status), the first of them sound
+// (fsck) and the first bare remote sound; every other repository (those with no
+// index) is held to the direct build by its object files, refs and files.
 func TestAScenarioCopyIsTheDirectBuild(t *testing.T) {
 	for _, sc := range scenarioBuilds {
 		t.Run(sc.name, func(t *testing.T) {
