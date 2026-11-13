@@ -24,7 +24,7 @@ func measure(root, project string, cores int, peak uint64) {
 	if peak > 0 {
 		use.Basis = envrun.BasisJob
 	}
-	need.Record(root, project, "test", testMachine, time.Now(), 10*time.Second, use, false)
+	need.Record(root, project, "test", "", testMachine, time.Now(), 10*time.Second, use, false)
 }
 
 func ask1(project, who string) Request {
@@ -256,7 +256,7 @@ func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
 	a.Record(25*time.Second, use)
 	a.Release()
 	b.Release()
-	runs := need.Runs(root, "p", "test", time.Now())
+	runs := need.Runs(root, "p", "test", "", time.Now())
 	if len(runs) != 2 || runs[0].Shared || !runs[1].Shared || runs[1].Wall != 25*time.Second {
 		t.Errorf("recorded runs = %+v, want one alone of 10s and one shared of 25s", runs)
 	}
@@ -268,7 +268,7 @@ func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
 func seed(root, project string, runs ...seededRun) {
 	for _, r := range runs {
 		wall := time.Duration(r.secs) * time.Second
-		need.Record(root, project, "test", testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, r.shared)
+		need.Record(root, project, "test", "", testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, r.shared)
 	}
 }
 
@@ -413,4 +413,32 @@ func TestTheEventsNameTheLevelWhenAProjectAsksForMore(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRunsOfAnotherCommandUnderTheSameOracleNameAreNotCompared: one oracle name
+// runs as several commands (a suite per workspace); a long suite's shared runs
+// are judged against its own alone time, not against a short suite's.
+func TestRunsOfAnotherCommandUnderTheSameOracleNameAreNotCompared(t *testing.T) {
+	root := t.TempDir()
+	record := func(command string, secs int, shared bool) {
+		wall := time.Duration(secs) * time.Second
+		need.Record(root, "p", "test", command, testMachine, time.Now(), wall, envrun.Usage{CPU: 4 * wall}, shared)
+	}
+	for _, c := range []struct {
+		command string
+		secs    int
+	}{{"short", 30}, {"short", 30}, {"long", 300}} {
+		record(c.command, c.secs, false)
+	}
+	// The long suite's shared runs take about its own alone time, which is
+	// ten times the short suite's: contention would show in them only if they
+	// ran past 1.5 times 300s.
+	record("long", 310, true)
+	record("long", 320, true)
+	measure(root, "other", 4, 0)
+	other := takeNow(t, root, ask1("other", "O/a"))
+	defer other()
+	long := ask1("p", "P/a")
+	long.Command = "long"
+	takeNow(t, root, long)()
 }

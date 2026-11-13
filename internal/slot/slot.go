@@ -162,7 +162,7 @@ func shareVerdict(root string, req Request, m machine.Reading, at time.Time) Ver
 		return Verdict{}
 	}
 	var runs []Run
-	for _, r := range need.Runs(root, req.Project, req.Oracle, at) {
+	for _, r := range need.Runs(root, req.Project, req.Oracle, req.Command, at) {
 		runs = append(runs, Run(r))
 	}
 	return Judge(runs, m)
@@ -474,7 +474,7 @@ func (s *Share) Release() { s.release() }
 // fail, never for one jig stopped. Best effort: without a figure the next run
 // asks for the whole machine.
 func (s *Share) Record(wall time.Duration, use envrun.Usage) {
-	need.Record(s.root, s.req.Project, s.req.Oracle, s.req.reading(), time.Now(), wall, use, s.Shared())
+	need.Record(s.root, s.req.Project, s.req.Oracle, s.req.Command, s.req.reading(), time.Now(), wall, use, s.Shared())
 }
 
 // Hold is Take for an oracle run: it records journal.EventSlotWait when the

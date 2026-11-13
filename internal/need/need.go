@@ -61,6 +61,10 @@ type record struct {
 	// record written before them has no wall time and is not read by it.
 	WallSeconds float64 `json:"wall_s,omitempty"`
 	Shared      bool    `json:"shared,omitempty"`
+	// Cmd names the command the run ran (a hash): one oracle name runs as
+	// several commands (one per workspace, one per repo), and the share rule
+	// compares a run only with runs of the same command.
+	Cmd string `json:"cmd,omitempty"`
 }
 
 // Run is one recorded run as the share rule reads it.
@@ -76,6 +80,12 @@ type Run struct {
 func path(root, project, oracle string) string {
 	sum := sha256.Sum256([]byte(oracle))
 	return filepath.Join(root, "needs", project, hex.EncodeToString(sum[:8])+".json")
+}
+
+// commandKey is the short hash that names a command in a record.
+func commandKey(command string) string {
+	sum := sha256.Sum256([]byte(command))
+	return hex.EncodeToString(sum[:8])
 }
 
 func (r record) counts(m machine.Reading, at time.Time) bool {
@@ -100,7 +110,7 @@ func load(p string) []record {
 // run, and what its process tree used. A run whose CPU time
 // was not measured is not recorded. It is best effort: a figure that cannot be
 // written leaves the next run unmeasured, which asks for the whole machine.
-func Record(root, project, oracle string, m machine.Reading, at time.Time, wall time.Duration, use envrun.Usage, shared bool) {
+func Record(root, project, oracle, command string, m machine.Reading, at time.Time, wall time.Duration, use envrun.Usage, shared bool) {
 	if project == "" || oracle == "" || wall <= 0 || use.CPU <= 0 {
 		return
 	}
@@ -121,7 +131,7 @@ func Record(root, project, oracle string, m machine.Reading, at time.Time, wall 
 	}
 	kept = append(kept, record{At: at, CPUs: m.CPUs, MemBytes: m.MemoryBytes,
 		Cores: use.CPU.Seconds() / wall.Seconds(), PeakBytes: use.PeakBytes, Basis: use.Basis,
-		WallSeconds: wall.Seconds(), Shared: shared})
+		WallSeconds: wall.Seconds(), Shared: shared, Cmd: commandKey(command)})
 	if len(kept) > History {
 		kept = kept[len(kept)-History:]
 	}
@@ -157,13 +167,14 @@ func Read(root, project, oracle string, m machine.Reading, at time.Time) (Need, 
 	return n, found
 }
 
-// Runs are the project's oracle's recorded runs not older than MaxAge as of
-// at, oldest first, whatever machine they were taken on (the rule that reads
-// them compares the counts). A run with no recorded wall time is left out.
-func Runs(root, project, oracle string, at time.Time) []Run {
+// Runs are the recorded runs of the project's oracle command not older than
+// MaxAge as of at, oldest first, whatever machine they were taken on (the rule
+// that reads them compares the counts). A run with no recorded wall time, or
+// of another command under the same oracle name, is left out.
+func Runs(root, project, oracle, command string, at time.Time) []Run {
 	var out []Run
 	for _, r := range load(path(root, project, oracle)) {
-		if r.WallSeconds <= 0 || at.Sub(r.At) > MaxAge {
+		if r.WallSeconds <= 0 || r.Cmd != commandKey(command) || at.Sub(r.At) > MaxAge {
 			continue
 		}
 		out = append(out, Run{Wall: time.Duration(r.WallSeconds * float64(time.Second)), Shared: r.Shared, CPUs: r.CPUs, MemBytes: r.MemBytes})
