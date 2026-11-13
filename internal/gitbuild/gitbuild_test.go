@@ -191,6 +191,12 @@ func TestAGlobalHooksPathFallsBack(t *testing.T) {
 	ran := filepath.Join(t.TempDir(), "ran")
 	write(t, hooks, "pre-commit", "#!/bin/sh\necho commit >> \""+filepath.ToSlash(ran)+"\"\n")
 	write(t, hooks, "pre-push", "#!/bin/sh\necho push >> \""+filepath.ToSlash(ran)+"\"\n")
+	// git runs only an executable hook; Windows has no such bit, Linux and macOS do.
+	for _, h := range []string{"pre-commit", "pre-push"} {
+		if err := os.Chmod(filepath.Join(hooks, h), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	global := filepath.Join(t.TempDir(), "gitconfig")
 	write(t, filepath.Dir(global), filepath.Base(global), "[core]\n\thooksPath = "+filepath.ToSlash(hooks)+"\n")
 
