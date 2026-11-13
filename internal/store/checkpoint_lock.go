@@ -91,7 +91,7 @@ func (s *Store) LockCheckpoint() (release func(), err error) {
 func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 	holderPath := filepath.Join(filepath.Dir(lockPath), checkpointHolderName)
 	notice, bound := s.checkpointWaits()
-	unlock, held, err := TryLock(lockPath, notice)
+	unlock, held, err := s.tryCheckpointLock(lockPath, notice)
 	if err != nil {
 		return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 	}
@@ -101,7 +101,7 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 		if rest < 0 {
 			rest = 0
 		}
-		unlock, held, err = TryLock(lockPath, rest)
+		unlock, held, err = s.tryCheckpointLock(lockPath, rest)
 		if err != nil {
 			return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 		}
@@ -119,6 +119,15 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 		_ = os.Remove(holderPath)
 		unlock()
 	}, nil
+}
+
+// tryCheckpointLock is TryLock, or the Store's replacement when a test set
+// one.
+func (s *Store) tryCheckpointLock(path string, timeout time.Duration) (func(), bool, error) {
+	if s.checkpointTryLock != nil {
+		return s.checkpointTryLock(path, timeout)
+	}
+	return TryLock(path, timeout)
 }
 
 // checkpointWaits returns the notice and the bound this store waits by.

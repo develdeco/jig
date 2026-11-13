@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -440,20 +441,30 @@ func TestLockCheckpointKeepsAHolderFileWhileHeld(t *testing.T) {
 }
 
 // TestLockCheckpointFailsAtTheBoundNotLater: with a notice of 1s and a bound
-// of 1.2s the wait ends close to 1.2s, not a notice and a bound apart.
+// of 1.2s the wait asks for the notice and then only the rest of the bound,
+// so it ends at the bound, not a notice and a bound apart. It reads the
+// timeouts the wait is split into rather than timing a wall clock, which a
+// loaded machine stretches.
 func TestLockCheckpointFailsAtTheBoundNotLater(t *testing.T) {
-	st, work := newTestStandaloneStore(t)
-	startCheckpointChild(t, work)
+	st, _ := newTestStandaloneStore(t)
 	setCheckpointBounds(st, time.Second, 1200*time.Millisecond)
 	st.Warn = func(string, ...any) {}
+	var asked []time.Duration
+	st.checkpointTryLock = func(_ string, timeout time.Duration) (func(), bool, error) {
+		asked = append(asked, timeout)
+		return func() {}, false, nil
+	}
 
-	begin := time.Now()
 	release, err := st.LockCheckpoint()
 	if err == nil {
 		release()
-		t.Fatal("LockCheckpoint returned no error while another process held the lock past the bound")
+		t.Fatal("LockCheckpoint returned no error while the lock stayed held past the bound")
 	}
-	if waited := time.Since(begin); waited >= 2*time.Second {
-		t.Errorf("failed after %s, want it near the 1.2s bound", waited)
+	want := []time.Duration{time.Second, 200 * time.Millisecond}
+	if !slices.Equal(asked, want) {
+		t.Errorf("the wait asked for %v, want %v: the notice, then the rest of the bound", asked, want)
+	}
+	if !strings.Contains(err.Error(), "after 1.2s") {
+		t.Errorf("error = %q, want it to name the 1.2s bound", err)
 	}
 }

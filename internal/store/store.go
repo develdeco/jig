@@ -27,6 +27,11 @@ type Store struct {
 	// defaults of the checkpoint lock's wait (a test shortens them).
 	checkpointNotice, checkpointBound time.Duration
 
+	// checkpointTryLock, when set, replaces TryLock for the checkpoint lock's
+	// waits, so a test can see the timeouts the wait is split into without
+	// timing a wall clock.
+	checkpointTryLock func(path string, timeout time.Duration) (release func(), held bool, err error)
+
 	// AfterCheckpoint, when set, runs once after every Push that actually
 	// lands (committed, and pushed when the store has an origin): the
 	// GitHub mirror's full sync hooks in here (internal/mirror), so the
