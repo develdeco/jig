@@ -25,15 +25,8 @@ func commitInBuildLease(t *testing.T, fx *fixture.Fixture, files map[string]stri
 			t.Fatal(err)
 		}
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-q", "-m", "oracle reuse step"); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if _, err := gitx.Run(dir, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
-		t.Fatalf("push: %v", err)
-	}
+	builder(t).Commit(dir, "oracle reuse step")
+	builder(t).Push(dir, "origin", ticketBranch(fx.Ticket))
 	head, err := gitx.RevParse(dir, "HEAD")
 	if err != nil {
 		t.Fatal(err)

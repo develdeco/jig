@@ -9,7 +9,6 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
 )
@@ -295,14 +294,14 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			other := cloneFrom(t, fx.RepoRemote)
 			run(t, other, "checkout", br)
 			writeAndCommit(t, other, "more.txt", "added on origin", "a commit only origin has")
-			run(t, other, "push", "origin", br)
+			builder(t).Push(other, "origin", br)
 		}
 
 		step(t, "built and not pushed", func(t *testing.T) {
 			wantCopy(t, d, fx, fx.Ticket, br, false, buildLeasesCopy, "the ticket's own branch lives in the build lease until a publish pushes it")
 		})
 		step(t, "pushed as it is", func(t *testing.T) {
-			run(t, buildDir, "push", "origin", br)
+			builder(t).Push(buildDir, "origin", br)
 			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "origin holds every commit the build lease does")
 		})
 		step(t, "pushed and built on", func(t *testing.T) {
@@ -310,7 +309,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			wantCopy(t, d, fx, fx.Ticket, br, false, buildLeasesCopy, "the build lease is ahead of origin's")
 		})
 		step(t, "pushed and pushed on", func(t *testing.T) {
-			run(t, buildDir, "push", "origin", br)
+			builder(t).Push(buildDir, "origin", br)
 			pushedOn(t)
 			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "the build lease's is behind it, so it is not the branch's head")
 		})
@@ -365,7 +364,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			buildLease := buildLeaseOf(t, fx, ticket)
 			run(t, buildLease, "fetch", "origin")
 			run(t, buildLease, "merge", "--no-edit", "origin/"+branch)
-			run(t, buildLease, "push", "origin", branch)
+			builder(t).Push(buildLease, "origin", branch)
 			wantCopy(t, d, fx, ticket, branch, true, originsCopy, "it holds jig's commit now")
 		})
 		// The journal records a commit jig built that is still in another
@@ -381,10 +380,7 @@ func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(lease.Dir, "fix2.txt"), []byte("the other machine's fix\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			run(t, lease.Dir, "add", "-A")
-			if _, err := gitx.RunEnv(lease.Dir, buildGitEnv, "commit", "-m", ticket+" fix-2: the other machine's fix"); err != nil {
-				t.Fatalf("commit the other machine's fix: %v", err)
-			}
+			builder(t).Commit(lease.Dir, ticket+" fix-2: the other machine's fix")
 			journalBuilt(t, d.Store, ticket, "fix-2", run(t, lease.Dir, "rev-parse", "HEAD"), 1)
 
 			_, err = pointAt(t, d, fx, ticket, branch, true)

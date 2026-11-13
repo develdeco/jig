@@ -14,6 +14,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
@@ -32,6 +33,14 @@ var buildGitEnv = []string{
 	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
 	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
 	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+}
+
+// builder is the Builder for a test's own commits, pushes and fetches in a
+// pool lease or a clone: in process where gitx serves the repository, the git
+// program where it declines, under buildGitEnv either way.
+func builder(t testing.TB) *gitbuild.Builder {
+	t.Helper()
+	return gitbuild.New(t, buildGitEnv)
 }
 
 // ticketBranch is the default branch name a ticket with no recorded branch
@@ -252,13 +261,7 @@ func applyScenarioPatch(t *testing.T, fx *fixture.Fixture, dir, ticket, slice st
 	if _, err := gitx.Run(dir, "apply", abs); err != nil {
 		t.Fatalf("git apply %s: %v", path, err)
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("git add after %s: %v", path, err)
-	}
-	msg := fmt.Sprintf("%s %s: attempt %d", ticket, slice, attempt)
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", msg); err != nil {
-		t.Fatalf("git commit after %s: %v", path, err)
-	}
+	builder(t).Commit(dir, fmt.Sprintf("%s %s: attempt %d", ticket, slice, attempt))
 }
 
 // journalBuilt records a green result the way frontier does when its commit
@@ -432,7 +435,7 @@ func authorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
 	run(t, dir, "clone", fx.RepoRemote, ".")
 	run(t, dir, "checkout", "-b", branch)
 	applyScenarioPatch(t, fx, dir, "author", "a", 1)
-	run(t, dir, "push", "origin", branch)
+	builder(t).Push(dir, "origin", branch)
 	return run(t, dir, "rev-parse", "HEAD")
 }
 
@@ -446,11 +449,8 @@ func authorPush(t *testing.T, fx *fixture.Fixture, branch, file string) string {
 	if err := os.WriteFile(filepath.Join(dir, file), []byte("the author again\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", file, err)
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "author: "+file); err != nil {
-		t.Fatalf("commit %s: %v", file, err)
-	}
-	run(t, dir, "push", "origin", branch)
+	builder(t).Commit(dir, "author: "+file)
+	builder(t).Push(dir, "origin", branch)
 	return run(t, dir, "rev-parse", "HEAD")
 }
 
