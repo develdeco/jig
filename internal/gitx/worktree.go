@@ -166,17 +166,21 @@ func readWorktreeRecords(common, dir string) (lockedHere, stale bool) {
 		locked := lockErr == nil
 		target := ""
 		if b, err := os.ReadFile(filepath.Join(rec, "gitdir")); err == nil {
-			target = strings.TrimSpace(string(b))
+			target = filepath.FromSlash(strings.TrimSpace(string(b)))
+			// With worktree.useRelativePaths git writes it relative to the record.
+			if target != "" && !filepath.IsAbs(target) {
+				target = filepath.Join(rec, target)
+			}
 		}
 		missing := true
 		if target != "" {
-			_, err := os.Stat(filepath.FromSlash(target))
+			_, err := os.Stat(target)
 			missing = err != nil && !errors.Is(err, os.ErrPermission)
 		}
 		switch {
 		case !locked && missing:
 			stale = true
-		case locked && target != "" && samePathSpelling(filepath.Dir(filepath.FromSlash(target)), dir):
+		case locked && target != "" && samePathSpelling(filepath.Dir(target), dir):
 			lockedHere = true
 		}
 	}

@@ -4,3 +4,7 @@
 
 # goreleaser output
 /dist/
+
+# a binary go build leaves in cmd/jig
+/cmd/jig/jig
+/cmd/jig/jig.exe

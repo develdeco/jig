@@ -49,7 +49,11 @@ func recordOf(t *testing.T, repo, dir string) string {
 		if err != nil {
 			continue
 		}
-		if SameDir(filepath.Dir(filepath.FromSlash(strings.TrimSpace(string(b)))), dir) {
+		target := filepath.FromSlash(strings.TrimSpace(string(b)))
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(repo, ".git", "worktrees", id, target)
+		}
+		if SameDir(filepath.Dir(target), dir) {
 			return id
 		}
 	}
@@ -151,4 +155,25 @@ func TestWorktreeRemoveLeavesTheRecordsGitWouldAndStartsOnlyTheGitItNeeds(t *tes
 	wantRecords("after the removal beside a locked record", lockedID)
 	wantProcesses("removing the locked worktree", remove(locked), 1)
 	wantRecords("after the locked worktree's own removal")
+
+	// With worktree.useRelativePaths git writes a record's gitdir relative to
+	// the record. A locked record of the removed directory (an add that died
+	// half way) still takes git's forced removal, so the directory can be
+	// added again.
+	if _, err := Run(repo, "config", "worktree.useRelativePaths", "true"); err != nil {
+		t.Fatal(err)
+	}
+	rel := add()
+	relID := recordOf(t, repo, rel)
+	if b, err := os.ReadFile(filepath.Join(repo, ".git", "worktrees", relID, "gitdir")); err != nil || filepath.IsAbs(filepath.FromSlash(strings.TrimSpace(string(b)))) {
+		t.Skipf("this git writes absolute gitdir records (%q, %v)", b, err)
+	}
+	if _, err := Run(repo, "worktree", "lock", "--reason", "initializing", rel); err != nil {
+		t.Fatal(err)
+	}
+	wantProcesses("removing a locked worktree with a relative record", remove(rel), 1)
+	wantRecords("after the relative locked worktree's removal")
+	if err := WorktreeAddDetached(repo, rel, "HEAD"); err != nil {
+		t.Errorf("adding at the directory again: %v", err)
+	}
 }

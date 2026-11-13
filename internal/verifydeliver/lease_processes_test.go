@@ -249,3 +249,26 @@ func TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt(t *testing.T) {
 		t.Errorf("a call that reused the pass started %d resets of the gate lease, want 2", got)
 	}
 }
+
+// TestRanNothingKeepsTheReviewResetAfterAnyRunInTheLease: only passes reused
+// as they were recorded leave a lease untouched; a run the gate made, and the
+// light command it ran in a reused pass's place (which may write tracked
+// files), do not.
+func TestRanNothingKeepsTheReviewResetAfterAnyRunInTheLease(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		runs []OracleRun
+		want bool
+	}{
+		{"no oracle", nil, true},
+		{"a reused pass", []OracleRun{{Command: "test", ReusedFrom: "abc"}}, true},
+		{"a run of the gate's own", []OracleRun{{Command: "test"}}, false},
+		{"a reused pass with the light command run", []OracleRun{{Command: "test", ReusedFrom: "abc", Ran: "lint"}}, false},
+		{"a reuse beside a run", []OracleRun{{Command: "a", ReusedFrom: "abc"}, {Command: "b"}}, false},
+	} {
+		if got := ranNothing(c.runs); got != c.want {
+			t.Errorf("%s: ranNothing = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

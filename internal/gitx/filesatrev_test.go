@@ -22,6 +22,7 @@ b
 M 100644 inline "sp ace.txt"
 data 2
 s
+M 160000 1111111111111111111111111111111111111111 sub
 M 120000 inline link
 data 5
 a.txt
@@ -72,6 +73,8 @@ var filesAtRevCases = []struct {
 	{"link", true},
 	{"dir", false},
 	{"missing.txt", false},
+	{"sub", false},
+	{"x blob", false},
 	{"a.txt/under", false},
 }
 

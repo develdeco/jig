@@ -1033,7 +1033,11 @@ func FilesAtRev(dir, rev string, paths []string) (map[string]bool, error) {
 	}
 	for i, p := range batch {
 		fields := strings.Fields(strings.TrimRight(lines[i+1], "\r"))
-		out[p] = len(fields) == 3 && fields[1] == "blob"
+		// An object answers "<oid> <type> <size>"; a missing one echoes the
+		// input with " missing", so a path named "x blob" is not read by its
+		// words: only a line that opens with an object id and ends in a size
+		// is an answer.
+		out[p] = len(fields) == 3 && fields[1] == "blob" && isObjectID(fields[0]) && isDigits(fields[2])
 	}
 	return out, nil
 }
@@ -1047,4 +1051,16 @@ func batchablePath(p string) bool {
 	}
 	return !(strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
 		strings.HasPrefix(p, ":") || p == "." || p == "..")
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
