@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
@@ -152,5 +153,51 @@ func TestGateOverOneRepoOfSeveral(t *testing.T) {
 	}
 	if len(rep.TargetSHA) != 1 || rep.TargetSHA["web"] == "" {
 		t.Errorf("target_sha = %v, want the web's alone", rep.TargetSHA)
+	}
+}
+
+// TestGateAdoptsABranchInEveryRepo: a ticket built outside jig, on one branch
+// that both repos of the orchestrator have. A gate that names the branch
+// reviews it in both and adopts it: the ticket records the branch, and the
+// start of the work in each repo is the tip the branch had there. A branch one
+// of the repos lacks is refused, naming the repo, and records nothing.
+func TestGateAdoptsABranchInEveryRepo(t *testing.T) {
+	t.Parallel()
+	o := orchestratorTicket(t, "api", "web")
+	api, web := o.d.Machine.Clones["api"], o.d.Machine.Clones["web"]
+
+	// feature/y is in the api alone.
+	run(t, api, "checkout", "-b", "feature/y")
+	writeAndCommit(t, api, "server/handler.go", orchAPISource, "api: handler")
+	_, err := GatePrepare(o.d, GateOpts{Ticket: o.ticket, Branch: "feature/y", Early: true})
+	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
+	if !strings.Contains(err.Error(), "repo web") {
+		t.Errorf("err = %v, want it to name the repo the branch is missing in, web", err)
+	}
+	if rec, err := o.d.Store.ReadTicket(o.ticket); err != nil || rec.Branch != "" {
+		t.Errorf("the refused gate recorded the branch: %+v (%v)", rec, err)
+	}
+
+	// feature/x is in both.
+	run(t, api, "checkout", "main")
+	run(t, api, "checkout", "-b", "feature/x")
+	tipAPI := writeAndCommit(t, api, "server/handler.go", orchAPISource, "api: handler")
+	run(t, web, "checkout", "-b", "feature/x")
+	tipWeb := writeAndCommit(t, web, "ui/page.go", orchWebSource, "web: page")
+	p, err := GatePrepare(o.d, GateOpts{Ticket: o.ticket, Branch: "feature/x", Early: true})
+	if err != nil {
+		t.Fatalf("GatePrepare --branch feature/x: %v", err)
+	}
+	if p.Branch != "feature/x" || len(p.Repos) != 2 || p.Repos[0].Head != tipAPI || p.Repos[1].Head != tipWeb {
+		t.Errorf("Prepared = branch %q repos %+v, want feature/x at %s in the api and %s in the web", p.Branch, p.Repos, tipAPI, tipWeb)
+	}
+	if rec, err := o.d.Store.ReadTicket(o.ticket); err != nil || rec.Branch != "feature/x" {
+		t.Errorf("the ticket records %+v (%v), want the adopted branch feature/x", rec, err)
+	}
+	for repo, want := range map[string]string{"api": tipAPI, "web": tipWeb} {
+		got, err := os.ReadFile(o.d.Store.StartSHAPath(o.ticket, repo))
+		if err != nil || strings.TrimSpace(string(got)) != want {
+			t.Errorf("start of the work in %s = %q (%v), want the tip of feature/x there, %s", repo, got, err, want)
+		}
 	}
 }
