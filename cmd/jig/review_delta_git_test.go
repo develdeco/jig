@@ -28,8 +28,7 @@ func deltaRepo(t *testing.T, base, change map[string]string) (dir, baseSHA, head
 				t.Fatal(err)
 			}
 		}
-		gitMust(t, dir, "add", "-A")
-		gitMust(t, dir, "commit", "-q", "-m", "c")
+		gitBuilder(t).Commit(dir, "c")
 	}
 	write(base)
 	baseSHA = gitMust(t, dir, "rev-parse", "HEAD")

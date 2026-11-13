@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
@@ -39,6 +40,14 @@ func newVerifyRig(t *testing.T) *verifyRig {
 	return r
 }
 
+// gitBuilder is the Builder for a test's own commits: in process where gitx
+// serves the repository, the git program where it declines, under the identity
+// and dates TestMain pinned.
+func gitBuilder(t testing.TB) *gitbuild.Builder {
+	t.Helper()
+	return gitbuild.New(t, nil)
+}
+
 // gitMust runs git in dir and fails the test on an error.
 func gitMust(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -62,12 +71,10 @@ func (r *verifyRig) commit(slice, msg string, files map[string]string) string {
 			r.t.Fatal(err)
 		}
 	}
-	gitMust(r.t, r.fx.RepoDir, "add", "-A")
-	args := []string{"commit", "-m", msg}
 	if slice != "" {
-		args = append(args, "-m", "Jig-Slice: "+slice)
+		msg += "\n\nJig-Slice: " + slice
 	}
-	gitMust(r.t, r.fx.RepoDir, args...)
+	gitBuilder(r.t).Commit(r.fx.RepoDir, msg)
 	return gitMust(r.t, r.fx.RepoDir, "rev-parse", "HEAD")
 }
 

@@ -115,8 +115,7 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 		if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		gitMust(t, fx.RepoDir, "add", "-A")
-		gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" d: long change", "-m", "Jig-Slice: d")
+		gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: long change"+"\n\n"+"Jig-Slice: d")
 		sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
 		if o, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(o, "state: pass") {
 			t.Fatalf("jig verify: exit = %d\n%s", code, o)

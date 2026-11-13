@@ -683,3 +683,44 @@ func TestGenerateOrchestratorRefusesOtherShapes(t *testing.T) {
 		}
 	}
 }
+
+// TestCodeRepoIsServedInProcess: a fixture's code repository, a lease cloned
+// from its remote and the bare remote itself are all repositories gitx serves
+// in process, so a test's own commits and pushes there start no git process:
+// the repo declares no conversion of any file.
+func TestCodeRepoIsServedInProcess(t *testing.T) {
+	fx := Generate(t, Opts{Home: t.TempDir()})
+
+	if _, err := gitx.OpenRepo(fx.RepoDir); err != nil {
+		t.Fatalf("OpenRepo(RepoDir) = %v, want the code repo served in process", err)
+	}
+	lease := filepath.Join(t.TempDir(), "lease")
+	if _, err := gitx.Run("", "clone", "-q", fx.RepoRemote, lease); err != nil {
+		t.Fatalf("clone of RepoRemote: %v", err)
+	}
+	repo, err := gitx.OpenRepo(lease)
+	if err != nil {
+		t.Fatalf("OpenRepo(lease cloned from RepoRemote) = %v, want it served in process", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lease, "note.txt"), []byte("note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
+	}
+	if committed, err := repo.CommitAllEnv("lease step", env); err != nil || !committed {
+		t.Fatalf("CommitAllEnv in the lease = %v, %v; want a commit", committed, err)
+	}
+	if err := repo.Push("origin", "main"); err != nil {
+		t.Fatalf("Push of a branch the remote already has = %v, want nil and not ErrUseCLI", err)
+	}
+	want, _ := gitx.Run(lease, "rev-parse", "HEAD")
+	if got, _ := gitx.Run(fx.RepoRemote, "rev-parse", "main"); got != want {
+		t.Fatalf("remote main = %s, want the pushed %s", got, want)
+	}
+	if _, err := repo.Fetch("origin", "main"); err != nil {
+		t.Fatalf("Fetch from the bare remote = %v, want it served in process", err)
+	}
+}

@@ -52,10 +52,7 @@ func jigBuildsOnAt(t *testing.T, d Deps, fx *fixture.Fixture, jigHome, ticket, b
 	if err := os.WriteFile(filepath.Join(lease.Dir, "fix.txt"), []byte("jig's fix\n"), 0o644); err != nil {
 		t.Fatalf("write fix.txt: %v", err)
 	}
-	run(t, lease.Dir, "add", "-A")
-	if _, err := gitx.RunEnv(lease.Dir, buildGitEnv, "commit", "-m", ticket+" fix-1: jig's fix"); err != nil {
-		t.Fatalf("commit jig's fix: %v", err)
-	}
+	builder(t).Commit(lease.Dir, ticket+" fix-1: jig's fix")
 	commit := run(t, lease.Dir, "rev-parse", "HEAD")
 	journalBuilt(t, d.Store, ticket, "fix-1", commit, 1)
 	return commit
@@ -195,10 +192,7 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(lease, "leftover.txt"), []byte("leftover reviewer commit\n"), 0o644); err != nil {
 			t.Fatalf("write leftover file: %v", err)
 		}
-		run(t, lease, "add", "-A")
-		if _, err := gitx.RunEnv(lease, buildGitEnv, "commit", "-m", "leftover reviewer commit"); err != nil {
-			t.Fatalf("commit leftover: %v", err)
-		}
+		builder(t).Commit(lease, "leftover reviewer commit")
 		if leftover := run(t, lease, "rev-parse", "HEAD"); leftover == pushed {
 			t.Fatal("test setup: leftover commit did not move HEAD")
 		}
@@ -232,10 +226,7 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "rewritten.txt"), []byte("rewritten\n"), 0o644); err != nil {
 			t.Fatalf("write rewritten.txt: %v", err)
 		}
-		run(t, dir, "add", "-A")
-		if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "author: rewritten"); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
+		builder(t).Commit(dir, "author: rewritten")
 		run(t, dir, "push", "--force", "origin", branch)
 		rewritten := run(t, dir, "rev-parse", "HEAD")
 
@@ -788,7 +779,7 @@ func TestGateRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
 
 		// The help: push it from the machine that built it. This machine's
 		// lease then follows origin, which holds the commit.
-		run(t, otherLease, "push", "origin", branch)
+		builder(t).Push(otherLease, "origin", branch)
 		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
 		if err != nil || r.Verdict != "clean" {
 			t.Fatalf("Gate after the commit was pushed = %q (err %v), want a clean round", r.Verdict, err)
@@ -808,10 +799,7 @@ func TestGateRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(lease.Dir, "fix2.txt"), []byte("this machine's fix\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		run(t, lease.Dir, "add", "-A")
-		if _, err := gitx.RunEnv(lease.Dir, buildGitEnv, "commit", "-m", ticket+" fix-2"); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
+		builder(t).Commit(lease.Dir, ticket+" fix-2")
 		own := run(t, lease.Dir, "rev-parse", "HEAD")
 		journalBuilt(t, d.Store, ticket, "fix-2", own, 1)
 
@@ -831,10 +819,7 @@ func commitLeftover(t *testing.T, dir, ticket string) string {
 	if err := os.WriteFile(filepath.Join(dir, "leftover.txt"), []byte("an attempt's leftover\n"), 0o644); err != nil {
 		t.Fatalf("write leftover.txt: %v", err)
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", ticket+" attempt: never verified"); err != nil {
-		t.Fatalf("commit the leftover: %v", err)
-	}
+	builder(t).Commit(dir, ticket+" attempt: never verified")
 	return run(t, dir, "rev-parse", "HEAD")
 }
 
@@ -885,7 +870,7 @@ func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
 	t.Run("jig's commit was pushed", func(t *testing.T) {
 		t.Parallel()
 		fx, d, leftover, built, otherLease := setup(t)
-		run(t, otherLease, "push", "origin", branch)
+		builder(t).Push(otherLease, "origin", branch)
 
 		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
 		if err != nil || r.Verdict != "clean" {
@@ -943,7 +928,7 @@ func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
 		}
 		built := jigBuildsOn(t, d, fx, ticket, branch)
 		buildLease := buildLeaseOf(t, fx, ticket)
-		run(t, buildLease, "push", "origin", branch)
+		builder(t).Push(buildLease, "origin", branch)
 		leftover := commitLeftover(t, buildLease, ticket)
 		pushed := authorPush(t, fx, branch, "more.txt") // on top of jig's commit
 
@@ -1045,11 +1030,8 @@ func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "squash.txt"), []byte("squash\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "squash"); err != nil {
-		t.Fatalf("commit the squash: %v", err)
-	}
-	run(t, dir, "push", "origin", ticketBranch(fx.Ticket))
+	builder(t).Commit(dir, "squash")
+	builder(t).Push(dir, "origin", ticketBranch(fx.Ticket))
 
 	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 	wantAxiCode(t, err, "BRANCH_DIVERGED")
@@ -1089,12 +1071,7 @@ func advanceTargetEditing(t *testing.T, fx *fixture.Fixture, rel string) {
 	if err := os.WriteFile(path, append(data, []byte("// upstream moved on\n")...), 0o644); err != nil {
 		t.Fatalf("write %s: %v", rel, err)
 	}
-	if _, err := gitx.Run(clone, "add", "-A"); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if _, err := gitx.RunEnv(clone, buildGitEnv, "commit", "-m", "upstream: unrelated change"); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
+	builder(t).Commit(clone, "upstream: unrelated change")
 	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {
 		t.Fatalf("push: %v", err)
 	}

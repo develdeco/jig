@@ -178,8 +178,7 @@ func TestDependResolvesAnAlias(t *testing.T) {
 	if err := os.WriteFile(path, append(data, []byte("aliases:\n  - OLD-2\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitMust(t, r.storeDir, "add", "-A")
-	gitMust(t, r.storeDir, "commit", "-m", "alias")
+	gitBuilder(t).Commit(r.storeDir, "alias")
 
 	out, code := r.jig(t, "depend", "DEMO-1", "--on", "OLD-2")
 	if code != 0 || !strings.Contains(out, "OLD-2 is now DEMO-2") || !strings.Contains(out, "blocked_by: \"DEMO-2:merged\"") {

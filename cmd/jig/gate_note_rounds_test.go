@@ -178,8 +178,7 @@ func changeBeta(t *testing.T, fx *fixture.Fixture) {
 	if err := os.WriteFile(path, append(data, []byte("\n// Greet trims nothing yet.\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" d: touch beta", "-m", "Jig-Slice: d")
+	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: touch beta"+"\n\n"+"Jig-Slice: d")
 	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
 	if out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "state: pass") {
 		t.Fatalf("jig verify of the change: exit = %d, want a pass\n%s", code, out)
