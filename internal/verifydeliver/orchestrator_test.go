@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -199,5 +200,178 @@ func TestGateAdoptsABranchInEveryRepo(t *testing.T) {
 		if err != nil || strings.TrimSpace(string(got)) != want {
 			t.Errorf("start of the work in %s = %q (%v), want the tip of feature/x there, %s", repo, got, err, want)
 		}
+	}
+}
+
+// reviewedClean takes the ticket's gate round over every repo it builds in and
+// closes it clean, as a reviewer that built none of it does.
+func (o orchestrated) reviewedClean(t *testing.T) {
+	t.Helper()
+	p, err := GatePrepare(o.d, GateOpts{Ticket: o.ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if _, err := GateFinish(o.d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish: %v", err)
+	}
+}
+
+// prLines are the pr lines of the ticket's journal, and whether publish-done
+// follows the last of them.
+func prLines(t *testing.T, d Deps, ticket string) (prs []journal.Line, doneAfter bool) {
+	t.Helper()
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		switch l.Event {
+		case journal.EventPr:
+			prs, doneAfter = append(prs, l), false
+		case journal.EventPublishDone:
+			doneAfter = true
+		}
+	}
+	return prs, doneAfter
+}
+
+// TestPublishHandOffPerRepo: the harness pushes the branch and opens the pull
+// requests itself, one in each repo. A pull request is recorded with the repo
+// it is in: without a repo jig asks which, a repo the project lacks is refused,
+// the host's word on the head is held to that repo's reviewed head, the ticket
+// is not published after the first, the second's body names the first, and the
+// second finishes the publish. Each repo's review notes go to its own pull
+// request, and recording opens and edits nothing.
+func TestPublishHandOffPerRepo(t *testing.T) {
+	t.Parallel()
+	o := orchestratorTicket(t, "api", "web")
+	headAPI, headWeb := o.build(t, "api"), o.build(t, "web")
+	o.reviewedClean(t)
+	logFile, addEnv := useGithubHost(t, &o.d, "", "")
+	const apiPR, webPR = "https://github.com/owner/fixture-repo/pull/3", "https://github.com/owner/fixture-repo/pull/4"
+	hostSays := func(sha string) { addEnv("GH_STUB_HEAD_REF="+o.branch, "GH_STUB_HEAD_OID="+sha) }
+
+	hostSays(headAPI)
+	_, err := PublishRecordPR(o.d, PublishOpts{Ticket: o.ticket}, apiPR, nil)
+	if err == nil || !strings.Contains(err.Error(), "say which repo") {
+		t.Errorf("--pr without a repo: err = %v, want it to ask which repo", err)
+	}
+	_, err = PublishRecordPR(o.d, PublishOpts{Ticket: o.ticket, Repo: "docs"}, apiPR, nil)
+	if err == nil || !strings.Contains(err.Error(), `the project has no repo "docs"`) {
+		t.Errorf("--pr for repo docs: err = %v, want the repo refused", err)
+	}
+	// The web's head is not the api's reviewed head.
+	hostSays(headWeb)
+	_, err = PublishRecordPR(o.d, PublishOpts{Ticket: o.ticket, Repo: "api"}, apiPR, nil)
+	wantAxiCode(t, err, "PUBLISH_UNREVIEWED_HEAD")
+	if prs, _ := prLines(t, o.d, o.ticket); len(prs) != 0 {
+		t.Fatalf("a refused --pr journaled %+v", prs)
+	}
+
+	hostSays(headAPI)
+	first, err := PublishRecordPR(o.d, PublishOpts{Ticket: o.ticket, Repo: "api"}, apiPR, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR api: %v", err)
+	}
+	if first.Repo != "api" || !first.Verified || !reflect.DeepEqual(first.Pending, []string{"web"}) {
+		t.Fatalf("first report = %+v, want the api verified with the web still asked for", first)
+	}
+	if prs, done := prLines(t, o.d, o.ticket); len(prs) != 1 || prs[0].Repo != "api" || prs[0].URL != apiPR || done {
+		t.Fatalf("after the first pr: lines %+v, publish-done %v, want the api's alone and no publish-done", prs, done)
+	}
+
+	// The web's body now names the api's pull request.
+	if _, err := PublishBody(o.d, PublishOpts{Ticket: o.ticket, Repo: "web"}); err != nil {
+		t.Fatalf("PublishBody web: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(o.d.Store.TicketDir(o.ticket), "pr", "web.md"))
+	if err != nil || !strings.Contains(strings.ReplaceAll(string(body), "\r\n", "\n"), "- also api: "+apiPR+"\n") {
+		t.Errorf("pr/web.md does not name the api's pull request (%v):\n%s", err, body)
+	}
+
+	hostSays(headWeb)
+	second, err := PublishRecordPR(o.d, PublishOpts{Ticket: o.ticket, Repo: "web"}, webPR, nil)
+	if err != nil {
+		t.Fatalf("PublishRecordPR web: %v", err)
+	}
+	if second.Repo != "web" || len(second.Pending) != 0 {
+		t.Fatalf("second report = %+v, want the web recorded and nothing left", second)
+	}
+	prs, done := prLines(t, o.d, o.ticket)
+	if len(prs) != 2 || prs[1].Repo != "web" || prs[1].URL != webPR || !done {
+		t.Errorf("after the second pr: lines %+v, publish-done %v, want both and publish-done after the web's", prs, done)
+	}
+
+	// Each repo's pull request carries that repo's own notes file, and the
+	// review-notes line names the repo.
+	comments := map[string]string{}
+	for _, argv := range loggedGh(t, logFile) {
+		if len(argv) > 2 && argv[0] == "pr" && argv[1] == "comment" {
+			comments[argv[2]] = filepath.Base(filepath.ToSlash(argv[len(argv)-1]))
+		}
+	}
+	if len(comments) != 2 || comments[apiPR] != "review-notes-api.md" || comments[webPR] != "review-notes-web.md" {
+		t.Errorf("pr comments = %v, want the api's notes on %s and the web's on %s", comments, apiPR, webPR)
+	}
+	posted := map[string]string{}
+	for _, l := range reviewNotesLines(t, o.d, o.ticket) {
+		posted[l.Repo] = l.URL
+	}
+	if len(posted) != 2 || posted["api"] != apiPR || posted["web"] != webPR {
+		t.Errorf("review-notes lines = %v, want one for each repo with its pull request", posted)
+	}
+	// Recording a pull request is not publishing it: jig opened none.
+	if n := publishPrCalls(t, logFile); n != 0 {
+		t.Errorf("--pr opened or edited a pull request %d time(s)", n)
+	}
+}
+
+// TestPublishOverOneRepoOfSeveral: a ticket of the orchestrator whose slices
+// are all in web, a repo that is not the first. Publish ships web from the
+// web's reviewed head with no word of the api: no repo needs naming, nothing
+// is pushed or opened for the api, and the body has no section about another
+// repo.
+func TestPublishOverOneRepoOfSeveral(t *testing.T) {
+	t.Parallel()
+	o := orchestratorTicket(t, "web")
+	head := o.build(t, "web")
+	o.reviewedClean(t)
+	logFile, _ := useGithubHost(t, &o.d, "", "")
+
+	// The api is not a repo of this ticket: naming it is refused.
+	_, err := Publish(o.d, PublishOpts{Ticket: o.ticket, Yes: true, Repo: "api"})
+	if err == nil || !strings.Contains(err.Error(), o.ticket+" builds in web, not in api") {
+		t.Errorf("publish for the api: err = %v, want it refused for building in web", err)
+	}
+
+	report, err := Publish(o.d, PublishOpts{Ticket: o.ticket, Yes: true})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(report.PRURL) != 1 || report.PRURL["web"] == "" || report.PRUpdated["web"] {
+		t.Fatalf("report urls = %v updated %v, want the web's pull request alone, opened", report.PRURL, report.PRUpdated)
+	}
+	remotes := o.fx.NestedRemotes
+	if got := originRef(t, remotes["web"], "refs/heads/"+o.branch); got != head {
+		t.Errorf("origin of web: %s = %s, want the reviewed head %s", o.branch, got, head)
+	}
+	if got := originRef(t, remotes["api"], "refs/heads/"+o.branch); got != "" {
+		t.Errorf("origin of api has %s at %s: publish shipped a repo the ticket does not build in", o.branch, got)
+	}
+	// The fake gh serves every repo from one host; the one pull request it was
+	// asked to open is the web's.
+	if n := ghCalls(loggedGh(t, logFile), "pr", "create"); n != 1 {
+		t.Errorf("pr create calls = %d, want the web's alone", n)
+	}
+	body, err := os.ReadFile(filepath.Join(o.d.Store.TicketDir(o.ticket), "pr", "web.md"))
+	if err != nil || strings.Contains(string(body), "Part of") {
+		t.Errorf("pr/web.md of a ticket in one repo has a Part of section (%v):\n%s", err, body)
+	}
+	prs, done := prLines(t, o.d, o.ticket)
+	if len(prs) != 1 || prs[0].Repo != "web" || prs[0].URL != report.PRURL["web"] || prs[0].Commit != head || !done {
+		t.Errorf("pr lines = %+v, publish-done = %v, want the web's alone at %s, then publish-done", prs, done, head)
+	}
+	if _, err := os.Stat(filepath.Join(o.d.Home, "pool", "api", o.ticket+"-publish")); err == nil {
+		t.Errorf("publish made a lease for the api, which the ticket does not build in")
 	}
 }
