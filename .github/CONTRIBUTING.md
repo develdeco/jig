@@ -49,6 +49,7 @@ reports green.
   or deliberately reverse. A comment says why; a build's judgment call (what
   was ambiguous, what was chosen and why) is recorded with jig, in the store,
   not in a repo file.
+  `lint.TestADRNumbersAreUnique` fails when two ADR files share a number.
 
 ## Pull requests
 
