@@ -54,9 +54,6 @@ type record struct {
 	Basis     string    `json:"peak_basis,omitempty"`
 }
 
-// now is the clock, replaced by tests.
-var now = time.Now
-
 // path is the file of a project's oracle: the oracle's name goes through a
 // hash since a name may hold characters a file name cannot.
 func path(root, project, oracle string) string {
@@ -80,12 +77,12 @@ func load(p string) []record {
 	return rs
 }
 
-// Record keeps a heavy run that ended on its own (a verdict, pass or fail; a
+// Record keeps, as of at, a heavy run that ended on its own (a verdict, pass or fail; a
 // run jig stopped is not recorded, since it did not finish using what it
 // would): its wall time and what its process tree used. A run whose CPU time
 // was not measured is not recorded. It is best effort: a figure that cannot be
 // written leaves the next run unmeasured, which asks for the whole machine.
-func Record(root, project, oracle string, m machine.Reading, wall time.Duration, use envrun.Usage) {
+func Record(root, project, oracle string, m machine.Reading, at time.Time, wall time.Duration, use envrun.Usage) {
 	if project == "" || oracle == "" || wall <= 0 || use.CPU <= 0 {
 		return
 	}
@@ -98,7 +95,6 @@ func Record(root, project, oracle string, m machine.Reading, wall time.Duration,
 		return
 	}
 	defer unlock()
-	at := now()
 	var kept []record
 	for _, r := range load(p) {
 		if r.counts(m, at) {
@@ -120,12 +116,11 @@ func Record(root, project, oracle string, m machine.Reading, wall time.Duration,
 	}
 }
 
-// Read is the figure of the project's oracle on this machine m, and false when
+// Read is the figure of the project's oracle on this machine m as of at, and false when
 // none counts: no run kept, all too old, or all measured on another machine.
-func Read(root, project, oracle string, m machine.Reading) (Need, bool) {
+func Read(root, project, oracle string, m machine.Reading, at time.Time) (Need, bool) {
 	var n Need
 	found := false
-	at := now()
 	rs := load(path(root, project, oracle))
 	if len(rs) > Keep {
 		rs = rs[len(rs)-Keep:]

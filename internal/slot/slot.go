@@ -57,9 +57,6 @@ const (
 	memHeadroom = 0.15
 )
 
-// readMachine reads what the machine has, replaced by tests.
-var readMachine = machine.Read
-
 // capacity is what the budget has of a machine: its CPUs and memory less the
 // headroom. mem is 0 when the machine's memory is not read, which leaves
 // memory unbudgeted.
@@ -96,6 +93,17 @@ type Request struct {
 	Oracle, Command string
 	// Pinned is the count the marker pinned, 0 when it pinned none.
 	Pinned int
+	// machine reads what the machine has: machine.Read when nil. It is the
+	// seam tests replace.
+	machine func() machine.Reading
+}
+
+// reading is what the machine has now.
+func (r Request) reading() machine.Reading {
+	if r.machine != nil {
+		return r.machine()
+	}
+	return machine.Read()
 }
 
 // entryInfo is what an entry file records of its run.
@@ -117,7 +125,7 @@ type entryInfo struct {
 // project's count, and what it uses counts against the other projects.
 func needOf(root string, req Request, m machine.Reading) entryInfo {
 	info := entryInfo{Project: req.Project, Who: req.Who, Pinned: req.Pinned}
-	n, ok := need.Read(root, req.Project, req.Oracle, m)
+	n, ok := need.Read(root, req.Project, req.Oracle, m, time.Now())
 	if ok {
 		info.Cores, info.Mem = n.Cores, n.PeakBytes
 	}
@@ -320,7 +328,7 @@ func Take(ctx context.Context, root string, req Request, onWait func()) (release
 	if err != nil {
 		return nil, err
 	}
-	seq, rel, err := register(dir, needOf(root, req, readMachine()))
+	seq, rel, err := register(dir, needOf(root, req, req.reading()))
 	unlock()
 	if err != nil {
 		return nil, err
@@ -339,7 +347,7 @@ func Take(ctx context.Context, root string, req Request, onWait func()) (release
 	for {
 		ok, err := false, ctx.Err()
 		if err == nil {
-			ok, err = tryAdmit(ctx, dir, seq)
+			ok, err = tryAdmit(ctx, dir, seq, req.reading())
 		}
 		if err != nil {
 			leave()
@@ -365,7 +373,7 @@ func Take(ctx context.Context, root string, req Request, onWait func()) (release
 
 // tryAdmit decides, under the queue lock, whether the entry seq is admitted
 // now, and marks it held when it is.
-func tryAdmit(ctx context.Context, dir, seq string) (bool, error) {
+func tryAdmit(ctx context.Context, dir, seq string, m machine.Reading) (bool, error) {
 	unlock, err := lockQueue(ctx, dir, queueLockWait)
 	if err != nil {
 		return false, err
@@ -375,7 +383,7 @@ func tryAdmit(ctx context.Context, dir, seq string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !admitted(entries, seq, readMachine()) {
+	if !admitted(entries, seq, m) {
 		return false, nil
 	}
 	if err := os.WriteFile(filepath.Join(dir, entriesDir, seq)+".held", nil, 0o644); err != nil {
@@ -400,7 +408,7 @@ func (s *Share) Release() { s.release() }
 // fail, never for one jig stopped. Best effort: without a figure the next run
 // asks for the whole machine.
 func (s *Share) Record(wall time.Duration, use envrun.Usage) {
-	need.Record(s.root, s.req.Project, s.req.Oracle, readMachine(), wall, use)
+	need.Record(s.root, s.req.Project, s.req.Oracle, s.req.reading(), time.Now(), wall, use)
 }
 
 // Hold is Take for an oracle run: it records journal.EventSlotWait when the

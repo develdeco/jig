@@ -14,13 +14,6 @@ import (
 // has 9 cores and 85 GiB.
 var testMachine = machine.Reading{CPUs: 10, MemoryBytes: 100 << 30}
 
-func onTestMachine(t *testing.T) {
-	t.Helper()
-	old := readMachine
-	readMachine = func() machine.Reading { return testMachine }
-	t.Cleanup(func() { readMachine = old })
-}
-
 // measure records a run of project's oracle test that kept cores busy and
 // peaked at peak bytes, so the next run of it asks for that.
 func measure(root, project string, cores int, peak uint64) {
@@ -28,11 +21,11 @@ func measure(root, project string, cores int, peak uint64) {
 	if peak > 0 {
 		use.Basis = envrun.BasisJob
 	}
-	need.Record(root, project, "test", testMachine, 10*time.Second, use)
+	need.Record(root, project, "test", testMachine, time.Now(), 10*time.Second, use)
 }
 
 func ask1(project, who string) Request {
-	return Request{Project: project, Who: who, Oracle: "test"}
+	return Request{Project: project, Who: who, Oracle: "test", machine: func() machine.Reading { return testMachine }}
 }
 
 func takeNow(t *testing.T, root string, r Request) func() {
@@ -49,7 +42,6 @@ func takeNow(t *testing.T, root string, r Request) func() {
 // TestAProjectThatMeasuredOneCoreRunsSeveralAtOnce: on a many-core machine the
 // runs of a project that kept one core busy are admitted together.
 func TestAProjectThatMeasuredOneCoreRunsSeveralAtOnce(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "p", 1, 1<<30)
 	var rels []func()
@@ -69,7 +61,6 @@ func TestAProjectThatMeasuredOneCoreRunsSeveralAtOnce(t *testing.T) {
 // TestAProjectWithNothingMeasuredRunsAlone: it waits for every holder, and
 // holds the whole machine against a run that is measured.
 func TestAProjectWithNothingMeasuredRunsAlone(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "small", 1, 1<<30)
 	small := takeNow(t, root, ask1("small", "S/a"))
@@ -87,7 +78,6 @@ func TestAProjectWithNothingMeasuredRunsAlone(t *testing.T) {
 
 // TestANeedPastTheMachineAsksForTheWholeMachine.
 func TestANeedPastTheMachineAsksForTheWholeMachine(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "big", 12, 1<<30)
 	big := takeNow(t, root, ask1("big", "B/a"))
@@ -101,7 +91,6 @@ func TestANeedPastTheMachineAsksForTheWholeMachine(t *testing.T) {
 // TestNothingPassesTheOldestWaitingRun: a run that would fit still waits behind
 // an older run that does not, so small runs never starve a large one.
 func TestNothingPassesTheOldestWaitingRun(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "four", 4, 0)
 	measure(root, "one", 1, 0)
@@ -121,7 +110,6 @@ func TestNothingPassesTheOldestWaitingRun(t *testing.T) {
 // TestMemoryBindsToo: runs that fit in cores wait when their peak memory does
 // not fit, and a run with no memory figure is held back by cores alone.
 func TestMemoryBindsToo(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "heavy", 1, 50<<30)
 	measure(root, "nomem", 1, 0)
@@ -137,11 +125,11 @@ func TestMemoryBindsToo(t *testing.T) {
 // TestAPinnedRunsFigureCountsAgainstTheBudget: a pinned project's run is
 // admitted by its count, and what it measured is taken from the budget.
 func TestAPinnedRunsFigureCountsAgainstTheBudget(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	measure(root, "pin", 8, 0)
 	measure(root, "other", 4, 0)
-	pin := Request{Project: "pin", Who: "P/a", Oracle: "test", Pinned: 1}
+	pin := ask1("pin", "P/a")
+	pin.Pinned = 1
 	p := takeNow(t, root, pin)
 	waiting, got := ask(t, root, ask1("other", "O/a"))
 	recv(t, waiting, "a 4-core run waits beside a pinned 8-core run on 9 cores")
@@ -153,7 +141,6 @@ func TestAPinnedRunsFigureCountsAgainstTheBudget(t *testing.T) {
 // TestAHeldRunsMeasurementChangesTheNextAsk: a run that records what it used
 // leaves its project asking for that, not the whole machine.
 func TestAHeldRunsMeasurementChangesTheNextAsk(t *testing.T) {
-	onTestMachine(t)
 	root := t.TempDir()
 	share, err := Hold(context.Background(), root, ask1("p", "T/a"), func(string, string) error { return nil })
 	if err != nil {
