@@ -25,7 +25,6 @@ import (
 const (
 	apiHandlerSource = "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n"
 	webPageSource    = "package ui\n\n// Page names what the web page shows.\nfunc Page() string { return \"order total\" }\n"
-	apiHandlerFixed  = "package server\n\n// Handler names what the api serves, with the currency.\nfunc Handler() string { return \"total in USD\" }\n"
 	webPageFixed     = "package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"
 )
 
@@ -176,7 +175,12 @@ func cleanResultOf(t *testing.T, mustReview []string) string {
 // opens a round whose context lists both repos, each with its own lease, base,
 // head and files to cover; a reviewer records a finding in web, which has to be
 // named as web/ui/page.go, and closes the round; the fix slice lands in web;
-// the next round reviews what changed in web, and is clean.
+// the next round reviews what changed in web, and is clean. It is the one
+// journey of a gate over two repos; the gate over one repo of several
+// (TestGateOverOneRepoOfSeveral), the adoption of a branch in every repo
+// (TestGateAdoptsABranchInEveryRepo) and who counts as independent
+// (TestBuildersAreTheAgentsThatChangedTheBranch) are in-process tests of
+// internal/verifydeliver.
 func TestGateCoversEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
@@ -471,8 +475,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 // recorded clean with independent: false (independence is a fact of the round,
 // not a condition of it). This is the one flow that runs the hook, the ledger,
 // the branch of a nested clone and the report together; which journal lines
-// make a builder, and who is independent of them, is the unit test of the
-// builders in internal/verifydeliver.
+// make a builder, and who is independent of them, is
+// TestBuildersAreTheAgentsThatChangedTheBranch in internal/verifydeliver.
 func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)

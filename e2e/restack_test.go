@@ -50,7 +50,10 @@ type restackNextOut struct {
 // into main the child is owed a merge of main and a publish: the chart is ready
 // again with the child as its only work, `jig next <child>` says it is behind
 // and names the merge and the publish that follow, and the chart is done once the
-// session has merged main into the child's branch.
+// session has merged main into the child's branch. It is the one journey of a
+// merged parent; what the gate and the publish do with the merge are in-process
+// tests (TestGateOpensADeltaRoundForAHandResolvedMerge in cmd/jig and
+// TestPublishRetargetsTheOpenPRFoundByBranch in internal/verifydeliver).
 func TestPublishedChildBehindItsMergedParentIsWork(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})

@@ -90,7 +90,12 @@ func prLines(t *testing.T, fx *fixture.Fixture, ticket string) (prs []journal.Li
 // nothing for it. A bare publish pushes the one branch to each repo's origin,
 // opens a pull request in each, and updates the first with the url of the
 // second, so each body names the other; publish-done follows the second pull
-// request, and the status lists both.
+// request, and the status lists both. It is the one journey of a publish over
+// two repos; recording the pull requests a harness opened
+// (TestPublishHandOffPerRepo), publishing the one repo a ticket builds in
+// (TestPublishOverOneRepoOfSeveral) and the other repos' findings in the review
+// notes (TestWriteReviewNotesListsOtherRepos) are tests of
+// internal/verifydeliver.
 func TestPublishOpensOnePRPerRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
