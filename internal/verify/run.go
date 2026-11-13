@@ -739,6 +739,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		// and the slice's state stays as it was.
 		line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
 			Outcome: "fail", Cause: journal.CauseStopped, Summary: oneLine(oerr.Error())}
+		if share != nil {
+			line.Shared = share.Shared()
+		}
 		if isLight {
 			line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
 		}
@@ -754,11 +757,11 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		seconds = 1
 	}
 	x.res.Seconds = seconds
+	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
 	if share != nil {
 		share.Record(d.now().Sub(started), use)
+		line.Shared = share.Shared()
 	}
-
-	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
 	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
 	if isLight {
 		line.Ran, line.ReusedFrom = light.ran, light.reusedFrom

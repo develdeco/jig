@@ -21,7 +21,7 @@ func measure(root, project string, cores int, peak uint64) {
 	if peak > 0 {
 		use.Basis = envrun.BasisJob
 	}
-	need.Record(root, project, "test", testMachine, time.Now(), 10*time.Second, use)
+	need.Record(root, project, "test", testMachine, time.Now(), 10*time.Second, use, false)
 }
 
 func ask1(project, who string) Request {
@@ -166,4 +166,95 @@ func TestAMemoryNeedPastTheMachineAsksForTheWholeMachine(t *testing.T) {
 	notYet(t, got, "a small run shares the machine with a run clamped to all of it")
 	big()
 	recv(t, got, "the small run is admitted after")()
+}
+
+// pin asks for a share that is counted by its project's own count, which a
+// test can hold beside any other run.
+func pin(project, who string) Request {
+	r := ask1(project, who)
+	r.Pinned = 1
+	return r
+}
+
+func holdShare(t *testing.T, root string, r Request) *Share {
+	t.Helper()
+	s, err := Hold(context.Background(), root, r, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatalf("%s: %v", r.Who, err)
+	}
+	return s
+}
+
+// TestRunsHeldTogetherSharedTheMachineInEitherArrivalOrder: both runs report
+// it, the one admitted first and the one admitted later.
+func TestRunsHeldTogetherSharedTheMachineInEitherArrivalOrder(t *testing.T) {
+	root := t.TempDir()
+	first := holdShare(t, root, pin("a", "A/1"))
+	if first.Shared() {
+		t.Fatal("a run alone on the machine reports it shared")
+	}
+	second := holdShare(t, root, pin("b", "B/1"))
+	// first.Shared() above fixed its answer at the moment its oracle "ended";
+	// a run whose oracle is still going sees the later arrival.
+	third := holdShare(t, root, pin("c", "C/1"))
+	if !second.Shared() || !third.Shared() {
+		t.Errorf("shared: second %v, third %v; want both", second.Shared(), third.Shared())
+	}
+	if first.Shared() {
+		t.Error("the answer given when the first run ended changed afterwards")
+	}
+	first.Release()
+	second.Release()
+	third.Release()
+}
+
+// TestARunAdmittedBeforeAnotherJoinedItSharedToo.
+func TestARunAdmittedBeforeAnotherJoinedItSharedToo(t *testing.T) {
+	root := t.TempDir()
+	first := holdShare(t, root, pin("a", "A/1"))
+	second := holdShare(t, root, pin("b", "B/1"))
+	if !first.Shared() || !second.Shared() {
+		t.Errorf("shared: first %v, second %v; want both", first.Shared(), second.Shared())
+	}
+	first.Release()
+	second.Release()
+}
+
+// TestSequentialRunsDoNotShare: a run admitted after another released, and one
+// that waited for it, ran alone.
+func TestSequentialRunsDoNotShare(t *testing.T) {
+	root := t.TempDir()
+	measure(root, "p", 9, 0)
+	first := holdShare(t, root, ask1("p", "P/1"))
+	waiting, got := ask(t, root, ask1("p", "P/2"))
+	recv(t, waiting, "a run that needs the whole budget waits")
+	if first.Shared() {
+		t.Error("a run that ran with only a waiter beside it reports it shared")
+	}
+	first.Release()
+	recv(t, got, "the second run is admitted after")()
+	third := holdShare(t, root, ask1("p", "P/3"))
+	if third.Shared() {
+		t.Error("a run admitted after the others left reports it shared")
+	}
+	third.Release()
+}
+
+// TestARunRecordsWhetherItSharedForTheRule: the machine's figures keep the
+// fact and the wall time per run, so the rule reads them.
+func TestARunRecordsWhetherItSharedForTheRule(t *testing.T) {
+	root := t.TempDir()
+	use := envrun.Usage{CPU: 10 * time.Second}
+	alone := holdShare(t, root, pin("p", "P/1"))
+	alone.Record(10*time.Second, use)
+	alone.Release()
+	a := holdShare(t, root, pin("p", "P/2"))
+	b := holdShare(t, root, pin("other", "O/1"))
+	a.Record(25*time.Second, use)
+	a.Release()
+	b.Release()
+	runs := need.Runs(root, "p", "test", time.Now())
+	if len(runs) != 2 || runs[0].Shared || !runs[1].Shared || runs[1].Wall != 25*time.Second {
+		t.Errorf("recorded runs = %+v, want one alone of 10s and one shared of 25s", runs)
+	}
 }

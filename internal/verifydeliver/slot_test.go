@@ -264,3 +264,61 @@ func TestTheGatePassesTheMarkersPinnedCountToTheHold(t *testing.T) {
 		})
 	}
 }
+
+// TestTheGatesOracleLinesCarryWhetherTheRunShared: the value the budget gave
+// the run reaches the gate-oracle line, a failed run's too.
+func TestTheGatesOracleLinesCarryWhetherTheRunShared(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	runs := []OracleRun{
+		{Oracle: "alone", Workspace: "root", Command: "echo a", Seconds: 1},
+		{Oracle: "together", Workspace: "root", Command: "echo b", Seconds: 1, Shared: true},
+	}
+	failed := &suiteFailure{Run: OracleRun{Oracle: "fails", Workspace: "root", Command: "exit 1", Seconds: 1, Shared: true}, Err: errors.New("boom")}
+	if err := journalGateRuns(d, fx.Ticket, fx.RepoDir, "", nil, runs, failed); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"alone": false, "together": true, "fails": true}
+	seen := 0
+	for _, l := range lines {
+		if l.Event != journal.EventGateOracle {
+			continue
+		}
+		seen++
+		if l.Shared != want[l.Oracle] {
+			t.Errorf("%s gate-oracle line shared = %v, want %v", l.Oracle, l.Shared, want[l.Oracle])
+		}
+	}
+	if seen != 3 {
+		t.Errorf("%d gate-oracle lines, want 3", seen)
+	}
+}
+
+// TestTheGatesRunReportsWhetherItSharedTheMachine: the suite run asks the
+// budget and hands the answer to its run record.
+func TestTheGatesRunReportsWhetherItSharedTheMachine(t *testing.T) {
+	root := t.TempDir()
+	neighbour, err := slot.Take(context.Background(), root, slot.Request{Project: "neighbour", Who: "N/x", Pinned: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer neighbour()
+	hold := func(name, cmd string) (*slot.Share, error) {
+		return slot.Hold(context.Background(), root, slot.Request{Project: "proj", Oracle: name, Command: cmd, Pinned: 1}, func(string, string) error { return nil })
+	}
+	man := manifest.Manifest{
+		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+		Oracles:    map[string]string{"test": "go test"},
+		Heavy:      []string{"test"},
+	}
+	run := func(cmd, dir string) (string, envrun.Usage, error) { return "", envrun.Usage{CPU: time.Second}, nil }
+	runs, _, err := runSuite(t.TempDir(), man, nil, run, hold)
+	if err != nil || len(runs) != 1 || !runs[0].Shared {
+		t.Errorf("runs = %+v, %v; want one run that shared", runs, err)
+	}
+}

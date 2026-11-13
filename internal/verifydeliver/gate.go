@@ -512,6 +512,7 @@ func journalGateRuns(d Deps, ticket, dir, env string, reused map[string]reusedPa
 			line.ReusedFrom, line.Ran, line.Env = run.ReusedFrom, run.Ran, reused[run.Command].Env
 		} else {
 			line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
+			line.Shared = run.Shared
 		}
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
@@ -525,6 +526,7 @@ func journalGateRuns(d Deps, ticket, dir, env string, reused map[string]reusedPa
 		if line.Cause != journal.CauseStopped {
 			line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
 		}
+		line.Shared = run.Shared
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
 		}
@@ -756,17 +758,19 @@ func runSuite(dir string, man manifest.Manifest, reused map[string]reusedPass, r
 			start := time.Now()
 			use, err := runOracleUsage(run, cmd, dir)
 			seconds := wholeSeconds(time.Since(start))
+			shared := false
 			if share != nil {
+				shared = share.Shared()
 				if !errors.Is(err, envrun.ErrStopped) {
 					share.Record(time.Since(start), use)
 				}
 				share.Release()
 			}
 			if err != nil {
-				failed := &suiteFailure{Run: OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use}, Err: err}
+				failed := &suiteFailure{Run: OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use, Shared: shared}, Err: err}
 				return runs, failed, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
 			}
-			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use})
+			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use, Shared: shared})
 		}
 	}
 	return runs, nil, nil
