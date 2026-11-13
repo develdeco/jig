@@ -15,7 +15,7 @@ import (
 // is "gate"; with no project there is nothing to say.
 func TestWaitRowsSayWhichRunWaitsForTheSlot(t *testing.T) {
 	root := t.TempDir()
-	holder, err := slot.Take(context.Background(), root, "demo", 1, slot.Who("DEMO-1", "a"), nil)
+	holder, err := slot.Take(context.Background(), root, slot.Request{Project: "demo", Who: slot.Who("DEMO-1", "a")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestWaitRowsSayWhichRunWaitsForTheSlot(t *testing.T) {
 		defer close(done)
 		// Whatever the waiter takes, it lets go: a slot taken between the
 		// cancel and the holder's release must not outlive the test.
-		if rel, err := slot.Take(ctx, root, "demo", 1, slot.Who("DEMO-2", ""), func() { close(waiting) }); err == nil {
+		if rel, err := slot.Take(ctx, root, slot.Request{Project: "demo", Who: slot.Who("DEMO-2", "")}, func() { close(waiting) }); err == nil {
 			rel()
 		}
 	}()
@@ -66,7 +66,7 @@ func TestStatusShowsTheWaitingTableFromTheCommandsJigHome(t *testing.T) {
 	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Event: journal.EventSlotWait, Slice: "a", Summary: "waiting"}); err != nil {
 		t.Fatal(err)
 	}
-	holder, err := slot.Take(context.Background(), r.fx.Home, cfg.Name, 1, slot.Who("DEMO-1", "x"), nil)
+	holder, err := slot.Take(context.Background(), r.fx.Home, slot.Request{Project: cfg.Name, Who: slot.Who("DEMO-1", "x")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestStatusShowsTheWaitingTableFromTheCommandsJigHome(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if rel, err := slot.Take(ctx, r.fx.Home, cfg.Name, 1, slot.Who(r.fx.Ticket, "a"), func() { close(waiting) }); err == nil {
+		if rel, err := slot.Take(ctx, r.fx.Home, slot.Request{Project: cfg.Name, Who: slot.Who(r.fx.Ticket, "a")}, func() { close(waiting) }); err == nil {
 			rel()
 		}
 	}()

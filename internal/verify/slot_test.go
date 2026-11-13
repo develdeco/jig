@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/machine"
+	"github.com/develdeco/jig/internal/need"
 	"github.com/develdeco/jig/internal/slot"
 )
 
@@ -124,6 +127,32 @@ func TestHeavyOraclesOfOneProjectRunOneAfterTheOther(t *testing.T) {
 	}
 }
 
+// TestAHeavyRunRecordsWhatItUsedUnlessJigStoppedIt: a heavy oracle that ends
+// with a verdict leaves its project's figure for the next run to be admitted
+// by; one jig stopped leaves none.
+func TestAHeavyRunRecordsWhatItUsedUnlessJigStoppedIt(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{"a pass": {nil, true}, "a stop": {envrun.ErrStopped, false}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r, shas := slotRig(t, true)
+			r.deps.Slots, r.deps.Oracle = 0, nil
+			r.deps.OracleUsage = func(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error) {
+				r.clock.advance(10 * time.Second)
+				return "", envrun.Usage{CPU: 5 * time.Second}, tc.err
+			}
+			_, _ = Run(r.deps, r.request("a", shas[0]))
+			_, ok := need.Read(r.fx.Home, "slotproj", "test", machine.Read(), time.Now())
+			if ok != tc.want {
+				t.Errorf("a figure kept = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
 // TestAnOracleTheManifestDoesNotMarkHeavyTakesNoSlot: with no heavy list both
 // oracles run at once and nothing is journaled about a slot.
 func TestAnOracleTheManifestDoesNotMarkHeavyTakesNoSlot(t *testing.T) {
@@ -144,7 +173,7 @@ func TestAnOracleTheManifestDoesNotMarkHeavyTakesNoSlot(t *testing.T) {
 func TestTheOracleStartsOnlyOnceTheSlotIsTaken(t *testing.T) {
 	t.Parallel()
 	r, shas := slotRig(t, true)
-	release, err := slot.Take(context.Background(), r.fx.Home, "slotproj", 1, "", nil)
+	release, err := slot.Take(context.Background(), r.fx.Home, slot.Request{Project: "slotproj", Who: ""}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

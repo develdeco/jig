@@ -17,7 +17,7 @@ func suiteWaits(jigHome, projectName, ticket string, lines []journal.Line) []slo
 	if jigHome == "" || projectName == "" {
 		return nil
 	}
-	waits, err := slot.Waits(jigHome, projectName, ticket, lines)
+	waits, err := slot.Waits(jigHome, ticket, lines)
 	if err != nil {
 		return nil
 	}
