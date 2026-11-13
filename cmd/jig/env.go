@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/setup"
@@ -85,6 +86,12 @@ type env struct {
 	// os.Stderr in production. The screens (`jig tui`) own the terminal, so
 	// a command they run writes it into the output they show instead.
 	stderr io.Writer
+	// memo is the command's git memo: what the run asks git about a
+	// repository (its remote URL, top level, common directory, author
+	// identity) it asks once. run makes one when the field is nil, except for
+	// the commands that outlive one command (`jig tui`, `jig mcp`); a test sets
+	// it to read what the run asked. A nil memo asks git every time.
+	memo *gitx.Memo
 }
 
 // processEnv is the env of the binary: the process's own environment and
