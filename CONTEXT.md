@@ -82,6 +82,10 @@ _Avoid_: task, subtask, step
 The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself, in the background, on each commit that names the slice (see **Verification**). It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
 _Avoid_: test suite, check
 
+**Slot**:
+A heavy oracle's share of the machine: the cores and memory its project's recent runs of that oracle kept busy, taken from one machine-wide budget in arrival order and given back when the run ends. A project with nothing measured asks for the whole machine; a marker's `slots: N` instead counts that project's own runs (ADR 0051).
+_Avoid_: lock, semaphore
+
 **Workspace**:
 A slice's target: a repo, or a module inside one. In a project of several repos a slice writes it as `<repo>/<workspace>`, or as the bare id of the one repo whose manifest declares it; a bare id that two repos declare, or that none does, belongs to no repo until the slice names one.
 _Avoid_: target dir, project root

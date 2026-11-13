@@ -20,7 +20,7 @@ import (
 // oracle the manifest does not mark heavy takes no slot.
 func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 	root := t.TempDir()
-	hold := func(name, cmd string) (func(), error) {
+	hold := func(name, cmd string) (*slot.Share, error) {
 		return slot.Hold(context.Background(), root, slot.Request{Project: "proj", Oracle: name, Command: cmd}, func(string, string) error { return nil })
 	}
 	suite := func(heavy []string, wantOverlap bool) int32 {

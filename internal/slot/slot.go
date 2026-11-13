@@ -14,6 +14,16 @@
 // large one; every waiter polls on its own clock, but only the oldest can be
 // admitted, so the poll decides when, never who.
 //
+// What a run needs is measured (internal/need): the cores it kept busy and its
+// peak memory in its project's recent runs of that oracle on this machine. The
+// machine has its logical CPUs and total memory, less a headroom for the rest
+// of the desktop, less the needs of the runs admitted now. Load from outside
+// jig is not subtracted: a moving reading would make the same run wait or not
+// by chance, and the headroom covers the ordinary load. A run with no figure
+// (none yet, too old, or measured on another machine) asks for the whole
+// machine: it fits only when nothing else holds a share, and while it holds
+// one nothing else fits. A need past the machine is clamped the same way.
+//
 // A run of a project whose marker pins a count (Request.Pinned) is the
 // person's own number: it waits for its project's count, not for the budget,
 // and does not hold up the runs that wait on the budget.
@@ -31,10 +41,31 @@ import (
 	"sync"
 	"time"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/filelock"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/machine"
+	"github.com/develdeco/jig/internal/need"
 )
+
+// The headroom the budget leaves for the rest of the machine, as a fraction of
+// its CPUs and of its memory. They are the same for any project and not a
+// setting.
+const (
+	cpuHeadroom = 0.10
+	memHeadroom = 0.15
+)
+
+// readMachine reads what the machine has, replaced by tests.
+var readMachine = machine.Read
+
+// capacity is what the budget has of a machine: its CPUs and memory less the
+// headroom. mem is 0 when the machine's memory is not read, which leaves
+// memory unbudgeted.
+func capacity(m machine.Reading) (cores float64, mem uint64) {
+	return float64(m.CPUs) * (1 - cpuHeadroom), uint64(float64(m.MemoryBytes) * (1 - memHeadroom))
+}
 
 // pollInterval is the pause between asks while a run waits for its turn.
 const pollInterval = 100 * time.Millisecond
@@ -72,6 +103,32 @@ type entryInfo struct {
 	Project string `json:"project"`
 	Who     string `json:"who"`
 	Pinned  int    `json:"pinned,omitempty"`
+	// Whole is set when the run asks for the whole machine, since nothing
+	// usable was measured of it. Otherwise Cores and Mem (0: not budgeted)
+	// are what it needs.
+	Whole bool    `json:"whole,omitempty"`
+	Cores float64 `json:"cores,omitempty"`
+	Mem   uint64  `json:"mem,omitempty"`
+}
+
+// needOf is what the request needs of machine m: its project's measured
+// figure, or the whole machine when there is none or it is past the machine.
+// A pinned run has the figure it measured, or nothing: it is counted by its
+// project's count, and what it uses counts against the other projects.
+func needOf(root string, req Request, m machine.Reading) entryInfo {
+	info := entryInfo{Project: req.Project, Who: req.Who, Pinned: req.Pinned}
+	n, ok := need.Read(root, req.Project, req.Oracle, m)
+	if ok {
+		info.Cores, info.Mem = n.Cores, n.PeakBytes
+	}
+	if req.Pinned > 0 {
+		return info
+	}
+	capCores, capMem := capacity(m)
+	if !ok || info.Cores > capCores || (capMem > 0 && info.Mem > capMem) {
+		return entryInfo{Project: req.Project, Who: req.Who, Whole: true}
+	}
+	return info
 }
 
 // entry is one live run of the queue.
@@ -163,7 +220,7 @@ func removeEntry(path string) {
 
 // register gives the request the next arrival number and an entry locked for
 // the run's life. The caller holds the queue lock.
-func register(dir string, req Request) (seq string, release func(), err error) {
+func register(dir string, info entryInfo) (seq string, release func(), err error) {
 	n := 0
 	if raw, rerr := os.ReadFile(filepath.Join(dir, "next")); rerr == nil {
 		n, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
@@ -180,7 +237,7 @@ func register(dir string, req Request) (seq string, release func(), err error) {
 	if !held {
 		return "", nil, fmt.Errorf("slot: arrival number %s is already taken", seq)
 	}
-	raw, _ := json.Marshal(entryInfo{Project: req.Project, Who: req.Who, Pinned: req.Pinned})
+	raw, _ := json.Marshal(info)
 	if err := os.WriteFile(path+".info", raw, 0o644); err != nil {
 		rel()
 		removeEntry(path)
@@ -190,8 +247,8 @@ func register(dir string, req Request) (seq string, release func(), err error) {
 }
 
 // admitted says whether the entry own is to be admitted now, given the live
-// entries oldest first.
-func admitted(entries []entry, own string) bool {
+// entries oldest first and the machine.
+func admitted(entries []entry, own string, m machine.Reading) bool {
 	var me *entry
 	for i := range entries {
 		if entries[i].seq == own {
@@ -215,17 +272,34 @@ func admitted(entries []entry, own string) bool {
 		}
 		return held < me.info.Pinned
 	}
+	var usedCores float64
+	var usedMem uint64
+	used := false
 	for _, e := range entries {
-		if e.pinned() || e.seq == own {
+		if e.seq == own {
 			continue
 		}
-		// This run needs the whole machine, which fits only when no other
-		// run on the budget holds any of it, and nothing older waits.
-		if e.held || e.seq < own {
-			return false
+		if !e.pinned() && !e.held && e.seq < own {
+			return false // nothing passes the oldest waiting run
 		}
+		if !e.held {
+			continue
+		}
+		if e.info.Whole {
+			return false // a run holding the whole machine leaves nothing
+		}
+		usedCores += e.info.Cores
+		usedMem += e.info.Mem
+		used = used || e.info.Cores > 0 || e.info.Mem > 0
 	}
-	return true
+	if me.info.Whole {
+		return !used
+	}
+	capCores, capMem := capacity(m)
+	if usedCores+me.info.Cores > capCores {
+		return false
+	}
+	return capMem == 0 || me.info.Mem == 0 || usedMem+me.info.Mem <= capMem
 }
 
 // Take asks for the request's share of the machine and waits for it in
@@ -246,7 +320,7 @@ func Take(ctx context.Context, root string, req Request, onWait func()) (release
 	if err != nil {
 		return nil, err
 	}
-	seq, rel, err := register(dir, req)
+	seq, rel, err := register(dir, needOf(root, req, readMachine()))
 	unlock()
 	if err != nil {
 		return nil, err
@@ -301,7 +375,7 @@ func tryAdmit(ctx context.Context, dir, seq string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !admitted(entries, seq) {
+	if !admitted(entries, seq, readMachine()) {
 		return false, nil
 	}
 	if err := os.WriteFile(filepath.Join(dir, entriesDir, seq)+".held", nil, 0o644); err != nil {
@@ -310,12 +384,31 @@ func tryAdmit(ctx context.Context, dir, seq string) (bool, error) {
 	return true, nil
 }
 
+// Share is a run's hold on its share of the machine.
+type Share struct {
+	release func()
+	root    string
+	req     Request
+}
+
+// Release gives the share back; it is safe to call more than once.
+func (s *Share) Release() { s.release() }
+
+// Record keeps what the run measured, for the next run of its project's
+// oracle to be admitted by (internal/need): its wall time and what its process
+// tree used. Call it for a run that ended on its own, with a verdict pass or
+// fail, never for one jig stopped. Best effort: without a figure the next run
+// asks for the whole machine.
+func (s *Share) Record(wall time.Duration, use envrun.Usage) {
+	need.Record(s.root, s.req.Project, s.req.Oracle, readMachine(), wall, use)
+}
+
 // Hold is Take for an oracle run: it records journal.EventSlotWait when the
 // run has to wait and journal.EventSlotTaken when it gets its share, through
 // record, which writes the line for the event it is handed, with the summary
 // a wait carries (Line). A record that fails gives the share back and returns
 // its error.
-func Hold(ctx context.Context, root string, req Request, record func(event, summary string) error) (release func(), err error) {
+func Hold(ctx context.Context, root string, req Request, record func(event, summary string) error) (*Share, error) {
 	var werr error
 	rel, err := Take(ctx, root, req, func() {
 		summary := ""
@@ -338,7 +431,7 @@ func Hold(ctx context.Context, root string, req Request, record func(event, summ
 		rel()
 		return nil, werr
 	}
-	return rel, nil
+	return &Share{release: rel, root: root, req: req}, nil
 }
 
 // Status is who holds the machine's budget and who waits for it right now.

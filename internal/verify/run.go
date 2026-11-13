@@ -713,10 +713,11 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	// A heavy oracle takes the project's suite slot before it starts, so its
 	// bound (set when the command starts) and its recorded seconds count from
 	// the slot. The light oracle of a light delta takes none.
+	var share *slot.Share
 	if !isLight && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
 		stopCtx, endStopCtx := envrun.StopContext(context.Background())
 		defer endStopCtx()
-		release, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Pinned: d.Slots}, func(event, summary string) error {
+		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Pinned: d.Slots}, func(event, summary string) error {
 			if event == journal.EventSlotWait {
 				x.logf("%s", summary)
 			}
@@ -728,7 +729,8 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 			}
 			return err
 		}
-		defer release()
+		share = held
+		defer share.Release()
 	}
 	started := d.now()
 	out, use, oerr := d.oracle(runs, x.dir, target.env(), limit)
@@ -752,6 +754,9 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		seconds = 1
 	}
 	x.res.Seconds = seconds
+	if share != nil {
+		share.Record(d.now().Sub(started), use)
+	}
 
 	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
 	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
