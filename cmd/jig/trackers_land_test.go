@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/mirror/github"
 )
 
 // TestTicketNewLeavesTheStoreLevelWithItsOriginAfterTheSync reproduces the
@@ -162,5 +164,58 @@ func TestTrackersSyncDryRunCommitsAndPushesNothing(t *testing.T) {
 	}
 	if status, _ := gitx.Run(clone, "status", "--porcelain"); status == "" {
 		t.Error("--dry-run committed the leftover spend line")
+	}
+}
+
+// treeProbeClient is a stubGitHub that looks at the store's working tree every
+// time the sync asks GitHub to place a board item, which the sync does after
+// the record it just wrote.
+type treeProbeClient struct {
+	stubGitHub
+	clone  string
+	probes int
+	dirty  []string
+}
+
+func (c *treeProbeClient) PlaceItem(ctx context.Context, p github.ProjectV2, nodeID, itemID, status string) (string, error) {
+	c.probes++
+	if status, err := gitx.Run(c.clone, "status", "--porcelain"); err != nil {
+		c.dirty = append(c.dirty, err.Error())
+	} else if status != "" {
+		c.dirty = append(c.dirty, status)
+	}
+	return c.stubGitHub.PlaceItem(ctx, p, nodeID, itemID, status)
+}
+
+// TestTrackersSyncKeepsItsWritesOutOfTheWorkingTreeUntilTheLanding: while `jig
+// trackers sync` runs, the records it has written are not yet in the working
+// tree, so another builder's claim on the same clone never meets them
+// unstaged. It lands them after, in the same clean end state.
+func TestTrackersSyncKeepsItsWritesOutOfTheWorkingTreeUntilTheLanding(t *testing.T) {
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	remote := newTestOriginCloneWithGitHubTracker(t, clone)
+	e.mirrorClient = stubFailingMirrorClient(t)
+	var buf bytes.Buffer
+	if code := run(e, []string{"ticket", "new", "--title", "Fix the thing", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("jig ticket new: exit %d\n%s", code, buf.String())
+	}
+
+	probe := &treeProbeClient{clone: clone}
+	e.mirrorClient = probe
+	buf.Reset()
+	if code := run(e, []string{"trackers", "sync", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("jig trackers sync: exit %d\n%s", code, buf.String())
+	}
+
+	if probe.probes == 0 {
+		t.Fatal("the sync never placed a board item, so the working tree was never looked at")
+	}
+	if len(probe.dirty) != 0 {
+		t.Errorf("the working tree held the sync's writes before the landing:\n%s", strings.Join(probe.dirty, "\n"))
+	}
+	if record, err := gitx.Run(remote, "show", "main:trackers/github/example/tracking/1/record.yaml"); err != nil || !strings.Contains(record, "synced:") {
+		t.Errorf("origin's record = %q (%v), want the landing's, with synced:", record, err)
 	}
 }
