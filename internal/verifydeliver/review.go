@@ -1430,6 +1430,10 @@ type RoundInput struct {
 	// written even when there is nothing to review, since someone still has
 	// to say so. A launched round skips the reviewer instead.
 	Recorded bool
+	// Pristine says the caller restored the lease (LeaseDir, or each of Repos)
+	// to its head just before, and nothing has run in it since: no oracle ran,
+	// so the restore a round starts with has nothing to undo and is left out.
+	Pristine bool
 	// Readable, when set, says whether the reviewer's session can read a
 	// file: a recording it cannot is left out of the list the reviewer is
 	// handed and counted as omitted, rather than listed as evidence it
