@@ -102,7 +102,9 @@ func testNameFromDir(dir string) string {
 }
 
 // attribute reads every trace file in dir and counts the processes by caller
-// and by test. A directory that was never made holds none. A file that cannot
+// and by test; a process with no caller is "(unattributed)" as a caller but still
+// belongs to the test its recorded directory names, and one with neither is
+// "(unattributed)" in both. A directory that was never made holds none. A file that cannot
 // be read counts as unattributed, so the total stays the file count that
 // countTraces gives.
 func attribute(dir string) (attribution, error) {
@@ -117,13 +119,19 @@ func attribute(dir string) (attribution, error) {
 	for _, e := range entries {
 		a.total++
 		h, _ := readTraceHead(filepath.Join(dir, e.Name()))
-		if h.caller == "" {
-			a.callers[unattributed]++
-			a.tests[unattributed]++
-			continue
+		caller, test := h.caller, unattributed
+		if caller == "" {
+			caller = unattributed
 		}
-		a.callers[h.caller]++
-		a.tests[testNameFromDir(h.dir)]++
+		// The directory names the test even when no caller was recorded.
+		switch {
+		case h.dir != "":
+			test = testNameFromDir(h.dir)
+		case h.caller != "":
+			test = otherTest
+		}
+		a.callers[caller]++
+		a.tests[test]++
 	}
 	return a, nil
 }

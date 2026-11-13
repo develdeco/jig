@@ -92,17 +92,19 @@ func TestAttribution(t *testing.T) {
 	write("d", `{"event":"exit","code":0}`+"\n")
 	write("e", "")
 	write("f", `{"event":"def_param","param":"JIG_GIT_CALLER","value":"pkg.T"}`+"\n"+`{"event":"def_par`)
+	// A directory with no caller still names its test.
+	write("g", `{"event":"def_param","param":"JIG_GIT_DIR","value":"/tmp/TestOne5/001"}`+"\n"+`{"event":"exit","code":0}`+"\n")
 
 	got, err := attribute(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	n, err := countTraces(dir)
-	if err != nil || got.total != n || n != 6 {
+	if err != nil || got.total != n || n != 7 {
 		t.Fatalf("total = %d, countTraces = %d, %v", got.total, n, err)
 	}
-	wantCallers := map[string]int{"pkg.A": 2, "pkg.B": 1, "pkg.T": 1, unattributed: 2}
-	wantTests := map[string]int{"TestOne": 2, otherTest: 2, unattributed: 2}
+	wantCallers := map[string]int{"pkg.A": 2, "pkg.B": 1, "pkg.T": 1, unattributed: 3}
+	wantTests := map[string]int{"TestOne": 3, otherTest: 2, unattributed: 2}
 	for name, c := range map[string]struct{ got, want map[string]int }{"callers": {got.callers, wantCallers}, "tests": {got.tests, wantTests}} {
 		sum := 0
 		for k, v := range c.want {
