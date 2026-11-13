@@ -99,10 +99,10 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 
 	opened := gateOpenLines(t, fx)
 	out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix_slices") || !strings.Contains(out, "fix-2-beta-test") {
-		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice fix-2-beta-test in fix_slices\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix_slices") || !strings.Contains(out, "fix-2-q-beta-test") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice fix-2-q-beta-test in fix_slices\n%s", code, out)
 	}
-	if strings.Contains(out, "fix-2-alpha-test") {
+	if strings.Contains(out, "fix-2-q-alpha-test") {
 		t.Fatalf("jig gate queued a slice for the dismissed note:\n%s", out)
 	}
 	if got := gateOpenLines(t, fx); got != opened {
@@ -121,8 +121,8 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasSlice(slices, "fix-2-beta-test") || hasSlice(slices, "fix-2-alpha-test") {
-		t.Fatalf("slices = %+v, want fix-2-beta-test and no slice for the dismissed note", slices)
+	if !hasSlice(slices, "fix-2-q-beta-test") || hasSlice(slices, "fix-2-q-alpha-test") {
+		t.Fatalf("slices = %+v, want fix-2-q-beta-test and no slice for the dismissed note", slices)
 	}
 
 	// The slice is open work: a second gate before it is green refuses and
@@ -131,7 +131,7 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 		t.Fatalf("jig gate with the kept slice unbuilt: exit = %d, want 1 GATE_NOT_GREEN\n%s", code, out)
 	}
 
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
 	round2Path := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code = roundThroughMain(t, e, fx, round2Path)
@@ -142,7 +142,7 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range slices {
-		if s.ID != "fix-2-beta-test" && len(s.Findings) > 0 && s.Findings[0] == "r1-f1" {
+		if s.ID != "fix-2-q-beta-test" && len(s.Findings) > 0 && s.Findings[0] == "r1-f1" {
 			t.Errorf("slice %s was queued for r1-f1 a second time", s.ID)
 		}
 	}
@@ -196,10 +196,10 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	}
 
 	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix-2-beta-test") {
-		t.Fatalf("jig gate exit = %d, want 0 and the fix slice fix-2-beta-test built from the kept note\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+		t.Fatalf("jig gate exit = %d, want 0 and the fix slice fix-2-q-beta-test built from the kept note\n%s", code, out)
 	}
-	if strings.Contains(out, "fix-2-alpha-test") {
+	if strings.Contains(out, "fix-2-q-alpha-test") {
 		t.Fatalf("jig gate queued a slice for the dismissed note:\n%s", out)
 	}
 
@@ -213,7 +213,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 	}
 	var goal string
 	for _, s := range slices {
-		if s.ID == "fix-2-beta-test" {
+		if s.ID == "fix-2-q-beta-test" {
 			goal = s.Goal
 			if s.FromGate != 2 || len(s.Findings) != 1 || s.Findings[0] != "r1-f1" {
 				t.Errorf("slice = %+v, want a fix slice of round 2 for r1-f1", s)
@@ -221,13 +221,13 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 		}
 	}
 	if !strings.Contains(goal, "Worth doing now.") || !strings.Contains(goal, "kept by the human") {
-		t.Errorf("fix-2-beta-test goal = %q, want the person's reason and who kept it", goal)
+		t.Errorf("fix-2-q-beta-test goal = %q, want the person's reason and who kept it", goal)
 	}
 	if used, _ := verifydeliver.UsedFixBudget(st, ticket, 3); used != 1 {
 		t.Errorf("fix budget used = %d, want 1: the keep queued before round 2 counts", used)
 	}
 
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
 	round2Path := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, round2Path, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	if out, code = roundThroughMain(t, e, fx, round2Path); code != 0 {
@@ -257,8 +257,8 @@ func TestReviewContextAfterAKeepNamesTheQueuedSlice(t *testing.T) {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
 	out, code := runMain(t, e, "", "review", "context", fx.Ticket, "--model", "m", "--store", fx.StoreDir)
-	if code != 0 || strings.Contains(out, "REVIEW_NOT_OPEN") || !strings.Contains(out, "fix-2-beta-test") {
-		t.Fatalf("jig review context after a keep: exit = %d, want 0 naming the queued slice fix-2-beta-test\n%s", code, out)
+	if code != 0 || strings.Contains(out, "REVIEW_NOT_OPEN") || !strings.Contains(out, "fix-2-q-beta-test") {
+		t.Fatalf("jig review context after a keep: exit = %d, want 0 naming the queued slice fix-2-q-beta-test\n%s", code, out)
 	}
 }
 
@@ -277,10 +277,10 @@ func TestAKeptAskQueuedByTheGateIsStillDecided(t *testing.T) {
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha-test") {
 		t.Fatalf("jig gate: exit = %d, want the slice queued\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-alpha-test", "alpha/alpha.go")
+	buildQueuedSlice(t, fx, "fix-2-q-alpha-test", "alpha/alpha.go")
 	next, _ := runMain(t, e, "", "next", fx.Ticket, "--store", fx.StoreDir)
 	if strings.Contains(next, "PHASE_ASKS_UNDECIDED") {
 		t.Fatalf("jig next stops at an undecided ask after the keep was queued:\n%s", next)
@@ -305,16 +305,16 @@ func TestALaterGateLeavesASpentKeepAloneWhileItQueuesAnother(t *testing.T) {
 		}
 	}
 	keep("r1-f1")
-	if out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-beta-test") {
-		t.Fatalf("first gate: exit = %d, want fix-2-beta-test queued\n%s", code, out)
+	if out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+		t.Fatalf("first gate: exit = %d, want fix-2-q-beta-test queued\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
 	keep("r1-f2")
 	out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("second gate: exit = %d, want fix-2-alpha-test queued\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-q-alpha-test") {
+		t.Fatalf("second gate: exit = %d, want fix-2-q-alpha-test queued\n%s", code, out)
 	}
-	if strings.Contains(out, "fix-2-beta-test") {
+	if strings.Contains(out, "fix-2-q-beta-test") {
 		t.Fatalf("second gate queued the spent keep again:\n%s", out)
 	}
 }
@@ -331,7 +331,7 @@ func TestTheFixBudgetCountsTheRoundAKeepWasQueuedForAfterItCloses(t *testing.T) 
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
 	round2 := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{ReviewedPaths: []string{"beta/beta.go"}, Summary: "round 2: nothing new"})
 	if out, code := roundThroughMain(t, e, fx, round2); code != 0 {
@@ -358,11 +358,11 @@ func TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice(t *testing.T) {
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "alpha/alpha.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "alpha/alpha.go")
 	round2 := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{ReviewedPaths: []string{"alpha/alpha.go", "beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code := roundThroughMain(t, e, fx, round2)
-	if code != 0 || strings.Contains(out, "fix-2-beta-test-2") || strings.Contains(out, "fix-3-beta-test") {
+	if code != 0 || strings.Contains(out, "fix-2-q-beta-test-2") || strings.Contains(out, "fix-3-beta-test") {
 		t.Fatalf("round 2 exit = %d, want 0 and no second slice for r1-f1\n%s", code, out)
 	}
 	st, err := store.Open(fx.StoreDir)
@@ -393,7 +393,7 @@ func TestAQueuedKeepIsSpentOnceItsRoundCloses(t *testing.T) {
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate (round 2 opens): exit = %d\n%s", code, out)
 	}
@@ -448,8 +448,8 @@ func TestTwoKeptNotesInOneWorkspaceAreOneFixSlice(t *testing.T) {
 	}
 
 	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix_slices[1]") || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("jig gate exit = %d, want 0 and the one fix slice fix-2-alpha-test\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix_slices[1]") || !strings.Contains(out, "fix-2-q-alpha-test") {
+		t.Fatalf("jig gate exit = %d, want 0 and the one fix slice fix-2-q-alpha-test\n%s", code, out)
 	}
 
 	st, err := store.Open(fx.StoreDir)
@@ -466,8 +466,8 @@ func TestTwoKeptNotesInOneWorkspaceAreOneFixSlice(t *testing.T) {
 			continue
 		}
 		found++
-		if s.ID != "fix-2-alpha-test" || len(s.Findings) != 2 || s.Findings[0] != "r1-f1" || s.Findings[1] != "r1-f2" {
-			t.Errorf("round 2 slice = %+v, want fix-2-alpha-test listing r1-f1 and r1-f2", s)
+		if s.ID != "fix-2-q-alpha-test" || len(s.Findings) != 2 || s.Findings[0] != "r1-f1" || s.Findings[1] != "r1-f2" {
+			t.Errorf("round 2 slice = %+v, want fix-2-q-alpha-test listing r1-f1 and r1-f2", s)
 		}
 		for _, want := range []string{"Say it now.", "Share the check now.", "Gate finding r1-f1, kept by the human:", "Gate finding r1-f2, kept by the human:"} {
 			if !strings.Contains(s.Goal, want) {
