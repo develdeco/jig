@@ -202,32 +202,46 @@ func (e *TimedOutError) Is(target error) bool { return target == ErrTimedOut }
 // record into the directory of an outer jig run), and a variable in env
 // replaces an inherited one of the same name.
 func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string, error) {
+	out, _, err := ShellOutputUsage(cmd, dir, limit, env)
+	return out, err
+}
+
+// ShellOutputUsage is ShellOutputEnv that also returns what the run's process
+// tree used (Usage). The usage covers a command that failed, and one killed at
+// its limit up to where it ended, except that on Linux and macOS a killed run
+// has no CPU figure (the kill reaps no descendant, so wait4 reads the shell
+// alone) and only its peak memory; a run ended because jig was stopped, which
+// reached no verdict, has none, and neither has a run whose figures could not
+// be read. A figure that cannot be read never changes the run's result.
+func ShellOutputUsage(cmd, dir string, limit time.Duration, env []string) (string, Usage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	c, err := shCommand(ctx, cmd, dir, env)
 	if err != nil {
-		return "", err
+		return "", Usage{}, err
 	}
 	var buf bytes.Buffer
 	c.Stdout, c.Stderr = &buf, &buf
 	g := newGuard(c)
 	c.WaitDelay = 10 * time.Second
+	var use Usage
 	err = g.start()
 	if err == nil {
 		err = c.Wait()
+		use = g.usage()
 		g.release()
 	}
 	out := buf.Bytes()
 	if g.stopped.Load() {
-		return string(out), &StoppedError{Cmd: cmd}
+		return string(out), Usage{}, &StoppedError{Cmd: cmd}
 	}
 	if ctx.Err() != nil {
-		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
+		return string(out), use, &TimedOutError{Cmd: cmd, Limit: limit}
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("shell %q: %w", cmd, err)
+		return string(out), use, fmt.Errorf("shell %q: %w", cmd, err)
 	}
-	return string(out), nil
+	return string(out), use, nil
 }
 
 // Sh is the sh every command of this package runs through, on every OS, so

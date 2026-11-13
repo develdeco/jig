@@ -50,6 +50,10 @@ type Deps struct {
 	// to its environment, bounded by limit, and returns its combined output.
 	// nil means the real run: envrun.ShellOutputEnv, through sh.
 	Oracle func(cmd, dir string, env []string, limit time.Duration) (string, error)
+	// OracleUsage is Oracle that also returns what the run's process tree
+	// used; it is used when Oracle is nil, and nil means the real run
+	// (envrun.ShellOutputUsage). An injected Oracle measures nothing.
+	OracleUsage func(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error)
 	// Sh finds the sh the oracle and the env class's commands run through;
 	// nil is envrun.Sh.
 	Sh func() (string, error)
@@ -158,12 +162,17 @@ func (d Deps) sleep(t time.Duration) {
 	time.Sleep(t)
 }
 
-// oracle runs cmd in dir, or for real when Deps.Oracle is nil.
-func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string, error) {
+// oracle runs cmd in dir, or for real when Deps.Oracle is nil, and returns
+// what its process tree used (zero when nothing measured it).
+func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error) {
 	if d.Oracle != nil {
-		return d.Oracle(cmd, dir, env, limit)
+		out, err := d.Oracle(cmd, dir, env, limit)
+		return out, envrun.Usage{}, err
 	}
-	return envrun.ShellOutputEnv(cmd, dir, limit, env)
+	if d.OracleUsage != nil {
+		return d.OracleUsage(cmd, dir, env, limit)
+	}
+	return envrun.ShellOutputUsage(cmd, dir, limit, env)
 }
 
 // sh finds the sh commands run through, with envrun.Sh when Deps.Sh is nil.
@@ -678,7 +687,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		defer release()
 	}
 	started := d.now()
-	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
+	out, use, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	if errors.Is(oerr, envrun.ErrStopped) {
 		// No verdict: the line says the run ended without judging the code,
 		// and the slice's state stays as it was.
@@ -701,6 +710,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	x.res.Seconds = seconds
 
 	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
+	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
 	if isLight {
 		line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
 		x.res.Ran, x.res.ReusedFrom = light.ran, light.reusedFrom
