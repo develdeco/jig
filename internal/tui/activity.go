@@ -371,6 +371,12 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		if l.Command != "" {
 			cmd = "`" + l.Command + "`"
 		}
+		if l.Outcome == "fail" {
+			return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+		}
+		if l.ReusedFrom != "" {
+			return cmd + " reused the pass of " + short(l.ReusedFrom)
+		}
 		return cmd + " passed" + took(l.Seconds)
 	case journal.EventVerified:
 		return "verified " + short(l.Commit)

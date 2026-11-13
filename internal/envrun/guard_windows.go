@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -139,6 +140,43 @@ func resumeProcess(pid uint32) {
 			windows.CloseHandle(th)
 		}
 	}
+}
+
+// jobAccounting is JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, which x/sys does
+// not define: times are in 100 ns units.
+type jobAccounting struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
+// usage is what the run's tree used, read from the job before release closes
+// it: the user plus kernel time of every process that was ever in it, ended
+// ones included, and the job's peak committed memory. With no job nothing is
+// measured.
+func (g *guard) usage() Usage {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var u Usage
+	if g.job == 0 {
+		return u
+	}
+	var acct jobAccounting
+	if err := windows.QueryInformationJobObject(g.job, windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&acct)), uint32(unsafe.Sizeof(acct)), nil); err == nil {
+		u.CPU = time.Duration(acct.TotalUserTime+acct.TotalKernelTime) * 100
+	}
+	var ext windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	if err := windows.QueryInformationJobObject(g.job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&ext)), uint32(unsafe.Sizeof(ext)), nil); err == nil && ext.PeakJobMemoryUsed > 0 {
+		u.PeakBytes, u.Basis = uint64(ext.PeakJobMemoryUsed), BasisJob
+	}
+	return u
 }
 
 // release is called once c has been waited for. The run is over, so what the

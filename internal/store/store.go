@@ -27,6 +27,11 @@ type Store struct {
 	// defaults of the checkpoint lock's wait (a test shortens them).
 	checkpointNotice, checkpointBound time.Duration
 
+	// checkpointTryLock, when set, replaces TryLock for the checkpoint lock's
+	// waits, so a test can see the timeouts the wait is split into without
+	// timing a wall clock.
+	checkpointTryLock func(path string, timeout time.Duration) (release func(), held bool, err error)
+
 	// AfterCheckpoint, when set, runs once after every Push that actually
 	// lands (committed, and pushed when the store has an origin): the
 	// GitHub mirror's full sync hooks in here (internal/mirror), so the
@@ -110,7 +115,8 @@ func (s *Store) invalidateAliasClaims() {
 // explicitly once the claim lands.
 //
 // What the hook wrote to the tracker tree goes out with it: the sync's
-// record writes land in the working tree, and this commits and pushes them
+// record writes are pending while it runs (HoldTrackerWrites), so no claim on
+// the clone meets them unstaged, and this applies, commits and pushes them
 // once the hook is done (landTrackerWrites), a sync that failed part-way
 // included, since the records it did write are true. A ticket's last
 // checkpoint is a checkpoint like any other, with no next one to carry them.
@@ -118,6 +124,7 @@ func (s *Store) RunCheckpointHook() {
 	if s.AfterCheckpoint == nil {
 		return
 	}
+	s.HoldTrackerWrites()
 	hookErr := s.AfterCheckpoint(s)
 	landErr := s.landTrackerWrites(false)
 	if hookErr != nil {

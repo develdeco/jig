@@ -252,3 +252,12 @@ func TestSlotDirIsOneDirectoryPerProjectUnderTheRoot(t *testing.T) {
 		t.Errorf("SlotDir = %q, want %q", got, want)
 	}
 }
+
+// TestGateDirIsOneDirectoryPerProjectUnderTheRoot: a project's gate locks
+// live in one directory of their own under the jig home.
+func TestGateDirIsOneDirectoryPerProjectUnderTheRoot(t *testing.T) {
+	root := t.TempDir()
+	if got, want := GateDir(root, "p"), filepath.Join(root, "gates", "p"); got != want {
+		t.Errorf("GateDir = %q, want %q", got, want)
+	}
+}

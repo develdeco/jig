@@ -15,9 +15,9 @@ import (
 // after checkpointLockNotice, who holds the lock and keeps waiting; at
 // checkpointLockBound in all it fails, naming the holder, and holds nothing.
 // Fifteen minutes covers a push over a slow network behind a busy queue and
-// still ends a wedged holder in a clear failure. They are variables so a test
-// can shorten them on a Store (see checkpointWaits).
-var (
+// still ends a wedged holder in a clear failure. They are constants: a test
+// shortens the wait on the Store it uses (see checkpointWaits), never here.
+const (
 	checkpointLockNotice = 2 * time.Minute
 	checkpointLockBound  = 15 * time.Minute
 )
@@ -64,12 +64,6 @@ const checkpointLockName = "jig-checkpoint"
 // reaches the store through Claim, which takes the lock itself. The release
 // func is idempotent, so a caller that releases early can still defer it.
 func (s *Store) LockCheckpoint() (release func(), err error) {
-	return s.lockCheckpoint()
-}
-
-// lockCheckpoint is LockCheckpoint; it reads the notice and the bound from the
-// package variables, so a test can see both without waiting minutes.
-func (s *Store) lockCheckpoint() (func(), error) {
 	key, lockPath := s.checkpointLockTarget()
 	h := checkpointHoldFor(key)
 
@@ -97,7 +91,7 @@ func (s *Store) lockCheckpoint() (func(), error) {
 func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 	holderPath := filepath.Join(filepath.Dir(lockPath), checkpointHolderName)
 	notice, bound := s.checkpointWaits()
-	unlock, held, err := TryLock(lockPath, notice)
+	unlock, held, err := s.tryCheckpointLock(lockPath, notice)
 	if err != nil {
 		return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 	}
@@ -107,7 +101,7 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 		if rest < 0 {
 			rest = 0
 		}
-		unlock, held, err = TryLock(lockPath, rest)
+		unlock, held, err = s.tryCheckpointLock(lockPath, rest)
 		if err != nil {
 			return nil, fmt.Errorf("store: lock %s: %w", lockPath, err)
 		}
@@ -125,6 +119,15 @@ func (s *Store) takeCheckpointFileLock(lockPath string) (func(), error) {
 		_ = os.Remove(holderPath)
 		unlock()
 	}, nil
+}
+
+// tryCheckpointLock is TryLock, or the Store's replacement when a test set
+// one.
+func (s *Store) tryCheckpointLock(path string, timeout time.Duration) (func(), bool, error) {
+	if s.checkpointTryLock != nil {
+		return s.checkpointTryLock(path, timeout)
+	}
+	return TryLock(path, timeout)
 }
 
 // checkpointWaits returns the notice and the bound this store waits by.
