@@ -2,6 +2,7 @@ package verifydeliver
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,7 +12,9 @@ import (
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/machine"
 	"github.com/develdeco/jig/internal/manifest"
+	"github.com/develdeco/jig/internal/need"
 	"github.com/develdeco/jig/internal/slot"
 )
 
@@ -20,8 +23,8 @@ import (
 // oracle the manifest does not mark heavy takes no slot.
 func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 	root := t.TempDir()
-	hold := func(name, cmd string) (func(), error) {
-		return slot.Hold(context.Background(), root, "proj", 1, "", func(string, string) error { return nil })
+	hold := func(name, cmd string) (*slot.Share, error) {
+		return slot.Hold(context.Background(), root, slot.Request{Project: "proj", Oracle: name, Command: cmd}, func(string, string) error { return nil })
 	}
 	suite := func(heavy []string, wantOverlap bool) int32 {
 		man := manifest.Manifest{
@@ -71,6 +74,37 @@ func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 	}
 }
 
+// TestTheGatesHeavyRunRecordsWhatItUsedUnlessJigStoppedIt: a heavy oracle the
+// gate ran to a verdict, pass or fail, leaves its project's figure for the next
+// run to be admitted by; one jig stopped leaves none.
+func TestTheGatesHeavyRunRecordsWhatItUsedUnlessJigStoppedIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{"a pass": {nil, true}, "a failure": {errors.New("boom"), true}, "a stop": {envrun.ErrStopped, false}} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			hold := func(name, cmd string) (*slot.Share, error) {
+				return slot.Hold(context.Background(), root, slot.Request{Project: "proj", Oracle: name, Command: cmd}, func(string, string) error { return nil })
+			}
+			man := manifest.Manifest{
+				Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
+				Oracles:    map[string]string{"test": "go test"},
+				Heavy:      []string{"test"},
+			}
+			run := func(cmd, dir string) (string, envrun.Usage, error) {
+				time.Sleep(20 * time.Millisecond)
+				return "", envrun.Usage{CPU: time.Second}, tc.err
+			}
+			_, _, _ = runSuite(t.TempDir(), man, nil, run, hold)
+			_, ok := need.Read(root, "proj", "test", machine.Read(), time.Now())
+			if ok != tc.want {
+				t.Errorf("a figure kept = %v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
 // TestTheGateHoldsNoSlotWithoutAProject: Deps that name no project take no
 // slot.
 func TestTheGateHoldsNoSlotWithoutAProject(t *testing.T) {
@@ -96,7 +130,7 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 		ran.Store(true)
 		return "", nil
 	}
-	release, err := slot.Take(context.Background(), d.Home, d.Cfg.Name, 1, slot.Who("OTHER", "x"), nil)
+	release, err := slot.Take(context.Background(), d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who("OTHER", "x")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +169,7 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 		t.Fatal("the gate's oracle ran while another run held the slot")
 	}
 	lines, _ := journal.Read(d.Store, fx.Ticket)
-	waits, err := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines)
+	waits, err := slot.Waits(d.Home, fx.Ticket, lines)
 	if err != nil || len(waits) != 1 || waits[0].Slice != "" || !strings.Contains(waits[0].Line, "OTHER/x is running its suite") {
 		t.Fatalf("Waits = %+v, %v; want the gate round behind OTHER/x", waits, err)
 	}
@@ -162,7 +196,71 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 	if taken == nil || taken.Slice != "" || taken.Source != "gate" {
 		t.Errorf("slot-taken line = %+v", taken)
 	}
-	if got, _ := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines); len(got) != 0 {
+	if got, _ := slot.Waits(d.Home, fx.Ticket, lines); len(got) != 0 {
 		t.Errorf("the gate still shows as waiting after it took the slot: %+v", got)
+	}
+}
+
+// TestTheGatePassesTheMarkersPinnedCountToTheHold: with the marker's slots
+// unset the gate's heavy run is measured and waits while another project's run
+// holds the machine; with slots pinned it is counted by its own project and is
+// admitted at once.
+func TestTheGatePassesTheMarkersPinnedCountToTheHold(t *testing.T) {
+	for name, tc := range map[string]struct {
+		slots      int
+		wantToWait bool
+	}{"unset": {0, true}, "pinned": {2, false}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d := newDeps(t, fx)
+			d.Cfg.SuiteSlots = tc.slots
+			release, err := slot.Take(context.Background(), d.Home, slot.Request{Project: "another-project", Who: slot.Who("OTHER", "x")}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			got := make(chan *slot.Share, 1)
+			go func() {
+				share, err := d.slotHolder(fx.Ticket)("test", "echo suite")
+				if err != nil {
+					t.Error(err)
+				}
+				got <- share
+			}()
+			if tc.wantToWait {
+				for deadline := time.Now().Add(60 * time.Second); ; {
+					lines, err := journal.Read(d.Store, fx.Ticket)
+					if err != nil {
+						t.Fatal(err)
+					}
+					waited := false
+					for _, l := range lines {
+						waited = waited || l.Event == journal.EventSlotWait
+					}
+					if waited {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("the gate never journaled that it waits")
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				select {
+				case <-got:
+					t.Fatal("the gate's run was admitted while another project held the machine")
+				default:
+				}
+				release()
+			}
+			select {
+			case share := <-got:
+				if share != nil {
+					share.Release()
+				}
+			case <-time.After(60 * time.Second):
+				t.Fatal("the gate's run was never admitted")
+			}
+		})
 	}
 }

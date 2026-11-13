@@ -742,21 +742,26 @@ func runSuite(dir string, man manifest.Manifest, reused map[string]reusedPass, r
 				runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, ReusedFrom: pass.Origin, Ran: ranOf(man, pass), Seconds: pass.Seconds})
 				continue
 			}
-			release := func() {}
+			var share *slot.Share
 			if hold != nil && man.IsHeavy(name) {
-				rel, err := hold(name, cmd)
+				held, err := hold(name, cmd)
 				if err != nil {
 					if errors.Is(err, envrun.ErrStopped) {
 						return runs, nil, oracleError("", err)
 					}
 					return runs, nil, err
 				}
-				release = rel
+				share = held
 			}
 			start := time.Now()
 			use, err := runOracleUsage(run, cmd, dir)
-			release()
 			seconds := wholeSeconds(time.Since(start))
+			if share != nil {
+				if !errors.Is(err, envrun.ErrStopped) {
+					share.Record(time.Since(start), use)
+				}
+				share.Release()
+			}
 			if err != nil {
 				failed := &suiteFailure{Run: OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use}, Err: err}
 				return runs, failed, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
@@ -807,7 +812,7 @@ const oracleLimit = 30 * time.Minute
 
 // slotHolder takes the project's suite slot for the heavy oracle name run as
 // cmd and returns the release that lets it go.
-type slotHolder = func(name, cmd string) (release func(), err error)
+type slotHolder = func(name, cmd string) (*slot.Share, error)
 
 // slotHolder is the gate's hold on the project's suite slot for ticket, or nil
 // when d names no project to hold one of. It journals slot-wait and
@@ -816,16 +821,16 @@ func (d Deps) slotHolder(ticket string) slotHolder {
 	if d.Cfg.Name == "" || d.Home == "" || d.Store == nil {
 		return nil
 	}
-	return func(name, cmd string) (func(), error) {
+	return func(name, cmd string) (*slot.Share, error) {
 		stopCtx, end := envrun.StopContext(context.Background())
 		defer end()
-		rel, err := slot.Hold(stopCtx, d.Home, d.Cfg.Name, d.Cfg.Slots(), slot.Who(ticket, ""), func(event, summary string) error {
+		share, err := slot.Hold(stopCtx, d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who(ticket, ""), Oracle: name, Command: cmd, Pinned: d.Cfg.PinnedSlots()}, func(event, summary string) error {
 			return journal.Append(d.Store, ticket, journal.Line{Event: event, Oracle: name, Command: cmd, Summary: summary, Source: "gate"})
 		})
 		if err != nil && stopCtx.Err() != nil {
 			return nil, envrun.Stopped("the wait for the suite slot")
 		}
-		return rel, err
+		return share, err
 	}
 }
 

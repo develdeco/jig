@@ -1,0 +1,25 @@
+# Heavy runs share the machine by measured need, in arrival order
+
+A heavy oracle (`heavy:` in the manifest) took one lock file per project and slot number, and the project's marker said how many (`slots: N`, one when unset). That counted runs, not what they use: a project whose suite keeps one core busy waited for itself as long as one that keeps twenty, two projects on one machine never waited for each other, and a waiter that polled first after a release won, whoever had asked first. The oracle line now carries the CPU time and peak memory of its process tree (`internal/envrun`'s `Usage`), so a run's need can be read from the runs before it.
+
+## Decision
+
+**One budget for the machine.** Every heavy run of every project asks one queue under the jig home (`slot-queue/`), through `slot.Hold`. It holds its share until the oracle ends and gives it back. The operating system frees the share when its holder dies, however it dies.
+
+**Arrival order.** A run takes the next arrival number under a short lock on the queue and registers an entry whose lock file it holds for as long as it lives, waiting or holding. A reader tells a live entry from a dead one by testing that lock, so a dead waiter is skipped and a dead holder frees its share with no cleanup. Admission is decided under the same short lock: a run is admitted when it is the oldest live run waiting on the budget and its need fits what is left. Nothing passes it, so small runs never starve a large one. Every waiter polls on its own clock, but only the oldest can be admitted, so the poll decides when, never who.
+
+**What a run needs.** Measured from its project's recent runs of that oracle on this machine (`internal/need`): the cores it kept busy on average (CPU seconds over wall seconds) and its peak memory. The figure is the largest of the project's last five runs of that oracle, taking the largest cores and the largest peak memory among them, so that a few small selections (a test run narrowed to some packages) do not hide the whole suite under the same oracle name. Runs older than 30 days, and runs taken on another count of CPUs or another amount of memory, do not count. A run jig stopped (no verdict) is not recorded; one that failed or hit the oracle's bound is, since it used what it used. Where peak memory is not measured the figure is cores only, and memory is not budgeted for that project. Figures live under the jig home, never in the store: they describe this machine.
+
+**What the machine has.** Read when a run asks: logical CPUs and total physical memory, less a headroom of 10 percent of the CPUs and 15 percent of the memory, less the needs of the runs admitted now. The headroom is two named constants for any project, not a setting. Load from outside jig is not subtracted: a moving reading would make the same run wait or not by chance, and the headroom covers the ordinary load around it. That is also why the memory side uses total memory: available memory already shows the admitted runs' use, and subtracting their measured need again would count it twice.
+
+**Nothing measured means alone.** A run with no usable figure (none yet, an expired one, one taken on another machine) asks for the whole machine: it fits only when nothing else holds a share, and while it holds one nothing else fits. A measured need past the machine is clamped the same way. One mechanism, no special case; its own run is then recorded and starts the figure. There is no bound on how long a run alone may wait and no default share: because nothing passes an older waiter, a run waits only for the runs held or ahead of it when it came, each bounded by its oracle's time bound, and a later arrival on the budget never delays it (a pinned project's later runs are counted by that project's own count, so they can).
+
+**A person's number wins.** A marker's `slots: N` keeps its meaning: at most N of that project's heavy runs at once, counted and not measured. Such a run waits for its project's count, not for the budget, and does not hold up others while it waits. It registers in the queue, and the figure it measured, when it has one, counts against every other project's runs; the pinned project's own runs are never held back by the budget. A marker without `slots:` is no longer the same as `slots: 1`: the first is measured, the second is pinned to one.
+
+## Consequences
+
+- A project whose runs measured one core runs several at once on a many-core machine; a project with nothing measured runs alone; two projects draw from one budget.
+- The first heavy run of a project on a machine, and the first after a change of the machine's CPUs or memory, runs alone. After that the figure follows what the project's suite does.
+- The waiting line keeps its words (`waiting for the suite slot: <run> is running its suite (N waiting)`) over the machine-wide queue.
+- A system that does not report total memory budgets cores only.
+- The slot description in `ARCHITECTURE.md` and the package comment of `internal/slot` describe the queue; the per-project lock files of the earlier slot are gone, and a stale `slots/` directory under the jig home is unused.

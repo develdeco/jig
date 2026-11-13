@@ -104,11 +104,13 @@ type Budget struct {
 	USD    float64 `yaml:"usd,omitempty"`
 }
 
-// SuiteSlots is how many whole-suite oracles of the project may run at once:
-// the marker's slots, or one when it sets none.
+// SuiteSlots is the count the marker pins: how many whole-suite oracles of the
+// project may run at once, or 0 when it sets none. None is not the same as a
+// pinned one: a pinned count is the person's number, none is left to the
+// machine.
 func (m Marker) SuiteSlots() int {
 	if m.Slots == nil {
-		return 1
+		return 0
 	}
 	return *m.Slots
 }

@@ -225,7 +225,7 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	}
 
 	d := verify.Deps{
-		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.Slots(), Clone: clone, Repo: repoName, Target: target,
+		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: clone, Repo: repoName, Target: target,
 		Now: e.now, Start: e.spawn,
 	}
 	if exe, err := e.executable(); err == nil {

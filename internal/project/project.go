@@ -208,16 +208,13 @@ type Config struct {
 	PublishTrailer string
 	// SuiteSlots is how many whole-suite oracles of the project may run at once
 	// on a machine: the jig.yaml marker's slots:. 0, as for a v2 store or a
-	// marker that sets none, is one (Slots).
+	// marker that sets none, is "none pinned" (PinnedSlots).
 	SuiteSlots int
 }
 
-// Slots is the number of suite slots the project has: SuiteSlots, or one.
-func (c Config) Slots() int {
-	if c.SuiteSlots < 1 {
-		return 1
-	}
-	return c.SuiteSlots
+// PinnedSlots is the count the marker pinned, 0 when it pinned none.
+func (c Config) PinnedSlots() int {
+	return max(c.SuiteSlots, 0)
 }
 
 // GitHubTracker is a project.yaml trackers: list's github: entry: the repo
