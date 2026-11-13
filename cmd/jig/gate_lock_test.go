@@ -168,3 +168,79 @@ func TestSecondGateReportsTheRoundStandingAtItsHead(t *testing.T) {
 		t.Errorf("gate-open lines = %d, want %d: the waiting gate ran a gate of its own", after, before)
 	}
 }
+
+// waitingGate runs `jig <args>` while another process holds the ticket's gate
+// lock, and returns its output and exit code once the lock is let go. It
+// fails when the command did not say it waits.
+func waitingGate(t *testing.T, e env, stderr *lockedBuffer, jigHome string, fx *fixture.Fixture, args ...string) (string, int) {
+	t.Helper()
+	release, err := gatelock.Take(context.Background(), jigHome, "fixture", fx.Ticket, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		out  string
+		code int
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, code := runMain(t, e, "", args...)
+		done <- result{out, code}
+	}()
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(stderr.String(), "waits for the gate") {
+		if time.Now().After(deadline) {
+			release()
+			t.Fatalf("%v never waited", args)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	release()
+	select {
+	case r := <-done:
+		return r.out, r.code
+	case <-time.After(90 * time.Second):
+		t.Fatalf("%v did not finish after the lock was released", args)
+	}
+	return "", 0
+}
+
+// TestSecondGateWithRoundShapingFlagsGoesOnAsToday: a gate that waited and was
+// given a flag that shapes the round does not report the standing round, which
+// would drop the flag; it goes on as a gate without the wait would.
+func TestSecondGateWithRoundShapingFlagsGoesOnAsToday(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	var stderr lockedBuffer
+	e.stderr = &stderr
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("first gate: exit = %d\n%s", code, out)
+	}
+	out, code := waitingGate(t, e, &stderr, jigHome, fx, "gate", fx.Ticket, "--yes", "--store", fx.StoreDir)
+	if code != 0 || strings.Contains(out, "stands at its head") {
+		t.Fatalf("waiting gate with --yes: exit = %d, want 0 and an ordinary report\n%s", code, out)
+	}
+}
+
+// TestSecondGateReviewContextTakesTheGateLockToOpenARound: `jig review context`
+// opens a round when none is open, so it waits for a running gate of the
+// ticket as `jig gate` does, and finishes once that gate lets go.
+func TestSecondGateReviewContextTakesTheGateLockToOpenARound(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	var stderr lockedBuffer
+	e.stderr = &stderr
+	out, code := waitingGate(t, e, &stderr, jigHome, fx, "review", "context", fx.Ticket, "--store", fx.StoreDir)
+	if code != 0 {
+		t.Fatalf("review context: exit = %d, want 0\n%s", code, out)
+	}
+	if got := stderr.String(); !strings.Contains(got, "took the lock after ") {
+		t.Errorf("review context did not say it took the lock:\n%s", got)
+	}
+}

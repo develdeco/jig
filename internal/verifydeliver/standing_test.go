@@ -1,7 +1,11 @@
 package verifydeliver
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestStandingRoundNoRound: a ticket nobody has gated has no round standing.
@@ -68,5 +72,34 @@ func TestStandingRoundSeveralRepos(t *testing.T) {
 	writeAndCommit(t, fx.SecondRepoDir, "more.txt", "more", "the second repo moves")
 	if st, err := StandingRound(d, fx.Ticket); err != nil || st != nil {
 		t.Fatalf("after one repo moved: %+v, %v; want none", st, err)
+	}
+}
+
+// TestStandingRoundNeverStandsWithoutAReviewedHead: a recorded round with no
+// reviewed head (a scripted round, or one an older jig recorded) stands at no
+// known head, even when the target's sha, which its report does name, is the
+// branch's tip.
+func TestStandingRoundNeverStandsWithoutAReviewedHead(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	path := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 1), "report.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep reportYAML
+	if err := yaml.Unmarshal(data, &rep); err != nil {
+		t.Fatal(err)
+	}
+	rep.ReviewedSHA = nil
+	rep.TargetSHA = map[string]string{"fixture-repo": head}
+	if data, err = yaml.Marshal(rep); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := StandingRound(d, fx.Ticket); err != nil || st != nil {
+		t.Fatalf("StandingRound = %+v, %v; want none: a round with no reviewed head stands at no head", st, err)
 	}
 }
