@@ -13,7 +13,8 @@ import (
 )
 
 // usageHelperEnv makes a run of this test binary the program TestUsageHelper
-// plays: "parent" or "child".
+// plays: "parent" or "child" (the whole tree), "fail" (burns 1 CPU-second and
+// exits non-zero) or "hang" (burns 1 CPU-second and waits to be killed).
 const usageHelperEnv = "JIG_ENVRUN_USAGE_HELPER"
 
 const (

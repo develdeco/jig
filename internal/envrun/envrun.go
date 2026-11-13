@@ -207,8 +207,10 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 }
 
 // ShellOutputUsage is ShellOutputEnv that also returns what the run's process
-// tree used (Usage). The usage covers a command that failed or was killed at
-// its limit, up to where it ended; a run ended because jig was stopped, which
+// tree used (Usage). The usage covers a command that failed, and one killed at
+// its limit up to where it ended, except that on Linux and macOS a killed run
+// has no CPU figure (the kill reaps no descendant, so wait4 reads the shell
+// alone) and only its peak memory; a run ended because jig was stopped, which
 // reached no verdict, has none, and neither has a run whose figures could not
 // be read. A figure that cannot be read never changes the run's result.
 func ShellOutputUsage(cmd, dir string, limit time.Duration, env []string) (string, Usage, error) {
