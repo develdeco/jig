@@ -73,9 +73,12 @@ type planEntry struct {
 // tplRepo is a repository of a template whose tracked files the copy
 // changes, and what its rewrite needs.
 type tplRepo struct {
-	dir    string   // the work tree, relative to the template's root
-	remote string   // its bare remote, relative to the root, "" for none
-	paths  []string // the files of the work tree the copy changes, relative to dir
+	dir    string // the work tree, relative to the template's root
+	remote string // its bare remote, relative to the root, "" for none
+	// remotes are the other bare repositories a scenario's work tree has a
+	// remote for, relative to the root.
+	remotes []string
+	paths   []string // the files of the work tree the copy changes, relative to dir
 }
 
 // template is the fixture of one shape, built once.
@@ -84,9 +87,19 @@ type template struct {
 	err  error
 
 	root  string   // where it was built; deleted when the test binary exits
-	fx    *Fixture // as buildTree returned it, rooted at root
+	fx    *Fixture // as buildTree returned it, rooted at root; nil for a scenario that returns none
 	plan  []planEntry
 	repos []tplRepo
+
+	// roots are the directories of the build whose path the files hold, each
+	// copied to a directory of its own: for a shape the one root, for a
+	// scenario one for each directory it spans, named subs under root.
+	roots []string
+	subs  []string
+	// history is set for a scenario: each repository's whole history is
+	// rewritten (gitx.RewriteHistory) and the repositories are found by
+	// looking, not named by the fixture's fields.
+	history bool
 }
 
 var (
@@ -129,7 +142,7 @@ func (t *template) build(opts Opts, testdataDir string) error {
 		os.RemoveAll(root)
 		return fmt.Errorf("fixture: build the template: %w", err)
 	}
-	t.root, t.fx = root, fx
+	t.root, t.fx, t.roots = root, fx, []string{root}
 	if err := t.scan(); err != nil {
 		os.RemoveAll(root)
 		return fmt.Errorf("fixture: scan the template: %w", err)
@@ -163,7 +176,11 @@ func rootSpellings(root, other string) (olds, news []string) {
 // scan walks the finished template once and plans a copy of it: what each
 // file is to the copy, and which repositories' tracked files change.
 func (t *template) scan() error {
-	olds, _ := rootSpellings(t.root, "")
+	var olds []string
+	for _, r := range t.roots {
+		o, _ := rootSpellings(r, "")
+		olds = append(olds, o...)
+	}
 	lowers := make([][]byte, len(olds))
 	for i, o := range olds {
 		lowers[i] = []byte(strings.ToLower(o))
@@ -173,6 +190,10 @@ func (t *template) scan() error {
 	// objectsDirs are the object databases found so far, as slash paths with
 	// a trailing slash. A directory is visited before what is in it.
 	var objectsDirs []string
+	// workTrees and bares are the repositories found, as slash paths, for a
+	// scenario.
+	var workTrees []string
+	bares := map[string]bool{}
 	err := filepath.WalkDir(t.root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -188,11 +209,17 @@ func (t *template) scan() error {
 		switch {
 		case d.IsDir():
 			t.plan = append(t.plan, planEntry{rel: slash, kind: planDir})
+			if d.Name() == ".git" {
+				workTrees = append(workTrees, path.Dir(slash))
+			}
 			if d.Name() == "objects" {
 				// The object database of a git directory: the directory has a
 				// HEAD beside it.
 				if _, err := os.Stat(filepath.Join(filepath.Dir(p), "HEAD")); err == nil {
 					objectsDirs = append(objectsDirs, slash+"/")
+					if gitDir := path.Dir(slash); path.Base(gitDir) != ".git" {
+						bares[gitDir] = true
+					}
 				}
 			}
 			return nil
@@ -256,7 +283,13 @@ func (t *template) scan() error {
 		return err
 	}
 
-	for _, r := range t.repositories() {
+	var repositories []tplRepo
+	if t.history {
+		repositories = t.discovered(workTrees, bares)
+	} else {
+		repositories = t.repositories()
+	}
+	for _, r := range repositories {
 		if r.dir == "" {
 			continue
 		}
@@ -329,7 +362,12 @@ func (t *template) repositories() []tplRepo {
 // ("~" is also the tail of a Windows short name, RUNNER~1). Any other dir is
 // built directly, which is correct and as slow as a Build always was.
 func (t *template) servable(dir string) bool {
-	if strings.Contains(t.root, " ") != strings.Contains(dir, " ") {
+	return servableTo(t.root, dir)
+}
+
+// servableTo is servable for a copy of the directory root made in dir.
+func servableTo(root, dir string) bool {
+	if strings.Contains(root, " ") != strings.Contains(dir, " ") {
 		return false
 	}
 	for _, r := range dir {
@@ -359,16 +397,30 @@ func buildFromTemplate(dir string, opts Opts, testdataDir string) (*Fixture, err
 // instantiate copies the template into the empty directory dir and points the
 // copy at dir.
 func (t *template) instantiate(dir string) (*Fixture, error) {
-	olds, news := rootSpellings(t.root, dir)
-	pairs := make([]string, 0, 2*len(olds))
-	for i := range olds {
-		pairs = append(pairs, olds[i], news[i])
+	return t.copyTo([]string{dir})
+}
+
+// copyTo copies the template into the empty directories targets, one for each
+// of its roots, and points the copy at them: the files that held a root hold
+// its target, the fixture the build returned (if any) is the one in targets,
+// and the commits agree with the files.
+func (t *template) copyTo(targets []string) (*Fixture, error) {
+	var pairs []string
+	for i, root := range t.roots {
+		olds, news := rootSpellings(root, targets[i])
+		for j := range olds {
+			pairs = append(pairs, olds[j], news[j])
+		}
 	}
 	replace := strings.NewReplacer(pairs...)
+	where := fmt.Sprint(targets)
 
 	for _, e := range t.plan {
 		src := filepath.Join(t.root, filepath.FromSlash(e.rel))
-		dst := filepath.Join(dir, filepath.FromSlash(e.rel))
+		dst, skip := t.dest(e.rel, targets)
+		if skip {
+			continue
+		}
 		var err error
 		switch e.kind {
 		case planDir:
@@ -381,46 +433,94 @@ func (t *template) instantiate(dir string) (*Fixture, error) {
 			err = copyData(src, dst, e.perm, replace)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("fixture: copy the template to %s: %w", dir, err)
+			return nil, fmt.Errorf("fixture: copy the template to %s: %w", where, err)
 		}
 	}
 
-	at := func(p string) string {
-		if p == "" {
-			return ""
-		}
-		rel, err := filepath.Rel(t.root, p)
-		if err != nil {
-			return ""
-		}
-		return filepath.Join(dir, rel)
+	var fx *Fixture
+	if t.fx != nil {
+		fx = t.fx.moved(func(p string) string { return t.at(p, targets) })
 	}
-	fx := *t.fx
-	fx.Dir = dir
-	fx.RepoDir, fx.RepoRemote = at(fx.RepoDir), at(fx.RepoRemote)
-	fx.StoreDir, fx.StoreRemote = at(fx.StoreDir), at(fx.StoreRemote)
-	fx.ScenarioDir = at(fx.ScenarioDir)
-	fx.SecondRepoDir, fx.SecondRepoRemote = at(fx.SecondRepoDir), at(fx.SecondRepoRemote)
-	fx.OrchestratorDir = at(fx.OrchestratorDir)
-	if fx.NestedDirs != nil {
-		fx.NestedDirs, fx.NestedRemotes = map[string]string{}, map[string]string{}
-		for name, p := range t.fx.NestedDirs {
-			fx.NestedDirs[name] = at(p)
-			fx.NestedRemotes[name] = at(t.fx.NestedRemotes[name])
-		}
-	}
-
 	for _, r := range t.repos {
 		var mirrors []string
-		if r.remote != "" {
-			mirrors = append(mirrors, filepath.Join(dir, filepath.FromSlash(r.remote)))
+		for _, m := range r.remotes {
+			mirrors = append(mirrors, t.abs(m, targets))
 		}
-		work := filepath.Join(dir, filepath.FromSlash(r.dir))
-		if err := gitx.RewriteHeadCommit(work, r.paths, mirrors...); err != nil {
-			return nil, fmt.Errorf("fixture: point %s at %s: %w", path.Base(r.dir), dir, err)
+		if r.remote != "" {
+			mirrors = append(mirrors, t.abs(r.remote, targets))
+		}
+		work := t.abs(r.dir, targets)
+		var err error
+		if t.history {
+			err = gitx.RewriteHistory(work, r.paths, mirrors...)
+		} else {
+			err = gitx.RewriteHeadCommit(work, r.paths, mirrors...)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fixture: point %s at %s: %w", path.Base(r.dir), where, err)
 		}
 	}
-	return &fx, nil
+	return fx, nil
+}
+
+// dest is where the template's entry rel (a slash path under its root) goes in
+// targets, and whether it is one of the target directories themselves, which
+// exist already.
+func (t *template) dest(rel string, targets []string) (string, bool) {
+	if len(t.subs) == 0 {
+		return filepath.Join(targets[0], filepath.FromSlash(rel)), false
+	}
+	for i, sub := range t.subs {
+		if rel == sub {
+			return targets[i], true
+		}
+		if rest, ok := strings.CutPrefix(rel, sub+"/"); ok {
+			return filepath.Join(targets[i], filepath.FromSlash(rest)), false
+		}
+	}
+	return "", true
+}
+
+// abs is the template's repository rel (a slash path under its root) in
+// targets.
+func (t *template) abs(rel string, targets []string) string {
+	p, _ := t.dest(rel, targets)
+	return p
+}
+
+// at is the path p of the template's build (or "" or a path outside every
+// root) as it is in targets.
+func (t *template) at(p string, targets []string) string {
+	if p == "" {
+		return ""
+	}
+	for i, root := range t.roots {
+		rel, err := filepath.Rel(root, p)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return filepath.Join(targets[i], rel)
+	}
+	return ""
+}
+
+// moved is the fixture with each of its paths passed through at.
+func (fx *Fixture) moved(at func(string) string) *Fixture {
+	n := *fx
+	n.Dir, n.Home = at(fx.Dir), at(fx.Home)
+	n.RepoDir, n.RepoRemote = at(fx.RepoDir), at(fx.RepoRemote)
+	n.StoreDir, n.StoreRemote = at(fx.StoreDir), at(fx.StoreRemote)
+	n.ScenarioDir = at(fx.ScenarioDir)
+	n.SecondRepoDir, n.SecondRepoRemote = at(fx.SecondRepoDir), at(fx.SecondRepoRemote)
+	n.OrchestratorDir = at(fx.OrchestratorDir)
+	if fx.NestedDirs != nil {
+		n.NestedDirs, n.NestedRemotes = map[string]string{}, map[string]string{}
+		for name, p := range fx.NestedDirs {
+			n.NestedDirs[name] = at(p)
+			n.NestedRemotes[name] = at(fx.NestedRemotes[name])
+		}
+	}
+	return &n
 }
 
 // linkOrCopy makes dst the same file as src through link, and a copy of it
