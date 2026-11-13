@@ -65,6 +65,10 @@ type Lease struct {
 	// "cherry-pick", "revert" or "unmerged index"; "" when there was nothing
 	// (recoverUnfinished).
 	Recovered string
+	// Fetched says Acquire fetched origin for this lease (a reused lease's fetch,
+	// a fresh clone's own), so its view of origin is as of Acquire and a caller
+	// that wants that view need not ask origin again.
+	Fetched bool
 }
 
 // Return leaves the lease directory exactly as it is: the pool never
@@ -256,7 +260,7 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		}
 	}
 
-	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered}, nil
+	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered, Fetched: true}, nil
 }
 
 // unfinishedOps are the operations an earlier session can leave in progress
