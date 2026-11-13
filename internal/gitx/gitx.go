@@ -946,3 +946,34 @@ func Standing(dir, a, b string) (ahead, behind int, err error) {
 	}
 	return ahead, behind, nil
 }
+
+// DiffNameStatus is DiffNameOnly's two answers, the changed paths ("AMT":
+// added, modified, type-changed) and the deleted ones ("D"), from one
+// process: "git diff --name-status -z --no-renames", split in process. Renames
+// are off, so a renamed file is its new path changed and its old path
+// deleted, as in DiffNameOnly. Both lists keep git's tree order; any other
+// status letter (a path git cannot place) is in neither, as with the filters.
+func DiffNameStatus(dir, base, head string) (changed, deleted []string, err error) {
+	args := []string{"diff", "--name-status", "-z", "--no-renames", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, nil, callError(args, stderr.String(), err)
+	}
+	raw := strings.TrimSuffix(stdout.String(), "\x00")
+	if raw == "" {
+		return nil, nil, nil
+	}
+	fields := strings.Split(raw, "\x00")
+	if len(fields)%2 != 0 {
+		return nil, nil, fmt.Errorf("gitx: unexpected diff --name-status -z output: %d fields", len(fields))
+	}
+	for i := 0; i < len(fields); i += 2 {
+		switch fields[i] {
+		case "A", "M", "T":
+			changed = append(changed, fields[i+1])
+		case "D":
+			deleted = append(deleted, fields[i+1])
+		}
+	}
+	return changed, deleted, nil
+}

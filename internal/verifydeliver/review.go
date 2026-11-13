@@ -1213,13 +1213,9 @@ type scopeDiff struct {
 // before the first one that reports any) passes nil. Only the reviewer
 // source (below) ever calls this; the scripted source never does.
 func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
-	changed, err := gitx.DiffNameOnly(leaseDir, base, head, "AMT")
+	changed, deleted, err := gitx.DiffNameStatus(leaseDir, base, head)
 	if err != nil {
-		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed files: %w", err)
-	}
-	deleted, err := gitx.DiffNameOnly(leaseDir, base, head, "D")
-	if err != nil {
-		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff deleted files: %w", err)
+		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed and deleted files: %w", err)
 	}
 	sort.Strings(changed)
 	sort.Strings(deleted)
