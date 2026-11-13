@@ -38,22 +38,22 @@ var errWorktreesBusy = errors.New("another process is adding or removing a workt
 // that has not locked them yet. Holding this lock around each keeps jig's own
 // processes from running into each other: the verify workers of one clone
 // start together whenever several commits are verified at once.
-func lockWorktrees(repoDir string, wait time.Duration) (release func(), err error) {
-	common := filepath.Join(repoDir, ".git")
+func lockWorktrees(repoDir string, wait time.Duration) (release func(), common string, err error) {
+	common = filepath.Join(repoDir, ".git")
 	if info, err := os.Stat(common); err != nil || !info.IsDir() {
 		// A linked worktree's .git is a file, and a bare repository has none.
 		if common, err = CommonDir(repoDir); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	release, held, err := filelock.TryLock(filepath.Join(common, worktreesLockName), wait)
 	if err != nil {
-		return nil, fmt.Errorf("gitx: lock the worktrees of %s: %w", repoDir, err)
+		return nil, "", fmt.Errorf("gitx: lock the worktrees of %s: %w", repoDir, err)
 	}
 	if !held {
-		return nil, fmt.Errorf("gitx: lock the worktrees of %s: %w (waited %s)", repoDir, errWorktreesBusy, wait)
+		return nil, "", fmt.Errorf("gitx: lock the worktrees of %s: %w (waited %s)", repoDir, errWorktreesBusy, wait)
 	}
-	return release, nil
+	return release, common, nil
 }
 
 // WorktreeAddDetached checks rev out, detached, into a new linked worktree of
@@ -89,7 +89,7 @@ func worktreeAddDetached(repoDir, dir, rev string, wait time.Duration) error {
 // git's add with no checkout, which writes the worktree's records, its .git
 // file and its detached HEAD.
 func addWorktreeRecords(repoDir, dir, rev string, wait time.Duration) error {
-	release, err := lockWorktrees(repoDir, wait)
+	release, _, err := lockWorktrees(repoDir, wait)
 	if err != nil {
 		return err
 	}
@@ -100,9 +100,10 @@ func addWorktreeRecords(repoDir, dir, rev string, wait time.Duration) error {
 
 // WorktreeRemove takes the linked worktree at dir away from repoDir's
 // repository, and the directory with it: it deletes the directory, then,
-// holding the repository's worktrees lock (lockWorktrees), removes the
-// worktree's record with git (forced twice, so a record git left locked goes
-// too) and prunes the records of worktrees whose directory is gone. A dir
+// holding the repository's worktrees lock (lockWorktrees), reads the
+// repository's worktree records in process and starts git only for what they
+// need: git's removal, forced twice, for a record git left locked, and one
+// prune when a record's worktree is gone (the one just removed included). A dir
 // that is not a worktree (the leftover of a run that died before git
 // registered it) is deleted all the same, and a dir that is already gone is
 // not an error: the call is safe to repeat, and to make before an add that
@@ -120,19 +121,87 @@ func worktreeRemove(repoDir, dir string, wait time.Duration) error {
 	if err := removeAllWithRetry(dir); err != nil {
 		return fmt.Errorf("gitx: remove worktree %s: %w", dir, err)
 	}
-	release, err := lockWorktrees(repoDir, wait)
+	release, common, err := lockWorktrees(repoDir, wait)
 	if err != nil {
 		return err
 	}
 	defer release()
-	// A failure is no news: the prune below clears the record of a worktree
-	// whose directory is gone, and a dir git never registered is what git
-	// calls "not a working tree".
-	_, _ = Run(repoDir, "worktree", "remove", "--force", "--force", dir)
-	if _, err := Run(repoDir, "worktree", "prune"); err != nil {
-		return err
+	// git is started only for a record that needs it: the directory is gone,
+	// so an unlocked record naming it is stale and the prune clears it, a
+	// locked one is what git's own forced removal takes away, and a directory
+	// no record names, in a repository with no stale record, needs no git at
+	// all.
+	lockedHere, stale := readWorktreeRecords(common, dir)
+	if lockedHere {
+		// A failure is no news: the prune below, or the next removal, clears
+		// whatever is left.
+		_, _ = Run(repoDir, "worktree", "remove", "--force", "--force", dir)
+	}
+	if stale {
+		if _, err := Run(repoDir, "worktree", "prune"); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// readWorktreeRecords reads the repository's worktree records (the
+// worktrees/ folder of its common directory) the way git's prune does, in
+// process: lockedHere says a locked record names dir, which git's prune keeps
+// and only a forced removal takes, and stale says an unlocked record points at
+// a worktree that is no longer there, which a prune deletes. The caller holds
+// the worktrees lock, so no add is half way through writing one.
+func readWorktreeRecords(common, dir string) (lockedHere, stale bool) {
+	records := filepath.Join(common, "worktrees")
+	entries, err := os.ReadDir(records)
+	if err != nil {
+		return false, false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rec := filepath.Join(records, e.Name())
+		_, lockErr := os.Stat(filepath.Join(rec, "locked"))
+		locked := lockErr == nil
+		target := ""
+		if b, err := os.ReadFile(filepath.Join(rec, "gitdir")); err == nil {
+			target = strings.TrimSpace(string(b))
+		}
+		missing := true
+		if target != "" {
+			_, err := os.Stat(filepath.FromSlash(target))
+			missing = err != nil && !errors.Is(err, os.ErrPermission)
+		}
+		switch {
+		case !locked && missing:
+			stale = true
+		case locked && target != "" && samePathSpelling(filepath.Dir(filepath.FromSlash(target)), dir):
+			lockedHere = true
+		}
+	}
+	return lockedHere, stale
+}
+
+// samePathSpelling reports whether a and b name the same path, which may no
+// longer exist: both made absolute with the parent that is there resolved
+// (a Windows temp directory is an 8.3 short name, macOS /var a link), and,
+// on Windows, compared without regard to case.
+func samePathSpelling(a, b string) bool {
+	norm := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if parent, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+			p = filepath.Join(parent, filepath.Base(p))
+		}
+		return filepath.Clean(p)
+	}
+	x, y := norm(a), norm(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(x, y)
+	}
+	return x == y
 }
 
 // removeAllWithRetry is os.RemoveAll that tries again for a short while: on
