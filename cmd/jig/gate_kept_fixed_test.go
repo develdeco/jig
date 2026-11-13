@@ -36,8 +36,7 @@ func keptAskRound2(t *testing.T, again bool) (string, int, *fixture.Fixture) {
 	if err := os.WriteFile(filepath.Join(fx.RepoDir, "go.mod"), []byte("module example.com/fixture\n\ngo 1.22\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", "bump the toolchain")
+	gitBuilder(t).Commit(fx.RepoDir, "bump the toolchain")
 	round2 := verifydeliver.ReviewResult{
 		Findings:      []verifydeliver.ResultFinding{},
 		ReviewedPaths: []string{"go.mod", "alpha/alpha.go"},

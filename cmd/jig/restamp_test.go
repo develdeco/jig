@@ -79,8 +79,7 @@ func TestValidateRestamp(t *testing.T) {
 	t.Parallel()
 	r := restampRig(t)
 	r.setBrief(t, restampEdited)
-	gitMust(t, r.storeDir, "add", "-A")
-	gitMust(t, r.storeDir, "commit", "-m", "edit the brief")
+	gitBuilder(t).Commit(r.storeDir, "edit the brief")
 
 	if out, code := r.jig(t, "validate", "DEMO-1", "--check"); code == 0 || !strings.Contains(out, "--restamp") {
 		t.Fatalf("validate --check on stale stamps: exit %d, want a refusal with the restamp hint\n%s", code, out)
@@ -141,8 +140,7 @@ func TestValidateRestampBuilding(t *testing.T) {
 	t.Parallel()
 	r := restampRig(t)
 	r.setBrief(t, restampEdited)
-	gitMust(t, r.storeDir, "add", "-A")
-	gitMust(t, r.storeDir, "commit", "-m", "edit the brief")
+	gitBuilder(t).Commit(r.storeDir, "edit the brief")
 	r.setState(t, "b", store.SliceState{State: "building", Attempts: 1})
 
 	before, head := r.slicesYAML(t), r.head(t)
@@ -163,8 +161,7 @@ func TestValidateRestampUnresolved(t *testing.T) {
 	r := restampRig(t)
 	// Problem is removed (c's heading is gone); Seams is edited (a resolves).
 	r.setBrief(t, "# DEMO-1: t\n\n## Seams\n\nThe seams, edited.\n")
-	gitMust(t, r.storeDir, "add", "-A")
-	gitMust(t, r.storeDir, "commit", "-m", "edit the brief")
+	gitBuilder(t).Commit(r.storeDir, "edit the brief")
 
 	out, code := r.jig(t, "validate", "DEMO-1", "--restamp")
 	if code == 0 || !strings.Contains(out, "unresolved[") || !strings.Contains(out, "c,") {

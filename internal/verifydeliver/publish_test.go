@@ -58,12 +58,7 @@ func advanceTarget(t *testing.T, fx *fixture.Fixture) {
 	if err := os.WriteFile(filepath.Join(clone, "UPSTREAM.md"), []byte("upstream moved on\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if _, err := gitx.Run(clone, "add", "-A"); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if _, err := gitx.RunEnv(clone, buildGitEnv, "commit", "-m", "upstream: unrelated change"); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
+	builder(t).Commit(clone, "upstream: unrelated change")
 	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {
 		t.Fatalf("push: %v", err)
 	}

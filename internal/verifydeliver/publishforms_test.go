@@ -153,7 +153,7 @@ func TestPublishBodyHoldsTheHeadToWhereTheBranchIs(t *testing.T) {
 
 	// Pushed to origin and reviewed there, the head is origin's tip: a body for
 	// it is fine even though the clone has moved on since.
-	run(t, fx.RepoDir, "push", "origin", ticketBranch(fx.Ticket)+"~1:refs/heads/"+ticketBranch(fx.Ticket))
+	builder(t).Push(fx.RepoDir, "origin", ticketBranch(fx.Ticket)+"~1:refs/heads/"+ticketBranch(fx.Ticket))
 	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("PublishBody for the head origin has: %v", err)
 	}
