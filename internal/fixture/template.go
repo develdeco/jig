@@ -100,6 +100,8 @@ type template struct {
 	// rewritten (gitx.RewriteHistory) and the repositories are found by
 	// looking, not named by the fixture's fields.
 	history bool
+	// bareDirs are the bare repositories of a scenario, as slash paths under root.
+	bareDirs []string
 }
 
 var (
@@ -286,6 +288,9 @@ func (t *template) scan() error {
 	var repositories []tplRepo
 	if t.history {
 		repositories = t.discovered(workTrees, bares)
+		for d := range bares {
+			t.bareDirs = append(t.bareDirs, d)
+		}
 	} else {
 		repositories = t.repositories()
 	}
@@ -301,7 +306,7 @@ func (t *template) scan() error {
 			}
 			r.paths = append(r.paths, rel)
 		}
-		if len(r.paths) > 0 {
+		if len(r.paths) > 0 || t.history {
 			t.repos = append(t.repos, r)
 		}
 	}
@@ -441,6 +446,12 @@ func (t *template) copyTo(targets []string) (*Fixture, error) {
 	if t.fx != nil {
 		fx = t.fx.moved(func(p string) string { return t.at(p, targets) })
 	}
+	if t.history {
+		if err := t.rewriteHistories(targets, replace); err != nil {
+			return nil, fmt.Errorf("fixture: point the copy at %s: %w", where, err)
+		}
+		return fx, nil
+	}
 	for _, r := range t.repos {
 		var mirrors []string
 		for _, m := range r.remotes {
@@ -450,13 +461,7 @@ func (t *template) copyTo(targets []string) (*Fixture, error) {
 			mirrors = append(mirrors, t.abs(r.remote, targets))
 		}
 		work := t.abs(r.dir, targets)
-		var err error
-		if t.history {
-			err = gitx.RewriteHistory(work, r.paths, mirrors...)
-		} else {
-			err = gitx.RewriteHeadCommit(work, r.paths, mirrors...)
-		}
-		if err != nil {
+		if err := gitx.RewriteHeadCommit(work, r.paths, mirrors...); err != nil {
 			return nil, fmt.Errorf("fixture: point %s at %s: %w", path.Base(r.dir), where, err)
 		}
 	}

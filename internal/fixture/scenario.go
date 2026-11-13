@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/develdeco/jig/internal/gittest"
+	"github.com/develdeco/jig/internal/gitx"
 )
 
 // A scenario is a state a test package builds once for its binary and every
@@ -165,4 +167,169 @@ func (t *template) discovered(workTrees []string, bares map[string]bool) []tplRe
 		repos = append(repos, r)
 	}
 	return repos
+}
+
+// maxHistoryPasses bounds the passes rewriteHistories makes: a repository's
+// files can hold the ids of another's commits, which move when that other is
+// rewritten, so a pass over every repository can change what the next one
+// reads. The chain a fixture makes is two or three long.
+const maxHistoryPasses = 8
+
+// rewriteHistories makes the commits of every repository of a scenario's copy
+// say what a build in the copy's directories would have made. The files of the
+// copy already hold the new directories (copyData replaced them); a commit that
+// held a root in a file now has other content, so its id changes, and so do
+// the ids of the commits on top of it, and a file that names such a commit (a
+// journal that records the commits it saw, the start of a ticket) must name the
+// new one. So each repository is rewritten (gitx.RewriteHistoryFunc: every
+// version of each file that holds a root or an old id, in every commit) with
+// the ids moved so far, and the passes repeat until none moves a commit.
+func (t *template) rewriteHistories(targets []string, roots *strings.Replacer) error {
+	moved := map[string]string{} // an id before the copy, and what it is now
+	for pass := 0; pass < maxHistoryPasses; pass++ {
+		changed := false
+		for _, r := range t.repos {
+			work := t.abs(r.dir, targets)
+			var mirrors []string
+			for _, m := range r.remotes {
+				mirrors = append(mirrors, t.abs(m, targets))
+			}
+			if r.remote != "" {
+				mirrors = append(mirrors, t.abs(r.remote, targets))
+			}
+			ids := idReplacer(moved)
+			paths, err := pointFilesAtIDs(work, r.paths, moved, ids)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path.Base(r.dir), err)
+			}
+			transform := func(_ string, data []byte) []byte {
+				return []byte(ids.Replace(roots.Replace(string(data))))
+			}
+			got, err := gitx.RewriteHistoryFunc(work, paths, transform, mirrors...)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path.Base(r.dir), err)
+			}
+			if len(got) == 0 {
+				continue
+			}
+			changed = true
+			// Compose: an id that moved before and moves again is the last.
+			for from, to := range moved {
+				if again, ok := got[to]; ok {
+					moved[from] = again
+				}
+			}
+			for from, to := range got {
+				moved[from] = to
+			}
+		}
+		if !changed {
+			return t.pointUntrackedAtIDs(targets, idReplacer(moved), moved)
+		}
+	}
+	return fmt.Errorf("the commits were still moving after %d passes", maxHistoryPasses)
+}
+
+// idReplacer replaces each old id of moved by its new one.
+func idReplacer(moved map[string]string) *strings.Replacer {
+	pairs := make([]string, 0, 2*len(moved))
+	for from, to := range moved {
+		pairs = append(pairs, from, to)
+	}
+	return strings.NewReplacer(pairs...)
+}
+
+// pointFilesAtIDs writes, into each file of the work tree at dir that holds an
+// id of moved, the new one, and returns paths and those files (slash paths
+// relative to dir).
+func pointFilesAtIDs(dir string, paths []string, moved map[string]string, ids *strings.Replacer) ([]string, error) {
+	out := append([]string(nil), paths...)
+	if len(moved) == 0 {
+		return out, nil
+	}
+	seen := map[string]bool{}
+	for _, p := range paths {
+		seen[p] = true
+	}
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		changed, err := replaceInFile(p, ids, moved)
+		if err != nil || !changed {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		if rel = filepath.ToSlash(rel); !seen[rel] {
+			seen[rel] = true
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// replaceInFile applies ids to the file at p if it holds an id of moved, and
+// reports whether it did.
+func replaceInFile(p string, ids *strings.Replacer, moved map[string]string) (bool, error) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return false, err
+	}
+	hit := false
+	for from := range moved {
+		if strings.Contains(string(data), from) {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		return false, nil
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return false, err
+	}
+	return true, os.WriteFile(p, []byte(ids.Replace(string(data))), info.Mode().Perm())
+}
+
+// pointUntrackedAtIDs points the files of the copy that no repository tracks
+// (state a build wrote beside its repositories) at the new ids. A file in a
+// repository's git directory or in a bare repository is left to the rewrite.
+func (t *template) pointUntrackedAtIDs(targets []string, ids *strings.Replacer, moved map[string]string) error {
+	if len(moved) == 0 {
+		return nil
+	}
+	bare := map[string]bool{}
+	for _, b := range t.bareDirs {
+		bare[filepath.Clean(t.abs(b, targets))] = true
+	}
+	for _, target := range targets {
+		err := filepath.WalkDir(target, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() && (d.Name() == ".git" || bare[filepath.Clean(p)]) {
+				return filepath.SkipDir
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			_, err = replaceInFile(p, ids, moved)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

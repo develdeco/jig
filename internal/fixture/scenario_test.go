@@ -82,6 +82,14 @@ func buildSmallHistory(t *testing.T, dirs []string) {
 	commitIn(t, other, "other first")
 	writeIn(t, other, "later.txt", "later\n")
 	commitIn(t, other, "other later")
+	// Files that name a commit of another repository, which moves when its
+	// files are pointed at the copy: one tracked, in two versions, and one not.
+	first := git(t, work, "rev-list", "--max-parents=0", "main")
+	writeIn(t, other, "ids.txt", "seen "+first+"\n")
+	commitIn(t, other, "other sees a commit")
+	writeIn(t, other, "ids.txt", "seen "+first+"\nand again\n")
+	commitIn(t, other, "other sees it again")
+	writeIn(t, dirs[1], "state.txt", "first commit "+first+"\n")
 }
 
 // sameTrees fails t unless the copy read as got is the direct build read as
@@ -147,8 +155,18 @@ var scenarioBuilds = []struct {
 			if got := git(t, work, "show", git(t, work, "rev-list", "--max-parents=0", "HEAD")+":manifest.yaml"); !strings.Contains(got, dirs[0]) || !strings.Contains(got, filepath.ToSlash(filepath.Join(dirs[1], "remote.git"))) {
 				t.Errorf("the first commit's manifest = %q, want it to name %s and the remote", got, dirs[0])
 			}
-			if got := git(t, filepath.Join(dirs[1], "other"), "show", "HEAD^:other.yaml"); !strings.Contains(got, dirs[1]) {
+			other := filepath.Join(dirs[1], "other")
+			if got := git(t, other, "show", "HEAD~3:other.yaml"); !strings.Contains(got, dirs[1]) {
 				t.Errorf("the other repository's first commit = %q, want it to name %s", got, dirs[1])
+			}
+			first := git(t, work, "rev-list", "--max-parents=0", "main")
+			for _, rev := range []string{"HEAD", "HEAD^"} {
+				if got := git(t, other, "show", rev+":ids.txt"); !strings.Contains(got, first) {
+					t.Errorf("ids.txt at %s = %q, want the first commit's new id %s", rev, got, first)
+				}
+			}
+			if got := readFileString(t, filepath.Join(dirs[1], "state.txt")); !strings.Contains(got, first) {
+				t.Errorf("state.txt = %q, want the first commit's new id %s", got, first)
 			}
 		},
 	},
@@ -437,4 +455,14 @@ func pin(t *testing.T, dir string, args ...string) {
 	if _, err := gitx.RunEnv(dir, append(append([]string{}, hermeticGitEnv...), identityEnv...), args...); err != nil {
 		t.Fatalf("git %s (in %s): %v", strings.Join(args, " "), dir, err)
 	}
+}
+
+// readFileString is the content of the file at p.
+func readFileString(t *testing.T, p string) string {
+	t.Helper()
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
