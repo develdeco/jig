@@ -362,7 +362,7 @@ func TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice(t *testing.T) {
 	round2 := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, round2, verifydeliver.ReviewResult{ReviewedPaths: []string{"alpha/alpha.go", "beta/beta.go"}, Summary: "round 2: nothing new"})
 	out, code := roundThroughMain(t, e, fx, round2)
-	if code != 0 || strings.Contains(out, "fix-2-q-beta-test-2") || strings.Contains(out, "fix-3-beta-test") {
+	if code != 0 || strings.Contains(out, "fix-2-beta-test") || strings.Contains(out, "fix-3-beta-test") {
 		t.Fatalf("round 2 exit = %d, want 0 and no second slice for r1-f1\n%s", code, out)
 	}
 	st, err := store.Open(fx.StoreDir)
