@@ -77,6 +77,9 @@ func RewriteHeadCommit(dir string, paths []string, mirrors ...string) error {
 	case "true", "input":
 		return fmt.Errorf("gitx: rewrite the commit in %s: core.autocrlf converts line endings, and the rewrite stores files as they are", dir)
 	}
+	if err := refuseLinkedWorktrees(gitDir); err != nil {
+		return fmt.Errorf("gitx: rewrite the commit in %s: %w", dir, err)
+	}
 	head, err := repo.Storer.Reference(plumbing.HEAD)
 	if err != nil {
 		return fmt.Errorf("gitx: rewrite the commit in %s: read HEAD: %w", dir, err)
@@ -519,6 +522,9 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 	case "true", "input":
 		return fail("core.autocrlf converts line endings, and the rewrite stores files as they are")
 	}
+	if err := refuseLinkedWorktrees(gitDir); err != nil {
+		return fail("%w", err)
+	}
 	head, err := repo.Storer.Reference(plumbing.HEAD)
 	if err != nil {
 		return fail("read HEAD: %w", err)
@@ -557,7 +563,7 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 		if err != nil {
 			return nil, err
 		}
-		work := map[plumbing.Hash][]byte{}
+		work := map[blobKey][]byte{}
 		for p := range changes {
 			entry, err := root.FindEntry(p)
 			if err != nil {
@@ -567,13 +573,13 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 			if err != nil {
 				return fail("%w", err)
 			}
-			work[entry.Hash] = data
+			work[blobKey{p, entry.Hash}] = data
 		}
 		transform = func(p string, data []byte) []byte {
 			if _, ok := changes[p]; !ok {
 				return data
 			}
-			if want, ok := work[blobHash(data)]; ok {
+			if want, ok := work[blobKey{p, blobHash(data)}]; ok {
 				return want
 			}
 			return data
@@ -907,4 +913,22 @@ func rewriteMirrorHistory(mirror string, src *git.Repository, w *historyRewrite)
 		}
 	}
 	return pruneLoose(mirror, w.stale, keep)
+}
+
+// refuseLinkedWorktrees is an error when the git directory has linked work
+// trees (git worktree add): each has a HEAD, a reflog and an index of its own
+// under worktrees/ that name commits and blobs, which a rewrite would leave at
+// the old ids while it removes the objects, and so corrupt the work tree.
+func refuseLinkedWorktrees(gitDir string) error {
+	entries, err := os.ReadDir(filepath.Join(gitDir, "worktrees"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("the repository has linked work trees (%s), whose HEAD and index a rewrite would leave at the old commits; remove them first", entries[0].Name())
+	}
+	return nil
 }

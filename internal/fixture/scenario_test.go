@@ -56,7 +56,8 @@ func scratchDirs(t *testing.T, n int) []string {
 func buildSmallHistory(t *testing.T, dirs []string) {
 	t.Helper()
 	work, remote, other := filepath.Join(dirs[0], "work"), filepath.Join(dirs[1], "remote.git"), filepath.Join(dirs[1], "other")
-	for _, d := range []string{work, other} {
+	aaa, zzz := filepath.Join(dirs[0], "aaa"), filepath.Join(dirs[1], "zzz")
+	for _, d := range []string{work, other, aaa, zzz} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -90,6 +91,18 @@ func buildSmallHistory(t *testing.T, dirs []string) {
 	writeIn(t, other, "ids.txt", "seen "+first+"\nand again\n")
 	commitIn(t, other, "other sees it again")
 	writeIn(t, dirs[1], "state.txt", "first commit "+first+"\n")
+
+	// An id that moves twice: other (rewritten before zzz in a pass) names a
+	// commit of zzz, so other's commits move again once zzz's are known. A file
+	// of aaa (rewritten before both, holding no directory, only the id) and one
+	// no repository tracks name other's commit.
+	writeIn(t, zzz, "zzz.yaml", "dir: "+dirs[1]+"\n")
+	commitIn(t, zzz, "zzz first")
+	writeIn(t, other, "zzz-seen.txt", "zzz "+git(t, zzz, "rev-parse", "HEAD")+"\n")
+	commitIn(t, other, "other names zzz")
+	writeIn(t, aaa, "seen.txt", "other "+git(t, other, "rev-parse", "HEAD")+"\n")
+	commitIn(t, aaa, "aaa names other")
+	writeIn(t, dirs[1], "twice.txt", "other "+git(t, other, "rev-parse", "HEAD")+"\n")
 }
 
 // sameTrees fails t unless the copy read as got is the direct build read as
@@ -164,6 +177,18 @@ var scenarioBuilds = []struct {
 				if got := git(t, other, "show", rev+":ids.txt"); !strings.Contains(got, first) {
 					t.Errorf("ids.txt at %s = %q, want the first commit's new id %s", rev, got, first)
 				}
+			}
+			// The ids that moved twice name commits that exist, in a file of a
+			// repository that holds no directory and in one no repository tracks.
+			for _, f := range []string{filepath.Join(dirs[0], "aaa", "seen.txt"), filepath.Join(dirs[1], "twice.txt")} {
+				id := strings.TrimSpace(strings.TrimPrefix(readFileString(t, f), "other "))
+				if got := git(t, other, "log", "-1", "--format=%s", id); got != "other names zzz" {
+					t.Errorf("%s names %s, whose subject is %q, want the commit that names zzz", f, id, got)
+				}
+			}
+			zid := strings.TrimSpace(strings.TrimPrefix(readFileString(t, filepath.Join(other, "zzz-seen.txt")), "zzz "))
+			if got := git(t, filepath.Join(dirs[1], "zzz"), "log", "-1", "--format=%s", zid); got != "zzz first" {
+				t.Errorf("zzz-seen.txt names %s, whose subject is %q", zid, got)
 			}
 			if got := readFileString(t, filepath.Join(dirs[1], "state.txt")); !strings.Contains(got, first) {
 				t.Errorf("state.txt = %q, want the first commit's new id %s", got, first)

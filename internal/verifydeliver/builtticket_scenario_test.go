@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -337,8 +338,8 @@ func compareBuilt(t *testing.T, copied, direct *fixture.Fixture, sameIDs bool) {
 				t.Errorf("%s: %d refs, direct build has %d", name, len(gr.refs), len(wr.refs))
 			}
 			for ref, files := range wr.trees {
-				if !sameTreeFiles(files, gr.trees[ref]) {
-					t.Errorf("%s: %s holds\n%v\ndirect build\n%v", name, ref, gr.trees[ref], files)
+				for _, problem := range treeFileProblems(t, wantRepos[j], gotRepos[j], files, gr.trees[ref], asDirect) {
+					t.Errorf("%s: %s: %s", name, ref, problem)
 				}
 			}
 			if gr.objects != wr.objects {
@@ -357,22 +358,6 @@ func compareBuilt(t *testing.T, copied, direct *fixture.Fixture, sameIDs bool) {
 	}
 }
 
-// sameTreeFiles reports whether two listings of "mode path blob" are the same
-// files: a file that holds a directory has another blob in another directory,
-// so only its mode and path are compared, and the other files' blobs too.
-func sameTreeFiles(want, got []string) bool {
-	if len(want) != len(got) {
-		return false
-	}
-	for i := range want {
-		w, g := strings.Fields(want[i]), strings.Fields(got[i])
-		if w[0] != g[0] || w[1] != g[1] {
-			return false
-		}
-	}
-	return true
-}
-
 // templatePathIn names a commit of the repository at dir that holds the
 // directory a scenario is built in, or "".
 func templatePathIn(t *testing.T, dir string) string {
@@ -387,4 +372,34 @@ func templatePathIn(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(out)
+}
+
+// treeFileProblems compares the files two trees of the same ref hold, each
+// listed as "mode path blob": the same modes and paths, and the same content,
+// read from the blob in its own repository with the roots read as each other's
+// and the times and ids blanked (a file that holds a directory or an id has
+// another blob in another directory). It returns what differs.
+func treeFileProblems(t *testing.T, wantDir, gotDir string, want, got []string, asDirect *strings.Replacer) []string {
+	t.Helper()
+	if len(want) != len(got) {
+		return []string{"the trees hold " + strconv.Itoa(len(got)) + " files, direct build " + strconv.Itoa(len(want))}
+	}
+	text := func(dir, blob string, replace *strings.Replacer) string {
+		out, err := gitx.RunRaw(dir, "cat-file", "blob", blob)
+		if err != nil {
+			t.Fatalf("read blob %s in %s: %v", blob, dir, err)
+		}
+		return objectID.ReplaceAllString(stampLike.ReplaceAllString(replace.Replace(out), "<time>"), "<id>")
+	}
+	var problems []string
+	for i := range want {
+		w, g := strings.Fields(want[i]), strings.Fields(got[i])
+		switch {
+		case w[0] != g[0] || w[1] != g[1]:
+			problems = append(problems, g[1]+" is "+g[0]+" "+g[1]+", direct build "+w[0]+" "+w[1])
+		case w[2] != g[2] && text(wantDir, w[2], strings.NewReplacer()) != text(gotDir, g[2], asDirect):
+			problems = append(problems, w[1]+" has other content than the direct build's")
+		}
+	}
+	return problems
 }

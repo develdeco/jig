@@ -351,3 +351,121 @@ func TestRewriteHistoryFuncPointsEveryVersionOfAFileAtTheNewPlace(t *testing.T) 
 		t.Errorf("a transform that changes nothing moved %v, %v", again, err)
 	}
 }
+
+// TestRewriteHistoryKeepsEachPathsOwnNewBytes: two paths that hold the same
+// bytes at the tip, and have other bytes in the work tree, each get their own;
+// and an older version of one that equals the other's tip blob is not replaced
+// by it, since only the blob the tip tracks at the path is.
+func TestRewriteHistoryKeepsEachPathsOwnNewBytes(t *testing.T) {
+	work := newRewriteRepo(t, map[string]string{"a.txt": "path /old\n", "b.txt": "other\n"}, "first")
+	writeFileT(t, work, "b.txt", "path /old\n")
+	pinnedGit(t, work, "add", "-A")
+	pinnedGit(t, work, "commit", "-q", "-m", "second")
+	writeFileT(t, work, "a.txt", "path /new-a\n")
+	writeFileT(t, work, "b.txt", "path /new-b\n")
+
+	if err := RewriteHistory(work, []string{"a.txt", "b.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	mustBeSound(t, work)
+	for rev, want := range map[string]string{
+		"HEAD:a.txt": "path /new-a", "HEAD:b.txt": "path /new-b",
+		"HEAD^:a.txt": "path /new-a", "HEAD^:b.txt": "other",
+	} {
+		if got := pinnedGit(t, work, "show", rev); got != want {
+			t.Errorf("%s = %q, want %q", rev, got, want)
+		}
+	}
+	if status := pinnedGit(t, work, "diff", "--name-only"); status != "" {
+		t.Errorf("the work tree differs from the index in %q", status)
+	}
+}
+
+// TestRewriteHistoryMovesACommitWhoseOnlyChangeIsItsParent: a commit that
+// deletes the path holds none of the changed blobs, and still takes the new id
+// of its parent, so no commit of the old history stays reachable.
+func TestRewriteHistoryMovesACommitWhoseOnlyChangeIsItsParent(t *testing.T) {
+	build := func(root string) string {
+		work := newRewriteRepo(t, map[string]string{"a.txt": "path " + root + "\n"}, "first")
+		pinnedGit(t, work, "rm", "-q", "a.txt")
+		pinnedGit(t, work, "commit", "-q", "-m", "delete it")
+		writeFileT(t, work, "a.txt", "path "+root+"\n")
+		pinnedGit(t, work, "add", "-A")
+		pinnedGit(t, work, "commit", "-q", "-m", "bring it back")
+		return work
+	}
+	work := build("/old")
+	oldCommits := strings.Fields(pinnedGit(t, work, "rev-list", "HEAD"))
+	fresh := build("/new")
+	writeFileT(t, work, "a.txt", "path /new\n")
+
+	if err := RewriteHistory(work, []string{"a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	mustBeSound(t, work)
+	if got, want := pinnedGit(t, work, "rev-list", "HEAD"), pinnedGit(t, fresh, "rev-list", "HEAD"); got != want {
+		t.Errorf("history:\n%s\nwant:\n%s", got, want)
+	}
+	for _, old := range oldCommits {
+		if objectExists(work, old) {
+			t.Errorf("old commit %s is still in the repository", old)
+		}
+	}
+}
+
+// TestRewriteHistoryRefusesWhatItCannotRewriteFaithfully: a commit that would
+// change and is signed, a repository that converts line endings, and one with
+// a linked work tree (whose HEAD and index the rewrite would leave at the old
+// commits) are errors, for the history rewriters and the head rewriter alike,
+// and leave the repository as it was.
+func TestRewriteHistoryRefusesWhatItCannotRewriteFaithfully(t *testing.T) {
+	changed := func(t *testing.T) string {
+		work := newRewriteRepo(t, map[string]string{"a.txt": "path /old\n"}, "first")
+		writeFileT(t, work, "a.txt", "path /new\n")
+		return work
+	}
+	rewriters := map[string]func(dir string) error{
+		"RewriteHistory": func(dir string) error { return RewriteHistory(dir, []string{"a.txt"}) },
+		"RewriteHistoryFunc": func(dir string) error {
+			_, err := RewriteHistoryFunc(dir, []string{"a.txt"}, func(_ string, d []byte) []byte { return []byte(strings.ReplaceAll(string(d), "/old", "/new")) })
+			return err
+		},
+		"RewriteHeadCommit": func(dir string) error { return RewriteHeadCommit(dir, []string{"a.txt"}) },
+	}
+	cases := map[string]struct {
+		setup func(t *testing.T, work string)
+		want  string
+		skip  string // a rewriter that has no such refusal
+	}{
+		"autocrlf": {func(t *testing.T, work string) { pinnedGit(t, work, "config", "core.autocrlf", "true") }, "autocrlf", ""},
+		"linked work tree": {func(t *testing.T, work string) {
+			pinnedGit(t, work, "worktree", "add", "-q", "--detach", filepath.Join(t.TempDir(), "linked"))
+		}, "linked work trees", ""},
+		"signed": {func(t *testing.T, work string) {
+			raw := pinnedGit(t, work, "cat-file", "commit", "HEAD")
+			head, rest, _ := strings.Cut(raw, "\n\n")
+			signed := head + "\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n abc\n -----END PGP SIGNATURE-----\n\n" + rest + "\n"
+			id, err := RunInputEnv(work, append(append([]string{}, rewriteEnv...), rewritePinned...), []byte(signed), "hash-object", "-t", "commit", "-w", "--stdin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pinnedGit(t, work, "update-ref", "refs/heads/main", id)
+		}, "signed", ""},
+	}
+	for name, c := range cases {
+		for rname, rewrite := range rewriters {
+			t.Run(name+"/"+rname, func(t *testing.T) {
+				work := changed(t)
+				c.setup(t, work)
+				before := pinnedGit(t, work, "rev-parse", "HEAD")
+				err := rewrite(work)
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("err = %v, want a refusal naming %q", err, c.want)
+				}
+				if got := pinnedGit(t, work, "rev-parse", "HEAD"); got != before {
+					t.Errorf("HEAD moved to %s after a refusal", got)
+				}
+			})
+		}
+	}
+}
