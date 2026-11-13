@@ -9,24 +9,23 @@ import (
 	"testing"
 )
 
-// GitCall is one git process a traced call started: its command line and the
-// directory it ran in (gitx names it when git traces; "" when it did not).
+// GitCall is one git process a trace names: its command line and the
+// directory it ran in (gitx names it when git traces, through the JIG_GIT_DIR
+// variable; "" when it did not).
 type GitCall struct {
 	Argv []string
 	Dir  string
+	// Child says a git process started it (an upload-pack, a pack-objects),
+	// not jig.
+	Child bool
 }
 
-// GitCalls is GitArgv with each process's directory, from the JIG_GIT_DIR
-// variable gitx hands git when tracing, and only the processes jig started: the
-// ones git started in turn (an upload-pack, a pack-objects) are left out. The
-// same rule applies: the test must
-// not be parallel.
-func GitCalls(t testing.TB, fn func()) []GitCall {
+// ReadTrace reads the GIT_TRACE2_EVENT file a traced run wrote and returns its
+// processes in the order they started. A file that is not there is no
+// process.
+func ReadTrace(t testing.TB, path string) []GitCall {
 	t.Helper()
-	trace := filepath.Join(t.TempDir(), "trace")
-	t.Setenv("GIT_TRACE2_EVENT", trace)
-	fn()
-	f, err := os.Open(trace)
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -48,10 +47,7 @@ func GitCalls(t testing.TB, fn func()) []GitCall {
 		}
 		switch ev.Event {
 		case "start":
-			if strings.Contains(ev.Sid, "/") {
-				continue // a process git started, named under its parent's
-			}
-			calls[ev.Sid] = &GitCall{Argv: ev.Argv}
+			calls[ev.Sid] = &GitCall{Argv: ev.Argv, Child: strings.Contains(ev.Sid, "/")}
 			order = append(order, ev.Sid)
 		case "def_param":
 			if c := calls[ev.Sid]; c != nil && ev.Param == "JIG_GIT_DIR" {
@@ -62,6 +58,23 @@ func GitCalls(t testing.TB, fn func()) []GitCall {
 	out := make([]GitCall, 0, len(order))
 	for _, sid := range order {
 		out = append(out, *calls[sid])
+	}
+	return out
+}
+
+// GitCalls runs fn with git tracing on and returns the git processes jig
+// started in it, not the ones git started in turn, in the order they began.
+// The same rule applies as for GitArgv: the test must not be parallel.
+func GitCalls(t testing.TB, fn func()) []GitCall {
+	t.Helper()
+	trace := filepath.Join(t.TempDir(), "trace")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+	fn()
+	var out []GitCall
+	for _, c := range ReadTrace(t, trace) {
+		if !c.Child {
+			out = append(out, c)
+		}
 	}
 	return out
 }
