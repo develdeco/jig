@@ -109,8 +109,7 @@ func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		gitMust(t, dir, "add", "-A")
-		gitMust(t, dir, "commit", "-q", "-m", name+" base")
+		gitBuilder(t).Commit(dir, name+" base")
 		base = gitMust(t, dir, "rev-parse", "HEAD")
 		return dir, base, base
 	}

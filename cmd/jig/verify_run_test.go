@@ -19,8 +19,7 @@ func (r *verifyRig) applyScenarioPatch(slice string) string {
 	r.t.Helper()
 	patch := filepath.Join(r.fx.ScenarioDir, "slices", slice, "attempt-1", "patch.diff")
 	gitMust(r.t, r.fx.RepoDir, "apply", patch)
-	gitMust(r.t, r.fx.RepoDir, "add", "-A")
-	gitMust(r.t, r.fx.RepoDir, "commit", "-m", slice+": scenario patch", "-m", "Jig-Slice: "+slice)
+	gitBuilder(r.t).Commit(r.fx.RepoDir, slice+": scenario patch"+"\n\n"+"Jig-Slice: "+slice)
 	return gitMust(r.t, r.fx.RepoDir, "rev-parse", "HEAD")
 }
 

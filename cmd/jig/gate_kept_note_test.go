@@ -68,8 +68,7 @@ func buildQueuedSlice(t *testing.T, fx *fixture.Fixture, slice, file string) {
 	if err := os.WriteFile(path, append(data, []byte("\n// trimmed\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", "build "+slice, "-m", "Jig-Slice: "+slice)
+	gitBuilder(t).Commit(fx.RepoDir, "build "+slice+"\n\n"+"Jig-Slice: "+slice)
 	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
 	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", slice, "--wait", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "state: pass") {
