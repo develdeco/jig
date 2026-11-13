@@ -290,3 +290,64 @@ func TestRewriteHistoryGivesAMirrorOnlyWhatItsRefsReach(t *testing.T) {
 		t.Errorf("refs of the remote:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// TestRewriteHistoryFuncPointsEveryVersionOfAFileAtTheNewPlace: a file that
+// holds a path in each of its versions (an edit in the second commit and
+// another in the third) is rewritten in all of them, by a rule, and the
+// history equals the one built with the final path from the start, commit ids
+// and the remote's objects included; the result names each commit that moved.
+func TestRewriteHistoryFuncPointsEveryVersionOfAFileAtTheNewPlace(t *testing.T) {
+	const oldRoot, newRoot = "/old/root", "/new/place/longer"
+	build := func(root string) (work, bare string) {
+		work = newRewriteRepo(t, map[string]string{"notes.txt": "root: " + root + "\nv1\n", "plain.txt": "x\n"}, "first")
+		bare = bareCloneOf(t, work)
+		for i, v := range []string{"v2", "v3"} {
+			writeFileT(t, work, "notes.txt", "root: "+root+"\n"+v+"\n")
+			pinnedGit(t, work, "add", "-A")
+			pinnedGit(t, work, "commit", "-q", "-m", "edit "+strings.Repeat("again ", i)+v)
+		}
+		writeFileT(t, work, "last.txt", "last\n")
+		pinnedGit(t, work, "add", "-A")
+		pinnedGit(t, work, "commit", "-q", "-m", "last")
+		pinnedGit(t, work, "push", "-q", "origin", "main")
+		return work, bare
+	}
+	work, bare := build(oldRoot)
+	oldCommits := strings.Fields(pinnedGit(t, work, "rev-list", "HEAD"))
+	fresh, freshBare := build(newRoot)
+	writeFileT(t, work, "notes.txt", strings.ReplaceAll(readFileT(t, work, "notes.txt"), oldRoot, newRoot))
+
+	moved, err := RewriteHistoryFunc(work, []string{"notes.txt", "plain.txt"}, func(_ string, data []byte) []byte {
+		return []byte(strings.ReplaceAll(string(data), oldRoot, newRoot))
+	}, bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != len(oldCommits) {
+		t.Errorf("%d commits moved, want all %d: %v", len(moved), len(oldCommits), moved)
+	}
+	newCommits := strings.Fields(pinnedGit(t, fresh, "rev-list", "HEAD"))
+	for i, old := range oldCommits {
+		if moved[old] != newCommits[i] {
+			t.Errorf("commit %d moved to %q, want %s", i, moved[old], newCommits[i])
+		}
+	}
+	for _, pair := range [][2]string{{work, fresh}, {bare, freshBare}} {
+		mustBeSound(t, pair[0])
+		if got, want := refList(t, pair[0]), refList(t, pair[1]); got != want {
+			t.Errorf("refs:\n%s\nwant:\n%s", got, want)
+		}
+		if got, want := strings.Join(objectIDs(t, pair[0]), "\n"), strings.Join(objectIDs(t, pair[1]), "\n"); got != want {
+			t.Errorf("objects:\n%s\nwant:\n%s", got, want)
+		}
+	}
+	if status := pinnedGit(t, work, "status", "--porcelain", "--untracked-files=no"); status != "" {
+		t.Errorf("git status = %q, want clean", status)
+	}
+	if a, b := pinnedGit(t, work, "ls-files", "-s"), pinnedGit(t, fresh, "ls-files", "-s"); a != b {
+		t.Errorf("index entries = %q, want %q", a, b)
+	}
+	if again, err := RewriteHistoryFunc(work, []string{"notes.txt"}, func(_ string, data []byte) []byte { return data }); err != nil || len(again) != 0 {
+		t.Errorf("a transform that changes nothing moved %v, %v", again, err)
+	}
+}

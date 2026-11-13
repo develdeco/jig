@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -459,29 +460,56 @@ func replaceFile(path string, data []byte) error {
 // A commit's version of a path is replaced only when it is the very blob the
 // tip tracks there (the old bytes of the file the work tree now has other
 // bytes for); another version of the path in an older commit is a different
-// file and stays as it is. A commit whose tree does not change keeps its id
-// unless a parent's id changed; one that changes keeps its parents (moved to
-// their new ids), author, committer, dates and message. Merges and octopus
-// merges are rewritten as any other commit.
+// file and stays as it is (RewriteHistoryFunc rewrites every version). A
+// commit whose tree does not change keeps its id unless a parent's id
+// changed; one that changes keeps its parents (moved to their new ids),
+// author, committer, dates and message. Merges and octopus merges are
+// rewritten as any other commit.
 //
 // Everything RewriteHeadCommit moves is moved here for every rewritten
 // commit: refs, reflog lines, packed-refs, the mirrors' refs (a mirror gets
-// the new objects its own refs reach, and need not hold the branch), the index
-// entries of the paths, and the loose objects the rewrite replaced and nothing
-// reaches any more are removed. With nothing to change nothing is touched, and for
-// a repository whose only changed commit is its tip the result is
-// RewriteHeadCommit's. A signed commit that would change, a ref naming an
-// annotated tag, a HEAD that is not on a branch and an index go-git cannot
-// read are errors.
+// the new objects its own refs reach, and need not hold the checked-out
+// branch), the index entries of the paths, and the loose objects the rewrite
+// replaced and nothing reaches any more are removed. With nothing to change
+// nothing is touched, and for a repository whose only changed commit is its
+// tip the result is RewriteHeadCommit's. A signed commit that would change, a
+// ref naming an annotated tag, a HEAD that is not on a branch and an index
+// go-git cannot read are errors.
 func RewriteHistory(dir string, paths []string, mirrors ...string) error {
+	_, err := rewriteHistory(dir, paths, nil, mirrors)
+	return err
+}
+
+// RewriteHistoryFunc is RewriteHistory for files that change by a rule, not
+// by one new version: every version of each of paths that any commit reachable
+// from the repository's refs holds (as a regular file) is passed through
+// transform with its path, and a version transform returns other bytes for is
+// replaced by them, in every such commit. So a path that holds a directory in
+// each of its versions (a journal that grew, a file edited since) is pointed
+// at the new one in all of them.
+//
+// The work tree must already hold, for each path the tip tracks, what
+// transform makes of the tip's version (the caller changed the file on disk);
+// the index entries of those paths take the new blobs and the files' stat
+// data. Everything else is as for RewriteHistory. The result is the commits
+// that moved, by their old id and their new one (40 hex digits each), for a
+// caller that must point other files at them.
+func RewriteHistoryFunc(dir string, paths []string, transform func(path string, data []byte) []byte, mirrors ...string) (map[string]string, error) {
+	return rewriteHistory(dir, paths, transform, mirrors)
+}
+
+// rewriteHistory is RewriteHistory when transform is nil (the new bytes of
+// the tip's version of a path are the work tree's, and no other version
+// changes), and RewriteHistoryFunc otherwise.
+func rewriteHistory(dir string, paths []string, transform func(path string, data []byte) []byte, mirrors []string) (map[string]string, error) {
 	gitDir := filepath.Join(dir, ".git")
 	repo, done, err := openStorage(gitDir)
 	if err != nil {
-		return fmt.Errorf("gitx: rewrite the history in %s: %w", dir, err)
+		return nil, fmt.Errorf("gitx: rewrite the history in %s: %w", dir, err)
 	}
 	defer done()
-	fail := func(format string, a ...any) error {
-		return fmt.Errorf("gitx: rewrite the history in %s: "+format, append([]any{dir}, a...)...)
+	fail := func(format string, a ...any) (map[string]string, error) {
+		return nil, fmt.Errorf("gitx: rewrite the history in %s: "+format, append([]any{dir}, a...)...)
 	}
 	cfg, err := repo.Config()
 	if err != nil {
@@ -514,34 +542,72 @@ func RewriteHistory(dir string, paths []string, mirrors ...string) error {
 	if err != nil {
 		return fail("read its tree: %w", err)
 	}
-	changes, added, _, err := changedBlobs(repo, root, dir, paths)
-	if err != nil {
-		return err
-	}
-	if len(changes) == 0 {
-		return nil
-	}
-	// The blob each changed path has at the tip is the one to replace
-	// wherever it appears.
-	oldBlob := map[string]plumbing.Hash{}
-	for p := range changes {
-		entry, err := root.FindEntry(p)
-		if err != nil {
-			return fail("find %s: %w", p, err)
+
+	w := &historyRewrite{repo: repo, moved: map[plumbing.Hash]plumbing.Hash{}, seen: map[plumbing.Hash]bool{}, blobs: map[blobKey]plumbing.Hash{}, paths: nil}
+	for _, p := range paths {
+		p = filepath.ToSlash(p)
+		if p == "" || strings.HasPrefix(p, "/") || strings.EqualFold(strings.SplitN(p, "/", 2)[0], ".git") {
+			continue
 		}
-		oldBlob[p] = entry.Hash
+		w.paths = append(w.paths, p)
+	}
+	if transform == nil {
+		// The new bytes of the tip's version of a path are the work tree's.
+		changes, _, _, err := changedBlobs(repo, root, dir, w.paths)
+		if err != nil {
+			return nil, err
+		}
+		work := map[plumbing.Hash][]byte{}
+		for p := range changes {
+			entry, err := root.FindEntry(p)
+			if err != nil {
+				return fail("find %s: %w", p, err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(p)))
+			if err != nil {
+				return fail("%w", err)
+			}
+			work[entry.Hash] = data
+		}
+		transform = func(p string, data []byte) []byte {
+			if _, ok := changes[p]; !ok {
+				return data
+			}
+			if want, ok := work[blobHash(data)]; ok {
+				return want
+			}
+			return data
+		}
+	}
+	w.transform = transform
+
+	// What the tip's versions become, for the index.
+	tipChanges := map[string]plumbing.Hash{}
+	for _, p := range w.paths {
+		entry, err := root.FindEntry(p)
+		if err != nil || (entry.Mode != filemode.Regular && entry.Mode != filemode.Executable) {
+			continue
+		}
+		nh, err := w.newBlob(p, entry.Hash)
+		if err != nil {
+			return fail("%w", err)
+		}
+		if nh != entry.Hash {
+			tipChanges[p] = nh
+		}
 	}
 
 	tips, err := refTips(repo)
 	if err != nil {
 		return fail("%w", err)
 	}
-	w := &historyRewrite{repo: repo, changes: changes, oldBlob: oldBlob, moved: map[plumbing.Hash]plumbing.Hash{}, seen: map[plumbing.Hash]bool{}}
-	w.objs = append(w.objs, added...)
 	for _, id := range tips {
 		if _, err := w.rewrite(id); err != nil {
 			return fail("%w", err)
 		}
+	}
+	if len(w.moved) == 0 {
+		return map[string]string{}, nil
 	}
 	newTip := tipID
 	if n, ok := w.moved[tipID]; ok {
@@ -572,25 +638,84 @@ func RewriteHistory(dir string, paths []string, mirrors ...string) error {
 	if got, err := refValue(repo, branch); err != nil || got != newTip {
 		return fail("%s is %s after the rewrite, want %s", branch, got, newTip)
 	}
-	if err := repointIndex(gitDir, dir, changes); err != nil {
+	if err := repointIndex(gitDir, dir, tipChanges); err != nil {
 		return fail("%w", err)
 	}
 	if err := pruneLoose(gitDir, w.stale, keep); err != nil {
 		return fail("%w", err)
 	}
-	return nil
+	out := make(map[string]string, len(w.moved))
+	for from, to := range w.moved {
+		out[from.String()] = to.String()
+	}
+	return out, nil
 }
 
-// historyRewrite is the state of one RewriteHistory: the new objects, the
-// objects they replace and the new id of each commit that changed.
+// blobHash is the id git gives a blob of data.
+func blobHash(data []byte) plumbing.Hash {
+	return plumbing.ComputeHash(plumbing.BlobObject, data)
+}
+
+// blobKey is a version of a path: what a transform is asked about once.
+type blobKey struct {
+	path string
+	blob plumbing.Hash
+}
+
+// historyRewrite is the state of one rewrite of a history: the new objects,
+// the objects they replace and the new id of each commit that changed.
 type historyRewrite struct {
-	repo    *git.Repository
-	changes map[string]plumbing.Hash
-	oldBlob map[string]plumbing.Hash
-	moved   map[plumbing.Hash]plumbing.Hash
-	seen    map[plumbing.Hash]bool
-	objs    []plumbing.EncodedObject
-	stale   []plumbing.Hash
+	repo      *git.Repository
+	paths     []string
+	transform func(path string, data []byte) []byte
+	blobs     map[blobKey]plumbing.Hash // what each version becomes (itself when it does not change)
+	moved     map[plumbing.Hash]plumbing.Hash
+	seen      map[plumbing.Hash]bool
+	objs      []plumbing.EncodedObject
+	stale     []plumbing.Hash
+}
+
+// newBlob is the blob the version old of path becomes: old itself when the
+// transform leaves its bytes as they are. A new blob is kept to be stored.
+func (w *historyRewrite) newBlob(path string, old plumbing.Hash) (plumbing.Hash, error) {
+	key := blobKey{path, old}
+	if h, ok := w.blobs[key]; ok {
+		return h, nil
+	}
+	blob, err := w.repo.BlobObject(old)
+	if err != nil {
+		return old, fmt.Errorf("read blob %s of %s: %w", old, path, err)
+	}
+	r, err := blob.Reader()
+	if err != nil {
+		return old, err
+	}
+	data, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		return old, err
+	}
+	next := w.transform(path, data)
+	if bytes.Equal(next, data) {
+		w.blobs[key] = old
+		return old, nil
+	}
+	obj := w.repo.Storer.NewEncodedObject()
+	obj.SetType(plumbing.BlobObject)
+	obj.SetSize(int64(len(next)))
+	ow, err := obj.Writer()
+	if err != nil {
+		return old, err
+	}
+	if _, err := ow.Write(next); err != nil {
+		return old, err
+	}
+	if err := ow.Close(); err != nil {
+		return old, err
+	}
+	w.objs = append(w.objs, obj)
+	w.blobs[key] = obj.Hash()
+	return obj.Hash(), nil
 }
 
 // rewrite rewrites the commit id after its parents and returns its new id,
@@ -616,19 +741,26 @@ func (w *historyRewrite) rewrite(id plumbing.Hash) (plumbing.Hash, error) {
 		}
 		parentsMoved = parentsMoved || parents[i] != p
 	}
-	// The changes this commit takes: the paths it holds at the tip's blob.
+	// The changes this commit takes: the versions of the paths it holds that
+	// become other blobs.
 	mine := map[string]plumbing.Hash{}
+	var replaced []plumbing.Hash
 	tree, err := w.repo.TreeObject(c.TreeHash)
 	if err != nil {
 		return id, fmt.Errorf("read the tree of %s: %w", id, err)
 	}
-	for p, h := range w.changes {
+	for _, p := range w.paths {
 		entry, err := tree.FindEntry(p)
-		if err != nil {
-			continue // not there, or a directory in the way
+		if err != nil || (entry.Mode != filemode.Regular && entry.Mode != filemode.Executable) {
+			continue // not there, a directory in the way, or not a file
 		}
-		if entry.Hash == w.oldBlob[p] && (entry.Mode == filemode.Regular || entry.Mode == filemode.Executable) {
-			mine[p] = h
+		nh, err := w.newBlob(p, entry.Hash)
+		if err != nil {
+			return id, err
+		}
+		if nh != entry.Hash {
+			mine[p] = nh
+			replaced = append(replaced, entry.Hash)
 		}
 	}
 	if len(mine) == 0 && !parentsMoved {
@@ -650,9 +782,7 @@ func (w *historyRewrite) rewrite(id plumbing.Hash) (plumbing.Hash, error) {
 		next.TreeHash = newRoot
 		w.objs = append(w.objs, trees...)
 		w.stale = append(w.stale, staleTrees...)
-		for p := range mine {
-			w.stale = append(w.stale, w.oldBlob[p])
-		}
+		w.stale = append(w.stale, replaced...)
 	}
 	obj, err := encodeCommit(w.repo, &next)
 	if err != nil {
