@@ -328,7 +328,12 @@ func rewriteMirror(mirror string, branch plumbing.ReferenceName, oldID, newID pl
 // packed-refs and every file under refs/ and logs/. Each is replaced
 // through its lock file, so a reader sees the old file or the new one.
 func repointRefs(gitDir string, from, to plumbing.Hash) error {
-	old, now := []byte(from.String()), []byte(to.String())
+	return repointRefsMap(gitDir, map[plumbing.Hash]plumbing.Hash{from: to})
+}
+
+// repointRefsMap is repointRefs for many commits at once: each id that is a
+// key of moved is replaced by its value in every file repointRefs visits.
+func repointRefsMap(gitDir string, moved map[plumbing.Hash]plumbing.Hash) error {
 	files := []string{
 		filepath.Join(gitDir, "HEAD"),
 		filepath.Join(gitDir, "ORIG_HEAD"),
@@ -360,10 +365,16 @@ func repointRefs(gitDir string, from, to plumbing.Hash) error {
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(data, old) {
+		next := data
+		for from, to := range moved {
+			if from != to {
+				next = bytes.ReplaceAll(next, []byte(from.String()), []byte(to.String()))
+			}
+		}
+		if bytes.Equal(next, data) {
 			continue
 		}
-		if err := replaceFile(p, bytes.ReplaceAll(data, old, now)); err != nil {
+		if err := replaceFile(p, next); err != nil {
 			return err
 		}
 	}
@@ -433,4 +444,301 @@ func replaceFile(path string, data []byte) error {
 	}
 	defer l.release()
 	return l.commit(data)
+}
+
+// RewriteHistory is RewriteHeadCommit for a history: it rewrites every
+// commit reachable from the repository's refs (branches, remote-tracking
+// branches and lightweight tags) that holds one of paths at the blob the
+// checked-out branch's tip holds, parent first, so that each holds the bytes
+// the work tree holds for the path now. It is for the same narrow job: a
+// repository a test has built with the git program, whose files that carry an
+// absolute path were committed before they were pointed at their final
+// directory, and on which later commits were made, so the files sit in an old
+// commit and not only in the tip.
+//
+// A commit's version of a path is replaced only when it is the very blob the
+// tip tracks there (the old bytes of the file the work tree now has other
+// bytes for); another version of the path in an older commit is a different
+// file and stays as it is. A commit whose tree does not change keeps its id
+// unless a parent's id changed; one that changes keeps its parents (moved to
+// their new ids), author, committer, dates and message. Merges and octopus
+// merges are rewritten as any other commit.
+//
+// Everything RewriteHeadCommit moves is moved here for every rewritten
+// commit: refs, reflog lines, packed-refs, the mirrors' refs (each mirror
+// must hold the checked-out branch at the tip's old commit), the index
+// entries of the paths, and the loose objects the rewrite replaced and no new
+// commit uses are removed. With nothing to change nothing is touched, and for
+// a repository whose only changed commit is its tip the result is
+// RewriteHeadCommit's. A signed commit that would change, a ref naming an
+// annotated tag, a HEAD that is not on a branch and an index go-git cannot
+// read are errors.
+func RewriteHistory(dir string, paths []string, mirrors ...string) error {
+	gitDir := filepath.Join(dir, ".git")
+	repo, done, err := openStorage(gitDir)
+	if err != nil {
+		return fmt.Errorf("gitx: rewrite the history in %s: %w", dir, err)
+	}
+	defer done()
+	fail := func(format string, a ...any) error {
+		return fmt.Errorf("gitx: rewrite the history in %s: "+format, append([]any{dir}, a...)...)
+	}
+	cfg, err := repo.Config()
+	if err != nil {
+		return fail("read config: %w", err)
+	}
+	switch strings.ToLower(cfg.Raw.Section("core").Option("autocrlf")) {
+	case "true", "input":
+		return fail("core.autocrlf converts line endings, and the rewrite stores files as they are")
+	}
+	head, err := repo.Storer.Reference(plumbing.HEAD)
+	if err != nil {
+		return fail("read HEAD: %w", err)
+	}
+	if head.Type() != plumbing.SymbolicReference || !head.Target().IsBranch() {
+		return fail("HEAD is not on a branch")
+	}
+	branch := head.Target()
+	tipID, err := refValue(repo, branch)
+	if err != nil {
+		return fail("read %s: %w", branch, err)
+	}
+	if tipID.IsZero() {
+		return fail("%s has no commit", branch)
+	}
+	tip, err := repo.CommitObject(tipID)
+	if err != nil {
+		return fail("read %s: %w", tipID, err)
+	}
+	root, err := repo.TreeObject(tip.TreeHash)
+	if err != nil {
+		return fail("read its tree: %w", err)
+	}
+	changes, added, _, err := changedBlobs(repo, root, dir, paths)
+	if err != nil {
+		return err
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	// The blob each changed path has at the tip is the one to replace
+	// wherever it appears.
+	oldBlob := map[string]plumbing.Hash{}
+	for p := range changes {
+		entry, err := root.FindEntry(p)
+		if err != nil {
+			return fail("find %s: %w", p, err)
+		}
+		oldBlob[p] = entry.Hash
+	}
+
+	tips, err := refTips(repo)
+	if err != nil {
+		return fail("%w", err)
+	}
+	w := &historyRewrite{repo: repo, changes: changes, oldBlob: oldBlob, moved: map[plumbing.Hash]plumbing.Hash{}, seen: map[plumbing.Hash]bool{}}
+	w.objs = append(w.objs, added...)
+	for _, id := range tips {
+		if _, err := w.rewrite(id); err != nil {
+			return fail("%w", err)
+		}
+	}
+	newTip := tipID
+	if n, ok := w.moved[tipID]; ok {
+		newTip = n
+	}
+
+	// Objects first, everywhere, then the refs that make them reachable.
+	if err := storeAll(repo, w.objs); err != nil {
+		return fail("%w", err)
+	}
+	keep := map[plumbing.Hash]bool{}
+	for _, id := range tips {
+		if n, ok := w.moved[id]; ok {
+			id = n
+		}
+		if err := keepCommits(repo, id, keep); err != nil {
+			return fail("%w", err)
+		}
+	}
+	for _, m := range mirrors {
+		if err := rewriteMirrorHistory(m, branch, tipID, newTip, w, keep); err != nil {
+			return fail("mirror %s: %w", m, err)
+		}
+	}
+	if err := repointRefsMap(gitDir, w.moved); err != nil {
+		return fail("%w", err)
+	}
+	if got, err := refValue(repo, branch); err != nil || got != newTip {
+		return fail("%s is %s after the rewrite, want %s", branch, got, newTip)
+	}
+	if err := repointIndex(gitDir, dir, changes); err != nil {
+		return fail("%w", err)
+	}
+	if err := pruneLoose(gitDir, w.stale, keep); err != nil {
+		return fail("%w", err)
+	}
+	return nil
+}
+
+// historyRewrite is the state of one RewriteHistory: the new objects, the
+// objects they replace and the new id of each commit that changed.
+type historyRewrite struct {
+	repo    *git.Repository
+	changes map[string]plumbing.Hash
+	oldBlob map[string]plumbing.Hash
+	moved   map[plumbing.Hash]plumbing.Hash
+	seen    map[plumbing.Hash]bool
+	objs    []plumbing.EncodedObject
+	stale   []plumbing.Hash
+}
+
+// rewrite rewrites the commit id after its parents and returns its new id,
+// which is id itself when nothing in it changed.
+func (w *historyRewrite) rewrite(id plumbing.Hash) (plumbing.Hash, error) {
+	if w.seen[id] {
+		if n, ok := w.moved[id]; ok {
+			return n, nil
+		}
+		return id, nil
+	}
+	w.seen[id] = true
+	c, err := w.repo.CommitObject(id)
+	if err != nil {
+		return id, fmt.Errorf("read %s: %w", id, err)
+	}
+	parents := make([]plumbing.Hash, len(c.ParentHashes))
+	parentsMoved := false
+	for i, p := range c.ParentHashes {
+		parents[i], err = w.rewrite(p)
+		if err != nil {
+			return id, err
+		}
+		parentsMoved = parentsMoved || parents[i] != p
+	}
+	// The changes this commit takes: the paths it holds at the tip's blob.
+	mine := map[string]plumbing.Hash{}
+	tree, err := w.repo.TreeObject(c.TreeHash)
+	if err != nil {
+		return id, fmt.Errorf("read the tree of %s: %w", id, err)
+	}
+	for p, h := range w.changes {
+		entry, err := tree.FindEntry(p)
+		if err != nil {
+			continue // not there, or a directory in the way
+		}
+		if entry.Hash == w.oldBlob[p] && (entry.Mode == filemode.Regular || entry.Mode == filemode.Executable) {
+			mine[p] = h
+		}
+	}
+	if len(mine) == 0 && !parentsMoved {
+		return id, nil
+	}
+	if c.PGPSignature != "" || c.MergeTag != "" {
+		return id, fmt.Errorf("%s is signed or carries a tag, which a rewrite would break", id)
+	}
+	if again, err := encodeCommit(w.repo, c); err != nil || again.Hash() != id {
+		return id, fmt.Errorf("%s does not encode back to itself", id)
+	}
+	next := *c
+	next.ParentHashes = parents
+	if len(mine) > 0 {
+		newRoot, trees, staleTrees, err := rewriteTree(w.repo, c.TreeHash, mine)
+		if err != nil {
+			return id, err
+		}
+		next.TreeHash = newRoot
+		w.objs = append(w.objs, trees...)
+		w.stale = append(w.stale, staleTrees...)
+		for p := range mine {
+			w.stale = append(w.stale, w.oldBlob[p])
+		}
+	}
+	obj, err := encodeCommit(w.repo, &next)
+	if err != nil {
+		return id, err
+	}
+	w.objs = append(w.objs, obj)
+	w.stale = append(w.stale, id)
+	w.moved[id] = obj.Hash()
+	return obj.Hash(), nil
+}
+
+// refTips is the commit every ref of the repository names, once each. A ref
+// naming an annotated tag is an error: the rewrite would leave it at the old
+// commit.
+func refTips(repo *git.Repository) ([]plumbing.Hash, error) {
+	iter, err := repo.Storer.IterReferences()
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	var tips []plumbing.Hash
+	seen := map[plumbing.Hash]bool{}
+	err = iter.ForEach(func(r *plumbing.Reference) error {
+		if r.Type() != plumbing.HashReference || !strings.HasPrefix(r.Name().String(), "refs/") {
+			return nil
+		}
+		if _, err := repo.TagObject(r.Hash()); err == nil {
+			return fmt.Errorf("%s names an annotated tag", r.Name())
+		}
+		if _, err := repo.CommitObject(r.Hash()); err != nil {
+			return nil // a ref to a tree or blob: nothing to rewrite
+		}
+		if !seen[r.Hash()] {
+			seen[r.Hash()] = true
+			tips = append(tips, r.Hash())
+		}
+		return nil
+	})
+	return tips, err
+}
+
+// keepCommits adds to keep every commit reachable from id and every tree and
+// blob of those commits.
+func keepCommits(repo *git.Repository, id plumbing.Hash, keep map[plumbing.Hash]bool) error {
+	if keep[id] {
+		return nil
+	}
+	c, err := repo.CommitObject(id)
+	if err != nil {
+		return err
+	}
+	keep[id] = true
+	trees, err := reachable(repo, c.TreeHash)
+	if err != nil {
+		return err
+	}
+	for h := range trees {
+		keep[h] = true
+	}
+	for _, p := range c.ParentHashes {
+		if err := keepCommits(repo, p, keep); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rewriteMirrorHistory is rewriteMirror for a history: the mirror gets the
+// new objects and every moved commit in its refs.
+func rewriteMirrorHistory(mirror string, branch plumbing.ReferenceName, tipID, newTip plumbing.Hash, w *historyRewrite, keep map[plumbing.Hash]bool) error {
+	repo, done, err := openStorage(mirror)
+	if err != nil {
+		return err
+	}
+	defer done()
+	if got, err := refValue(repo, branch); err != nil || got != tipID {
+		return fmt.Errorf("%s is %s, not the rewritten commit %s", branch, got, tipID)
+	}
+	if err := storeAll(repo, w.objs); err != nil {
+		return err
+	}
+	if err := repointRefsMap(mirror, w.moved); err != nil {
+		return err
+	}
+	if got, err := refValue(repo, branch); err != nil || got != newTip {
+		return fmt.Errorf("%s is %s after the rewrite, want %s", branch, got, newTip)
+	}
+	return pruneLoose(mirror, w.stale, keep)
 }
