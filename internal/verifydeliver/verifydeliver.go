@@ -59,7 +59,9 @@ type Deps struct {
 	StdinIsTerminal func() bool
 	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
 	GuardedPush func(dir, remote, branch string, confirmed bool) error
-	// FetchOrigin refreshes the view of origin. nil means the default fetch.
+	// FetchOrigin refreshes the view of origin. nil means the default fetch,
+	// which a publish skips for a lease Acquire has just fetched; one set here
+	// is always called.
 	FetchOrigin func(dir string) error
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)
