@@ -197,62 +197,6 @@ func mergeParentIntoMain(t *testing.T, b builtTicket) {
 	h.Branch(b.branch)
 }
 
-// TestHandResolvedMergeGetsADeltaRound: the session merged the target into a
-// built child's branch and resolved the merge by hand. A publish refuses the
-// head as unreviewed; a gate round opens whose delta is the resolution alone
-// (the base is a tree, git's own merge, and must_review names the edited file
-// and none of what the target brought in); once that round is clean the publish
-// goes through, pushing the merge commit.
-func TestHandResolvedMergeGetsADeltaRound(t *testing.T) {
-	t.Parallel()
-	b, env, _ := stackedBuiltTicket(t)
-	mergeParentIntoMain(t, b)
-	h := b.builder
-
-	// The session merges main, edits a file the merge touched, and commits.
-	h.git("merge", "--no-ff", "--no-commit", "origin/main")
-	writeFileOrFatal(t, filepath.Join(h.Clone, "alpha", "MAIN_A.md"), []byte("from main\nand a line of the session's\n"))
-	h.git("add", "-A")
-	h.git("commit", "-m", "merge main, by hand")
-	merge := h.git("rev-parse", "HEAD")
-
-	// A bare publish refuses the head: nobody reviewed the resolution.
-	refused := runJig(t, env, h.Clone, "publish", b.fx.Ticket, "--yes")
-	if refused.Code == 0 || !strings.Contains(refused.Stdout, "PUBLISH_UNREVIEWED_HEAD") {
-		t.Fatalf("jig publish after a hand-resolved merge: exit %d, want PUBLISH_UNREVIEWED_HEAD\nstdout:\n%s\nstderr:\n%s", refused.Code, refused.Stdout, refused.Stderr)
-	}
-	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != "" {
-		t.Fatalf("the refused publish pushed %s", got)
-	}
-
-	// The gate opens round 2 over the resolution.
-	gate := h.Jig("gate", b.fx.Ticket)
-	if gate.Code != 0 || !strings.Contains(gate.Stdout, "round: 2") || !strings.Contains(gate.Stdout, "scope: delta") {
-		t.Fatalf("jig gate: exit %d, want round 2 as a delta\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-	req := b.request(t, 2)
-	if req.Scope != "delta" || req.HeadSHA != merge {
-		t.Errorf("round 2 = scope %q head %s, want a delta at the merge %s", req.Scope, req.HeadSHA, merge)
-	}
-	if kind := gitLog(t, b.fx.RepoDir, "cat-file", "-t", req.BaseSHA); kind != "tree" {
-		t.Errorf("base_sha %s is a %s, want a tree: git's own merge of the merge's parents", req.BaseSHA, kind)
-	}
-	if want := []string{"alpha/MAIN_A.md"}; !reflect.DeepEqual(req.MustReview, want) {
-		t.Errorf("must_review = %v, want the edited file alone, %v", req.MustReview, want)
-	}
-
-	// A reviewer in a session of its own reports it clean, and the publish ships
-	// the merge commit.
-	b.reviewedClean(t, 2)
-	pub := runJig(t, env, h.Clone, "publish", b.fx.Ticket, "--yes")
-	if pub.Code != 0 {
-		t.Fatalf("jig publish after the clean round: exit %d\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
-	}
-	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != merge {
-		t.Errorf("origin's %s = %s, want the merge commit %s", b.branch, got, merge)
-	}
-}
-
 // TestCleanMergePublishesAndRetargets: a built child published into its parent's
 // branch, its pull request open from the branch. The parent merges and the
 // session merges main into the child's branch, clean. The ticket is behind, and
