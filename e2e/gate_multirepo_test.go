@@ -10,7 +10,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -465,79 +464,34 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 }
 
-// TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo: a session that built
-// in one repo of the ticket is a builder of the ticket, whichever repo its work
-// is in - the builder of the api, the builder of the web, and a session that
-// only edited a file of the web with its tools - and jig tells it so before the
-// review. Its round is recorded clean (independence is a fact of the round,
-// not a condition of it): unknown where no hook reported the session's calls
-// (the two builders commit with none), false where one did (the edit). A
-// session that built none of it reviews both repos, independent.
+// TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo: a session whose
+// only act was a hook-reported edit of a file in the web clone is a builder of
+// the ticket, though the branch it edited on is a nested clone's: the ledger
+// binds the call to the ticket by that branch, and the round it reviews is
+// recorded clean with independent: false (independence is a fact of the round,
+// not a condition of it). This is the one flow that runs the hook, the ledger,
+// the branch of a nested clone and the report together; which journal lines
+// make a builder, and who is independent of them, is the unit test of the
+// builders in internal/verifydeliver.
 func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
 	ticket := b.fx.Ticket
 
-	// Each builder built in one repo only, and neither is fresh for the ticket.
-	for _, h := range []*fakeHarness{b.api, b.web} {
-		next := h.Jig("next", ticket)
-		if next.Code != 0 || !strings.Contains(next.Stdout, "fresh: no") {
-			t.Errorf("jig next as %s: exit %d, want fresh: no\n%s", h.Session, next.Code, next.Stdout)
-		}
-	}
-	if gate := b.api.Jig("gate", ticket); gate.Code != 0 {
-		t.Fatalf("jig gate: exit %d\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-
-	// closedBy has h read the open round and close it, as a reviewer would.
-	closedBy := func(h *fakeHarness, round string) jigResult {
-		t.Helper()
-		if ctx := h.Jig("review", "context", ticket); ctx.Code != 0 {
-			t.Fatalf("jig review context as %s: exit %d\nstdout:\n%s\nstderr:\n%s", h.Session, ctx.Code, ctx.Stdout, ctx.Stderr)
-		}
-		return h.Jig("review", "done", ticket, "--result", cleanResultOf(t, b.request(t, round).MustReview))
-	}
-	// opened has the api's session open round n.
-	opened := func(round string) {
-		t.Helper()
-		if r := b.api.Jig("gate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "round: "+round) {
-			t.Fatalf("jig gate for round %s: exit %d\nstdout:\n%s\nstderr:\n%s", round, r.Code, r.Stdout, r.Stderr)
-		}
-	}
-	// byABuilder has h, a builder of the ticket, review round n: the round is
-	// recorded clean with the independence jig could tell (want).
-	byABuilder := func(h *fakeHarness, round string, want any) {
-		t.Helper()
-		done := closedBy(h, round)
-		if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, fmt.Sprintf("independent: %v", want)) {
-			t.Fatalf("jig review done by %s: exit %d, want a clean round with independent: %v\nstdout:\n%s\nstderr:\n%s", h.Session, done.Code, want, done.Stdout, done.Stderr)
-		}
-		if rep := b.report(t, round); rep.Verdict != "clean" || rep.Independent != want {
-			t.Errorf("report.yaml of round %s = %+v, want a clean round with independent: %v", round, rep, want)
-		}
-	}
-
-	// The web's builder never touched the api, and the api's builder never
-	// touched the web; each built part of what the round reviews.
-	byABuilder(b.web, "1", "unknown")
-	opened("2")
-	byABuilder(b.api, "2", "unknown")
-
-	// A session that only edited a file in the web clone with its tools: the
-	// ledger names it a builder by the ticket the branch of that clone binds, in
-	// either repo.
 	edited := newHarness(t, b.fx, b.env, "s-edit")
 	edited.Clone = b.fx.NestedDirs["web"]
 	edited.Hook("PostToolUse", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": filepath.Join(edited.Clone, "ui", "page.go")}})
-	opened("3")
-	byABuilder(edited, "3", false)
-
-	// A session that built none of it reviews round 4, over both repos.
-	opened("4")
-	rev := newHarness(t, b.fx, b.env, "s-reviewer")
-	rev.Clone = b.fx.NestedDirs["web"]
-	done := closedBy(rev, "4")
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
-		t.Fatalf("jig review done by a session that built nothing: exit %d, want a clean round\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	if gate := b.api.Jig("gate", ticket); gate.Code != 0 {
+		t.Fatalf("jig gate: exit %d\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
+	}
+	if ctx := edited.Jig("review", "context", ticket); ctx.Code != 0 {
+		t.Fatalf("jig review context as %s: exit %d\nstdout:\n%s\nstderr:\n%s", edited.Session, ctx.Code, ctx.Stdout, ctx.Stderr)
+	}
+	done := edited.Jig("review", "done", ticket, "--result", cleanResultOf(t, b.request(t, "1").MustReview))
+	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: false") {
+		t.Fatalf("jig review done by %s: exit %d, want a clean round with independent: false\nstdout:\n%s\nstderr:\n%s", edited.Session, done.Code, done.Stdout, done.Stderr)
+	}
+	if rep := b.report(t, "1"); rep.Verdict != "clean" || rep.Independent != false {
+		t.Errorf("report.yaml of round 1 = %+v, want a clean round with independent: false", rep)
 	}
 }
