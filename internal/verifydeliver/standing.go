@@ -64,10 +64,10 @@ func StandingRound(d Deps, ticket string) (*Standing, error) {
 			return nil, fmt.Errorf("verifydeliver: standing round: parse round %d: %w", n, err)
 		}
 		st.Round, st.Verdict, st.CarriedFrom = n, rep.Verdict, rep.CarriedFrom
+		// Only the head a reviewer read counts: a round without one (a
+		// scripted round, or an older jig's) names the target's tip, which is
+		// not a head the round stood at.
 		st.Heads = rep.ReviewedSHA
-		if len(st.Heads) == 0 {
-			st.Heads = rep.TargetSHA
-		}
 		slices, err := d.Store.ReadSlices(ticket)
 		if err != nil {
 			return nil, fmt.Errorf("verifydeliver: standing round: read slices: %w", err)

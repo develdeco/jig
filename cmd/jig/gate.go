@@ -189,7 +189,9 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	// round that gate opened stands at the head, and a second one over it
 	// would only repeat the suite. A gate that did not wait is a person asking
 	// again, and gets a round.
-	if waited {
+	// A flag that shapes the round (it records an intent, adopts a branch,
+	// gates early, keeps findings) is never dropped: the gate goes on with it.
+	if waited && !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
 		standing, err := verifydeliver.StandingRound(deps, ticket)
 		if err != nil {
 			return renderErr(stdout, err)

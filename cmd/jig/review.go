@@ -297,6 +297,18 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	if !open {
+		// Opening a round is what a running gate of the ticket is doing: wait
+		// for it, then look again, since its round may be the one to read.
+		releaseLock, _, err := takeGateLock(e, jigHome, cfg.Name, ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		defer releaseLock()
+		if p, open, err = verifydeliver.CurrentRound(deps, ticket); err != nil {
+			return renderErr(stdout, err)
+		}
+	}
+	if !open {
 		if p, err = verifydeliver.GatePrepare(deps, verifydeliver.GateOpts{Ticket: ticket}); err != nil {
 			return renderErr(stdout, err)
 		}
