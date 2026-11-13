@@ -1,6 +1,8 @@
 package verifydeliver
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -31,7 +33,7 @@ func TestTheGatesOracleLineCarriesWhatItsRunUsed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := journalGateRuns(d, fx.Ticket, fx.RepoDir, runs); err != nil {
+	if err := journalGateRuns(d, fx.Ticket, fx.RepoDir, "", nil, runs, nil); err != nil {
 		t.Fatal(err)
 	}
 	lines, err := journal.Read(d.Store, fx.Ticket)
@@ -52,6 +54,47 @@ func TestTheGatesOracleLineCarriesWhatItsRunUsed(t *testing.T) {
 		case "bare":
 			if l.CPUMs != 0 || l.PeakBytes != 0 || l.PeakBasis != "" {
 				t.Errorf("an unmeasured run's line carries figures: %+v", l)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("%d gate-oracle lines, want 2", seen)
+	}
+}
+
+// TestTheGatesFailedRunLineCarriesWhatItUsed: a failed gate run's line holds
+// what its tree used until it ended, and a run jig stopped holds nothing.
+func TestTheGatesFailedRunLineCarriesWhatItUsed(t *testing.T) {
+	t.Parallel()
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	used := envrun.Usage{CPU: 1500 * time.Millisecond, PeakBytes: 32 << 20, Basis: envrun.BasisJob}
+	for _, f := range []*suiteFailure{
+		{Run: OracleRun{Oracle: "fails", Workspace: "root", Command: "exit 1", Seconds: 2, Usage: used}, Err: errors.New("exit status 1")},
+		{Run: OracleRun{Oracle: "stopped", Workspace: "root", Command: "sleep 9", Seconds: 2, Usage: used}, Err: fmt.Errorf("run: %w", envrun.ErrStopped)},
+	} {
+		if err := journalGateRuns(d, fx.Ticket, fx.RepoDir, "", nil, nil, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, l := range lines {
+		if l.Event != journal.EventGateOracle {
+			continue
+		}
+		seen++
+		switch l.Oracle {
+		case "fails":
+			if l.Outcome != "fail" || l.CPUMs != 1500 || l.PeakBytes != 32<<20 || l.PeakBasis != "job" {
+				t.Errorf("failed gate-oracle line = %+v, want the figures it used", l)
+			}
+		case "stopped":
+			if l.Cause != journal.CauseStopped || l.CPUMs != 0 || l.PeakBytes != 0 || l.PeakBasis != "" {
+				t.Errorf("stopped gate-oracle line = %+v, want no figures", l)
 			}
 		}
 	}

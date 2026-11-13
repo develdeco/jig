@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -416,17 +417,11 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 		}
 	}
 	if coversSuite(man, reused) {
-		runs, err := oracleSuiteRuns(dir, man, reused, d.oracle(), d.slotHolder(ticket))
-		if err != nil {
-			return nil, err
-		}
-		if err := journalGateRuns(d, ticket, dir, runs); err != nil {
-			return nil, err
-		}
-		return withSlices(runs, repo, man, slices), nil
+		return runAndJournal(d, ticket, repo, dir, man, slices, reused, "")
 	}
 
 	var handles []*envrun.Handle
+	var up []string
 	defer func() {
 		for _, h := range handles {
 			_ = h.Down()
@@ -461,42 +456,95 @@ func runGateOracles(d Deps, ticket, repo, dir string, man manifest.Manifest, sli
 			return nil, fmt.Errorf("verifydeliver: gate: bring up env %q: %w", s.Env, err)
 		}
 		handles = append(handles, h)
+		up = append(up, s.Env)
 	}
 
-	runs, err := oracleSuiteRuns(dir, man, reused, d.oracle(), d.slotHolder(ticket))
-	if err != nil {
-		return nil, err
+	// More than one class up is a set no single-class pass equals (sameEnvs).
+	sort.Strings(up)
+	return runAndJournal(d, ticket, repo, dir, man, slices, reused, strings.Join(up, "+"))
+}
+
+// runAndJournal runs the suite, taking the passes in reused from there, and
+// journals what the gate did on dir's HEAD: each run it made or reused, and the
+// run that failed, so a later round reads the gate's own verdicts as it reads a
+// slice's. env is the env class set that was up for the runs the gate made
+// ("" for none).
+func runAndJournal(d Deps, ticket, repo, dir string, man manifest.Manifest, slices []store.Slice, reused map[string]reusedPass, env string) ([]OracleRun, error) {
+	runs, failed, err := runSuite(dir, man, reused, d.oracle(), d.slotHolder(ticket))
+	if jerr := journalGateRuns(d, ticket, dir, env, reused, runs, failed); jerr != nil {
+		return nil, jerr
 	}
-	if err := journalGateRuns(d, ticket, dir, runs); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	return withSlices(runs, repo, man, slices), nil
 }
 
-// journalGateRuns journals a gate-oracle line for each oracle the gate ran
-// itself (not one reused from a slice's pass, which has its own oracle line),
-// at dir's HEAD with the command that ran, so a publish names that command
-// beside the oracle. It is no oracle line: a slice's state and the frontier
-// read those, and the gate's run is no slice's verification.
-func journalGateRuns(d Deps, ticket, dir string, runs []OracleRun) error {
-	var head string
+// suiteFailure is the run of the suite that ended in error, and the error.
+type suiteFailure struct {
+	Run OracleRun
+	Err error
+}
+
+// journalGateRuns journals a gate-oracle line, at dir's HEAD, for each oracle
+// the gate ran or reused and for the one that failed, with the command that
+// ran, so a publish names that command beside the oracle and a later round
+// reads these lines as it reads a slice's oracle lines (ADR 0021). A reuse
+// names the commit it stands on and the light command that ran in the suite's
+// place, and keeps the env class of the pass it stands on (from reused); a run
+// the gate made carries env, the class set that was up. A failed run that never
+// judged the code (a kill or a stop) carries its cause. They are no oracle
+// lines: a slice's state and the frontier read those, and the gate's run is no
+// slice's verification.
+func journalGateRuns(d Deps, ticket, dir, env string, reused map[string]reusedPass, runs []OracleRun, failed *suiteFailure) error {
+	if len(runs) == 0 && failed == nil {
+		return nil
+	}
+	head, err := gitx.RevParse(dir, "HEAD")
+	if err != nil {
+		return fmt.Errorf("verifydeliver: gate: resolve HEAD for the oracle lines: %w", err)
+	}
 	for _, run := range runs {
+		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Env: env, Seconds: run.Seconds, Source: "gate"}
 		if run.ReusedFrom != "" {
-			continue
+			// A reuse ran nothing new: its figure stays on the line of the run
+			// that measured it.
+			line.ReusedFrom, line.Ran, line.Env = run.ReusedFrom, run.Ran, reused[run.Command].Env
+		} else {
+			line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
 		}
-		if head == "" {
-			var err error
-			if head, err = gitx.RevParse(dir, "HEAD"); err != nil {
-				return fmt.Errorf("verifydeliver: gate: resolve HEAD for the oracle lines: %w", err)
-			}
+		if err := journal.Append(d.Store, ticket, line); err != nil {
+			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
 		}
-		line := journal.Line{Event: journal.EventGateOracle, Outcome: "pass", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Seconds: run.Seconds, Source: "gate"}
-		line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
+	}
+	if failed != nil {
+		run := failed.Run
+		line := journal.Line{Event: journal.EventGateOracle, Outcome: "fail", Commit: head, Oracle: run.Oracle, Workspace: run.Workspace, Command: run.Command, Env: env, Seconds: run.Seconds, Source: "gate", Cause: failureCause(failed.Err), Summary: refusalReason(failed.Err)}
+		// A failed or timed-out run used what it used until it ended; a run
+		// jig stopped measured nothing it can stand on.
+		if line.Cause != journal.CauseStopped {
+			line.SetUsage(run.Usage.CPU, run.Usage.PeakBytes, run.Usage.Basis)
+		}
 		if err := journal.Append(d.Store, ticket, line); err != nil {
 			return fmt.Errorf("verifydeliver: gate: journal gate-oracle: %w", err)
 		}
 	}
 	return nil
+}
+
+// failureCause is the journal cause of a run that ended with err: timeout for
+// the wedge guard's kill, stopped for a stop, "" for a run that ended with the
+// test's own result. Read from the typed error, never from its text, which
+// embeds the oracle command.
+func failureCause(err error) string {
+	var t *envrun.TimedOutError
+	switch {
+	case errors.As(err, &t):
+		return journal.CauseTimeout
+	case errors.Is(err, envrun.ErrStopped):
+		return journal.CauseStopped
+	}
+	return ""
 }
 
 // withSlices names, on each run, the slices whose oracle it is in its
@@ -531,6 +579,9 @@ type reusedPass struct {
 	// Ran is the light command a verify light line ran in place of the
 	// suite, "" for a full run.
 	Ran string
+	// Env is the env class that was up for the pass ("" for none), kept on
+	// the gate's line for a reuse so the next round's env rule reads it.
+	Env string
 }
 
 // reusablePasses returns, by exact command, the oracle pass jig recorded at
@@ -563,7 +614,9 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 	lightCache := map[string]bool{}
 	fullSeconds := map[string]int{} // a full run's commit -> its seconds
 	for _, l := range lines {
-		if l.Event != "oracle" || l.Commit == "" || l.Command == "" {
+		// The gate's own verdicts stand beside a slice's: a pass or failure
+		// the gate journaled is as much a run of the command on its tree.
+		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Commit == "" || l.Command == "" {
 			continue
 		}
 		exact := sameTree(l.Commit)
@@ -599,7 +652,7 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 				// A light line's time is the lint's: the suite's is its origin's.
 				seconds = fullSeconds[origin]
 			}
-			p := reusedPass{Commit: l.Commit, Seconds: seconds, Origin: origin, Ran: l.Ran}
+			p := reusedPass{Commit: l.Commit, Seconds: seconds, Origin: origin, Ran: l.Ran, Env: l.Env}
 			switch {
 			case exact:
 				passed[l.Command] = p
@@ -666,14 +719,21 @@ func coversSuite(man manifest.Manifest, reused map[string]reusedPass) bool {
 	return true
 }
 
-// oracleSuiteRuns is RunOracleSuite with the runs in reused (by command)
+// oracleSuiteRuns is runSuite without the failed run: its runs are those that
+// passed, and a nil error means every one did.
+func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc, hold slotHolder) ([]OracleRun, error) {
+	runs, _, err := runSuite(dir, man, reused, run, hold)
+	return runs, err
+}
+
+// runSuite is RunOracleSuite with the runs in reused (by command)
 // taken from there instead of run again, and each other run made by run and
 // timed.
 //
 // hold, when not nil, takes the project's suite slot for an oracle the
 // manifest marks heavy and returns its release; the run starts, and its bound
 // and its seconds count, after the slot is taken.
-func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc, hold slotHolder) ([]OracleRun, error) {
+func runSuite(dir string, man manifest.Manifest, reused map[string]reusedPass, run oracleFunc, hold slotHolder) ([]OracleRun, *suiteFailure, error) {
 	var runs []OracleRun
 	for _, ws := range man.Workspaces {
 		for _, name := range SortedOracleNames(man) {
@@ -687,22 +747,24 @@ func oracleSuiteRuns(dir string, man manifest.Manifest, reused map[string]reused
 				rel, err := hold(name, cmd)
 				if err != nil {
 					if errors.Is(err, envrun.ErrStopped) {
-						return nil, oracleError("", err)
+						return runs, nil, oracleError("", err)
 					}
-					return nil, err
+					return runs, nil, err
 				}
 				release = rel
 			}
 			start := time.Now()
 			use, err := runOracleUsage(run, cmd, dir)
 			release()
+			seconds := wholeSeconds(time.Since(start))
 			if err != nil {
-				return nil, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
+				failed := &suiteFailure{Run: OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use}, Err: err}
+				return runs, failed, oracleError(fmt.Sprintf("oracle %q failed in workspace %s: %v", name, ws.ID, err), err)
 			}
-			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: wholeSeconds(time.Since(start)), Usage: use})
+			runs = append(runs, OracleRun{Oracle: name, Workspace: ws.ID, Command: cmd, Seconds: seconds, Usage: use})
 		}
 	}
-	return runs, nil
+	return runs, nil, nil
 }
 
 // ranOf is the light command that stands in for the suite on a reused pass:
