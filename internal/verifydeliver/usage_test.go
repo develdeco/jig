@@ -59,3 +59,22 @@ func TestTheGatesOracleLineCarriesWhatItsRunUsed(t *testing.T) {
 		t.Errorf("%d gate-oracle lines, want 2", seen)
 	}
 }
+
+// TestTheRealGateOracleRunReturnsWhatItsTreeUsed: the gate's real oracle run
+// (shellOracle) measures the tree of the command it ran, so the gate-oracle
+// line built from it has figures.
+func TestTheRealGateOracleRunReturnsWhatItsTreeUsed(t *testing.T) {
+	t.Parallel()
+	// A shell loop that does a measurable amount of work on any OS.
+	cmd := `i=0; while [ $i -lt 20000 ]; do i=$((i+1)); done`
+	_, use, err := shellOracle(cmd, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if use.CPU <= 0 {
+		t.Errorf("usage = %+v, want the CPU time of the command's tree", use)
+	}
+	if (use.PeakBytes == 0) != (use.Basis == "") {
+		t.Errorf("usage = %+v: peak and basis disagree", use)
+	}
+}

@@ -63,6 +63,15 @@ func TestUsageHelper(t *testing.T) {
 		t.Skip("only the usage tests run this")
 	}
 	start := time.Now()
+	switch role {
+	case "fail":
+		burn(1, time.Second)
+		t.Fatal("the helper fails on purpose")
+	case "hang":
+		burn(1, time.Second)
+		time.Sleep(10 * time.Minute)
+		return
+	}
 	block := hold()
 	if role == "child" {
 		burn(1, 2*time.Second)
@@ -104,10 +113,11 @@ func TestShellOutputUsageReadsTheWholeTree(t *testing.T) {
 		t.Errorf("CPU = %v, want %v to %v (4 CPU-seconds were burned)", use.CPU, lo, hi)
 	}
 	if use.PeakBytes == 0 {
-		if runtime.GOOS == "windows" {
-			t.Fatal("no peak memory was read from the job")
+		// The brief's one exemption: a host with no ps measures no sampled peak.
+		if _, err := exec.LookPath("ps"); runtime.GOOS != "windows" && err != nil {
+			t.Skip("ps is not available here: peak memory is not measured")
 		}
-		t.Skip("ps is not usable here: peak memory is not measured")
+		t.Fatal("no peak memory was read from the tree")
 	}
 	const loMem, hiMem = 230 << 20, 384 << 20
 	if use.PeakBytes < loMem || use.PeakBytes > hiMem {
@@ -125,26 +135,34 @@ func TestShellOutputUsageReadsTheWholeTree(t *testing.T) {
 
 // TestShellOutputUsageSurvivesAFailureAndAKill: a command that exits non-zero
 // or is killed at its limit still returns what its tree used until it ended,
-// and the verdict is the same one ShellOutputEnv gives.
+// and the verdict is the one ShellOutputEnv gives. The commands do measurable
+// work (1 CPU-second), since a trivial shell may read as no CPU at all.
 func TestShellOutputUsageSurvivesAFailureAndAKill(t *testing.T) {
-	dir := t.TempDir()
-	out, use, err := ShellOutputUsage("echo hi; exit 3", dir, time.Minute, nil)
-	if err == nil || trimEOL(out) != "hi" {
-		t.Fatalf("out = %q, err = %v, want hi and a failure", out, err)
+	if testing.Short() {
+		t.Skip("burns CPU for seconds")
 	}
-	if use.CPU <= 0 {
-		t.Errorf("a failed run has CPU %v, want it measured", use.CPU)
+	dir := t.TempDir()
+	const burned = 900 * time.Millisecond // 1 CPU-second, less the tolerance
+	_, use, err := ShellOutputUsage(helperCommand(), dir, 2*time.Minute, []string{usageHelperEnv + "=fail"})
+	if err == nil || errors.Is(err, ErrTimedOut) {
+		t.Fatalf("err = %v, want the helper's failure", err)
+	}
+	if use.CPU < burned {
+		t.Errorf("a failed run has CPU %v, want at least %v", use.CPU, burned)
 	}
 	if (use.PeakBytes == 0) != (use.Basis == "") {
 		t.Errorf("peak %d and basis %q disagree", use.PeakBytes, use.Basis)
 	}
 
-	_, use, err = ShellOutputUsage("sleep 600", dir, 2*time.Second, nil)
+	_, use, err = ShellOutputUsage(helperCommand(), dir, 10*time.Second, []string{usageHelperEnv + "=hang"})
 	if !errors.Is(err, ErrTimedOut) {
 		t.Fatalf("err = %v, want a timeout", err)
 	}
-	if use.CPU <= 0 {
-		t.Errorf("a killed run has CPU %v, want it measured", use.CPU)
+	if (use.PeakBytes == 0) != (use.Basis == "") {
+		t.Errorf("peak %d and basis %q disagree", use.PeakBytes, use.Basis)
+	}
+	if runtime.GOOS == "windows" && use.CPU < burned {
+		t.Errorf("a killed run has CPU %v, want at least %v", use.CPU, burned)
 	}
 }
 

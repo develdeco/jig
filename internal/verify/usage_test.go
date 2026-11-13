@@ -83,3 +83,27 @@ func TestARunJigStoppedKeepsItsLineWithoutFigures(t *testing.T) {
 		t.Errorf("oracle line = %+v, want a stopped line with no figures", l)
 	}
 }
+
+// TestARealOracleRunEndsWithTheFiguresOfItsTree: with no oracle injected, the
+// run goes through the real path (sh, the job or group, the measuring), and the
+// line it writes carries what the tree used.
+func TestARealOracleRunEndsWithTheFiguresOfItsTree(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	r.deps.Oracle = nil
+	sha := r.fixClamp()
+	res, err := Run(r.deps, r.request("a", sha))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.State != journal.VerifyPass {
+		t.Fatalf("state = %s, want pass: %s", res.State, res.Tail)
+	}
+	l := r.oracleLine()
+	if l.CPUMs <= 0 {
+		t.Errorf("oracle line = %+v, want the CPU time of the tree that ran", l)
+	}
+	if (l.PeakBytes == 0) != (l.PeakBasis == "") {
+		t.Errorf("oracle line = %+v: peak and basis disagree", l)
+	}
+}
