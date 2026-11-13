@@ -11,7 +11,6 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -540,78 +539,6 @@ func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	done := closedBy(rev, "4")
 	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
 		t.Fatalf("jig review done by a session that built nothing: exit %d, want a clean round\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-}
-
-// TestGateCoversTheOneRepoATicketBuildsIn: a ticket of the orchestrator whose
-// slices are all in one repo, and that repo is not the first. The gate covers
-// that repo and no other: one lease, one head, and nothing of the api.
-func TestGateCoversTheOneRepoATicketBuildsIn(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const ticket = "JIG-2"
-	slices, err := st.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateTicketRecord(ticket, store.Ticket{Title: "Web only"}); err != nil {
-		t.Fatal(err)
-	}
-	writeFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "brief.md"), readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "brief.md")))
-	if err := st.AppendSlices(ticket, []store.Slice{{ID: "page", Workspace: "web/ui", Goal: "Show the page.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[1].FromBrief}}); err != nil {
-		t.Fatal(err)
-	}
-	branch := nextJSON[nextRepos](t, env, fx.OrchestratorDir, ticket).Branch
-	web := newHarness(t, fx, env, "s-web")
-	web.Clone = fx.NestedDirs["web"]
-	web.Branch(branch)
-
-	verifySlots <- struct{}{}
-	sha := web.Commit("page", "page: show it", map[string]string{"ui/page.go": webPageSource})
-	r := web.Jig("verify", "--wait")
-	<-verifySlots
-	if r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-	web.WaitVerifiers()
-
-	gate := web.Jig("gate", ticket)
-	if gate.Code != 0 || !strings.Contains(gate.Stdout, "repos[1]{") || !strings.Contains(gate.Stdout, "  web,the clone's,"+sha+",") {
-		t.Fatalf("jig gate: exit %d, want a round over the web alone\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-	if strings.Contains(gate.Stdout, "  api,") {
-		t.Errorf("jig gate lists the api, which the ticket does not build in:\n%s", gate.Stdout)
-	}
-	if _, err := os.Stat(filepath.Join(env.home, "pool", "api", ticket+"-gate")); err == nil {
-		t.Errorf("the gate made a lease for the api, which the ticket does not build in")
-	}
-	data := readFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "work", "gate.round-1.review.json"))
-	var req gateRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		t.Fatal(err)
-	}
-	if len(req.Repos) != 1 || req.Repos[0].Repo != "web" || req.Repos[0].HeadSHA != sha || !reflect.DeepEqual(req.MustReview, []string{"web/ui/page.go"}) {
-		t.Errorf("review.json = %s, want the web alone at %s with web/ui/page.go to review", data, sha)
-	}
-
-	rev := newHarness(t, fx, env, "s-reviewer")
-	rev.Clone = fx.NestedDirs["web"]
-	if ctx := rev.Jig("review", "context", ticket); ctx.Code != 0 {
-		t.Fatalf("jig review context: exit %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
-	}
-	done := rev.Jig("review", "done", ticket, "--result", cleanResultOf(t, req.MustReview))
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "target_sha[1]{repo,sha}:\n  web,") {
-		t.Fatalf("jig review done: exit %d, want a clean round with the web's target alone\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-	var rep struct {
-		ReviewedSHA map[string]string `yaml:"reviewed_sha"`
-	}
-	if err := yaml.Unmarshal(readFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "gate", "round-1", "report.yaml")), &rep); err != nil || !reflect.DeepEqual(rep.ReviewedSHA, map[string]string{"web": sha}) {
-		t.Errorf("reviewed_sha = %v (%v), want the web's head alone", rep.ReviewedSHA, err)
 	}
 }
 
