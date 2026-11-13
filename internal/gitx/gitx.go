@@ -176,10 +176,11 @@ func callerName() string {
 }
 
 // isStdlib reports whether a function name belongs to the standard library
-// or runtime: its import path's first element has no dot.
+// or runtime: a package with no slash in its path (testing.tRunner), or one
+// whose first path element has no dot (os/exec.Command).
 func isStdlib(name string) bool {
-	first, _, _ := strings.Cut(name, "/")
-	return !strings.Contains(first, ".")
+	first, _, found := strings.Cut(name, "/")
+	return !found || !strings.Contains(first, ".")
 }
 
 // gitCommand returns exec.Command("git", args...) with the PATH search

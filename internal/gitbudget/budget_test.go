@@ -292,6 +292,18 @@ func TestCountsTheGitProcessesOfTheBinaryItRuns(t *testing.T) {
 	if code := run([]string{"check", cfg, baselineFile, counts, pkg}, noenv, &stdout, &stderr); code != 0 {
 		t.Errorf("check after write: exit %d, want 0:\n%s%s", code, stdout.String(), stderr.String())
 	}
+	// check's own report, for a package whose path has a slash, names the
+	// caller and the test of the process the wrapper counted.
+	for _, want := range []string{"example.com/m/pkg.Asker", "TestWrapped", fmt.Sprintf("(%d git processes)", n)} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("check's output lacks %q:\n%s", want, stdout.String())
+		}
+	}
+	tsv, err := os.ReadFile(filepath.Join(counts, callersFile))
+	if err != nil || !strings.Contains(string(tsv), fmt.Sprintf("internal/gitbudget\tcaller\texample.com/m/pkg.Asker\t%d\n", n)) ||
+		!strings.Contains(string(tsv), fmt.Sprintf("internal/gitbudget\ttest\tTestWrapped\t%d\n", n)) {
+		t.Errorf("callers.tsv (%v):\n%s", err, tsv)
+	}
 	stderr.Reset()
 	if code := run([]string{"check", cfg, "-", counts, "example.com/other"}, noenv, new(bytes.Buffer), &stderr); code != 1 {
 		t.Errorf("check of a package outside the module: exit %d, want 1: %s", code, stderr.String())
@@ -331,14 +343,14 @@ func TestCheckReportsCallersAndTests(t *testing.T) {
 			{"x.Setup", "/tmp/TestA1/001"}, {"x.Setup", "/tmp/TestA2/001"}, {"x.Setup", "/tmp/TestB3/001"},
 			{"x.Commit", "/tmp/TestB4/001"}, {"", ""},
 		},
-		"lint": {{"x.Setup", "/tmp/elsewhere"}},
+		"internal/lint": {{"x.Setup", "/tmp/elsewhere"}},
 	}
 	for _, c := range []struct {
 		name, base string
 		code       int
 	}{
-		{"within", "packages:\n  e2e: 5\n  lint: 1\n", 0},
-		{"over", "packages:\n  e2e: 2\n  lint: 1\n", 1},
+		{"within", "packages:\n  e2e: 5\n  internal/lint: 1\n", 0},
+		{"over", "packages:\n  e2e: 2\n  internal/lint: 1\n", 1},
 		{"none", "", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -355,7 +367,7 @@ func TestCheckReportsCallersAndTests(t *testing.T) {
 				return ""
 			}
 			var stdout, stderr bytes.Buffer
-			code := run([]string{"check", cfg, base, counts, testModule + "/e2e", testModule + "/lint"}, env, &stdout, &stderr)
+			code := run([]string{"check", cfg, base, counts, testModule + "/e2e", testModule + "/internal/lint"}, env, &stdout, &stderr)
 			if code != c.code {
 				t.Fatalf("exit %d, want %d (attribution never changes the verdict):\n%s%s", code, c.code, stdout.String(), stderr.String())
 			}
@@ -369,7 +381,7 @@ func TestCheckReportsCallersAndTests(t *testing.T) {
 				"e2e: top callers (5 git processes)",
 				"       2   40.0%  TestA",
 				"       1   20.0%  (unattributed)",
-				"lint: top tests (1 git processes)",
+				"internal/lint: top tests (1 git processes)",
 				"       1  100.0%  (other)",
 			} {
 				if !strings.Contains(stdout.String(), want) {
@@ -395,7 +407,7 @@ func TestCheckReportsCallersAndTests(t *testing.T) {
 			}
 			wantTSV := "e2e\tcaller\tx.Setup\t3\n" + "e2e\tcaller\t(unattributed)\t1\n" + "e2e\tcaller\tx.Commit\t1\n" +
 				"e2e\ttest\tTestA\t2\n" + "e2e\ttest\tTestB\t2\n" + "e2e\ttest\t(unattributed)\t1\n" +
-				"lint\tcaller\tx.Setup\t1\n" + "lint\ttest\t(other)\t1\n"
+				"internal/lint\tcaller\tx.Setup\t1\n" + "internal/lint\ttest\t(other)\t1\n"
 			if string(tsv) != wantTSV {
 				t.Errorf("callers.tsv:\n%s\nwant:\n%s", tsv, wantTSV)
 			}
@@ -415,5 +427,49 @@ func TestCheckOmitsPackagesWithoutTraces(t *testing.T) {
 	tsv, _ := os.ReadFile(filepath.Join(counts, callersFile))
 	if strings.Contains(string(tsv), "lint") || strings.Contains(string(tsv), "nothing") || !strings.Contains(string(tsv), "e2e\tcaller\tx.A\t1\n") {
 		t.Errorf("callers.tsv:\n%s", tsv)
+	}
+}
+
+// The report cuts at 20 callers overall and 10 per package; callers.tsv
+// keeps every row.
+func TestReportCutsAreAppliedAndTheTSVKeepsEverything(t *testing.T) {
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	var procs [][2]string
+	for i := range 25 {
+		procs = append(procs, [2]string{fmt.Sprintf("x.F%02d", i), "/tmp/TestA1"})
+	}
+	counts := traced(t, map[string][][2]string{"internal/big": procs})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check", cfg, "-", counts, testModule + "/internal/big"}, func(string) string { return "" }, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s%s", code, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	overall, perPkg, _ := strings.Cut(out, "internal/big: top callers")
+	if n := strings.Count(overall, "x.F"); n != topOverall {
+		t.Errorf("%d callers in the overall section, want %d:\n%s", n, topOverall, out)
+	}
+	callers, _, _ := strings.Cut(perPkg, "internal/big: top tests")
+	if n := strings.Count(callers, "x.F"); n != topPackage {
+		t.Errorf("%d callers in the package section, want %d", n, topPackage)
+	}
+	tsv, err := os.ReadFile(filepath.Join(counts, callersFile))
+	if err != nil || strings.Count(string(tsv), "\tcaller\t") != 25 {
+		t.Errorf("callers.tsv should hold all 25 callers (%v):\n%s", err, tsv)
+	}
+}
+
+// With no traces at all the report is empty and no callers.tsv is written.
+func TestCheckWithoutTracesPrintsNoReport(t *testing.T) {
+	cfg := writeFile(t, "git-budget.yaml", "margin: 5\nslack: 10\n")
+	counts := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check", cfg, "-", counts, testModule + "/internal/none"}, func(string) string { return "" }, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), "callers") {
+		t.Errorf("report for no traces:\n%s", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(counts, callersFile)); err == nil {
+		t.Error("callers.tsv written with no traces")
 	}
 }

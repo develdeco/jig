@@ -66,6 +66,9 @@ func TestCallerIsNamedWhenGitTraces(t *testing.T) {
 	}{
 		{"function", askGit, pkg + "askGit"},
 		{"method and closure", asker{}.askGit, pkg + "asker.askGit"},
+		{"standard input", func(dir string, env []string) {
+			_, _ = gitx.RunInputEnv(dir, env, []byte("x"), "hash-object", "--stdin")
+		}, pkg + "TestCallerIsNamedWhenGitTraces"},
 		{"replaced environment", func(dir string, env []string) {
 			_, _ = gitx.RunReplaceEnv(dir, append(os.Environ(), env...), "version")
 		}, pkg + "TestCallerIsNamedWhenGitTraces"},

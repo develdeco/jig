@@ -39,7 +39,7 @@ func RunInputEnv(dir string, env []string, stdin []byte, args ...string) (string
 func runInput(dir string, env []string, stdin []byte, stdout, stderr *bytes.Buffer, args []string) error {
 	cmd := gitCommand(append([]string{"-c", "maintenance.auto=false"}, args...))
 	cmd.Dir = dir
-	cmd.Env = append(inheritedEnv(), env...)
+	cmd.Env = withCaller(append(inheritedEnv(), env...), dir)
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

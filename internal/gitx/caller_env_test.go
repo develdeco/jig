@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -26,5 +27,38 @@ func TestCallerVariablesAreAddedWithATrace(t *testing.T) {
 	}
 	if !slices.ContainsFunc(got, func(s string) bool { return strings.HasPrefix(s, "JIG_GIT_CALLER=") }) {
 		t.Errorf("no JIG_GIT_CALLER: %v", got)
+	}
+}
+
+func TestCallerDirIsAbsolute(t *testing.T) {
+	got := withCaller([]string{"GIT_TRACE2_EVENT=/x"}, "rel/dir")
+	want, err := filepath.Abs("rel/dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(got, "JIG_GIT_DIR="+want) {
+		t.Errorf("want JIG_GIT_DIR=%s in %v", want, got)
+	}
+}
+
+func TestCallerNameStripsClosuresAndSkipsTheStandardLibrary(t *testing.T) {
+	for in, want := range map[string]string{
+		"a.example/m/pkg.F.func1":       "a.example/m/pkg.F",
+		"a.example/m/pkg.F.func1.2":     "a.example/m/pkg.F",
+		"a.example/m/pkg.F.func1.func2": "a.example/m/pkg.F",
+		"a.example/m/pkg.(*T).M.func3":  "a.example/m/pkg.(*T).M",
+		"a.example/m/pkg.F":             "a.example/m/pkg.F",
+	} {
+		if got := closureSuffix.ReplaceAllString(in, ""); got != want {
+			t.Errorf("closureSuffix on %q = %q, want %q", in, got, want)
+		}
+	}
+	for name, std := range map[string]bool{
+		"testing.tRunner": true, "runtime.goexit": true, "os/exec.(*Cmd).Run": true,
+		"a.example/m/pkg.F": false, "github.com/x/y.Z": false,
+	} {
+		if isStdlib(name) != std {
+			t.Errorf("isStdlib(%q) = %v, want %v", name, !std, std)
+		}
 	}
 }

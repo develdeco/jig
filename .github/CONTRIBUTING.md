@@ -137,7 +137,7 @@ matching the directory name and a `description:` of at most 50 words.
   each trace file also names the Go function that asked `gitx` for the process
   and the directory it ran in, from which the test is derived (the nearest
   `Test`, `Fuzz`, `Example` or `Benchmark` path component, so two tests that
-  agree in their first 40 characters share a row). `check` prints the top 20
+  agree in their first 64 characters share a row). `check` prints the top 20
   callers across the packages and each package's top 10 callers and tests
   after the table, in the job summary too, and CI uploads every count as
   `callers.tsv` (the `git-callers` artifact, kept 7 days: package, `caller` or

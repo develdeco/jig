@@ -86,9 +86,9 @@ var testPrefixes = []string{"Test", "Fuzz", "Example", "Benchmark"}
 
 // testNameFromDir derives the test that ran in dir: the nearest path
 // component that starts with a test prefix, trailing digits removed (t.TempDir
-// appends random digits to the test's name, cut to 40 characters). A directory
+// appends random digits to the test's name, cut to 64 characters). A directory
 // with no such component is "(other)". The name is approximate: two tests
-// whose names agree in their first 40 characters share it.
+// whose names agree in their first 64 characters share it.
 func testNameFromDir(dir string) string {
 	parts := strings.FieldsFunc(dir, func(r rune) bool { return r == '/' || r == '\\' })
 	for i := len(parts) - 1; i >= 0; i-- {
