@@ -31,8 +31,7 @@ func commitScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attemp
 	t.Helper()
 	patch := filepath.Join(fx.ScenarioDir, "slices", slice, "attempt-"+strconv.Itoa(attempt), "patch.diff")
 	gitMust(t, fx.RepoDir, "apply", patch)
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" "+slice+": scenario patch", "-m", "Jig-Slice: "+slice)
+	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" "+slice+": scenario patch"+"\n\n"+"Jig-Slice: "+slice)
 	return gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
 }
 

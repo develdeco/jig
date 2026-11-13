@@ -180,15 +180,8 @@ func TestGateHandsTheNextRoundItsProbeLedger(t *testing.T) {
 	if err := os.WriteFile(path, append(body, []byte("\n// changed after round 1\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitx.Run(build, "add", "-A"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.RunEnv(build, buildGitEnv, "commit", "-m", "change beta after round 1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitx.Run(build, "push", "origin", ticketBranch(fx.Ticket)); err != nil {
-		t.Fatal(err)
-	}
+	builder(t).Commit(build, "change beta after round 1")
+	builder(t).Push(build, "origin", ticketBranch(fx.Ticket))
 
 	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 2: %v", err)

@@ -114,7 +114,7 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 			run(t, foreign, "clone", fx.RepoRemote, ".")
 			run(t, foreign, "checkout", "-b", branch, oldMain)
 			writeAndCommit(t, foreign, "theirs.txt", "not in the build lease", "someone else's commit")
-			run(t, foreign, "push", "origin", branch)
+			builder(t).Push(foreign, "origin", branch)
 			theirs = originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 		})
 		journalBefore := journalLen(t, d, fx.Ticket)

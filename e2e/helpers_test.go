@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitenv"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -292,19 +293,12 @@ func scriptedPush(t *testing.T, remote, relPath, content, message string) {
 	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 		t.Fatalf("scriptedPush: write %s: %v", full, err)
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("scriptedPush: git add: %v", err)
-	}
-	if _, err := gitx.RunEnv(dir, pinnedIdentityEnv, "commit", "-m", message); err != nil {
-		t.Fatalf("scriptedPush: git commit: %v", err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Commit(dir, message)
 	branch, err := gitx.Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		t.Fatalf("scriptedPush: rev-parse HEAD: %v", err)
 	}
-	if _, err := gitx.Run(dir, "push", "origin", branch); err != nil {
-		t.Fatalf("scriptedPush: push: %v", err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Push(dir, "origin", branch)
 }
 
 // readJournal opens fx's store and reads ticket's journal.

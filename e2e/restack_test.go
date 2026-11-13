@@ -212,8 +212,7 @@ func TestHandResolvedMergeGetsADeltaRound(t *testing.T) {
 	// The session merges main, edits a file the merge touched, and commits.
 	h.git("merge", "--no-ff", "--no-commit", "origin/main")
 	writeFileOrFatal(t, filepath.Join(h.Clone, "alpha", "MAIN_A.md"), []byte("from main\nand a line of the session's\n"))
-	h.git("add", "-A")
-	h.git("commit", "-m", "merge main, by hand")
+	h.builder().Commit(h.Clone, "merge main, by hand")
 	merge := h.git("rev-parse", "HEAD")
 
 	// A bare publish refuses the head: nobody reviewed the resolution.

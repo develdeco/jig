@@ -261,6 +261,14 @@ func scenarioBranchDir(testdataDir string, opts Opts) (string, error) {
 	return branchDir, nil
 }
 
+// writeCodeAttributes gives a code repository the root .gitattributes of the
+// store: no conversion of any file. gitx serves a repository in process only
+// when its root attributes say so, and the tests' own builder moves in a
+// code repo, a lease cloned from it and its bare remote are in-process ones.
+func writeCodeAttributes(dir string) error {
+	return writeFile(filepath.Join(dir, ".gitattributes"), []byte(gitx.StoreAttributes))
+}
+
 // buildTree writes the fixture opts describes into the empty directory dir
 // with the git program: every repository, remote, the store and the
 // scenario, everything but the per-machine mapping (mapMachine). It is what
@@ -293,6 +301,9 @@ func buildTree(dir string, opts Opts, testdataDir string) (*Fixture, error) {
 	if err := rewriteJigYAML(repoDir, envtoolBin, stateFile, opts.EnvFail); err != nil {
 		return nil, err
 	}
+	if err := writeCodeAttributes(repoDir); err != nil {
+		return nil, err
+	}
 	if err := initGitRepo(repoDir); err != nil {
 		return nil, err
 	}
@@ -315,6 +326,9 @@ func buildTree(dir string, opts Opts, testdataDir string) (*Fixture, error) {
 			return nil, err
 		}
 		if err := rewriteJigYAML(secondDir, envtoolBin, stateFile, false); err != nil {
+			return nil, err
+		}
+		if err := writeCodeAttributes(secondDir); err != nil {
 			return nil, err
 		}
 		if err := initGitRepo(secondDir); err != nil {

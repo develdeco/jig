@@ -43,6 +43,7 @@ func testEnv(jigHome string) env {
 func envFrom(vars map[string]string) env {
 	e := processEnv()
 	e.getenv = func(key string) string { return vars[key] }
+	e.getwd = startingDir
 	e.mirrorClient = noGitHub()
 	e.spawn = refuseSpawn
 	e.unsetenv = func(string) {}

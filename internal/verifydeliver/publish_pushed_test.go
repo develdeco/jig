@@ -57,7 +57,7 @@ func TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt(t *testing.T) {
 	}
 	writeAndCommit(t, stale.Dir, "leftover.txt", "an earlier attempt", "an earlier publish's leftover")
 	// The branch reaches origin from the build lease.
-	run(t, buildDir, "push", "origin", branch)
+	builder(t).Push(buildDir, "origin", branch)
 	pushed := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 	logFile, _ := useGithubHost(t, &d, openPullOf(t, branch), "")
 
