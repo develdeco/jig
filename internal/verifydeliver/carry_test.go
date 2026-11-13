@@ -20,12 +20,19 @@ import (
 // without a conflict, returning the branch's new head.
 func targetMoves(t *testing.T, fx *fixture.Fixture, name string) string {
 	t.Helper()
-	run(t, fx.RepoDir, "checkout", "main")
-	writeAndCommit(t, fx.RepoDir, name, "from the target", "the target moves: "+name)
-	run(t, fx.RepoDir, "push", "origin", "main")
-	run(t, fx.RepoDir, "checkout", ticketBranch(fx.Ticket))
-	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "main")
-	return run(t, fx.RepoDir, "rev-parse", "HEAD")
+	return targetMovesIn(t, fx, fx.RepoDir, name)
+}
+
+// targetMovesIn is targetMoves for the clone at repoDir, a ticket's other repo
+// among them.
+func targetMovesIn(t *testing.T, fx *fixture.Fixture, repoDir, name string) string {
+	t.Helper()
+	run(t, repoDir, "checkout", "main")
+	writeAndCommit(t, repoDir, name, "from the target", "the target moves: "+name)
+	run(t, repoDir, "push", "origin", "main")
+	run(t, repoDir, "checkout", ticketBranch(fx.Ticket))
+	run(t, repoDir, "merge", "--no-ff", "--no-edit", "main")
+	return run(t, repoDir, "rev-parse", "HEAD")
 }
 
 func readReport(t *testing.T, d Deps, ticket string, n int) reportYAML {
@@ -306,12 +313,7 @@ func TestGateCarriesATwoRepoRoundWhenTheTargetMovedInOne(t *testing.T) {
 		t.Fatalf("round 1 reviewed_sha = %v, want both repos", first.ReviewedSHA)
 	}
 
-	run(t, fx.SecondRepoDir, "checkout", "main")
-	writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
-	run(t, fx.SecondRepoDir, "push", "origin", "main")
-	run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
-	run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
-	merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+	merged := targetMovesIn(t, fx, fx.SecondRepoDir, "main1.txt")
 
 	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -336,12 +338,7 @@ func TestGateCarriesARoundWhoseStackedRepoMergedNothing(t *testing.T) {
 	d.Stack = stackedOnJIG0
 	first := readReport(t, d, fx.Ticket, 1)
 
-	run(t, fx.SecondRepoDir, "checkout", "main")
-	writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
-	run(t, fx.SecondRepoDir, "push", "origin", "main")
-	run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
-	run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
-	merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+	merged := targetMovesIn(t, fx, fx.SecondRepoDir, "main1.txt")
 
 	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -506,12 +503,7 @@ func TestRoundsRecordTheMergeADeltaCarriedInEachShape(t *testing.T) {
 	t.Run("one repo of a round over two", func(t *testing.T) {
 		t.Parallel()
 		fx, d, _ := reviewedInTwoRepos(t)
-		run(t, fx.SecondRepoDir, "checkout", "main")
-		writeAndCommit(t, fx.SecondRepoDir, "main1.txt", "from the target", "the target moves in the second repo")
-		run(t, fx.SecondRepoDir, "push", "origin", "main")
-		run(t, fx.SecondRepoDir, "checkout", ticketBranch(fx.Ticket))
-		run(t, fx.SecondRepoDir, "merge", "--no-ff", "--no-edit", "main")
-		merged := run(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+		merged := targetMovesIn(t, fx, fx.SecondRepoDir, "main1.txt")
 		writeAndCommit(t, fx.SecondRepoDir, "fix.txt", "a fix", "a fix after the merge")
 
 		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/spawn"
@@ -50,11 +52,19 @@ type Deps struct {
 	// to its environment, bounded by limit, and returns its combined output.
 	// nil means the real run: envrun.ShellOutputEnv, through sh.
 	Oracle func(cmd, dir string, env []string, limit time.Duration) (string, error)
+	// OracleUsage is Oracle that also returns what the run's process tree
+	// used; it is used when Oracle is nil, and nil means the real run
+	// (envrun.ShellOutputUsage). An injected Oracle measures nothing.
+	OracleUsage func(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error)
 	// Sh finds the sh the oracle and the env class's commands run through;
 	// nil is envrun.Sh.
 	Sh func() (string, error)
 	// Now is the clock the run's lines and its timing read; nil is time.Now.
 	Now func() time.Time
+	// Alive says whether a verification worker with the pid, started at the
+	// time, is still running; nil is the operating system's answer
+	// (workerlive.Alive).
+	Alive func(pid int, notBefore time.Time) bool
 	// Log, when set, is where the run writes what it did and the tail of a
 	// failed oracle's output; a detached worker's is its own stdout, which is
 	// the machine-local log. nil discards.
@@ -158,12 +168,17 @@ func (d Deps) sleep(t time.Duration) {
 	time.Sleep(t)
 }
 
-// oracle runs cmd in dir, or for real when Deps.Oracle is nil.
-func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string, error) {
+// oracle runs cmd in dir, or for real when Deps.Oracle is nil, and returns
+// what its process tree used (zero when nothing measured it).
+func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error) {
 	if d.Oracle != nil {
-		return d.Oracle(cmd, dir, env, limit)
+		out, err := d.Oracle(cmd, dir, env, limit)
+		return out, envrun.Usage{}, err
 	}
-	return envrun.ShellOutputEnv(cmd, dir, limit, env)
+	if d.OracleUsage != nil {
+		return d.OracleUsage(cmd, dir, env, limit)
+	}
+	return envrun.ShellOutputUsage(cmd, dir, limit, env)
 }
 
 // sh finds the sh commands run through, with envrun.Sh when Deps.Sh is nil.
@@ -226,7 +241,7 @@ func (d Deps) prepare(r Request) (*run, error) {
 // is one, and reports whether the request stops there: it does unless Rerun.
 func (x *run) existing(lines []journal.Line) bool {
 	cur := journal.VerificationState(lines, x.sha, x.r.Slice)
-	if cur.State == journal.VerifyNone || x.r.Rerun {
+	if cur.State == journal.VerifyNone || x.r.Rerun || x.standsAside(lines, cur) {
 		return false
 	}
 	x.res.Existing = true
@@ -235,6 +250,44 @@ func (x *run) existing(lines []journal.Line) bool {
 	x.res.Seconds = cur.Seconds
 	x.res.Summary = cur.Summary
 	return true
+}
+
+// standsAside reports whether the latest record cur judged nothing about the
+// code, so the request runs the oracle instead of repeating it: a pending line
+// whose worker is gone, a stopped run, a verification that could not start.
+// The ledger is read only for a pending line, to find its worker.
+func (x *run) standsAside(lines []journal.Line, cur journal.Verification) bool {
+	ref := phase.CommitRef{SHA: x.sha, Slice: x.r.Slice}
+	in := phase.VerifyInput{
+		Ticket: x.r.Ticket, Lines: lines, Commits: []phase.CommitRef{ref}, BranchKnown: true,
+		Now: x.d.now(), Alive: x.d.Alive,
+	}
+	if in.Alive == nil {
+		in.Alive = Alive
+	}
+	if cur.State == journal.VerifyPending {
+		in.Spawned, _ = LatestSpawned(x.d.JigHome, x.r.Ticket, in.Commits)
+		// A worker that Spawn started for this very request has written its
+		// own spawned line by the time it gets here: it is the one asking, not
+		// one that is already on the commit.
+		for k, list := range in.Spawned {
+			var others []phase.Spawned
+			for _, sp := range list {
+				if sp.PID != os.Getpid() {
+					others = append(others, sp)
+				}
+			}
+			in.Spawned[k] = others
+		}
+	}
+	// The derivation also judges the ticket's other pending verifications:
+	// only this request's own commit and slice count.
+	for _, row := range phase.DeriveVerifications(in) {
+		if row.Commit == ref.SHA && row.Slice == ref.Slice {
+			return row.State.StandsAside()
+		}
+	}
+	return false
 }
 
 // subject is the first line of the commit's message, as the clone has it: the
@@ -678,7 +731,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		defer release()
 	}
 	started := d.now()
-	out, oerr := d.oracle(runs, x.dir, target.env(), limit)
+	out, use, oerr := d.oracle(runs, x.dir, target.env(), limit)
 	if errors.Is(oerr, envrun.ErrStopped) {
 		// No verdict: the line says the run ended without judging the code,
 		// and the slice's state stays as it was.
@@ -701,6 +754,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	x.res.Seconds = seconds
 
 	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
+	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
 	if isLight {
 		line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
 		x.res.Ran, x.res.ReusedFrom = light.ran, light.reusedFrom

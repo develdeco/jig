@@ -151,7 +151,7 @@ A session taking a slice to build it (`jig claim`): a journal line plus the slic
 _Avoid_: assign, lock
 
 **Verification**:
-One run of a slice's oracle on a commit, in a detached worktree of the operator's clone and a detached process (`jig verify`), started by git's post-commit hook or the harness's PostToolUse. It is recorded as `verify-pending`, `oracle`, `recorded` and `verified` (or `verify-error`) lines, keyed by (commit, slice) and idempotent. Green is what a verification proved, never what a session claimed.
+One run of a slice's oracle on a commit, in a detached worktree of the operator's clone and a detached process (`jig verify`), started by git's post-commit hook or the harness's PostToolUse. It is recorded as `verify-pending`, `oracle`, `recorded` and `verified` (or `verify-error`) lines, keyed by (commit, slice) and idempotent. Green is what a verification proved, never what a session claimed. Its `oracle` line (and the gate's own `gate-oracle` line) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
 _Avoid_: CI run, test run
 
 **Journal**:

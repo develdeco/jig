@@ -70,6 +70,25 @@ func TestAFailureThatAnotherCommitFixedIsHistory(t *testing.T) {
 	}
 }
 
+func TestATimedOutVerificationIsToldAsFailed(t *testing.T) {
+	t.Parallel()
+	timedOut := newRig(t)
+	timedOut.onTicketBranch()
+	timedOut.handle(timedOut.ev(KindSessionStart))
+	timedOut.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: "1111111111111111", Attempt: 1, Outcome: "fail", Cause: journal.CauseTimeout, Summary: "slow"})
+	if res := timedOut.handle(timedOut.ev(KindPrompt)); !strings.Contains(res.Context, "verification FAILED") {
+		t.Errorf("prompt context = %q, want a timed out run told as failed", res.Context)
+	}
+
+	stopped := newRig(t)
+	stopped.onTicketBranch()
+	stopped.handle(stopped.ev(KindSessionStart))
+	stopped.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: "1111111111111111", Attempt: 1, Outcome: "fail", Cause: journal.CauseStopped, Summary: "stopped"})
+	if res := stopped.handle(stopped.ev(KindPrompt)); strings.Contains(res.Context, "verification FAILED") {
+		t.Errorf("prompt context = %q, want a stopped run not told as failed", res.Context)
+	}
+}
+
 func TestAnAnswerReachesTheSessionThatAsked(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)

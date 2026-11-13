@@ -693,6 +693,7 @@ func lsTreeEntry(entry string) (entryType, path string, err error) {
 func CommonDir(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
+		inProcessReads.Add(1)
 		out = loc.commonDir
 	} else {
 		var err error
@@ -744,6 +745,7 @@ func SameDir(a, b string) bool {
 func TopLevel(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
+		inProcessReads.Add(1)
 		out = loc.workTree
 	} else {
 		var err error

@@ -273,8 +273,8 @@ func (c *Context) readBrief(st *store.Store, ticket string, sl store.Slice) erro
 }
 
 // failedAttempts lists the failed oracle runs of slice (not a run jig's stop
-// ended, which judged nothing), oldest first, the
-// latest MaxFailedAttempts of them.
+// ended, which judged nothing), oldest first, the latest MaxFailedAttempts of
+// them.
 func failedAttempts(lines []journal.Line, slice string) []FailedAttempt {
 	out := []FailedAttempt{}
 	for _, l := range lines {

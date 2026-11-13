@@ -57,6 +57,15 @@ type Line struct {
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`
+	// CPUMs, PeakBytes and PeakBasis are what an oracle run's whole process
+	// tree used: its CPU time in whole milliseconds (at least 1 for a measured
+	// run), the most memory it held at once, and how that peak was measured
+	// (PeakBasisJob or PeakBasisSampled). Each is omitted when it could not be
+	// measured; not measured is not zero. They are the store's history of what
+	// a run cost, read by other tickets and other machines.
+	CPUMs     int64  `json:"cpu_ms,omitempty"`
+	PeakBytes uint64 `json:"peak_bytes,omitempty"`
+	PeakBasis string `json:"peak_basis,omitempty"`
 	// Head is a result line's lease head when that turn of the attempt
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
@@ -390,6 +399,27 @@ func GreenClaims(lines []Line) []string {
 		}
 	}
 	return commits
+}
+
+// The bases of an oracle line's PeakBytes: the exact peak committed memory of
+// a Windows job object, and the largest sum of resident sets seen by samples
+// of a Unix process group (a lower bound). Figures of different bases are not
+// compared with each other. They are envrun's BasisJob and BasisSampled.
+const (
+	PeakBasisJob     = "job"
+	PeakBasisSampled = "sampled"
+)
+
+// SetUsage records what a run's process tree used on l: cpu in whole
+// milliseconds, rounded up so a measured run is at least 1, and the peak with
+// its basis. A figure that is zero was not measured and is left unset.
+func (l *Line) SetUsage(cpu time.Duration, peakBytes uint64, basis string) {
+	if cpu > 0 {
+		l.CPUMs = int64((cpu + time.Millisecond - 1) / time.Millisecond)
+	}
+	if peakBytes > 0 && basis != "" {
+		l.PeakBytes, l.PeakBasis = peakBytes, basis
+	}
 }
 
 // LastOracleSeconds is the wall time of the latest oracle run of command,

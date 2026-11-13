@@ -486,3 +486,32 @@ func TestInProcessAnswersAreTallied(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkTreeProbeAndDiscoveriesCountAsInProcessReads: the work-tree probe,
+// CommonDir and TopLevel answer from discovery alone, so each adds one to the
+// tally the session-start ceilings read, and none when gitx declines.
+func TestWorkTreeProbeAndDiscoveriesCountAsInProcessReads(t *testing.T) {
+	calls := map[string]func(dir string){
+		"WorkTreeProbe": func(d string) { _, _ = WorkTreeProbe(d) },
+		"CommonDir":     func(d string) { _, _ = CommonDir(d) },
+		"TopLevel":      func(d string) { _, _ = TopLevel(d) },
+	}
+	raises := func(dir string, call func(dir string)) int64 {
+		before := InProcessReads()
+		call(dir)
+		return InProcessReads() - before
+	}
+	work, _ := fakeRepo(t)
+	for name, call := range calls {
+		if got := raises(work, call); got != 1 {
+			t.Errorf("%s on a plain repository raised the tally by %d, want 1", name, got)
+		}
+	}
+	declined, gitDir := fakeRepo(t)
+	setConfig("[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n")(t, declined, gitDir)
+	for name, call := range calls {
+		if got := raises(declined, call); got != 0 {
+			t.Errorf("%s on a declined repository raised the tally by %d, want 0", name, got)
+		}
+	}
+}

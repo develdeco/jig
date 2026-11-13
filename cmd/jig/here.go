@@ -204,6 +204,9 @@ type hereView struct {
 	verified  []hereVerified
 	questions []hereQuestion
 	pending   []herePending
+	// states are the commits whose verification is not clear (not verified,
+	// stale, stopped, failed or timed out).
+	states []hereVerificationState
 	// waits are the runs of the ticket waiting for the project's suite slot.
 	waits []hereWait
 	// prompt is what to ask an agent to move the ticket on (internal/phase), "" when
@@ -283,6 +286,7 @@ func buildHereView(hc hereCtx) (hereView, error) {
 		return v, err
 	}
 	v.verified, v.pending = verificationsIn(lines)
+	v.states = hereVerificationStates(hc, lines, sliceIDs(st, ticket))
 	for _, r := range waitRows(suiteWaits(hc.JigHome, hc.Where.Project, ticket, lines)) {
 		v.waits = append(v.waits, hereWait{Slice: r[0], Line: r[1]})
 	}
@@ -397,6 +401,9 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 			}
 			blocks = append(blocks, axi.Table("pending_verifications", []string{"slice", "commit"}, prows))
 		}
+		if len(v.states) > 0 {
+			blocks = append(blocks, statesTable(v.states))
+		}
 		if len(v.waits) > 0 {
 			var wrows [][]string
 			for _, w := range v.waits {
@@ -480,11 +487,12 @@ type hereRefJSON struct {
 }
 
 type hereStateJSON struct {
-	Slices               []hereSlice    `json:"slices"`
-	Verified             []hereVerified `json:"verified"`
-	Questions            []hereQuestion `json:"questions"`
-	PendingVerifications []herePending  `json:"pending_verifications"`
-	Waiting              []hereWait     `json:"waiting,omitempty"`
+	Slices               []hereSlice             `json:"slices"`
+	Verified             []hereVerified          `json:"verified"`
+	Questions            []hereQuestion          `json:"questions"`
+	PendingVerifications []herePending           `json:"pending_verifications"`
+	Waiting              []hereWait              `json:"waiting,omitempty"`
+	VerificationStates   []hereVerificationState `json:"verification_states"`
 }
 
 // json builds the --json object: the located parts, the ticket's state, and
@@ -512,7 +520,7 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 		out.Session = &hereRefJSON{ID: w.Session, How: w.SessionHow}
 	}
 	if hc.Store != nil && w.Ticket != "" {
-		st := &hereStateJSON{Slices: v.slices, Verified: v.verified, Questions: v.questions, PendingVerifications: v.pending, Waiting: v.waits}
+		st := &hereStateJSON{Slices: v.slices, Verified: v.verified, Questions: v.questions, PendingVerifications: v.pending, Waiting: v.waits, VerificationStates: v.states}
 		if st.Slices == nil {
 			st.Slices = []hereSlice{}
 		}
@@ -524,6 +532,9 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 		}
 		if st.PendingVerifications == nil {
 			st.PendingVerifications = []herePending{}
+		}
+		if st.VerificationStates == nil {
+			st.VerificationStates = []hereVerificationState{}
 		}
 		out.State = st
 	}
