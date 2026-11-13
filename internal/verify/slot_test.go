@@ -144,7 +144,7 @@ func TestAnOracleTheManifestDoesNotMarkHeavyTakesNoSlot(t *testing.T) {
 func TestTheOracleStartsOnlyOnceTheSlotIsTaken(t *testing.T) {
 	t.Parallel()
 	r, shas := slotRig(t, true)
-	release, err := slot.Take(context.Background(), r.fx.Home, "slotproj", 1, "", nil)
+	release, err := slot.Take(context.Background(), r.fx.Home, slot.Request{Project: "slotproj", Who: ""}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

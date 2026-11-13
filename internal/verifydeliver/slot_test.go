@@ -96,7 +96,7 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 		ran.Store(true)
 		return "", nil
 	}
-	release, err := slot.Take(context.Background(), d.Home, d.Cfg.Name, 1, slot.Who("OTHER", "x"), nil)
+	release, err := slot.Take(context.Background(), d.Home, slot.Request{Project: d.Cfg.Name, Who: slot.Who("OTHER", "x")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 		t.Fatal("the gate's oracle ran while another run held the slot")
 	}
 	lines, _ := journal.Read(d.Store, fx.Ticket)
-	waits, err := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines)
+	waits, err := slot.Waits(d.Home, fx.Ticket, lines)
 	if err != nil || len(waits) != 1 || waits[0].Slice != "" || !strings.Contains(waits[0].Line, "OTHER/x is running its suite") {
 		t.Fatalf("Waits = %+v, %v; want the gate round behind OTHER/x", waits, err)
 	}
@@ -162,7 +162,7 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 	if taken == nil || taken.Slice != "" || taken.Source != "gate" {
 		t.Errorf("slot-taken line = %+v", taken)
 	}
-	if got, _ := slot.Waits(d.Home, d.Cfg.Name, fx.Ticket, lines); len(got) != 0 {
+	if got, _ := slot.Waits(d.Home, fx.Ticket, lines); len(got) != 0 {
 		t.Errorf("the gate still shows as waiting after it took the slot: %+v", got)
 	}
 }

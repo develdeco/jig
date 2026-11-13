@@ -32,7 +32,7 @@ func TestVerifyOfAHeavyOracleWaitsForTheProjectsSlotAndHereShowsIt(t *testing.T)
 	if err != nil || cfg.Name == "" {
 		t.Fatalf("store config = %+v, %v", cfg, err)
 	}
-	release, err := slot.Take(context.Background(), r.fx.Home, cfg.Name, 1, slot.Who("OTHER", "x"), nil)
+	release, err := slot.Take(context.Background(), r.fx.Home, slot.Request{Project: cfg.Name, Who: slot.Who("OTHER", "x")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
