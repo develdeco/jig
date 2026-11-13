@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/manifest"
@@ -133,6 +134,9 @@ type OracleRun struct {
 	// Slices are the ids of the ticket's slices whose oracle this is, in this
 	// workspace: the code those slices built is what the oracle was run for.
 	Slices []string `json:"slices,omitempty"`
+	// Usage is what the gate's own run of the oracle used; it stays out of
+	// review.json and is journalled on the gate-oracle line.
+	Usage envrun.Usage `json:"-"`
 }
 
 // Probe outcomes (ADR 0036): caught when the test command failed or timed out

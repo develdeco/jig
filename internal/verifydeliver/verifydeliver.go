@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
@@ -83,7 +84,11 @@ type Deps struct {
 // oracle is d.Oracle, or the real run when it is nil.
 func (d Deps) oracle() oracleFunc {
 	if d.Oracle != nil {
-		return d.Oracle
+		// An injected oracle measures nothing.
+		return func(cmd, dir string) (string, envrun.Usage, error) {
+			out, err := d.Oracle(cmd, dir)
+			return out, envrun.Usage{}, err
+		}
 	}
 	return shellOracle
 }

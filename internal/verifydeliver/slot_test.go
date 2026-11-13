@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
@@ -30,7 +31,7 @@ func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 		}
 		var running, peak atomic.Int32
 		arrived := make(chan struct{}, 2)
-		run := func(cmd, dir string) (string, error) {
+		run := func(cmd, dir string) (string, envrun.Usage, error) {
 			n := running.Add(1)
 			for {
 				p := peak.Load()
@@ -47,7 +48,7 @@ func TestTheGateTakesTheSlotOnlyForAHeavyOracle(t *testing.T) {
 				time.Sleep(300 * time.Millisecond)
 			}
 			running.Add(-1)
-			return "", nil
+			return "", envrun.Usage{}, nil
 		}
 		var wg sync.WaitGroup
 		for range 2 {
