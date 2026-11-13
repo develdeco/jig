@@ -469,3 +469,38 @@ func TestRewriteHistoryRefusesWhatItCannotRewriteFaithfully(t *testing.T) {
 		}
 	}
 }
+
+// TestRewritersRefuseAMirrorWithLinkedWorkTrees: a bare mirror that has a work
+// tree of its own (git worktree add from the bare repository) is refused, as
+// the repository itself is, by each rewriter, and nothing is changed.
+func TestRewritersRefuseAMirrorWithLinkedWorkTrees(t *testing.T) {
+	rewriters := map[string]func(dir, mirror string) error{
+		"RewriteHistory": func(dir, mirror string) error { return RewriteHistory(dir, []string{"a.txt"}, mirror) },
+		"RewriteHistoryFunc": func(dir, mirror string) error {
+			_, err := RewriteHistoryFunc(dir, []string{"a.txt"}, func(_ string, d []byte) []byte { return []byte(strings.ReplaceAll(string(d), "/old", "/new")) }, mirror)
+			return err
+		},
+		"RewriteHeadCommit": func(dir, mirror string) error { return RewriteHeadCommit(dir, []string{"a.txt"}, mirror) },
+	}
+	for name, rewrite := range rewriters {
+		t.Run(name, func(t *testing.T) {
+			work := newRewriteRepo(t, map[string]string{"a.txt": "path /old\n"}, "first")
+			bare := bareCloneOf(t, work)
+			pinnedGit(t, bare, "worktree", "add", "-q", "--detach", filepath.Join(t.TempDir(), "linked"), "main")
+			writeFileT(t, work, "a.txt", "path /new\n")
+			before := pinnedGit(t, work, "rev-parse", "HEAD")
+
+			err := rewrite(work, bare)
+			if err == nil || !strings.Contains(err.Error(), "linked work trees") {
+				t.Fatalf("err = %v, want a refusal naming the linked work trees", err)
+			}
+			if got := pinnedGit(t, work, "rev-parse", "HEAD"); got != before {
+				t.Errorf("HEAD moved to %s after a refusal", got)
+			}
+			if got := pinnedGit(t, bare, "rev-parse", "main"); got != before {
+				t.Errorf("the mirror's main moved to %s after a refusal", got)
+			}
+			mustBeSound(t, bare)
+		})
+	}
+}

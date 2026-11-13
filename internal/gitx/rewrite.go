@@ -77,7 +77,7 @@ func RewriteHeadCommit(dir string, paths []string, mirrors ...string) error {
 	case "true", "input":
 		return fmt.Errorf("gitx: rewrite the commit in %s: core.autocrlf converts line endings, and the rewrite stores files as they are", dir)
 	}
-	if err := refuseLinkedWorktrees(gitDir); err != nil {
+	if err := refuseLinkedWorktrees(append([]string{gitDir}, mirrors...)...); err != nil {
 		return fmt.Errorf("gitx: rewrite the commit in %s: %w", dir, err)
 	}
 	head, err := repo.Storer.Reference(plumbing.HEAD)
@@ -522,7 +522,7 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 	case "true", "input":
 		return fail("core.autocrlf converts line endings, and the rewrite stores files as they are")
 	}
-	if err := refuseLinkedWorktrees(gitDir); err != nil {
+	if err := refuseLinkedWorktrees(append([]string{gitDir}, mirrors...)...); err != nil {
 		return fail("%w", err)
 	}
 	head, err := repo.Storer.Reference(plumbing.HEAD)
@@ -915,20 +915,24 @@ func rewriteMirrorHistory(mirror string, src *git.Repository, w *historyRewrite)
 	return pruneLoose(mirror, w.stale, keep)
 }
 
-// refuseLinkedWorktrees is an error when the git directory has linked work
-// trees (git worktree add): each has a HEAD, a reflog and an index of its own
-// under worktrees/ that name commits and blobs, which a rewrite would leave at
-// the old ids while it removes the objects, and so corrupt the work tree.
-func refuseLinkedWorktrees(gitDir string) error {
-	entries, err := os.ReadDir(filepath.Join(gitDir, "worktrees"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if len(entries) > 0 {
-		return fmt.Errorf("the repository has linked work trees (%s), whose HEAD and index a rewrite would leave at the old commits; remove them first", entries[0].Name())
+// refuseLinkedWorktrees is an error when one of the git directories (the
+// repository's and each mirror's) has linked work trees (git worktree add):
+// each has a HEAD, a reflog and an index of its own under worktrees/ that name
+// commits and blobs, which a rewrite would leave at the old ids while it
+// removes the objects, and so corrupt the work tree. It runs before anything is
+// changed.
+func refuseLinkedWorktrees(gitDirs ...string) error {
+	for _, gitDir := range gitDirs {
+		entries, err := os.ReadDir(filepath.Join(gitDir, "worktrees"))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("%s has linked work trees (%s), whose HEAD and index a rewrite would leave at the old commits; remove them first", gitDir, entries[0].Name())
+		}
 	}
 	return nil
 }
