@@ -23,7 +23,7 @@ func memoRepo(t *testing.T, url string) string {
 // editing the file would.
 func setMemoOrigin(t *testing.T, dir, url string) {
 	t.Helper()
-	cfg := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + url + "\n"
+	cfg := "[core]\n\trepositoryformatversion = 0\n[user]\n\tname = memo\n\temail = memo@example.invalid\n[remote \"origin\"]\n\turl = " + url + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
