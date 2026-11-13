@@ -13,11 +13,13 @@ import (
 )
 
 // stopCase is one way to end a running jig process: stop does it, skip (when
-// set) says why the case is not run.
+// set) says why the case is not run, and skipWhen (when set) says so only
+// where the case cannot work, returning the reason or "".
 type stopCase struct {
-	name string
-	stop func(*os.Process) error
-	skip string
+	name     string
+	stop     func(*os.Process) error
+	skip     string
+	skipWhen func() string
 }
 
 // oracleScript is the oracle the test commits: it starts a long-running
@@ -42,7 +44,7 @@ oracles:
 
 // TestKilledJigStopsItsOracle: an oracle's tree lives and dies with the jig
 // process that runs it. A jig gate, or a verification worker, stopped
-// mid-oracle (Windows: terminated; Unix: SIGTERM or SIGHUP) leaves no process
+// mid-oracle (Windows: terminated; Unix: SIGINT, SIGTERM or SIGHUP) leaves no process
 // of the oracle running, however the shell that started the oracle's tests
 // went.
 func TestKilledJigStopsItsOracle(t *testing.T) {
@@ -51,6 +53,11 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 			t.Run(how+"/"+sc.name, func(t *testing.T) {
 				if sc.skip != "" {
 					t.Skip(sc.skip)
+				}
+				if sc.skipWhen != nil {
+					if why := sc.skipWhen(); why != "" {
+						t.Skip(why)
+					}
 				}
 				t.Parallel()
 				fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "clean-round"})

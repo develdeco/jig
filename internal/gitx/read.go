@@ -101,9 +101,9 @@ type reader struct {
 }
 
 // inProcessReads counts the questions taken in process instead of by the
-// git program: newReader (every in-process read but the work-tree probe) and
-// workTreeProbeInProcess add one once the repository is discovered, so a
-// repository gitx declines adds none.
+// git program: newReader (every in-process read but the work-tree probe),
+// workTreeProbeInProcess, CommonDir and TopLevel add one once the repository
+// is discovered, so a repository gitx declines adds none.
 var inProcessReads atomic.Int64
 
 // InProcessReads is the number of in-process read answers so far. Its one

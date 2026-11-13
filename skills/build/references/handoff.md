@@ -10,3 +10,5 @@ You are done when `jig here` shows the slice verified. There is no result file t
 Stuck: `jig ask --slice <slice> "<question>"`, saying what you would do by default, and carry on with what it does not block. A brief that cannot be built as written, or an oracle that cannot pass, is a question, not another try. An environment that will not come up is a note and a release.
 Leave pushing to publish, and never answer your own question.
 ```
+
+`JIG_SLICE` scopes a session like a claim: a green slice it names starts no verification, while a `Jig-Slice` trailer names one commit's slice and that commit is still verified.

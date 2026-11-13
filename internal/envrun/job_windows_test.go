@@ -77,3 +77,37 @@ func TestTimeoutEndsTheOracleTree(t *testing.T) {
 	}
 	waitGone(t, pid)
 }
+
+// TestAnEndAfterReleaseKillsNothing: once the run is released its pid and
+// handle are no longer the run's, so a late end (a signal arriving as the run
+// finishes) must not take down whatever now holds them. With no job the end
+// would otherwise be a taskkill of the shell's tree.
+func TestAnEndAfterReleaseKillsNothing(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "pid")
+	c, err := shCommand(context.Background(), sleeperCommand(file), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newGuard(c)
+	if g.job != 0 {
+		_ = windows.CloseHandle(g.job)
+		g.job = 0
+		c.SysProcAttr = nil
+	}
+	if err := g.start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := waitForPID(t, file)
+	t.Cleanup(func() {
+		_ = KillTree(c)
+		_ = c.Wait()
+	})
+	g.release()
+	if err := g.end(); err != nil {
+		t.Fatalf("end after release = %v, want nil", err)
+	}
+	time.Sleep(time.Second)
+	if !pidAlive(c.Process.Pid) || !pidAlive(pid) {
+		t.Fatal("an end after release killed the run's tree")
+	}
+}
