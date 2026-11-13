@@ -120,9 +120,9 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// TestSpawnStartsNothingForAVerificationThatIsThere: any record of the commit
-// for the slice stands, pending ones too, a worker holding the lock counts as
-// one, and none of it starts a process or writes a line.
+// TestSpawnStartsNothingForAVerificationThatIsThere: a pass, a failure and a
+// pending line with no spawned line to doubt stand, a worker holding the lock
+// counts as one, and none of it starts a process or writes a line.
 func TestSpawnStartsNothingForAVerificationThatIsThere(t *testing.T) {
 	t.Parallel()
 	r, s := spawnRig(t)
@@ -131,9 +131,8 @@ func TestSpawnStartsNothingForAVerificationThatIsThere(t *testing.T) {
 		journal.VerifyPending: {Event: journal.EventVerifyPending, Attempt: 1},
 		journal.VerifyPass:    {Event: journal.EventOracle, Outcome: "pass", Attempt: 1},
 		journal.VerifyFail:    {Event: journal.EventOracle, Outcome: "fail", Attempt: 1},
-		journal.VerifyError:   {Event: journal.EventVerifyError, Attempt: 1},
 	} {
-		slice := map[string]string{journal.VerifyPending: "a", journal.VerifyPass: "b", journal.VerifyFail: "c", journal.VerifyError: "d"}[state]
+		slice := map[string]string{journal.VerifyPending: "a", journal.VerifyPass: "b", journal.VerifyFail: "c"}[state]
 		line.Slice, line.Commit = slice, sha
 		if err := journal.Append(r.st, r.fx.Ticket, line); err != nil {
 			t.Fatal(err)
@@ -149,8 +148,8 @@ func TestSpawnStartsNothingForAVerificationThatIsThere(t *testing.T) {
 	if led := ledgerOf(t, r); len(led) != 0 {
 		t.Errorf("ledger lines %+v, want none", led)
 	}
-	if n := len(r.lines()); n != 4 {
-		t.Errorf("journal has %d lines, want only the four the test wrote", n)
+	if n := len(r.lines()); n != 3 {
+		t.Errorf("journal has %d lines, want only the three the test wrote", n)
 	}
 
 	// A rerun starts one over an outcome.
