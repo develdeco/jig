@@ -682,6 +682,9 @@ func eventState(l events.Envelope) string {
 		}
 		return StateStalled
 	case journal.EventGateOracle:
+		if l.Outcome == "fail" {
+			return StateStalled
+		}
 		return StateGreen
 	case journal.EventVerified, journal.EventGateClean, journal.EventPublishDone:
 		return StateGreen
