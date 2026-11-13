@@ -3,6 +3,8 @@ package gitx
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/develdeco/jig/internal/gittest"
 )
 
 // filesStream is one commit holding a file, a directory with a file in it, a
@@ -26,10 +28,10 @@ a.txt
 
 `
 
-// filesRepos makes a plain repository holding filesStream and a clone of it
+// filesRepos makes a plain repository holding filesStream, a clone of it
 // that borrows its objects (alternates), which gitx leaves to the git
-// program, and returns both.
-func filesRepos(t *testing.T) (plain, declined string) {
+// program, and the commit they hold.
+func filesRepos(t *testing.T) (plain, declined, sha string) {
 	t.Helper()
 	root := t.TempDir()
 	plain = filepath.Join(root, "plain")
@@ -43,7 +45,11 @@ func filesRepos(t *testing.T) (plain, declined string) {
 	if _, err := Run(root, "clone", "-q", "--shared", plain, declined); err != nil {
 		t.Fatal(err)
 	}
-	return plain, declined
+	sha, err := Run(plain, "rev-parse", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plain, declined, sha
 }
 
 // filesAtRevCases are the paths asked of the repository filesStream makes and
@@ -70,10 +76,10 @@ var filesAtRevCases = []struct {
 // directory, a missing path and a path under a file do not, and an unknown rev
 // is an error.
 func TestFileExistsAtRevAnswersTheSameInADeclinedRepository(t *testing.T) {
-	plain, declined := filesRepos(t)
+	plain, declined, sha := filesRepos(t)
 	for name, dir := range map[string]string{"plain": plain, "declined": declined} {
 		for _, c := range filesAtRevCases {
-			got, err := FileExistsAtRev(dir, "main", c.path)
+			got, err := FileExistsAtRev(dir, sha, c.path)
 			if err != nil || got != c.want {
 				t.Errorf("%s: FileExistsAtRev(%q) = %v, %v; want %v", name, c.path, got, err, c.want)
 			}
@@ -81,5 +87,56 @@ func TestFileExistsAtRevAnswersTheSameInADeclinedRepository(t *testing.T) {
 		if _, err := FileExistsAtRev(dir, "no-such-rev", "a.txt"); err == nil {
 			t.Errorf("%s: an unknown rev is not an error", name)
 		}
+	}
+}
+
+// TestFilesAtRevAnswersWhatFileExistsAtRevDoes: per path, in both kinds of
+// repository, a repeated path and an unknown rev included.
+func TestFilesAtRevAnswersWhatFileExistsAtRevDoes(t *testing.T) {
+	plain, declined, sha := filesRepos(t)
+	var asked []string
+	for _, c := range filesAtRevCases {
+		asked = append(asked, c.path)
+	}
+	asked = append(asked, "a.txt")
+	for name, dir := range map[string]string{"plain": plain, "declined": declined} {
+		got, err := FilesAtRev(dir, sha, asked)
+		if err != nil {
+			t.Fatalf("%s: FilesAtRev: %v", name, err)
+		}
+		for _, c := range filesAtRevCases {
+			if got[c.path] != c.want {
+				t.Errorf("%s: FilesAtRev(%q) = %v, want %v", name, c.path, got[c.path], c.want)
+			}
+		}
+		if _, err := FilesAtRev(dir, "no-such-rev", asked); err == nil {
+			t.Errorf("%s: an unknown rev is not an error", name)
+		}
+		if got, err := FilesAtRev(dir, "no-such-rev", nil); err != nil || len(got) != 0 {
+			t.Errorf("%s: no paths asked of an unknown rev = %v, %v; want nothing", name, got, err)
+		}
+	}
+}
+
+// TestFilesAtRevStartsOneGitProcessInADeclinedRepository: where gitx leaves
+// the repository to git, several paths cost one process, and where it reads
+// the repository itself they cost none. Not parallel: it counts through the
+// process's trace.
+func TestFilesAtRevStartsOneGitProcessInADeclinedRepository(t *testing.T) {
+	plain, declined, sha := filesRepos(t)
+	paths := []string{"a.txt", "dir/b.txt", "sp ace.txt", "missing.txt", "dir"}
+	if n := gittest.CountGit(t, func() {
+		if _, err := FilesAtRev(declined, sha, paths); err != nil {
+			t.Error(err)
+		}
+	}); n != 1 {
+		t.Errorf("a declined repository: %d git processes for %d paths, want 1", n, len(paths))
+	}
+	if n := gittest.CountGit(t, func() {
+		if _, err := FilesAtRev(plain, sha, paths); err != nil {
+			t.Error(err)
+		}
+	}); n != 0 {
+		t.Errorf("a plain repository: %d git processes, want 0 (answered in process)", n)
 	}
 }

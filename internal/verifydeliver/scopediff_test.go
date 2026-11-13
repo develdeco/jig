@@ -128,3 +128,26 @@ func TestComputeScopeDiffAsksGitOnce(t *testing.T) {
 		t.Errorf("computeScopeDiff started %d git processes, want 1", n)
 	}
 }
+
+// TestComputeScopeDiffAddsTheOpenFilesThatStillExist: an open finding's file
+// that is still at the head is to be reviewed, one that is gone is not, and the
+// lookups of several files add no git process to the diff's one. Not
+// parallel: it counts through the process's trace.
+func TestComputeScopeDiffAddsTheOpenFilesThatStillExist(t *testing.T) {
+	dir, base, head := scopeRepo(t)
+	open := []string{"keep.txt", "del.txt", "sp ace.txt", "mod.txt"}
+	var diff scopeDiff
+	n := gittest.CountGit(t, func() {
+		var err error
+		if diff, err = computeScopeDiff(dir, base, head, open); err != nil {
+			t.Error(err)
+		}
+	})
+	want := []string{"added.txt", "keep.txt", "mod.txt", "new sp ace.txt", "new ünï.txt", "new-name.txt", "tc.txt"}
+	if !equalStrings(diff.MustReview, want) {
+		t.Errorf("MustReview = %q, want %q", diff.MustReview, want)
+	}
+	if n != 1 {
+		t.Errorf("computeScopeDiff with four open files started %d git processes, want 1 (the diff)", n)
+	}
+}

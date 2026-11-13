@@ -1224,16 +1224,22 @@ func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDif
 	for _, f := range changed {
 		mustReview[f] = true
 	}
+	var norms []string
 	for _, f := range openFiles {
 		norm, err := normalizeRepoRelPath(f)
 		if err != nil {
 			continue // an open finding's file was already validated when recorded
 		}
-		exists, err := gitx.FileExistsAtRev(leaseDir, head, norm)
-		if err != nil {
-			return scopeDiff{}, fmt.Errorf("verifydeliver: review: check open finding file %q at head: %w", f, err)
-		}
-		if exists {
+		norms = append(norms, norm)
+	}
+	// One question for every open file: a repository gitx reads itself answers
+	// them in process, and one it leaves to git costs one process, not two a file.
+	exist, err := gitx.FilesAtRev(leaseDir, head, norms)
+	if err != nil {
+		return scopeDiff{}, fmt.Errorf("verifydeliver: review: check the open finding files at head: %w", err)
+	}
+	for _, norm := range norms {
+		if exist[norm] {
 			mustReview[norm] = true
 		}
 	}

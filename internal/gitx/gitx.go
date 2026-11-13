@@ -977,3 +977,74 @@ func DiffNameStatus(dir, base, head string) (changed, deleted []string, err erro
 	}
 	return changed, deleted, nil
 }
+
+// FilesAtRev is FileExistsAtRev for several paths: for each of paths, whether
+// it is a blob (not a tree, not a submodule) in dir's tree at rev. A path the
+// repository is read in process for is answered there, as FileExistsAtRev
+// answers it; the rest, which are all of them in a repository gitx declines
+// (alternates, a pack index too large to read, and the other declines), go to
+// one "git cat-file --batch-check" that also checks rev, instead of a
+// rev-parse and an ls-tree a path. A rev that does not name a commit is an
+// error, as it is there. A path that cannot be a line of that protocol (a
+// newline, an empty or relative one) is asked alone, as FileExistsAtRev does.
+func FilesAtRev(dir, rev string, paths []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(paths))
+	var batch, alone []string
+	for _, p := range paths {
+		if _, seen := out[p]; seen {
+			continue
+		}
+		if et, found, ok := treeEntryInProcess(dir, rev, p, os.LookupEnv); ok {
+			out[p] = found && et == "blob"
+			continue
+		}
+		out[p] = false
+		if batchablePath(p) && !strings.ContainsAny(rev, "\n\x00") {
+			batch = append(batch, p)
+		} else {
+			alone = append(alone, p)
+		}
+	}
+	for _, p := range alone {
+		exists, err := FileExistsAtRev(dir, rev, p)
+		if err != nil {
+			return nil, err
+		}
+		out[p] = exists
+	}
+	if len(batch) == 0 {
+		return out, nil
+	}
+	var in strings.Builder
+	in.WriteString(rev + "^{commit}\n")
+	for _, p := range batch {
+		in.WriteString(rev + ":" + p + "\n")
+	}
+	got, err := RunInput(dir, []byte(in.String()), "cat-file", "--batch-check")
+	if err != nil {
+		return nil, fmt.Errorf("gitx: files at rev: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(got, "\r\n"), "\n")
+	if len(lines) != len(batch)+1 {
+		return nil, fmt.Errorf("gitx: files at rev: cat-file --batch-check answered %d lines for %d questions", len(lines), len(batch)+1)
+	}
+	if strings.HasSuffix(strings.TrimRight(lines[0], "\r"), " missing") {
+		return nil, fmt.Errorf("gitx: files at rev: rev %q does not resolve to a commit", rev)
+	}
+	for i, p := range batch {
+		fields := strings.Fields(strings.TrimRight(lines[i+1], "\r"))
+		out[p] = len(fields) == 3 && fields[1] == "blob"
+	}
+	return out, nil
+}
+
+// batchablePath reports whether p can be one "rev:path" line of git's
+// object-name protocol: not empty, on one line, and not a form git reads
+// relative to something ("./x", "../x", "/x", ":x").
+func batchablePath(p string) bool {
+	if p == "" || strings.ContainsAny(p, "\n\r\x00") {
+		return false
+	}
+	return !(strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
+		strings.HasPrefix(p, ":") || p == "." || p == "..")
+}
