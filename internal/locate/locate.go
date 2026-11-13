@@ -265,6 +265,9 @@ func (l *locator) attach() error {
 	case l.o.Slice != "":
 		w.Slice, w.SliceHow = l.o.Slice, HowArg
 	case l.o.Getenv("JIG_SLICE") != "":
+		// JIG_SLICE is a session's scope, like a claim: a green slice it names
+		// starts no verification. A Jig-Slice trailer names one commit's
+		// slice instead, and that commit is still verified.
 		w.Slice, w.SliceHow = l.o.Getenv("JIG_SLICE"), HowEnv
 	case st != nil && w.Ticket != "" && w.Session != "":
 		if slice := claimedSlice(st, w.Ticket, w.Session); slice != "" {
