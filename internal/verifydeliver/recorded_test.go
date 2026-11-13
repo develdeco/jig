@@ -538,6 +538,42 @@ func TestBuildersAreTheAgentsThatChangedTheBranch(t *testing.T) {
 			t.Errorf("JudgeIndependence(%+v) = %q (%v), want %q", who, got, err, want)
 		}
 	}
+
+	// A ticket built in two repos: the journal's lines name the repo each was
+	// made in, and the builder of either repo is a builder of the ticket. No
+	// hook reported either session's calls, so each is unknown, and a session
+	// that built none of it is independent of both.
+	o := orchestratorTicket(t, "api", "web")
+	for _, l := range []journal.Line{
+		{Event: journal.EventClaim, Session: "s-api", Slice: o.slice["api"], Repo: "api"},
+		{Event: journal.EventOracle, Session: "s-web", Slice: o.slice["web"], Repo: "web", Outcome: "pass"},
+		{Event: journal.EventGateOpen, Session: "s-opener"},
+	} {
+		if err := journal.Append(o.d.Store, o.ticket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	both, err := Builders(o.d, o.ticket, o.branch)
+	if err != nil {
+		t.Fatalf("Builders over two repos: %v", err)
+	}
+	names = nil
+	for _, b := range both {
+		names = append(names, b.Session+"/"+b.Agent)
+	}
+	if want := []string{"s-api/", "s-web/"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("builders of a ticket in two repos = %v, want %v", names, want)
+	}
+	for who, want := range map[string]Independence{
+		"s-api":      IndependentUnknown,
+		"s-web":      IndependentUnknown,
+		"s-opener":   IndependentYes,
+		"s-reviewer": IndependentYes,
+	} {
+		if got, err := JudgeIndependence(o.d, o.ticket, o.branch, Provenance{Session: who}); err != nil || got != want {
+			t.Errorf("JudgeIndependence(%s) over two repos = %q (%v), want %q", who, got, err, want)
+		}
+	}
 }
 
 // TestIndependenceReadsAndWritesAsAPlainYAMLScalar: true and false are YAML
