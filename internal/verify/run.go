@@ -271,8 +271,14 @@ func (x *run) standsAside(lines []journal.Line, cur journal.Verification) bool {
 			in.Spawned[k] = others
 		}
 	}
-	rows := phase.DeriveVerifications(in)
-	return len(rows) == 1 && rows[0].State.StandsAside()
+	// The derivation also judges the ticket's other pending verifications:
+	// only this request's own commit and slice count.
+	for _, row := range phase.DeriveVerifications(in) {
+		if row.Commit == ref.SHA && row.Slice == ref.Slice {
+			return row.State.StandsAside()
+		}
+	}
+	return false
 }
 
 // subject is the first line of the commit's message, as the clone has it: the

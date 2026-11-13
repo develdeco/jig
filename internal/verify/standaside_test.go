@@ -137,3 +137,47 @@ func TestAWorkerSpawnedMomentsAfterTheStaleLineRunsTheOracle(t *testing.T) {
 		t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run", res, err, len(r.oracle.seen()))
 	}
 }
+
+// TestStandAsideIgnoresOtherPendingVerifications: another commit's pending line
+// in the journal (a hook's worker for the next commit) does not keep a stopped
+// verification from running again, and two stale lines each stand aside.
+func TestStandAsideIgnoresOtherPendingVerifications(t *testing.T) {
+	t.Parallel()
+	old := time.Now().Add(-20 * time.Minute).Format(time.RFC3339Nano)
+	t.Run("stopped beside a pending commit", func(t *testing.T) {
+		t.Parallel()
+		r := newRig(t, fixture.Opts{})
+		sha := r.fixClamp()
+		for _, l := range []journal.Line{
+			{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Cause: journal.CauseStopped, Commit: sha, Attempt: 1},
+			{Slice: "b", Event: journal.EventVerifyPending, Commit: "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed", Attempt: 1},
+		} {
+			if err := journal.Append(r.st, r.fx.Ticket, l); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := Run(r.deps, r.request("a", sha))
+		if err != nil || res.Existing || len(r.oracle.seen()) != 1 {
+			t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run", res, err, len(r.oracle.seen()))
+		}
+	})
+	t.Run("two stale lines", func(t *testing.T) {
+		t.Parallel()
+		r := newRig(t, fixture.Opts{})
+		sha := r.fixClamp()
+		other := "feedfeedfeedfeedfeedfeedfeedfeedfeedfeed"
+		pid := exitedPID(t)
+		for _, c := range []struct{ slice, commit string }{{"a", sha}, {"b", other}} {
+			if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: c.slice, Event: journal.EventVerifyPending, Commit: c.commit, Attempt: 1, TS: old}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ledger.Append(r.deps.JigHome, journal.Line{Ticket: r.fx.Ticket, Slice: c.slice, Event: journal.EventVerifySpawned, Commit: c.commit, PID: pid, TS: old}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := Run(r.deps, r.request("a", sha))
+		if err != nil || res.Existing || len(r.oracle.seen()) != 1 {
+			t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run", res, err, len(r.oracle.seen()))
+		}
+	})
+}
