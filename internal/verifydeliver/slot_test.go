@@ -200,3 +200,67 @@ func TestTheGatesSuiteWaitsForTheSlotAndSaysSo(t *testing.T) {
 		t.Errorf("the gate still shows as waiting after it took the slot: %+v", got)
 	}
 }
+
+// TestTheGatePassesTheMarkersPinnedCountToTheHold: with the marker's slots
+// unset the gate's heavy run is measured and waits while another project's run
+// holds the machine; with slots pinned it is counted by its own project and is
+// admitted at once.
+func TestTheGatePassesTheMarkersPinnedCountToTheHold(t *testing.T) {
+	for name, tc := range map[string]struct {
+		slots      int
+		wantToWait bool
+	}{"unset": {0, true}, "pinned": {2, false}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d := newDeps(t, fx)
+			d.Cfg.SuiteSlots = tc.slots
+			release, err := slot.Take(context.Background(), d.Home, slot.Request{Project: "another-project", Who: slot.Who("OTHER", "x")}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			got := make(chan *slot.Share, 1)
+			go func() {
+				share, err := d.slotHolder(fx.Ticket)("test", "echo suite")
+				if err != nil {
+					t.Error(err)
+				}
+				got <- share
+			}()
+			if tc.wantToWait {
+				for deadline := time.Now().Add(60 * time.Second); ; {
+					lines, err := journal.Read(d.Store, fx.Ticket)
+					if err != nil {
+						t.Fatal(err)
+					}
+					waited := false
+					for _, l := range lines {
+						waited = waited || l.Event == journal.EventSlotWait
+					}
+					if waited {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("the gate never journaled that it waits")
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				select {
+				case <-got:
+					t.Fatal("the gate's run was admitted while another project held the machine")
+				default:
+				}
+				release()
+			}
+			select {
+			case share := <-got:
+				if share != nil {
+					share.Release()
+				}
+			case <-time.After(60 * time.Second):
+				t.Fatal("the gate's run was never admitted")
+			}
+		})
+	}
+}
