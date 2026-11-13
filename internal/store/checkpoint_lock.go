@@ -15,9 +15,9 @@ import (
 // after checkpointLockNotice, who holds the lock and keeps waiting; at
 // checkpointLockBound in all it fails, naming the holder, and holds nothing.
 // Fifteen minutes covers a push over a slow network behind a busy queue and
-// still ends a wedged holder in a clear failure. They are variables so a test
-// can shorten them on a Store (see checkpointWaits).
-var (
+// still ends a wedged holder in a clear failure. They are constants: a test
+// shortens the wait on the Store it uses (see checkpointWaits), never here.
+const (
 	checkpointLockNotice = 2 * time.Minute
 	checkpointLockBound  = 15 * time.Minute
 )
@@ -64,12 +64,6 @@ const checkpointLockName = "jig-checkpoint"
 // reaches the store through Claim, which takes the lock itself. The release
 // func is idempotent, so a caller that releases early can still defer it.
 func (s *Store) LockCheckpoint() (release func(), err error) {
-	return s.lockCheckpoint()
-}
-
-// lockCheckpoint is LockCheckpoint; it reads the notice and the bound from the
-// package variables, so a test can see both without waiting minutes.
-func (s *Store) lockCheckpoint() (func(), error) {
 	key, lockPath := s.checkpointLockTarget()
 	h := checkpointHoldFor(key)
 

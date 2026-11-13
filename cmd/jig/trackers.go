@@ -68,6 +68,11 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	// command, so unlike the checkpoint hook it has no reason to share the
 	// 2-minute bound a first sync of a sizeable store cannot finish inside:
 	// it runs until it is done.
+	if !*dryRun {
+		// The sync's record writes stay pending until the landing, so a claim
+		// by another builder meanwhile finds the store clean.
+		st.HoldTrackerWrites()
+	}
 	report, err := mirror.Sync(mirror.Deps{Store: st, Cfg: cfg, Home: jigHome, Client: e.mirrorClient}, mirror.SyncOpts{DryRun: *dryRun, Unbounded: true})
 	// What the sync wrote goes out even when it failed part-way: the records
 	// it did write are true. Together with the commit Sync made of the
