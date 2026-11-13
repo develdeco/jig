@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/pool"
 )
@@ -43,6 +44,9 @@ func newLeaseFx(t *testing.T) leaseFx {
 	run(t, lease, "checkout", "-b", "b")
 	writeAndCommit(t, lease, "one.txt", "one", "one")
 	source := cloneFrom(t, lease)
+	if err := os.Remove(filepath.Join(source, "one.txt")); err != nil {
+		t.Fatal(err)
+	}
 	tip := writeAndCommit(t, source, "two.txt", "two", "two")
 	return leaseFx{lease: lease, source: source, branch: "b", tip: tip}
 }
@@ -60,6 +64,9 @@ func (f leaseFx) wantAtTheSourcesTip(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(f.lease, "two.txt")); err != nil || string(b) != "two" {
 		t.Errorf("two.txt in the lease = %q, %v; want the source's file", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.lease, "one.txt")); !os.IsNotExist(err) {
+		t.Errorf("one.txt, which the source's commit deleted, is still in the lease: %v", err)
 	}
 	if got := run(t, f.lease, "status", "--porcelain"); got != "" {
 		t.Errorf("the lease is dirty:\n%s", got)
@@ -125,6 +132,9 @@ func TestFetchTicketBranchFromBuildLeaseTakesOneProcessWhenTheLeaseIsOnTheBranch
 		run(t, build, "checkout", "-b", "b")
 		writeAndCommit(t, build, "one.txt", "one", "one")
 		lease := cloneFrom(t, build)
+		if err := os.Remove(filepath.Join(build, "one.txt")); err != nil {
+			t.Fatal(err)
+		}
 		tip := writeAndCommit(t, build, "two.txt", "two", "two")
 		return home, leaseFx{lease: lease, source: build, branch: "b", tip: tip}
 	}
@@ -196,5 +206,46 @@ func TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt(t *te
 				t.Errorf("PrepareReviewRequest started %d resets of the lease, want %d (%q)", resets, c.resets, subcommands(calls, dir))
 			}
 		})
+	}
+}
+
+// TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt counts the hard resets
+// one recorded gate call starts in its lease: the one before the lease is
+// re-acquired (dirt would block the checkout), the one that restores it at the
+// copy it points at, and, only when the gate ran an oracle in it, the one
+// before the review. A round that reuses a pass runs nothing in the lease, so
+// it starts none for the review. Not parallel: it counts through the
+// process's trace.
+func TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt(t *testing.T) {
+	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	d := newDeps(t, fx)
+	driveBuild(t, fx, "rung-a")
+	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resets := func() int {
+		var gerr error
+		calls := gittest.GitCalls(t, func() { _, gerr = GatePrepare(d, GateOpts{Ticket: fx.Ticket}) })
+		if gerr != nil {
+			t.Fatalf("GatePrepare: %v", gerr)
+		}
+		n := 0
+		for _, s := range subcommands(calls, gateLease) {
+			if strings.HasPrefix(s, "reset --hard") {
+				n++
+			}
+		}
+		return n
+	}
+	// The lease is new and the gate runs the suite in it: the restore at the
+	// copy, and the one for what the suite left.
+	if got := resets(); got != 2 {
+		t.Errorf("a first call started %d resets of the gate lease, want 2", got)
+	}
+	// The head has not moved, so the suite's pass stands and nothing runs: the
+	// restore before the acquire and the one at the copy are all there is.
+	if got := resets(); got != 2 {
+		t.Errorf("a call that reused the pass started %d resets of the gate lease, want 2", got)
 	}
 }

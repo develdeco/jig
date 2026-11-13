@@ -375,25 +375,14 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 // (the name the caller resolved for the ticket once), at the build lease's
 // copy, in the pool under the jig home root jigHome: gate and publish leases
 // are separate clones, and the ticket branch exists only in the build lease
-// until publish pushes it.
+// until publish pushes it. Like fetchBranchFrom it leaves a lease on the branch
+// with its old tree for the restore the caller makes next.
 func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch string) error {
 	buildLeaseDir, err := pool.Dir(jigHome, repoName, ticket, pool.Build)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: resolve build lease: %w", err)
 	}
-	refspec := fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch)
-	// Fetching into refs/heads/<branch> fails while that branch is the
-	// lease's own checked-out HEAD, so step off it first.
-	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
-		return fmt.Errorf("verifydeliver: detach HEAD before fetch: %w", err)
-	}
-	if _, err := gitx.Run(leaseDir, "fetch", buildLeaseDir, refspec); err != nil {
-		return fmt.Errorf("verifydeliver: fetch %s from build lease: %w", branch, err)
-	}
-	if _, err := gitx.Run(leaseDir, "checkout", branch); err != nil {
-		return fmt.Errorf("verifydeliver: checkout %s: %w", branch, err)
-	}
-	return nil
+	return fetchBranchCopy(leaseDir, buildLeaseDir, "build lease", branch)
 }
 
 // runGateOracles runs every manifest oracle across every workspace and

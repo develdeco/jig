@@ -47,6 +47,10 @@ type gateRepo struct {
 	copy       branchCopy
 	man        manifest.Manifest
 	oracleRuns []OracleRun
+	// pristine says the lease was restored to its head when it was pointed at
+	// its copy and nothing has run in it since, so the restore a review round
+	// starts with would have nothing to undo (RoundRepo.Pristine).
+	pristine bool
 }
 
 // gateRepos are the repos a gate round covers, in the project's order. A

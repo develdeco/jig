@@ -456,14 +456,34 @@ func restorePristine(leaseDir, rev, step string) error {
 // fetchBranchFrom points the lease's own branch at the copy the repository at
 // source has: committed work only, whatever source's working tree holds.
 // Fetching into refs/heads/<branch> fails while that branch is the lease's
-// HEAD, so HEAD steps off it first, and the branch is checked out again after.
+// HEAD, unless git is told the update of the checked-out branch is meant
+// (--update-head-ok): it then moves the branch and leaves the index and the
+// tree where they were, which the restore the caller makes next (a hard reset
+// to a revision) brings along, so a lease on the branch is one process here
+// and not a detach, a fetch and a checkout. A lease on any other HEAD steps
+// off it first and checks the branch out after, as it always did.
+//
+// The caller's next step must be that restore: this leaves a lease on the
+// branch with the tree of its old tip until it is.
 func fetchBranchFrom(leaseDir, source, branch string) error {
+	return fetchBranchCopy(leaseDir, source, source, branch)
+}
+
+// fetchBranchCopy is fetchBranchFrom with from, what the error names the
+// source as.
+func fetchBranchCopy(leaseDir, source, from, branch string) error {
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch)
+	if on, ok := gitx.HeadBranch(leaseDir); ok && on == branch {
+		if _, err := gitx.Run(leaseDir, "fetch", "--update-head-ok", source, refspec); err != nil {
+			return fmt.Errorf("verifydeliver: fetch %s from %s: %w", branch, from, err)
+		}
+		return nil
+	}
 	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
 		return fmt.Errorf("verifydeliver: detach HEAD before fetch: %w", err)
 	}
 	if _, err := gitx.Run(leaseDir, "fetch", source, refspec); err != nil {
-		return fmt.Errorf("verifydeliver: fetch %s from %s: %w", branch, source, err)
+		return fmt.Errorf("verifydeliver: fetch %s from %s: %w", branch, from, err)
 	}
 	if _, err := gitx.Run(leaseDir, "checkout", branch); err != nil {
 		return fmt.Errorf("verifydeliver: checkout %s: %w", branch, err)
