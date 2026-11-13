@@ -267,9 +267,8 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
-	driveBuild(t, fx, "rung-a")
 	authorBranch(t, fx, "add-retry")
 	authorBranch(t, fx, "add-backoff")
 
@@ -1015,9 +1014,8 @@ func TestGateIgnoresACommitJigReportedButNeverVerified(t *testing.T) {
 func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
-	driveBuild(t, fx, "rung-a")
 	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("Gate round 1: %v", err)
 	}

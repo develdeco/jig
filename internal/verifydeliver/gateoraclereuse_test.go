@@ -3,7 +3,6 @@ package verifydeliver
 import (
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
@@ -33,8 +32,7 @@ func gateLines(t *testing.T, d Deps, ticket, command string) []journal.Line {
 // tree is journaled and makes the next gate on that tree run the suite.
 func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	alpha, beta := func() string { return testCmd(t, fx, "alpha") }, func() string { return testCmd(t, fx, "beta") }
 	var first string

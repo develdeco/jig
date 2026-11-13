@@ -106,8 +106,10 @@ type lineCase struct {
 	ownTreeOf string
 }
 
-// lineCases builds the cases of the table over one repository.
-func lineCases(t *testing.T) (dir string, cases []lineCase) {
+// lineCasesByGit builds the cases of the table over one repository with the git
+// program, one command at a time: the reference the line history scenario
+// (lineCases) is proven equal to. The tests read the scenario's copy instead.
+func lineCasesByGit(t *testing.T) (dir string, cases []lineCase) {
 	t.Helper()
 	r := newLineRepo(t)
 	reviewed := r.commit("work.txt", "the work\n")

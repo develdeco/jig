@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
@@ -125,8 +124,7 @@ func TestValidateReviewResultStillPresentRules(t *testing.T) {
 func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
 	t.Parallel()
 
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
+	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	round := 0
