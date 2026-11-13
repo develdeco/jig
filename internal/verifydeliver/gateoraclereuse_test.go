@@ -5,7 +5,9 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // gateLines returns the ticket's gate-oracle lines of command, in order.
@@ -34,7 +36,7 @@ func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	driveBuild(t, fx, "rung-a")
 	d := newDeps(t, fx)
-	alpha := func() string { return testCmd(t, fx, "alpha") }
+	alpha, beta := func() string { return testCmd(t, fx, "alpha") }, func() string { return testCmd(t, fx, "beta") }
 	var first string
 
 	step(t, "a gate pass is journaled with the env class that was up", func(t *testing.T) {
@@ -131,6 +133,34 @@ func TestGateReusesItsOwnEarlierPass(t *testing.T) {
 		}
 		if ran := rec.ran(); len(ran) != 2 {
 			t.Errorf("the gate ran %q, want both suite commands", ran)
+		}
+
+		// The rerun passed, so both commands have a pass on this tree; the
+		// command that failed here is sampled again, the other stands. A gate
+		// opens no round on a head it already reviewed, so the rule is read
+		// where the next round would read it.
+		st, err := store.Open(fx.StoreDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices, err := st.ReadSlices(fx.Ticket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := buildLeaseDir(t, fx)
+		man, err := manifest.Resolve(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reused, err := reusablePasses(d, fx.Ticket, dir, man, slices)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := reused[alpha()]; ok {
+			t.Errorf("alpha's pass stands beside a failed gate run on its tree: %+v", reused[alpha()])
+		}
+		if p, ok := reused[beta()]; !ok || p.Commit != head {
+			t.Errorf("beta's pass = %+v (found %v), want the pass at %s", p, ok, head)
 		}
 	})
 }
