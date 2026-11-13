@@ -197,37 +197,59 @@ func (in VerifyInput) judge(p CommitRef) CommitVerification {
 	return row
 }
 
-// workerGone reports whether the pending verification v has no live worker:
-// the spawned line's process is gone or was created after the line, and with
-// no spawned line, the pending line is older than PendingMaxAge.
+// workerGone reports whether the pending verification v has no live worker.
+// The workers of the pending line are the spawned lines it is the first
+// pending line after (spawnTied): it is gone when it has such a worker and
+// none is alive, and with no such worker, when the line is older than
+// PendingMaxAge. A worker that ran in process (jig verify --wait) leaves no
+// spawned line, and the lines of an earlier run of the commit belong to the
+// pending line of that run.
 func (in VerifyInput) workerGone(p CommitRef, v journal.Verification) bool {
 	ts, err := time.Parse(time.RFC3339Nano, v.TS)
 	if err != nil {
 		return false
 	}
-	// The latest spawned line that started this pending line's worker. A
-	// worker that ran in process (jig verify --wait) leaves none, and a line
-	// of an earlier or later run is not its worker: the age rule judges it.
-	var tied *Spawned
-	for i, sp := range in.Spawned[p] {
-		if sp.PID > 0 && spawnTie(sp.At, ts) && (tied == nil || sp.At.After(tied.At)) {
-			tied = &in.Spawned[p][i]
+	tied := false
+	for _, sp := range in.Spawned[p] {
+		if sp.PID <= 0 || !in.spawnTied(p, sp.At, ts) {
+			continue
+		}
+		tied = true
+		if in.Alive == nil || in.Alive(sp.PID, sp.At) {
+			return false
 		}
 	}
-	if tied != nil {
-		return in.Alive != nil && !in.Alive(tied.PID, tied.At)
+	if tied {
+		return true
 	}
 	return in.Now.Sub(ts) > PendingMaxAge
 }
 
-// spawnTie says whether a spawned line written at spawned started the worker
-// that wrote the pending line at pending: the line is written right after the
-// process starts and the worker writes its pending line first thing, so the
-// two are close, the spawned line usually the earlier. A line far from the
-// pending line belongs to another run of the same commit.
-func spawnTie(spawned, pending time.Time) bool {
+// spawnTied says whether the spawned line written at spawned started the
+// worker of the pending line written at pending: the line is written right
+// after the process starts and the worker writes its pending line first thing,
+// so the pending line is the first of the pair at or after the spawned line
+// (less a little, for the order the two are written in), and not long after
+// it. A line with an earlier pending line of the pair between them started
+// that line's worker.
+func (in VerifyInput) spawnTied(p CommitRef, spawned, pending time.Time) bool {
 	gap := pending.Sub(spawned)
-	return gap >= -spawnLead && gap <= spawnLag
+	if gap < -spawnLead || gap > spawnLag {
+		return false
+	}
+	for _, l := range in.Lines {
+		if l.Event != journal.EventVerifyPending || l.Commit != p.SHA || l.Slice != p.Slice {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, l.TS)
+		if err != nil {
+			continue
+		}
+		if at.Before(pending) && !at.Before(spawned.Add(-spawnLead)) {
+			return false
+		}
+	}
+	return true
 }
 
 const (

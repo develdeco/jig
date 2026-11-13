@@ -116,3 +116,24 @@ func TestAWorkerSpawnedForAStaleVerificationRunsTheOracle(t *testing.T) {
 		t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run and pass", res, err, len(r.oracle.seen()))
 	}
 }
+
+// TestAWorkerSpawnedMomentsAfterTheStaleLineRunsTheOracle: the same, with the
+// worker's spawned line written within seconds of the stale pending line.
+func TestAWorkerSpawnedMomentsAfterTheStaleLineRunsTheOracle(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	at := time.Now().Add(-3 * time.Second).Format(time.RFC3339Nano)
+	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1, TS: at}); err != nil {
+		t.Fatal(err)
+	}
+	for _, pid := range []int{exitedPID(t), os.Getpid()} {
+		if err := ledger.Append(r.deps.JigHome, journal.Line{Ticket: r.fx.Ticket, Slice: "a", Event: journal.EventVerifySpawned, Commit: sha, PID: pid, TS: time.Now().Format(time.RFC3339Nano)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := Run(r.deps, r.request("a", sha))
+	if err != nil || res.Existing || len(r.oracle.seen()) != 1 {
+		t.Fatalf("Run = %+v, %v, oracle calls %d, want the oracle to run", res, err, len(r.oracle.seen()))
+	}
+}

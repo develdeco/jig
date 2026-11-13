@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -257,6 +258,18 @@ func (x *run) standsAside(lines []journal.Line, cur journal.Verification) bool {
 	}
 	if cur.State == journal.VerifyPending {
 		in.Spawned, _ = LatestSpawned(x.d.JigHome, x.r.Ticket, in.Commits)
+		// A worker that Spawn started for this very request has written its
+		// own spawned line by the time it gets here: it is the one asking, not
+		// one that is already on the commit.
+		for k, list := range in.Spawned {
+			var others []phase.Spawned
+			for _, sp := range list {
+				if sp.PID != os.Getpid() {
+					others = append(others, sp)
+				}
+			}
+			in.Spawned[k] = others
+		}
 	}
 	rows := phase.DeriveVerifications(in)
 	return len(rows) == 1 && rows[0].State.StandsAside()

@@ -138,3 +138,35 @@ func TestAnEarlierRunsSpawnedLineDoesNotJudgeALaterPendingLine(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestAnInProcessRunIsNotJudgedByAnEarlierWorker(t *testing.T) {
+	// The dead worker's own pending line sits between its spawned line and the
+	// newer pending line of a run in process: the spawned line is not that
+	// run's.
+	lines := []journal.Line{
+		{Event: journal.EventVerifyPending, Slice: "s", Commit: shaA, TS: vts(3 * time.Minute), Attempt: 1},
+		{Event: journal.EventVerifyPending, Slice: "s", Commit: shaA, TS: vts(time.Minute), Attempt: 2},
+	}
+	in := VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}},
+		Spawned: map[CommitRef][]Spawned{{shaA, "s"}: {{PID: 7, At: vNow.Add(-3 * time.Minute)}}},
+		Alive:   func(int, time.Time) bool { return false }}
+	if r := derive(in)["a"]; r.State != VerifyRunning {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestTwoSpawnsForOnePendingLineAreRunningWhileOneIsAlive(t *testing.T) {
+	// Two workers started close together: one took the lock and wrote the
+	// pending line, the other found it held and left.
+	lines := []journal.Line{{Event: journal.EventVerifyPending, Slice: "s", Commit: shaA, TS: vts(time.Minute)}}
+	in := VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}},
+		Spawned: map[CommitRef][]Spawned{{shaA, "s"}: {{PID: 7, At: vNow.Add(-61 * time.Second)}, {PID: 8, At: vNow.Add(-60 * time.Second)}}},
+		Alive:   func(pid int, _ time.Time) bool { return pid == 7 }}
+	if r := derive(in)["a"]; r.State != VerifyRunning {
+		t.Fatalf("%+v", r)
+	}
+	in.Alive = func(int, time.Time) bool { return false }
+	if r := derive(in)["a"]; r.State != VerifyStale {
+		t.Fatalf("both gone: %+v", r)
+	}
+}
