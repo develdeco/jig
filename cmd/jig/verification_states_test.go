@@ -91,7 +91,7 @@ func TestHereNamesVerificationStates(t *testing.T) {
 }
 
 // TestStatusNamesVerificationStates: `jig status` tells the same commit, and
-// says the check was not done when the branch cannot be read.
+// names none when the branch cannot be read.
 func TestStatusNamesVerificationStates(t *testing.T) {
 	t.Parallel()
 	fx, e := statesRig(t)
@@ -114,13 +114,13 @@ func TestStatusNamesVerificationStates(t *testing.T) {
 		t.Errorf("jig status does not name the unverified commit:\n%s", out)
 	}
 
-	// With no start sha there is no branch to read: the check is not done.
+	// With no start sha there is no branch to read, so no commit is named.
 	if err := os.Remove(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "start.fixture-repo.sha")); err != nil {
 		t.Fatal(err)
 	}
 	out, _ = runMain(t, e, "", "status", fx.Ticket)
-	if !strings.Contains(out, "not verified: not checked (") || strings.Contains(out, "verification_states[") {
-		t.Errorf("jig status without a branch to read should say the check was not done:\n%s", out)
+	if strings.Contains(out, "verification_states[") {
+		t.Errorf("jig status without a branch to read should name no commit:\n%s", out)
 	}
 }
 

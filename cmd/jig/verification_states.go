@@ -120,7 +120,7 @@ func verificationStatesBlocks(e env, jigHome string, cfg project.Config, mp proj
 			}
 		}
 		var blocks []string
-		if !t.BranchKnown {
+		if !t.BranchKnown && why == "no clone" {
 			blocks = append(blocks, "not verified: not checked ("+why+")")
 		}
 		if states := statesOf(t.Derive()); len(states) > 0 {

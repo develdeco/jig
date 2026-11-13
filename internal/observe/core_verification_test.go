@@ -9,6 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // recordStart records where the ticket's branch started, as a claim does.
@@ -69,6 +70,11 @@ func TestStopTellsFailedAndStoppedWithoutHolding(t *testing.T) {
 	r.unattendedClaim("a")
 	r.recordStart()
 
+	for _, s := range []string{"a", "b"} {
+		if err := r.st.WriteSliceState(r.fx.Ticket, s, store.SliceState{State: "building", Attempts: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	failed := r.commit("a", "a.txt")
 	stopped := r.commit("b", "b.txt")
 	r.add(journal.Line{Event: journal.EventOracle, Outcome: "fail", Slice: "a", Commit: failed, Attempt: 1, Summary: "ok pkg 0.1s --- FAIL: TestX (0.00s) boom"})

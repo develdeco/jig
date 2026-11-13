@@ -188,6 +188,11 @@ func (h *handler) verificationFindings() []finding {
 		if underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] || r.State == phase.VerifyRunning || !r.State.Unclear() {
 			continue
 		}
+		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {
+			// A failed or stopped run is told to a builder still on the slice;
+			// once the slice is green, stalled or parked it is history.
+			continue
+		}
 		sha := short12(r.Commit)
 		f := finding{ref: string(r.State) + ":" + sha + ":" + r.Slice, blocking: r.State.Holds()}
 		switch r.State {
@@ -263,4 +268,10 @@ func (h *handler) dirtyTracked() []string {
 func fingerprint(parts []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+// building reports whether the slice is being built now.
+func (h *handler) building(slice string) bool {
+	ss, err := h.st.ReadSliceState(h.w.Ticket, slice)
+	return err == nil && ss.State == "building"
 }
