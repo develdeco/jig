@@ -13,6 +13,7 @@ package gitbuild
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
@@ -60,11 +61,16 @@ func (b *Builder) Commit(dir, msg string) {
 	b.run(dir, "commit", "-q", "-m", msg)
 }
 
-// Push pushes branch of the repository in dir to remote. A push the remote
+// Push pushes branch (or a refspec, which is the git program's) of the repository in dir to remote. A push the remote
 // rejects as not a fast-forward fails the test, as the git program's push
 // does.
 func (b *Builder) Push(dir, remote, branch string) {
 	b.t.Helper()
+	// A refspec (HEAD~1:refs/heads/x) is no branch name gitx knows.
+	if strings.ContainsAny(branch, ":~^") {
+		b.run(dir, "push", "-q", remote, branch)
+		return
+	}
 	if repo, err := gitx.OpenRepo(dir); err == nil {
 		err := repo.Push(remote, branch)
 		if err == nil {
