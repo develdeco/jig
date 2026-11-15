@@ -54,8 +54,8 @@ func hereCloneInfo(r clonebehind.Result) hereCloneJSON {
 // belongs to by: the machine map's spelling of the clone, found with symlinks
 // resolved on both sides (git reports /private/var where the map holds /var),
 // else the clone root itself. A linked worktree is named as its clone.
-func cloneNamedByMap(jigHome, dir string) string {
-	root := locate.CloneRoot(dir)
+func cloneNamedByMap(m *gitx.Memo, jigHome, dir string) string {
+	root := locate.CloneRoot(m, dir)
 	if machine, err := project.LoadMachine(jigHome); err == nil {
 		for _, mp := range machine {
 			for _, mapped := range mp.Clones {
@@ -74,7 +74,7 @@ func hereCloneJudged(c hereCtx) (clonebehind.Result, bool) {
 	if c.Where.RepoDir == "" {
 		return clonebehind.Result{}, false
 	}
-	r := clonebehind.Check(cloneNamedByMap(c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
+	r := clonebehind.Check(c.e.memo, cloneNamedByMap(c.e.memo, c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
 	return r, r.State == clonebehind.Behind || r.State == clonebehind.Diverged
 }
 
@@ -84,12 +84,12 @@ func hereCloneTarget(c hereCtx) string {
 	var repos []project.Repo
 	switch {
 	case c.Where.StorePath != "":
-		if cfg, err := project.LoadConfig(c.Where.JigHome, c.Where.StorePath, c.Where.Project, c.Where.Root, c.Where.RepoDir); err == nil {
+		if cfg, err := project.LoadConfigWith(c.e.memo, c.Where.JigHome, c.Where.StorePath, c.Where.Project, c.Where.Root, c.Where.RepoDir); err == nil {
 			repos = cfg.Repos
 		}
 	case c.Where.Root != "":
 		if m, err := project.LoadMarker(filepath.Join(c.Where.Root, project.MarkerFile)); err == nil {
-			repos = project.WithMarkerRepos(project.Config{Name: c.Where.Project}, c.Where.Root, m).Repos
+			repos = project.WithMarkerRepos(c.e.memo, project.Config{Name: c.Where.Project}, c.Where.Root, m).Repos
 		}
 	}
 	for _, r := range repos {

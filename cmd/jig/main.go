@@ -107,6 +107,12 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			Help: []string{"Run `jig` with no arguments to see the command list"},
 		})
 	}
+	// One memo per run, so a command asks git each repository question once.
+	// The commands that outlive one command (a screen, a server) keep none for
+	// the process's life: their own requests re-enter run and get one each.
+	if e.memo == nil && v.Spec.Name != "tui" && v.Spec.Name != "mcp" {
+		e.memo = gitx.NewMemo()
+	}
 	return v.Run(e, rest, stdout, stdin)
 }
 
@@ -229,7 +235,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	storePath, cfg, err := locateStore(jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
+	storePath, cfg, err := locateStore(e.memo, jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
@@ -243,6 +249,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	// The marker says which tracker's ids lead the project's branch names;
 	// the store names every ticket's branch by it.
 	st.BranchesFrom = cfg.BranchesFrom
+	st.Memo = e.memo
 	// Every store checkpoint (Store.Push) syncs the GitHub mirror, from
 	// inside the command that made it: the mirror depends on the store
 	// (internal/mirror imports internal/store), never the reverse, so this

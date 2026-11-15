@@ -72,6 +72,12 @@ type Store struct {
 	// identity (identity.go).
 	ident identityCache
 
+	// Memo is the command's git memo: the identity and the origin the Store
+	// reads are asked of git once per command, however many Stores the command
+	// makes of one repository. nil asks git each time. The command that opens
+	// the store sets it, as it does BranchesFrom.
+	Memo *gitx.Memo
+
 	// writer is the name this clone writes under in writers mode, resolved on
 	// first use by writerName (writers.go).
 	writer writerCache
@@ -220,7 +226,7 @@ func (s *Store) TrackerLinkPath(e TrackerEntry, o TrackerOwner) string {
 
 // HasRemote reports whether the store has a git remote named "origin".
 func (s *Store) HasRemote() bool {
-	_, err := gitx.Run(s.Root, "remote", "get-url", "origin")
+	_, err := s.Memo.OriginURL(s.Root, "origin")
 	return err == nil
 }
 

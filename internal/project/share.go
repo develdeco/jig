@@ -25,6 +25,8 @@ type ShareOpts struct {
 	// Create makes a repository through the host's CLI for each repo that
 	// has no remote and was given none (--create).
 	Create bool
+	// Memo is the command's git memo; nil asks git each time.
+	Memo *gitx.Memo
 }
 
 // ShareTarget is one repository `jig share` sets a remote on and pushes.
@@ -59,6 +61,9 @@ type SharePlan struct {
 	// Without are the nested repos that still have no remote after share:
 	// collaborators cannot get them.
 	Without []string
+	// Memo is the command's git memo, carried from ShareOpts; RunShare forgets
+	// a repository's entries when it changes its remote.
+	Memo *gitx.Memo
 }
 
 // Summary says in a line each what the plan will do.
@@ -98,7 +103,7 @@ func PlanShare(o ShareOpts) (SharePlan, error) {
 	if name == "" {
 		name = baseName(o.Root)
 	}
-	plan := SharePlan{Root: o.Root, Marker: m}
+	plan := SharePlan{Root: o.Root, Marker: m, Memo: o.Memo}
 	plan.Marker.Project = name
 	used := map[string]bool{}
 	var missing []string
@@ -107,7 +112,7 @@ func PlanShare(o ShareOpts) (SharePlan, error) {
 	// checked out; a nested repo that is only read (a submodule is detached
 	// by default) does not, and is checked when it turns out to be pushed.
 	target := func(label, dir, given string) (ShareTarget, error) {
-		t := ShareTarget{Name: label, Dir: dir, Origin: OriginOf(dir), Push: true}
+		t := ShareTarget{Name: label, Dir: dir, Origin: OriginOf(o.Memo, dir), Push: true}
 		t.Branch, _ = gitx.HeadBranch(dir)
 		switch {
 		case t.Origin != "" && given != "" && !sameRemote(t.Origin, given):
@@ -273,7 +278,9 @@ func RunShare(plan SharePlan, create HostCreate) (ShareResult, error) {
 		default:
 			continue
 		}
-		targets[i].Origin = OriginOf(t.Dir)
+		// The remote just changed: a stale answer must not outlive it.
+		plan.Memo.Forget(t.Dir)
+		targets[i].Origin = OriginOf(plan.Memo, t.Dir)
 		if targets[i].Origin == "" {
 			return res, fmt.Errorf("project: the %s has no origin after setting it", t.Name)
 		}

@@ -81,6 +81,12 @@ func LoadStoreConfig(storeRoot string) (Config, error) {
 // name is the project's name as the caller found it, used when neither the
 // store nor a marker says.
 func LoadConfig(jigHome, storeRoot, name string, roots ...string) (Config, error) {
+	return LoadConfigWith(nil, jigHome, storeRoot, name, roots...)
+}
+
+// LoadConfigWith is LoadConfig that asks the repos' origins through m, so a
+// command that loads a project's config several times asks git once.
+func LoadConfigWith(m *gitx.Memo, jigHome, storeRoot, name string, roots ...string) (Config, error) {
 	cfg, err := LoadStoreConfig(storeRoot)
 	if err != nil || cfg.SchemaVersion < 3 {
 		return cfg, err
@@ -92,11 +98,11 @@ func LoadConfig(jigHome, storeRoot, name string, roots ...string) (Config, error
 		if dir == "" || !isFile(filepath.Join(dir, MarkerFile)) {
 			return cfg, false
 		}
-		m, err := LoadMarker(filepath.Join(dir, MarkerFile))
-		if err != nil || !cfg.TakesMarker(m) {
+		marker, err := LoadMarker(filepath.Join(dir, MarkerFile))
+		if err != nil || !cfg.TakesMarker(marker) {
 			return cfg, false
 		}
-		return WithMarkerRepos(cfg, dir, m), true
+		return WithMarkerRepos(m, cfg, dir, marker), true
 	}
 	for _, dir := range roots {
 		if out, ok := try(dir); ok {
@@ -142,7 +148,7 @@ func (cfg Config) TakesMarker(m Marker) bool {
 // marker's, the origin of the repo's own clone, the URL .gitmodules gives its
 // path, else the repo's directory on this machine (pool clones work from a
 // local path, and a project that is not shared has no other address).
-func WithMarkerRepos(cfg Config, root string, m Marker) Config {
+func WithMarkerRepos(memo *gitx.Memo, cfg Config, root string, m Marker) Config {
 	if m.Project != "" {
 		cfg.Name = m.Project
 	}
@@ -152,7 +158,7 @@ func WithMarkerRepos(cfg Config, root string, m Marker) Config {
 			dir := RepoDir(root, r)
 			repos = append(repos, Repo{
 				Label:  RepoName(r),
-				Remote: repoRemote(root, r, dir),
+				Remote: repoRemote(memo, root, r, dir),
 				Target: r.Target,
 			})
 		}
@@ -168,7 +174,7 @@ func WithMarkerRepos(cfg Config, root string, m Marker) Config {
 		if r.Name == "" {
 			r.Name = filepath.Base(root)
 		}
-		repos = []Repo{{Label: r.Name, Remote: repoRemote(root, r, root), Target: r.Target}}
+		repos = []Repo{{Label: r.Name, Remote: repoRemote(memo, root, r, root), Target: r.Target}}
 	}
 	cfg.Repos = repos
 	if m.Branches != nil {
@@ -205,12 +211,12 @@ func RepoDir(root string, r MarkerRepo) string {
 }
 
 // repoRemote is a repo's remote, by the rule WithMarkerRepos states.
-func repoRemote(root string, r MarkerRepo, dir string) string {
+func repoRemote(memo *gitx.Memo, root string, r MarkerRepo, dir string) string {
 	if r.Remote != "" {
 		return r.Remote
 	}
 	if isGitDir(dir) {
-		if origin := OriginOf(dir); origin != "" {
+		if origin := OriginOf(memo, dir); origin != "" {
 			return origin
 		}
 	}
@@ -223,9 +229,9 @@ func repoRemote(root string, r MarkerRepo, dir string) string {
 }
 
 // OriginOf is the URL of dir's origin remote, "" when it has none (or dir is
-// no repo).
-func OriginOf(dir string) string {
-	out, err := gitx.Run(dir, "remote", "get-url", "origin")
+// no repo), asked through m (nil asks git).
+func OriginOf(m *gitx.Memo, dir string) string {
+	out, err := m.OriginURL(dir, "origin")
 	if err != nil {
 		return ""
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
@@ -70,6 +71,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 		Slice:     *sliceFlag,
 		Session:   *sessionFlag,
 		Getenv:    e.getenv,
+		Memo:      e.memo,
 		NoMap:     *noMap,
 	})
 	if err != nil {
@@ -85,7 +87,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	}
 
 	hc := hereCtx{e: e, Where: where, JigHome: jigHome, memo: &hereMemo{}}
-	if hc.Store, _, err = openLocatedStore(where); err != nil {
+	if hc.Store, _, err = openLocatedStore(e.memo, where); err != nil {
 		return renderErr(stdout, err)
 	}
 	if hc.Store != nil && (where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias) {
@@ -129,13 +131,13 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 // that its schema is one this binary reads, with the project config it holds.
 // A directory whose store is not on this machine has none: the store is nil
 // and so is the error.
-func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) {
+func openLocatedStore(m *gitx.Memo, where locate.Where) (*store.Store, project.Config, error) {
 	if where.StorePath == "" {
 		return nil, project.Config{}, nil
 	}
 	// The store config is completed with the project's repos from its marker,
 	// as locateStore does for a verb: a v3 store lists none itself.
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return nil, project.Config{}, err
 	}
@@ -146,6 +148,7 @@ func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) 
 	if err != nil {
 		return nil, project.Config{}, err
 	}
+	st.Memo = m
 	return st, cfg, nil
 }
 

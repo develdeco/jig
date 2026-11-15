@@ -65,6 +65,9 @@ func TestAcquireCloneAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
+	if !lease1.Fetched {
+		t.Error("a lease Acquire cloned does not say it fetched origin")
+	}
 	if lease1.Branch != "jig/T-1" {
 		t.Fatalf("Branch = %q, want jig/T-1", lease1.Branch)
 	}
@@ -93,6 +96,9 @@ func TestAcquireCloneAndResume(t *testing.T) {
 	lease2, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("second Acquire: %v", err)
+	}
+	if !lease2.Fetched {
+		t.Error("a lease Acquire reused does not say it fetched origin")
 	}
 	if lease2.Dir != lease1.Dir {
 		t.Fatalf("second Acquire dir = %q, want reuse of %q", lease2.Dir, lease1.Dir)
@@ -153,6 +159,9 @@ func TestAcquireNeverResetsExistingLocalBranch(t *testing.T) {
 	lease2, err := Acquire(jigHome, "fixture2", remote, "main", "jig/T-2", "T-2", Build)
 	if err != nil {
 		t.Fatalf("second Acquire: %v", err)
+	}
+	if !lease2.Fetched {
+		t.Error("a lease Acquire reused does not say it fetched origin")
 	}
 	if lease2.Dir != lease1.Dir {
 		t.Fatalf("second Acquire dir = %q, want reuse of %q", lease2.Dir, lease1.Dir)

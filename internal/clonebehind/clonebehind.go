@@ -55,16 +55,16 @@ type Result struct {
 	Reason string
 }
 
-// Check judges the clone in dir against origin's target branch. It reads
-// only local state.
-func Check(dir, target string) Result {
+// Check judges the clone in dir against origin's target branch, asking git
+// through m (nil asks each time). It reads only local state.
+func Check(m *gitx.Memo, dir, target string) Result {
 	of := "origin/" + target
 	r := Result{State: Unjudged, Dir: dir, Of: of}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		r.Reason = "the clone is not on disk"
 		return r
 	}
-	if _, err := gitx.TopLevel(dir); err != nil {
+	if _, err := m.TopLevel(dir); err != nil {
 		r.Reason = "the folder is not a git repository"
 		return r
 	}
@@ -80,7 +80,7 @@ func Check(dir, target string) Result {
 		return r
 	}
 	if !exists {
-		if _, err := gitx.Run(dir, "remote", "get-url", "origin"); err != nil {
+		if _, err := m.OriginURL(dir, "origin"); err != nil {
 			r.NoRemote = true
 			r.Reason = "the clone has no origin remote"
 			return r

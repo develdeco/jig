@@ -103,7 +103,7 @@ func cmdShare(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	where, err := locate.Locate(p.jigHome, cwd, locate.Opts{Getenv: e.getenv, StoreOnly: true})
+	where, err := locate.Locate(p.jigHome, cwd, locate.Opts{Getenv: e.getenv, StoreOnly: true, Memo: e.memo})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -129,6 +129,7 @@ func cmdShare(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		StoreDir:    where.StorePath,
 		StoreRemote: storeURL,
 		Remotes:     given,
+		Memo:        e.memo,
 		Create:      *create,
 	})
 	if err != nil {

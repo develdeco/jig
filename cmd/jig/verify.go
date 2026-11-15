@@ -177,7 +177,7 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		}
 	}
 	where, err := locate.Locate(jigHome, cwd, locate.Opts{
-		StoreFlag: st.Root, Ticket: ticket, Slice: o.slice, Session: o.session, Getenv: e.getenv, NoMap: true,
+		StoreFlag: st.Root, Ticket: ticket, Slice: o.slice, Session: o.session, Getenv: e.getenv, NoMap: true, Memo: e.memo,
 	})
 	if err != nil {
 		return none(err)
@@ -200,7 +200,7 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	if err != nil {
 		return none(err)
 	}
-	clone, workDir, err := verifyClone(cwd, o.cloneFlag, where.RepoDir, mp.Clones[repoName])
+	clone, workDir, err := verifyClone(e.memo, cwd, o.cloneFlag, where.RepoDir, mp.Clones[repoName])
 	if err != nil {
 		return none(err)
 	}
@@ -310,7 +310,7 @@ func verifySliceRepo(st *store.Store, cfg project.Config, mp project.MachineProj
 // directory. The directory is where the command runs when that is a checkout
 // of the same repository (a linked worktree has a HEAD of its own), else the
 // clone itself.
-func verifyClone(cwd, cloneFlag, located, mapped string) (clone, workDir string, err error) {
+func verifyClone(m *gitx.Memo, cwd, cloneFlag, located, mapped string) (clone, workDir string, err error) {
 	switch {
 	case cloneFlag != "":
 		clone = cloneFlag
@@ -319,7 +319,7 @@ func verifyClone(cwd, cloneFlag, located, mapped string) (clone, workDir string,
 	case mapped != "":
 		clone = mapped
 	default:
-		if clone, err = gitx.TopLevel(cwd); err != nil {
+		if clone, err = m.TopLevel(cwd); err != nil {
 			return "", "", &axi.Error{
 				Msg:  "no clone of the project's repo is known on this machine, and this directory is not in a git repository",
 				Code: "VALIDATION_ERROR",
@@ -328,9 +328,9 @@ func verifyClone(cwd, cloneFlag, located, mapped string) (clone, workDir string,
 		}
 	}
 	workDir = clone
-	if top, terr := gitx.TopLevel(cwd); terr == nil {
-		theirs, e1 := gitx.CommonDir(top)
-		ours, e2 := gitx.CommonDir(clone)
+	if top, terr := m.TopLevel(cwd); terr == nil {
+		theirs, e1 := m.CommonDir(top)
+		ours, e2 := m.CommonDir(clone)
 		if e1 == nil && e2 == nil && gitx.SameDir(theirs, ours) {
 			workDir = top
 		}

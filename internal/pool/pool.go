@@ -65,6 +65,10 @@ type Lease struct {
 	// "cherry-pick", "revert" or "unmerged index"; "" when there was nothing
 	// (recoverUnfinished).
 	Recovered string
+	// Fetched says Acquire fetched origin for this lease (a reused lease's fetch,
+	// a fresh clone's own), so its view of origin is as of Acquire and a caller
+	// that wants that view need not ask origin again.
+	Fetched bool
 }
 
 // Return leaves the lease directory exactly as it is: the pool never
@@ -256,7 +260,7 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		}
 	}
 
-	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered}, nil
+	return Lease{Dir: dir, Repo: repoName, Branch: branch, Recovered: recovered, Fetched: true}, nil
 }
 
 // unfinishedOps are the operations an earlier session can leave in progress
@@ -417,18 +421,16 @@ func Compare(dir, branch string) (Standing, error) {
 	if local == remote {
 		return InStep, nil
 	}
-	behind, err := gitx.IsAncestor(dir, local, remote)
+	ahead, behind, err := gitx.Standing(dir, local, remote)
 	if err != nil {
 		return 0, fmt.Errorf("pool: compare %s with %s: %w", localRef, remoteRef, err)
 	}
-	if behind {
+	switch {
+	case ahead == 0 && behind == 0:
+		return InStep, nil
+	case ahead == 0:
 		return Behind, nil
-	}
-	ahead, err := gitx.IsAncestor(dir, remote, local)
-	if err != nil {
-		return 0, fmt.Errorf("pool: compare %s with %s: %w", remoteRef, localRef, err)
-	}
-	if ahead {
+	case behind == 0:
 		return Ahead, nil
 	}
 	return Diverged, nil

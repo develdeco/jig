@@ -108,7 +108,7 @@ func TestCheck(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPair(t)
 			dir := tc.setup(t, p)
-			got := Check(dir, "main")
+			got := Check(nil, dir, "main")
 			if got.State != tc.want || got.NoRef != tc.noRef {
 				t.Fatalf("Check = %+v, want state %s noRef %v", got, tc.want, tc.noRef)
 			}
@@ -132,7 +132,7 @@ func TestCheck(t *testing.T) {
 func TestCheckNoRemoteIsNotNoRef(t *testing.T) {
 	p := newPair(t)
 	mustGit(t, p.clone, "remote", "remove", "origin")
-	if got := Check(p.clone, "main"); !got.NoRemote || got.NoRef {
+	if got := Check(nil, p.clone, "main"); !got.NoRemote || got.NoRef {
 		t.Fatalf("Check = %+v, want NoRemote and not NoRef", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestDivergedNote(t *testing.T) {
 	p := newPair(t)
 	commit(t, p.clone, "local")
 	p.originMoves(t, "x")
-	r := Check(p.clone, "main")
+	r := Check(nil, p.clone, "main")
 	want := "clone " + p.clone + " has diverged from origin/main (as of its last fetch): 1 behind, 1 ahead; a fast-forward pull will refuse, so it needs a merge or rebase by a person"
 	if got := DivergedNote(p.clone, r); got != want {
 		t.Fatalf("DivergedNote = %q, want %q", got, want)

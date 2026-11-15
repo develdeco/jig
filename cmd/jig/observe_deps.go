@@ -12,6 +12,7 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/observe"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -24,7 +25,7 @@ func observeDeps(e env, jigHome string) observe.Deps {
 		Now:       e.now,
 		Getenv:    e.getenv,
 		Start:     e.spawn,
-		OpenStore: openLocatedStore,
+		OpenStore: func(w locate.Where) (*store.Store, project.Config, error) { return openLocatedStore(nil, w) },
 		Derive:    derivePhase,
 		Here: func(w locate.Where, st *store.Store) (string, error) {
 			return hereText(e, w, jigHome, st)

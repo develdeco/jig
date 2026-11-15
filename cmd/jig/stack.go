@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -163,7 +164,7 @@ func cachedMergeReader(st *store.Store, cfg project.Config, mp project.MachinePr
 // from the machine mapping, and whether a parent merged from what this
 // machine knows (cachedMergeReader). A ticket stacked on nothing is told from
 // its record alone: the hook asks at every event.
-func locatedStack(where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
+func locatedStack(m *gitx.Memo, where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
 	rec, err := st.ReadTicket(where.Ticket)
 	if err != nil {
 		return stack.Plan{}, err
@@ -171,7 +172,7 @@ func locatedStack(where locate.Where, st *store.Store, jigHome string) (stack.Pl
 	if !stack.StackedOnAny(rec) {
 		return stack.Plan{Ticket: where.Ticket}, nil
 	}
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return stack.Plan{}, err
 	}
@@ -190,7 +191,7 @@ func hereStack(c hereCtx) (stack.Plan, bool) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return stack.Plan{}, false
 	}
-	plan, err := locatedStack(c.Where, c.Store, c.JigHome)
+	plan, err := locatedStack(c.e.memo, c.Where, c.Store, c.JigHome)
 	if err != nil || !plan.Stacked() {
 		return stack.Plan{}, false
 	}

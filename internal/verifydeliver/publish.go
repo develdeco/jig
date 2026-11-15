@@ -446,11 +446,14 @@ type publishFuncs struct {
 	confirm     func(branch, ticket, openPR string, hasHost bool) bool
 	guardedPush func(dir, remote, branch string, confirmed bool) error
 	fetchOrigin func(dir string) error
-	warn        func(format string, args ...any)
+	// injectedFetch says fetchOrigin is the caller's own (Deps.FetchOrigin), not
+	// the default, which a lease that has just fetched makes redundant.
+	injectedFetch bool
+	warn          func(format string, args ...any)
 }
 
 func (d Deps) publishFuncs() publishFuncs {
-	f := publishFuncs{confirm: d.Confirm, guardedPush: d.GuardedPush, fetchOrigin: d.FetchOrigin, warn: d.Warn}
+	f := publishFuncs{confirm: d.Confirm, guardedPush: d.GuardedPush, fetchOrigin: d.FetchOrigin, injectedFetch: d.FetchOrigin != nil, warn: d.Warn}
 	// The confirm default covers the whole interactive seam - both the
 	// fmt.Printf prompt and the stdin read - so a test that hands its own
 	// never touches the real terminal: stubbing only the read half would
@@ -526,8 +529,14 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	if err != nil {
 		return nil, err
 	}
-	if err := fn.fetchOrigin(lease.Dir); err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+	// Acquire fetched origin a moment ago, so a lease it made has the view of
+	// origin this publish needs, and asking again is a second process for the
+	// same answer. A publish whose caller supplies its own fetch (Deps.FetchOrigin)
+	// keeps it, and a lease that did not fetch gets exactly one.
+	if !lease.Fetched || fn.injectedFetch {
+		if err := fn.fetchOrigin(lease.Dir); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+		}
 	}
 	// A pull request into the branch of the parent the ticket is stacked on
 	// needs that branch on the origin: jig pushes no branch but the ticket's.

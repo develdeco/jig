@@ -463,7 +463,7 @@ func (d *doctorCtx) cloneNotes() {
 		// clone is named as the machine map spells it, as jig here does.
 		clone := d.cloneName(scope)
 		target := d.cloneTarget(clone)
-		res := clonebehind.Check(clone, target)
+		res := clonebehind.Check(d.e.memo, clone, target)
 		switch {
 		case res.State == clonebehind.Behind:
 			d.note("clone is %d %s behind %s (as of its last fetch): %s", res.Behind, plural(res.Behind, "commit", "commits"), res.Of, res.Pull)
@@ -478,7 +478,7 @@ func (d *doctorCtx) cloneNotes() {
 }
 
 func (d *doctorCtx) cloneName(dir string) string {
-	return cloneNamedByMap(d.jigHome, dir)
+	return cloneNamedByMap(d.e.memo, d.jigHome, dir)
 }
 
 // cloneTarget is the branch the marker's repo for clone lands work on:

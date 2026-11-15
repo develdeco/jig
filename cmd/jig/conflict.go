@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -191,7 +192,7 @@ func readHereConflicts(c hereCtx) (conflictAdvice, bool) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return conflictAdvice{}, false
 	}
-	cfg, mp, ok := locatedProject(c.Where, c.JigHome)
+	cfg, mp, ok := locatedProject(c.e.memo, c.Where, c.JigHome)
 	if !ok {
 		return conflictAdvice{}, false
 	}
@@ -200,8 +201,8 @@ func readHereConflicts(c hereCtx) (conflictAdvice, bool) {
 
 // locatedProject is the project config and the machine's mapping of it for
 // where; ok is false when either cannot be read.
-func locatedProject(where locate.Where, jigHome string) (project.Config, project.MachineProject, bool) {
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+func locatedProject(m *gitx.Memo, where locate.Where, jigHome string) (project.Config, project.MachineProject, bool) {
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return project.Config{}, project.MachineProject{}, false
 	}

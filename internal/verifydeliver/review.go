@@ -1216,13 +1216,9 @@ type scopeDiff struct {
 // before the first one that reports any) passes nil. Only the reviewer
 // source (below) ever calls this; the scripted source never does.
 func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
-	changed, err := gitx.DiffNameOnly(leaseDir, base, head, "AMT")
+	changed, deleted, err := gitx.DiffNameStatus(leaseDir, base, head)
 	if err != nil {
-		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed files: %w", err)
-	}
-	deleted, err := gitx.DiffNameOnly(leaseDir, base, head, "D")
-	if err != nil {
-		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff deleted files: %w", err)
+		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed and deleted files: %w", err)
 	}
 	sort.Strings(changed)
 	sort.Strings(deleted)
@@ -1231,16 +1227,22 @@ func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDif
 	for _, f := range changed {
 		mustReview[f] = true
 	}
+	var norms []string
 	for _, f := range openFiles {
 		norm, err := normalizeRepoRelPath(f)
 		if err != nil {
 			continue // an open finding's file was already validated when recorded
 		}
-		exists, err := gitx.FileExistsAtRev(leaseDir, head, norm)
-		if err != nil {
-			return scopeDiff{}, fmt.Errorf("verifydeliver: review: check open finding file %q at head: %w", f, err)
-		}
-		if exists {
+		norms = append(norms, norm)
+	}
+	// One question for every open file: a repository gitx reads itself answers
+	// them in process, and one it leaves to git costs one process, not two a file.
+	exist, err := gitx.FilesAtRev(leaseDir, head, norms)
+	if err != nil {
+		return scopeDiff{}, fmt.Errorf("verifydeliver: review: check the open finding files at head: %w", err)
+	}
+	for _, norm := range norms {
+		if exist[norm] {
 			mustReview[norm] = true
 		}
 	}
@@ -1376,6 +1378,8 @@ type RoundRepo struct {
 	// OracleRuns are the oracle runs that passed on the lease head's tree in
 	// this repo just before the round.
 	OracleRuns []OracleRun
+	// Pristine is RoundInput.Pristine for this repo's lease.
+	Pristine bool
 }
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
@@ -1431,6 +1435,11 @@ type RoundInput struct {
 	// written even when there is nothing to review, since someone still has
 	// to say so. A launched round skips the reviewer instead.
 	Recorded bool
+	// Pristine says the caller restored the lease (LeaseDir; a round over several
+	// repos says it in each RoundRepo) to its head just before, and nothing has
+	// run in it since (no oracle ran), so the restore a round starts with has
+	// nothing to undo and is left out.
+	Pristine bool
 	// Readable, when set, says whether the reviewer's session can read a
 	// file: a recording it cannot is left out of the list the reviewer is
 	// handed and counted as omitted, rather than listed as evidence it
@@ -1469,7 +1478,7 @@ func (in RoundInput) repoList() []RoundRepo {
 	}
 	return []RoundRepo{{
 		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir,
-		OperatorClone: in.OperatorClone, Manifest: in.Manifest, OracleRuns: in.OracleRuns,
+		OperatorClone: in.OperatorClone, Manifest: in.Manifest, OracleRuns: in.OracleRuns, Pristine: in.Pristine,
 	}}
 }
 
@@ -1681,7 +1690,9 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	files := roundFiles{qualified: qualified}
 	var prep ReviewPrep
 	for _, r := range repos {
-		if err := resetLeasePristine(r.LeaseDir, "HEAD"); err != nil {
+		if r.Pristine {
+			// Restored and untouched since: the reset would only repeat itself.
+		} else if err := resetLeasePristine(r.LeaseDir, "HEAD"); err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: restore lease before round: %w", err))
 		}
 		head, err := gitx.RevParse(r.LeaseDir, "HEAD")

@@ -971,6 +971,9 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		// final checkout back onto that branch fails on the dirty file, so it
 		// returns with the lease detached at the old commit and still dirty.
 		advance(t, "third slice")
+		// A lease on the branch is fetched with no checkout to fail, so the lease
+		// is left off the branch, as the attempt that failed had it.
+		run(t, gateDir, "checkout", "--detach", "HEAD")
 		dirty(t, "leftover from a killed attempt")
 		if err := fetchTicketBranchFromBuildLease(fx.Home, gateDir, "fixture-repo", fx.Ticket, ticketBranch(fx.Ticket)); err == nil {
 			t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the pre-Acquire restore runs")
