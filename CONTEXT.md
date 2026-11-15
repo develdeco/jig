@@ -83,7 +83,7 @@ The command that proves a slice done. Green is done - there is no separate test 
 _Avoid_: test suite, check
 
 **Slot**:
-A heavy oracle's share of the machine: the cores and memory its project's recent runs of that oracle kept busy, taken from one machine-wide budget in arrival order and given back when the run ends. A project with nothing measured asks for the whole machine; a marker's `slots: N` instead counts that project's own runs (ADR 0051).
+A heavy oracle's share of the machine: the cores and memory its project's recent runs of that oracle kept busy, taken from one machine-wide budget in arrival order and given back when the run ends. A project with nothing measured asks for the whole machine; a marker's `slots: N` instead counts that project's own runs (ADR 0051). A project whose runs that shared the machine ran much slower than its runs alone asks for a larger share of the budget, and gets it back as its shared runs stop running slow.
 _Avoid_: lock, semaphore
 
 **Workspace**:

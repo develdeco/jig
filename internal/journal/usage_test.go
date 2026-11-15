@@ -56,3 +56,27 @@ func TestVerificationCarriesTheLatestOracleLinesUsage(t *testing.T) {
 		t.Errorf("an oracle line with no figures gave %+v", got)
 	}
 }
+
+// TestSharedIsOmittedWhenFalseAndAnOlderLineReadsAsNotShared: the field rides
+// on an oracle line only for a run that shared the machine.
+func TestSharedIsOmittedWhenFalseAndAnOlderLineReadsAsNotShared(t *testing.T) {
+	alone, err := json.Marshal(Line{Event: EventOracle, Seconds: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(alone), "shared") {
+		t.Errorf("a run that did not share wrote %s", alone)
+	}
+	shared, err := json.Marshal(Line{Event: EventOracle, Seconds: 3, Shared: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Line
+	if err := json.Unmarshal(shared, &back); err != nil || !back.Shared || back.Seconds != 3 {
+		t.Errorf("round trip of %s = %+v, %v", shared, back, err)
+	}
+	var older Line
+	if err := json.Unmarshal([]byte(`{"event":"oracle","seconds":3,"cpu_ms":1000}`), &older); err != nil || older.Shared {
+		t.Errorf("an older line read as %+v, %v; want not shared", older, err)
+	}
+}

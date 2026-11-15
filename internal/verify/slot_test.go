@@ -211,3 +211,26 @@ func TestTheOracleStartsOnlyOnceTheSlotIsTaken(t *testing.T) {
 		t.Errorf("started %v, slot-wait journaled before the oracle %v", started.Load(), waitedBefore.Load())
 	}
 }
+
+// TestTheOracleLineSaysWhetherTheRunSharedTheMachine: a heavy run that ran with
+// another project's heavy run held beside it writes a shared line, and one that
+// ran with nothing else heavy writes an unshared one.
+func TestTheOracleLineSaysWhetherTheRunSharedTheMachine(t *testing.T) {
+	t.Parallel()
+	for _, shared := range []bool{false, true} {
+		r, shas := slotRig(t, true)
+		if shared {
+			release, err := slot.Take(context.Background(), r.fx.Home, slot.Request{Project: "neighbour", Who: "N/x", Pinned: 1}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+		}
+		if res, err := Run(r.deps, r.request("a", shas[0])); err != nil || res.State != journal.VerifyPass {
+			t.Fatalf("Run = %+v, %v", res, err)
+		}
+		if got := r.oracleLine().Shared; got != shared {
+			t.Errorf("oracle line shared = %v, want %v", got, shared)
+		}
+	}
+}

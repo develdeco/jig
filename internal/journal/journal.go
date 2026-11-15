@@ -66,6 +66,11 @@ type Line struct {
 	CPUMs     int64  `json:"cpu_ms,omitempty"`
 	PeakBytes uint64 `json:"peak_bytes,omitempty"`
 	PeakBasis string `json:"peak_basis,omitempty"`
+	// Shared is set on an oracle line of a heavy run that shared the machine:
+	// another heavy run, of any project, held a share at any moment of it. It
+	// is omitted when false, so a line an older jig wrote reads as a run that
+	// did not share.
+	Shared bool `json:"shared,omitempty"`
 	// Head is a result line's lease head when that turn of the attempt
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
