@@ -133,7 +133,7 @@ func TestRenderStatusFixBudgetLineReached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	writeGateReportYAML(t, fx.StoreDir, fx.Ticket, 1, []string{"fix-1-root-test"})
+	writeGateReportYAML(t, fx.StoreDir, fx.Ticket, 1, []string{"fix-1-root"})
 
 	got, err := RenderStatus(st, fx.Ticket)
 	if err != nil {
@@ -165,7 +165,7 @@ func TestRenderStatusOutstandingAsksWhyColumnAndParkedHelpLine(t *testing.T) {
 			t.Fatalf("write slice state %s: %v", id, err)
 		}
 	}
-	writeGateReportYAML(t, fx.StoreDir, fx.Ticket, 1, []string{"fix-1-root-test"})
+	writeGateReportYAML(t, fx.StoreDir, fx.Ticket, 1, []string{"fix-1-root"})
 	writeParkedFindingYAML(t, fx.StoreDir, fx.Ticket, 2)
 
 	got, err := RenderStatus(st, fx.Ticket)

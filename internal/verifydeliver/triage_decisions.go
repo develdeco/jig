@@ -8,6 +8,7 @@ package verifydeliver
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
@@ -94,17 +95,15 @@ func (d TriageDecision) Decided() bool {
 
 // KeepLacksTarget reports whether d keeps f without the build target a fix
 // slice needs, so that closing a round leaves f asked (routeRound drops a
-// kept ask whose workspace or oracle stays unresolved). It is BuildTargetGaps
-// without a manifest: a workspace is missing when neither the finding (which
-// ApplyRound derived it for) nor the decision names one, and so is an oracle,
-// which ApplyRound had already resolved against the manifest when it could.
-// An oracle the reviewer named that the manifest no longer has is not seen
-// here, only by the round.
+// kept ask whose workspace or command stays missing). It is BuildTargetGaps
+// applied to f and then to the decision: a part f lacks is supplied when the
+// decision names it, and a blank command names none.
 func (d TriageDecision) KeepLacksTarget(f Finding) bool {
 	if d.Outcome != TriageKeep {
 		return false
 	}
-	return (f.Workspace == "" && d.Workspace == "") || (f.Oracle == "" && d.Oracle == "")
+	noWorkspace, noOracle := BuildTargetGaps(f)
+	return (noWorkspace && d.Workspace == "") || (noOracle && strings.TrimSpace(d.Oracle) == "")
 }
 
 // Label is the decision as `jig status` and the review request show it for f:

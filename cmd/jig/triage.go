@@ -16,7 +16,7 @@ import (
 const (
 	triageReasonUsage    = "why, in a sentence: carried into the fix slice's goal when the finding is kept"
 	triageWorkspaceUsage = "the workspace to build the fix in, for a kept finding whose file lies in none"
-	triageOracleUsage    = "the oracle that proves the fix, for a kept finding the reviewer named none for"
+	triageOracleUsage    = "the command that proves the fix, a literal, for a kept finding the reviewer named none for"
 )
 
 // triageNote is the note of `jig triage -h`: when a decision takes effect.
@@ -166,7 +166,7 @@ func cmdTriage(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	if decision == verifydeliver.TriageDismiss && (*workspace != "" || *oracle != "") {
 		return renderErr(stdout, &axi.Error{
-			Msg:  "--workspace and --oracle choose where a kept ask is built; a dismissed one is not built",
+			Msg:  "--workspace and --oracle choose where and how a kept ask is built; a dismissed one is not built",
 			Code: "VALIDATION_ERROR",
 		})
 	}

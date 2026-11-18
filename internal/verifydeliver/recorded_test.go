@@ -257,7 +257,7 @@ func TestAppendDraftHoldsADraftToTheRulesOfAResult(t *testing.T) {
 		"an unknown action":                   {Finding: &ResultFinding{File: file, Title: "t", Action: "maybe", Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown risk":                     {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: "huge", RiskRationale: "r"}},
 		"an absolute file":                    {Finding: &ResultFinding{File: "/etc/passwd", Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r"}},
-		"an unknown oracle":                   {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "nope"}},
+		"a fix naming no command":             {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown prior":                    {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"}},
 		"a still_present of an unknown prior": {StillPresent: &StillPresentEntry{Prior: "r1-f1", Line: 3}},
 		"neither":                             {},
@@ -698,7 +698,7 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 	in := TriageInput{
 		Fixes: []Finding{{ID: "r1-f9"}},
 		Asks: []Finding{
-			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha"}, {ID: "r1-f4"},
+			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha", Oracle: "test"}, {ID: "r1-f4"},
 		},
 	}
 
@@ -716,7 +716,6 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 
 	// With --yes the asks nobody decided that have a full build target are kept
 	// as DefaultTriage keeps them; r1-f4 has no workspace and stays undecided.
-	in.Manifest.Oracles = map[string]string{"test": "true"}
 	res = recordedTriage(d, fx.Ticket, true)(in)
 	if got := res.Asks["r1-f3"]; !got.Keep || got.Human {
 		t.Errorf("Asks[r1-f3] with --yes = %+v, want kept by default, not by a human", got)

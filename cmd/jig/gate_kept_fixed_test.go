@@ -28,10 +28,10 @@ func keptAskRound2(t *testing.T, again bool) (string, int, *fixture.Fixture) {
 	}
 	// The next gate queues the keep's slice, and the work it asks for is
 	// committed under it on the ticket's branch.
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept ask's slice queued\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-q-alpha-test", "alpha/alpha.go")
+	buildQueuedSlice(t, fx, "fix-2-q-alpha", "alpha/alpha.go")
 	// The work the ask wanted, committed on the ticket's branch.
 	if err := os.WriteFile(filepath.Join(fx.RepoDir, "go.mod"), []byte("module example.com/fixture\n\ngo 1.22\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -111,8 +111,8 @@ func TestKeptAskRecordedInAnOpenRoundIsQueuedByItsClose(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, path, verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{}, ReviewedPaths: []string{"go.mod"}, Summary: "round 2"})
 	out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", path, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-alpha") {
+		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha\n%s", code, out)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestKeptAskRecordedInAnOpenRoundIsQueuedByItsClose(t *testing.T) {
 func TestKeptAskTheClosingRoundReportsAgainStillQueuesItsFixSlice(t *testing.T) {
 	t.Parallel()
 	out, code, _ := keptAskRound2(t, true)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha-test\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "fix-2-alpha") {
+		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha\n%s", code, out)
 	}
 }
 
@@ -151,10 +151,10 @@ func keptNoteRound2(t *testing.T, reviewed []string) (string, int, *fixture.Fixt
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Look at it.", "--workspace", "beta", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/version.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/version.go")
 	path2 := filepath.Join(t.TempDir(), "round-2.json")
 	writeReviewResultAt(t, path2, verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{}, ReviewedPaths: reviewed, Summary: "round 2"})
 	out, code := roundThroughMain(t, e, fx, path2)

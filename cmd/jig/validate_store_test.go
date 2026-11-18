@@ -209,8 +209,8 @@ func TestValidateAdvisoriesLeaveFixSlicesOutOfTheGroups(t *testing.T) {
 	slices := []store.Slice{
 		{ID: "round", Goal: "Discount once"},
 		{ID: "clamp", Goal: "Clamp the percent", BlockedBy: []string{"round"}},
-		{ID: "fix-1-cart-test", Goal: "Fix these gate findings", FromGate: 1},
-		{ID: "fix-2-cart-test", Goal: "Fix these gate findings", FromGate: 2},
+		{ID: "fix-1-cart", Goal: "Fix these gate findings", FromGate: 1},
+		{ID: "fix-2-cart", Goal: "Fix these gate findings", FromGate: 2},
 	}
 	for _, a := range validateAdvisories(st, "T-9", slices, nil) {
 		if a.Code == advisorySlicesUnconnected {
