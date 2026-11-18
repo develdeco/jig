@@ -27,6 +27,8 @@ jig context <ticket> --slice <slice>
 ## Build
 
 - Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change.
+- Read the function, not the file: find code with `grep -n` or the LSP, read that range; for tests, the one you change and one neighbour as the pattern. Make independent reads in one step; an edit's result shows it applied.
+- A fix slice's goal names the findings it fixes. Fix the rule each finding names wherever its oracle reaches. Before committing, mutate each term the fix adds (operand, condition, constant, return), run its oracle, and add a test for each survivor.
 - Commit as you land, each commit with the trailer that ties it to the slice:
 
 ```
