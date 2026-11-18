@@ -93,7 +93,10 @@ func TestStatusLastRunsCostNoGitLogOfTheirOwn(t *testing.T) {
 	}
 	with := run()
 	t.Logf("jig status: %d git processes with no last run, %d with four", without, with)
-	if with > without {
-		t.Errorf("four last runs cost %d more git processes in jig status, want none: the branch is read once", with-without)
+	// Both sections read the branch whether or not a slice ran, so the two
+	// counts alone cannot tell a shared read from two: one git log is the whole
+	// of what the status starts here.
+	if with > without || with > 1 {
+		t.Errorf("jig status started %d git processes (%d with no last run), want one git log shared by its sections", with, without)
 	}
 }
