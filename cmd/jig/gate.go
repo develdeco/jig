@@ -168,9 +168,10 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return printGateReport(stdout, st, ticket, report)
 	}
 
-	// A round that already stands at the branch's head is reported, not opened
-	// again: a gate run twice at one head, or two gates started together,
-	// converge on one round. A flag that shapes the round (it records an
+	// A round still open at the branch's head is reported, not opened again:
+	// a gate run while a reviewer's round stands, or two gates started
+	// together, converge on one round. A recorded round never stands: a gate
+	// after it applies decisions and opens the next. A flag that shapes the round (it records an
 	// intent, adopts a branch, gates early, keeps findings) is never dropped:
 	// the gate goes on with it.
 	if !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
@@ -204,16 +205,8 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 
 // printStandingRound prints the round a gate found at the branch's
 // head instead of opening another: the fields of a gate report, saying the
-// round was not opened again. An open round points at its review, a recorded
-// one shows its verdict.
+// round was not opened again, and the help that points at its review.
 func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket string, st *verifydeliver.Standing) int {
-	verdict := "open"
-	if !st.Open {
-		verdict = st.Verdict
-		if st.CarriedFrom > 0 {
-			verdict += " (carried over from round " + strconv.Itoa(st.CarriedFrom) + ")"
-		}
-	}
 	var shaRows [][]string
 	for _, repo := range slices.Sorted(maps.Keys(st.Heads)) {
 		shaRows = append(shaRows, []string{repo, st.Heads[repo]})
@@ -222,13 +215,11 @@ func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket st
 		axi.KV("gate", [][2]string{
 			{"ticket", ticket},
 			{"round", strconv.Itoa(st.Round) + " stands at its head (not opened again)"},
-			{"verdict", verdict},
+			{"verdict", "open"},
 		}),
 		axi.Table("head", []string{"repo", "sha"}, shaRows),
 	}
-	if st.Open {
-		blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
-	}
+	blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
 }

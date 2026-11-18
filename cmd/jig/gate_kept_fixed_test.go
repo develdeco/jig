@@ -28,7 +28,7 @@ func keptAskRound2(t *testing.T, again bool) (string, int, *fixture.Fixture) {
 	}
 	// The next gate queues the keep's slice, and the work it asks for is
 	// committed under it on the ticket's branch.
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept ask's slice queued\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-alpha", "alpha/alpha.go")
@@ -102,7 +102,7 @@ func TestKeptAskRecordedInAnOpenRoundIsQueuedByItsClose(t *testing.T) {
 	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
 		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (the round opens)\n%s", code, out)
 	}
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
@@ -151,7 +151,7 @@ func keptNoteRound2(t *testing.T, reviewed []string) (string, int, *fixture.Fixt
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Look at it.", "--workspace", "beta", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/version.go")

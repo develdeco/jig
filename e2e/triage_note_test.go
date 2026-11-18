@@ -57,15 +57,15 @@ func TestTriageKeepsANoteTheFloorRoutedAndTheNextGateQueuesItsSlice(t *testing.T
 		t.Fatalf("status exit = %d, want decided_notes listing the kept note\n%s", status.Code, status.Stdout)
 	}
 
-	queue := runJig(t, env, fx.StoreDir, "gate", ticket, "--early")
+	queue := runJig(t, env, fx.StoreDir, "gate", ticket)
 	if queue.Code != 0 || !strings.Contains(queue.Stdout, "fix_slices") || !strings.Contains(queue.Stdout, "fix-2-q-beta") {
 		t.Fatalf("gate after the keep exit = %d, want 0 and the slice fix-2-q-beta in fix_slices\nstdout:\n%s\nstderr:\n%s", queue.Code, queue.Stdout, queue.Stderr)
 	}
 	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-2")); err == nil {
 		t.Fatal("the gate that queued the keep recorded a round")
 	}
-	if again := runJig(t, env, fx.StoreDir, "gate", ticket); again.Code != 0 || !strings.Contains(again.Stdout, "stands at its head") {
-		t.Fatalf("gate with the kept slice unbuilt exit = %d, want the standing round\n%s", again.Code, again.Stdout)
+	if again := runJig(t, env, fx.StoreDir, "gate", ticket); again.Code == 0 || !strings.Contains(again.Stdout, "GATE_NOT_GREEN") {
+		t.Fatalf("gate with the kept slice unbuilt exit = %d, want GATE_NOT_GREEN\n%s", again.Code, again.Stdout)
 	}
 
 	st, err := store.Open(fx.StoreDir)
