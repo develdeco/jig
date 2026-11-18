@@ -1,10 +1,9 @@
 // Package manifest resolves a repo's build surface: its workspaces, its
-// oracle commands, and its environment classes, by overlaying detected
-// defaults with a declared .claude/jig.yaml.
+// oracle commands, and its environment classes, as the repo declares them in
+// .claude/jig.yaml.
 package manifest
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -59,35 +58,20 @@ func (m Manifest) OracleLimit() time.Duration {
 	return DefaultOracleLimit
 }
 
-// declaredPath is where a repo may override detection.
+// declaredPath is where a repo declares its build surface.
 const declaredPath = ".claude/jig.yaml"
 
-// Resolve builds repoDir's manifest: detection (go.mod → a "test" oracle;
-// package.json scripts → one oracle per script) overlaid by a declared
-// .claude/jig.yaml, where declared workspaces replace detected ones,
-// declared oracles merge over detected ones (declared wins on the same
-// name), and envs come only from the declaration.
+// Resolve builds repoDir's manifest from its declared .claude/jig.yaml alone:
+// jig guesses no oracle from a go.mod or a package.json, because a guess per
+// language needs code for each new language and is a whole suite either way.
+// A repo with no declaration has the root workspace and no oracle, and an
+// oracle name nothing declares is run as a literal command (OracleCmd). Keys
+// the file holds that nothing reads are ignored.
 func Resolve(repoDir string) (Manifest, error) {
 	m := Manifest{
 		Workspaces: []Workspace{{ID: "root", Path: "."}},
 		Oracles:    map[string]string{},
 		Envs:       map[string]EnvClass{},
-	}
-
-	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err == nil {
-		m.Oracles["test"] = "go test ./..."
-	}
-
-	if data, err := os.ReadFile(filepath.Join(repoDir, "package.json")); err == nil {
-		var pkg struct {
-			Scripts map[string]string `json:"scripts"`
-		}
-		if jerr := json.Unmarshal(data, &pkg); jerr != nil {
-			return Manifest{}, fmt.Errorf("manifest: parse package.json: %w", jerr)
-		}
-		for name := range pkg.Scripts {
-			m.Oracles[name] = "npm run " + name
-		}
 	}
 
 	declFile := filepath.Join(repoDir, filepath.FromSlash(declaredPath))

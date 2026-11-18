@@ -113,3 +113,21 @@ func countLines(lines []string, want string) int {
 	}
 	return n
 }
+
+// TestForeignOracleSaysNothingWhenNoRepoDeclaresTheName: with nothing declared
+// anywhere a slice's oracle is a literal command, which a manifest cannot
+// judge; it is flagged only when another repo declares the name and its own
+// repo does not.
+func TestForeignOracleSaysNothingWhenNoRepoDeclaresTheName(t *testing.T) {
+	t.Parallel()
+	api := read("api", []string{"root"}, nil)
+	web := read("web", []string{"root"}, nil)
+	sl := sliceIn("a", "api/root", "test")
+	if got := foreignOracle([]ready.Repo{api, web}, api, sl); got != "" {
+		t.Errorf("no repo declares test: %q, want no problem", got)
+	}
+	web = read("web", []string{"root"}, []string{"test"})
+	if got := foreignOracle([]ready.Repo{api, web}, api, sl); !strings.Contains(got, "repo web declares it") {
+		t.Errorf("web declares test and api does not: %q, want the slice flagged", got)
+	}
+}
