@@ -407,6 +407,15 @@ func (h *fakeHarness) Jig(args ...string) jigResult {
 	return runJig(h.t, h.env.with("JIG_SESSION="+h.Session), h.Clone, args...)
 }
 
+// Verify proves the commit sha of slice the way a builder does, from the
+// clone as this session, and returns the result for the test to judge. It is
+// the one place the e2e journeys call `jig verify` for a slice they have
+// committed, so a change to how a slice is proven is a change here.
+func (h *fakeHarness) Verify(ticket, sha, slice string) jigResult {
+	h.t.Helper()
+	return h.Jig("verify", ticket, sha, "--slice", slice, "--wait")
+}
+
 // Push pushes branch from the clone to its origin.
 func (h *fakeHarness) Push(branch string) {
 	h.t.Helper()

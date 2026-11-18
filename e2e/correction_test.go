@@ -280,7 +280,7 @@ func TestCorrectionStall(t *testing.T) {
 		t.Helper()
 		sha, hook := corrCommit(t, h, file, "")
 		corrSliceOnly(t, "the PostToolUse of the commit of "+file, sha, hook)
-		res := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
+		res := h.Verify(fx.Ticket, sha, "a")
 		if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
 			t.Fatalf("jig verify --wait exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
@@ -343,7 +343,7 @@ func TestCorrectionBriefDrift(t *testing.T) {
 	t.Parallel()
 	fx, env, h := corrRig(t)
 	sha := h.CommitScenario("a", 1)
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
+	res := h.Verify(fx.Ticket, sha, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify --wait exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
@@ -708,7 +708,7 @@ func TestCommitWithoutSliceGetsANote(t *testing.T) {
 	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+third[:12]+" on") {
 		t.Errorf("PostToolUse context = %q, want the note of %s", ctx, third)
 	}
-	if res := h.Jig("verify", fx.Ticket, third, "--slice", "e", "--wait"); res.Code != 0 {
+	if res := h.Verify(fx.Ticket, third, "e"); res.Code != 0 {
 		t.Fatalf("jig verify --wait exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	stop = decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))

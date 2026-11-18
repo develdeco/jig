@@ -36,7 +36,7 @@ func declareLightInClone(t *testing.T, fx *fixture.Fixture) {
 // line it journaled.
 func verifyWaiting(t *testing.T, h *fakeHarness, fx *fixture.Fixture, sha, slice string) journal.Line {
 	t.Helper()
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", slice, "--wait")
+	res := h.Verify(fx.Ticket, sha, slice)
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify %s exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", sha, res.Code, res.Stdout, res.Stderr)
 	}

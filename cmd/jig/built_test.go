@@ -41,11 +41,20 @@ func commitScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attemp
 func buildScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attempt int) string {
 	t.Helper()
 	sha := commitScenarioSlice(t, fx, slice, attempt)
+	verifyHere(t, fx, slice, sha)
+	return sha
+}
+
+// verifyHere is the one place the cmd/jig tests have jig prove a committed
+// slice the way a builder does, from the operator's clone, and fails the test
+// unless the slice passed. Every test that needs a green slice calls it, so a
+// change to how a slice is proven is a change here.
+func verifyHere(t *testing.T, fx *fixture.Fixture, slice, sha string) {
+	t.Helper()
 	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", slice, "--wait", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "state: pass") {
 		t.Fatalf("jig verify %s %s: exit = %d, want 0 and a pass\n%s", slice, sha, code, out)
 	}
-	return sha
 }
 
 // buildFixtureTicket builds the fixture ticket the way an agent does: on the

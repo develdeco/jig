@@ -70,10 +70,7 @@ func buildQueuedSlice(t *testing.T, fx *fixture.Fixture, slice, file string) {
 	}
 	gitBuilder(t).Commit(fx.RepoDir, "build "+slice+"\n\n"+"Jig-Slice: "+slice)
 	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", slice, "--wait", "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "state: pass") {
-		t.Fatalf("jig verify %s: exit = %d, want 0 and a pass\n%s", slice, code, out)
-	}
+	verifyHere(t, fx, slice, sha)
 }
 
 // TestGateQueuesAKeptNoteBeforeTheNextRoundOpens pins the point at which a

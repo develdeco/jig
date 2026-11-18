@@ -43,12 +43,12 @@ oracles:
 `
 
 // TestKilledJigStopsItsOracle: an oracle's tree lives and dies with the jig
-// process that runs it. A jig gate, or a verification worker, stopped
+// process that runs it. A jig gate, or a foreground `jig verify`, stopped
 // mid-oracle (Windows: terminated; Unix: SIGINT, SIGTERM or SIGHUP) leaves no process
 // of the oracle running, however the shell that started the oracle's tests
 // went.
 func TestKilledJigStopsItsOracle(t *testing.T) {
-	for _, how := range []string{"gate", "worker"} {
+	for _, how := range []string{"gate", "verify"} {
 		for _, sc := range stopCases {
 			t.Run(how+"/"+sc.name, func(t *testing.T) {
 				if sc.skip != "" {
@@ -77,8 +77,8 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 				case "gate":
 					p = startJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
 				default:
-					p = startJig(t, env, h.Clone, "verify", "--worker", "--store", fx.StoreDir,
-						"--repo-dir", h.Clone, "--slice", "a", fx.Ticket, sha)
+					p = startJig(t, env, h.Clone, "verify", fx.Ticket, sha,
+						"--slice", "a", "--wait", "--store", fx.StoreDir)
 				}
 
 				waitFor(t, 2*time.Minute, "the oracle to start its child", func() bool {
