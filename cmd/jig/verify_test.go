@@ -18,11 +18,10 @@ import (
 // verifyRig is a fixture with its clone on the ticket's branch and an env that
 // runs in the clone and records the processes a command would start.
 type verifyRig struct {
-	t     *testing.T
-	fx    *fixture.Fixture
-	st    *store.Store
-	spawn *spawnRecorder
-	e     env
+	t  *testing.T
+	fx *fixture.Fixture
+	st *store.Store
+	e  env
 }
 
 func newVerifyRig(t *testing.T) *verifyRig {
@@ -32,9 +31,8 @@ func newVerifyRig(t *testing.T) *verifyRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := &spawnRecorder{PID: 777}
-	e := testEnv(fx.Home).inDir(fx.RepoDir).withSpawn(rec.Spawn).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
-	r := &verifyRig{t: t, fx: fx, st: st, spawn: rec, e: e}
+	e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
+	r := &verifyRig{t: t, fx: fx, st: st, e: e}
 	gitMust(t, fx.RepoDir, "checkout", "-b", "jig/"+fx.Ticket)
 	return r
 }
@@ -152,9 +150,6 @@ func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
-	}
-	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("processes started = %d, want none", n)
 	}
 	var kinds []string
 	for _, l := range r.journal() {

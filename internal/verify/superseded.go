@@ -23,6 +23,9 @@ func Superseded(lines []journal.Line, slice, sha string, isAncestor func(ancesto
 		if l.Event != journal.EventOracle && l.Event != journal.EventVerifyError {
 			continue
 		}
+		if l.Uncovered != "" {
+			continue // a run that covers nothing is the outcome of no commit
+		}
 		if isAncestor(sha, l.Commit) {
 			return true
 		}

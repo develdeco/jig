@@ -48,11 +48,6 @@ func (s VerifyState) Told() string {
 	return string(s)
 }
 
-// StandsAside reports whether a request to verify the commit runs the oracle
-// without being forced: the verification is stale or stopped, and nothing in
-// it judged the code.
-func (s VerifyState) StandsAside() bool { return s == VerifyStale || s == VerifyStopped }
-
 // Unclear reports whether the state is one a reader should name: anything but
 // a pass or a verification under way.
 func (s VerifyState) Unclear() bool { return s != VerifyPass && s != VerifyRunning }

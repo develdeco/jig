@@ -17,7 +17,7 @@ import (
 // start sha recorded, as a claim records it.
 func statesRig(t *testing.T) (*fixture.Fixture, env) {
 	t.Helper()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	start, err := gitx.RevParse(fx.RepoDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)

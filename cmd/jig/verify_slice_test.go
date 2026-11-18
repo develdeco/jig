@@ -108,9 +108,6 @@ func TestVerifyRefusesWhatItCannotPlace(t *testing.T) {
 			}
 		}
 	}
-	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("started %d processes, want none", n)
-	}
 	if lines := r.journal(); len(lines) != 0 {
 		t.Errorf("journal has %+v, want nothing", lines)
 	}

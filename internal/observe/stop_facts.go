@@ -154,9 +154,20 @@ func (h *handler) verificationFindings() []finding {
 	truth := h.verifyTruth(lines)
 	rows := truth.Derive()
 
+	// Only a slice's latest commit on the branch is held to a result: the
+	// command that clears a commit runs at HEAD, so an older commit of the
+	// slice (a test commit before the code) is history once a later one exists.
+	latest := map[string]string{}
+	for _, c := range truth.Commits { // oldest first
+		latest[c.Slice] = c.SHA
+	}
+
 	var out []finding
 	for _, r := range rows {
 		if r.State == phase.VerifyRunning || !r.State.Unclear() {
+			continue
+		}
+		if l, ok := latest[r.Slice]; ok && l != r.Commit {
 			continue
 		}
 		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {

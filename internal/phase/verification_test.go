@@ -80,9 +80,6 @@ func TestStoppedErrorAndTimedOutAreToldApart(t *testing.T) {
 	if got["a"].State != VerifyStopped || got["b"].State != VerifyStopped || got["c"].State != VerifyTimedOut {
 		t.Fatalf("%+v", got)
 	}
-	if got["c"].State.StandsAside() || !got["a"].State.StandsAside() {
-		t.Fatal("stood aside wrongly")
-	}
 	if got["a"].State.Told() != "stopped, not counted" || got["c"].State.Told() != "timed out, not counted" {
 		t.Fatal("words")
 	}

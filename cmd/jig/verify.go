@@ -475,6 +475,10 @@ func verifyHeader(plan verify.Result, req verify.Request, o verifyOpts, source s
 	if req.Command == "" {
 		kv[0][1] = command + " (the slice's oracle)"
 	}
+	if !req.NoRecord {
+		// The one variable jig adds to the command's environment.
+		kv = append(kv, [2]string{"env_added", "JIG_RECORD_DIR (where the scenarios' recordings go)"})
+	}
 	if o.json {
 		kv = append(kv, [2]string{"output", "stderr (--json)"})
 	}

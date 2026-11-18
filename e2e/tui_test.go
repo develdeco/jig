@@ -252,7 +252,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("\x7f")
 	screens.press("\x1b[A")
 	screens.press("\r")
-	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "fix budget 0 of 3 rounds used")
+	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
 	screens.press("\x7f")

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -169,6 +171,8 @@ type run struct {
 	storeID string
 	dir     string // the worktree
 	cmdDir  string // where the command runs
+	subject string // HEAD's subject
+	pre     string // why the run cannot cover, known before it starts
 	attempt int
 	res     Result
 }
@@ -250,8 +254,14 @@ func (d Deps) prepare(r Request) (*run, error) {
 	x.cmdDir = d.Clone
 	if r.Dir != "" {
 		x.cmdDir = r.Dir
+		if fi, err := os.Stat(r.Dir); err != nil || !fi.IsDir() {
+			return x, fmt.Errorf("verify: %s is not a directory to run the command in", r.Dir)
+		}
 	}
 	x.res.Dir = x.cmdDir
+	if subject, err := gitx.Subject(d.Clone, sha); err == nil {
+		x.subject = oneLine(strings.TrimSpace(subject))
+	}
 
 	slices, err := d.Store.ReadSlices(r.Ticket)
 	if err != nil {
@@ -313,11 +323,15 @@ func Run(d Deps, r Request) (Result, error) {
 	}
 	if why != "" {
 		x.res.State, x.res.Summary, x.res.Code = journal.VerifyError, oneLine(why), ExitUnrun
-		if err := x.journal(journal.Line{Event: journal.EventVerifyError, Outcome: "error", Summary: x.res.Summary}); err != nil {
-			return x.res, err
+		// A run that could not have covered anything leaves no line a reader
+		// of verification state would take for the commit's.
+		if x.pre == "" {
+			if err := x.journal(journal.Line{Event: journal.EventVerifyError, Outcome: "error", Summary: x.res.Summary}); err != nil {
+				return x.res, err
+			}
+			x.recordedLine(journal.EventVerifyError)
+			x.push("could not verify")
 		}
-		x.recordedLine(journal.EventVerifyError)
-		x.push("could not verify")
 	}
 	return x.res, nil
 }
@@ -484,11 +498,29 @@ func short(sha string) string {
 
 // treeState is whether dir's working tree is clean: nothing modified, staged
 // or untracked, ignored files excluded.
+// A tree git cannot read is dirty: the rule is evidence only when git could
+// say the tree is clean.
 func treeState(dir string) string {
-	if dirtyTree(dir) != "" {
+	status, err := gitx.Run(dir, "status", "--porcelain")
+	if err != nil || strings.TrimSpace(status) != "" {
 		return journal.TreeDirty
 	}
 	return journal.TreeClean
+}
+
+// within reports whether dir is root or inside it.
+func within(root, dir string) bool {
+	resolve := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
+		}
+		return filepath.Clean(p)
+	}
+	rel, err := filepath.Rel(resolve(root), resolve(dir))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // execute does the run: the env class up, the command, the record. It returns
@@ -514,6 +546,13 @@ func (x *run) execute() (why string, err error) {
 		cmd = x.r.Command
 	}
 	x.res.Command, x.res.Env = cmd, x.sl.Env
+	// What already says the run cannot cover is settled before the env class
+	// is brought up, so a class that will not come up leaves the slice alone.
+	x.res.TreeBefore = treeState(x.dir)
+	x.pre = x.uncoveredBecause(x.r.Command == "", x.res.TreeBefore, x.sha)
+	if x.pre == journal.UncoveredNotDescend {
+		x.pre = ""
+	}
 
 	down, why, err := x.bringUpEnv(m)
 	if why != "" || err != nil {
@@ -622,17 +661,19 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 		if policy == "" {
 			policy = "pause"
 		}
-		if err := x.journal(journal.Line{Event: journal.EventEnvUnavailable, Outcome: policy}); err != nil {
-			return nil, "", err
+		if x.pre == "" {
+			if err := x.journal(journal.Line{Event: journal.EventEnvUnavailable, Outcome: policy}); err != nil {
+				return nil, "", err
+			}
+			if err := x.setState(func(st *store.SliceState) bool {
+				st.State, st.Reason = "env-blocked", "env-up-failed"
+				st.Attempts = max(st.Attempts, x.attempt)
+				return true
+			}); err != nil {
+				return nil, "", err
+			}
+			x.push("env-blocked")
 		}
-		if err := x.setState(func(st *store.SliceState) bool {
-			st.State, st.Reason = "env-blocked", "env-up-failed"
-			st.Attempts = max(st.Attempts, x.attempt)
-			return true
-		}); err != nil {
-			return nil, "", err
-		}
-		x.push("env-blocked")
 		return nil, fmt.Sprintf("the env class %q is unavailable: %v", x.sl.Env, unavail.Err), nil
 	}
 	if err := x.journal(journal.Line{Event: journal.EventEnvUp}); err != nil {
@@ -658,6 +699,8 @@ func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string
 		return journal.UncoveredHeadMoved
 	case !ownOracle:
 		return journal.UncoveredOtherCmd
+	case !within(x.dir, x.cmdDir):
+		return journal.UncoveredOtherDir
 	case x.descendsFromStart() != "":
 		return journal.UncoveredNotDescend
 	}
@@ -671,7 +714,6 @@ func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string
 // covers nothing changes no state.
 func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err error) {
 	d := x.d
-	x.res.TreeBefore = treeState(x.dir)
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	var target recordTarget
 	if !x.r.NoRecord {
@@ -720,7 +762,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	// The oracle line carries everything needed to run this again by hand.
 	base := func() journal.Line {
 		return journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
-			Dir: x.cmdDir, Flags: x.r.Flags, HeadEnd: x.headNow(), TreeBefore: x.res.TreeBefore, TreeAfter: treeState(x.dir)}
+			Dir: x.cmdDir, Subject: x.subject, Flags: x.r.Flags, HeadEnd: x.headNow(), TreeBefore: x.res.TreeBefore, TreeAfter: treeState(x.dir)}
 	}
 	tail := &tailWriter{}
 	w := io.Writer(tail)

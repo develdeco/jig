@@ -75,9 +75,6 @@ func TestVerifyRunsInTheForegroundAndExitsWithTheCommandsCode(t *testing.T) {
 	if ss, err := r.st.ReadSliceState(r.fx.Ticket, "a"); err != nil || ss.State != "green" {
 		t.Errorf("slice a state = %+v, %v, want green", ss, err)
 	}
-	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("verify started %d processes, want none", n)
-	}
 
 	// A command that fails with its own code: that code is the exit code, the
 	// output reached the stream, and the slice builds on.

@@ -122,7 +122,10 @@ type Line struct {
 	// run covers no commit (the Uncovered constants): every reader of
 	// verification state skips a line that has it. Each is omitted when empty,
 	// so a line an older jig wrote reads back with none.
-	Dir        string `json:"dir,omitempty"`
+	Dir string `json:"dir,omitempty"`
+	// Subject is the first line of the message of the commit an oracle line's
+	// run was of, so a reader of the journal can name the change.
+	Subject    string `json:"subject,omitempty"`
 	Flags      string `json:"flags,omitempty"`
 	HeadEnd    string `json:"head_end,omitempty"`
 	TreeBefore string `json:"tree_before,omitempty"`

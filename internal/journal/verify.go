@@ -41,6 +41,7 @@ const (
 	UncoveredHeadMoved   = "head moved"
 	UncoveredOtherCmd    = "another command"
 	UncoveredNotDescend  = "not a descendant of the start sha"
+	UncoveredOtherDir    = "another directory"
 )
 
 // Verification is the latest record of verifying one commit for one slice.

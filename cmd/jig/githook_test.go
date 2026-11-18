@@ -248,7 +248,7 @@ func TestGithookPostCommitIsHidden(t *testing.T) {
 // through the environment stays. It sets process environment, so it does not
 // run in parallel.
 func TestGithookPostCommitRecordsTheCommitAndStartsNothing(t *testing.T) {
-	fx, e, rec := observeRig(t)
+	fx, e := observeRig(t)
 	if err := os.WriteFile(filepath.Join(fx.RepoDir, "alpha", "n.txt"), []byte("n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -281,8 +281,8 @@ func TestGithookPostCommitRecordsTheCommitAndStartsNothing(t *testing.T) {
 	if got := ledgerEvents(t, fx.Home, journal.EventGitCommit); len(got) != 1 {
 		t.Errorf("git-commit lines = %+v, want the commit recorded", got)
 	}
-	if got := ledgerEvents(t, fx.Home, journal.EventVerifySpawned); len(got) != 0 || len(rec.Specs()) != 0 {
-		t.Errorf("the hook started %+v (specs %+v), want nothing", got, rec.Specs())
+	if got := ledgerEvents(t, fx.Home, journal.EventVerifySpawned); len(got) != 0 {
+		t.Errorf("the hook started %+v ), want nothing", got)
 	}
 	seen := os.Environ()
 	for _, kv := range seen {

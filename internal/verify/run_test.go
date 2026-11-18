@@ -107,7 +107,7 @@ func TestACleanPassAtAnUnchangedHeadCoversTheCommit(t *testing.T) {
 	oracle, verified := lines[0], lines[1]
 	if oracle.Slice != "a" || oracle.Commit != sha || oracle.Attempt != 1 || oracle.Command != wantCmd || oracle.Env != "" ||
 		oracle.Seconds != 3 || oracle.Source != "jig" || oracle.Session != "s-1" || oracle.Agent != "agent-1" ||
-		oracle.Summary != "" || oracle.Signature != "" || oracle.Uncovered != "" {
+		oracle.Summary != "" || oracle.Signature != "" || oracle.Uncovered != "" || oracle.Subject != "fix Clamp" {
 		t.Errorf("oracle line = %+v, want a pass of %q at %s", oracle, wantCmd, sha)
 	}
 	if filepath.Clean(oracle.Dir) != filepath.Clean(r.fx.RepoDir) || oracle.Flags != "--slice a" || oracle.HeadEnd != sha ||
@@ -165,6 +165,8 @@ func TestADirtyTreeOrAMovedHeadCoversNothing(t *testing.T) {
 			if c.during != nil {
 				r.oracle.during = func(string) { c.during(r) }
 			}
+			// The run records scenarios; a run that covers nothing keeps none.
+			r.oracle.files = map[string]string{"login.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>"}
 			rq := r.request("a", sha)
 			rq.Command = c.cmd
 			res, err := Run(r.deps, rq)

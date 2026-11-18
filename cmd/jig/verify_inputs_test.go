@@ -45,12 +45,19 @@ func TestVerifyHeaderAndFooterNameWhatRanAndWhatWasRecorded(t *testing.T) {
 		t.Errorf("the header does not come first:\n%s", out)
 	}
 
+	if !strings.Contains(header, "JIG_RECORD_DIR") {
+		t.Errorf("the header does not say JIG_RECORD_DIR was added:\n%s", header)
+	}
+
 	// A flag that was given is not marked as the default.
 	out, _ = r.run("verify", "--slice", "a", "--timeout", "90s", "--no-record")
 	for _, want := range []string{"slice: a (--slice)", "timeout: 1m30s", "no-record: on", "recorded: nothing (--no-record)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "JIG_RECORD_DIR") {
+		t.Errorf("a --no-record run's header names JIG_RECORD_DIR, which it does not add:\n%s", out)
 	}
 
 	// A run that cannot start its command has no footer.
@@ -80,6 +87,14 @@ func TestVerifyDryRunPrintsAndRunsNothing(t *testing.T) {
 	}
 	if strings.Contains(out, "result:") {
 		t.Errorf("a dry run printed a footer:\n%s", out)
+	}
+	if !strings.Contains(out, "JIG_RECORD_DIR") {
+		t.Errorf("the header does not name the variable it adds:\n%s", out)
+	}
+	// Another command is foretold as covering nothing, as the run will be.
+	other, code := r.run("verify", "--dry-run", "--", "echo", "x")
+	if code != 0 || !strings.Contains(other, "covers: no") || !strings.Contains(other, "uncovered: another command") {
+		t.Errorf("--dry-run -- echo x: exit %d, want covers: no, another command\n%s", code, other)
 	}
 	if lines := r.journal(); len(lines) != 0 {
 		t.Errorf("a dry run wrote %+v", lines)

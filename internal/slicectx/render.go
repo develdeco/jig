@@ -278,7 +278,7 @@ func (c *Context) readBrief(st *store.Store, ticket string, sl store.Slice) erro
 func failedAttempts(lines []journal.Line, slice string) []FailedAttempt {
 	out := []FailedAttempt{}
 	for _, l := range lines {
-		if l.Slice == slice && l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped {
+		if l.Slice == slice && l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped && l.Uncovered == "" {
 			out = append(out, FailedAttempt{Attempt: l.Attempt, Commit: l.Commit, Summary: l.Summary, Seconds: l.Seconds})
 		}
 	}

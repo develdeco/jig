@@ -49,8 +49,8 @@ flowchart TB
   verbs -->|"publish: push head, open PR"| github
   harness -->|edits, commits| clone
   clone -->|commit| hook
-  hook -->|spawns| verify
-  verbs -.->|HEAD moved| verify
+  hook -->|"git-commit line only"| home
+  harness -->|"runs jig verify"| verify
   verify -->|oracle, verified| store
 ```
 
