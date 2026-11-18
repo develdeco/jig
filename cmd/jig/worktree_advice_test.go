@@ -130,8 +130,9 @@ func TestWorktreeRowsAddABranchTheCloneHas(t *testing.T) {
 	rows := r.src.rows(r.facts())
 	want := []nextWorktree{{
 		Repo: "api", Action: "add", Branch: wtBranch, Clone: clone,
-		Dir:     clone + ".worktrees/" + wtTicket,
-		Command: "git -C " + clone + " worktree add " + clone + ".worktrees/" + wtTicket + " " + wtBranch,
+		Dir:      clone + ".worktrees/" + wtTicket,
+		existing: true,
+		Command:  "git -C " + clone + " worktree add " + clone + ".worktrees/" + wtTicket + " " + wtBranch,
 	}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("rows = %+v, want %+v", rows, want)
@@ -557,11 +558,12 @@ func TestWorktreeRenderHelp(t *testing.T) {
 	}
 	// A branch the clone has already is added with no -b and no base: its tie is
 	// a switch, and the line names no base.
+	// The clone's path holds " -b ": the row's own fact decides, not its command.
 	existing := []nextWorktree{{
-		Repo: "api", Action: "add", Branch: wtBranch, Clone: "/src/api", Dir: "/src/api.worktrees/JIG-7",
-		Command: "git -C /src/api worktree add /src/api.worktrees/JIG-7 " + wtBranch,
+		Repo: "api", Action: "add", Branch: wtBranch, Clone: "/src/x -b y", Dir: "/src/x -b y.worktrees/JIG-7", existing: true,
+		Command: `git -C "/src/x -b y" worktree add "/src/x -b y.worktrees/JIG-7" ` + wtBranch,
 	}}
-	wantExisting := "Add the worktree of JIG-7 in api: work on branch " + wtBranch + " in a worktree your harness makes, then `git switch " + wtBranch + "` inside it; a harness with no worktree method runs `git -C /src/api worktree add /src/api.worktrees/JIG-7 " + wtBranch + "`"
+	wantExisting := "Add the worktree of JIG-7 in api: work on branch " + wtBranch + " in a worktree your harness makes, then `git switch " + wtBranch + "` inside it; a harness with no worktree method runs `" + existing[0].Command + "`"
 	if got := worktreeHelp("JIG-7", existing); !reflect.DeepEqual(got, []string{wantExisting}) {
 		t.Errorf("help for an existing branch = %q, want %q", got, wantExisting)
 	}

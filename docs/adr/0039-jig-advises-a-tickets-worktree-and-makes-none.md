@@ -28,7 +28,7 @@ The commands above are advice for a harness with no worktree method of its own. 
 
 A worktree the harness made is tied to the ticket by its branch, the one thing jig already finds a worktree by. The harness names its branch (or leaves a detached HEAD), so the session renames it inside the worktree with `git branch -m <branch>` (on a detached HEAD, which git refuses to rename, `git switch -c <branch>`), using the branch the row names; a branch the clone has already is switched to instead, since a branch outlives a removed worktree. A worktree the harness starts at its own HEAD is reset to the row's `base` before anything is committed there. From then on `jig next` shows the row `present` with the worktree's `dir` and `jig here` run in it binds the ticket. No jig verb renames.
 
-A subagent of a multi-repo ticket in a clone the harness's worktree does not reach runs the row's `command`. Removal is the harness's: it cleans up a worktree it made, and one it kept is removed after the publish with the advised command, never forced.
+A row in a clone the harness's worktree does not reach (another repo than the session's, or a harness with no worktree method) is added with the row's `command`: the main session runs these one at a time, since git's records of a repository's worktrees are not safe against parallel adds, and a nested builder of a multi-repo ticket runs its own repo's. A builder with no harness worktree never renames or resets in the person's clone. Removal is the harness's for a clean worktree; one it kept is removed after the publish with the `remove` command, never forced.
 
 ## Rejected alternatives
 

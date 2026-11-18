@@ -54,9 +54,13 @@ func TestChartSkillHandsOff(t *testing.T) {
 	for _, want := range []string{
 		"`isolation: worktree`", "you run no `add`", "`git branch -m <branch>`", "`git switch -c <branch>`", "`git reset --hard <base>`", "no worktree method",
 		// A row in another clone than the session's repo is not the harness's to reach.
-		"An `add` row in another clone (a single-repo ticket's too)", "the builder runs the row's `command`",
+		"An `add` row in this session's repo (its `clone`): start the subagent with `isolation: worktree`",
+		"An `add` row in another clone (a single-repo ticket's too), or any `add` with no worktree method (no Agent isolation, no EnterWorktree): you run its `command`, one at a time, then start the subagent with no isolation, in its `dir`",
 		// A present row is worked in place, with no isolation and no tie.
-		"`present`: no isolation, it works in its `dir`", "A `present` row or another clone's: no tie, work only in its `dir`",
+		"`present`: no isolation, it works in its `dir`",
+		// Only a worktree the harness made for the builder is renamed or reset.
+		"A worktree the harness made for you starts at its HEAD: tie it",
+		"With no harness worktree (a `present` row, another clone's, no worktree method): never rename or reset, work only in its `dir`",
 	} {
 		if !strings.Contains(builds, want) {
 			t.Errorf("the Builds section lacks %q:\n%s", want, builds)

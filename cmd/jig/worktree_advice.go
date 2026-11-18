@@ -47,8 +47,12 @@ type nextWorktree struct {
 	Clone   string `json:"clone,omitempty"`   // the repo's clone on this machine
 	Dir     string `json:"dir,omitempty"`     // where the worktree goes (add) or is (present, remove)
 	Base    string `json:"base,omitempty"`    // add of a branch the clone lacks: its start point
-	Command string `json:"command,omitempty"` // advice for a harness with no worktree method (add, remove)
+	Command string `json:"command,omitempty"` // add: advice for a harness with no worktree method; remove: what removes a kept worktree
 	Note    string `json:"note,omitempty"`    // no_clone: what to know
+
+	// existing says an add is of a branch the clone has already: its tie is a
+	// switch, not a rename. Not part of the row jig prints.
+	existing bool
 }
 
 // worktreeFacts are what the rows of one ticket are decided from. Every caller
@@ -198,6 +202,7 @@ func (s *worktreeSource) rows(f worktreeFacts) []nextWorktree {
 			row.Dir = advised
 			add := "git -C " + gitPath(clone) + " worktree add " + gitPath(row.Dir)
 			if exists {
+				row.existing = true
 				row.Command = add + " " + f.Branch
 			} else {
 				row.Base = startPoint(s.cfg, f.Plan, repo)
@@ -309,17 +314,18 @@ func worktreeBlocks(rows []nextWorktree) []string {
 
 // worktreeHelp are the lines about the worktrees of the rows: one for each add
 // and each remove, none for a repo whose worktree is there already. The harness
-// makes and removes a worktree by its own method; the git command of a row is
-// advice for a harness with none (ADR 0039).
+// makes a worktree by its own method, so an add's git command is advice for a
+// harness with none; a remove's command is what removes a worktree the harness
+// kept (ADR 0039).
 func worktreeHelp(ticket string, rows []nextWorktree) []string {
 	var help []string
 	for _, r := range rows {
 		switch r.Action {
 		case worktreeAdd:
-			// The command adds with -b only when the clone lacks the branch:
-			// that one is tied by a rename, an existing one by a switch.
+			// A branch the clone lacks is tied by a rename, one it has by a
+			// switch.
 			work, tie := "work on branch "+r.Branch, "`git switch "+r.Branch+"`"
-			if strings.Contains(r.Command, " -b ") {
+			if !r.existing {
 				tie = "`git branch -m " + r.Branch + "` (on a detached HEAD `git switch -c " + r.Branch + "`)"
 				if r.Base != "" {
 					work += " from base " + r.Base
