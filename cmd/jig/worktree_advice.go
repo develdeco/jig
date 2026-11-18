@@ -36,7 +36,9 @@ const (
 const worktreesDirSuffix = ".worktrees/"
 
 // nextWorktree is one repo's worktree of a ticket as jig advises it. jig adds
-// and removes none: Command is what the session runs (ADR 0039).
+// and removes none and the harness makes the worktree: Branch and Base say what
+// to work on and from where, and Command is advice for a harness with no
+// worktree method (ADR 0039).
 type nextWorktree struct {
 	Repo    string `json:"repo"`
 	Action  string `json:"action"`            // add, present, remove or no_clone
@@ -304,17 +306,26 @@ func worktreeBlocks(rows []nextWorktree) []string {
 	return blocks
 }
 
-// worktreeHelp are the lines that tell a session to run the commands of the
-// rows: one for each add and each remove, none for a repo whose worktree is
-// there already.
+// worktreeHelp are the lines about the worktrees of the rows: one for each add
+// and each remove, none for a repo whose worktree is there already. The harness
+// makes and removes a worktree by its own method; the git command of a row is
+// advice for a harness with none (ADR 0039).
 func worktreeHelp(ticket string, rows []nextWorktree) []string {
 	var help []string
 	for _, r := range rows {
 		switch r.Action {
 		case worktreeAdd:
-			help = append(help, fmt.Sprintf("Add the worktree of %s in %s: `%s`", ticket, r.Repo, r.Command))
+			work := "work on branch " + r.Branch
+			if r.Base != "" {
+				work += " from base " + r.Base
+			}
+			help = append(help, fmt.Sprintf(
+				"Add the worktree of %s in %s: %s in a worktree your harness makes, then `git branch -m %s` inside it if it named the branch itself (`git switch %s` when the clone has the branch already); a harness with no worktree method runs `%s`",
+				ticket, r.Repo, work, r.Branch, r.Branch, r.Command))
 		case worktreeRemove:
-			help = append(help, fmt.Sprintf("Remove the worktree of %s in %s (git refuses one with changes): `%s`", ticket, r.Repo, r.Command))
+			help = append(help, fmt.Sprintf(
+				"Remove the worktree of %s in %s: the harness removes a worktree it made; with no method, run `%s` (git refuses one with changes)",
+				ticket, r.Repo, r.Command))
 		}
 	}
 	return help

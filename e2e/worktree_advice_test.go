@@ -167,8 +167,10 @@ func TestNextAdvisesAWorktreePerRepo(t *testing.T) {
 	text := runJig(t, env, fx.RepoDir, "next", fx.Ticket).Stdout
 	for _, want := range []string{
 		"worktrees[2]{repo,action,dir,base,command}:",
-		"Add the worktree of JIG-1 in fixture-repo: `" + shared.Command + "`",
-		"Add the worktree of JIG-1 in second-repo: `" + own.Command + "`",
+		"Add the worktree of JIG-1 in fixture-repo: work on branch " + n.Branch + " from base " + parentBranch + " in a worktree your harness makes",
+		"a harness with no worktree method runs `" + shared.Command + "`",
+		"Add the worktree of JIG-1 in second-repo: work on branch " + n.Branch + " from base origin/main in a worktree your harness makes",
+		"a harness with no worktree method runs `" + own.Command + "`",
 		"git switch -c " + n.Branch,
 	} {
 		if !strings.Contains(text, want) {
@@ -274,7 +276,7 @@ func TestWorktreeAdviceEndsWithThePublish(t *testing.T) {
 		t.Fatalf("jig publish --pr exit = %d, want 0 and a verified pull request\nstdout:\n%s\nstderr:\n%s", rec.Code, rec.Stdout, rec.Stderr)
 	}
 	removeCmd := "git -C " + wtQuoted(clone) + " worktree remove " + wtQuoted(dir)
-	removeLine := "Remove the worktree of JIG-1 in fixture-repo (git refuses one with changes): `" + removeCmd + "`"
+	removeLine := "Remove the worktree of JIG-1 in fixture-repo: the harness removes a worktree it made; with no method, run `" + removeCmd + "` (git refuses one with changes)"
 	statusLine := "Run `jig status JIG-1` to confirm the ticket is fully green"
 	for _, want := range []string{"publish_pr:", "worktrees[1]{repo,action,dir,base,command}:", "fixture-repo,remove,", removeLine} {
 		if !strings.Contains(rec.Stdout, want) {
@@ -429,5 +431,50 @@ func TestChartCarriesWorktrees(t *testing.T) {
 	}
 	if got := c.worktreesOf(t, second); len(got) != 1 || got[0].Action != "add" {
 		t.Errorf("%s after the first's add: %+v, want its add still advised", second, got)
+	}
+}
+
+// TestHarnessWorktreeRenamedIsFound: a harness makes the ticket's worktree by
+// its own method, on a branch it names itself; jig advises an add until the
+// session renames that branch to the ticket's (`git branch -m`, inside the
+// worktree), and from then on `jig next` finds the worktree by its branch,
+// present at its directory, and `jig here` run in it binds the ticket.
+func TestHarnessWorktreeRenamedIsFound(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	env = env.without("JIG_SLICE", "JIG_SESSION")
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveBriefOf(t, st, fx.Ticket)
+
+	n := nextJSON[wtNextOut](t, env, fx.RepoDir, fx.Ticket)
+	if row := rowIn(t, n.Worktrees, "fixture-repo"); row.Action != "add" || row.Branch == "" {
+		t.Fatalf("before any worktree: %+v, want an add that names the branch", row)
+	}
+	branch := n.Branch
+
+	// The harness's worktree: a folder of its own choosing, a branch of its own.
+	dir := filepath.Join(t.TempDir(), "harness-made")
+	gitLog(t, fx.RepoDir, "worktree", "add", "-b", "harness/agent-1", dir)
+	n = nextJSON[wtNextOut](t, env, fx.RepoDir, fx.Ticket)
+	if row := rowIn(t, n.Worktrees, "fixture-repo"); row.Action != "add" {
+		t.Fatalf("on the harness's own branch: %+v, want the add still advised", row)
+	}
+
+	// The tie: rename the branch inside the worktree.
+	gitLog(t, dir, "branch", "-m", branch)
+	n = nextJSON[wtNextOut](t, env, fx.RepoDir, fx.Ticket)
+	row := rowIn(t, n.Worktrees, "fixture-repo")
+	if row.Action != "present" || !gitx.SameDir(row.Dir, dir) || row.Command != "" {
+		t.Fatalf("after the rename: %+v, want present at %s with no command", row, dir)
+	}
+	if text := runJig(t, env, fx.RepoDir, "next", fx.Ticket).Stdout; strings.Contains(text, "Add the worktree") || !strings.Contains(text, "fixture-repo,present,") {
+		t.Errorf("jig next after the rename:\n%s", text)
+	}
+
+	if here := hereJSON(t, env, dir); here.Ticket.ID != fx.Ticket {
+		t.Errorf("jig here in the renamed worktree binds %q, want %s", here.Ticket.ID, fx.Ticket)
 	}
 }
