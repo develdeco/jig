@@ -43,12 +43,12 @@ oracles:
 `
 
 // TestKilledJigStopsItsOracle: an oracle's tree lives and dies with the jig
-// process that runs it. A jig gate, or a foreground `jig verify`, stopped
-// mid-oracle (Windows: terminated; Unix: SIGINT, SIGTERM or SIGHUP) leaves no process
+// process that runs it. A foreground `jig verify`, or `jig verify --final`
+// whose union runs the same command, stopped mid-oracle (Windows: terminated; Unix: SIGINT, SIGTERM or SIGHUP) leaves no process
 // of the oracle running, however the shell that started the oracle's tests
 // went.
 func TestKilledJigStopsItsOracle(t *testing.T) {
-	for _, how := range []string{"gate", "verify"} {
+	for _, how := range []string{"final", "verify"} {
 		for _, sc := range stopCases {
 			t.Run(how+"/"+sc.name, func(t *testing.T) {
 				if sc.skip != "" {
@@ -74,8 +74,9 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 
 				var p *jigProc
 				switch how {
-				case "gate":
-					p = startJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
+				case "final":
+					p = startJig(t, env, h.Clone, "verify", fx.Ticket, "--final",
+						"--store", fx.StoreDir)
 				default:
 					p = startJig(t, env, h.Clone, "verify", fx.Ticket,
 						"--slice", "a", "--store", fx.StoreDir)
@@ -113,7 +114,7 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 				// failed oracle line for it, whatever the stopped jig wrote,
 				// except one that says jig's stop ended the run.
 				for _, l := range readJournal(t, fx, fx.Ticket) {
-					if l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped {
+					if (l.Event == journal.EventOracle || l.Event == journal.EventFinalOracle) && l.Outcome == "fail" && l.Cause != journal.CauseStopped {
 						t.Errorf("the journal holds a failed oracle line after jig %s was stopped: %+v", how, l)
 					}
 				}
