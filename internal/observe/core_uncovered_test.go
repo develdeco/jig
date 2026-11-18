@@ -1,6 +1,8 @@
 package observe
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,6 +29,26 @@ func TestAnUncoveredFailureIsNoEnforcedNote(t *testing.T) {
 	stop := r.handle(r.ev(KindStop))
 	if strings.Contains(stop.Block, "FAILED") || strings.Contains(stop.Message, "failed") {
 		t.Errorf("Stop = %+v, want no failure named for a run that covers nothing", stop)
+	}
+}
+
+// TestACommitWithATrailerAndNoRecordedResultHoldsAnUnattendedStop: work begun
+// by hand has no claim and so no recorded start sha; its commits are those
+// past origin's target, and one that carries a slice trailer and has no
+// recorded result still holds an unattended session at Stop.
+func TestACommitWithATrailerAndNoRecordedResultHoldsAnUnattendedStop(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	sha := r.commit("a", "a.txt") // no claim, no start sha recorded
+	marker := "jig: \"1\"\nproject: " + r.projectName(t) + "\nunattended: true\n"
+	if err := os.WriteFile(filepath.Join(r.fx.RepoDir, "jig.yaml"), []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := r.handle(r.ev(KindStop))
+	if !strings.Contains(res.Block, "commit "+sha[:12]+" for slice a is not verified") {
+		t.Errorf("Block = %q, want the commit with no recorded result held", res.Block)
 	}
 }
 

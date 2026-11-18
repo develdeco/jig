@@ -224,13 +224,42 @@ func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
 		if dir == "" {
 			dir = h.w.RepoDir
 		}
-		if start := verify.StartSHA(h.st, h.w.Ticket, h.w.Repo); start != "" && dir != "" {
+		repo, target := h.repoAndTarget()
+		start := verify.StartSHA(h.st, h.w.Ticket, repo)
+		if start == "" && dir != "" && target != "" {
+			// A branch no claim started from (the work was begun by hand) has
+			// no recorded start: its commits are those past the target branch,
+			// as origin has it, else as the clone has it.
+			for _, ref := range []string{"refs/remotes/origin/" + target, "refs/heads/" + target} {
+				if base, err := gitx.MergeBase(dir, "HEAD", ref); err == nil && base != "" {
+					start = base
+					break
+				}
+			}
+		}
+		if start != "" && dir != "" {
 			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
 				t.Commits, t.BranchKnown = c, true
 			}
 		}
 	}
 	return t
+}
+
+// repoAndTarget is the located repo name in the project and its target
+// branch. A repo the project does not list has no target (a commit with no
+// known fork point is not held to one); the project's only repo is the repo
+// of a Locate that named none.
+func (h *handler) repoAndTarget() (name, target string) {
+	for _, r := range h.cfg.Repos {
+		if h.w.Repo != "" && r.Name() == h.w.Repo {
+			return r.Name(), r.TargetBranch()
+		}
+	}
+	if len(h.cfg.Repos) == 1 {
+		return h.cfg.Repos[0].Name(), h.cfg.Repos[0].TargetBranch()
+	}
+	return h.w.Repo, ""
 }
 
 // dirtyTracked lists the tracked files of the session directory that have
