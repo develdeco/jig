@@ -287,7 +287,7 @@ func buildHereView(hc hereCtx) (hereView, error) {
 	}
 	v.verified = verificationsIn(lines)
 	truth := hereTruth(hc, lines, sliceIDs(st, ticket))
-	v.states = statesOf(truth.Derive())
+	v.states = statesOf(truth.Outstanding())
 	for _, r := range truth.LastRuns() {
 		for i := range v.slices {
 			if v.slices[i].ID == r.Slice {

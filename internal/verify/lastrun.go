@@ -75,7 +75,7 @@ func (t Truth) LastRuns() []LastRun {
 			run.Covers = CoversNotChecked
 		case !known:
 			run.Covers = CoversNoPrefix + "slice has no commit on the branch"
-		case !AtOrAfter(t.Commits, last, l.Commit):
+		case !AtOrAfter(t.Parents, last, l.Commit):
 			run.Covers = CoversNoPrefix + "slice's last commit is " + short12(last)
 		default:
 			run.Covers = CoversYes

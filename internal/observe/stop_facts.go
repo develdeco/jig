@@ -152,36 +152,14 @@ func (h *handler) verificationFindings() []finding {
 		return nil
 	}
 	truth := h.verifyTruth(lines)
-	rows := truth.Derive()
-
-	// Only a slice's latest commit on the branch is held to a result: the
-	// command that clears a commit runs at HEAD, so an older commit of the
-	// slice (a test commit before the code) is history once a later one exists,
-	// and so is a commit the slice has a verified line at a descendant of
-	// (slices verified one after the other at HEAD).
-	latest := map[string]string{}
-	for _, c := range truth.Commits { // oldest first
-		latest[c.Slice] = c.SHA
-	}
-	ancestry := verify.GitAncestry(h.w.RepoDir)
-	history := func(commit, slice string) bool {
-		for _, l := range lines {
-			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && (verify.AtOrAfter(truth.Commits, commit, l.Commit) || ancestry(commit, l.Commit)) {
-				return true
-			}
-		}
-		return false
-	}
+	// Only a slice's building tip is held to a result: an older commit of the
+	// slice, or one it has a verified line at or after, is history
+	// (Truth.Outstanding), the rule `jig here` and `jig status` share.
+	rows := truth.Outstanding()
 
 	var out []finding
 	for _, r := range rows {
 		if !r.State.Unclear() {
-			continue
-		}
-		if l, ok := latest[r.Slice]; ok && l != r.Commit {
-			continue
-		}
-		if history(r.Commit, r.Slice) {
 			continue
 		}
 		if !r.State.Holds() && !h.building(r.Slice) {
@@ -239,8 +217,8 @@ func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
 			}
 		}
 		if start != "" && dir != "" {
-			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
-				t.Commits, t.BranchKnown = c, true
+			if c, parents, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
+				t.Commits, t.Parents, t.BranchKnown = c, parents, true
 			}
 		}
 	}

@@ -447,8 +447,10 @@ var startedEvents = map[string]bool{
 type sliceView struct {
 	Slice
 	verifiedCommit string
-	// failed: the slice's latest covering run failed and nothing has verified
-	// it since.
+	// failed: the slice's latest covering run failed, judging the code, and
+	// nothing has verified it since. It only reads failed while the store has
+	// the slice building, the state `jig verify` sets a failed slice back to,
+	// as the TUI's rows do.
 	failed    bool
 	claimed   bool
 	claimedBy string
@@ -750,11 +752,11 @@ func (d *digest) readSlices() {
 				v.verifiedCommit = l.Commit
 				v.failed = false
 			case journal.EventOracle:
-				// The latest run that covered a commit decides; a run a stop or
-				// a timeout ended judged nothing, and an uncovered one says
-				// nothing of a commit.
-				if l.Uncovered == "" && l.Cause == "" {
-					v.failed = l.Outcome == "fail"
+				// The latest run that covered a commit decides (an uncovered one
+				// says nothing of a commit), and it is a failure only when it
+				// judged the code: a run a stop or a timeout ended did not.
+				if l.Uncovered == "" {
+					v.failed = l.Outcome == "fail" && l.Cause == ""
 				}
 			case journal.EventClaim:
 				claim, v.claimedBy = i, l.Session
@@ -1057,7 +1059,7 @@ func (d *digest) sliceState(s sliceView) (state, detail string) {
 		return SubNeedsYou, "waits for your answer"
 	case s.State == sliceStalled:
 		return SubFailed, "stalled"
-	case s.failed && s.State != sliceGreen:
+	case s.failed && s.State == sliceBuilding:
 		return SubFailed, "failed its last run"
 	case s.State == sliceGreen:
 		return SubDone, strings.TrimSpace("verified " + short(s.verifiedCommit))
@@ -1100,7 +1102,7 @@ func (d *digest) buildFocus() string {
 				return "slice " + s.ID + " needs your answer"
 			case want == "stalled" && s.State == sliceStalled:
 				return "slice " + s.ID + " stalled"
-			case want == "failed" && s.failed && s.State != sliceGreen:
+			case want == "failed" && s.failed && s.State == sliceBuilding:
 				return "slice " + s.ID + " failed its last run"
 			case want == "env" && s.State == sliceEnvBlocked:
 				return "slice " + s.ID + " waits for its environment"

@@ -13,24 +13,31 @@ import (
 // SliceTrailerKey is the commit trailer that names the slice a commit is for.
 const SliceTrailerKey = "Jig-Slice"
 
-// BranchCommits lists the commits reachable from rev and not from start in the
-// work tree dir whose message carries a slice trailer, oldest first, each with
-// the slice it names (the last trailer wins). It runs one git log however many
-// commits there are.
-func BranchCommits(dir, start, rev string) ([]phase.CommitRef, error) {
-	out, err := gitx.Run(dir, "log", "--no-merges", "--reverse",
-		"--format=%H%x1f%(trailers:key="+SliceTrailerKey+",valueonly,separator=%x1f)%x1e", start+".."+rev)
+// BranchCommits reads the branch past start in the work tree dir with one git
+// log: the commits reachable from rev and not from start whose message carries
+// a slice trailer, oldest first, each with the slice it names (the last trailer
+// wins; a merge commit is not one), and every commit of the range with its
+// parents, so descent over the branch is answered with no git process more.
+func BranchCommits(dir, start, rev string) ([]phase.CommitRef, map[string][]string, error) {
+	out, err := gitx.Run(dir, "log", "--reverse",
+		"--format=%H%x1f%P%x1f%(trailers:key="+SliceTrailerKey+",valueonly,separator=%x1f)%x1e", start+".."+rev)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var refs []phase.CommitRef
+	parents := map[string][]string{}
 	for _, rec := range strings.Split(out, "\x1e") {
 		parts := strings.Split(strings.TrimSpace(rec), "\x1f")
-		if len(parts) < 2 {
+		if len(parts) < 2 || parts[0] == "" {
+			continue
+		}
+		ps := strings.Fields(parts[1])
+		parents[parts[0]] = ps
+		if len(ps) > 1 {
 			continue
 		}
 		slice := ""
-		for _, p := range parts[1:] {
+		for _, p := range parts[2:] {
 			if p = strings.TrimSpace(p); p != "" {
 				slice = p
 			}
@@ -39,7 +46,7 @@ func BranchCommits(dir, start, rev string) ([]phase.CommitRef, error) {
 			refs = append(refs, phase.CommitRef{SHA: parts[0], Slice: slice})
 		}
 	}
-	return refs, nil
+	return refs, parents, nil
 }
 
 // StartSHA is the start sha the ticket recorded in repo, "" when it has none.
@@ -68,31 +75,61 @@ type Truth struct {
 	// shows is judged.
 	Commits     []phase.CommitRef
 	BranchKnown bool
+	// Parents holds every commit of the branch past the start sha with its
+	// parents, trailer or not, merge or not (BranchCommits).
+	Parents map[string][]string
 	// BranchSlices are the slices that build in a repo whose branch was read,
 	// in a project of several repos where only some branches are. nil says
 	// every slice's branch was read (when BranchKnown).
 	BranchSlices map[string]bool
 }
 
-// AtOrAfter reports whether at is commit or a commit made after it on the
-// branch: commits is the branch's log, oldest first. A run or a verified line
-// at such a commit covers a tree that holds commit. It is the one rule the
-// Stop hook (a commit is history once its slice is verified at a later one)
-// and a slice's last run (does it cover the slice's last commit) share.
-func AtOrAfter(commits []phase.CommitRef, commit, at string) bool {
+// AtOrAfter reports whether at is commit or a commit that has it as an
+// ancestor, over parents (every commit of the branch past the start sha, with
+// its parents, as BranchCommits reads them). A run or a verified line at such
+// a commit covers a tree that holds commit, whether the commit between them
+// carries a trailer, is a merge of the target branch or is neither. It is the
+// one rule a slice's last run (does it cover the slice's last commit), the
+// Stop hook and `verification_states` share.
+func AtOrAfter(parents map[string][]string, commit, at string) bool {
 	if commit == "" || at == "" {
 		return false
 	}
-	if commit == at {
-		return true
-	}
-	seen := false
-	for _, c := range commits {
-		if c.SHA == commit {
-			seen = true
+	seen := map[string]bool{}
+	stack := []string{at}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if c == commit {
+			return true
+		}
+		if seen[c] {
 			continue
 		}
-		if seen && c.SHA == at {
+		seen[c] = true
+		stack = append(stack, parents[c]...)
+	}
+	return false
+}
+
+// History reports whether commit of slice is history, not something still to
+// be given a result: the slice has a later commit of its own on the branch
+// (the command that clears a commit runs at HEAD, so a test commit before the
+// code is history once the code exists), or the slice has a verified line at a
+// commit after it (slices verified one after the other at HEAD). Without the
+// branch nothing is history.
+func (t Truth) History(commit, slice string) bool {
+	latest := ""
+	for _, c := range t.Commits { // oldest first
+		if c.Slice == slice {
+			latest = c.SHA
+		}
+	}
+	if latest != "" && latest != commit {
+		return true
+	}
+	for _, l := range t.Lines {
+		if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && AtOrAfter(t.Parents, commit, l.Commit) {
 			return true
 		}
 	}
@@ -113,4 +150,17 @@ func (t Truth) Derive() []phase.CommitVerification {
 		}
 	}
 	return phase.DeriveVerifications(in)
+}
+
+// Outstanding is Derive's rows that are not a pass and not history: the
+// commits a reader should name. A slice's building tip with no recorded
+// result is one.
+func (t Truth) Outstanding() []phase.CommitVerification {
+	var out []phase.CommitVerification
+	for _, r := range t.Derive() {
+		if r.State.Unclear() && !t.History(r.Commit, r.Slice) {
+			out = append(out, r)
+		}
+	}
+	return out
 }

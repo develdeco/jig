@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -194,6 +195,26 @@ func TestHereTwoRepoProject(t *testing.T) {
 		if !strings.Contains(r.Stdout, want) {
 			t.Errorf("jig here lacks %q:\n%s", want, r.Stdout)
 		}
+	}
+
+	// `jig status` reads the same way: it reads the ticket's branch in the
+	// clones that have a start sha, so only the second repo's.
+	next := runJig(t, env, fx.SecondRepoDir, "next", "JIG-1")
+	b := regexp.MustCompile(`(?m)^\s*branch:\s*(\S+)`).FindStringSubmatch(next.Stdout)
+	if b == nil {
+		t.Fatalf("jig next names no branch:\n%s", next.Stdout)
+	}
+	gitLog(t, fx.SecondRepoDir, "branch", "-f", b[1], "HEAD")
+	r = runJig(t, env, fx.SecondRepoDir, "status", "JIG-1")
+	var lastRuns []string
+	for _, l := range strings.Split(r.Stdout, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "a,") || strings.HasPrefix(strings.TrimSpace(l), "e,") {
+			lastRuns = append(lastRuns, l)
+		}
+	}
+	text := strings.Join(lastRuns, "\n")
+	if !strings.Contains(text, ",pass,not checked,") || !strings.Contains(text, "\"no: slice has no commit on the branch\"") {
+		t.Errorf("jig status last_runs: a (first repo, no start sha) should say not checked and e (second repo) that it has no commit:\n%s", r.Stdout)
 	}
 }
 

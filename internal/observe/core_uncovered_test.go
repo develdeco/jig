@@ -6,8 +6,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 )
+
+// git runs git in the clone and fails the test on an error.
+func (r *rig) git(args ...string) {
+	r.t.Helper()
+	if _, err := gitx.Run(r.fx.RepoDir, args...); err != nil {
+		r.t.Fatalf("git %v: %v", args, err)
+	}
+}
 
 // TestAnUncoveredFailureIsNoEnforcedNote: a failed run that covers no commit (a
 // dirty tree, another command) is no verification of the commit it names, so
@@ -113,6 +122,27 @@ func TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant(t *testin
 			r.add(journal.Line{Event: journal.EventOracle, Slice: "a", Commit: b1, Attempt: 1, Outcome: "pass", Uncovered: journal.UncoveredDirtyBefore})
 			return a1
 		}, true},
+		{"slice a verified at a later untrailed commit holds nothing for a1", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			u := r.commit("", "u.txt")
+			pass(r, "a", u)
+			return a1
+		}, false},
+		{"slice a verified at a merge of the target branch holds nothing for a1", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			r.git("branch", "side", a1)
+			r.commit("", "u.txt")
+			r.git("checkout", "-q", "side")
+			r.commit("", "x.txt")
+			r.git("checkout", "-q", "-")
+			r.git("merge", "--no-ff", "-q", "-m", "merge side", "side")
+			m, err := gitx.RevParse(r.fx.RepoDir, "HEAD")
+			if err != nil {
+				r.t.Fatal(err)
+			}
+			pass(r, "a", m)
+			return a1
+		}, false},
 		{"slice a verified at a1, then a2 committed: a2 is held", func(r *rig) string {
 			a1 := r.commit("a", "a1.txt")
 			pass(r, "a", a1)

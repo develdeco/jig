@@ -85,8 +85,8 @@ func hereTruth(hc hereCtx, lines []journal.Line, ids []string) verify.Truth {
 			dir = w.RepoDir
 		}
 		if start := verify.StartSHA(hc.Store, w.Ticket, w.Repo); start != "" && dir != "" {
-			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
-				t.Commits, t.BranchKnown = c, true
+			if c, parents, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
+				t.Commits, t.Parents, t.BranchKnown = c, parents, true
 				read = w.Repo
 			}
 		}
@@ -186,8 +186,14 @@ func (s *statusTruth) read(st *store.Store, ticket string) (verify.Truth, string
 		}
 		why = "no branch " + branch
 		for _, ref := range []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch} {
-			if c, err := verify.BranchCommits(dir, start, ref); err == nil {
+			if c, parents, err := verify.BranchCommits(dir, start, ref); err == nil {
 				t.Commits, t.BranchKnown = append(t.Commits, c...), true
+				if t.Parents == nil {
+					t.Parents = map[string][]string{}
+				}
+				for sha, ps := range parents {
+					t.Parents[sha] = ps
+				}
 				read = append(read, r.Name())
 				break
 			}
@@ -212,7 +218,7 @@ func (s *statusTruth) verificationStatesBlocks(st *store.Store, ticket string) (
 	if !t.BranchKnown && why == "no clone" {
 		blocks = append(blocks, "no recorded result: not checked ("+why+")")
 	}
-	if states := statesOf(t.Derive()); len(states) > 0 {
+	if states := statesOf(t.Outstanding()); len(states) > 0 {
 		blocks = append(blocks, statesTable(states))
 	}
 	return blocks, nil
