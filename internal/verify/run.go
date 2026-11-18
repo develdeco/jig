@@ -19,7 +19,6 @@ import (
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/slot"
-	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -71,12 +70,6 @@ type Deps struct {
 	Log io.Writer
 	// Sleep waits between the tries of a push; nil is time.Sleep.
 	Sleep func(time.Duration)
-
-	// Executable is the jig binary Spawn starts as the worker, and Start the
-	// function that starts a detached process (spawn.Detached in production).
-	// Only Spawn reads them.
-	Executable string
-	Start      func(spawn.Spec) (int, error)
 }
 
 // Request names one verification: the slice's oracle, run on the commit.

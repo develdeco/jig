@@ -1,10 +1,10 @@
 package e2e
 
 // End-to-end tests of `jig verify`: the commit a person or an agent made by
-// hand, verified in a detached worktree by a detached worker, recorded in the
-// journal as the frontier records a builder's green run, so the gate can reuse
-// the pass. The harness stands for the agent session: it commits in the
-// operator clone with the Jig-Slice trailer and runs jig from there.
+// hand, verified by the run of `jig verify` the builder makes itself, recorded
+// in the journal as the frontier records a builder's green run, so the gate
+// can reuse the pass. The harness stands for the agent session: it commits in
+// the operator clone with the Jig-Slice trailer and runs jig from there.
 
 import (
 	"encoding/json"
@@ -23,8 +23,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// verifyWait is how long a test gives a detached verification to record its
-// outcome: a go test run in a fresh worktree, on a loaded machine.
+// verifyWait is how long a test gives a verification to record its outcome: a
+// go test run in a fresh worktree, on a loaded machine.
 const verifyWait = 3 * time.Minute
 
 // dropEnvFromSlices removes the env class slice d names from the store's
@@ -60,7 +60,7 @@ func oracleLine(lines []journal.Line, slice, sha, outcome string) (journal.Line,
 }
 
 // TestVerifyHandCommitReusedByGate: a commit made by hand on the ticket's
-// branch for slice a is verified by a detached worker (`jig verify`), which
+// branch for slice a is verified by the builder's own `jig verify`, which
 // journals the pending line, the oracle line and the verified line; the gate
 // round that follows reuses that pass for the alpha workspace's oracle instead
 // of running it again, and runs beta's, which no one verified.
@@ -74,20 +74,14 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	sha := h.CommitScenario("a", 1)
 	h.Push(branch)
 
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", "a")
-	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") || !strings.Contains(res.Stdout, "pid: ") {
-		t.Fatalf("jig verify exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	res := h.Verify(fx.Ticket, sha, "a")
+	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	oracle := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventOracle && l.Slice == "a" && l.Commit == sha
-	})
-	if oracle.Outcome != "pass" {
-		t.Fatalf("oracle line = %+v, want a pass", oracle)
+	oracle, ok := oracleLine(readJournal(t, fx, fx.Ticket), "a", sha, "pass")
+	if !ok {
+		t.Fatalf("no oracle pass line for %s", sha)
 	}
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Slice == "a" && l.Commit == sha
-	})
-	h.WaitVerifiers()
 
 	lines := readJournal(t, fx, fx.Ticket)
 	var kinds []string
@@ -110,8 +104,10 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	if ss, err := st.ReadSliceState(fx.Ticket, "a"); err != nil || ss.State != "green" || ss.Attempts != 1 {
 		t.Errorf("slice a state = %+v, %v, want green after 1 attempt", ss, err)
 	}
-	if ledger := readLedger(t, env); len(ledger) != 1 || ledger[0].Event != journal.EventVerifySpawned || ledger[0].Commit != sha {
-		t.Errorf("ledger = %+v, want the one verify-spawned line", ledger)
+	for _, l := range readLedger(t, env) {
+		if l.Event == journal.EventVerifySpawned {
+			t.Errorf("ledger holds %+v: a foreground verify starts no worker", l)
+		}
 	}
 
 	gate := runJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
@@ -147,8 +143,8 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 
 // TestVerifyIdempotent: a second `jig verify` of a commit that has a
 // verification reports the existing one and adds nothing: no journal line, no
-// ledger line, no worker. The same holds while a verification is pending, and
-// --rerun is the way to run it again, as the slice's next attempt.
+// ledger line, no worker. --rerun is the way to run it again, as the slice's
+// next attempt.
 func TestVerifyIdempotent(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -164,7 +160,7 @@ func TestVerifyIdempotent(t *testing.T) {
 	journalBefore := readJournal(t, fx, fx.Ticket)
 	ledgerBefore := readLedger(t, env)
 
-	second := h.Jig("verify", fx.Ticket, sha, "--slice", "a")
+	second := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
 	if second.Code != 0 || !strings.Contains(second.Stdout, "existing: true") || !strings.Contains(second.Stdout, "state: pass") {
 		t.Fatalf("second jig verify exit = %d, want 0 and the existing pass\nstdout:\n%s\nstderr:\n%s", second.Code, second.Stdout, second.Stderr)
 	}
@@ -178,27 +174,6 @@ func TestVerifyIdempotent(t *testing.T) {
 	}
 	if got := readLedger(t, env); !reflect.DeepEqual(got, ledgerBefore) {
 		t.Errorf("the ledger changed on a repeat: %+v", got)
-	}
-
-	// A pending record stands the same way.
-	pendingSHA := h.Commit("b", "b: by hand", map[string]string{"notes/b.txt": "hand written"})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := journal.Append(st, fx.Ticket, journal.Line{Slice: "b", Event: journal.EventVerifyPending, Commit: pendingSHA, Attempt: 1}); err != nil {
-		t.Fatal(err)
-	}
-	journalBefore = readJournal(t, fx, fx.Ticket)
-	pending := h.Jig("verify", fx.Ticket, pendingSHA, "--slice", "b")
-	if pending.Code != 0 || !strings.Contains(pending.Stdout, "existing: true") || !strings.Contains(pending.Stdout, "state: pending") {
-		t.Fatalf("jig verify over a pending record exit = %d\nstdout:\n%s\nstderr:\n%s", pending.Code, pending.Stdout, pending.Stderr)
-	}
-	if got := readJournal(t, fx, fx.Ticket); !reflect.DeepEqual(got, journalBefore) {
-		t.Errorf("the journal changed over a pending record: %d lines, were %d", len(got), len(journalBefore))
-	}
-	if got := readLedger(t, env); !reflect.DeepEqual(got, ledgerBefore) {
-		t.Errorf("the ledger changed over a pending record: %+v", got)
 	}
 
 	rerun := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--rerun", "--wait")
@@ -217,10 +192,10 @@ func TestVerifyIdempotent(t *testing.T) {
 }
 
 // TestVerifyFailPersistsSignature: slice b's first attempt, made without the
-// fix slice a brings, fails its test. The detached worker journals the failed
-// oracle line with the flattened tail of the output and the stall signature
-// built from it, the full tail is in the worker's log, no verified line is
-// written, and the slice is building.
+// fix slice a brings, fails its test. `jig verify` exits 1, journals the
+// failed oracle line with the flattened tail of the output and the stall
+// signature built from it, the full tail is in the run's log, no verified
+// line is written, and the slice is building.
 func TestVerifyFailPersistsSignature(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -229,14 +204,14 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 	h.Branch(branch)
 	sha := h.CommitScenario("b", 1)
 
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", "b")
-	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-		t.Fatalf("jig verify exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	res := h.Verify(fx.Ticket, sha, "b")
+	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
+		t.Fatalf("jig verify exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	line := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventOracle && l.Slice == "b" && l.Commit == sha
-	})
-	h.WaitVerifiers()
+	line, ok := oracleLine(readJournal(t, fx, fx.Ticket), "b", sha, "fail")
+	if !ok {
+		t.Fatalf("no failed oracle line for %s", sha)
+	}
 
 	if line.Outcome != "fail" || line.Attempt != 1 || line.Source != "jig" || line.Session != h.Session {
 		t.Fatalf("oracle line = %+v, want a failure of attempt 1 by jig for session %s", line, h.Session)
@@ -271,7 +246,7 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 		return nil
 	})
 	if !strings.Contains(logBody, "the oracle failed") || !strings.Contains(logBody, "FAIL") {
-		t.Errorf("the worker's log under %s lacks the oracle's output tail:\n%s", logs, logBody)
+		t.Errorf("the run's log under %s lacks the oracle's output tail:\n%s", logs, logBody)
 	}
 }
 

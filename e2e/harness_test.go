@@ -5,9 +5,9 @@ package e2e
 // beside it, works in the operator clone, runs jig and git, and fires hooks
 // at jig observe. This fake does just those things, scripted: it commits a
 // scenario patches with the trailer a real session leaves, builds the hook
-// payloads Claude Code sends, runs jig observe on them, and waits for or kills
-// the detached verification workers a commit starts. It adds no model and no
-// network.
+// payloads Claude Code sends, and runs jig observe on them. A commit starts no
+// verification; the harness proves a commit with `jig verify`, as a builder
+// does. It adds no model and no network.
 
 import (
 	"bytes"
@@ -17,25 +17,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 )
-
-// verifierWait is how long WaitVerifiers gives the detached verification
-// workers a harness started to finish before it kills them.
-const verifierWait = 60 * time.Second
 
 // sliceTrailerKey is the commit trailer that names the slice a commit is for.
 const sliceTrailerKey = "Jig-Slice"
@@ -56,30 +47,20 @@ type fakeHarness struct {
 	Agent string
 	// Transcript is the payloads transcript_path. The file need not exist.
 	Transcript string
-	// VerifierWait is how long WaitVerifiers waits before it kills.
-	VerifierWait time.Duration
-
-	// reportf is how WaitVerifiers reports a worker it had to kill: it fails
-	// the test, except in the test of WaitVerifiers itself.
-	reportf func(format string, args ...any)
 }
 
 // newHarness returns a harness for session working in the clone of fx,
-// running jig and git with env. Detached verification workers it left
-// running are killed when the test ends.
+// running jig and git with env.
 func newHarness(t *testing.T, fx *fixture.Fixture, env jigEnv, session string) *fakeHarness {
 	t.Helper()
 	h := &fakeHarness{
-		t:            t,
-		fx:           fx,
-		env:          env,
-		Clone:        fx.RepoDir,
-		Session:      session,
-		Transcript:   filepath.Join(fx.Dir, "transcripts", session+".jsonl"),
-		VerifierWait: verifierWait,
-		reportf:      t.Errorf,
+		t:          t,
+		fx:         fx,
+		env:        env,
+		Clone:      fx.RepoDir,
+		Session:    session,
+		Transcript: filepath.Join(fx.Dir, "transcripts", session+".jsonl"),
 	}
-	t.Cleanup(h.killVerifiers)
 	return h
 }
 
@@ -168,55 +149,6 @@ func (h *fakeHarness) Commit(slice, msg string, files map[string]string) string 
 	}
 	h.git(args...)
 	return h.git("rev-parse", "HEAD")
-}
-
-// holdSource is the test HoldVerifications writes into a workspace: it
-// passes once the release file exists, and fails after holdLimit without it.
-const holdSource = `package %s
-
-import (
-	"os"
-	"testing"
-	"time"
-)
-
-// TestHeldByTheE2ETest waits for the e2e test that wrote it to let the
-// verification go.
-func TestHeldByTheE2ETest(t *testing.T) {
-	for deadline := time.Now().Add(%d * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		if _, err := os.Stat(%q); err == nil {
-			return
-		}
-	}
-	t.Fatal("the e2e test never released this verification")
-}
-`
-
-// holdLimit is how long a held oracle waits for its release.
-const holdLimit = 2 * time.Minute
-
-// HoldVerifications makes the oracle of every verification started from the
-// next commit on wait until release is called, so a test can look at a
-// verification that is still running however loaded the machine is. It
-// writes a test into each of workspaces (clone-relative directories whose
-// package is named after the directory, as the fixture's are), left for the
-// next commit to take in; the oracle's go test then runs it, and it passes
-// once released. The test's cleanup releases it too, so a test that fails
-// first leaves no worker waiting.
-func (h *fakeHarness) HoldVerifications(workspaces ...string) (release func()) {
-	h.t.Helper()
-	gate := filepath.Join(h.t.TempDir(), "released")
-	for _, ws := range workspaces {
-		src := fmt.Sprintf(holdSource, filepath.Base(ws), int(holdLimit/time.Second), gate)
-		writeFileOrFatal(h.t, filepath.Join(h.Clone, filepath.FromSlash(ws), "held_by_e2e_test.go"), []byte(src))
-	}
-	release = sync.OnceFunc(func() {
-		if err := os.WriteFile(gate, nil, 0o644); err != nil {
-			h.t.Errorf("HoldVerifications: release: %v", err)
-		}
-	})
-	h.t.Cleanup(release)
-	return release
 }
 
 // Payload builds the JSON a Claude Code hook sends on stdin for event: the
@@ -420,76 +352,6 @@ func (h *fakeHarness) Verify(ticket, sha, slice string) jigResult {
 func (h *fakeHarness) Push(branch string) {
 	h.t.Helper()
 	h.builder().Push(h.Clone, "origin", branch)
-}
-
-// verifierPIDs lists the pids of the detached verification workers the ledger
-// says were spawned.
-func (h *fakeHarness) verifierPIDs() ([]spawnedWorker, error) {
-	lines, err := ledger.Read(h.env.home)
-	if err != nil {
-		return nil, err
-	}
-	var workers []spawnedWorker
-	for _, l := range lines {
-		if l.Event != journal.EventVerifySpawned || l.PID <= 0 {
-			continue
-		}
-		at, err := time.Parse(time.RFC3339Nano, l.TS)
-		if err != nil || slices.ContainsFunc(workers, func(w spawnedWorker) bool { return w.pid == l.PID }) {
-			continue
-		}
-		workers = append(workers, spawnedWorker{pid: l.PID, at: at})
-	}
-	return workers, nil
-}
-
-// spawnedWorker is a verification worker as its verify-spawned line names
-// it: its pid and when the line was written, which is after the worker
-// started.
-type spawnedWorker struct {
-	pid int
-	at  time.Time
-}
-
-// running reports whether w is still running: a live process under its pid
-// that started no later than its line was written. Windows hands a pid out
-// again as soon as it is free, so a later process under the same pid is
-// another test's jig, git or go, and must never be waited for or killed in
-// the worker's place (a force-kill ends it with exit status 1 and no
-// output, which is how it showed).
-func (w spawnedWorker) running() bool { return startedBy(w.pid, w.at) }
-
-// WaitVerifiers waits for the detached verification workers the ledger
-// verify-spawned lines name to exit, up to VerifierWait, and kills (with the
-// tree under them) any still running then, reporting each as a test failure:
-// a test must not leave a worker behind. Workers spawned later are not seen;
-// call it again.
-func (h *fakeHarness) WaitVerifiers() {
-	h.t.Helper()
-	workers, err := h.verifierPIDs()
-	if err != nil {
-		h.t.Fatalf("WaitVerifiers: read the ledger: %v", err)
-	}
-	if pollUntil(h.VerifierWait, func() bool { return !slices.ContainsFunc(workers, spawnedWorker.running) }) {
-		return
-	}
-	for _, w := range workers {
-		if w.running() {
-			h.reportf("verification worker %d was still running %s after the test waited for it; killed", w.pid, h.VerifierWait)
-			killTree(w.pid)
-		}
-	}
-}
-
-// killVerifiers kills, without waiting, every verification worker still
-// running: the cleanup of a test that did not wait for them.
-func (h *fakeHarness) killVerifiers() {
-	workers, _ := h.verifierPIDs()
-	for _, w := range workers {
-		if w.running() {
-			killTree(w.pid)
-		}
-	}
 }
 
 // killTree ends the process pid and the processes it started.

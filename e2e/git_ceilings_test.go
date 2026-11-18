@@ -14,7 +14,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gittest"
-	"github.com/develdeco/jig/internal/journal"
 )
 
 // processCeilings is, per command, the most git processes one run of it may
@@ -96,11 +95,7 @@ func TestGitProcessCeilings(t *testing.T) {
 		sha := h.CommitScenario("a", 1)
 
 		th, path = traceOf("verify")
-		must(th.Jig("verify", ticket, sha, "--slice", "a"), "jig verify")
-		waitJournal(t, fx, ticket, verifyWait, func(l journal.Line) bool {
-			return l.Slice == "a" && l.Event == journal.EventVerified && l.Commit == sha
-		})
-		h.WaitVerifiers()
+		must(th.Verify(ticket, sha, "a"), "jig verify")
 		checkCeiling(t, "verify", path)
 
 		th, path = traceOf("gate")

@@ -666,10 +666,13 @@ func TestCommitWithoutSliceGetsANote(t *testing.T) {
 		t.Errorf("slice e = %+v, %v, want queued: the guess moves nothing", ss, err)
 	}
 
-	// The trailer names the slice: jig verifies the commit, and says nothing.
+	// The trailer names the slice: the commit says nothing, and the builder's
+	// own jig verify records it against that slice.
 	withTrailer, hook := corrCommit(t, h, "delta/trailer.txt", "e")
 	corrSilent(t, "the PostToolUse of a commit with the trailer", hook)
-	h.WaitVerifiers()
+	if res := h.Verify(fx.Ticket, withTrailer, "e"); res.Code != 0 {
+		t.Fatalf("jig verify exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	if lines := corrVerifyLines(t, fx, withTrailer); len(lines) == 0 {
 		t.Errorf("a commit with the trailer was not verified: no journal line for %s", withTrailer)
 	}

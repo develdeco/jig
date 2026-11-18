@@ -24,14 +24,11 @@ import (
 // the same text, which the help parity test compares.
 const (
 	verifySliceUsage   = "slice to verify (default: the commit's Jig-Slice trailer, then the slice your session claimed)"
-	verifyWaitUsage    = "run the oracle here and wait for its outcome (or for the worker already running), instead of in a detached process"
+	verifyWaitUsage    = "run the oracle here and wait for its outcome"
 	verifyRerunUsage   = "verify again a commit that already has a verification"
 	verifySessionUsage = "harness session id recorded on the lines (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 	verifyStoreUsage   = "explicit store path"
 	verifyProjectUsage = "project name, resolved via the machine mapping"
-	verifyWorkerUsage  = "run as the detached worker that does the verification"
-	verifyAgentUsage   = "agent id recorded on the lines"
-	verifyCloneUsage   = "the repo clone to check the commit out from (set for the worker)"
 )
 
 // verifySliceTrailer is the commit trailer that names the slice a commit is
@@ -48,9 +45,6 @@ func init() {
 			{"session", verifySessionUsage, false},
 			{"store", verifyStoreUsage, false},
 			{"project", verifyProjectUsage, false},
-			{"worker", verifyWorkerUsage, true},
-			{"agent-id", verifyAgentUsage, true},
-			{"repo-dir", verifyCloneUsage, true},
 		}, false},
 		Order: 320,
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
@@ -63,23 +57,21 @@ func init() {
 // are parsed.
 type verifyOpts struct {
 	ticket, rev            string
-	slice, session, agent  string
+	slice, session         string
 	storeFlag, projectFlag string
-	cloneFlag              string
-	wait, rerun, worker    bool
+	wait, rerun            bool
 }
 
 // cmdVerify implements `jig verify [T] [sha] [--slice S] [--wait] [--rerun]
 // [--session ID]`: run slice S's oracle on commit sha of ticket T in a
 // detached worktree and record the outcome in the ticket's journal. Without
-// --wait the run is a detached worker (`--worker` is the worker itself, hidden)
-// and the command returns once it is started; the ticket defaults to the one
-// the clone's branch is for, the commit to HEAD, the slice to the commit's
-// Jig-Slice trailer and then the slice the session claimed.
+// --wait the run is in this process, and starts nothing; the ticket defaults
+// to the one the clone's branch is for, the commit to HEAD, the slice to the
+// commit's Jig-Slice trailer and then the slice the session claimed.
 func cmdVerify(e env, args []string, stdout io.Writer) int {
-	// The positionals come first (`jig verify T-1 <sha> --slice a`) or last
-	// (a worker's command line puts its flags first); the flag package stops
-	// at the first of them, so the leading ones are taken out here.
+	// The positionals come first (`jig verify T-1 <sha> --slice a`) or last;
+	// the flag package stops at the first of them, so the leading ones are
+	// taken out here.
 	var pos []string
 	rest := args
 	for len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
@@ -95,9 +87,6 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	fs.StringVar(&o.session, "session", "", verifySessionUsage)
 	fs.StringVar(&o.storeFlag, "store", "", verifyStoreUsage)
 	fs.StringVar(&o.projectFlag, "project", "", verifyProjectUsage)
-	fs.BoolVar(&o.worker, "worker", false, verifyWorkerUsage)
-	fs.StringVar(&o.agent, "agent-id", "", verifyAgentUsage)
-	fs.StringVar(&o.cloneFlag, "repo-dir", "", verifyCloneUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
 		return 0
 	} else if err != nil {
@@ -115,9 +104,6 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	if o.storeFlag, err = e.abs(o.storeFlag); err != nil {
 		return renderErr(stdout, err)
 	}
-	if o.cloneFlag, err = e.abs(o.cloneFlag); err != nil {
-		return renderErr(stdout, err)
-	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, o.projectFlag, o.storeFlag, stdout)
 	if err != nil {
@@ -128,13 +114,7 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	switch {
-	case o.worker:
-		return runVerifyWorker(d, req, stdout)
-	case o.wait:
-		return runVerifyWait(e, d, req, stdout)
-	}
-	return runVerifySpawn(e, d, req, stdout)
+	return runVerifyWait(e, d, req, stdout)
 }
 
 // splitVerifyArgs tells the positionals apart: a ticket id (a key and a
@@ -196,11 +176,11 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	}
 	o.session = where.Session
 
-	repoName, target, err := verifyRepo(cfg, mp, where.Repo, o.cloneFlag)
+	repoName, target, err := verifyRepo(cfg, where.Repo)
 	if err != nil {
 		return none(err)
 	}
-	clone, workDir, err := verifyClone(e.memo, cwd, o.cloneFlag, where.RepoDir, mp.Clones[repoName])
+	clone, workDir, err := verifyClone(e.memo, cwd, where.RepoDir, mp.Clones[repoName])
 	if err != nil {
 		return none(err)
 	}
@@ -226,30 +206,19 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 
 	d := verify.Deps{
 		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: clone, Repo: repoName, Target: target,
-		Now: e.now, Start: e.spawn,
+		Now: e.now,
 	}
-	if exe, err := e.executable(); err == nil {
-		d.Executable = exe
-	}
-	return d, verify.Request{Ticket: ticket, Slice: slice, SHA: sha, Session: o.session, Agent: o.agent, Rerun: o.rerun}, nil
+	return d, verify.Request{Ticket: ticket, Slice: slice, SHA: sha, Session: o.session, Rerun: o.rerun}, nil
 }
 
 // verifyRepo is the repo the commit is in, by its name in the project, and its
 // target branch: the one locate found around the working directory, else the
-// one whose mapped clone is the clone named (--repo-dir), else the project's
-// only repo. A project of several repos with none to go by is refused: no
+// project's only repo. A project of several repos with none to go by is refused: no
 // repo is the one that owns what is not placed.
-func verifyRepo(cfg project.Config, mp project.MachineProject, located, cloneFlag string) (name, target string, err error) {
+func verifyRepo(cfg project.Config, located string) (name, target string, err error) {
 	for _, r := range cfg.Repos {
 		if located != "" && r.Name() == located {
 			return r.Name(), r.TargetBranch(), nil
-		}
-	}
-	if cloneFlag != "" {
-		for _, r := range cfg.Repos {
-			if dir := mp.Clones[r.Name()]; dir != "" && gitx.SameDir(dir, cloneFlag) {
-				return r.Name(), r.TargetBranch(), nil
-			}
 		}
 	}
 	switch len(cfg.Repos) {
@@ -265,7 +234,7 @@ func verifyRepo(cfg project.Config, mp project.MachineProject, located, cloneFla
 	return "", "", &axi.Error{
 		Msg:  fmt.Sprintf("cannot tell which repo of the project the commit is in: this directory is in none of %s", strings.Join(names, ", ")),
 		Code: "VALIDATION_ERROR",
-		Help: []string{"Run `jig verify` from inside the clone of the repo the commit is in, or pass --repo-dir"},
+		Help: []string{"Run `jig verify` from inside the clone of the repo the commit is in"},
 	}
 }
 
@@ -304,16 +273,14 @@ func verifySliceRepo(st *store.Store, cfg project.Config, mp project.MachineProj
 }
 
 // verifyClone finds the operator's clone to check the commit out from and the
-// directory to resolve the commit in. The clone is the one named (the worker's
-// --repo-dir), else the one locate found the working directory in, else the
+// directory to resolve the commit in. The clone is the one locate found the
+// working directory in, else the
 // project's mapped clone of the repo, else the repository around the working
 // directory. The directory is where the command runs when that is a checkout
 // of the same repository (a linked worktree has a HEAD of its own), else the
 // clone itself.
-func verifyClone(m *gitx.Memo, cwd, cloneFlag, located, mapped string) (clone, workDir string, err error) {
+func verifyClone(m *gitx.Memo, cwd, located, mapped string) (clone, workDir string, err error) {
 	switch {
-	case cloneFlag != "":
-		clone = cloneFlag
 	case located != "":
 		clone = located
 	case mapped != "":
@@ -445,49 +412,6 @@ func verifyReportOf(res verify.Result, log string) verifyReport {
 		existing: res.Existing, command: res.Command, env: res.Env, summary: res.Summary, signature: res.Signature,
 		log: log, pushErr: res.PushErr, light: lightWords(res.Ran, res.ReusedFrom),
 	}
-}
-
-// runVerifySpawn starts the detached worker, or says what is already there.
-func runVerifySpawn(e env, d verify.Deps, req verify.Request, stdout io.Writer) int {
-	got, err := verify.Spawn(d, req)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-	rep := verifyReport{
-		ticket: got.Ticket, slice: got.Slice, sha: got.SHA, state: got.State, attempt: got.Attempt,
-		existing: got.Existing, pid: got.PID, log: got.Log, warning: got.Warning,
-	}
-	call := fmt.Sprintf("jig verify %s %s --slice %s", got.Ticket, shortSHA(got.SHA), got.Slice)
-	help := fmt.Sprintf("Run `%s --wait` to wait for the outcome, or `jig status %s` to see the slice states", call, got.Ticket)
-	if got.Existing {
-		help = fmt.Sprintf("Run `%s --rerun` to verify it again, or `%s --wait` to wait for one that is running", call, call)
-	} else {
-		rep.state = journal.VerifyPending
-	}
-	axi.Render(stdout, rep.blocks(help)...)
-	return 0
-}
-
-// runVerifyWorker is the detached worker: it verifies in this process, with
-// its stdout the machine-local log, and prints the report there. It ends by
-// the exit code of the outcome the way --wait does, except that a failing
-// oracle is a verification that worked.
-func runVerifyWorker(d verify.Deps, req verify.Request, stdout io.Writer) int {
-	// A git hook that started jig leaves the repo variables in its
-	// environment; main cleared them for this process already, and this keeps
-	// the worker honest if it is ever called in-process.
-	gitx.ClearRepoEnv()
-	d.Log = stdout
-	res, err := verify.Run(d, req)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-	rep := verifyReportOf(res, "")
-	axi.Render(stdout, rep.blocks(fmt.Sprintf("Run `jig status %s` to see the slice states", res.Ticket))...)
-	if res.State == journal.VerifyError {
-		return 1
-	}
-	return 0
 }
 
 // runVerifyWait verifies in this process and waits for the outcome: it runs

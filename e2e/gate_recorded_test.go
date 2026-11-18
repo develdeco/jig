@@ -62,37 +62,30 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	branch := fx.Branch
 	h.Branch(branch)
 
-	type built struct{ slice, sha string }
-	steps := []built{{"a", h.CommitScenario("a", 1)}}
+	// Each commit is proven right after it is made, as a builder does.
+	var last string
+	prove := func(slice string, attempt int) {
+		t.Helper()
+		last = h.CommitScenario(slice, attempt)
+		res := h.Verify(fx.Ticket, last, slice)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
+		}
+	}
+	prove("a", 1)
 	if whole {
 		// Slice b's first attempt fails its test and is never verified; the
 		// second is the slice's commit.
 		h.CommitScenario("b", 1)
-		steps = append(steps, built{"b", h.CommitScenario("b", 2)}, built{"c", h.CommitScenario("c", 2)}, built{"d", h.CommitScenario("d", 1)})
+		prove("b", 2)
+		prove("c", 2)
+		prove("d", 1)
 	}
-	for _, s := range steps {
-		res := h.Jig("verify", fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	for _, s := range steps {
-		l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail")
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	h.WaitVerifiers()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: steps[len(steps)-1].sha, st: st}
+	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: last, st: st}
 }
 
 // buildFix has the builder commit the scenario's patch for each slice given -
@@ -103,30 +96,15 @@ func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
 	t.Helper()
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
-	type built struct{ slice, sha string }
-	var steps []built
+	var sha string
 	for _, s := range slices {
-		steps = append(steps, built{s, b.builder.CommitScenario(s, 1)})
-	}
-	for _, s := range steps {
-		res := b.builder.Jig("verify", b.fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
+		sha = b.builder.CommitScenario(s, 1)
+		res := b.builder.Verify(b.fx.Ticket, sha, s)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s, res.Code, res.Stdout, res.Stderr)
 		}
 	}
-	for _, s := range steps {
-		l := waitJournal(t, b.fx, b.fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Commit == s.sha)
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	b.builder.WaitVerifiers()
-	return steps[len(steps)-1].sha
+	return sha
 }
 
 // workFile is a file of the ticket's work directory in the store.

@@ -47,7 +47,7 @@ func TestStopHoldsOnNotVerifiedAndStale(t *testing.T) {
 	short := sha[:12]
 	first := r.handle(r.ev(KindStop))
 	if !strings.Contains(first.Block, "commit "+short+" for slice a is not verified") ||
-		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" "+short+" --slice a --wait") {
+		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" --slice a --wait") {
 		t.Fatalf("Block = %q, want the unverified commit held with the command that verifies it", first.Block)
 	}
 

@@ -7,19 +7,15 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// lastSpawnedSlice is the slice of the worker the last spawn started.
-func lastSpawnedSlice(r *verifyRig) string {
-	specs := r.spawn.Specs()
-	if len(specs) == 0 {
-		return ""
-	}
-	args := specs[len(specs)-1].Args
-	for i, a := range args {
-		if a == "--slice" && i+1 < len(args) {
-			return args[i+1]
+// lastVerifiedSlice is the slice of the latest oracle line a run journaled.
+func lastVerifiedSlice(r *verifyRig) string {
+	slice := ""
+	for _, l := range r.journal() {
+		if l.Event == journal.EventOracle {
+			slice = l.Slice
 		}
 	}
-	return ""
+	return slice
 }
 
 // TestVerifyPicksTheSliceFromFlagThenTrailerThenClaim is the order the slice
@@ -46,29 +42,29 @@ func TestVerifyPicksTheSliceFromFlagThenTrailerThenClaim(t *testing.T) {
 		{"the flag wins over the trailer", []string{"verify", "JIG-1", trailered, "--slice", "d", "--session", "s-1"}, "d"},
 		{"the trailer wins over the claim", []string{"verify", "JIG-1", trailered, "--session", "s-1"}, "b"},
 	} {
-		if out, code := r.run(c.args...); code != 0 || lastSpawnedSlice(r) != c.want {
-			t.Errorf("%s: exit %d, slice %q, want %q\n%s", c.name, code, lastSpawnedSlice(r), c.want, out)
+		if out, code := r.run(c.args...); code > 1 || lastVerifiedSlice(r) != c.want {
+			t.Errorf("%s: exit %d, slice %q, want %q\n%s", c.name, code, lastVerifiedSlice(r), c.want, out)
 		}
 	}
 
 	bare := r.commit("", "no trailer", map[string]string{"c.txt": "1"})
-	if out, code := r.run("verify", "JIG-1", bare, "--session", "s-1"); code != 0 || lastSpawnedSlice(r) != "c" {
-		t.Errorf("the claim: exit %d, slice %q, want c\n%s", code, lastSpawnedSlice(r), out)
+	if out, code := r.run("verify", "JIG-1", bare, "--session", "s-1"); code > 1 || lastVerifiedSlice(r) != "c" {
+		t.Errorf("the claim: exit %d, slice %q, want c\n%s", code, lastVerifiedSlice(r), out)
 	}
 	// The session comes from JIG_SESSION when the flag is not given.
 	r.e.getenv = func(key string) string {
 		return map[string]string{"JIG_HOME": r.fx.Home, "JIG_SESSION": "s-1"}[key]
 	}
-	if out, code := r.run("verify", "JIG-1", bare); code != 0 || lastSpawnedSlice(r) != "c" {
-		t.Errorf("the claim of $JIG_SESSION: exit %d, slice %q, want c\n%s", code, lastSpawnedSlice(r), out)
+	if out, code := r.run("verify", "JIG-1", bare); code > 1 || lastVerifiedSlice(r) != "c" {
+		t.Errorf("the claim of $JIG_SESSION: exit %d, slice %q, want c\n%s", code, lastVerifiedSlice(r), out)
 	}
 
 	// JIG_SLICE names the slice for a commit with no trailer, ahead of a claim.
 	r.e.getenv = func(key string) string {
 		return map[string]string{"JIG_HOME": r.fx.Home, "JIG_SESSION": "s-1", "JIG_SLICE": "d"}[key]
 	}
-	if out, code := r.run("verify", "JIG-1", bare); code != 0 || lastSpawnedSlice(r) != "d" {
-		t.Errorf("$JIG_SLICE: exit %d, slice %q, want d\n%s", code, lastSpawnedSlice(r), out)
+	if out, code := r.run("verify", "JIG-1", bare); code > 1 || lastVerifiedSlice(r) != "d" {
+		t.Errorf("$JIG_SLICE: exit %d, slice %q, want d\n%s", code, lastVerifiedSlice(r), out)
 	}
 	r.e.getenv = func(key string) string {
 		return map[string]string{"JIG_HOME": r.fx.Home, "JIG_SESSION": "s-1"}[key]
@@ -76,8 +72,8 @@ func TestVerifyPicksTheSliceFromFlagThenTrailerThenClaim(t *testing.T) {
 
 	// A trailer for a slice the ticket does not have is passed over to the claim.
 	wrong := r.commit("zz", "wrong trailer", map[string]string{"zz.txt": "1"})
-	if out, code := r.run("verify", "JIG-1", wrong, "--session", "s-1"); code != 0 || lastSpawnedSlice(r) != "c" {
-		t.Errorf("a trailer naming no slice: exit %d, slice %q, want the claim c\n%s", code, lastSpawnedSlice(r), out)
+	if out, code := r.run("verify", "JIG-1", wrong, "--session", "s-1"); code > 1 || lastVerifiedSlice(r) != "c" {
+		t.Errorf("a trailer naming no slice: exit %d, slice %q, want the claim c\n%s", code, lastVerifiedSlice(r), out)
 	}
 }
 
@@ -127,10 +123,8 @@ func TestVerifyRefusesWhatItCannotPlace(t *testing.T) {
 	}
 }
 
-// TestVerifyHelpListsItsFlagsButNotTheWorkersOwn: --worker, --agent and
-// --clone are how the foreground talks to the worker; the person reads about
-// the rest.
-func TestVerifyHelpListsItsFlagsButNotTheWorkersOwn(t *testing.T) {
+// TestVerifyHelpListsItsFlags: the worker's own flags are gone with the worker.
+func TestVerifyHelpListsItsFlags(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(flagsBlockFor("verify"), "\n")
 	for _, want := range []string{"--slice", "--wait", "--rerun", "--session", "--store", "--project"} {

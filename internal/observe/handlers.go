@@ -115,8 +115,9 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-// tool records the tool call, verifies a commit it made, and gives the
-// session the notes it has not heard.
+// tool records the tool call, notes a commit it made, and gives the session
+// the notes it has not heard. A commit starts nothing: the builder runs
+// `jig verify` itself.
 func (h *handler) tool() Result {
 	if !h.locate() {
 		return Result{}
@@ -133,9 +134,6 @@ func (h *handler) tool() Result {
 		if head != "" && mem.head != "" && head != mem.head && sameDir(mem.headCwd, h.w.Cwd) {
 			moved = head
 		}
-	}
-	if moved != "" {
-		h.verifyCommit(moved)
 	}
 
 	l := h.base(journal.EventTool)

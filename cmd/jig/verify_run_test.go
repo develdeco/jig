@@ -109,40 +109,6 @@ func TestVerifyWaitReportsAFailureWithItsSignature(t *testing.T) {
 	}
 }
 
-// TestVerifyWorkerVerifiesInProcessAndWritesItsReportToStdout: the hidden
-// worker mode is the same verification with stdout as the log; it exits 0 for a
-// failed oracle (the worker did its job) and 1 for a run that could not reach
-// one.
-func TestVerifyWorkerVerifiesInProcessAndWritesItsReportToStdout(t *testing.T) {
-	t.Parallel()
-	r := newVerifyRig(t)
-	sha := r.applyScenarioPatch("b")
-
-	out, code := r.run("verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "b", "--session", "s-9", "--agent-id", "ag-1", "JIG-1", sha)
-	if code != 0 {
-		t.Fatalf("worker exit = %d, want 0 for a failed oracle\n%s", code, out)
-	}
-	for _, want := range []string{"verify: verifying", "the oracle failed", "state: fail"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("worker stdout lacks %q:\n%s", want, out)
-		}
-	}
-	for _, l := range r.journal() {
-		if l.Event == journal.EventVerifyPending && (l.Session != "s-9" || l.Agent != "ag-1") {
-			t.Errorf("pending line = %+v, want the session and agent the worker was given", l)
-		}
-	}
-
-	// A commit that does not descend from the start sha cannot be verified.
-	if err := r.st.WriteStartSHA(r.fx.Ticket, "fixture-repo", sha); err != nil {
-		t.Fatal(err)
-	}
-	out, code = r.run("verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "b", "--rerun", "JIG-1", sha)
-	if code != 1 || !strings.Contains(out, "state: error") || !strings.Contains(out, "no new work") {
-		t.Errorf("worker over a commit that is the start sha: exit %d, want 1 and an error saying so\n%s", code, out)
-	}
-}
-
 // TestVerifyWaitWaitsForTheWorkerAlreadyOnTheCommit: a pending record means a
 // worker (the git hook started one, say) is on it; --wait waits for its outcome
 // rather than reporting "pending" and leaving.

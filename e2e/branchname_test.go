@@ -315,31 +315,24 @@ func TestPublishBodyTargetsRecordedName(t *testing.T) {
 	// Publish takes a whole ticket: every slice is built and verified, as in
 	// newBuiltTicket (slice b's first attempt fails its test and is never
 	// verified).
-	type built struct{ slice, sha string }
-	steps := []built{{"a", h.CommitScenario("a", 1)}}
-	h.CommitScenario("b", 1)
-	steps = append(steps, built{"b", h.CommitScenario("b", 2)}, built{"c", h.CommitScenario("c", 2)}, built{"d", h.CommitScenario("d", 1)})
-	sha := steps[len(steps)-1].sha
+	var sha string
 	func() {
 		// Each verification is a `go test` in a worktree, and the suite runs
 		// its tests in parallel (verifySlots).
 		verifySlots <- struct{}{}
 		defer func() { <-verifySlots }()
-		for _, s := range steps {
-			res := h.Jig("verify", fx.Ticket, s.sha, "--slice", s.slice)
-			if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-				t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
+		prove := func(slice string, attempt int) {
+			sha = h.CommitScenario(slice, attempt)
+			res := h.Verify(fx.Ticket, sha, slice)
+			if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+				t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
 			}
 		}
-		for _, s := range steps {
-			l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-				return l.Slice == s.slice && ((l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail"))
-			})
-			if l.Event != journal.EventVerified {
-				t.Fatalf("slice %s failed its oracle at %s: %s", s.slice, s.sha, l.Summary)
-			}
-		}
-		h.WaitVerifiers()
+		prove("a", 1)
+		h.CommitScenario("b", 1)
+		prove("b", 2)
+		prove("c", 2)
+		prove("d", 1)
 	}()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

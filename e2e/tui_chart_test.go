@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -227,23 +226,21 @@ func TestTUIChartScreenDetailsTheTicketUnderTheCursor(t *testing.T) {
 	writeFileOrFatal(t, joinPath(dir, "map.md"), []byte(chartMapText))
 	writeFileOrFatal(t, joinPath(dir, "tickets.yaml"), []byte("tickets:\n  - id: "+fx.Ticket+"\n    title: Greet the person\n"))
 
-	// The subagent claims slice a unattended, commits it while its verification
-	// is held, and is held back from stopping.
+	// The subagent claims slice a unattended, commits it with no verification
+	// run, and is held back from stopping.
 	if res := jigHooked(sub, "claim", fx.Ticket, "--slice", "a", "--unattended"); res.Code != 0 {
 		t.Fatalf("jig claim --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	release := sub.HoldVerifications("alpha", "beta")
 	sha := sub.CommitScenario("a", 1)
-	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
 	stop := runHookCommand(t, env, fx.RepoDir, subagentStop, sub.Payload("SubagentStop", map[string]any{"stop_hook_active": false}))
 	if held := decodeHook(t, stop); held.Decision != "block" {
-		t.Fatalf("SubagentStop = %+v, want a refusal while the verification runs", held)
+		t.Fatalf("SubagentStop = %+v, want a refusal while the commit has no recorded result", held)
 	}
 
 	// The chart screen, with the cursor on the chart's only ticket, details it.
 	tui := startJig(t, env, fx.RepoDir, "tui", "checkout")
 	screens := tuiScreens{t: t, p: tui}
-	screen := screens.until("› checkout", "╭─ Detail", "╭─ Run", "a · verifying · builder · agent a-1", "agent a-1 held at its stop", "verification of "+sha[:12])
+	screen := screens.until("› checkout", "╭─ Detail", "╭─ Run", "agent a-1 held at its stop", "commit "+sha[:12]+" for slice a is not verified")
 	if edge := detailPanelOf(screen); !strings.HasSuffix(strings.SplitN(edge, "\n", 2)[0], fx.Ticket+" ─╮") {
 		t.Errorf("the Detail panel's top edge does not end with the ticket %s:\n%s", fx.Ticket, screen)
 	}
@@ -251,13 +248,12 @@ func TestTUIChartScreenDetailsTheTicketUnderTheCursor(t *testing.T) {
 		t.Errorf("the Detail panel is not between the Tickets and the Run panels:\n%s", screen)
 	}
 
-	// The verification lands: the hold is over, so the Detail panel no longer
-	// says it (the Activity panel keeps the history of it).
-	release()
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a"
-	})
-	sub.WaitVerifiers()
+	// The subagent runs jig verify and it lands: the hold is over, so the
+	// Detail panel no longer says it (the Activity panel keeps the history of
+	// it).
+	if res := sub.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	if screen = screens.until("1 of 4 green"); strings.Contains(detailPanelOf(screen), "held at its stop") {
 		t.Errorf("the Detail panel still says the stop is held once the verification landed:\n%s", screen)
 	}

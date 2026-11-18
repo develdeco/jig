@@ -10,7 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
@@ -137,12 +136,11 @@ func TestVerifySplitsItsPositionals(t *testing.T) {
 	}
 }
 
-// TestVerifyStartsADetachedWorkerForTheCommitAtHead: bare `jig verify` in a
-// clone on the ticket's branch finds the ticket from the branch, the commit
-// from HEAD and the slice from its trailer, starts the worker through the
-// spawn seam with its log under the jig home, and says it is pending. It writes
-// nothing to the journal itself.
-func TestVerifyStartsADetachedWorkerForTheCommitAtHead(t *testing.T) {
+// TestVerifyStartsNoWorkerForTheCommitAtHead: bare `jig verify` in a clone on
+// the ticket's branch finds the ticket from the branch, the commit from HEAD
+// and the slice from its trailer, and runs the oracle in this process: it
+// starts no process of jig's and writes no verify-spawned line.
+func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 	t.Parallel()
 	r := newVerifyRig(t)
 	sha := r.fixClamp()
@@ -151,70 +149,47 @@ func TestVerifyStartsADetachedWorkerForTheCommitAtHead(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify exit = %d, want 0:\n%s", code, out)
 	}
-	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pending", "pid: 777", "help[1]:"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
-	}
-	specs := r.spawn.Specs()
-	if len(specs) != 1 {
-		t.Fatalf("processes started = %d, want 1", len(specs))
-	}
-	id, err := r.st.ID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantLog, err := home.VerifyLogPath(r.fx.Home, id, r.fx.Ticket, sha, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec := specs[0]
-	wantArgs := []string{"verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "a", "JIG-1", sha}
-	if !strings.HasSuffix(spec.Path, "jig") || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Dir != r.fx.RepoDir || spec.LogPath != wantLog {
-		t.Errorf("Spec = %+v\nwant args %v and log %s", spec, wantArgs, wantLog)
-	}
-	if !strings.Contains(out, "log: "+wantLog) && !strings.Contains(out, `"`+strings.ReplaceAll(wantLog, `\`, `\`)+`"`) {
-		t.Errorf("output does not name the log %s:\n%s", wantLog, out)
-	}
-	if lines := r.journal(); len(lines) != 0 {
-		t.Errorf("the foreground wrote journal lines: %+v", lines)
-	}
-	led, err := ledger.Read(r.fx.Home)
-	if err != nil || len(led) != 1 || led[0].Event != journal.EventVerifySpawned || led[0].PID != 777 || led[0].Commit != sha {
-		t.Errorf("ledger = %+v, %v, want one verify-spawned line for pid 777", led, err)
-	}
-}
-
-// TestVerifyReportsAnExistingVerificationAndStartsNothing: a second call finds
-// the verification in the journal, whatever state it is in, prints it, and
-// starts nothing and writes nothing; --rerun starts a worker over it.
-func TestVerifyReportsAnExistingVerificationAndStartsNothing(t *testing.T) {
-	t.Parallel()
-	r := newVerifyRig(t)
-	sha := r.fixClamp()
-	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Commit: sha, Attempt: 1, Seconds: 4, Summary: "FAIL TestClamp"}); err != nil {
-		t.Fatal(err)
-	}
-
-	out, code := r.run("verify", "JIG-1", sha[:10])
-	if code != 0 {
-		t.Fatalf("verify exit = %d, want 0: reporting what is there is not a failure\n%s", code, out)
-	}
-	for _, want := range []string{"state: fail", "existing: true", "attempt: 1", "--rerun"} {
+	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pass", "help[1]:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
 	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("started %d processes, want none", n)
+		t.Errorf("processes started = %d, want none", n)
 	}
-	if n := len(r.journal()); n != 1 {
-		t.Errorf("journal has %d lines, want the 1 the test wrote", n)
+	var kinds []string
+	for _, l := range r.journal() {
+		kinds = append(kinds, l.Event)
 	}
+	if want := []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
+		t.Errorf("journal events = %v, want %v", kinds, want)
+	}
+	led, err := ledger.Read(r.fx.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range led {
+		if l.Event == journal.EventVerifySpawned {
+			t.Errorf("ledger holds a verify-spawned line: %+v", l)
+		}
+	}
+}
 
-	out, code = r.run("verify", "JIG-1", sha, "--rerun")
-	if code != 0 || len(r.spawn.Specs()) != 1 || !contains(r.spawn.Specs()[0].Args, "--rerun") || strings.Contains(out, "existing: true") {
-		t.Errorf("verify --rerun: exit %d, specs %+v, want a worker started with --rerun\n%s", code, r.spawn.Specs(), out)
+// TestVerifyRerunRunsTheOracleAgainHere: --rerun is another run, in this
+// process, as the slice's next attempt.
+func TestVerifyRerunRunsTheOracleAgainHere(t *testing.T) {
+	t.Parallel()
+	r := newVerifyRig(t)
+	sha := r.fixClamp()
+	if out, code := r.run("verify", "JIG-1", sha, "--wait"); code != 0 {
+		t.Fatalf("first verify exit = %d\n%s", code, out)
+	}
+	out, code := r.run("verify", "JIG-1", sha, "--rerun")
+	if code != 0 || !strings.Contains(out, "attempt: 2") || strings.Contains(out, "existing: true") {
+		t.Errorf("verify --rerun: exit %d, want a second attempt run here\n%s", code, out)
+	}
+	if n := len(r.spawn.Specs()); n != 0 {
+		t.Errorf("started %d processes, want none", n)
 	}
 }
 

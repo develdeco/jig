@@ -138,19 +138,13 @@ func (h *handler) markerUnattended() bool {
 	return false
 }
 
-// inFlightWindow is how long a worker the ledger says was started is taken
-// to be running when the journal has no outcome of it: the worker has not
-// yet written its first line.
-const inFlightWindow = 10 * time.Minute
-
 // verificationFindings tells the state of the ticket's verifications as the
-// agent is about to stop. A verification under way (a pending line whose
-// worker is alive, or a worker the ledger started a moment ago that has not
-// yet written to the journal) holds an unattended session as it always did. A
-// commit that is not verified, or whose verification is stale, holds it too,
-// since no one is judging it and the clearing command runs the oracle. A
-// failed, stopped or timed-out verification is told and holds nobody back:
-// the builder may stop, and the slice stays building.
+// agent is about to stop. A commit that is not verified, or whose verification
+// is stale, holds an unattended session, since no one is judging it and the
+// clearing command runs the oracle. A failed, stopped or timed-out
+// verification is told and holds nobody back: the builder may stop, and the
+// slice stays building. A verification running is not said: jig starts none,
+// so the one that runs is the builder's own, in its own shell.
 func (h *handler) verificationFindings() []finding {
 	lines, err := h.journal()
 	if err != nil {
@@ -161,31 +155,8 @@ func (h *handler) verificationFindings() []finding {
 	rows := truth.Derive()
 
 	var out []finding
-	underWay := map[phase.CommitRef]bool{}
 	for _, r := range rows {
-		if r.State == phase.VerifyRunning {
-			underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] = true
-			out = append(out, h.runningFinding(r.Commit, r.Slice))
-		}
-	}
-	cutoff := h.d.Now().Add(-inFlightWindow)
-	h.fail(ledger.ReadBackward(h.d.JigHome, spawnWindow, func(l journal.Line) bool {
-		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil && at.Before(cutoff) {
-			return false
-		}
-		if l.Event != journal.EventVerifySpawned || l.Ticket != h.w.Ticket || l.Commit == "" {
-			return true
-		}
-		p := phase.CommitRef{SHA: l.Commit, Slice: l.Slice}
-		if journal.VerificationState(lines, l.Commit, l.Slice).State == journal.VerifyNone && !underWay[p] {
-			underWay[p] = true
-			out = append(out, h.runningFinding(l.Commit, l.Slice))
-		}
-		return true
-	}))
-
-	for _, r := range rows {
-		if underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] || r.State == phase.VerifyRunning || !r.State.Unclear() {
+		if r.State == phase.VerifyRunning || !r.State.Unclear() {
 			continue
 		}
 		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {
@@ -198,10 +169,10 @@ func (h *handler) verificationFindings() []finding {
 		switch r.State {
 		case phase.VerifyNotVerified:
 			f.text = fmt.Sprintf("commit %s for slice %s is not verified", sha, r.Slice)
-			f.hint = fmt.Sprintf("verify it with `%s`", r.Clear)
+			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s --wait`", h.w.Ticket, r.Slice)
 		case phase.VerifyStale:
 			f.text = fmt.Sprintf("verification of %s for slice %s is stale: its worker is gone", sha, r.Slice)
-			f.hint = fmt.Sprintf("run it again with `%s`", r.Clear)
+			f.hint = fmt.Sprintf("run it again with `jig verify %s --slice %s --wait`", h.w.Ticket, r.Slice)
 		case phase.VerifyFailed:
 			f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
 		default:
@@ -210,16 +181,6 @@ func (h *handler) verificationFindings() []finding {
 		out = append(out, f)
 	}
 	return out
-}
-
-func (h *handler) runningFinding(commit, slice string) finding {
-	sha := short12(commit)
-	return finding{
-		ref:      "pending:" + sha + ":" + slice,
-		text:     fmt.Sprintf("verification of %s for slice %s is still running", sha, slice),
-		hint:     fmt.Sprintf("wait for it with `jig verify %s %s --slice %s --wait`", h.w.Ticket, sha, slice),
-		blocking: true,
-	}
 }
 
 // verifyTruth gathers what the derivation of the ticket's verifications reads.

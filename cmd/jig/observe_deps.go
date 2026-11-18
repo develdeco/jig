@@ -17,14 +17,12 @@ import (
 )
 
 // observeDeps wires the observe core to the env of this run: the clock, the
-// environment, the way a detached process is started, and the two things only
-// cmd/jig knows, how a store is opened and what `jig here` says.
+// environment, and the two things only cmd/jig knows, how a store is opened and what `jig here` says.
 func observeDeps(e env, jigHome string) observe.Deps {
 	d := observe.Deps{
 		JigHome:   jigHome,
 		Now:       e.now,
 		Getenv:    e.getenv,
-		Start:     e.spawn,
 		OpenStore: func(w locate.Where) (*store.Store, project.Config, error) { return openLocatedStore(nil, w) },
 		Derive:    derivePhase,
 		Here: func(w locate.Where, st *store.Store) (string, error) {
@@ -33,9 +31,6 @@ func observeDeps(e env, jigHome string) observe.Deps {
 	}
 	if cwd, err := e.getwd(); err == nil {
 		d.Cwd = cwd
-	}
-	if exe, err := e.executable(); err == nil {
-		d.Executable = exe
 	}
 	return d
 }

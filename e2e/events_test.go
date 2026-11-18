@@ -50,8 +50,8 @@ func eventsOf(envs []events.Envelope, src string) []string {
 	return out
 }
 
-// TestEventsReadsHarnessRun: a session registers, commits a slice and has it
-// verified by a detached worker, and its tools run; jig events then reads the
+// TestEventsReadsHarnessRun: a session registers, commits a slice and runs
+// `jig verify` for it, and its tools run; jig events then reads the
 // journal and the ledger of that run as one stream, in time order, the
 // journal lines tagged with the project and the ledger lines about the
 // ticket (those that name it, and those of a session that is on it) with
@@ -67,16 +67,12 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 		t.Fatalf("jig session start exit = %d\n%s%s", res.Code, res.Stdout, res.Stderr)
 	}
 	sha := h.CommitScenario("a", 1)
-	if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-		t.Fatalf("jig verify exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Slice == "a" && l.Commit == sha
-	})
-	h.WaitVerifiers()
 	// What the PostToolUse hook leaves once `jig observe` is in: a tool line
-	// with the session and no ticket.
-	if err := ledger.Append(env.home, journal.Line{Event: journal.EventTool, Session: h.Session, Tool: "Bash"}); err != nil {
+	// with the session and the ticket the session is on.
+	if err := ledger.Append(env.home, journal.Line{Event: journal.EventTool, Session: h.Session, Tool: "Bash", Ticket: fx.Ticket}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,9 +89,9 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 	if got, want := eventsOf(envs, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events = %v, want %v", got, want)
 	}
-	// verify-spawned names the ticket and binds the session to it, so the
-	// tool line that follows is about the ticket too.
-	if got, want := eventsOf(envs, events.SrcLedger), []string{"verify-spawned", "tool"}; !reflect.DeepEqual(got, want) {
+	// A commit's verification starts nothing, so the ledger holds only the
+	// session's tool line about the ticket.
+	if got, want := eventsOf(envs, events.SrcLedger), []string{"tool"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("ledger events = %v, want %v", got, want)
 	}
 	var prev time.Time
@@ -134,7 +130,7 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 		t.Fatalf("jig events --all: exit %d\n%s%s", all.Code, all.Stdout, all.Stderr)
 	}
 	allEnvs := parseEnvelopes(t, all.Stdout)
-	if got, want := eventsOf(allEnvs, events.SrcLedger), []string{"session-start", "verify-spawned", "tool"}; !reflect.DeepEqual(got, want) {
+	if got, want := eventsOf(allEnvs, events.SrcLedger), []string{"session-start", "tool"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("--all ledger events = %v, want %v", got, want)
 	}
 	if got, want := eventsOf(allEnvs, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
@@ -147,11 +143,11 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 	}
 }
 
-// TestEventsFollowSeesHookVerification: jig events --follow, running before the
-// commit, prints the verification as it is recorded: the worker's
-// verify-pending line first, then its oracle line, then verified - each as
-// the detached worker writes it - and the ledger line of the spawn between.
-func TestEventsFollowSeesHookVerification(t *testing.T) {
+// TestEventsFollowSeesAForegroundVerification: jig events --follow, running
+// before the commit, prints the verification as it is recorded: the
+// verify-pending line first, then the oracle line, then verified - each as
+// the foreground `jig verify` writes it - and no ledger line of a spawn.
+func TestEventsFollowSeesAForegroundVerification(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	h := newHarness(t, fx, env, "s-follow")
@@ -161,12 +157,11 @@ func TestEventsFollowSeesHookVerification(t *testing.T) {
 	follow := startJig(t, env, fx.RepoDir, "events", "--follow", fx.Ticket)
 
 	sha := h.CommitScenario("a", 1)
-	if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-		t.Fatalf("jig verify exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 
-	// Read the stream until the verification is over, with the worker's go
-	// test in a fresh worktree to wait out.
+	// Read the stream until the verification is over.
 	var seen []events.Envelope
 	deadline := time.Now().Add(verifyWait)
 	for !hasEvent(seen, journal.EventVerified) {
@@ -180,7 +175,6 @@ func TestEventsFollowSeesHookVerification(t *testing.T) {
 		}
 		seen = append(seen, parseEnvelopes(t, line)...)
 	}
-	h.WaitVerifiers()
 
 	if got, want := eventsOf(seen, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events followed = %v, want %v", got, want)
@@ -192,8 +186,8 @@ func TestEventsFollowSeesHookVerification(t *testing.T) {
 	if o := seen[oracle]; o.Outcome != "pass" || o.Commit != sha || o.Slice != "a" || o.Src != events.SrcJournal {
 		t.Errorf("oracle envelope = %+v, want a journal pass of slice a at %s", o, sha)
 	}
-	if !hasEvent(seen, journal.EventVerifySpawned) {
-		t.Errorf("the ledger's verify-spawned line did not reach the stream: %v", eventsOf(seen, ""))
+	if hasEvent(seen, journal.EventVerifySpawned) {
+		t.Errorf("a verify-spawned line reached the stream: %v", eventsOf(seen, ""))
 	}
 
 	// Stopping ends it: it was interrupted, not failed by what it read.

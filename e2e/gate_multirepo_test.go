@@ -85,7 +85,6 @@ func verifyPasses(t *testing.T, h *fakeHarness, slice, sha string) {
 	if r.Code != 0 || !strings.Contains(r.Stdout, "slice: "+slice+"\n") || !strings.Contains(r.Stdout, "commit: "+sha) || !strings.Contains(r.Stdout, "state: pass") {
 		t.Fatalf("jig verify --wait in %s: exit %d, want slice %s to pass at %s\nstdout:\n%s\nstderr:\n%s", h.Clone, r.Code, slice, sha, r.Stdout, r.Stderr)
 	}
-	h.WaitVerifiers()
 }
 
 // buildOrchestratorTicket builds the ticket described on builtOrchestrator.
