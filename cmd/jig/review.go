@@ -170,9 +170,9 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	blocks = append(blocks, axi.Table("dismissed", []string{"id", "file:line", "title"}, dismissedRows))
 	var oracleRows [][]string
 	for _, o := range req.OraclesPassed {
-		oracleRows = append(oracleRows, []string{o.Oracle, o.Workspace, strconv.Itoa(o.Seconds), strings.Join(o.Slices, ","), o.ReusedFrom, o.Ran})
+		oracleRows = append(oracleRows, []string{o.Slice, o.Workspace, o.Command, shortSHA(o.Commit), o.AtHead, strconv.Itoa(o.Seconds)})
 	}
-	blocks = append(blocks, axi.Table("oracles_passed", []string{"oracle", "workspace", "seconds", "slices", "reused_from", "ran"}, oracleRows))
+	blocks = append(blocks, axi.Table("oracles_passed", []string{"slice", "workspace", "command", "commit", "at_head", "seconds"}, oracleRows))
 	// The probe ledger (ADR 0036): what earlier rounds probed, current or
 	// stale at this head, and the hunks of the change nothing covers yet - the
 	// sweep's work list.

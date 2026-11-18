@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -126,36 +125,7 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Home: fx.Home, Oracle: passingOracle}
-}
-
-// passingOracle stands in for the gate's own oracle runs in tests that are
-// not about them: every run passes at once. A test about the gate's oracle
-// run (what it runs, a red run, what it runs after) sets Deps.Oracle to nil
-// for the real one.
-func passingOracle(string, string) (string, error) { return "", nil }
-
-// oracleRecorder stands in for the gate's oracle runs like passingOracle,
-// and records each command it was asked to run, in order, so a test can say
-// which runs the gate made without paying for them.
-type oracleRecorder struct {
-	mu   sync.Mutex
-	cmds []string
-}
-
-// run is the recorder's Deps.Oracle.
-func (r *oracleRecorder) run(cmd, _ string) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cmds = append(r.cmds, cmd)
-	return "", nil
-}
-
-// ran returns the commands run so far, in order.
-func (r *oracleRecorder) ran() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.cmds...)
+	return Deps{Store: st, Cfg: cfg, Home: fx.Home}
 }
 
 // buildLeaseDir returns the build lease directory frontier would use for the

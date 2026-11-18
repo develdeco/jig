@@ -103,8 +103,8 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 		t.Fatalf("round 1 verdict = %q, want fix-slices", report.Verdict)
 	}
 
-	driveFixSlice(t, fx, "rung-a", "fix-1-alpha-test")
-	driveFixSlice(t, fx, "rung-a", "fix-1-beta-test")
+	driveFixSlice(t, fx, "rung-a", "fix-1-alpha")
+	driveFixSlice(t, fx, "rung-a", "fix-1-beta")
 
 	round2Triage := func(TriageInput) TriageResult {
 		return TriageResult{FixHuman: true, Asks: map[string]AskOutcome{}}
@@ -117,7 +117,7 @@ func gateThroughReviewerScenario(t *testing.T, fx *fixture.Fixture, d Deps) Gate
 		t.Fatalf("round 2 verdict = %q, want fix-slices", report.Verdict)
 	}
 
-	driveFixSlice(t, fx, "rung-a", "fix-2-alpha-test")
+	driveFixSlice(t, fx, "rung-a", "fix-2-alpha")
 
 	report, err = Gate(d, src, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -170,8 +170,8 @@ Gate rounds:
 - Round 1 (full): 2 fix slices asked
 - Round 2 (delta): 1 fix slice asked
 - Round 3 (delta): clean
-`, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
-	wantBody = withGateCommand(t, fx, wantBody)
+`, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha"))
+	wantBody = withNoFinalRun(t, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha"), wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
@@ -190,22 +190,22 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
 - b (%[2]s): Give Clamp a percentage-range caller, once it works.
 - c (%[3]s): Decide and implement the greeting's tone.
 - d (%[4]s): Smoke-test the rig environment class.
-- fix-1-alpha-test (%[5]s): Fix these gate findings
+- fix-1-alpha (%[5]s): Fix these gate findings
   - Add's doc comment still omits overflow behavior
-- fix-1-beta-test (%[6]s): Fix these gate findings
+- fix-1-beta (%[6]s): Fix these gate findings
   - Greeting formality beyond casual is not decided
-- fix-2-alpha-test (%[7]s): Fix these gate findings
+- fix-2-alpha (%[7]s): Fix these gate findings
   - Add's doc comment still omits overflow behavior
 
 ## Findings
 
 - **Add's doc comment still omits overflow behavior** (high): silent overflow could misfeed a downstream money calculation
-  - Status: fixed by slice fix-2-alpha-test and cleared at round 3
+  - Status: fixed by slice fix-2-alpha and cleared at round 3
   - History: high at round 1: Add's doc comment omits overflow behavior; continued at round 2 as high: Add's doc comment still omits overflow behavior
   - Oracle: test
 
 - **Greeting formality beyond casual is not decided** (medium): the wrong formality reaches every caller of Greet
-  - Status: fixed by slice fix-1-beta-test and cleared at round 2
+  - Status: fixed by slice fix-1-beta and cleared at round 2
   - Oracle: test
 
 - **Greet does not trim surrounding whitespace from name** (low): cosmetic only, no functional or safety impact
@@ -214,7 +214,6 @@ round 3: nothing new; the shared-helper note from round 1 remains on record
 
 - **ClampPercent and Clamp could share a bounds-check helper later** (low): no functional risk, purely a maintainability idea
   - Status: noted
-  - Oracle: test
 
 ## Coverage
 
@@ -259,9 +258,9 @@ Hunks no probe or skip covers:
 		greenShortSHA(t, d, fx.Ticket, "b"),
 		greenShortSHA(t, d, fx.Ticket, "c"),
 		greenShortSHA(t, d, fx.Ticket, "d"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1-alpha-test"),
-		greenShortSHA(t, d, fx.Ticket, "fix-1-beta-test"),
-		greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1-alpha"),
+		greenShortSHA(t, d, fx.Ticket, "fix-1-beta"),
+		greenShortSHA(t, d, fx.Ticket, "fix-2-alpha"),
 	)
 	if notes != wantNotes {
 		t.Fatalf("pr/review-notes.md =\n%s\nwant\n%s", notes, wantNotes)
@@ -332,7 +331,7 @@ Gate rounds:
 - Round 1: 1 fix slice asked
 - Round 2: clean
 `
-	wantBody = withGateCommand(t, fx, wantBody)
+	wantBody = withNoFinalRun(t, shortSHA(run(t, buildLeaseDir(t, fx), "rev-parse", "HEAD")), wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}

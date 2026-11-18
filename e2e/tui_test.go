@@ -151,17 +151,15 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens := tuiScreens{t: t, p: tui}
 	screens.until("› " + fx.Ticket)
 
-	// The first commit, verified by a worker the builder starts. Like every
+	// The first commit, verified by the builder's own `jig verify`. Like every
 	// verification of the suite it holds one of the slots that bound how many
-	// `go test` runs the parallel tests have going at once: under a loaded
-	// machine the screens would otherwise wait out their minute on a worker
-	// that is queued behind the rest.
+	// `go test` runs the parallel tests have going at once.
 	func() {
 		verifySlots <- struct{}{}
 		defer func() { <-verifySlots }()
-		sha := h.CommitScenario("a", 1)
-		if res := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify a exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		h.CommitScenario("a", 1)
+		if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify a exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
 		screens.untilWithin(verifyWait, "1 of 4 green")
 	}()
@@ -185,24 +183,18 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The rest of the ticket is built and verified. Slice b's first attempt
 	// fails its test and is never verified; the second is the slice's commit.
 	h.CommitScenario("b", 1)
-	rest := []struct{ slice, sha string }{{"b", h.CommitScenario("b", 2)}, {"c", h.CommitScenario("c", 2)}, {"d", h.CommitScenario("d", 1)}}
-	last := rest[len(rest)-1].sha
+	var last string
 	verifySlots <- struct{}{}
-	for _, s := range rest {
-		if res := h.Jig("verify", fx.Ticket, s.sha, "--slice", s.slice); res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	for _, s := range rest {
-		l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			return l.Slice == s.slice && ((l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Commit == s.sha))
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s", s.slice, s.sha, l.Summary)
+	for _, s := range []struct {
+		slice   string
+		attempt int
+	}{{"b", 2}, {"c", 2}, {"d", 1}} {
+		last = h.CommitScenario(s.slice, s.attempt)
+		if res := h.Verify(fx.Ticket, s.slice); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
 		}
 	}
 	<-verifySlots
-	h.WaitVerifiers()
 	screens.until("4 slices green, each verified by jig")
 
 	// The gate opens from the screens. A subagent of the builder's session

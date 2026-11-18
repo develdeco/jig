@@ -3,8 +3,8 @@ package e2e
 // End-to-end tests of the hooks: what `jig hooks --global` and `jig githook
 // --global` install, run by a scripted harness the way a real one runs them,
 // drive `jig observe` through a session on the fixture ticket. The commits are
-// real, so the verifications are too: a detached worker per commit, in a
-// worktree of its own, recorded in the journal.
+// real; a commit starts nothing, and the session proves each one by running
+// `jig verify` itself, recorded in the journal.
 
 import (
 	"os"
@@ -19,7 +19,8 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// spawnedFor counts the ledger lines that say a worker was started for sha.
+// spawnedFor counts the ledger lines that say a worker was started for sha: a
+// commit starts none, so a test that saw a commit expects 0.
 func spawnedFor(lines []journal.Line, sha string) int {
 	n := 0
 	for _, l := range lines {
@@ -32,9 +33,10 @@ func spawnedFor(lines []journal.Line, sha string) int {
 
 // TestHooksDriveVerify is the digester's loop with the hooks installed and
 // nothing else: SessionStart tells the session its ticket and slices, a commit
-// started by git's hook is verified by a detached worker once, however many
-// hooks see it, Stop shows the verification while it runs, the outcome reaches
-// the session at its next prompt, and SessionEnd closes the session.
+// made through git's hook starts nothing however many hooks see it, Stop says
+// the commit has no recorded result, the session's own `jig verify` records
+// it, the outcome reaches the session at its next prompt, and SessionEnd
+// closes the session.
 func TestHooksDriveVerify(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -65,7 +67,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
 	got := decodeHook(t, runHookCommand(t, env.with("CLAUDE_ENV_FILE="+envFile), fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
-	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,attempts,blocked_by,question}") ||
+	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,covers,attempts,blocked_by,question}") ||
 		!strings.Contains(got.Specific.Context, "session: s-hooks") {
 		t.Fatalf("SessionStart context = %q, want %s, its slice table and the session id", got.Specific.Context, fx.Ticket)
 	}
@@ -76,28 +78,38 @@ func TestHooksDriveVerify(t *testing.T) {
 		t.Errorf("SessionStart context = %q, asks for JIG_SESSION though the harness set it", got.Specific.Context)
 	}
 
-	// A commit made by git: its global post-commit hook starts the worker.
-	// Every verification waits for the release below, so the hooks in between
-	// see it running however long they take.
-	release := h.HoldVerifications("alpha", "beta")
+	// The session claims slice a, which records where the ticket's work
+	// started, then commits it through git: its global post-commit hook
+	// records the commit and starts nothing.
+	if res := h.Jig("claim", fx.Ticket, "--slice", "a"); res.Code != 0 {
+		t.Fatalf("jig claim exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	sha := h.CommitScenario("a", 1)
-	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
+	if n := spawnedFor(readLedger(t, env), sha); n != 0 {
+		t.Fatalf("%d workers were started for %s, want none: a commit starts nothing", n, sha[:12])
+	}
 
-	// Stop right after: the verification is still running.
+	// Stop right after: the commit has no recorded result, and the message
+	// names the command that records one.
 	stop := decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
-	if want := "verification of " + sha[:12] + " for slice a is still running"; !strings.Contains(stop.SystemMessage, want) || stop.Decision != "" {
+	if want := "commit " + sha[:12] + " for slice a has no recorded result"; !strings.Contains(stop.SystemMessage, want) || stop.Decision != "" {
 		t.Errorf("Stop = %+v, want a message saying %q and no refusal", stop, want)
 	}
+	if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 
-	// The agent commits through its Bash tool: git's hook starts the worker,
-	// then the PostToolUse hook sees the commit and starts nothing more.
+	// The agent commits through its Bash tool: git's hook records the commit,
+	// then the PostToolUse hook sees it, and neither starts anything. The
+	// hook hands the session the outcome of slice a's run, which it has not
+	// heard yet.
 	bash := h.Bash("git commit --allow-empty -m 'c: nothing yet' -m 'Jig-Slice: c'")
-	if bash.Code != 0 || bash.Hook.Code != 0 || bash.Hook.Stdout != "" {
-		t.Fatalf("Bash commit: exit %d, hook exit %d, hook stdout %q, want a silent hook", bash.Code, bash.Hook.Code, bash.Hook.Stdout)
+	if bash.Code != 0 || bash.Hook.Code != 0 || !strings.Contains(bash.Hook.Stdout, "verified "+sha[:12]+" for slice a") {
+		t.Fatalf("Bash commit: exit %d, hook exit %d, hook stdout %q, want the outcome of slice a", bash.Code, bash.Hook.Code, bash.Hook.Stdout)
 	}
 	sha2 := h.git("rev-parse", "HEAD")
-	if lines := readLedger(t, env); spawnedFor(lines, sha) != 1 || spawnedFor(lines, sha2) != 1 {
-		t.Errorf("verify-spawned lines per commit = %d and %d, want 1 and 1: the hooks that see a commit after the first start nothing", spawnedFor(lines, sha), spawnedFor(lines, sha2))
+	if lines := readLedger(t, env); spawnedFor(lines, sha) != 0 || spawnedFor(lines, sha2) != 0 {
+		t.Errorf("verify-spawned lines per commit = %d and %d, want none: the hooks that see a commit start nothing", spawnedFor(lines, sha), spawnedFor(lines, sha2))
 	}
 	var tools []journal.Line
 	for _, l := range readLedger(t, env) {
@@ -109,21 +121,15 @@ func TestHooksDriveVerify(t *testing.T) {
 		t.Errorf("tool lines = %+v, want the one Bash call, at the new commit", tools)
 	}
 
-	// Both verify, and the journal says so.
-	release()
-	for _, c := range []struct{ sha, slice string }{{sha, "a"}, {sha2, "c"}} {
-		waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			return l.Event == journal.EventVerified && l.Commit == c.sha && l.Slice == c.slice
-		})
+	// The session verifies the second commit too, and the journal says so.
+	if res := h.Verify(fx.Ticket, "c"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	h.WaitVerifiers()
 
 	// The outcome reaches the session at its next prompt, once.
 	prompt := decodeHook(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "carry on"}))
-	for _, want := range []string{"verified " + sha[:12] + " for slice a", "verified " + sha2[:12] + " for slice c"} {
-		if !strings.Contains(prompt.Specific.Context, want) {
-			t.Errorf("prompt context = %q, want %q", prompt.Specific.Context, want)
-		}
+	if want := "verified " + sha2[:12] + " for slice c"; !strings.Contains(prompt.Specific.Context, want) {
+		t.Errorf("prompt context = %q, want %q", prompt.Specific.Context, want)
 	}
 	if again := h.Hook("UserPromptSubmit", map[string]any{"prompt": "and again"}); again.Code != 0 || again.Stdout != "" {
 		t.Errorf("a second prompt = exit %d, %q, want silence: the session was told", again.Code, again.Stdout)
@@ -148,10 +154,11 @@ func TestHooksDriveVerify(t *testing.T) {
 
 // TestSubagentStopHoldsOnlyTheClaimHolder is a chart run's build in miniature,
 // with the hooks installed: a subagent of the main session claims a slice
-// unattended and commits, and while the verification runs its own stop is held
-// back, with its reason, while the main session's stop, in the same session and
-// the same clone, is only told. Once the verification passes each agent hears
-// the outcome once, and neither stop has anything left to say.
+// unattended and commits, and while the commit has no recorded result its own
+// stop is held back, with its reason, while the main session's stop, in the
+// same session and the same clone, is only told. Once the subagent's
+// `jig verify` passes each agent hears the outcome once, and neither stop has
+// anything left to say.
 func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -195,27 +202,26 @@ func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 	if res := jigHooked(sub, "claim", fx.Ticket, "--slice", "a", "--unattended"); res.Code != 0 {
 		t.Fatalf("jig claim --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	release := sub.HoldVerifications("alpha", "beta")
 	sha := sub.CommitScenario("a", 1)
-	waitFor(t, 10*time.Second, "the worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), sha) == 1 })
-	running := "verification of " + sha[:12] + " for slice a is still running"
+	if n := spawnedFor(readLedger(t, env), sha); n != 0 {
+		t.Fatalf("%d workers were started for %s, want none", n, sha[:12])
+	}
+	unverified := "commit " + sha[:12] + " for slice a has no recorded result"
 
 	held := decodeHook(t, stopSub(false))
-	if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, running) {
-		t.Fatalf("SubagentStop = %+v, want a refusal that names the running verification", held)
+	if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, unverified) {
+		t.Fatalf("SubagentStop = %+v, want a refusal that names the commit with no result", held)
 	}
-	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, running) {
-		t.Errorf("main Stop = %+v, want the verification said and no refusal: the claim is the subagent's", mainStop)
+	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, unverified) {
+		t.Errorf("main Stop = %+v, want the commit said and no refusal: the claim is the subagent's", mainStop)
 	}
-	if again := decodeHook(t, stopSub(true)); again.Decision != "" || !strings.Contains(again.SystemMessage, running) {
+	if again := decodeHook(t, stopSub(true)); again.Decision != "" || !strings.Contains(again.SystemMessage, unverified) {
 		t.Errorf("SubagentStop while continuing = %+v, want a message and no second refusal for the same fact", again)
 	}
 
-	release()
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a"
-	})
-	sub.WaitVerifiers()
+	if res := sub.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 
 	// Each agent hears the outcome, once, on its own.
 	verified := "verified " + sha[:12] + " for slice a"
@@ -254,7 +260,7 @@ func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 // TestSubagentStopHoldsEachClaimHolder is a chart run's build with two agents
 // of one session at once (a ticket subagent and a repo builder nested in it):
 // each claims a different slice of the same ticket unattended and commits.
-// While their verifications run, the stop of each is held back with its own
+// While their commits have no recorded result, the stop of each is held back with its own
 // reason, however the claims interleave; the main session's stop, in the same
 // session, is only told.
 func TestSubagentStopHoldsEachClaimHolder(t *testing.T) {
@@ -302,12 +308,12 @@ func TestSubagentStopHoldsEachClaimHolder(t *testing.T) {
 			t.Fatalf("jig claim --slice %s --unattended exit = %d\nstdout:\n%s\nstderr:\n%s", c.slice, res.Code, res.Stdout, res.Stderr)
 		}
 	}
-	release := first.HoldVerifications("alpha", "beta")
 	shaA := first.CommitScenario("a", 1)
-	waitFor(t, 10*time.Second, "the first worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), shaA) == 1 })
 	second.git("commit", "--allow-empty", "-m", "c: nothing yet", "-m", "Jig-Slice: c")
 	shaC := second.git("rev-parse", "HEAD")
-	waitFor(t, 10*time.Second, "the second worker git's hook started", func() bool { return spawnedFor(readLedger(t, env), shaC) == 1 })
+	if spawnedFor(readLedger(t, env), shaA) != 0 || spawnedFor(readLedger(t, env), shaC) != 0 {
+		t.Fatal("a commit started a worker, want none")
+	}
 
 	for _, c := range []struct {
 		h     *fakeHarness
@@ -316,19 +322,12 @@ func TestSubagentStopHoldsEachClaimHolder(t *testing.T) {
 		slice string
 	}{{first, "a-1", shaA, "a"}, {second, "a-2", shaC, "c"}} {
 		held := stopOf(c.h)
-		running := "verification of " + c.sha[:12] + " for slice " + c.slice + " is still running"
+		running := "commit " + c.sha[:12] + " for slice " + c.slice + " has no recorded result"
 		if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, running) {
 			t.Errorf("SubagentStop of %s = %+v, want a refusal that names %q", c.agent, held, running)
 		}
 	}
-	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, "is still running") {
-		t.Errorf("main Stop = %+v, want the verifications said and no refusal: the claims are the subagents'", mainStop)
+	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, "has no recorded result") {
+		t.Errorf("main Stop = %+v, want the commits said and no refusal: the claims are the subagents'", mainStop)
 	}
-
-	release()
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Commit == shaA && l.Slice == "a"
-	})
-	first.WaitVerifiers()
-	second.WaitVerifiers()
 }

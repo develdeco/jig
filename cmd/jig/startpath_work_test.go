@@ -17,7 +17,7 @@ import (
 // as growth, as on a real store.
 func startPathRig(t *testing.T) (*fixture.Fixture, env) {
 	t.Helper()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	branchOf := regexp.MustCompile(`(?m)^\s*branch:\s*(\S+)`)
 	idOf := regexp.MustCompile(`(?m)^\s*id:\s*(\S+)`)
 	for i := 1; i <= 5; i++ {

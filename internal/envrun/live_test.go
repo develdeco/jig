@@ -180,7 +180,7 @@ func TestEndAllEndsOraclesThatStartAfterIt(t *testing.T) {
 }
 
 // TestStopContextEndsWhenJigIsStopped: a wait that is not an oracle (the wait
-// for a suite slot) ends with the oracles when jig is stopped, and is not
+// for a gate's turn) ends with the oracles when jig is stopped, and is not
 // ended by cancel alone being skipped; Stopped matches ErrStopped.
 func TestStopContextEndsWhenJigIsStopped(t *testing.T) {
 	ctx, cancel := StopContext(context.Background())

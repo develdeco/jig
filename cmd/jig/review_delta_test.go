@@ -20,15 +20,12 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
 	change(t, fx)
-	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta-test: done with the change", "-m", "Jig-Slice: fix-2-q-beta-test")
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	if out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "fix-2-q-beta-test", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "state: pass") {
-		t.Fatalf("jig verify of the kept note's slice: exit = %d\n%s", code, out)
-	}
+	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta: done with the change", "-m", "Jig-Slice: fix-2-q-beta")
+	verifyHere(t, fx, "fix-2-q-beta")
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (round 2 opens)\n%s", code, out)
 	}
@@ -116,10 +113,7 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 			t.Fatal(err)
 		}
 		gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: long change"+"\n\n"+"Jig-Slice: d")
-		sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-		if o, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(o, "state: pass") {
-			t.Fatalf("jig verify: exit = %d\n%s", code, o)
-		}
+		verifyHere(t, fx, "d")
 	})
 	if strings.Contains(out, "filler line") || strings.Contains(out, "  diff: |") {
 		t.Errorf("a long delta's context prints the diff\n%s", out)

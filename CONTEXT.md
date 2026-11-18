@@ -79,12 +79,8 @@ A tracer-bullet unit of work with a named oracle and blocking edges to other sli
 _Avoid_: task, subtask, step
 
 **Oracle**:
-The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself, in the background, on each commit that names the slice (see **Verification**). It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
+The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which the builder runs with `jig verify` on each commit that names the slice (see **Verification**); the ticket's last run is `jig verify --final`, the union of its slices' commands at the reviewed head. It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
 _Avoid_: test suite, check
-
-**Slot**:
-A heavy oracle's share of the machine: the cores and memory its project's recent runs of that oracle kept busy, taken from one machine-wide budget in arrival order and given back when the run ends. A project with nothing measured asks for the whole machine; a marker's `slots: N` instead counts that project's own runs (ADR 0051). A project whose runs that shared the machine ran much slower than its runs alone asks for a larger share of the budget, and gets it back as its shared runs stop running slow.
-_Avoid_: lock, semaphore
 
 **Workspace**:
 A slice's target: a repo, or a module inside one. In a project of several repos a slice writes it as `<repo>/<workspace>`, or as the bare id of the one repo whose manifest declares it; a bare id that two repos declare, or that none does, belongs to no repo until the slice names one.
@@ -155,7 +151,7 @@ A session taking a slice to build it (`jig claim`): a journal line plus the slic
 _Avoid_: assign, lock
 
 **Verification**:
-One run of a slice's oracle on a commit, in a detached worktree of the operator's clone and a detached process (`jig verify`), started by git's post-commit hook or the harness's PostToolUse. It is recorded as `verify-pending`, `oracle`, `recorded` and `verified` (or `verify-error`) lines, keyed by (commit, slice) and idempotent. Green is what a verification proved, never what a session claimed. Its `oracle` line (and the gate's own `gate-oracle` line) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
+One run of a slice's oracle in the builder's own worktree, in the foreground (`jig verify`, which the builder runs itself: jig starts none on a commit and only witnesses the run). It is recorded as an `oracle` line holding every input and fact needed to run it again by hand, then, when the run *covers* HEAD (the tree clean before and after, HEAD unmoved, the command the slice's own oracle, HEAD a descendant of the ticket's start sha), `recorded` and `verified` lines and the slice's state; any other run is recorded with its `uncovered` reason and changes nothing, and a run that could not reach its command is a `verify-error` line. A second run runs again. Green is what a covering verification proved, never what a session claimed. Its `oracle` line (and the `final-oracle` line of a `jig verify --final` run) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict. Every reader says one of two things of a commit and slice: the result a `jig verify` run recorded for it (a pass, a failure, or a verification that could not run) or that it has none (`no recorded result`); nothing is ever "pending" or "running". A slice shows its *last run*, its latest `oracle` line whether it covered a commit or not, and whether that run covers the slice's last commit on the branch. A `verify-pending` or `verify-spawned` line is an old worker's history that a reader skips and never reads as work in flight.
 _Avoid_: CI run, test run
 
 **Journal**:
@@ -255,7 +251,7 @@ A branch recorded in a ticket's `ticket.yaml` as its own: by the first `jig gate
 _Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
-Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` opens a round and starts nothing, and a fresh-context reviewer that jig did not start closes it (see **Recorded round**).
+Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` opens a round and runs no command (it lists the passes the slices' builders had witnessed), and a fresh-context reviewer that jig did not start closes it (see **Recorded round**).
 _Avoid_: code review, QA pass
 
 **Recorded round**:
@@ -315,7 +311,7 @@ The per-dispatch model ladder jig used while it chose models: the first rung fir
 _Avoid_: model tiering, escalation policy
 
 **Stall**:
-The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. When the command has passed on this machine and the failed run printed something that pass did not, the signature is built from those new lines only (otherwise from the end of the output), so the same failure matches and two different ones do not. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
+The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. The signature is built from the end of the failed run's output, so the same failure matches and two different ones do not; a run that covers no commit never counts. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
 _Avoid_: retry loop, flaky failure
 
 **Chart**:

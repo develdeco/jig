@@ -6,6 +6,7 @@
       "title": "WriteAll ignores the error from f.Close()",
       "detail": "Unlike a read-only close, a failed close after writes can silently drop buffered data that was never flushed to disk.",
       "action": "fix",
+      "oracle": "go test ./store -run 'TestWriteAll'",
       "risk": "medium",
       "risk_rationale": "A failed close after writing can silently lose data."
     },

@@ -62,37 +62,30 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	branch := fx.Branch
 	h.Branch(branch)
 
-	type built struct{ slice, sha string }
-	steps := []built{{"a", h.CommitScenario("a", 1)}}
+	// Each commit is proven right after it is made, as a builder does.
+	var last string
+	prove := func(slice string, attempt int) {
+		t.Helper()
+		last = h.CommitScenario(slice, attempt)
+		res := h.Verify(fx.Ticket, slice)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
+		}
+	}
+	prove("a", 1)
 	if whole {
 		// Slice b's first attempt fails its test and is never verified; the
 		// second is the slice's commit.
 		h.CommitScenario("b", 1)
-		steps = append(steps, built{"b", h.CommitScenario("b", 2)}, built{"c", h.CommitScenario("c", 2)}, built{"d", h.CommitScenario("d", 1)})
+		prove("b", 2)
+		prove("c", 2)
+		prove("d", 1)
 	}
-	for _, s := range steps {
-		res := h.Jig("verify", fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	for _, s := range steps {
-		l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail")
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	h.WaitVerifiers()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: steps[len(steps)-1].sha, st: st}
+	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: last, st: st}
 }
 
 // buildFix has the builder commit the scenario's patch for each slice given -
@@ -103,30 +96,15 @@ func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
 	t.Helper()
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
-	type built struct{ slice, sha string }
-	var steps []built
+	var sha string
 	for _, s := range slices {
-		steps = append(steps, built{s, b.builder.CommitScenario(s, 1)})
-	}
-	for _, s := range steps {
-		res := b.builder.Jig("verify", b.fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
+		sha = b.builder.CommitScenario(s, 1)
+		res := b.builder.Verify(b.fx.Ticket, s)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s, res.Code, res.Stdout, res.Stderr)
 		}
 	}
-	for _, s := range steps {
-		l := waitJournal(t, b.fx, b.fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Commit == s.sha)
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	b.builder.WaitVerifiers()
-	return steps[len(steps)-1].sha
+	return sha
 }
 
 // workFile is a file of the ticket's work directory in the store.
@@ -236,8 +214,8 @@ func (b builtTicket) reviewedClean(t *testing.T, round int) jigResult {
 
 // TestGateReviewsClonesCopy: a branch built by hand in the operator clone and
 // not pushed anywhere is what `jig gate` reviews: it reads the clone's
-// committed copy, re-verifies it (reusing the pass `jig verify` recorded),
-// opens the round without making a gate/round-N directory, and hands the
+// committed copy, runs nothing (the request lists the pass `jig verify`
+// witnessed for each slice), opens the round without making a gate/round-N directory, and hands the
 // reviewer a request. A reviewer in a session of its own reads it, reads the
 // code, and ends the round with `jig review done`: clean, and independent of the
 // builder.
@@ -280,23 +258,22 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		}
 	}
 	lease := filepath.Join(b.env.home, filepath.FromSlash(open.Lease))
-	// The oracle pass jig verify recorded stands for the gate's run of alpha's
-	// oracle; beta's, which no one verified, the gate ran itself.
+	// The round ran no command: oracles_passed is the pass `jig verify`
+	// witnessed for slice a, at the head; the other workspace has no row.
 	var req struct {
 		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			ReusedFrom string `json:"reused_from"`
+			Slice     string `json:"slice"`
+			Workspace string `json:"workspace"`
+			Commit    string `json:"commit"`
+			AtHead    string `json:"at_head"`
 		} `json:"oracles_passed"`
 	}
 	if err := json.Unmarshal(readFileOrFatal(t, b.workFile("gate.round-1.review.json")), &req); err != nil {
 		t.Fatal(err)
 	}
-	reused := map[string]string{}
-	for _, o := range req.OraclesPassed {
-		reused[o.Workspace] = o.ReusedFrom
-	}
-	if reused["alpha"] != b.sha || reused["beta"] != "" {
-		t.Errorf("oracles_passed reused_from = %v, want alpha reused from %s and beta run by the gate", reused, b.sha)
+	if len(req.OraclesPassed) != 1 || req.OraclesPassed[0].Slice != "a" || req.OraclesPassed[0].Workspace != "alpha" ||
+		req.OraclesPassed[0].Commit != b.sha || req.OraclesPassed[0].AtHead != "yes" {
+		t.Errorf("oracles_passed = %+v, want slice a's pass in alpha at %s, at the head", req.OraclesPassed, b.sha)
 	}
 	// The reviewer reads the code at the head in the worktree the open round
 	// names, which is jig's, not the clone.

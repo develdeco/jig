@@ -576,8 +576,7 @@ func (dr Draft) kinds() int {
 
 // AppendDraft checks d against the open round and appends it to the round's
 // findings drafts. What it checks is what needs no other draft: the fields
-// ParseReviewResult checks of a finding, a probe or a skip, an oracle that is
-// one of the manifest's, a prior that names a finding under open or
+// ParseReviewResult checks of a finding, a probe or a skip, a prior that names a finding under open or
 // dismissed, and a file of a probe or a skip in a repo of the round. That the
 // file exists at the head, that no two drafts share a prior and that the
 // reviewed paths cover must_review are checked when the round is done. It
@@ -603,8 +602,7 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultFinding(len(existing), f); err != nil {
 			return 0, err
 		}
-		// A round over several repos names a file "<repo>/<path>", and the
-		// oracles a finding can name are those of its repo.
+		// A round over several repos names a file "<repo>/<path>".
 		rf := p.Request.files()
 		file, err := normalizeRepoRelPath(f.File)
 		if err != nil {
@@ -612,13 +610,6 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		}
 		if _, _, ok := rf.of(file); !ok {
 			return 0, reviewInvalid(rf.unknownRepoFile(f.File))
-		}
-		oracles := rf.oracles(file)
-		if f.Oracle != "" && !inStrings(oracles, f.Oracle) {
-			return 0, reviewInvalid(fmt.Sprintf("oracle %q is not a manifest oracle (%s)", f.Oracle, strings.Join(oracles, ", ")))
-		}
-		if f.Oracle == "" && len(oracles) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
-			return 0, reviewInvalid(fmt.Sprintf("a finding with action %q must name one of the manifest's %d oracles (%s)", f.Action, len(oracles), strings.Join(oracles, ", ")))
 		}
 		if f.Prior != "" && !known[f.Prior] {
 			return 0, reviewInvalid(fmt.Sprintf("prior %q does not name a finding under open or dismissed", f.Prior))
@@ -728,15 +719,6 @@ func marshalResult(r ReviewResult) ([]byte, error) {
 		r.ReviewedPaths = []string{}
 	}
 	return json.MarshalIndent(r, "", "  ")
-}
-
-func inStrings(list []string, s string) bool {
-	for _, have := range list {
-		if have == s {
-			return true
-		}
-	}
-	return false
 }
 
 // GateFinish closes the open round p with the reviewer's report rr, which the
@@ -983,8 +965,9 @@ const (
 )
 
 // TriageTarget encodes the build target a kept ask lacked (the workspace its
-// file lies in, the oracle that proves the fix), the person's choice, in the
-// triage line's Command.
+// file lies in, the command that proves the fix), the person's choice, in the
+// triage line's Command: `workspace=W` when there is one, then `oracle=` and
+// the command to the end of the line, which may hold spaces.
 func TriageTarget(workspace, oracle string) string {
 	var parts []string
 	if workspace != "" {
@@ -996,16 +979,14 @@ func TriageTarget(workspace, oracle string) string {
 	return strings.Join(parts, " ")
 }
 
-// triageTarget decodes TriageTarget.
+// triageTarget decodes TriageTarget, and a line written before the command
+// could hold spaces (`workspace=W oracle=O`, one word each) alike.
 func triageTarget(command string) (workspace, oracle string) {
-	for _, part := range strings.Fields(command) {
-		if v, ok := strings.CutPrefix(part, "workspace="); ok {
-			workspace = v
-		}
-		if v, ok := strings.CutPrefix(part, "oracle="); ok {
-			oracle = v
-		}
+	rest := command
+	if v, ok := strings.CutPrefix(rest, "workspace="); ok {
+		workspace, rest, _ = strings.Cut(v, " ")
 	}
+	oracle, _ = strings.CutPrefix(rest, "oracle=")
 	return workspace, oracle
 }
 

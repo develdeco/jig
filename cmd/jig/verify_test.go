@@ -10,7 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
@@ -19,11 +18,10 @@ import (
 // verifyRig is a fixture with its clone on the ticket's branch and an env that
 // runs in the clone and records the processes a command would start.
 type verifyRig struct {
-	t     *testing.T
-	fx    *fixture.Fixture
-	st    *store.Store
-	spawn *spawnRecorder
-	e     env
+	t  *testing.T
+	fx *fixture.Fixture
+	st *store.Store
+	e  env
 }
 
 func newVerifyRig(t *testing.T) *verifyRig {
@@ -33,9 +31,8 @@ func newVerifyRig(t *testing.T) *verifyRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := &spawnRecorder{PID: 777}
-	e := testEnv(fx.Home).inDir(fx.RepoDir).withSpawn(rec.Spawn).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
-	r := &verifyRig{t: t, fx: fx, st: st, spawn: rec, e: e}
+	e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
+	r := &verifyRig{t: t, fx: fx, st: st, e: e}
 	gitMust(t, fx.RepoDir, "checkout", "-b", "jig/"+fx.Ticket)
 	return r
 }
@@ -104,45 +101,43 @@ func (r *verifyRig) run(args ...string) (string, int) {
 	return runMain(r.t, r.e, "", args...)
 }
 
-// TestVerifySplitsItsPositionals: a ticket id and a revision, each optional, in
-// either order, neither twice.
+// TestVerifySplitsItsPositionals: a ticket id, optional and given once. A run
+// is of the worktree's HEAD, so a commit is no positional.
 func TestVerifySplitsItsPositionals(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name         string
 		pos          []string
-		ticket, rev  string
+		ticket       string
 		wantErrMatch string
 	}{
-		{"none", nil, "", "", ""},
-		{"a ticket", []string{"JIG-1"}, "JIG-1", "", ""},
-		{"a sha", []string{"abc1234"}, "", "abc1234", ""},
-		{"HEAD", []string{"HEAD"}, "", "HEAD", ""},
-		{"a ticket and a sha", []string{"JIG-1", "abc1234"}, "JIG-1", "abc1234", ""},
-		{"a sha and a ticket", []string{"abc1234", "JIG-1"}, "JIG-1", "abc1234", ""},
-		{"a branch named for a ticket is a revision", []string{"JIG-1-fix"}, "", "JIG-1-fix", ""},
-		{"two tickets", []string{"JIG-1", "JIG-2"}, "", "", "one ticket"},
-		{"two commits", []string{"abc1234", "def5678"}, "", "", "one commit"},
+		{"none", nil, "", ""},
+		{"a ticket", []string{"JIG-1"}, "JIG-1", ""},
+		{"a sha", []string{"abc1234"}, "", "takes no commit"},
+		{"HEAD", []string{"HEAD"}, "", "takes no commit"},
+		{"a ticket and a sha", []string{"JIG-1", "abc1234"}, "", "takes no commit"},
+		{"a branch named for a ticket is no ticket", []string{"JIG-1-fix"}, "", "takes no commit"},
+		{"two tickets", []string{"JIG-1", "JIG-2"}, "", "one ticket"},
+		{"an option", []string{"--all"}, "", "is not a ticket"},
 	} {
-		ticket, rev, err := splitVerifyArgs(c.pos)
+		ticket, err := splitVerifyArgs(c.pos)
 		if c.wantErrMatch != "" {
 			if err == nil || !strings.Contains(err.Error(), c.wantErrMatch) {
 				t.Errorf("%s: err = %v, want one saying %q", c.name, err, c.wantErrMatch)
 			}
 			continue
 		}
-		if err != nil || ticket != c.ticket || rev != c.rev {
-			t.Errorf("%s: = %q, %q, %v, want %q, %q", c.name, ticket, rev, err, c.ticket, c.rev)
+		if err != nil || ticket != c.ticket {
+			t.Errorf("%s: = %q, %v, want %q", c.name, ticket, err, c.ticket)
 		}
 	}
 }
 
-// TestVerifyStartsADetachedWorkerForTheCommitAtHead: bare `jig verify` in a
-// clone on the ticket's branch finds the ticket from the branch, the commit
-// from HEAD and the slice from its trailer, starts the worker through the
-// spawn seam with its log under the jig home, and says it is pending. It writes
-// nothing to the journal itself.
-func TestVerifyStartsADetachedWorkerForTheCommitAtHead(t *testing.T) {
+// TestVerifyStartsNoWorkerForTheCommitAtHead: bare `jig verify` in a clone on
+// the ticket's branch finds the ticket from the branch, the commit from HEAD
+// and the slice from its trailer, and runs the oracle in this process: it
+// starts no process of jig's and writes no verify-spawned line.
+func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 	t.Parallel()
 	r := newVerifyRig(t)
 	sha := r.fixClamp()
@@ -151,70 +146,26 @@ func TestVerifyStartsADetachedWorkerForTheCommitAtHead(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify exit = %d, want 0:\n%s", code, out)
 	}
-	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pending", "pid: 777", "help[1]:"} {
+	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pass", "covers: yes", "help[1]:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	specs := r.spawn.Specs()
-	if len(specs) != 1 {
-		t.Fatalf("processes started = %d, want 1", len(specs))
+	var kinds []string
+	for _, l := range r.journal() {
+		kinds = append(kinds, l.Event)
 	}
-	id, err := r.st.ID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantLog, err := home.VerifyLogPath(r.fx.Home, id, r.fx.Ticket, sha, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec := specs[0]
-	wantArgs := []string{"verify", "--worker", "--store", r.st.Root, "--repo-dir", r.fx.RepoDir, "--slice", "a", "JIG-1", sha}
-	if !strings.HasSuffix(spec.Path, "jig") || !reflect.DeepEqual(spec.Args, wantArgs) || spec.Dir != r.fx.RepoDir || spec.LogPath != wantLog {
-		t.Errorf("Spec = %+v\nwant args %v and log %s", spec, wantArgs, wantLog)
-	}
-	if !strings.Contains(out, "log: "+wantLog) && !strings.Contains(out, `"`+strings.ReplaceAll(wantLog, `\`, `\`)+`"`) {
-		t.Errorf("output does not name the log %s:\n%s", wantLog, out)
-	}
-	if lines := r.journal(); len(lines) != 0 {
-		t.Errorf("the foreground wrote journal lines: %+v", lines)
+	if want := []string{"oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
+		t.Errorf("journal events = %v, want %v", kinds, want)
 	}
 	led, err := ledger.Read(r.fx.Home)
-	if err != nil || len(led) != 1 || led[0].Event != journal.EventVerifySpawned || led[0].PID != 777 || led[0].Commit != sha {
-		t.Errorf("ledger = %+v, %v, want one verify-spawned line for pid 777", led, err)
-	}
-}
-
-// TestVerifyReportsAnExistingVerificationAndStartsNothing: a second call finds
-// the verification in the journal, whatever state it is in, prints it, and
-// starts nothing and writes nothing; --rerun starts a worker over it.
-func TestVerifyReportsAnExistingVerificationAndStartsNothing(t *testing.T) {
-	t.Parallel()
-	r := newVerifyRig(t)
-	sha := r.fixClamp()
-	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Commit: sha, Attempt: 1, Seconds: 4, Summary: "FAIL TestClamp"}); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	out, code := r.run("verify", "JIG-1", sha[:10])
-	if code != 0 {
-		t.Fatalf("verify exit = %d, want 0: reporting what is there is not a failure\n%s", code, out)
-	}
-	for _, want := range []string{"state: fail", "existing: true", "attempt: 1", "--rerun"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
+	for _, l := range led {
+		if l.Event == journal.EventVerifySpawned {
+			t.Errorf("ledger holds a verify-spawned line: %+v", l)
 		}
-	}
-	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("started %d processes, want none", n)
-	}
-	if n := len(r.journal()); n != 1 {
-		t.Errorf("journal has %d lines, want the 1 the test wrote", n)
-	}
-
-	out, code = r.run("verify", "JIG-1", sha, "--rerun")
-	if code != 0 || len(r.spawn.Specs()) != 1 || !contains(r.spawn.Specs()[0].Args, "--rerun") || strings.Contains(out, "existing: true") {
-		t.Errorf("verify --rerun: exit %d, specs %+v, want a worker started with --rerun\n%s", code, r.spawn.Specs(), out)
 	}
 }
 

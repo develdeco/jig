@@ -266,22 +266,6 @@ var buildEventNames = []string{
 	journal.EventFixSlice, journal.EventSliceAdd,
 }
 
-// verifying lists the slices whose latest verify-pending has had no result
-// since: a worker is running (or died; the stall shows that).
-func (t *ticket) verifying() map[string]bool {
-	out := map[string]bool{}
-	for _, slice := range t.sliceIDsFromLines() {
-		p := t.latest(slice, journal.EventVerifyPending)
-		if p < 0 {
-			continue
-		}
-		if t.latest(slice, journal.EventOracle, journal.EventVerified, journal.EventVerifyError) < p {
-			out[slice] = true
-		}
-	}
-	return out
-}
-
 // sliceIDsFromLines are the slices the journal names, in order of first
 // appearance.
 func (t *ticket) sliceIDsFromLines() []string {
@@ -537,16 +521,14 @@ type sliceRow struct {
 
 // relevantSliceEvents are the lines worth showing as a slice's latest.
 var relevantSliceEvents = []string{
-	journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventSlotWait, journal.EventSlotTaken, journal.EventOracle,
+	journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventOracle,
 	journal.EventVerified, journal.EventVerifyError, journal.EventQuestion, journal.EventAnswer,
 	journal.EventStall, journal.EventRequeue, journal.EventNote,
 }
 
 // slices are the ticket's slices: the store's list when a status has been
-// read (its states are the store's, with verifying laid over a slice a worker
-// is checking), else the slices the journal names.
+// read (its states are the store's), else the slices the journal names.
 func (t *ticket) slices(zone *time.Location) []sliceRow {
-	verifying := t.verifying()
 	var out []sliceRow
 	if t.status != nil && len(t.status.Slices) > 0 {
 		for _, s := range t.status.Slices {
@@ -562,8 +544,12 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	}
 	for i := range out {
 		r := &out[i]
-		if verifying[r.ID] && (r.State == StateQueued || r.State == StateBuilding) {
-			r.State = StateVerifying
+		if r.State == StateBuilding {
+			// The store sets a failed slice back to building; the recorded
+			// last run says it failed.
+			if run, failed := t.lastRunFailed(r.ID); failed && run.Cause == "" {
+				r.State = StateFail
+			}
 		}
 		if p := t.latest(r.ID, relevantSliceEvents...); p >= 0 {
 			l := t.lines[p]
@@ -608,16 +594,14 @@ func describe(l events.Envelope) string {
 	case journal.EventRelease:
 		return "released" + by(l.Session)
 	case journal.EventVerifyPending:
-		return "verify pending " + short(l.Commit)
-	case journal.EventSlotWait:
-		return firstOf(l.Summary, "waiting for the suite slot")
-	case journal.EventSlotTaken:
-		return "took the suite slot"
+		return "verification requested for " + short(l.Commit)
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return "oracle pass " + short(l.Commit)
 		}
 		return strings.TrimSpace("oracle " + l.Outcome + " " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		return strings.TrimSpace("final run " + l.Outcome + " " + short(l.Commit))
 	case journal.EventVerified:
 		return "verified " + short(l.Commit)
 	case journal.EventVerifyError:
@@ -674,10 +658,13 @@ func eventState(l events.Envelope) string {
 	switch l.Event {
 	case journal.EventClaim, journal.EventDispatch, journal.EventRequeue, journal.EventFixSlice:
 		return StateBuilding
-	case journal.EventVerifyPending, journal.EventSlotWait, journal.EventSlotTaken:
-		return StateVerifying
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
+			return StateGreen
+		}
+		return StateStalled
+	case journal.EventFinalOracle:
+		if l.Outcome == "pass" && l.Uncovered == "" {
 			return StateGreen
 		}
 		return StateStalled
@@ -751,18 +738,12 @@ func (t *ticket) phase(zone *time.Location) (state, label string) {
 			// building the journal's lines might otherwise suggest.
 			return StateQueued, t.status.State
 		}
-		if len(t.verifying()) > 0 {
-			return StateVerifying, "verifying"
-		}
 		return StateBuilding, "building"
 	}
 	for _, id := range t.sliceIDsFromLines() {
 		if t.guessSliceState(id) == StateStalled {
 			return StateStalled, "stalled"
 		}
-	}
-	if len(t.verifying()) > 0 {
-		return StateVerifying, "verifying"
 	}
 	if build >= 0 {
 		return StateBuilding, "building"

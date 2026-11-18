@@ -15,7 +15,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -200,38 +199,38 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	}
 
 	// A commit in each clone, with its slice's trailer, is verified in that
-	// clone. The first call of a session only starts the watch on HEAD.
+	// clone, by the session's own `jig verify`. The first call of a session
+	// only starts the watch on HEAD.
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
 	api.Bash("git status --short")
 	web.Bash("git status --short")
 	shaAPI := commitSlice(t, api, "server", "server/handler.go", "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n")
 	shaWeb := commitSlice(t, web, "ui", "ui/page.go", "package ui\n\n// Page names what the web page shows.\nfunc Page() string { return \"order total\" }\n")
-	for _, c := range []struct{ slice, sha, other, command string }{
-		{"server", shaAPI, webDir, " test ./server/..."},
-		{"ui", shaWeb, apiDir, " test ./ui/..."},
+	for _, c := range []struct {
+		h                          *fakeHarness
+		slice, sha, other, command string
+	}{
+		{api, "server", shaAPI, webDir, " test ./server/..."},
+		{web, "ui", shaWeb, apiDir, " test ./ui/..."},
 	} {
-		oracle := waitJournal(t, fx, ticket, verifyWait, func(l journal.Line) bool {
-			return l.Event == journal.EventOracle && l.Slice == c.slice && l.Commit == c.sha
-		})
-		if oracle.Outcome != "pass" || !strings.HasSuffix(oracle.Command, c.command) {
+		if r := c.h.Verify(ticket, c.slice); r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
+			t.Fatalf("jig verify of %s: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", c.slice, r.Code, r.Stdout, r.Stderr)
+		}
+		oracle, _ := oracleLine(readJournal(t, fx, ticket), c.slice, c.sha, "pass")
+		if !strings.HasSuffix(oracle.Command, c.command) {
 			t.Errorf("oracle line of %s = %+v, want a pass of the oracle that ends in%q: the workspace of its own repo", c.slice, oracle, c.command)
 		}
-		waitJournal(t, fx, ticket, verifyWait, func(l journal.Line) bool {
-			return l.Event == journal.EventVerified && l.Slice == c.slice && l.Commit == c.sha
-		})
 		// The commit is in the clone it was verified from and not in the other:
 		// nothing was verified in the wrong repo.
 		if _, err := gitx.Run(c.other, "cat-file", "-e", c.sha+"^{commit}"); err == nil {
 			t.Errorf("commit %s of slice %s is in %s too", c.sha[:12], c.slice, c.other)
 		}
 	}
-	api.WaitVerifiers()
-	web.WaitVerifiers()
 
 	// A commit is verified in the repo it was made in, for a slice of that repo.
-	// One whose trailer names a slice of the other repo is not verified: the hook
-	// that sees it starts nothing, and jig verify says why. The sessions that
+	// One whose trailer names a slice of the other repo is not verified: jig
+	// verify says why. The sessions that
 	// commit here claimed nothing: a session that claimed a slice has a slice to
 	// verify a commit for.
 	api2, web2 := newHarness(t, fx, env, "s-api-2"), newHarness(t, fx, env, "s-web-2")
@@ -242,29 +241,27 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	if got := spawnedFor(readLedger(t, env), wrong); got != 0 {
 		t.Errorf("%d verifications were started for a commit in web made for the api's slice, want none", got)
 	}
-	projRefusal(t, "jig verify of a commit for another repo's slice", web2.Jig("verify"), 2,
+	projRefusal(t, "jig verify of a commit for another repo's slice", web2.Jig("verify"), 125,
 		"slice server of "+ticket+" builds in repo api, but this commit is in repo web", "Commit it in the clone of api")
 
-	// The same, for the web's slice, is verified: here by the command, which waits
-	// for the oracle. The api's session does the same in its own clone.
+	// The same, for the web's slice, is verified by the command, which runs the
+	// oracle. The api's session does the same in its own clone.
 	right := commitSlice(t, web2, "ui", "ui/right.go", "package ui\n\n// Right is a change in the web repo made for its own slice.\nfunc Right() {}\n")
-	if r := web2.Jig("verify", "--wait"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: ui") || !strings.Contains(r.Stdout, "commit: "+right) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
+	if r := web2.Jig("verify"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: ui") || !strings.Contains(r.Stdout, "commit: "+right) || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
 	}
 	apiSha := commitSlice(t, api2, "server", "server/more.go", "package server\n\n// More names a second thing the api serves.\nfunc More() string { return \"more\" }\n")
-	if r := api2.Jig("verify", "--wait"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: server") || !strings.Contains(r.Stdout, "commit: "+apiSha) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
+	if r := api2.Jig("verify"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: server") || !strings.Contains(r.Stdout, "commit: "+apiSha) || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
 	}
 
 	// From the orchestrator, in none of the repos, the commit has no repo to be
 	// in until the clone is named.
-	projRefusal(t, "jig verify from the orchestrator", runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui"), 2,
-		"cannot tell which repo of the project the commit is in", "--repo-dir")
-	if r := runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, right, "--slice", "ui", "--repo-dir", webDir, "--wait", "--rerun"); r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --repo-dir from the orchestrator: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	projRefusal(t, "jig verify from the orchestrator", runJig(t, env.with("JIG_SESSION=s-root"), fx.OrchestratorDir, "verify", ticket, "--slice", "ui"), 125,
+		"cannot tell which repo of the project the commit is in", "inside the clone")
+	if r := runJig(t, env.with("JIG_SESSION=s-root"), webDir, "verify", ticket, "--slice", "ui"); r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
+		t.Errorf("jig verify from inside the clone: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
 	}
-	api2.WaitVerifiers()
-	web2.WaitVerifiers()
 
 	// status shows both slices green.
 	status := runJig(t, env, fx.OrchestratorDir, "status", ticket)

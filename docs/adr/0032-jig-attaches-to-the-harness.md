@@ -1,5 +1,7 @@
 # jig attaches to the harness: boxes go, seams stay
 
+**Amended by [ADR 0052](0052-jig-witnesses-a-run-and-starts-none.md):** the post-commit hook and the harness's PostToolUse no longer start `jig verify` on a commit. The builder runs it in its own worktree, in the foreground, and jig records the run it witnessed. The mechanism below that started the oracle on a commit is superseded, for its cold leases outside the harness's process tree, the Stop hold on a running worker, and the polling both caused; the rule that green is what jig ran stands.
+
 **Amended by [ADR 0034](0034-jig-advises-context-and-runs-no-context-tool.md):** `jig context` returns no code a graph links to the goal. Running a context tool for the session is a box, so jig runs none and says the code is the session's to find with its own tools; the verdict map's row for 0026 reads retire.
 
 jig began as a dispatch loop. `jig run` and `jig solve` started a coding session for each ready slice - a `claude -p` subprocess or a herdr agent in a pooled worktree - handed it a `slice.json`, and read back a `result.json`. Around that session jig built a box: a headless permission model with a screen hook (ADR 0008), a model staircase and efforts (ADRs 0019, 0023), a prompt that taught the session to test narrowly (ADR 0018), a wait loop, and a resume turn when the oracle came back red (ADR 0020). It launched three more sessions of its own, an intent summarizer, a reviewer and a pick session for the demo. Everything jig knew about the work it knew because it had started the session that did it.

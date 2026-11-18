@@ -20,14 +20,13 @@ func TestPRBodyEndsWithTheProjectsTrailer(t *testing.T) {
 	d := newDeps(t, fx)
 
 	const what = "- changes the greeting\n"
-	oracles := []string{"test"}
 	rounds := []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}}
-	rep := reportYAML{}
-	base := renderWhatSection(what) + renderVerificationSection(rep, oracles, nil, rounds)
+	finals := []FinalRunReport{{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunNone}}
+	base := renderWhatSection(what) + renderVerificationSection(finals, rounds)
 
 	render := func(trailer string) string {
 		t.Helper()
-		rel, _, err := writePRBody(d.Store, fx.Ticket, "fixture-repo", what, rep, oracles, nil, rounds, nil, nil, stack.Repo{}, trailer)
+		rel, _, err := writePRBody(d.Store, fx.Ticket, "fixture-repo", what, finals, rounds, nil, nil, stack.Repo{}, trailer)
 		if err != nil {
 			t.Fatalf("writePRBody: %v", err)
 		}

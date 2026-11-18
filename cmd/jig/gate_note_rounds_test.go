@@ -125,10 +125,10 @@ func TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain(t *testing.T)
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
 
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
-	buildQueuedSlice(t, fx, "fix-2-q-beta-test", "beta/beta.go")
+	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")
 
 	round2 := reviewRoundResult(t, e, fx, verifydeliver.ReviewResult{
 		Summary:      "round 2: the note still stands",
@@ -179,10 +179,7 @@ func changeBeta(t *testing.T, fx *fixture.Fixture) {
 		t.Fatal(err)
 	}
 	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: touch beta"+"\n\n"+"Jig-Slice: d")
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	if out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "state: pass") {
-		t.Fatalf("jig verify of the change: exit = %d, want a pass\n%s", code, out)
-	}
+	verifyHere(t, fx, "d")
 }
 
 // reviewRoundResult opens the next round and writes res to a result file whose

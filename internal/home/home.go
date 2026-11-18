@@ -7,8 +7,6 @@
 package home
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -69,13 +67,6 @@ func PoolDir(root string) string {
 	return filepath.Join(root, "pool")
 }
 
-// SlotQueueDir returns where the machine's heavy-run queue lives under the jig
-// home root: <root>/slot-queue, one entry per run that waits or holds, shared
-// by every project. It is machine state, never the store or a repo.
-func SlotQueueDir(root string) string {
-	return filepath.Join(root, "slot-queue")
-}
-
 // MachinePath returns the per-machine project mapping file path under the
 // jig home root.
 func MachinePath(root string) string {
@@ -97,20 +88,6 @@ func IntentExcerptDir(root string) string {
 // code under review) and never the store.
 func IntentScratchDir(root string) string {
 	return filepath.Join(root, "intent-scratch")
-}
-
-// BaselinePath returns the file under the jig home root that holds the output
-// lines of the latest passing run of an oracle command:
-// <root>/baselines/<key>.txt, key being a hash of the repo, the workspace and
-// the command, so each combination has one file and the latest pass replaces
-// it. It lives under the jig home, never the store or the repo: it is
-// machine-local and means nothing elsewhere.
-func BaselinePath(root, repo, workspace, command string) string {
-	h := sha256.New()
-	for _, part := range []string{repo, workspace, command} {
-		fmt.Fprintf(h, "%d:%s;", len(part), part)
-	}
-	return filepath.Join(root, "baselines", hex.EncodeToString(h.Sum(nil)[:16])+".txt")
 }
 
 // The evidence tree is <root>/evidence/<storeID>/<ticket>/...: a fifth home

@@ -1,5 +1,7 @@
 # The reviewer confirms an unchanged finding by id
 
+**Amended 2026-11-18:** a finding confirmed unchanged keeps its recorded command, which is now a literal command and no longer a manifest oracle name; a changed version that names none keeps its prior's.
+
 A gate reviewer reports every problem in the files it reviews, including those already listed under `open`, and wrote each one in full: file, line, title, detail, action, risk, risk_rationale, oracle and prior. On a delta round most of those are unchanged. In the first measured run's third round the reviewer rewrote all 15 carried low notes to add 3 new findings, and writing `result.json` alone was about 13k of the session's 40k output tokens, about 2 of its 9.2 minutes.
 
 ## The contract

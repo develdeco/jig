@@ -13,7 +13,7 @@ import (
 )
 
 // bigBuild is BIG-1 with slices s1 to s<n>, the first <green> of them green, the
-// next one being verified and the rest queued: its `jig status` and the journal
+// next one being built and the rest queued: its `jig status` and the journal
 // lines a build like that leaves.
 func bigBuild(n, green int) (status string, lines []events.Envelope) {
 	var rows [][]string

@@ -153,8 +153,8 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 			s.State = StateEnvBlocked
 		case counts[StateNeedsInput] > 0:
 			s.State = StateNeedsInput
-		case counts[StateVerifying] > 0:
-			s.State = StateVerifying
+		case counts[StateFail] > 0:
+			s.State = StateFail
 		}
 	}
 	return s
@@ -289,9 +289,9 @@ var headerWords = map[stepState]string{
 	{stepBuild, StateQueued}:       "waiting to build",
 	{stepBuild, StateReady}:        "ready to build",
 	{stepBuild, StateBuilding}:     "build in progress",
-	{stepBuild, StateVerifying}:    "build verifying",
 	{stepBuild, StateNeedsInput}:   "build needs you",
 	{stepBuild, StateStalled}:      "build stalled",
+	{stepBuild, StateFail}:         "build failing",
 	{stepBuild, StateEnvBlocked}:   "build blocked by its environment",
 	{stepReview, StateQueued}:      "waiting to review",
 	{stepReview, StateReady}:       "ready to review",

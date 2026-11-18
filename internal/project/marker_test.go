@@ -182,31 +182,3 @@ func TestMarkerRoundTripAndLenientRead(t *testing.T) {
 		t.Errorf("marker directory holds %d entries after the writes, want only jig.yaml (no lock or temp file left in a person's repo)", len(entries))
 	}
 }
-
-// TestSlotsAreNoneUnlessPinnedAndRefuseANonPositiveValue: a marker without
-// slots pins none (0, which is not the same as one); a positive value is kept; zero or negative is an error
-// naming the file.
-func TestSlotsAreNoneUnlessPinnedAndRefuseANonPositiveValue(t *testing.T) {
-	dir := t.TempDir()
-	write := func(body string) string {
-		path := filepath.Join(dir, MarkerFile)
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-	m, err := LoadMarker(write("project: p\n"))
-	if err != nil || m.SuiteSlots() != 0 {
-		t.Fatalf("no slots: %d, %v; want 0", m.SuiteSlots(), err)
-	}
-	m, err = LoadMarker(write("project: p\nslots: 3\n"))
-	if err != nil || m.SuiteSlots() != 3 {
-		t.Fatalf("slots 3: %d, %v", m.SuiteSlots(), err)
-	}
-	for _, bad := range []string{"0", "-2"} {
-		path := write("project: p\nslots: " + bad + "\n")
-		if _, err := LoadMarker(path); err == nil || !strings.Contains(err.Error(), path) {
-			t.Errorf("slots %s: err %v, want one naming %s", bad, err, path)
-		}
-	}
-}

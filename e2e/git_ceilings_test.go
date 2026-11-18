@@ -5,7 +5,7 @@ package e2e
 // ceiling a test fails over, so a change that asks git the same thing over
 // again shows up where it is made and not in the next suite's wall clock. It
 // counts what git's own trace sees (every process, the ones git starts in turn
-// included), the way internal/gitbudget does for the whole suite.
+// included), the way internal/gitbudget reports it for the whole suite.
 
 import (
 	"path/filepath"
@@ -14,7 +14,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gittest"
-	"github.com/develdeco/jig/internal/journal"
 )
 
 // processCeilings is, per command, the most git processes one run of it may
@@ -93,14 +92,10 @@ func TestGitProcessCeilings(t *testing.T) {
 		checkCeiling(t, "claim", path)
 
 		h.Branch(fx.Branch)
-		sha := h.CommitScenario("a", 1)
+		h.CommitScenario("a", 1)
 
 		th, path = traceOf("verify")
-		must(th.Jig("verify", ticket, sha, "--slice", "a"), "jig verify")
-		waitJournal(t, fx, ticket, verifyWait, func(l journal.Line) bool {
-			return l.Slice == "a" && l.Event == journal.EventVerified && l.Commit == sha
-		})
-		h.WaitVerifiers()
+		must(th.Verify(ticket, "a"), "jig verify")
 		checkCeiling(t, "verify", path)
 
 		th, path = traceOf("gate")

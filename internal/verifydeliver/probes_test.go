@@ -8,9 +8,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/store"
 )
 
 // TestParseReviewResultProbeRules: probes and skipped are optional, parse as
@@ -217,44 +215,6 @@ func TestGateHandsTheNextRoundItsProbeLedger(t *testing.T) {
 	}
 }
 
-// TestGateTimesTheOraclesItRunsAndNamesTheirSlices: every oracles_passed
-// entry carries the seconds of the run it stands for, at least 1 for a run
-// the gate made, and the slices whose oracle it is in its workspace.
-func TestGateTimesTheOraclesItRunsAndNamesTheirSlices(t *testing.T) {
-	t.Parallel()
-
-	fx := generateBuilt(t, "rung-a")
-	d := newDeps(t, fx)
-	slices, err := d.Store.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
-	if len(got) == 0 {
-		t.Fatal("oracles_passed is empty")
-	}
-	named := 0
-	for _, run := range got {
-		named += len(run.Slices)
-		if run.ReusedFrom == "" && run.Seconds < 1 {
-			t.Errorf("%+v: a run the gate made, want at least 1 second", run)
-		}
-		var want []string
-		for _, s := range slices {
-			if s.Oracle == run.Oracle && s.Workspace == run.Workspace {
-				want = append(want, s.ID)
-			}
-		}
-		if strings.Join(run.Slices, ",") != strings.Join(want, ",") {
-			t.Errorf("%+v: slices %v, want %v", run, run.Slices, want)
-		}
-	}
-	if named == 0 {
-		t.Errorf("oracles_passed = %+v, want the fixture's slices named on their oracle's runs", got)
-	}
-}
-
 // TestCoverHunksCountsProbesInsideAndTakesACoveringSkip: a probe counts in
 // the hunk its line falls inside and nowhere else, and a skip covers a hunk it
 // contains whole, or every hunk of its file when it names the file alone.
@@ -279,29 +239,6 @@ func TestCoverHunksCountsProbesInsideAndTakesACoveringSkip(t *testing.T) {
 	}
 	if left := unprobedHunks(got); len(left) != 2 || left[0] != want[1] || left[1] != want[3] {
 		t.Errorf("unprobed = %+v, want the second a.go hunk and c.go's", left)
-	}
-}
-
-// TestWithSlicesReadsAWorkspaceAsASliceWritesIt: a run names the slices of its
-// workspace whether the slice writes it bare, as a bare id holding a slash, or
-// as <repo>/<id>, and a slice of one workspace is never put on another's run.
-func TestWithSlicesReadsAWorkspaceAsASliceWritesIt(t *testing.T) {
-	t.Parallel()
-
-	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "cmd/jig"}, {ID: "x"}, {ID: "a/x"}}}
-	runs := []OracleRun{{Oracle: "test", Workspace: "cmd/jig"}, {Oracle: "test", Workspace: "x"}, {Oracle: "test", Workspace: "a/x"}}
-	got := withSlices(runs, "proj", man, []store.Slice{
-		{ID: "s1", Workspace: "cmd/jig", Oracle: "test"},
-		{ID: "s2", Workspace: "a/x", Oracle: "test"},
-		{ID: "s3", Workspace: "proj/x", Oracle: "test"},
-		{ID: "s4", Workspace: "x", Oracle: "lint"},
-		{ID: "s5", Workspace: "other/x", Oracle: "test"},
-	})
-	want := map[string]string{"cmd/jig": "s1", "x": "s3", "a/x": "s2"}
-	for _, run := range got {
-		if strings.Join(run.Slices, ",") != want[run.Workspace] {
-			t.Errorf("run of %s names slices %v, want %s", run.Workspace, run.Slices, want[run.Workspace])
-		}
 	}
 }
 

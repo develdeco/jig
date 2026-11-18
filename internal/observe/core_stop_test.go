@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -16,52 +16,38 @@ func (r *rig) unattendedClaim(slice string) {
 	r.add(journal.Line{Event: journal.EventClaim, Slice: slice, Session: "s1", Unattended: true})
 }
 
-func TestStopInteractiveSaysWhatIsRunningAndNeverBlocks(t *testing.T) {
+// TestStopDoesNotNameARunningVerification: a verification is the builder's own
+// run in its own shell, so Stop has nothing to say about one that is under
+// way, and an unattended session is not held back for it. A pending line
+// with a live worker and a worker only the ledger knows are both passed over.
+func TestStopDoesNotNameARunningVerification(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
+	r.unattendedClaim("a")
+	r.recordStart()
 	sha := r.commit("a", "a.txt")
 	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: "a", Commit: sha, Attempt: 1})
-
-	res := r.handle(r.ev(KindStop))
-	if res.Block != "" || !strings.Contains(res.Message, "verification of "+sha[:12]+" for slice a is still running") {
-		t.Fatalf("Result = %+v, want a message naming the running verification and no block", res)
+	if err := ledger.Append(r.d.JigHome, journal.Line{Ticket: r.fx.Ticket, Slice: "a", Event: journal.EventVerifySpawned, Commit: sha, PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
 	}
-	// An interactive Stop is the same every time: it is the state, not an event.
-	if again := r.handle(r.ev(KindStop, func(e *Event) { e.StopActive = true })); again.Message != res.Message || again.Block != "" {
-		t.Errorf("second Stop = %+v, want the same message", again)
-	}
-	hooks := r.hooksOf(KindStop)
-	if len(hooks) != 2 || hooks[0].Harness != "claude" || !strings.HasPrefix(hooks[0].Summary, "shown: ") {
-		t.Errorf("hook lines = %+v, want two stop lines that say they showed it", hooks)
-	}
-}
-
-func TestStopSeesAWorkerTheLedgerStartedBeforeItWroteTheJournal(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	sha := r.commit("a", "a.txt")
-	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
-
-	res := r.handle(r.ev(KindStop))
-	if !strings.Contains(res.Message, "verification of "+sha[:12]+" for slice a is still running") {
-		t.Errorf("Stop message = %q, want the commit whose worker only the ledger knows", res.Message)
-	}
-	// Once the journal has its outcome the commit is not running any more.
-	r.add(journal.Line{Event: journal.EventVerified, Slice: "a", Commit: sha, Attempt: 1})
-	if res := r.handle(r.ev(KindStop)); strings.Contains(res.Message, "still running") {
-		t.Errorf("Stop message = %q after the verification finished", res.Message)
-	}
-	// A worker the ledger started long ago and the journal never heard of is
-	// a dead one.
 	sha2 := r.commit("b", "b.txt")
-	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
-	r.clock.advance(11 * time.Minute)
-	if res := r.handle(r.ev(KindStop)); strings.Contains(res.Message, sha2[:12]) {
-		t.Errorf("Stop message = %q, want a worker started 11 minutes ago passed over", res.Message)
+	if err := ledger.Append(r.d.JigHome, journal.Line{Ticket: r.fx.Ticket, Slice: "b", Event: journal.EventVerifySpawned, Commit: sha2, PID: os.Getpid()}); err != nil {
+		t.Fatal(err)
+	}
+
+	res := r.handle(r.ev(KindStop))
+	for _, text := range []string{res.Message, res.Block} {
+		if strings.Contains(text, "still running") || strings.Contains(text, "--slice a` to wait") {
+			t.Errorf("Stop = %+v, want no running verification named", res)
+		}
+	}
+	// The commit that has no recorded result is still named, with the command
+	// that clears it.
+	if !strings.Contains(res.Block, "commit "+sha2[:12]+" for slice b has no recorded result") ||
+		!strings.Contains(res.Block, "jig verify "+r.fx.Ticket+" --slice b") {
+		t.Errorf("Block = %q, want the commit with no result held with the command that verifies it", res.Block)
 	}
 }
 

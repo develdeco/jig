@@ -31,7 +31,7 @@ func TestEveryKindOfLineNamesTheSubstepItAdvances(t *testing.T) {
 		{jl(at(1, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")), "slice a", "builder took it"},
 		{jl(at(1, 1), "JIG-6", "a", journal.EventRelease, with("s-builder", "", "", "", "", "")), "slice a", "builder let go of it"},
 		{jl(at(1, 2), "JIG-6", "a", journal.EventDispatch), "slice a", "jig started a builder"},
-		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verifying aaaaaaa"},
+		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verification requested for aaaaaaa"},
 		{jl(at(1, 4), "JIG-6", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./cart", 3 }), "slice a", "`go test ./cart` passed in 3s"},
 		{jl(at(1, 5), "JIG-6", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")), "slice a", "verified aaaaaaa"},
 		{jl(at(1, 6), "JIG-6", "a", journal.EventVerifyError, with("", "", "", "no worker", "", "")), "slice a", "could not be verified: no worker"},
@@ -187,41 +187,6 @@ func TestAGateOracleLineLandsUnderTheGatesStepWithItsState(t *testing.T) {
 	}
 	if got := eventState(ran); got != StateGreen {
 		t.Errorf("a gate-oracle line is drawn %q, want %q", got, StateGreen)
-	}
-}
-
-// TestTheGatesSlotWaitLandsUnderTheGatesStep: the line a gate journals while it
-// waits for the suite slot (no slice) belongs to the Review step and the round
-// it waits for, says the waiting line, and is drawn as verifying; a slice's own
-// wait stays on the Build step.
-func TestTheGatesSlotWaitLandsUnderTheGatesStep(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "JIG-6")
-	tk := ticketOf("JIG-6")
-	g.m.w.tickets["JIG-6"] = tk
-	open := jl(at(3, 0), "JIG-6", "", journal.EventGateOpen)
-	line := "waiting for the suite slot: JIG-5/a is running its suite (1 waiting)"
-	wait := jl(at(3, 1), "JIG-6", "", journal.EventSlotWait, with("", "", "", line, "", ""))
-	taken := jl(at(3, 2), "JIG-6", "", journal.EventSlotTaken)
-	tk.lines = append(tk.lines, open, wait, taken)
-
-	for _, l := range []events.Envelope{wait, taken} {
-		if got := stepOfLine(l); got != stepReview {
-			t.Errorf("a gate %s line is in step %d, want the Review step %d", l.Event, got, stepReview)
-		}
-		if got := tk.labelOf(subLabels{"round:1": "round 1"}, l); got != "round 1" {
-			t.Errorf("a gate %s line names %q, want the round it waits for", l.Event, got)
-		}
-	}
-	if got := g.m.say(tk, wait); got != line {
-		t.Errorf("the gate's slot-wait says %q, want the waiting line", got)
-	}
-	if got := eventState(wait); got != StateVerifying {
-		t.Errorf("the gate's slot-wait is drawn %q, want %q", got, StateVerifying)
-	}
-	own := jl(at(3, 3), "JIG-6", "a", journal.EventSlotWait)
-	if got := stepOfLine(own); got != stepBuild {
-		t.Errorf("a slice's slot-wait is in step %d, want the Build step", got)
 	}
 }
 

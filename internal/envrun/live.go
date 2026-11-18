@@ -27,7 +27,7 @@ var live struct {
 }
 
 // StopContext returns a context that ends when jig is stopped (EndAll), for a
-// wait that is not an oracle, such as the wait for a suite slot, to end with
+// wait that is not an oracle, such as the wait for a gate's turn, to end with
 // the process instead of being cut off mid-wait. cancel releases it. Stopped
 // says what the caller returns when the wait ended that way.
 func StopContext(parent context.Context) (ctx context.Context, cancel func()) {

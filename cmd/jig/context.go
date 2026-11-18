@@ -105,6 +105,6 @@ func contextHelp(c slicectx.Context) []string {
 	}
 	help = append(help, find)
 	return append(help, fmt.Sprintf(
-		"Test at the seams and commit with the trailer `Jig-Slice: %s`; jig runs the oracle on each commit. `jig ask` takes a question to the person",
+		"Test at the seams and commit with the trailer `Jig-Slice: %s`, then run `jig verify` in your worktree to prove it. `jig ask` takes a question to the person",
 		c.Slice.ID))
 }

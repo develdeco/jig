@@ -17,9 +17,11 @@ import (
 // every run of the oracle against it.
 type commitRecord struct {
 	SHA, Subject string
-	// State is how the commit stands: StateVerifying until a run ends,
-	// StateGreen once verified, StateStalled when the latest run failed or the
-	// verification could not run.
+	// State is how the commit stands: StateQueued while it has no recorded
+	// result (an old pending line is no result), StateBuilding once a run
+	// passed and no verified line follows, StateGreen once verified,
+	// StateStalled when the latest run failed or the verification could not
+	// run.
 	State string
 	// At is when the verification was asked for, and Verified when it passed.
 	At, Verified events.Envelope
@@ -42,7 +44,7 @@ func (t *ticket) commits(slice string) []commitRecord {
 			return &out[i]
 		}
 		at[sha] = len(out)
-		out = append(out, commitRecord{SHA: sha, State: StateVerifying})
+		out = append(out, commitRecord{SHA: sha, State: StateQueued})
 		return &out[len(out)-1]
 	}
 	for _, l := range t.lines {
@@ -55,10 +57,14 @@ func (t *ticket) commits(slice string) []commitRecord {
 			c.At, c.Subject = l, firstOf(c.Subject, l.Summary)
 		case journal.EventOracle:
 			c := get(l.Commit)
+			c.Subject = firstOf(c.Subject, l.Subject)
 			c.Runs = append(c.Runs, l)
-			if l.Outcome == "pass" {
-				c.State = StateVerifying
-			} else {
+			// A run that covers nothing is listed, and leaves the state alone.
+			switch {
+			case l.Uncovered != "":
+			case l.Outcome == "pass":
+				c.State = StateBuilding
+			default:
 				c.State = StateStalled
 			}
 		case journal.EventVerified:
@@ -77,6 +83,17 @@ func (t *ticket) commits(slice string) []commitRecord {
 // verification, or false when the latest run passed or there is none.
 func (t *ticket) lastRunFailed(slice string) (events.Envelope, bool) {
 	i := t.latest(slice, journal.EventOracle)
+	for i >= 0 && t.lines[i].Uncovered != "" {
+		// A run that covers nothing is not the slice's latest word.
+		j := -1
+		for k := i - 1; k >= 0; k-- {
+			if t.lines[k].Slice == slice && t.lines[k].Event == journal.EventOracle {
+				j = k
+				break
+			}
+		}
+		i = j
+	}
 	if i < 0 || t.lines[i].Outcome == "pass" {
 		return events.Envelope{}, false
 	}

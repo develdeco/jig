@@ -69,7 +69,6 @@ func TestGateCleanRound2(t *testing.T) {
 	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	src := NewFakeGateSource(fx.ScenarioDir)
 	if err := d.Store.WriteIntent(fx.Ticket, store.Intent{Source: IntentSourceExplicit, Text: "stale explicit intent"}); err != nil {
 		t.Fatalf("WriteIntent: %v", err)
@@ -674,50 +673,6 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 	return gateReviewRequest(t, d, ticket, opts).Intent
 }
 
-// TestGateHandsTheReviewerTheOraclesItRan: review.json's oracles_passed
-// lists every oracle run the gate made before dispatching the reviewer -
-// one per oracle per workspace, workspaces in manifest order and oracles by
-// name - so the reviewer has the oracle's result and reads instead of
-// retesting (ADR 0017). Two oracles make the order observable: map order
-// would put vet before test about half the time.
-func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
-	t.Parallel()
-
-	fx := generateBuilt(t, "rung-a")
-	addSecondOracle(t, buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
-	d := newDeps(t, fx)
-	rec := &oracleRecorder{}
-	d.Oracle = rec.run
-
-	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
-	// The fixture repo's jig.yaml declares test as "@GO test ./{path}/..."
-	// over workspaces alpha and beta; addSecondOracle adds vet beside it.
-	want := []struct{ oracle, workspace, suffix string }{
-		{"test", "alpha", " test ./alpha/..."},
-		{"vet", "alpha", " vet ./alpha/..."},
-		{"test", "beta", " test ./beta/..."},
-		{"vet", "beta", " vet ./beta/..."},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("review.json oracles_passed = %+v, want %d runs", got, len(want))
-	}
-	for i, w := range want {
-		if got[i].Oracle != w.oracle || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
-			t.Errorf("oracles_passed[%d] = %+v, want oracle %s, workspace %s, a command ending %q", i, got[i], w.oracle, w.workspace, w.suffix)
-		}
-	}
-	// Every entry is a run the gate made, in the order it made them.
-	ran := rec.ran()
-	if len(ran) != len(got) {
-		t.Fatalf("the gate ran %q, want the %d runs oracles_passed lists", ran, len(got))
-	}
-	for i := range got {
-		if ran[i] != got[i].Command {
-			t.Errorf("run %d = %q, want %q, oracles_passed's entry %d", i, ran[i], got[i].Command, i)
-		}
-	}
-}
-
 // TestGateRefusesAnIntentMDItCannotBind checks that resolveIntent refuses
 // a ticket's intent.md when it binds nothing jig could stand behind, each
 // with its own code and before the round's gate-open journal line, and that
@@ -854,21 +809,20 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 }
 
 // TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances is the chain of what a
-// killed reviewer or oracle leaves in the gate lease, on one build whose gate
-// rounds run the real oracles: what the second round must not trip over.
+// killed reviewer leaves in the gate lease, on one build: what the second round
+// must not trip over.
 //
 // NM2 scenario A: a reviewer that outlived a killed jig (no signal handler
 // reaches a future reviewer source's own defer restore) can leave an untracked
 // failing test file and a tracked edit sitting in the gate lease. The next `jig
-// gate` must not have its oracles fail or get skewed by that leftover dirt -
-// Gate itself restores the lease to a pristine head before any oracle runs. The
-// untracked file here is a failing test of alpha, which the fixture's "test"
-// oracle (`go test ./alpha/...`) runs for real: it is only absent from the
-// oracle's run if the restore came first.
+// gate` must not have its review skewed by that leftover dirt -
+// Gate itself restores the lease to a pristine head before the round reads it. The
+// untracked file here is a failing test of alpha: it is only absent from the
+// lease the reviewer reads if the restore came first.
 //
 // NM5, a residual of NM2: leftover tracked dirt (a reviewer that outlived a
-// killed jig, or an oracle rewrite from an earlier attempt) does not get in the
-// way of an oracle run by itself, but once the ticket branch later advances past
+// killed jig, or a rewrite from an earlier attempt) does not get in the
+// way of a round by itself, but once the ticket branch later advances past
 // the same file, the checkout that runs before Gate's post-acquire restore
 // (fetchTicketBranchFromBuildLease's own final `git checkout <branch>`) refuses
 // with "local changes ... would be overwritten", and Gate would return before
@@ -886,7 +840,6 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	var gateDir string
 	trackedPath := func() string { return filepath.Join(gateDir, "alpha", "alpha.go") }
 	var orig []byte
@@ -935,15 +888,15 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		}
 	})
 
-	step(t, "round 2 wipes a failing repro and a tracked edit before its oracles, though the branch advanced", func(t *testing.T) {
+	step(t, "round 2 wipes a failing repro and a tracked edit before it reads the lease, though the branch advanced", func(t *testing.T) {
 		// An untracked failing test file, as a reviewer's own repro would leave
-		// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
+		// behind.
 		reproPath := filepath.Join(gateDir, "alpha", "zz_repro_test.go")
 		repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
 		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
 			t.Fatalf("write leftover repro test: %v", err)
 		}
-		// A tracked edit left uncommitted, as an oracle rewrite or a killed
+		// A tracked edit left uncommitted, as a killed
 		// reviewer's own edit would leave behind.
 		dirty(t, "leftover reviewer edit")
 		// Advance the ticket's branch in the build lease with a commit touching the
@@ -1444,7 +1397,7 @@ func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testin
 // TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices pins
 // "Fix slices sized to one session" through the full Gate round:
 // gate.fix_slice_findings threads from project.yaml down to the appended
-// slices, a (workspace, oracle) group over the bound splits into several
+// slices, a workspace group over the bound splits into several
 // fix slices, each carrying only its own subset, and the split slices are
 // numbered "-1", "-2" from 1. A group that fits in one slice keeps today's
 // unsuffixed id, already pinned by TestGateCleanRound2; the packing
@@ -1478,7 +1431,7 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
-	wantIDs := []string{"fix-1-alpha-test-1", "fix-1-alpha-test-2"}
+	wantIDs := []string{"fix-1-alpha-1", "fix-1-alpha-2"}
 	if !equalStrings(report.FixSlices, wantIDs) {
 		t.Fatalf("FixSlices = %v, want %v", report.FixSlices, wantIDs)
 	}
@@ -1491,10 +1444,10 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 	for _, s := range allSlices {
 		byID[s.ID] = s
 	}
-	if got := byID["fix-1-alpha-test-1"].Findings; !equalStrings(got, []string{"r1-f1", "r1-f2"}) {
+	if got := byID["fix-1-alpha-1"].Findings; !equalStrings(got, []string{"r1-f1", "r1-f2"}) {
 		t.Errorf("slice 1 (alpha/alpha.go, fits the bound) Findings = %v, want [r1-f1 r1-f2]", got)
 	}
-	if got := byID["fix-1-alpha-test-2"].Findings; !equalStrings(got, []string{"r1-f3"}) {
+	if got := byID["fix-1-alpha-2"].Findings; !equalStrings(got, []string{"r1-f3"}) {
 		t.Errorf("slice 2 (alpha/alpha_test.go, crowded out of slice 1) Findings = %v, want [r1-f3]", got)
 	}
 }
@@ -1764,15 +1717,15 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	if f.RoutedAs != ActionAsk || f.Recurrences != 2 {
 		t.Fatalf("round 3 finding = %+v, want routed_as ask, 2 recurrences (the bound reached)", f)
 	}
-	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-alpha-test" {
-		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-alpha-test] (the ask grouped into the workspace slice)", report3.FixSlices)
+	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-alpha" {
+		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-alpha] (the ask grouped into the workspace slice)", report3.FixSlices)
 	}
 }
 
 // TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
 // reproduces the wedge a text match on git's cat-file message used to fall
 // into: an open finding's file is later untracked and gitignored on the
-// ticket branch, but an oracle regenerates it on disk in the gate lease
+// ticket branch, but something regenerates it on disk in the gate lease
 // before the next round's review. FileExistsAtRev must report it absent at
 // head from the tree alone, never from what happens to sit in the working
 // tree, or every later round fails the same way and no dismissal can get
@@ -1792,7 +1745,6 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	builder(t).Push(buildDir, "origin", branch)
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	round := 0
 	backend := stubBackend{run: func(sd session.Dispatch) error {
 		round++
@@ -1989,13 +1941,11 @@ func renameOracle(t *testing.T, buildDir, branch, from, to string) {
 // setupStaleOracleThroughRoundTwo drives a fixture through two green gate
 // rounds recording the same open finding on a two-oracle manifest with an
 // explicit oracle ("vet"), then renames that oracle to "lint" on the ticket
-// branch: a fix slice recorded a valid oracle, went green twice, and the
-// manifest changed between rounds so that recorded oracle no longer
-// resolves. round3 supplies round 3's own review
+// branch: a fix slice recorded "vet", went green twice, and the manifest
+// changed between rounds so that "vet" is no longer a manifest oracle, only a
+// command. round3 supplies round 3's own review
 // result (a recurrence of the same finding via Prior, reported as a note
-// with its oracle omitted so validation's "must name one of the manifest's
-// oracles" rule does not apply - the same way the real scenario reaches jig
-// with a stale, carried-forward oracle instead of a freshly named one) and
+// with its oracle omitted, so it carries forward the recorded one) and
 // gets req (round 3's review.json request) to build it from. It returns the
 // deps, fixture and reviewer source with rounds 1 and 2 already applied,
 // ready for the caller to run round 3 through Gate.
@@ -2091,13 +2041,11 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 	return d, fx, src
 }
 
-// TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle
-// proves the terminal half of the same rule: a human keeping the same
-// finding supplies the missing oracle (exactly what cmd/jig's
-// interactiveTriage prompt gathers once BuildTargetGaps reports it
-// missing), and routing builds the fix slice on that chosen oracle, not the
-// stale one the finding carried forward.
-func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *testing.T) {
+// TestGateRecurrenceKeepBuildsSliceOnTheRecordedCommand proves that a name
+// the manifest has since lost is just a command: a person keeping the
+// recurrence the bound asked about gets a fix slice on the command the
+// finding recorded, as written, and is asked for none.
+func TestGateRecurrenceKeepBuildsSliceOnTheRecordedCommand(t *testing.T) {
 	t.Parallel()
 
 	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
@@ -2111,15 +2059,13 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 		}
 	})
 
-	// The triage hook stands in for cmd/jig's interactiveTriage: a human at
-	// a terminal keeping this finding and being prompted for an oracle
-	// (its own, "vet", no longer resolves) answers "lint".
+	// The triage hook stands in for a person keeping this finding.
 	triage := func(in TriageInput) TriageResult {
 		if len(in.Asks) != 1 || in.Asks[0].ID != "r1-f1" {
 			t.Fatalf("TriageInput.Asks = %+v, want exactly [r1-f1]", in.Asks)
 		}
 		return TriageResult{Asks: map[string]AskOutcome{
-			"r1-f1": {Keep: true, Decision: "use lint here", Oracle: "lint", Human: true},
+			"r1-f1": {Keep: true, Decision: "use lint here", Human: true},
 		}}
 	}
 
@@ -2146,8 +2092,8 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 	if fs == nil {
 		t.Fatalf("appended fix slice %q not found in slices.yaml", report3.FixSlices[0])
 	}
-	if fs.Oracle != "lint" {
-		t.Fatalf("fix slice oracle = %q, want lint (the human's chosen oracle, not the stale one)", fs.Oracle)
+	if fs.Oracle != "vet" {
+		t.Fatalf("fix slice oracle = %q, want vet (the command the finding recorded, as written)", fs.Oracle)
 	}
 	if !strings.Contains(fs.Goal, "use lint here") {
 		t.Fatalf("fix slice goal missing the human's decision text:\n%s", fs.Goal)
@@ -2157,8 +2103,8 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 	if err != nil || !ok {
 		t.Fatalf("read round 3 findings.yaml: ok=%v err=%v", ok, err)
 	}
-	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "lint" || ff.Findings[0].Triage != TriageHuman {
-		t.Fatalf("round 3 finding = %+v, want open, oracle lint, triage human", ff.Findings[0])
+	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "vet" || ff.Findings[0].Triage != TriageHuman {
+		t.Fatalf("round 3 finding = %+v, want open, oracle vet, triage human", ff.Findings[0])
 	}
 }
 

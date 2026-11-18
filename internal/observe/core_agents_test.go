@@ -19,7 +19,7 @@ func TestEachAgentOfASessionIsHeldByItsOwnClaim(t *testing.T) {
 	r.handle(r.ev(KindSessionStart))
 	r.claimBy("a-7", "a", true)
 	r.claimBy("a-9", "b", true)
-	r.pending("a", "a.txt")
+	r.unverified("a", "a.txt")
 
 	stop := func(agent string) Result {
 		return r.handle(r.ev(KindStop, func(e *Event) { e.Agent = agent }))
@@ -34,7 +34,7 @@ func TestEachAgentOfASessionIsHeldByItsOwnClaim(t *testing.T) {
 	}
 
 	r.add(journal.Line{Event: journal.EventRelease, Slice: "a", Session: "s1"})
-	r.pending("b", "b.txt")
+	r.unverified("b", "b.txt")
 	if res := stop("a-7"); res.Block != "" {
 		t.Errorf("Stop of a-7 after releasing its slice = %+v, want no block", res)
 	}
@@ -54,7 +54,7 @@ func TestAnAgentIsHeldByItsLatestClaimNotAnEarlierOne(t *testing.T) {
 	r.claimBy("a-7", "a", true)
 	r.claimBy("a-9", "b", true)
 	r.claimBy("a-7", "c", false)
-	r.pending("a", "a.txt")
+	r.unverified("a", "a.txt")
 
 	if res := r.handle(r.ev(KindStop, subagent)); res.Block != "" {
 		t.Errorf("Stop of a-7 with an interactive latest claim = %+v, want no block", res)
@@ -75,7 +75,7 @@ func TestAnUnknownHolderOfTheLatestClaimHoldsEveryAgent(t *testing.T) {
 	r.handle(r.ev(KindSessionStart))
 	r.claimBy("a-7", "a", true)
 	r.unattendedClaim("b")
-	r.pending("a", "a.txt")
+	r.unverified("a", "a.txt")
 
 	for _, agent := range []string{"", "a-7", "a-9"} {
 		if res := r.handle(r.ev(KindStop, func(e *Event) { e.Agent = agent })); res.Block == "" {

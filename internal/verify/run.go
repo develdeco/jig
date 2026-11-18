@@ -1,25 +1,22 @@
 package verify
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
-	"github.com/develdeco/jig/internal/phase"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/scopebase"
-	"github.com/develdeco/jig/internal/slot"
-	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -29,19 +26,19 @@ type Deps struct {
 	// command that runs the verification, so the pushes the run makes sync
 	// the mirror as any other checkpoint does.
 	Store *store.Store
-	// JigHome is the jig home root: the worktree, the log and the recordings
-	// live under it, and the ledger is its.
+	// JigHome is the jig home root: the recordings live under it, and the
+	// ledger is its.
 	JigHome string
-	// Clone is the operator's clone of the repo the commit is in: the
-	// worktree is added from it, so the commit is guaranteed present and no
-	// fetch is made.
+	// Clone is the worktree the run is of: the directory whose HEAD is the
+	// commit that is verified, and where the oracle runs. It is the builder's
+	// own checkout, in the builder's own shell; jig makes no checkout of its
+	// own.
 	Clone string
-	// Project and Slots are the project's name and how many suite slots it has
-	// on this machine (project.Config's Name and Slots). An oracle the
-	// manifest marks heavy takes a slot of the project before it starts; with
-	// no Project it takes none.
-	Project string
-	Slots   int
+	// Repos are the project's repos with the workspaces each declares, in a
+	// project of several: they say which slices of a ticket build in Repo
+	// (ready.Place), which a final run is the union of. nil, or one repo,
+	// means every slice builds here.
+	Repos []ready.Repo
 	// Repo is the repo's name in the project and Target its target branch.
 	// They find the sha the commit must descend from: the ticket's
 	// start.<Repo>.sha, else the merge base with origin/<Target>. Either may
@@ -49,87 +46,99 @@ type Deps struct {
 	Repo   string
 	Target string
 	// Oracle runs an oracle command in dir with env (each "NAME=value") added
-	// to its environment, bounded by limit, and returns its combined output.
-	// nil means the real run: envrun.ShellOutputEnv, through sh.
+	// to its environment, bounded by limit (0 for none), and returns its
+	// combined output. nil means the real run: envrun.ShellStream, through sh.
 	Oracle func(cmd, dir string, env []string, limit time.Duration) (string, error)
 	// OracleUsage is Oracle that also returns what the run's process tree
-	// used; it is used when Oracle is nil, and nil means the real run
-	// (envrun.ShellOutputUsage). An injected Oracle measures nothing.
+	// used; it is used when Oracle is nil, and nil means the real run. An
+	// injected Oracle measures nothing.
 	OracleUsage func(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error)
 	// Sh finds the sh the oracle and the env class's commands run through;
 	// nil is envrun.Sh.
 	Sh func() (string, error)
 	// Now is the clock the run's lines and its timing read; nil is time.Now.
 	Now func() time.Time
-	// Alive says whether a verification worker with the pid, started at the
-	// time, is still running; nil is the operating system's answer
-	// (workerlive.Alive).
-	Alive func(pid int, notBefore time.Time) bool
-	// Log, when set, is where the run writes what it did and the tail of a
-	// failed oracle's output; a detached worker's is its own stdout, which is
-	// the machine-local log. nil discards.
+	// Out, when set, is where the command's combined output goes as it is
+	// produced, unfiltered. nil discards it; the run keeps only a bounded tail
+	// of it either way, for a failure's summary and signature.
+	Out io.Writer
+	// Log, when set, is where the run writes what jig did besides the command
+	// (a push that did not go through). nil discards.
 	Log io.Writer
 	// Sleep waits between the tries of a push; nil is time.Sleep.
 	Sleep func(time.Duration)
-
-	// Executable is the jig binary Spawn starts as the worker, and Start the
-	// function that starts a detached process (spawn.Detached in production).
-	// Only Spawn reads them.
-	Executable string
-	Start      func(spawn.Spec) (int, error)
 }
 
-// Request names one verification: the slice's oracle, run on the commit.
+// Request names one verification: the slice's oracle, run in the worktree
+// Deps.Clone and recorded against its HEAD.
 type Request struct {
 	Ticket string
 	Slice  string
-	// SHA is the commit; any revision the clone resolves to one, which the
-	// run turns into the full sha before it records anything.
-	SHA string
 	// Session and Agent are who asked, written on the lines the run records.
 	Session string
 	Agent   string
-	// Rerun verifies again a commit the journal already has a verification
-	// of; without it the existing one stands and nothing runs.
-	Rerun bool
+	// Command, when set, is run in the place of the slice's oracle. The run is
+	// recorded as another command and covers nothing.
+	Command string
+	// Flags is the command line's flags and `--` command, as given, recorded
+	// on the oracle line so the run can be made again by hand.
+	Flags string
+	// Timeout bounds the command when it is above 0; the run is unbounded
+	// otherwise.
+	Timeout time.Duration
+	// Dir is where the command runs; the worktree's root when empty.
+	Dir string
+	// NoRecord runs the command and writes nothing: no line, no state, no
+	// recording directory, no push. An exploratory run.
+	NoRecord bool
 }
 
-// Result is what a verification found, or what was already there.
+// Result is what a verification found.
 type Result struct {
 	Ticket string
 	Slice  string
-	// SHA is the full sha of the commit.
+	// SHA is the full sha of HEAD when the run started.
 	SHA string
-	// Attempt is the slice attempt the verification took (the existing one's
-	// when Existing).
+	// Attempt is the slice attempt the run took.
 	Attempt int
 	// State is one of journal's Verify constants: pass, fail or error for a
-	// verification that finished, pending for one still running, and for an
-	// Existing result the state the journal already holds.
+	// run that could not reach its command.
 	State string
-	// Existing is true when the journal already held a verification of the
-	// commit for the slice (or a worker is on it) and Rerun was not set:
-	// nothing ran and nothing was recorded.
-	Existing bool
-	// Command and Env are the oracle command that ran and the env class that
-	// was up for it.
+	// Code is the command's own exit code: 0 for a pass, the code the command
+	// ended with, 124 for a command ended at the --timeout. 0 when the command
+	// never ran.
+	Code int
+	// Ran is whether the command started.
+	Ran bool
+	// Covered is whether the run covers SHA: it changed the slice's state and
+	// wrote the pass. Uncovered says why not, in the journal's words.
+	Covered   bool
+	Uncovered string
+	// HeadEnd is HEAD when the run ended; TreeBefore and TreeAfter whether the
+	// working tree was clean (journal.TreeClean) then.
+	HeadEnd    string
+	TreeBefore string
+	TreeAfter  string
+	// Dir is where the command ran.
+	Dir string
+	// Command and Env are the command that ran and the env class that was up
+	// for it.
 	Command string
 	Env     string
-	// Ran and ReusedFrom are set when the delta was light: the light command
-	// that ran in the place of Command, and the commit of the full run the
-	// pass stands on.
-	Ran, ReusedFrom string
-	// Seconds is the oracle's wall time, rounded up.
+	// Seconds is the command's wall time, rounded up.
 	Seconds int
 	// Summary is a failure's flattened tail (at most 600 bytes) or the reason
-	// a run could not reach its oracle, and Signature the failure's stall
-	// signature; Tail is the last 4,000 bytes of a failed oracle's output.
+	// a run could not reach its command, and Signature the failure's stall
+	// signature; Tail is the last 4,000 bytes of a failed command's output.
 	Summary   string
 	Signature string
 	Tail      string
-	// PushErr is why the last push failed, "" when it did not: the lines are
-	// recorded and stay local until the next checkpoint pushes them.
-	PushErr string
+	// Pushed is whether the run's lines went to the store's remote; PushErr is
+	// why not, "" when they did: the lines are recorded and stay local until
+	// the next checkpoint pushes them. Recorded names the lines the run wrote.
+	PushErr  string
+	Pushed   bool
+	Recorded []string
 }
 
 // pushTries is how many times the run tries a push before it leaves the
@@ -140,6 +149,15 @@ const (
 	pushWait  = 500 * time.Millisecond
 )
 
+// ExitUnrun is the exit code `jig verify` ends with when jig's own work
+// failed before the command started: the code git bisect run uses for "could
+// not test".
+const ExitUnrun = 125
+
+// exitTimedOut is the exit code of a command ended at its --timeout, the one
+// timeout(1) uses.
+const exitTimedOut = 124
+
 // run is one verification in flight.
 type run struct {
 	d   Deps
@@ -149,8 +167,14 @@ type run struct {
 
 	storeID string
 	dir     string // the worktree
-	attempt int
-	res     Result
+	cmdDir  string // where the command runs
+	subject string // HEAD's subject
+	pre     string // why the run cannot cover, known before it starts
+
+	descent     string // why HEAD does not descend from the start sha, once asked
+	descentDone bool
+	attempt     int
+	res         Result
 }
 
 func (d Deps) now() time.Time {
@@ -168,17 +192,21 @@ func (d Deps) sleep(t time.Duration) {
 	time.Sleep(t)
 }
 
-// oracle runs cmd in dir, or for real when Deps.Oracle is nil, and returns
-// what its process tree used (zero when nothing measured it).
-func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error) {
-	if d.Oracle != nil {
+// oracle runs cmd in dir, or for real when Deps.Oracle is nil, streaming its
+// output to w, and returns what its process tree used (zero when nothing
+// measured it).
+func (d Deps) oracle(cmd, dir string, env []string, limit time.Duration, w io.Writer) (envrun.Usage, error) {
+	switch {
+	case d.Oracle != nil:
 		out, err := d.Oracle(cmd, dir, env, limit)
-		return out, envrun.Usage{}, err
+		_, _ = io.WriteString(w, out)
+		return envrun.Usage{}, err
+	case d.OracleUsage != nil:
+		out, use, err := d.OracleUsage(cmd, dir, env, limit)
+		_, _ = io.WriteString(w, out)
+		return use, err
 	}
-	if d.OracleUsage != nil {
-		return d.OracleUsage(cmd, dir, env, limit)
-	}
-	return envrun.ShellOutputUsage(cmd, dir, limit, env)
+	return envrun.ShellStream(cmd, dir, limit, env, w)
 }
 
 // sh finds the sh commands run through, with envrun.Sh when Deps.Sh is nil.
@@ -189,29 +217,38 @@ func (d Deps) sh() (string, error) {
 	return envrun.Sh()
 }
 
-// prepare checks the request against the store and the clone and resolves
-// what the run needs before it touches the journal: the commit's full sha,
-// the slice, and the paths the verification lives at. It records nothing.
+// tailWriter keeps the last tailBytes bytes written to it.
+type tailWriter struct{ buf []byte }
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > 2*tailBytes {
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-tailBytes:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailWriter) String() string { return string(t.buf) }
+
+// prepare checks the request against the store and the worktree and resolves
+// what the run needs before it touches the journal: HEAD's full sha and the
+// slice. It records nothing.
 func (d Deps) prepare(r Request) (*run, error) {
-	x := &run{d: d, r: r, res: Result{Ticket: r.Ticket, Slice: r.Slice, SHA: r.SHA}}
+	x := &run{d: d, r: r, res: Result{Ticket: r.Ticket, Slice: r.Slice}}
 	switch {
 	case d.Store == nil:
 		return x, errors.New("verify: no store")
 	case d.JigHome == "":
 		return x, errors.New("verify: no jig home")
 	case d.Clone == "":
-		return x, errors.New("verify: no clone to verify the commit from")
-	case r.Ticket == "" || r.Slice == "" || r.SHA == "":
-		return x, errors.New("verify: a request names a ticket, a slice and a commit")
-	case strings.HasPrefix(r.SHA, "-"):
-		return x, fmt.Errorf("verify: %q is not a commit", r.SHA)
+		return x, errors.New("verify: no worktree to verify")
+	case r.Ticket == "" || r.Slice == "":
+		return x, errors.New("verify: a request names a ticket and a slice")
 	}
 
-	sha, err := gitx.RevParse(d.Clone, r.SHA+"^{commit}")
-	if err != nil {
-		return x, fmt.Errorf("verify: commit %s is not in %s: %w", r.SHA, d.Clone, err)
+	if err := x.prepareHead(); err != nil {
+		return x, err
 	}
-	x.sha, x.res.SHA = sha, sha
 
 	slices, err := d.Store.ReadSlices(r.Ticket)
 	if err != nil {
@@ -231,198 +268,125 @@ func (d Deps) prepare(r Request) (*run, error) {
 	if x.storeID, err = d.Store.ID(); err != nil {
 		return x, fmt.Errorf("verify: %w", err)
 	}
-	if x.dir, err = home.VerifyWorktreeDir(d.JigHome, x.storeID, r.Ticket, sha, r.Slice); err != nil {
-		return x, err
-	}
 	return x, nil
 }
 
-// existing fills res from the journal's record of the verification when there
-// is one, and reports whether the request stops there: it does unless Rerun.
-func (x *run) existing(lines []journal.Line) bool {
-	cur := journal.VerificationState(lines, x.sha, x.r.Slice)
-	if cur.State == journal.VerifyNone || x.r.Rerun || x.standsAside(lines, cur) {
-		return false
-	}
-	x.res.Existing = true
-	x.res.State = cur.State
-	x.res.Attempt = cur.Attempt
-	x.res.Seconds = cur.Seconds
-	x.res.Summary = cur.Summary
-	return true
-}
-
-// standsAside reports whether the latest record cur judged nothing about the
-// code, so the request runs the oracle instead of repeating it: a pending line
-// whose worker is gone, a stopped run, a verification that could not start.
-// The ledger is read only for a pending line, to find its worker.
-func (x *run) standsAside(lines []journal.Line, cur journal.Verification) bool {
-	ref := phase.CommitRef{SHA: x.sha, Slice: x.r.Slice}
-	in := phase.VerifyInput{
-		Ticket: x.r.Ticket, Lines: lines, Commits: []phase.CommitRef{ref}, BranchKnown: true,
-		Now: x.d.now(), Alive: x.d.Alive,
-	}
-	if in.Alive == nil {
-		in.Alive = Alive
-	}
-	if cur.State == journal.VerifyPending {
-		in.Spawned, _ = LatestSpawned(x.d.JigHome, x.r.Ticket, in.Commits)
-		// A worker that Spawn started for this very request has written its
-		// own spawned line by the time it gets here: it is the one asking, not
-		// one that is already on the commit.
-		for k, list := range in.Spawned {
-			var others []phase.Spawned
-			for _, sp := range list {
-				if sp.PID != os.Getpid() {
-					others = append(others, sp)
-				}
-			}
-			in.Spawned[k] = others
-		}
-	}
-	// The derivation also judges the ticket's other pending verifications:
-	// only this request's own commit and slice count.
-	for _, row := range phase.DeriveVerifications(in) {
-		if row.Commit == ref.SHA && row.Slice == ref.Slice {
-			return row.State.StandsAside()
-		}
-	}
-	return false
-}
-
-// subject is the first line of the commit's message, as the clone has it: the
-// pending line carries it so a reader of the journal can say which change is
-// being verified without a repository at hand. A commit git cannot show
-// leaves it empty.
-func (x *run) subject() string {
-	out, err := gitx.Subject(x.d.Clone, x.sha)
+// prepareHead resolves the commit a run is of and where its command runs: HEAD
+// of the worktree, its subject, and the directory the request names (the
+// worktree's root when none).
+func (x *run) prepareHead() error {
+	d, r := x.d, x.r
+	sha, err := gitx.RevParse(d.Clone, "HEAD")
 	if err != nil {
-		return ""
+		return fmt.Errorf("verify: HEAD of %s: %w", d.Clone, err)
 	}
-	return oneLine(strings.TrimSpace(out))
-}
-
-// finishPass completes a pass that a run stopped recording halfway: the slice
-// was marked green, and the verified line that comes next was never written.
-// The commit's latest record is then a pass with no verified line for it, and
-// the slice is green. The line is written now, with the attempt, session and
-// agent of that pass, and pushed, so every reader of verified lines
-// (journal.BuiltCommits, the pull request body, the notes a session is told)
-// counts the commit. Anything else is left as it is.
-func (x *run) finishPass(lines []journal.Line) error {
-	if x.res.State != journal.VerifyPass {
-		return nil
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventVerified && l.Commit == x.sha && l.Slice == x.r.Slice {
-			return nil
+	x.sha, x.res.SHA, x.dir = sha, sha, d.Clone
+	x.cmdDir = d.Clone
+	if r.Dir != "" {
+		x.cmdDir = r.Dir
+		if fi, err := os.Stat(r.Dir); err != nil || !fi.IsDir() {
+			return fmt.Errorf("verify: %s is not a directory to run the command in", r.Dir)
 		}
 	}
-	st, err := x.d.Store.ReadSliceState(x.r.Ticket, x.r.Slice)
-	if err != nil {
-		return fmt.Errorf("verify: read the state of slice %s: %w", x.r.Slice, err)
+	x.res.Dir = x.cmdDir
+	if subject, err := gitx.Subject(d.Clone, sha); err == nil {
+		x.subject = oneLine(strings.TrimSpace(subject))
 	}
-	if st.State != "green" {
-		return nil
-	}
-	cur := journal.VerificationState(lines, x.sha, x.r.Slice)
-	l := journal.Line{
-		TS:      x.d.now().UTC().Format(time.RFC3339Nano),
-		Event:   journal.EventVerified,
-		Slice:   x.r.Slice,
-		Commit:  x.sha,
-		Attempt: cur.Attempt,
-		Session: cur.Session,
-		Agent:   cur.Agent,
-	}
-	if err := journal.Append(x.d.Store, x.r.Ticket, l); err != nil {
-		return fmt.Errorf("verify: journal %s: %w", l.Event, err)
-	}
-	x.logf("finished the pass of %s for slice %s: its verified line was missing", short(x.sha), x.r.Slice)
-	x.push("verified")
 	return nil
 }
 
-// Run verifies the request in this process.
+// Run verifies HEAD of the worktree Deps.Clone in this process: it runs the
+// slice's oracle (or Request.Command) there, in the caller's environment, in
+// the foreground, streams its output, and records the run in one oracle line
+// that holds every input and fact needed to run it again by hand.
 //
-// It takes the verification's lock (a lock file beside its worktree, held to
-// the end), so two workers for one (commit, slice) never run together: the
-// second finds the first's lock and reports the verification as pending.
-// Under the lock it reads the journal; a verification already there stands
-// unless Rerun is set (Result.Existing), and a pass a run stopped recording
-// halfway is finished (finishPass). Otherwise the order is the contract:
+// A run covers HEAD when the tree was clean before and after, HEAD did not
+// move, the command was the slice's own oracle, it ran in the worktree (not
+// another work tree) and HEAD descends from the ticket's start sha. A covering pass marks the slice green and writes the
+// verified line after the oracle line (and the recorded line before them
+// when the scenarios recorded), a covering failure leaves the slice
+// building; any other run is recorded with the reason it covers nothing
+// (journal.Line.Uncovered) and changes no slice state. The run writes no
+// verify-pending line, takes no lock and refuses nothing: a second run of
+// the same commit runs again. The lines are then pushed, tried three times;
+// if it fails the lines stay local for the next checkpoint (Result.PushErr).
 //
-//  1. a verify-pending line, pushed, so the work is visible before it is
-//     done;
-//  2. a detached worktree of the commit, the start-sha descent check, the
-//     env class up if the slice names one;
-//  3. the slice's oracle, as the manifest at that commit resolves it, run
-//     with a recording directory in JIG_RECORD_DIR;
-//  4. the oracle line (Source jig, Commit the sha, Command, Env, Seconds,
-//     and on a failure Summary and Signature), then on a pass the recorded
-//     line if the scenarios recorded, the slice's state green, and the
-//     verified line, so a reader the verified line wakes finds the slice
-//     green; on a failure the slice's state building;
-//  5. a push, tried three times; if it fails the lines stay local for the
-//     next checkpoint (Result.PushErr).
-//
-// A run that cannot reach the oracle (there is no sh to run it with, the
-// worktree cannot be made, the descent check fails, the slice names an env
-// class that is undeclared or will not come up) records a verify-error line
-// with the reason and returns it as State error: that is an outcome, not an
-// error. Run returns an error only when the run could not be recorded or was
-// not set up.
+// A run that cannot reach its command (there is no sh to run it with, the
+// manifest does not resolve, the slice names an env class that is undeclared
+// or will not come up) records a verify-error line with the reason and
+// returns it as State error: that is an outcome, not an error. Run returns
+// an error only when the run could not be recorded or was not set up.
 func Run(d Deps, r Request) (Result, error) {
 	x, err := d.prepare(r)
 	if err != nil {
 		return x.res, err
 	}
-	release, held, err := store.TryLock(x.dir, 0)
-	if err != nil {
-		return x.res, fmt.Errorf("verify: lock %s: %w", x.dir, err)
-	}
-	if !held {
-		x.res.Existing, x.res.State = true, journal.VerifyPending
-		return x.res, nil
-	}
-	defer release()
-
 	lines, err := journal.Read(d.Store, r.Ticket)
 	if err != nil {
 		return x.res, fmt.Errorf("verify: read the journal of %s: %w", r.Ticket, err)
 	}
-	if x.existing(lines) {
-		return x.res, x.finishPass(lines)
-	}
 	x.attempt = journal.NextAttempt(lines, r.Slice)
 	x.res.Attempt = x.attempt
-
-	if err := x.journal(journal.Line{Event: journal.EventVerifyPending, Summary: x.subject()}); err != nil {
-		return x.res, err
-	}
-	x.res.State = journal.VerifyPending
-	x.logf("verifying %s for slice %s of %s (attempt %d)", short(x.sha), r.Slice, r.Ticket, x.attempt)
-	x.push("verifying")
 
 	why, err := x.execute()
 	if err != nil {
 		return x.res, err
 	}
 	if why != "" {
-		x.logf("could not verify: %s", why)
-		x.res.State, x.res.Summary = journal.VerifyError, oneLine(why)
-		if err := x.journal(journal.Line{Event: journal.EventVerifyError, Outcome: "error", Summary: x.res.Summary}); err != nil {
-			return x.res, err
+		x.res.State, x.res.Summary, x.res.Code = journal.VerifyError, oneLine(why), ExitUnrun
+		// A run that could not have covered anything leaves no line a reader
+		// of verification state would take for the commit's.
+		if x.pre == "" {
+			if err := x.journal(journal.Line{Event: journal.EventVerifyError, Outcome: "error", Summary: x.res.Summary}); err != nil {
+				return x.res, err
+			}
+			x.recordedLine(journal.EventVerifyError)
+			x.push("could not verify")
 		}
-		x.push("could not verify")
 	}
 	return x.res, nil
 }
 
-// failureTail is the tail of a failed oracle run kept for the log and the
-// summary: the end of its output, with the reason added when the run was
-// killed for taking too long (the output says nothing of that) or printed
-// nothing at all.
+// Plan says what Run would do for r, and runs and writes nothing: the commit,
+// the command and the directory it would run in, the env class, the attempt
+// it would take, the tree as it is now, and the reason it would cover nothing
+// when that is already so (Result.Uncovered; one that only the run can bring
+// about, a tree left dirty or a HEAD moved, is not foretold).
+func Plan(d Deps, r Request) (Result, error) {
+	x, err := d.prepare(r)
+	if err != nil {
+		return x.res, err
+	}
+	lines, err := journal.Read(d.Store, r.Ticket)
+	if err != nil {
+		return x.res, fmt.Errorf("verify: read the journal of %s: %w", r.Ticket, err)
+	}
+	x.attempt = journal.NextAttempt(lines, r.Slice)
+	x.res.Attempt = x.attempt
+	m, err := manifest.Resolve(x.dir)
+	if err != nil {
+		return x.res, fmt.Errorf("verify: the manifest at %s does not resolve: %w", short(x.sha), err)
+	}
+	ws, _ := m.WorkspaceIn(x.d.Repo, x.sl.Workspace)
+	oracleCmd := m.OracleCmd(x.sl.Oracle, ws)
+	if strings.TrimSpace(oracleCmd) == "" {
+		return x.res, fmt.Errorf("verify: slice %s has no oracle to run", r.Slice)
+	}
+	x.res.Command, x.res.Env = oracleCmd, x.sl.Env
+	if r.Command != "" {
+		x.res.Command = r.Command
+	}
+	x.res.TreeBefore = treeState(x.dir)
+	x.res.HeadEnd = x.sha
+	x.res.TreeAfter = x.res.TreeBefore
+	x.res.Uncovered = x.uncoveredBecause(r.Command == "", x.res.TreeBefore, x.sha)
+	x.res.Covered = x.res.Uncovered == ""
+	return x.res, nil
+}
+
+// failureTail is the tail of a failed oracle run kept for the summary: the end
+// of its output, with the reason added when the run was killed for taking too
+// long (the output says nothing of that) or printed nothing at all.
 func failureTail(out string, err error) string {
 	tail := outputTail(out)
 	switch {
@@ -434,11 +398,30 @@ func failureTail(out string, err error) string {
 	return tail
 }
 
+// exitCodeOf is the code a command's error stands for: 0 for none, the exit
+// status of the process for a non-zero exit, 124 for a command ended at its
+// timeout and 1 for anything else that ended it.
+func exitCodeOf(err error) int {
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, envrun.ErrTimedOut):
+		return exitTimedOut
+	case errors.As(err, &ee) && ee.ExitCode() > 0:
+		return ee.ExitCode()
+	}
+	return 1
+}
+
 // setState reads the slice's state under the store's checkpoint lock, lets
 // change edit it (and say whether to write it), and writes it back, so a
 // claim or an answer made meanwhile by another process is not overwritten by
 // a stale copy.
 func (x *run) setState(change func(*store.SliceState) bool) error {
+	if x.r.NoRecord {
+		return nil
+	}
 	release, err := x.d.Store.LockCheckpoint()
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
@@ -462,6 +445,9 @@ func (x *run) setState(change func(*store.SliceState) bool) error {
 // the frontier gave them), its attempt and commit. The lines that say who
 // asked carry the session and agent of the request.
 func (x *run) journal(l journal.Line) error {
+	if x.r.NoRecord {
+		return nil
+	}
 	l.Slice = x.r.Slice
 	l.TS = x.d.now().UTC().Format(time.RFC3339Nano)
 	switch l.Event {
@@ -485,7 +471,15 @@ func (x *run) journal(l journal.Line) error {
 // never goes through is not a failure of the verification: the lines are
 // written and the next checkpoint carries them.
 func (x *run) push(what string) {
-	msg := fmt.Sprintf("%s: verify %s %s: %s", x.r.Ticket, x.r.Slice, short(x.sha), what)
+	if x.r.NoRecord {
+		return
+	}
+	x.res.Pushed = true
+	slice := x.r.Slice
+	if slice == "" {
+		slice = "final"
+	}
+	msg := fmt.Sprintf("%s: verify %s %s: %s", x.r.Ticket, slice, short(x.sha), what)
 	var err error
 	for i := 0; i < pushTries; i++ {
 		if err = x.d.Store.Push(msg); err == nil {
@@ -497,6 +491,7 @@ func (x *run) push(what string) {
 		}
 	}
 	x.res.PushErr = err.Error()
+	x.res.Pushed = false
 	x.logf("push failed after %d tries; the lines stay local for the next checkpoint: %v", pushTries, err)
 }
 
@@ -508,8 +503,7 @@ func (x *run) logf(format string, args ...any) {
 	fmt.Fprintf(x.d.Log, "verify: "+format+"\n", args...)
 }
 
-// short is the first twelve characters of a sha, as the verification's
-// directory and log name it.
+// short is the first twelve characters of a sha.
 func short(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]
@@ -517,34 +511,58 @@ func short(sha string) string {
 	return sha
 }
 
-// execute does steps 2 to 5 of Run's order. It returns why the oracle could
-// not be reached ("" when it ran), or an error when a line could not be
-// written.
+// treeState is whether dir's working tree is clean: nothing modified, staged
+// or untracked, ignored files excluded.
+// A tree git cannot read is dirty: the rule is evidence only when git could
+// say the tree is clean.
+func treeState(dir string) string {
+	status, err := gitx.Run(dir, "status", "--porcelain")
+	if err != nil || strings.TrimSpace(status) != "" {
+		return journal.TreeDirty
+	}
+	return journal.TreeClean
+}
+
+// sameWorktree reports whether dir is in the work tree whose root is root: git
+// says dir's top level is that checkout, so a checkout nested in the worktree
+// (an ignored directory holding another worktree), its parent and an unrelated
+// directory are not.
+func sameWorktree(root, dir string) bool {
+	rootTop, err := gitx.TopLevel(root)
+	if err != nil {
+		return false
+	}
+	top, err := gitx.TopLevel(dir)
+	return err == nil && gitx.SameDir(rootTop, top)
+}
+
+// execute does the run: the env class up, the command, the record. It returns
+// why the command could not be reached ("" when it ran), or an error when a
+// line could not be written.
 func (x *run) execute() (why string, err error) {
-	// The oracle and the env class's commands run through sh: without one the
-	// oracle cannot be reached, which is no failure of the commit.
+	// The command and the env class's commands run through sh: without one the
+	// command cannot be reached, which is no failure of the commit.
 	if _, err := x.d.sh(); err != nil {
 		return err.Error(), nil
-	}
-	// Removed on every way out, a checkout that failed half-way included.
-	defer x.removeWorktree()
-	if err := x.addWorktree(); err != nil {
-		return err.Error(), nil
-	}
-
-	if why := x.checkCheckout(); why != "" {
-		return why, nil
 	}
 	m, err := manifest.Resolve(x.dir)
 	if err != nil {
 		return fmt.Sprintf("the manifest at %s does not resolve: %v", short(x.sha), err), nil
 	}
 	ws, _ := m.WorkspaceIn(x.d.Repo, x.sl.Workspace)
-	cmd := m.OracleCmd(x.sl.Oracle, ws)
-	if strings.TrimSpace(cmd) == "" {
+	oracleCmd := m.OracleCmd(x.sl.Oracle, ws)
+	if strings.TrimSpace(oracleCmd) == "" {
 		return fmt.Sprintf("slice %s has no oracle to run", x.r.Slice), nil
 	}
+	cmd := oracleCmd
+	if x.r.Command != "" {
+		cmd = x.r.Command
+	}
 	x.res.Command, x.res.Env = cmd, x.sl.Env
+	// What already says the run cannot cover is settled before the env class
+	// is brought up, so a class that will not come up leaves the slice alone.
+	x.res.TreeBefore = treeState(x.dir)
+	x.pre = x.uncoveredBecause(x.r.Command == "", x.res.TreeBefore, x.sha)
 
 	down, why, err := x.bringUpEnv(m)
 	if why != "" || err != nil {
@@ -557,35 +575,38 @@ func (x *run) execute() (why string, err error) {
 			}
 		}()
 	}
-	light, isLight := x.lightFor(m, cmd)
-	if err := x.runOracle(m, cmd, light, isLight); errors.Is(err, envrun.ErrStopped) {
+	if err := x.runOracle(cmd, cmd == oracleCmd && x.r.Command == ""); errors.Is(err, envrun.ErrStopped) {
 		// jig was stopped mid-run: no verdict, and never the commit's failure.
-		return "the verification was stopped before the oracle finished", nil
+		return "", nil
 	} else if err != nil {
 		return "", err
 	}
 	return "", nil
 }
 
-// checkCheckout holds the fresh checkout to what an oracle run needs of it to
-// be evidence: a clean tree, so the run is of exactly the commit, and a
-// descent from the ticket's start sha, so the commit is new work on the
-// ticket's branch (the frontier's verifyGreen). It returns why the commit
-// cannot be verified, or "".
-func (x *run) checkCheckout() string {
-	d := x.d
-	if dirty := dirtyTree(x.dir); dirty != "" {
-		return "the checkout of " + short(x.sha) + " is not clean, so an oracle run on it would say nothing of the commit: " + oneLine(dirty)
+// descendsFromStart holds HEAD to the ticket's start sha, as the frontier's
+// verifyGreen did: HEAD must be new work on the ticket's branch. It returns
+// why not, "" when it does or when no start is known.
+func (x *run) descendsFromStart() string {
+	if x.descentDone {
+		return x.descent
 	}
+	x.descent, x.descentDone = x.descentFromStart(), true
+	return x.descent
+}
+
+// descentFromStart asks git, once per run: it is fixed before the command
+// starts, since HEAD at the start and the start sha do not move under it.
+func (x *run) descentFromStart() string {
 	start := x.startSHA()
 	if start == "" {
 		return ""
 	}
-	if !gitx.HasCommit(d.Clone, start) {
-		return fmt.Sprintf("the start sha %s is not in this clone (fetch it, then run again)", short(start))
+	if !gitx.HasCommit(x.d.Clone, start) {
+		return fmt.Sprintf("the start sha %s is not in this clone", short(start))
 	}
 	if reason, ok := verifyGreen(x.dir, start, outcome.Result{Outcome: outcome.Green, Commit: x.sha}); !ok {
-		return "the commit does not verify: " + reason
+		return reason
 	}
 	return ""
 }
@@ -639,7 +660,7 @@ func (x *run) changedBase() string {
 // bringUpEnv brings the slice's env class up in the worktree when it names
 // one, as the frontier does: an env-up line, and down is what brings it back
 // down (with its env-down line). An env class the manifest does not declare,
-// or one that will not come up, is a reason the oracle cannot be reached; the
+// or one that will not come up, is a reason the command cannot be reached; the
 // latter also journals env-unavailable with the class's policy and parks the
 // slice as env-blocked, the frontier's own handling.
 func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, err error) {
@@ -650,7 +671,7 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 	if !ok {
 		return nil, fmt.Sprintf("slice %s names the env class %q, which the manifest at %s does not declare", x.r.Slice, x.sl.Env, short(x.sha)), nil
 	}
-	h, uerr := envrun.Up(ec, x.r.Ticket, x.dir)
+	h, uerr := envrun.Up(ec, x.r.Ticket, x.cmdDir)
 	if uerr != nil {
 		var unavail *envrun.Unavailable
 		if !errors.As(uerr, &unavail) {
@@ -660,17 +681,19 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 		if policy == "" {
 			policy = "pause"
 		}
-		if err := x.journal(journal.Line{Event: journal.EventEnvUnavailable, Outcome: policy}); err != nil {
-			return nil, "", err
+		if x.pre == "" {
+			if err := x.journal(journal.Line{Event: journal.EventEnvUnavailable, Outcome: policy}); err != nil {
+				return nil, "", err
+			}
+			if err := x.setState(func(st *store.SliceState) bool {
+				st.State, st.Reason = "env-blocked", "env-up-failed"
+				st.Attempts = max(st.Attempts, x.attempt)
+				return true
+			}); err != nil {
+				return nil, "", err
+			}
+			x.push("env-blocked")
 		}
-		if err := x.setState(func(st *store.SliceState) bool {
-			st.State, st.Reason = "env-blocked", "env-up-failed"
-			st.Attempts = max(st.Attempts, x.attempt)
-			return true
-		}); err != nil {
-			return nil, "", err
-		}
-		x.push("env-blocked")
 		return nil, fmt.Sprintf("the env class %q is unavailable: %v", x.sl.Env, unavail.Err), nil
 	}
 	if err := x.journal(journal.Line{Event: journal.EventEnvUp}); err != nil {
@@ -683,71 +706,69 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 	}, "", nil
 }
 
-// runOracle runs the oracle in the worktree and records what came of it: the
-// oracle line, the recorded line of a pass that recorded, then the green
-// state and the verified line, in that order (see the pass below); a failure
-// leaves the slice building.
-//
-// On a light delta (lightFor) the manifest's light oracle runs in the place of
-// cmd, and the oracle line, which still carries cmd so slice state and the gate
-// read it as ever, names the light command (Ran) and the full run it stands on
-// (ReusedFrom).
-func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight bool) (err error) {
+// uncoveredBecause says why a run that left the tree as treeAfter and HEAD at
+// headEnd covers nothing, in the journal's words, or "" when it covers HEAD:
+// the first of the six reasons that holds.
+func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string {
+	switch {
+	case x.res.TreeBefore != journal.TreeClean:
+		return journal.UncoveredDirtyBefore
+	case treeAfter != journal.TreeClean:
+		return journal.UncoveredDirtyAfter
+	case headEnd != x.sha:
+		return journal.UncoveredHeadMoved
+	case !ownOracle:
+		return journal.UncoveredOtherCmd
+	case !sameWorktree(x.dir, x.cmdDir):
+		return journal.UncoveredOtherDir
+	case x.descendsFromStart() != "":
+		return journal.UncoveredNotDescend
+	}
+	return ""
+}
+
+// runOracle runs the command in the worktree and records what came of it: the
+// oracle line, and for a run that covers HEAD the recorded line of a pass that
+// recorded, then the green state and the verified line, in that order (see the
+// pass below); a covering failure leaves the slice building, and a run that
+// covers nothing changes no state.
+func (x *run) runOracle(cmd string, ownOracle bool) (err error) {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
-	target := rec.start(x.r.Slice, x.attempt, x.sha)
-	// A run that jig's stop ended (in the oracle or in the wait for the slot)
-	// has nothing to record: its directory goes as a failed run's does.
+	var target recordTarget
+	if !x.r.NoRecord {
+		target = rec.start(x.r.Slice, x.attempt, x.sha)
+	}
+	// A run that jig's stop ended has nothing to record: its directory goes as
+	// a failed run's does.
 	defer func() {
 		if errors.Is(err, envrun.ErrStopped) {
 			_ = rec.finish(x.r.Slice, x.attempt, x.sha, target, false)
 		}
 	}()
 
-	limit := m.OracleLimit()
-	runs := cmd
-	if isLight {
-		runs = light.ran
-		x.logf("the delta from the last pass of %q is light: running %q in its place", cmd, runs)
+	// The oracle line carries everything needed to run this again by hand.
+	base := func() journal.Line {
+		return journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
+			Dir: x.cmdDir, Subject: x.subject, Flags: x.r.Flags, HeadEnd: x.headNow(), TreeBefore: x.res.TreeBefore, TreeAfter: treeState(x.dir)}
 	}
-	// A heavy oracle takes the project's suite slot before it starts, so its
-	// bound (set when the command starts) and its recorded seconds count from
-	// the slot. The light oracle of a light delta takes none.
-	var share *slot.Share
-	if !isLight && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
-		stopCtx, endStopCtx := envrun.StopContext(context.Background())
-		defer endStopCtx()
-		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Repo: d.Repo, Pinned: d.Slots}, func(event, summary string) error {
-			if event == journal.EventSlotWait {
-				x.logf("%s", summary)
-			}
-			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
-		})
-		if err != nil {
-			if stopCtx.Err() != nil {
-				return envrun.Stopped("the wait for the suite slot")
-			}
-			return err
-		}
-		share = held
-		defer share.Release()
+	tail := &tailWriter{}
+	w := io.Writer(tail)
+	if d.Out != nil {
+		w = io.MultiWriter(d.Out, tail)
 	}
 	started := d.now()
-	out, use, oerr := d.oracle(runs, x.dir, target.env(), limit)
+	x.res.Ran = true
+	use, oerr := d.oracle(cmd, x.cmdDir, target.env(), x.r.Timeout, w)
 	if errors.Is(oerr, envrun.ErrStopped) {
 		// No verdict: the line says the run ended without judging the code,
 		// and the slice's state stays as it was.
-		line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
-			Outcome: "fail", Cause: journal.CauseStopped, Summary: oneLine(oerr.Error())}
-		if share != nil {
-			line.Shared = share.Shared()
-		}
-		if isLight {
-			line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
-		}
+		line := base()
+		line.Outcome, line.Cause, line.Summary = "fail", journal.CauseStopped, oneLine(oerr.Error())
 		if jerr := x.journal(line); jerr != nil {
 			return jerr
 		}
+		x.recordedLine(journal.EventOracle)
 		return oerr
 	}
 	// Rounded up, so every run records at least a second and 0 keeps meaning
@@ -757,49 +778,40 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 		seconds = 1
 	}
 	x.res.Seconds = seconds
-	line := journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Seconds: seconds, Source: "jig"}
-	if share != nil {
-		share.Record(d.now().Sub(started), use)
-		line.Shared = share.Shared()
-	}
+	x.res.Code = exitCodeOf(oerr)
+
+	line := base()
+	line.Seconds = seconds
+	x.res.HeadEnd, x.res.TreeAfter = line.HeadEnd, line.TreeAfter
 	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
-	if isLight {
-		line.Ran, line.ReusedFrom = light.ran, light.reusedFrom
-		x.res.Ran, x.res.ReusedFrom = light.ran, light.reusedFrom
-	}
+	line.Uncovered = x.uncoveredBecause(ownOracle, line.TreeAfter, line.HeadEnd)
+	x.res.Uncovered, x.res.Covered = line.Uncovered, line.Uncovered == ""
 	if oerr == nil {
-		x.keepBaseline(runs, out)
 		line.Outcome = "pass"
 		x.res.State = journal.VerifyPass
 	} else {
-		x.res.Tail, x.res.Summary = x.failureOf(out, oerr, runs)
+		x.res.Tail, x.res.Summary = failureOutput(tail.String(), oerr)
 		x.res.Signature = failureSignature(x.r.Slice, x.res.Summary, oerr)
 		x.res.State = journal.VerifyFail
 		line.Outcome, line.Summary, line.Signature = "fail", x.res.Summary, x.res.Signature
 		line.Cause = failureCause(oerr)
-		x.logf("the oracle failed after %ds (limit %s); the lines a passing run did not print (when it kept a baseline), then the last %d bytes of its output:\n%s", seconds, limit, tailBytes, x.res.Tail)
 	}
 	if err := x.journal(line); err != nil {
 		return err
 	}
-	if err := rec.finish(x.r.Slice, x.attempt, x.sha, target, oerr == nil); err != nil {
+	x.recordedLine(journal.EventOracle)
+	if err := rec.finish(x.r.Slice, x.attempt, x.sha, target, oerr == nil && x.res.Covered); err != nil {
 		return err
 	}
-
-	// A newer commit of the slice may already have an outcome: workers finish
-	// in any order. This one is history then, and the slice's state stays
-	// what the newer commit made it.
-	newer := x.superseded()
-	if newer {
-		x.logf("a newer commit of slice %s already has an outcome; its state stays as that one left it", x.r.Slice)
+	if !x.res.Covered {
+		// Recorded, and nothing more: no state, no verified line.
+		x.push("run recorded, covers nothing: " + x.res.Uncovered)
+		return nil
 	}
 
 	if oerr != nil {
 		err := x.setState(func(st *store.SliceState) bool {
 			st.Attempts = max(st.Attempts, x.attempt)
-			if newer {
-				return true
-			}
 			// An open question outranks a failed run: the person's answer is
 			// what a slice that needs input waits for.
 			if st.State != "needs-input" {
@@ -823,9 +835,6 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	// line, which already stands as the commit's pass (VerificationState).
 	err = x.setState(func(st *store.SliceState) bool {
 		st.Attempts = max(st.Attempts, x.attempt)
-		if newer {
-			return true
-		}
 		st.State = "green"
 		st.Question, st.Reason, st.Signature, st.StallSummary = "", "", "", ""
 		return true
@@ -836,44 +845,23 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, light lightRun, isLight
 	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
 		return err
 	}
+	x.recordedLine(journal.EventVerified)
 	x.push("oracle passed")
 	return nil
 }
 
-// superseded reports whether a newer commit of this slice already has an
-// outcome in the journal (see Superseded). A journal that cannot be read
-// leaves the state to this run, as before.
-func (x *run) superseded() bool {
-	lines, err := journal.Read(x.d.Store, x.r.Ticket)
+// headNow is the worktree's HEAD now, "" when git cannot say.
+func (x *run) headNow() string {
+	head, err := gitx.RevParse(x.dir, "HEAD")
 	if err != nil {
-		return false
+		return ""
 	}
-	return Superseded(lines, x.r.Slice, x.sha, GitAncestry(x.d.Clone))
+	return head
 }
 
-// baselinePath is where the latest pass of this run's oracle command keeps
-// its output lines.
-func (x *run) baselinePath(cmd string) string {
-	return home.BaselinePath(x.d.JigHome, x.d.Repo, x.sl.Workspace, cmd)
-}
-
-// keepBaseline stores the lines of a passing run's output as the command's
-// baseline, replacing the last one. A baseline that cannot be written only
-// costs the next failure its comparison, so it is logged and no more.
-func (x *run) keepBaseline(cmd, out string) {
-	path := x.baselinePath(cmd)
-	// Atomic, so a failing worker reading it meanwhile never sees half a file.
-	if err := store.AtomicWrite(path, []byte(baselineText(out))); err != nil {
-		x.logf("could not keep the baseline of the passing run: %v", err)
+// recordedLine notes that the run wrote a line of kind, unless it writes none.
+func (x *run) recordedLine(kind string) {
+	if !x.r.NoRecord {
+		x.res.Recorded = append(x.res.Recorded, kind)
 	}
-}
-
-// failureOf is the tail and summary of a failed run, compared against the
-// command's baseline when a pass left one (failureOutput).
-func (x *run) failureOf(out string, oerr error, cmd string) (tail, summary string) {
-	var base map[string]bool
-	if data, err := fileshare.ReadFile(x.baselinePath(cmd)); err == nil {
-		base = parseBaseline(string(data))
-	}
-	return failureOutput(out, oerr, base)
 }

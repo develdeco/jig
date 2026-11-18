@@ -54,6 +54,9 @@ type Line struct {
 	// ran for, since an oracle has a command for each workspace.
 	Workspace string `json:"workspace,omitempty"`
 	Env       string `json:"env,omitempty"`
+	// Slices is a final-oracle line's slice ids: the slices whose commands the
+	// run was the union of, in slices.yaml order. Omitted when empty.
+	Slices []string `json:"slices,omitempty"`
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`
@@ -66,11 +69,6 @@ type Line struct {
 	CPUMs     int64  `json:"cpu_ms,omitempty"`
 	PeakBytes uint64 `json:"peak_bytes,omitempty"`
 	PeakBasis string `json:"peak_basis,omitempty"`
-	// Shared is set on an oracle line of a heavy run that shared the machine:
-	// another heavy run, of any project, held a share at any moment of it. It
-	// is omitted when false, so a line an older jig wrote reads as a run that
-	// did not share.
-	Shared bool `json:"shared,omitempty"`
 	// Head is a result line's lease head when that turn of the attempt
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
@@ -113,6 +111,24 @@ type Line struct {
 	// omitted for a run that ended with the test's own result, and on every line
 	// written before the field existed.
 	Cause string `json:"cause,omitempty"`
+	// The fields below are an oracle line's record of the run `jig verify`
+	// witnessed, which holds every input and fact needed to run it again by
+	// hand: Dir is the directory the command ran in, Flags the flags and the
+	// `--` command `jig verify` was given, Commit HEAD when the run started and
+	// HeadEnd HEAD when it ended, TreeBefore and TreeAfter whether the working
+	// tree was clean (TreeClean) or not (TreeDirty) then. Uncovered is why the
+	// run covers no commit (the Uncovered constants): every reader of
+	// verification state skips a line that has it. Each is omitted when empty,
+	// so a line an older jig wrote reads back with none.
+	Dir string `json:"dir,omitempty"`
+	// Subject is the first line of the message of the commit an oracle line's
+	// run was of, so a reader of the journal can name the change.
+	Subject    string `json:"subject,omitempty"`
+	Flags      string `json:"flags,omitempty"`
+	HeadEnd    string `json:"head_end,omitempty"`
+	TreeBefore string `json:"tree_before,omitempty"`
+	TreeAfter  string `json:"tree_after,omitempty"`
+	Uncovered  string `json:"uncovered,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
 	// Approval is the publish approval a pr line's head had when the pull

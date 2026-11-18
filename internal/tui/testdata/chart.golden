@@ -2,14 +2,14 @@ jig  demo › checkout  Coupons at checkout                          ◐ in prog
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 5 published ─╮
   │  ✓ JIG-4  Coupon model    ✓ ✓ ✓ ✓  published https://example.test/acme/de… │
-  │▸ ◑ JIG-5  Apply a coupo…  ✓ ◑ ○ ○  Build: 1 of 3 green · verifying slice … │
+  │▸ ◐ JIG-5  Apply a coupo…  ✓ ◐ ○ ○  Build: 1 of 3 green · slice s2 is bein… │
   │  ◐ JIG-8  Show the disc…  ◐ ○ ○ ○  ready · brief next                      │
   │  ◐ JIG-6  Remove a coup…  ◐ ○ ○ ○  stacked on JIG-5                        │
   │  ◐ JIG-7  Coupons in re…  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open │
   │  ·        Stack two cou…  fog · not graduated                              │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────── JIG-5 ─╮
-  │  slice    s2 · verifying · builder                                         │
+  │  slice    s2 · claimed · builder                                           │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────── in progress ─╮
   │  next     say "Continue checkout"                                          │

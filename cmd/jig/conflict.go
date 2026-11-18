@@ -213,7 +213,7 @@ func locatedProject(m *gitx.Memo, where locate.Where, jigHome string) (project.C
 	return cfg, machine[cfg.Name], true
 }
 
-// printConflicts tells the session, before a gate runs its oracle or a publish
+// printConflicts tells the session, before a gate round opens or a publish
 // pushes, which other open tickets' branches the ticket's cannot merge with:
 // the same warning, table and help as `jig here`, and nothing for a clean
 // pair. It is advice: it changes no exit code, round or verdict.

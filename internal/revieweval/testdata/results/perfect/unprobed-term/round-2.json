@@ -8,7 +8,7 @@
       "action": "fix",
       "risk": "high",
       "risk_rationale": "An order of several units of one item would be priced as one unit with the suite still green.",
-      "oracle": "test"
+      "oracle": "go test ./cart -run 'TestTotal'"
     }
   ],
   "still_present": [],

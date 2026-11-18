@@ -1,10 +1,10 @@
 package journal
 
-// What the journal says about `jig verify`: whether a commit has been
-// verified for a slice, which verifications are still running, and which
-// attempt the next one is. The lines are the frontier's own oracle and
-// verified lines and the digester's verify-pending and verify-error lines
-// (events.go); nothing here adds a line shape.
+// What the journal says about `jig verify`: whether a commit has a recorded
+// result for a slice, and which attempt the next one is. The lines are the
+// frontier's own oracle and verified lines and the digester's verify-error
+// line (events.go); nothing here adds a line shape. A verify-pending line is
+// an old worker's, no result, and is skipped.
 
 // The state of one (commit, slice) verification, as VerificationState reads
 // it from the journal.
@@ -12,10 +12,6 @@ const (
 	// VerifyNone: the journal has no record of verifying the commit for the
 	// slice.
 	VerifyNone = ""
-	// VerifyPending: a verify-pending line is the latest record: a worker
-	// started and has not recorded an outcome. It stays so if the worker
-	// died; the journal cannot tell, and a rerun replaces it.
-	VerifyPending = "pending"
 	// VerifyPass: the oracle passed on the commit.
 	VerifyPass = "pass"
 	// VerifyFail: the oracle failed on the commit.
@@ -24,6 +20,24 @@ const (
 	// no oracle, an env class that would not come up); the oracle neither
 	// passed nor failed.
 	VerifyError = "error"
+)
+
+// The states of a working tree an oracle line records (Line.TreeBefore and
+// TreeAfter).
+const (
+	TreeClean = "clean"
+	TreeDirty = "dirty"
+)
+
+// Why a run of `jig verify` covers no commit (Line.Uncovered). A line that
+// carries one is recorded and read by no reader of verification state.
+const (
+	UncoveredDirtyBefore = "tree dirty before"
+	UncoveredDirtyAfter  = "tree dirty after"
+	UncoveredHeadMoved   = "head moved"
+	UncoveredOtherCmd    = "another command"
+	UncoveredNotDescend  = "not a descendant of the start sha"
+	UncoveredOtherDir    = "another directory"
 )
 
 // Verification is the latest record of verifying one commit for one slice.
@@ -91,16 +105,20 @@ func (v Verification) LightWords() string {
 // its own, since a journal that kept its verified line and lost its oracle
 // line is still a verified commit (BuiltCommits reads it); an oracle line of
 // either outcome counts, whoever ran it, because the frontier's lines are
-// the evidence a commit was verified before the digester existed.
+// the evidence a commit was verified before the digester existed. A
+// verify-pending line is no result: an old worker wrote it, and it hides
+// nothing a run before it recorded.
 func verificationLine(l Line) (state string, ok bool) {
 	switch l.Event {
-	case EventVerifyPending:
-		return VerifyPending, true
 	case EventVerified:
 		return VerifyPass, true
 	case EventVerifyError:
 		return VerifyError, true
 	case EventOracle:
+		if l.Uncovered != "" {
+			// A run that covers no commit: recorded, and says nothing of one.
+			return "", false
+		}
 		switch l.Outcome {
 		case "pass":
 			return VerifyPass, true
@@ -112,10 +130,9 @@ func verificationLine(l Line) (state string, ok bool) {
 }
 
 // VerificationState reads the latest record of verifying commit sha for
-// slice from lines: the last of the slice's verify-pending, oracle, verified
-// and verify-error lines at that commit, in journal order. A rerun therefore
-// replaces an earlier outcome with its own pending line, then its own
-// outcome. A recorded line says nothing about verification and is skipped.
+// slice from lines: the last of the slice's covering oracle, verified and
+// verify-error lines at that commit, in journal order. A line that records no
+// result (a verify-pending line, an uncovered run) is skipped.
 func VerificationState(lines []Line, sha, slice string) Verification {
 	var v Verification
 	if sha == "" {
@@ -136,9 +153,6 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 			// carries no time of its own: keep the oracle line's.
 			next.Seconds, next.Ran, next.ReusedFrom = v.Seconds, v.Ran, v.ReusedFrom
 			next.CPUMs, next.PeakBytes, next.PeakBasis = v.CPUMs, v.PeakBytes, v.PeakBasis
-		case state == VerifyPending:
-			// A pending line's summary is the commit's subject, which says
-			// what is verified, not how a run came out.
 		default:
 			next.Seconds, next.Summary = l.Seconds, l.Summary
 			next.CPUMs, next.PeakBytes, next.PeakBasis = l.CPUMs, l.PeakBytes, l.PeakBasis
@@ -146,43 +160,6 @@ func VerificationState(lines []Line, sha, slice string) Verification {
 		v = next
 	}
 	return v
-}
-
-// PendingVerification is a verification the journal shows started and not
-// finished.
-type PendingVerification struct {
-	Slice   string
-	Commit  string
-	Attempt int
-	// TS is when the verify-pending line was written.
-	TS      string
-	Session string
-	Agent   string
-}
-
-// Pending lists the verifications lines show started and not finished: each
-// (commit, slice) whose latest record is a verify-pending line, in the order
-// those lines were written. It cannot tell a running worker from one that
-// died; a reader that needs to know checks the process the ledger recorded.
-func Pending(lines []Line) []PendingVerification {
-	type key struct{ slice, commit string }
-	latest := map[key]int{} // the index of the (commit, slice)'s latest record
-	for i, l := range lines {
-		if l.Commit == "" {
-			continue
-		}
-		if _, ok := verificationLine(l); ok {
-			latest[key{l.Slice, l.Commit}] = i
-		}
-	}
-	var out []PendingVerification
-	for i, l := range lines {
-		if l.Event != EventVerifyPending || l.Commit == "" || latest[key{l.Slice, l.Commit}] != i {
-			continue
-		}
-		out = append(out, PendingVerification{Slice: l.Slice, Commit: l.Commit, Attempt: l.Attempt, TS: l.TS, Session: l.Session, Agent: l.Agent})
-	}
-	return out
 }
 
 // NextAttempt is the attempt number the next verification of slice takes: one
@@ -199,4 +176,29 @@ func NextAttempt(lines []Line, slice string) int {
 		}
 	}
 	return highest + 1
+}
+
+// FinalRunAt is the final run `jig verify --final` recorded at exactly head
+// for repo: the latest final-oracle line of that repo whose commit is head,
+// that covers it (no Uncovered reason) and judged the code (a pass or a fail,
+// not a run jig's stop ended). repo is "" in a project of one repo, whose
+// lines carry none. A run at another commit stands for nothing, even one with
+// the same tree: nothing borrows a pass. ok is false when there is none.
+func FinalRunAt(lines []Line, repo, head string) (line Line, ok bool) {
+	if head == "" {
+		return Line{}, false
+	}
+	for _, l := range lines {
+		if l.Event != EventFinalOracle || l.Commit != head || l.Repo != repo || l.Uncovered != "" {
+			continue
+		}
+		if l.Outcome != "pass" && l.Outcome != "fail" {
+			continue
+		}
+		if l.Cause == CauseStopped {
+			continue
+		}
+		line, ok = l, true
+	}
+	return line, ok
 }

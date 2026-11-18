@@ -20,8 +20,8 @@ their sources on the `gh-pages` branch when they drift.
 ## System context
 
 jig is one binary reached through four doors. It never starts the harness
-session; it observes it, verifies its commits in a detached worker, and
-keeps the facts in the store and the jig home.
+session; it observes it, witnesses the oracle runs the builder makes with
+`jig verify`, and keeps the facts in the store and the jig home.
 [Interactive version](https://develdeco.github.io/jig/diagrams/system-context.html).
 
 ```mermaid
@@ -33,7 +33,7 @@ flowchart TB
     doors{{"Doors<br/>hooks, skills, MCP, CLI"}}
     verbs["jig verbs<br/>claim, validate, gate, publish"]
     hook["post-commit hook<br/>global, or a block in the clone's"]
-    verify["jig verify<br/>detached oracle run"]
+    verify["jig verify<br/>witnessed oracle run"]
   end
   store[("Store repo<br/>tickets, charts, journals")]
   home[("jig home<br/>ledger, logs, evidence")]
@@ -49,8 +49,8 @@ flowchart TB
   verbs -->|"publish: push head, open PR"| github
   harness -->|edits, commits| clone
   clone -->|commit| hook
-  hook -->|spawns| verify
-  verbs -.->|HEAD moved| verify
+  hook -->|"git-commit line only"| home
+  harness -->|"runs jig verify"| verify
   verify -->|oracle, verified| store
 ```
 
@@ -199,7 +199,7 @@ flowchart TB
     confirm -->|"valid: yes"| validate["jig validate<br/>records the approval"]
   end
   subgraph build ["Build"]
-    claim["Session: claim, build<br/>commit with Jig-Slice"] -->|commit| verify["jig verify<br/>oracle per commit"]
+    claim["Session: claim, build<br/>commit with Jig-Slice"] -->|"commit, then run"| verify["jig verify<br/>oracle in the builder's worktree"]
     verify -.->|"red: note"| claim
   end
   subgraph review ["Review"]
@@ -220,10 +220,13 @@ flowchart TB
 
 ## A commit's verification
 
-A commit that names a slice is verified in the background, in a detached
-worktree at that commit. The session is told the outcome once, at its next
-tool call or prompt. The worker shares no memory with the session: the store
-and the machine ledger are the whole interface.
+A commit starts nothing. The builder runs `jig verify` in its own worktree,
+in the foreground or as the harness's background task, and jig witnesses the
+run: the slice's oracle runs in that directory and that environment, its
+output reaches the builder as it is produced, and one `oracle` line records
+every input and fact of the run. The session is told the outcome once, at
+its next tool call or prompt. The store and the machine ledger are the
+whole interface between the run and the other sessions.
 [Interactive version](https://develdeco.github.io/jig/diagrams/commit-verification.html).
 
 ```mermaid
@@ -231,29 +234,26 @@ sequenceDiagram
   participant S as Session
   participant G as git
   participant O as jig observe
-  participant W as verify worker
-  participant T as Worktree at the sha
+  participant V as jig verify
   participant J as Store journal
 
   S->>G: git commit (Jig-Slice: s)
   G->>O: jig githook post-commit
-  O-)W: spawn detached
-  Note over O,W: one run per commit and slice
-  O-->>G: exit 0, one line only if something failed
+  O-->>G: exit 0, the commit noted in the ledger only
   G-->>S: commit done
 
-  W->>J: verify-pending, pushed first
-  W->>T: git worktree add --detach
-  W->>T: env up, run the manifest's oracle
-  T-->>W: pass or fail
-  W->>J: oracle, and verified on a pass
-  Note over W,J: pass: the slice is green<br/>fail: building, unless it needs input<br/>cannot run: verify-error
+  S->>V: jig verify (own worktree, foreground)
+  V-->>S: header, then the command's output as it runs
+  V->>V: env up, run the manifest's oracle in the worktree
+  V->>J: oracle line, with the run's inputs and facts
+  Note over V,J: covers HEAD: verified, and the slice is green on a pass<br/>or building on a fail<br/>any other run: recorded with its reason, no state change
+  V-->>S: footer, exit code of the command
 
   S->>O: next tool call (hook)
   O->>J: read journal
   J-->>O: outcomes since the session began
   O-->>S: note, told once
-  Note over S,O: a pass is only told<br/>a fail or verify-error also holds Stop<br/>when the claim is unattended
+  Note over S,O: a pass is only told<br/>a fail or verify-error is told too<br/>Stop holds an unattended claim<br/>while a commit has no recorded result
 ```
 
 ## A slice's states

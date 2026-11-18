@@ -6,6 +6,7 @@
       "title": "Clamp's doc comment has a typo",
       "detail": "The comment reads \"Clamp restrict v\" where it should read \"restricts\".",
       "action": "fix",
+      "oracle": "go test ./mathutil -run 'TestClamp'",
       "risk": "low",
       "risk_rationale": "Cosmetic, but a doc comment should read correctly."
     },
@@ -15,6 +16,7 @@
       "title": "unusedHelper is dead code",
       "detail": "unusedHelper is defined but never called anywhere in this package.",
       "action": "fix",
+      "oracle": "go test ./mathutil -run 'TestUnusedHelper'",
       "risk": "low",
       "risk_rationale": "Dead code adds no risk on its own but should not ship."
     },
@@ -24,6 +26,7 @@
       "title": "Average has no doc comment",
       "detail": "Average is exported but undocumented, unlike Clamp.",
       "action": "fix",
+      "oracle": "go test ./mathutil -run 'TestAverage'",
       "risk": "low",
       "risk_rationale": "Every other exported function in this package is documented."
     }

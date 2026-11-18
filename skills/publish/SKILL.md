@@ -7,7 +7,7 @@ description: Publishes a ticket's reviewed branch - renders the pull request bod
 
 Run `jig next <T>`. If the phase it names is not publish, tell the person what it needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch. Publishing needs every slice green and a clean round (`PUBLISH_NOT_CLEAN`); the review notes say whether its reviewer built part of the change. A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again.
+jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch. Publishing needs every slice green and a clean round (`PUBLISH_NOT_CLEAN`); the review notes say whether its reviewer built part of the change. A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again. After the last clean round, run `jig verify T-1 --final` in the worktree at the reviewed head, before publishing: publish runs no test and only says when the head has none.
 
 ## Two ways, one hand-off
 

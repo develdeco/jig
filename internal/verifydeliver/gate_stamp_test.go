@@ -17,7 +17,6 @@ func TestGateRoundNamesTheBuild(t *testing.T) {
 	t.Parallel()
 	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
-	d.Oracle = nil
 	report, err := Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatalf("Gate: %v", err)

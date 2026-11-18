@@ -55,11 +55,6 @@ func stepOfLine(l events.Envelope) int {
 		return stepPublish
 	case journal.EventSpend:
 		return -1
-	case journal.EventSlotWait, journal.EventSlotTaken:
-		// A wait with no slice is the gate's, for its round's oracles.
-		if l.Slice == "" {
-			return stepReview
-		}
 	}
 	return stepBuild
 }
@@ -176,12 +171,16 @@ func (t *ticket) goal(id string) string {
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
-// verify writes on its verify-pending line.
+// verify writes on its oracle line (an older journal had it on a
+// verify-pending line).
 func (t *ticket) subjects() map[string]string {
 	out := map[string]string{}
 	for _, l := range t.lines {
-		if l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "" {
+		switch {
+		case l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "":
 			out[l.Commit] = l.Summary
+		case l.Event == journal.EventOracle && l.Commit != "" && l.Subject != "":
+			out[l.Commit] = l.Subject
 		}
 	}
 	return out
@@ -240,11 +239,6 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "slices"
 	case journal.EventGateOpen, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return "round:" + strconv.Itoa(t.roundOf(l))
-	case journal.EventSlotWait, journal.EventSlotTaken:
-		if l.Slice == "" {
-			return "round:" + strconv.Itoa(t.roundOf(l))
-		}
-		return ""
 	case journal.EventTriage:
 		return "asks"
 	case journal.EventFixSlice:
@@ -352,11 +346,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventDispatch:
 		return "jig started a builder"
 	case journal.EventVerifyPending:
-		return "verifying " + commitWords(t, l.Commit)
-	case journal.EventSlotWait:
-		return firstOf(l.Summary, "waiting for the suite slot")
-	case journal.EventSlotTaken:
-		return "took the suite slot"
+		// An old worker's line: said as history, in no state of work in flight.
+		return "verification requested for " + commitWords(t, l.Commit)
 	case journal.EventOracle:
 		cmd := "its oracle"
 		if l.Command != "" {
@@ -366,6 +357,20 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 			return cmd + " passed" + took(l.Seconds)
 		}
 		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		cmd := "the final run"
+		// A command on several lines would take several rows of the page: left out.
+		if l.Command != "" && !strings.Contains(l.Command, "\n") {
+			cmd = "the final run `" + l.Command + "`"
+		}
+		covered := ""
+		if l.Uncovered != "" {
+			covered = " (covers nothing: " + l.Uncovered + ")"
+		}
+		if l.Outcome == "pass" {
+			return cmd + " passed" + took(l.Seconds) + covered
+		}
+		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + covered + ": " + firstOf(l.Summary, l.Signature))
 	case journal.EventGateOracle:
 		cmd := "its oracle"
 		if l.Command != "" {

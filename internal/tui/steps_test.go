@@ -267,7 +267,6 @@ func TestTheHeaderSaysEveryStepInEveryStateInWordsThatRead(t *testing.T) {
 		{stepBuild, StateQueued, "waiting to build"},
 		{stepBuild, StateReady, "ready to build"},
 		{stepBuild, StateBuilding, "build in progress"},
-		{stepBuild, StateVerifying, "build verifying"},
 		{stepBuild, StateNeedsInput, "build needs you"},
 		{stepBuild, StateStalled, "build stalled"},
 		{stepBuild, StateEnvBlocked, "build blocked by its environment"},

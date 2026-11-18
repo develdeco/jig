@@ -44,9 +44,9 @@ type gateRepo struct {
 
 	lease pool.Lease
 	// copy says whose copy of the branch the lease was left at.
-	copy       branchCopy
-	man        manifest.Manifest
-	oracleRuns []OracleRun
+	copy        branchCopy
+	man         manifest.Manifest
+	slicePasses []SlicePass
 	// pristine says the lease was restored to its head when it was pointed at
 	// its copy and nothing has run in it since, so the restore a review round
 	// starts with would have nothing to undo (RoundRepo.Pristine).
@@ -243,16 +243,6 @@ func (rf roundFiles) workspace(file string) string {
 	return ws
 }
 
-// oracles are the oracle names that can prove a fix of file: those of the
-// manifest of the repo it is in.
-func (rf roundFiles) oracles(file string) []string {
-	repo, _, ok := rf.of(file)
-	if !ok {
-		return nil
-	}
-	return SortedOracleNames(repo.Man)
-}
-
 // allOracles are the oracle names of every repo of the round, sorted, without
 // repeats.
 func (rf roundFiles) allOracles() []string {
@@ -268,13 +258,6 @@ func (rf roundFiles) allOracles() []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// manifestOf is the manifest file is judged against, empty for a file no repo
-// of the round holds.
-func (rf roundFiles) manifestOf(file string) manifest.Manifest {
-	repo, _, _ := rf.of(file)
-	return repo.Man
 }
 
 // atHead reports whether file exists at the commit under review in its repo.

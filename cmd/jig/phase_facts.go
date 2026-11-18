@@ -196,7 +196,7 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 		}
 	}
 	// The open record in the store is the word on an open round: a gate that
-	// failed on its oracles journaled its opening and opened nothing.
+	// failed before its round opened journaled its opening and opened nothing.
 	if s, err := verifydeliver.ReadStatus(st, ticket); err == nil {
 		if s.Open != nil {
 			f.Open = &phase.OpenRound{Round: s.Open.Round, Reviewer: s.Open.Reviewer.Session}

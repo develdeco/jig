@@ -18,7 +18,7 @@ import (
 const repoName = "fixture-repo"
 
 // wantNoOracleRun asserts the verification stopped before the oracle, with a
-// verify-error that says why, and left no worktree behind.
+// verify-error that says why.
 func wantNoOracleRun(t *testing.T, r *rig, res Result, err error, reason string) {
 	t.Helper()
 	if err != nil {
@@ -27,7 +27,7 @@ func wantNoOracleRun(t *testing.T, r *rig, res Result, err error, reason string)
 	if res.State != journal.VerifyError || !strings.Contains(res.Summary, reason) {
 		t.Errorf("Result = %+v, want an error that says %q", res, reason)
 	}
-	if got, want := events(r.lines()), []string{"verify-pending", "verify-error:error"}; !reflect.DeepEqual(got, want) {
+	if got, want := events(r.lines()), []string{"verify-error:error"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events = %v, want %v", got, want)
 	}
 	if last := r.lines()[len(r.lines())-1]; !strings.Contains(last.Summary, reason) || last.Commit != res.SHA {
@@ -36,8 +36,8 @@ func wantNoOracleRun(t *testing.T, r *rig, res Result, err error, reason string)
 	if n := len(r.oracle.seen()); n != 0 {
 		t.Errorf("the oracle ran %d times, want never", n)
 	}
-	if got := worktreesOf(t, r.fx.RepoDir); len(got) != 1 {
-		t.Errorf("the clone has worktrees %v, want only itself", got)
+	if res.Code != ExitUnrun {
+		t.Errorf("Code = %d, want %d: jig could not start the command", res.Code, ExitUnrun)
 	}
 	if st := r.state("a"); st.State != "queued" {
 		t.Errorf("slice a state = %+v, want it left as it was", st)
@@ -45,13 +45,13 @@ func wantNoOracleRun(t *testing.T, r *rig, res Result, err error, reason string)
 }
 
 // TestRunHoldsTheCommitToTheStartSha: the commit must be new work on the
-// ticket's branch, a descendant of the start sha the ticket recorded, and
-// the frontier's verifyGreen is what says so. A commit that is the start sha,
-// one that does not descend from it, and a start sha this clone does not have
-// each end in a verify-error and never reach the oracle.
+// ticket's branch, a descendant of the start sha the ticket recorded, and the
+// frontier's verifyGreen is what says so. A commit that is the start sha, one
+// that does not descend from it, and a start sha this clone does not have are
+// still run and recorded, and cover nothing.
 func TestRunHoldsTheCommitToTheStartSha(t *testing.T) {
 	t.Parallel()
-	t.Run("a descendant passes", func(t *testing.T) {
+	t.Run("a descendant is covered", func(t *testing.T) {
 		t.Parallel()
 		r := newRig(t, fixture.Opts{})
 		r.deps.Repo = repoName
@@ -60,44 +60,46 @@ func TestRunHoldsTheCommitToTheStartSha(t *testing.T) {
 			t.Fatal(err)
 		}
 		sha := r.fixClamp()
-		if res, err := Run(r.deps, r.request("a", sha)); err != nil || res.State != journal.VerifyPass {
-			t.Fatalf("Run = %+v, %v, want a pass", res, err)
+		if res, err := Run(r.deps, r.request("a", sha)); err != nil || res.State != journal.VerifyPass || !res.Covered {
+			t.Fatalf("Run = %+v, %v, want a covering pass", res, err)
 		}
 	})
-	t.Run("the start sha itself is no new work", func(t *testing.T) {
-		t.Parallel()
-		r := newRig(t, fixture.Opts{})
-		r.deps.Repo = repoName
-		sha := r.fixClamp()
-		if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, sha); err != nil {
-			t.Fatal(err)
-		}
-		res, err := Run(r.deps, r.request("a", sha))
-		wantNoOracleRun(t, r, res, err, "no new work")
-	})
-	t.Run("a commit that does not descend from it", func(t *testing.T) {
-		t.Parallel()
-		r := newRig(t, fixture.Opts{})
-		r.deps.Repo = repoName
-		sha := r.fixClamp()
-		later := r.commit("", "later", map[string]string{"later.txt": "x"})
-		if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, later); err != nil {
-			t.Fatal(err)
-		}
-		res, err := Run(r.deps, r.request("a", sha))
-		wantNoOracleRun(t, r, res, err, "is not a descendant of start sha")
-	})
-	t.Run("a start sha this clone does not have", func(t *testing.T) {
-		t.Parallel()
-		r := newRig(t, fixture.Opts{})
-		r.deps.Repo = repoName
-		sha := r.fixClamp()
-		if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, "0123456789abcdef0123456789abcdef01234567"); err != nil {
-			t.Fatal(err)
-		}
-		res, err := Run(r.deps, r.request("a", sha))
-		wantNoOracleRun(t, r, res, err, "is not in this clone")
-	})
+	for name, setup := range map[string]func(r *rig, sha string) string{
+		"the start sha itself is no new work": func(r *rig, sha string) string {
+			if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, sha); err != nil {
+				t.Fatal(err)
+			}
+			return sha
+		},
+		"a commit that does not descend from it": func(r *rig, sha string) string {
+			later := r.commit("", "later", map[string]string{"later.txt": "x"})
+			if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, later); err != nil {
+				t.Fatal(err)
+			}
+			return later
+		},
+		"a start sha this clone does not have": func(r *rig, sha string) string {
+			if err := r.st.WriteStartSHA(r.fx.Ticket, repoName, "0123456789abcdef0123456789abcdef01234567"); err != nil {
+				t.Fatal(err)
+			}
+			return sha
+		},
+	} {
+		setup := setup
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := newRig(t, fixture.Opts{})
+			r.deps.Repo = repoName
+			sha := setup(r, r.fixClamp())
+			res, err := Run(r.deps, r.request("a", sha))
+			if err != nil || res.Covered || res.Uncovered != journal.UncoveredNotDescend || !res.Ran {
+				t.Fatalf("Run = %+v, %v, want a run that covers nothing: %s", res, err, journal.UncoveredNotDescend)
+			}
+			if got, want := events(r.lines()), []string{"oracle:pass"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("journal events = %v, want %v", got, want)
+			}
+		})
+	}
 }
 
 // TestRunFindsTheStartShaFromTheTargetBranch: with no start sha recorded the
@@ -125,8 +127,9 @@ func TestRunFindsTheStartShaFromTheTargetBranch(t *testing.T) {
 			t.Fatal(err)
 		}
 		tip, _ := gitx.RevParse(r.fx.RepoDir, "HEAD")
-		res, err := Run(r.deps, r.request("a", tip))
-		wantNoOracleRun(t, r, res, err, "no new work")
+		if res, err := Run(r.deps, r.request("a", tip)); err != nil || res.Covered || res.Uncovered != journal.UncoveredNotDescend {
+			t.Fatalf("Run = %+v, %v, want a run that covers nothing: no new work", res, err)
+		}
 	})
 	t.Run("no origin branch fetched, no recorded sha: no descent is checked", func(t *testing.T) {
 		t.Parallel()
@@ -154,8 +157,8 @@ func TestRunNeedsAnSh(t *testing.T) {
 }
 
 // TestRunUsesTheManifestOfTheCommit: the oracle is the one the manifest at the
-// verified commit resolves, not the operator's working tree, and a timeout the
-// commit's manifest declares is the limit.
+// verified commit resolves, and a timeout the manifest declares bounds
+// nothing: the harness owns time.
 func TestRunUsesTheManifestOfTheCommit(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, fixture.Opts{})
@@ -174,10 +177,7 @@ oracles:
 timeout: 45m
 `
 	sha := r.commit("a", "declare a timeout", map[string]string{".claude/jig.yaml": declared})
-	// The working tree moves on after the commit; the worktree must not see it.
-	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_ = data
 
 	res, err := Run(r.deps, r.request("a", sha))
 	if err != nil || res.State != journal.VerifyPass {
@@ -187,13 +187,13 @@ timeout: 45m
 	if len(calls) != 1 {
 		t.Fatalf("the oracle ran %d times, want 1", len(calls))
 	}
-	if calls[0].limit.String() != "45m0s" {
-		t.Errorf("limit = %s, want the 45m the commit's manifest declares", calls[0].limit)
+	if calls[0].limit != 0 {
+		t.Errorf("limit = %s, want none: the manifest's 45m no longer bounds a run", calls[0].limit)
 	}
 	if calls[0].cmd != "echo verified alpha" {
 		t.Errorf("command = %q, want the oracle the commit's manifest declares", calls[0].cmd)
 	}
-	if line := r.lines()[1]; line.Command != "echo verified alpha" {
+	if line := r.lines()[0]; line.Command != "echo verified alpha" {
 		t.Errorf("oracle line command = %q", line.Command)
 	}
 }

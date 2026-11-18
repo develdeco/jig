@@ -5,14 +5,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The states the screens draw. A slice is in one of the first seven (the
-// store's own slice states plus verifying, which the journal shows before the
-// store does); a ticket is in a slice state while it is being built, then in
+// The states the screens draw. A slice is in one of the first six (the
+// store's own slice states); a ticket is in a slice state while it is being built, then in
 // the phases that follow; an ask and a command have the last states.
 const (
 	StateQueued     = "queued"
 	StateBuilding   = "building"
-	StateVerifying  = "verifying"
 	StateGreen      = "green"
 	StateNeedsInput = "needs-input"
 	StateStalled    = "stalled"
@@ -48,8 +46,6 @@ func lookOf(state string) Look {
 		return Look{"○", "8"}
 	case StateBuilding:
 		return Look{"◐", "3"}
-	case StateVerifying:
-		return Look{"◑", "6"}
 	case StateGreen:
 		return Look{"●", "2"}
 	case StateNeedsInput:
