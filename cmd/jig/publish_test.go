@@ -149,3 +149,37 @@ func TestJoinWords(t *testing.T) {
 		}
 	}
 }
+
+// TestPublishPrintsTheFinalRun: the report of a publish says, for each repo's
+// reviewed head, a pass with its seconds and command, a failure with its
+// command, or that there is none at the head, with the line to run; it says it
+// in every form that prints it and never as a refusal.
+func TestPublishPrintsTheFinalRun(t *testing.T) {
+	t.Parallel()
+	runs := map[string]verifydeliver.FinalRunReport{
+		"api": {Repo: "api", Head: "aaaaaaaaaaaaaaaa", Outcome: verifydeliver.FinalRunPass, Seconds: 12, Command: "go test ./api"},
+		"web": {Repo: "web", Head: "bbbbbbbbbbbbbbbb", Outcome: verifydeliver.FinalRunNone},
+		"lib": {Repo: "lib", Head: "cccccccccccccccc", Outcome: verifydeliver.FinalRunFail, Seconds: 3, Command: "go test ./lib"},
+	}
+	got := finalRunTable("JIG-1", finalRunsByRepo(runs))
+	for _, want := range []string{
+		"final_run[3]{repo,outcome,seconds,command,run}:",
+		"  api,pass,12,go test ./api,\n",
+		"  lib,fail,,go test ./lib,jig verify JIG-1 --final\n",
+		"  web,none at the reviewed head bbbbbbbbbbbb,,,jig verify JIG-1 --final",
+	} {
+		if !strings.Contains(got+"\n", want) {
+			t.Errorf("the final run table lacks %q:\n%s", want, got)
+		}
+	}
+
+	var out strings.Builder
+	renderBodies(&out, "store", "JIG-1", verifydeliver.BodyReport{Branch: "jig/JIG-1", Covered: []string{"api"}, Repos: []verifydeliver.RepoBody{{Repo: "api", Target: "main", Head: "aaa111", FinalRun: runs["api"]}}})
+	if !strings.Contains(out.String(), "final_run[1]{repo,outcome,seconds,command,run}:") {
+		t.Errorf("the body report lacks the final run:\n%s", out.String())
+	}
+	rec := strings.Join(recordedBlocks("JIG-1", verifydeliver.RecordReport{Repo: "web", FinalRun: runs["web"]}, nil), "\n")
+	if !strings.Contains(rec, "none at the reviewed head") || strings.Contains(strings.ToLower(rec), "error") {
+		t.Errorf("the recorded report lacks the final run or reads as a refusal:\n%s", rec)
+	}
+}

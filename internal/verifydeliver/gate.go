@@ -258,19 +258,14 @@ type reportYAML struct {
 	// Reviewer is who reported the round, as the reviewer's session and
 	// agent ids and how jig learned them.
 	Reviewer *Provenance `yaml:"reviewer,omitempty"`
-	// OracleNames are the manifest's oracle names, kept so the pull request
-	// body can name the oracles a publish rendered without a checkout.
+	// OracleNames are the manifest's oracle names, kept so the review request
+	// and the contract index can name them without a checkout.
 	OracleNames []string `yaml:"oracle_names,omitempty"`
 	// FixSlices is the ids of the fix slices this round appended, whoever
 	// kept them (a reviewer round's own routing, or a scripted round's
 	// scenario fix slices): the fix budget's own used-rounds count
 	// (UsedFixBudget) is a round whose list here is non-empty.
 	FixSlices []string `yaml:"fix_slices,omitempty"`
-	// Reuse is, for an oracle name whose pass stands on an earlier whole-suite
-	// run through the manifest's light rule, the words that say so. It is
-	// derived from the journal when a publish renders the body, never read from
-	// or written to a report.
-	Reuse map[string]string `yaml:"-"`
 }
 
 // reportIntentYAML is report.yaml's own "intent" block: the source

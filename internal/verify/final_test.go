@@ -13,6 +13,17 @@ import (
 	"github.com/develdeco/jig/internal/manifest"
 )
 
+// sameDir says whether a and b are the same directory on disk, never by their
+// text: a Windows short path and its long form name one directory.
+func sameDir(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
+}
+
 // finalRequest is a final run of the fixture's ticket.
 func (r *rig) finalRequest() FinalRequest {
 	return FinalRequest{Ticket: r.fx.Ticket, Session: "s-1", Agent: "agent-1", Flags: "--final"}
@@ -68,7 +79,7 @@ func TestFinalRunsTheUnionOfTheSliceCommands(t *testing.T) {
 	if len(calls) != 1 || calls[0].cmd != want {
 		t.Fatalf("the oracle ran %+v, want one call of %q", calls, want)
 	}
-	if filepath.Clean(calls[0].dir) != filepath.Clean(r.fx.RepoDir) || calls[0].head != sha || calls[0].limit != 0 {
+	if !sameDir(calls[0].dir, r.fx.RepoDir) || calls[0].head != sha || calls[0].limit != 0 {
 		t.Errorf("the union ran in %s at %s within %s, want the worktree at %s with no limit", calls[0].dir, calls[0].head, calls[0].limit, sha)
 	}
 	if rd := envValue(calls[0].env, recordDirEnv); rd != "" {
@@ -190,7 +201,7 @@ func TestAFinalRunCoversTheHeadItRanAt(t *testing.T) {
 	if line.Commit != sha || line.HeadEnd != sha || line.TreeBefore != journal.TreeClean || line.TreeAfter != journal.TreeClean ||
 		line.Flags != "--final" || line.Source != "jig" || line.Session != "s-1" || line.Agent != "agent-1" || line.Jig == "" ||
 		line.Seconds < 1 || line.Command != res.Command || line.Slice != "" || line.Env != "rig" ||
-		!reflect.DeepEqual(line.Slices, []string{"a", "b", "c", "d"}) || filepath.Clean(line.Dir) != filepath.Clean(r.fx.RepoDir) {
+		!reflect.DeepEqual(line.Slices, []string{"a", "b", "c", "d"}) || !sameDir(line.Dir, r.fx.RepoDir) {
 		t.Errorf("final-oracle line = %+v, want every input and fact of the run", line)
 	}
 

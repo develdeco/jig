@@ -171,7 +171,7 @@ Gate rounds:
 - Round 2 (delta): 1 fix slice asked
 - Round 3 (delta): clean
 `, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"))
-	wantBody = withGateCommand(t, fx, wantBody)
+	wantBody = withNoFinalRun(t, greenShortSHA(t, d, fx.Ticket, "fix-2-alpha-test"), wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
@@ -332,7 +332,7 @@ Gate rounds:
 - Round 1: 1 fix slice asked
 - Round 2: clean
 `
-	wantBody = withGateCommand(t, fx, wantBody)
+	wantBody = withNoFinalRun(t, shortSHA(run(t, buildLeaseDir(t, fx), "rev-parse", "HEAD")), wantBody)
 	if body != wantBody {
 		t.Fatalf("pr/fixture-repo.md =\n%s\nwant\n%s", body, wantBody)
 	}
