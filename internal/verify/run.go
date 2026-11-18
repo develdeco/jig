@@ -575,7 +575,7 @@ func (x *run) execute() (why string, err error) {
 			}
 		}()
 	}
-	if err := x.runOracle(m, cmd, cmd == oracleCmd && x.r.Command == ""); errors.Is(err, envrun.ErrStopped) {
+	if err := x.runOracle(cmd, cmd == oracleCmd && x.r.Command == ""); errors.Is(err, envrun.ErrStopped) {
 		// jig was stopped mid-run: no verdict, and never the commit's failure.
 		return "", nil
 	} else if err != nil {
@@ -732,15 +732,15 @@ func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string
 // recorded, then the green state and the verified line, in that order (see the
 // pass below); a covering failure leaves the slice building, and a run that
 // covers nothing changes no state.
-func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err error) {
+func (x *run) runOracle(cmd string, ownOracle bool) (err error) {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	var target recordTarget
 	if !x.r.NoRecord {
 		target = rec.start(x.r.Slice, x.attempt, x.sha)
 	}
-	// A run that jig's stop ended (in the command)
-	// has nothing to record: its directory goes as a failed run's does.
+	// A run that jig's stop ended has nothing to record: its directory goes as
+	// a failed run's does.
 	defer func() {
 		if errors.Is(err, envrun.ErrStopped) {
 			_ = rec.finish(x.r.Slice, x.attempt, x.sha, target, false)

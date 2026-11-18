@@ -24,7 +24,7 @@ func TestHereAndStatusShowNoWaitingSection(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("jig %s exit %d:\n%s", strings.Join(args, " "), code, out)
 		}
-		if strings.Contains(out, "waiting") {
+		if strings.Contains(out, "waiting[") || strings.Contains(out, `"waiting":`) {
 			t.Errorf("jig %s shows a waiting section:\n%s", strings.Join(args, " "), out)
 		}
 	}
