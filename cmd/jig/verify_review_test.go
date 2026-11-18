@@ -32,7 +32,7 @@ func TestVerifyDirOutsideTheWorktreeCoversNothing(t *testing.T) {
 		if l.Event == journal.EventVerified {
 			t.Errorf("a run in another directory wrote %+v", l)
 		}
-		if l.Event == journal.EventOracle && (l.Uncovered != journal.UncoveredOtherDir || filepath.Clean(l.Dir) != filepath.Clean(elsewhere)) {
+		if l.Event == journal.EventOracle && (l.Uncovered != journal.UncoveredOtherDir || !sameDirectory(l.Dir, elsewhere)) {
 			t.Errorf("oracle line = %+v, want the directory it ran in and the reason", l)
 		}
 	}
@@ -132,4 +132,12 @@ func TestVerifyExitsWith125WhenItCannotReachTheCommand(t *testing.T) {
 	if code != 125 || strings.Contains(out, "result:") || !strings.Contains(out, "nonesuch") {
 		t.Errorf("verify of a slice with an undeclared env class: exit %d, want 125, the reason and no footer\n%s", code, out)
 	}
+}
+
+// sameDirectory reports whether a and b name one directory, whatever their
+// spelling (a short Windows path and its long form are one).
+func sameDirectory(a, b string) bool {
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(x, y)
 }
