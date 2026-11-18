@@ -53,26 +53,64 @@ func TestStopHoldsOnlyOnASlicesLatestCommit(t *testing.T) {
 	}
 }
 
-// TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant: slice a committed, then
-// slice b, then both verified at HEAD (the plain order of a multi-slice
-// ticket): slice a's commit is history, for `jig verify` at HEAD records a
-// verification of HEAD and could never clear it.
+// TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant: slice a
+// committed, then slice b, then both verified at HEAD (the plain order of a
+// multi-slice ticket): slice a's commit is history, for `jig verify` at HEAD
+// records a verification of HEAD and could never clear it. Only a `verified`
+// line of that same slice, at a descendant, makes a commit history.
 func TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant(t *testing.T) {
 	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-	r.handle(r.ev(KindSessionStart))
-	r.unattendedClaim("a")
-	r.recordStart()
-	a1 := r.commit("a", "a1.txt")
-	b1 := r.commit("b", "b1.txt")
-	for _, slice := range []string{"a", "b"} {
-		r.add(journal.Line{Event: journal.EventOracle, Slice: slice, Commit: b1, Attempt: 1, Outcome: "pass"})
-		r.add(journal.Line{Event: journal.EventVerified, Slice: slice, Commit: b1, Attempt: 1})
+	pass := func(r *rig, slice, commit string) {
+		r.add(journal.Line{Event: journal.EventOracle, Slice: slice, Commit: commit, Attempt: 1, Outcome: "pass"})
+		r.add(journal.Line{Event: journal.EventVerified, Slice: slice, Commit: commit, Attempt: 1})
 	}
+	for _, c := range []struct {
+		name string
+		// build makes the commits and lines, and returns the commit of slice a
+		// whose hold is in question.
+		build    func(r *rig) string
+		wantHeld bool
+	}{
+		{"both slices verified at HEAD hold nothing for slice a", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			b1 := r.commit("b", "b1.txt")
+			pass(r, "a", b1)
+			pass(r, "b", b1)
+			return a1
+		}, false},
+		{"only slice b verified at HEAD: slice a's commit is still held", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			b1 := r.commit("b", "b1.txt")
+			pass(r, "b", b1)
+			return a1
+		}, true},
+		{"only an uncovered pass of slice a at HEAD: still held", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			b1 := r.commit("b", "b1.txt")
+			pass(r, "b", b1)
+			r.add(journal.Line{Event: journal.EventOracle, Slice: "a", Commit: b1, Attempt: 1, Outcome: "pass", Uncovered: journal.UncoveredDirtyBefore})
+			return a1
+		}, true},
+		{"slice a verified at a1, then a2 committed: a2 is held", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			pass(r, "a", a1)
+			return r.commit("a", "a2.txt")
+		}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRig(t)
+			r.onTicketBranch()
+			r.handle(r.ev(KindSessionStart))
+			r.unattendedClaim("a")
+			r.recordStart()
+			commit := c.build(r)
 
-	res := r.handle(r.ev(KindStop))
-	if strings.Contains(res.Block, a1[:12]) || strings.Contains(res.Message, a1[:12]) {
-		t.Errorf("Stop = %+v, want no hold naming slice a's commit: it is verified at a descendant", res)
+			res := r.handle(r.ev(KindStop))
+			held := strings.Contains(res.Block, "commit "+commit[:12]+" for slice a is not verified")
+			if held != c.wantHeld {
+				t.Errorf("Stop = %+v, commit %s held = %v, want %v", res, commit[:12], held, c.wantHeld)
+			}
+		})
 	}
 }
