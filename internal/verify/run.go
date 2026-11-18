@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/store"
@@ -41,6 +42,11 @@ type Deps struct {
 	// no Project it takes none.
 	Project string
 	Slots   int
+	// Repos are the project's repos with the workspaces each declares, in a
+	// project of several: they say which slices of a ticket build in Repo
+	// (ready.Place), which a final run is the union of. nil, or one repo,
+	// means every slice builds here.
+	Repos []ready.Repo
 	// Repo is the repo's name in the project and Target its target branch.
 	// They find the sha the commit must descend from: the ticket's
 	// start.<Repo>.sha, else the merge base with origin/<Target>. Either may
@@ -248,21 +254,8 @@ func (d Deps) prepare(r Request) (*run, error) {
 		return x, errors.New("verify: a request names a ticket and a slice")
 	}
 
-	sha, err := gitx.RevParse(d.Clone, "HEAD")
-	if err != nil {
-		return x, fmt.Errorf("verify: HEAD of %s: %w", d.Clone, err)
-	}
-	x.sha, x.res.SHA, x.dir = sha, sha, d.Clone
-	x.cmdDir = d.Clone
-	if r.Dir != "" {
-		x.cmdDir = r.Dir
-		if fi, err := os.Stat(r.Dir); err != nil || !fi.IsDir() {
-			return x, fmt.Errorf("verify: %s is not a directory to run the command in", r.Dir)
-		}
-	}
-	x.res.Dir = x.cmdDir
-	if subject, err := gitx.Subject(d.Clone, sha); err == nil {
-		x.subject = oneLine(strings.TrimSpace(subject))
+	if err := x.prepareHead(); err != nil {
+		return x, err
 	}
 
 	slices, err := d.Store.ReadSlices(r.Ticket)
@@ -284,6 +277,30 @@ func (d Deps) prepare(r Request) (*run, error) {
 		return x, fmt.Errorf("verify: %w", err)
 	}
 	return x, nil
+}
+
+// prepareHead resolves the commit a run is of and where its command runs: HEAD
+// of the worktree, its subject, and the directory the request names (the
+// worktree's root when none).
+func (x *run) prepareHead() error {
+	d, r := x.d, x.r
+	sha, err := gitx.RevParse(d.Clone, "HEAD")
+	if err != nil {
+		return fmt.Errorf("verify: HEAD of %s: %w", d.Clone, err)
+	}
+	x.sha, x.res.SHA, x.dir = sha, sha, d.Clone
+	x.cmdDir = d.Clone
+	if r.Dir != "" {
+		x.cmdDir = r.Dir
+		if fi, err := os.Stat(r.Dir); err != nil || !fi.IsDir() {
+			return fmt.Errorf("verify: %s is not a directory to run the command in", r.Dir)
+		}
+	}
+	x.res.Dir = x.cmdDir
+	if subject, err := gitx.Subject(d.Clone, sha); err == nil {
+		x.subject = oneLine(strings.TrimSpace(subject))
+	}
+	return nil
 }
 
 // Run verifies HEAD of the worktree Deps.Clone in this process: it runs the
@@ -466,7 +483,11 @@ func (x *run) push(what string) {
 		return
 	}
 	x.res.Pushed = true
-	msg := fmt.Sprintf("%s: verify %s %s: %s", x.r.Ticket, x.r.Slice, short(x.sha), what)
+	slice := x.r.Slice
+	if slice == "" {
+		slice = "final"
+	}
+	msg := fmt.Sprintf("%s: verify %s %s: %s", x.r.Ticket, slice, short(x.sha), what)
 	var err error
 	for i := 0; i < pushTries; i++ {
 		if err = x.d.Store.Push(msg); err == nil {

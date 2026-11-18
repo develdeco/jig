@@ -20,6 +20,7 @@ const (
 	EventEnvDown        = "env-down"
 	EventEnvUnavailable = "env-unavailable"
 	EventEnvUp          = "env-up"
+	EventFinalOracle    = "final-oracle"
 	EventFixSlice       = "fix-slice"
 	EventGateClean      = "gate-clean"
 	EventGateOracle     = "gate-oracle"

@@ -54,6 +54,9 @@ type Line struct {
 	// ran for, since an oracle has a command for each workspace.
 	Workspace string `json:"workspace,omitempty"`
 	Env       string `json:"env,omitempty"`
+	// Slices is a final-oracle line's slice ids: the slices whose commands the
+	// run was the union of, in slices.yaml order. Omitted when empty.
+	Slices []string `json:"slices,omitempty"`
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`

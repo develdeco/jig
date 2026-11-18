@@ -124,7 +124,7 @@ func TestVerifyRefusesWhatItCannotPlace(t *testing.T) {
 func TestVerifyHelpListsItsFlags(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(flagsBlockFor("verify"), "\n")
-	for _, want := range []string{"--slice", "--dir", "--timeout", "--dry-run", "--no-record", "--json", "--session", "--store", "--project", "-- <cmd>", "[<ticket>]", "125"} {
+	for _, want := range []string{"--slice", "--final", "--dir", "--timeout", "--dry-run", "--no-record", "--json", "--session", "--store", "--project", "-- <cmd>", "[<ticket>]", "125"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("jig verify -h lacks %s:\n%s", want, got)
 		}
