@@ -11,8 +11,7 @@
 // (PublishRecordPR) or pushes the reviewed head and opens it (Publish). Publish
 // reconciles nothing, squashes nothing and commits nothing on the ticket
 // branch, so the person's branch never diverges from origin's because of it.
-// The one launched reviewer left is the source internal/revieweval measures
-// reviewers with (a Launcher starts its sessions; this package starts none).
+// This package starts no session.
 package verifydeliver
 
 import (

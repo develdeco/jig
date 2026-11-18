@@ -1,22 +1,17 @@
 package verifydeliver
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -1072,80 +1067,5 @@ func advanceTargetEditing(t *testing.T, fx *fixture.Fixture, rel string) {
 	builder(t).Commit(clone, "upstream: unrelated change")
 	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {
 		t.Fatalf("push: %v", err)
-	}
-}
-
-// TestGateInfersAnAdoptedTicketsIntent: an adopted ticket's intent follows the
-// precedence every ticket's does - brief, intent.md, inferred, none - and
-// inference needs nothing special for it. A branch built outside jig is the
-// case inference exists for: the scope diff is the adopted branch against its
-// merge base with the target (not the target's tip: main has moved on since the
-// fork), and the session that matches is the author's own. The round records
-// the adoption and the inferred intent.md, and later rounds read it.
-func TestGateInfersAnAdoptedTicketsIntent(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	tmpHome := t.TempDir()
-	fx := fixture.Generate(t, fixture.Opts{ScenarioBranch: "inferred-intent", Home: t.TempDir()})
-	d := newDeps(t, fx)
-	d.UserHome = tmpHome
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	newAdoptTicket(t, d, ticket)
-	authorBranch(t, fx, branch) // touches alpha/alpha.go only
-	// main moves on by editing a file that exists at the fork point, so a scope
-	// diff taken against main's tip instead of the merge base would show it.
-	advanceTargetEditing(t, fx, "beta/beta.go")
-	writeSyntheticClaudeSession(t, tmpHome, "session-author", fx.RepoDir,
-		[]string{"alpha/alpha.go"}, time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC))
-
-	backend, err := session.New("fake", session.Options{ScenarioDir: fx.ScenarioDir})
-	if err != nil {
-		t.Fatalf("session.New: %v", err)
-	}
-	var requests []ReviewRequest
-	wrapped := stubBackend{run: func(sd session.Dispatch) error {
-		if sd.Slice != "gate" {
-			t.Errorf("a %q session was dispatched, but only the reviewer is", sd.Slice)
-		}
-		data, rerr := os.ReadFile(sd.SliceJSON)
-		if rerr != nil {
-			t.Errorf("read the reviewer's request: %v", rerr)
-		}
-		var req ReviewRequest
-		if jerr := json.Unmarshal(data, &req); jerr != nil {
-			t.Errorf("parse the reviewer's request: %v", jerr)
-		}
-		requests = append(requests, req)
-		return backend.Run(sd)
-	}}
-
-	report, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket, Branch: branch})
-	if err != nil {
-		t.Fatalf("Gate --branch on a brief-less ticket: %v", err)
-	}
-	if report.Branch != branch {
-		t.Fatalf("report.Branch = %q, want the adopted %q", report.Branch, branch)
-	}
-	// The author's own session matches the adopted branch's diff (against its
-	// merge base, without main's own change), so the reviewer is pointed at its
-	// excerpt. No intent is stated or recorded: the excerpt is a hint.
-	if report.Intent.Source != IntentSourceNone || report.IntentNote != "" {
-		t.Fatalf("intent = %q (note %q), want none and no note: the author's own session matches the adopted branch's diff", report.Intent.Source, report.IntentNote)
-	}
-	want := filepath.Join(home.IntentExcerptDir(fx.Home), ticket, "session-author.md")
-	if len(requests) != 1 || requests[0].IntentExcerpt != want {
-		t.Fatalf("the reviewer's requests = %+v, want one pointing at the excerpt %s", requests, want)
-	}
-	if _, ok, err := d.Store.ReadIntent(ticket); err != nil || ok {
-		t.Fatalf("ReadIntent: ok=%v err=%v, want no intent.md", ok, err)
-	}
-	if got, err := d.Store.TicketBranch(ticket, "main"); err != nil || got != branch {
-		t.Fatalf("TicketBranch = %q (err %v), want the adopted %q", got, err, branch)
-	}
-
-	// A later round points at the excerpt again.
-	if _, err := Gate(d, newReviewerGateSource(wrapped), GateOpts{Ticket: ticket}); err != nil {
-		t.Fatalf("Gate round 2: %v", err)
 	}
 }

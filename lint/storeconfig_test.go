@@ -17,13 +17,12 @@ import (
 // and read through one door. internal/project is that door (LoadStoreConfig,
 // LoadConfig); the others write or move the file: the store's Open names the
 // two it accepts, the migration steps rewrite one into the other, the fixture
-// writes a v2 store, and the review eval builds a store of its own.
+// writes a v2 store.
 var storeConfigFiles = []string{
 	"internal/project/",
 	"internal/migrate/",
 	"internal/store/store.go",
 	"internal/fixture/fixture.go",
-	"internal/revieweval/runner.go",
 }
 
 // TestStoreConfigIsReadThroughTheLoader keeps a v3 store working everywhere: a

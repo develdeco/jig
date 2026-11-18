@@ -168,12 +168,6 @@ type roundFiles struct {
 	qualified bool
 }
 
-// oneRepoFiles is the files of a round over one repo with manifest man, whose
-// files are paths in the repo.
-func oneRepoFiles(man manifest.Manifest) roundFiles {
-	return roundFiles{repos: []roundRepo{{Man: man}}}
-}
-
 // of returns the repo file is in and its path there. ok is false when a
 // round over several repos is handed a file that does not begin with the name
 // of one of them.

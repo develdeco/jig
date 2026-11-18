@@ -19,9 +19,6 @@ const modulePath = "github.com/develdeco/jig"
 // does not start one, so no code of that kind is in the binary, whether or not
 // anything calls it.
 var cliForbiddenDeps = []string{
-	"internal/session",
-	"internal/staircase",
-	"internal/screen",
 	"internal/frontier",
 }
 

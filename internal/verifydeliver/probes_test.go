@@ -1,14 +1,12 @@
 package verifydeliver
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/session"
 )
 
 // TestParseReviewResultProbeRules: probes and skipped are optional, parse as
@@ -70,148 +68,6 @@ func TestParseReviewResultProbeRules(t *testing.T) {
 				t.Fatalf("ParseReviewResult = %v, want REVIEW_INVALID", err)
 			}
 		})
-	}
-}
-
-// TestGateHandsTheNextRoundItsProbeLedger drives two real gate rounds (ADR
-// 0036). Round 1 starts from no probe and every hunk of the change unprobed;
-// its reviewer probes one hunk of an alpha file and one of a beta file and
-// skips another file whole, and the round keeps them in findings.yaml with
-// their files' blobs and counts what it left. The branch then changes the beta
-// file only. Round 2's request lists the alpha probe current and the beta one
-// stale, and its hunks are the whole change's, not the delta's: the alpha
-// hunk still has its probe, the skipped file is still set aside, and the beta
-// file's hunks are unprobed again.
-func TestGateHandsTheNextRoundItsProbeLedger(t *testing.T) {
-	t.Parallel()
-
-	fx := generateBuilt(t, "rung-a")
-	d := newDeps(t, fx)
-
-	var reqs []ReviewRequest
-	var alpha, beta HunkEntry
-	skipped := ""
-	backend := stubBackend{run: func(sd session.Dispatch) error {
-		data, err := os.ReadFile(sd.SliceJSON)
-		if err != nil {
-			t.Fatalf("read review.json: %v", err)
-		}
-		var req ReviewRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			t.Fatalf("parse review.json: %v", err)
-		}
-		reqs = append(reqs, req)
-		result := ReviewResult{ReviewedPaths: req.MustReview, Summary: "probed"}
-		if len(reqs) == 1 {
-			for _, h := range req.Hunks {
-				switch {
-				case alpha.File == "" && strings.HasPrefix(h.File, "alpha/"):
-					alpha = h
-				case beta.File == "" && strings.HasPrefix(h.File, "beta/"):
-					beta = h
-				}
-			}
-			for _, h := range req.Hunks {
-				if h.File != alpha.File && h.File != beta.File {
-					skipped = h.File
-				}
-			}
-			if alpha.File == "" || beta.File == "" || skipped == "" {
-				t.Fatalf("round 1 hunks = %+v, want hunks in alpha and beta and a third file", req.Hunks)
-			}
-			result.Probes = []ResultProbe{
-				{Seam: "alpha's path", File: alpha.File, Line: alpha.From, Mutation: "negate it", Command: "go test ./alpha", Outcome: ProbeCaught},
-				{Seam: "beta's path", File: beta.File, Line: beta.From, Mutation: "drop it", Command: "go test ./beta", Outcome: ProbeSurvived},
-			}
-			result.Skipped = []ResultSkip{{File: skipped, Why: "tests"}}
-		}
-		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
-	}}
-	src := newReviewerGateSource(backend)
-
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	req1 := reqs[0]
-	if len(req1.Probed) != 0 {
-		t.Errorf("round 1 probed = %+v, want none", req1.Probed)
-	}
-	for _, h := range req1.Hunks {
-		if !h.Unprobed() {
-			t.Errorf("round 1 hunk %+v, want every hunk unprobed", h)
-		}
-	}
-	covered := 0
-	for _, h := range req1.Hunks {
-		if h == alpha || h == beta || h.File == skipped {
-			covered++
-		}
-	}
-	if report1.Probes != 2 || report1.Unprobed != len(req1.Hunks)-covered {
-		t.Errorf("round 1 report: probes %d, unprobed %d; want 2 and %d", report1.Probes, report1.Unprobed, len(req1.Hunks)-covered)
-	}
-	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
-	if err != nil || !ok {
-		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
-	}
-	if len(ff1.Probes) != 2 || len(ff1.Skipped) != 1 {
-		t.Fatalf("round 1 findings.yaml probes %+v, skipped %+v; want 2 and 1", ff1.Probes, ff1.Skipped)
-	}
-	head1 := req1.HeadSHA
-	for _, p := range ff1.Probes {
-		want, err := gitx.RevParse(buildLeaseDir(t, fx), head1+":"+p.File)
-		if err != nil || p.Blob != want {
-			t.Errorf("probe of %s keeps blob %q, want %q (err %v)", p.File, p.Blob, want, err)
-		}
-	}
-
-	// The branch changes the beta file and nothing else.
-	build := buildLeaseDir(t, fx)
-	path := filepath.Join(build, filepath.FromSlash(beta.File))
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, append(body, []byte("\n// changed after round 1\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	builder(t).Commit(build, "change beta after round 1")
-	builder(t).Push(build, "origin", ticketBranch(fx.Ticket))
-
-	if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if len(reqs) != 2 {
-		t.Fatalf("reviewer dispatched %d times, want 2", len(reqs))
-	}
-	req2 := reqs[1]
-	if req2.Scope != "delta" {
-		t.Errorf("round 2 scope = %q, want delta", req2.Scope)
-	}
-	states := map[string]string{}
-	for _, p := range req2.Probed {
-		if p.Round != 1 {
-			t.Errorf("round 2 probed %+v, want round 1", p)
-		}
-		states[p.File] = p.State
-	}
-	if states[alpha.File] != ProbeCurrent || states[beta.File] != ProbeStale {
-		t.Errorf("round 2 probed states = %v, want %s current and %s stale", states, alpha.File, beta.File)
-	}
-	var sawAlpha bool
-	for _, h := range req2.Hunks {
-		switch {
-		case h == HunkEntry{File: alpha.File, From: alpha.From, To: alpha.To, Probes: 1}:
-			sawAlpha = true
-		case h.File == skipped && h.Skip != "tests":
-			t.Errorf("round 2 hunk %+v, want it set aside as tests", h)
-		case h.File == beta.File && !h.Unprobed():
-			t.Errorf("round 2 hunk %+v of the changed file, want it unprobed", h)
-		}
-	}
-	if !sawAlpha {
-		t.Errorf("round 2 hunks = %+v, want the whole change's, with alpha's probed hunk %+v", req2.Hunks, alpha)
 	}
 }
 

@@ -25,7 +25,7 @@ const VerdictNotIndependent = "not-independent"
 // passed, each lease is on the copy of the branch the round works on, the
 // oracles passed on its head, and the round is numbered and journaled as
 // opened. A recorded round (GatePrepare) stops here and hands the review to
-// an agent; a scripted or launched one (Gate) asks its source; either way
+// an agent; a scripted one (Gate) asks its source; either way
 // finish does the rest.
 type gateRun struct {
 	d      Deps
@@ -360,7 +360,7 @@ func (r *gateRun) queueKeptFindings() error {
 }
 
 // roundInput is what the review of this round is handed: the request is built
-// from it (PrepareReviewRequest), and a launched or scripted source reads it.
+// from it (PrepareReviewRequest), and a scripted source reads it.
 func (r *gateRun) roundInput() RoundInput {
 	in := RoundInput{
 		Store:      r.d.Store,
@@ -419,16 +419,14 @@ func (r *gateRun) copies() string {
 }
 
 // Gate runs one gate round for ticket on a source that supplies its review
-// itself: the scripted source a scenario plays back, or a reviewer session
-// jig launches. It runs no command: it reads the ticket's branch in a fresh gate lease,
+// itself: the scripted source a scenario plays back. It runs no command: it reads the ticket's branch in a fresh gate lease,
 // lists the passes the slices' builders had witnessed, then asks src for this round's review
 // content, and records the round (finish).
 //
 // `jig gate` does not use it for a real review: a person's or an agent's
 // review is recorded by GatePrepare, which opens the round, and GateFinish,
 // which closes it once a reviewer jig did not start has reported. Gate stays
-// for the scripted source (`jig gate --scenario`, the tests) and the launched
-// reviewer of internal/revieweval.
+// for the scripted source (`jig gate --scenario`, the tests).
 func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
@@ -443,7 +441,7 @@ func Gate(d Deps, src GateSource, o GateOpts) (report GateReport, err error) {
 }
 
 // finishInfo is what a round's record carries of who reviewed it, beyond the
-// review itself: nothing for a scripted or launched round, the reviewer's
+// review itself: nothing for a scripted round, the reviewer's
 // self-reported model and effort, who they are and whether they are
 // independent of the builders for a recorded one.
 type finishInfo struct {
@@ -563,12 +561,12 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		// The fix budget: a ticket's used budget is the count of its
 		// earlier gate rounds (1..n-1) that appended at least one fix
 		// slice; once that equals gate.fix_rounds, this round parks every
-		// would-be open fix instead of queuing it (ApplyRound's own
+		// would-be open fix instead of queuing it (applyRound's own
 		// budgetReached parameter).
 		budgetUsed, _ := UsedFixBudget(d.Store, ticket, n)
 		budgetReached := budgetUsed >= *gateCfg.FixRounds
 		// still_present entries are expanded into full ResultFindings here,
-		// right before ApplyRound, so recurrence counting, routing, triage,
+		// right before applyRound, so recurrence counting, routing, triage,
 		// the fix budget and findings.yaml all see exactly what a full
 		// re-report of each confirmed finding would give them;
 		// round.Review.Result (and the reviewer's raw result.json on disk)

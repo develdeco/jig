@@ -98,50 +98,8 @@ In scope - what jig itself guarantees, and a report that breaks one of these:
   git history, or the host machine itself, through jig's own machinery rather
   than through git or the OS directly.
 
-The reviewer evaluation (`internal/revieweval`, opt-in: `JIG_REVIEWEVAL_BACKEND`;
-not part of the `jig` binary) is the one place the source tree still starts a
-model, as a `headless` session (`internal/session`). That backend is not a
-security boundary: a granted session's shell and file reads run with the
-operator's own user rights and are not confined to its worktree, so run the
-evaluation only against code, and only on a machine, you would already hand that
-same shell and file access. The screens are an accident guard, not a sandbox:
-they deny specific destructive or history-rewriting git subcommands and
-credential-shaped paths for the backend's tool calls; they do not confine a
-session's shell, and ordinary git commands (commit, checkout, fetch, and the
-like) are still allowed. jig's own settings grant such a session's shell and
-file-read tools only through a passing screen, and its file-edit tools only
-inside the worktree and on its own `result.json`; the operator's own user
-settings still load on top of that (`--setting-sources user`) and can grant
-more, the same way their deny rules can narrow it. The backend checks that the
-screen still answers before each screened session starts (`SCREEN_UNAVAILABLE`),
-though that check binds only the start of a session. The worktree's own
-`.claude` settings are not loaded, since they are part of the code under review;
-its `CLAUDE.md` is read from the committed tree, capped at 64 KiB
-(`LEASE_MEMORY_TOO_LARGE`), rather than from the working tree. See
-[ADR 0008](../docs/adr/0008-headless-permission-model.md) for why a denylist of
-path spellings cannot substitute for confinement. Within that, in scope: a
-headless session that starts with its shell or file-read tools ungranted by the
-screen hook, or whose file-edit tools write outside its worktree or its own
-`result.json`, through jig's generated settings rather than the operator's own
-Claude Code settings.
-
 Out of scope:
 
-- A credential-shaped path that the secret screen
-  (`internal/screen.SecretPath` and `internal/screen.ToolCall`) fails to
-  deny through a shell glob or variable expansion, a junction or hard
-  link, or a search root anchored one level above a credential directory.
-  The screen is an accident guard on an unconfined shell, not a boundary a
-  denylist of path spellings can complete - see
-  [ADR 0008](../docs/adr/0008-headless-permission-model.md) for why. Real
-  confinement (a container, a separate user, or a credential-free `HOME`)
-  is future work, not a bug in the current design.
-- A `git push` (or another banned subcommand) that the structural command
-  screen (`internal/screen.Command`) fails to catch through an indirection
-  such as a git alias (`-c alias.x=push`), a shell variable, or command
-  substitution. The screen judges one token at a time before a shell ever
-  interprets it, the same accident-guard shape as the credential-path gap
-  above - see [ADR 0008](../docs/adr/0008-headless-permission-model.md).
 - Vulnerabilities in Go itself, the `git` binary, `gh`, or the harness jig
   attaches to (Claude Code, Codex, Gemini CLI, Cursor, GitHub Copilot, OpenCode)
   - report those upstream.

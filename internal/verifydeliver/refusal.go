@@ -1,7 +1,6 @@
 package verifydeliver
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -23,28 +22,4 @@ func refusalReason(err error) string {
 		s = string(r[:refusalReasonCap]) + "..."
 	}
 	return s
-}
-
-// backendFallback reports whether data, a session's result file, has the
-// shape a backend gives the result it writes itself when a session wrote
-// none: a JSON object with an "outcome" field, the slice result's, which a
-// pick result does not have. It is the field, not any wording, that says so.
-// outcome and summary are what the backend recorded, for the report; one that
-// is not a string is left out.
-func backendFallback(data []byte) (outcome, summary string, ok bool) {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(data, &top); err != nil {
-		return "", "", false
-	}
-	if _, ok := top["outcome"]; !ok {
-		return "", "", false
-	}
-	str := func(key string) string {
-		var v string
-		if raw, ok := top[key]; ok {
-			_ = json.Unmarshal(raw, &v)
-		}
-		return v
-	}
-	return str("outcome"), str("summary"), true
 }

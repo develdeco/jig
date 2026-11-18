@@ -16,9 +16,9 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// Round is one gate round's content, whether played back by a fake source
-// (tests) or produced by a real reviewer session. Review is set only by the
-// reviewer source (review.go): its validated result plus scope data, which
+// Round is one gate round's content, whether played back by a scripted source
+// or the review of a recorded round (GateFinish). Review is its validated
+// result plus scope data, which
 // Gate applies through findings bookkeeping (findings.go) to decide clean
 // vs fix-slices and to persist findings.yaml/md, then routes into fix
 // slices (route.go) - those are appended directly from routing's own
@@ -146,7 +146,7 @@ type GateReport struct {
 	Effort string
 	// Reviewer is who reported a recorded round, and Independent whether they
 	// are independent of the agents that built what they reviewed. Both are
-	// the zero value for a scripted or launched round.
+	// the zero value for a scripted round.
 	Reviewer    Provenance
 	Independent Independence
 	// OracleNames are the manifest's oracle names at this round.
@@ -156,7 +156,7 @@ type GateReport struct {
 	Copy string
 	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
 	// every reviewer round, clean or not - the anchor the next round's
-	// scope resolves against (review.go's resolveScopeBase). nil for a
+	// scope resolves against (review.go's resolveScope). nil for a
 	// scripted round.
 	ReviewedSHA map[string]string
 	// ReviewedBase is repoName -> the base the reviewer read repo from, on
@@ -240,7 +240,7 @@ type reportYAML struct {
 	Intent       reportIntentYAML  `yaml:"intent"`
 	// Independent says whether the reviewer of a recorded round is
 	// independent of the builders (true, false or unknown); absent for a
-	// scripted or launched round. A fact of the round, never a reason it
+	// scripted round. A fact of the round, never a reason it
 	// is not clean (ADR 0046).
 	Independent Independence `yaml:"independent,omitempty"`
 	// CarriedFrom is the number of the round whose verdict this clean round
@@ -283,7 +283,7 @@ type reportIntentYAML struct {
 // gate.fix_rounds to decide whether a round still queues fix findings or
 // parks them. unreadable names any round in that range whose report.yaml
 // could not be read or parsed, skipped rather than counted either way -
-// the same tolerance OutstandingAsks and `jig status`'s own round-reading
+// the same tolerance OutstandingFindings and `jig status`'s own round-reading
 // already apply, since one corrupt earlier round is not reason enough to
 // treat every ticket's budget as exhausted or to refuse every later
 // round. Gate and `jig status` share this one reading, so neither can

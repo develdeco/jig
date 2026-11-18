@@ -167,33 +167,6 @@ func TestRecordedRoundKeepsOnlyTheLatestRecordings(t *testing.T) {
 	}
 }
 
-// TestRecordedRoundKeepsARecordingItsReaderRefusesOutOfTheList: a recording the round's
-// Readable rule refuses is not listed, and is counted as omitted instead of
-// being listed as evidence the reviewer cannot read.
-func TestRecordedRoundKeepsARecordingItsReaderRefusesOutOfTheList(t *testing.T) {
-	t.Parallel()
-	l := newRecordingsLease(t)
-	st := newReviewStore(t)
-	jigHome := t.TempDir()
-	d := Deps{Store: st, Home: jigHome}
-	journalLines(t, st, "JIG-1", recordBuild(t, d, "JIG-1", l.c2, "a-a1-f0", []recSpec{
-		{File: "home.svg", Content: "home"},
-		{File: "press_key.svg", Content: "a key press"},
-		{File: ".env-setup.svg", Content: "setup"},
-	}))
-
-	in := l.roundInput(st, jigHome)
-	in.Readable = func(file string) bool {
-		base := filepath.Base(file)
-		return !strings.HasPrefix(base, ".env") && !strings.Contains(base, "_key")
-	}
-	preparedRequest(t, in)
-	list := recordedList(t, reviewListPath(t, st, jigHome, 1))
-	if len(list.Recordings) != 1 || list.Recordings[0].Scenario != "home" || list.Omitted != 2 {
-		t.Errorf("listed %+v, omitted %d; want home alone, with the two the reader refuses counted", list.Recordings, list.Omitted)
-	}
-}
-
 // TestRecordedRoundKeepsTheListFromBeingWrittenThroughALink: the list is not
 // written below a directory that is a link (the round fails and the link's
 // target is untouched), a link in the list's own place is replaced, not written

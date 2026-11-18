@@ -803,7 +803,7 @@ func riskOrder(risk string) int {
 // ticket's `jig triage` lines, TriageDecisions; nil for none): "dismissed by a
 // person", "kept by an agent", with the decision's reason. A finding with no
 // such line reads as before: "dismissed by a human". A repeat of an
-// already-dismissed finding (ApplyRound's rule 2) resets its own Triage field
+// already-dismissed finding (applyRound's rule 2) resets its own Triage field
 // to "" on purpose, so the wording comes from the line, never from that field.
 func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDecision, lastRound int, slices []store.Slice) (outcomes []findingOutcome, reviewedPaths []string, lastSummary string, err error) {
 	latest := make(map[string]Finding)

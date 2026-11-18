@@ -261,7 +261,7 @@ jobs:
   # The package the test job's Windows leg skips, on a Windows runner of its
   # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
   # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
-  # cmd/jig, e2e and revieweval land; until then cmd/jig bounds the
+  # cmd/jig and e2e land; until then cmd/jig bounds the
   # step and the saving does not show. A package alone on the runner runs
   # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
   # step). It runs when the test job's Windows leg does. Main's ruleset does

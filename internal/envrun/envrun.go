@@ -106,8 +106,8 @@ func Shell(cmd, dir string) error {
 // scenarios record into (ADR 0029). jig sets it only on a builder's green
 // oracle run; unset means do not record. Because the variable is how a run
 // opts in, jig never passes it on from its own environment to a command in
-// this package (an oracle run, an env class's up, check and down) or to a
-// headless session (internal/session), both through ChildEnv. jig can itself
+// this package (an oracle run, an env class's up, check and down), through
+// ChildEnv. jig can itself
 // run inside a recording oracle run (it tests itself), and these must not
 // record into that run's directory. git and gh run no scenarios and may
 // inherit it.

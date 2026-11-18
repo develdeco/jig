@@ -181,12 +181,11 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 	d := newDeps(t, fx)
 	newAdoptTicket(t, d, ticket)
 	tip := authorBranch(t, fx, branch)
-	src := newReviewerGateSource(reviewerBackend(t))
 
 	step(t, "a target that moved after the clean round changes nothing a publish ships", func(t *testing.T) {
-		first, err := Gate(d, src, GateOpts{Ticket: ticket, Branch: branch})
-		if err != nil || first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] != tip {
-			t.Fatalf("Gate --branch: verdict %q, reviewed %q, err %v, want a clean reviewer round over the author's %s", first.Verdict, first.ReviewedSHA["fixture-repo"], err, tip)
+		first := recordedRound(t, d, GateOpts{Ticket: ticket, Branch: branch}, cleanReport)
+		if first.Verdict != "clean" || first.ReviewedSHA["fixture-repo"] != tip {
+			t.Fatalf("Gate --branch: verdict %q, reviewed %q, want a clean reviewer round over the author's %s", first.Verdict, first.ReviewedSHA["fixture-repo"], tip)
 		}
 		advanceTarget(t, fx)
 
@@ -218,9 +217,9 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 			t.Fatalf("the journal grew from %d to %d lines over a refused publish", len(journalBefore), len(after))
 		}
 
-		second, err := Gate(d, src, GateOpts{Ticket: ticket})
-		if err != nil || second.ReviewedSHA["fixture-repo"] != pushed {
-			t.Fatalf("Gate round 2: reviewed %q, err %v, want a round over the author's new commit %s", second.ReviewedSHA["fixture-repo"], err, pushed)
+		second := recordedRound(t, d, GateOpts{Ticket: ticket}, cleanReport)
+		if second.ReviewedSHA["fixture-repo"] != pushed {
+			t.Fatalf("Gate round 2: reviewed %q, want a round over the author's new commit %s", second.ReviewedSHA["fixture-repo"], pushed)
 		}
 		if _, err := Publish(d, PublishOpts{Ticket: ticket, Yes: true}); err != nil {
 			t.Fatalf("Publish after a round over the branch as it is: %v", err)

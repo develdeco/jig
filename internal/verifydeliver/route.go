@@ -13,7 +13,7 @@ import (
 )
 
 // TriageInput is what one Triage hook call sees: this round's newly routed
-// findings (findings.go's ApplyRound output, split by jig's own status),
+// findings (findings.go's applyRound output, split by jig's own status),
 // each list sorted by risk, high first. Fixes is every finding routed open
 // (a new or recurring fix; a fix with no build target jig can derive never
 // appears here - see Asks); Asks is every finding routed asked; Notes is
@@ -128,7 +128,7 @@ func sortByRiskThenID(fs []Finding) {
 	})
 }
 
-// routeRound runs triage over reported (findings.go's ApplyRound output for
+// routeRound runs triage over reported (findings.go's applyRound output for
 // this round) plus outstanding (cum's still-asked findings this round's
 // reviewer did not report again, findings.go's outstandingAsks) and turns
 // the outcome into fix slices. It mutates and returns reported's own
@@ -142,7 +142,7 @@ func sortByRiskThenID(fs []Finding) {
 // for outstanding's noted findings (cum's notes this round's reviewer did not
 // report again): a person's keep or dismissal of one is applied like an ask's
 // (TriageResult.Notes), and a note nobody decided is left exactly as
-// ApplyRound reported it or cum has it. Routing
+// applyRound reported it or cum has it. Routing
 // and triage finish entirely inside this call, before Gate appends any
 // slice or pushes the store.
 //
