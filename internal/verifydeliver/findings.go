@@ -34,7 +34,8 @@ const (
 // RoutedWhy vocabulary: the reason jig forced a finding to asked despite
 // the reviewer's own label (Finding.RoutedWhy) - budget for one parked past
 // the fix budget, recurrence for one forced by the recurrence bound,
-// build-target for one missing a workspace or an oracle jig can resolve.
+// build-target for one missing a workspace or the command its reviewer
+// should have named.
 // Empty (no constant) for a reviewer's own ask, which jig never had to
 // force.
 const (

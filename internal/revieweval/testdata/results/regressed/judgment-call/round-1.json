@@ -6,7 +6,7 @@
       "title": "Retry retries a possibly non-idempotent request",
       "detail": "Retry retries every failure the same way, including one where send may have already taken effect before returning an error, such as a call that creates a record; the loop should skip retrying that case.",
       "action": "fix",
-      "oracle": "go test ./... -run 'TestCase'",
+      "oracle": "go test ./netutil -run 'TestRetry'",
       "risk": "medium",
       "risk_rationale": "Retrying a request that already succeeded server-side can duplicate its effect."
     }

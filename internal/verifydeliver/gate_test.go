@@ -1941,13 +1941,11 @@ func renameOracle(t *testing.T, buildDir, branch, from, to string) {
 // setupStaleOracleThroughRoundTwo drives a fixture through two green gate
 // rounds recording the same open finding on a two-oracle manifest with an
 // explicit oracle ("vet"), then renames that oracle to "lint" on the ticket
-// branch: a fix slice recorded a valid oracle, went green twice, and the
-// manifest changed between rounds so that recorded oracle no longer
-// resolves. round3 supplies round 3's own review
+// branch: a fix slice recorded "vet", went green twice, and the manifest
+// changed between rounds so that "vet" is no longer a manifest oracle, only a
+// command. round3 supplies round 3's own review
 // result (a recurrence of the same finding via Prior, reported as a note
-// with its oracle omitted so validation's "must name one of the manifest's
-// oracles" rule does not apply - the same way the real scenario reaches jig
-// with a stale, carried-forward oracle instead of a freshly named one) and
+// with its oracle omitted, so it carries forward the recorded one) and
 // gets req (round 3's review.json request) to build it from. It returns the
 // deps, fixture and reviewer source with rounds 1 and 2 already applied,
 // ready for the caller to run round 3 through Gate.

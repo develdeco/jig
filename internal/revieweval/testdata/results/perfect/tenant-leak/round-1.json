@@ -6,7 +6,7 @@
       "title": "ForTenant ignores tenantID",
       "detail": "ForTenant returns the whole package-level invoices slice regardless of the tenantID argument, so a caller for one tenant sees every tenant's invoices.",
       "action": "fix",
-      "oracle": "go test ./... -run 'TestCase'",
+      "oracle": "go test ./billing -run 'TestForTenant'",
       "risk": "high",
       "risk_rationale": "One tenant can read another tenant's billing data."
     }

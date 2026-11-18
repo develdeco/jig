@@ -174,7 +174,7 @@ func TestAnOmittedOracleStaysEmpty(t *testing.T) {
 
 // --- routeRound: grouping ------------------------------------------------
 
-func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
+func TestRouteRoundGroupsFixesByWorkspace(t *testing.T) {
 	t.Parallel()
 
 	st := newReviewStore(t)

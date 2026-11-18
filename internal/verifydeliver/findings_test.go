@@ -204,7 +204,7 @@ func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
 	}
 	f := reported[0]
 	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
-		t.Errorf("finding = %+v, want asked/routed_as ask (no oracle jig can resolve)", f)
+		t.Errorf("finding = %+v, want asked/routed_as ask (no command named)", f)
 	}
 }
 

@@ -6,7 +6,7 @@
       "title": "job is captured by reference across goroutines",
       "detail": "Every goroutine closes over the same loop variable job, so by the time they run it may hold the last job's value.",
       "action": "fix",
-      "oracle": "go test ./... -run 'TestCase'",
+      "oracle": "go test ./worker -run 'TestRunAll'",
       "risk": "medium",
       "risk_rationale": "Jobs could run with the wrong argument."
     }

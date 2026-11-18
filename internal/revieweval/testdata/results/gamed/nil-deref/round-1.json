@@ -6,7 +6,7 @@
       "title": "Lookup's nil check would be redundant",
       "detail": "store is populated with every valid id at startup and Lookup is only ever called with ids the caller already validated, so u can never be nil here.",
       "action": "fix",
-      "oracle": "go test ./... -run 'TestCase'",
+      "oracle": "go test ./users -run 'TestLookup'",
       "risk": "low",
       "risk_rationale": "No caller passes an id outside the validated set (this is the gamed, incorrect premise: nothing validates the id before Lookup is called)."
     }

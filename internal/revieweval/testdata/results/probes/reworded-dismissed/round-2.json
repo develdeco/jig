@@ -6,7 +6,7 @@
       "title": "Highest can't select a non-positive priority",
       "detail": "bestPriority starts at 0, so a task whose priority is 0 or negative never replaces it; when every priority is non-positive, Highest returns \"\".",
       "action": "fix",
-      "oracle": "go test ./... -run 'TestCase'",
+      "oracle": "go test ./queue -run 'TestHighest'",
       "risk": "medium",
       "risk_rationale": "A queue of only non-positive priorities silently returns no winner."
     },
