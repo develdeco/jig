@@ -20,7 +20,7 @@ jig context <ticket> --slice <slice>
 
 `jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. **Stop on any claim warning.**
 
-Read `jig skill build claim` when the claim prints a warning or is refused, when another session holds the slice, or to give a slice up.
+Read `jig skill build claim` before claiming when nobody is watching, when the claim prints a warning or is refused, when another session holds the slice, or to give a slice up.
 
 ## Read the context
 
@@ -49,7 +49,7 @@ jig ask --slice <slice> "<question>"          # returns at once; the slice waits
 
 Ask one question at a time, with your default.
 
-Read `jig skill build ask` to wait for the answer, or when an answer arrives.
+Read `jig skill build ask` after asking, to wait for the answer, or when an answer arrives.
 
 ## Leave a note
 

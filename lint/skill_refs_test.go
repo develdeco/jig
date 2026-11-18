@@ -11,12 +11,12 @@ import (
 	"testing/fstest"
 )
 
-// refLinkRE matches a "jig skill <name> <ref>" pointer.
 // capRemedy ends every cap failure: a skill file over its budget makes room
 // by moving, because trimming a rule to fit is what the cap's history shows
 // dropping rules.
 const capRemedy = "; move a block most runs never reach into a reference linked from the core (ADR 0049), never trim a rule"
 
+// refLinkRE matches a "jig skill <name> <ref>" pointer.
 var refLinkRE = regexp.MustCompile("`jig skill ([a-z0-9][a-z0-9-]*) ([a-z][a-z0-9-]*)`")
 
 // skillTreeProblems checks a skills tree (<name>/SKILL.md and
