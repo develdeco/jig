@@ -125,7 +125,7 @@ func TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain(t *testing.T)
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
 
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")

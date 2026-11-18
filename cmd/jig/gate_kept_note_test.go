@@ -93,7 +93,7 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 	}
 
 	opened := gateOpenLines(t, fx)
-	out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	out, code := runMain(t, e, "", "gate", ticket, "--early", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix_slices") || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice fix-2-q-beta in fix_slices\n%s", code, out)
 	}
@@ -120,10 +120,10 @@ func TestGateQueuesAKeptNoteBeforeTheNextRoundOpens(t *testing.T) {
 		t.Fatalf("slices = %+v, want fix-2-q-beta and no slice for the dismissed note", slices)
 	}
 
-	// The slice is open work: a second gate before it is green refuses and
-	// queues nothing more.
-	if out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 1 || !strings.Contains(out, "GATE_NOT_GREEN") {
-		t.Fatalf("jig gate with the kept slice unbuilt: exit = %d, want 1 GATE_NOT_GREEN\n%s", code, out)
+	// The branch has not moved, so a second gate reports the round that stands
+	// there and queues nothing more.
+	if out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "stands at its head") {
+		t.Fatalf("jig gate with the kept slice unbuilt: exit = %d, want 0 and the standing round\n%s", code, out)
 	}
 
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")
@@ -190,7 +190,7 @@ func TestTriageTakesANoteAndTheNextRoundAppliesIt(t *testing.T) {
 		t.Fatalf("status exit = %d, want 0 and decided_notes listing both decisions\n%s", code, statusOut)
 	}
 
-	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	out, code = runMain(t, e, "", "gate", ticket, "--early", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate exit = %d, want 0 and the fix slice fix-2-q-beta built from the kept note\n%s", code, out)
 	}
@@ -272,7 +272,7 @@ func TestAKeptAskQueuedByTheGateIsStillDecided(t *testing.T) {
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate: exit = %d, want the slice queued\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-alpha", "alpha/alpha.go")
@@ -300,7 +300,7 @@ func TestALaterGateLeavesASpentKeepAloneWhileItQueuesAnother(t *testing.T) {
 		}
 	}
 	keep("r1-f1")
-	if out, code := runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
+	if out, code := runMain(t, e, "", "gate", ticket, "--early", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("first gate: exit = %d, want fix-2-q-beta queued\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")
@@ -323,7 +323,7 @@ func TestTheFixBudgetCountsTheRoundAKeepWasQueuedForAfterItCloses(t *testing.T) 
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")
@@ -350,7 +350,7 @@ func TestAQueuedNoteWhoseFixLandsInAnotherFileIsNotQueuedTwice(t *testing.T) {
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "alpha/alpha.go")
@@ -385,11 +385,11 @@ func TestAQueuedKeepIsSpentOnceItsRoundCloses(t *testing.T) {
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Do it.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d\n%s", code, out)
 	}
 	buildQueuedSlice(t, fx, "fix-2-q-beta", "beta/beta.go")
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--early", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate (round 2 opens): exit = %d\n%s", code, out)
 	}
 	ctx, code := runMain(t, e, "", "review", "context", fx.Ticket, "--json", "--store", fx.StoreDir)
@@ -442,7 +442,7 @@ func TestTwoKeptNotesInOneWorkspaceAreOneFixSlice(t *testing.T) {
 		}
 	}
 
-	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	out, code = runMain(t, e, "", "gate", ticket, "--early", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix_slices[1]") || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate exit = %d, want 0 and the one fix slice fix-2-q-alpha\n%s", code, out)
 	}

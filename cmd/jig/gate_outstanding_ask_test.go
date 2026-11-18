@@ -102,7 +102,7 @@ func TestOutstandingAskIsDecidedWithJigTriageAndQueuedByTheNextGate(t *testing.T
 	}
 
 	// The next gate queues the kept ask's slice and opens no round.
-	out, code = runMain(t, e, "", "gate", ticket, "--store", fx.StoreDir)
+	out, code = runMain(t, e, "", "gate", ticket, "--early", "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the fix slice built from the kept ask\n%s", code, out)
 	}

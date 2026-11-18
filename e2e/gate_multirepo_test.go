@@ -428,8 +428,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 
 	// The fix lands in web, and the next round is a delta in web alone: the api
 	// has nothing new to read.
-	if r := b.api.Jig("gate", ticket); r.Code == 0 || !strings.Contains(r.Stdout, "code: GATE_NOT_GREEN") {
-		t.Errorf("jig gate with the fix slice not built: exit %d, want GATE_NOT_GREEN\n%s", r.Code, r.Stdout)
+	if r := b.api.Jig("gate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "round: 1 stands at its head (not opened again)") {
+		t.Errorf("jig gate with the fix slice not built, at the head round 1 reviewed: exit %d, want the standing round\n%s", r.Code, r.Stdout)
 	}
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()

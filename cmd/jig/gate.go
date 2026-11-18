@@ -155,7 +155,7 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 
 	// A ticket's gates go one at a time: a second one waits here, before the
 	// sync and the suite, instead of running them beside the first.
-	releaseLock, waited, err := takeGateLock(e, jigHome, cfg.Name, ticket)
+	releaseLock, _, err := takeGateLock(e, jigHome, cfg.Name, ticket)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -180,13 +180,12 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return printGateReport(stdout, st, ticket, report)
 	}
 
-	// A gate that waited for another has most likely been overtaken by it: the
-	// round that gate opened stands at the head, and a second one over it
-	// would only repeat the suite. A gate that did not wait is a person asking
-	// again, and gets a round.
-	// A flag that shapes the round (it records an intent, adopts a branch,
-	// gates early, keeps findings) is never dropped: the gate goes on with it.
-	if waited && !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
+	// A round that already stands at the branch's head is reported, not opened
+	// again: a gate run twice at one head, or two gates started together,
+	// converge on one round. A flag that shapes the round (it records an
+	// intent, adopts a branch, gates early, keeps findings) is never dropped:
+	// the gate goes on with it.
+	if !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
 		standing, err := verifydeliver.StandingRound(deps, ticket)
 		if err != nil {
 			return renderErr(stdout, err)
@@ -246,7 +245,7 @@ func takeGateLock(e env, jigHome, project, ticket string) (release func(), waite
 	return release, waited, nil
 }
 
-// printStandingRound prints the round a waiting gate found at the branch's
+// printStandingRound prints the round a gate found at the branch's
 // head instead of opening another: the fields of a gate report, saying the
 // round was not opened again. An open round points at its review, a recorded
 // one shows its verdict.
