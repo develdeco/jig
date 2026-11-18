@@ -254,7 +254,10 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 	if report.Readback.Match != "" {
 		kv = append(kv, [2]string{"body_match", readbackWords(report.Readback)})
 	}
-	blocks := []string{axi.KV("publish_pr", kv), finalRunTable(ticket, []verifydeliver.FinalRunReport{report.FinalRun})}
+	blocks := []string{axi.KV("publish_pr", kv)}
+	if report.FinalRun.Outcome != "" {
+		blocks = append(blocks, finalRunTable(ticket, []verifydeliver.FinalRunReport{report.FinalRun}))
+	}
 	var lead []string
 	if report.Readback.Match == journal.BodyDiffers {
 		lead = append(lead, "The pull request does not carry the render: update it with the title and body `jig publish "+ticket+" --body` reports (gh pr edit <url> --title <title> --body-file <pr_body>), then record it again")
