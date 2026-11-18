@@ -34,7 +34,8 @@ const (
 // RoutedWhy vocabulary: the reason jig forced a finding to asked despite
 // the reviewer's own label (Finding.RoutedWhy) - budget for one parked past
 // the fix budget, recurrence for one forced by the recurrence bound,
-// build-target for one missing a workspace or an oracle jig can resolve.
+// build-target for one missing a workspace or the command its reviewer
+// should have named.
 // Empty (no constant) for a reviewer's own ask, which jig never had to
 // force.
 const (
@@ -258,8 +259,6 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if ferr != nil {
 			return nil, fmt.Errorf("verifydeliver: findings: finding file %q: %w", rf.File, ferr)
 		}
-		oracleNames := files.oracles(file)
-
 		var id string
 		var prior Finding
 		var hasPrior bool
@@ -312,13 +311,8 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if rf.Oracle != "" {
 			f.Oracle = rf.Oracle
 		}
-		// An omitted oracle defaults to the manifest's sole oracle when it
-		// has exactly one (there is no choice to make); a recurrence whose
-		// prior occurrence never got an oracle resolved this same way
-		// falls back to the same default rather than staying empty.
-		if resolved, ok := resolveOracle(f.Oracle, oracleNames); ok {
-			f.Oracle = resolved
-		}
+		// An omitted oracle stays empty: jig never picks a command for a
+		// reviewer, not even a manifest's only oracle.
 		f.Recurrences = recurrences
 		// Triage, RoutedAs and RoutedWhy are always this round's own
 		// routing, decided afresh below, never carried: a continuation (an
@@ -364,15 +358,11 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// is a record, not a question put to a person.
 		belowFloor := wasOpen && !isRiskInFloor(f.Risk, fixRisks)
 		// A fix finding missing part of its build target - no declared
-		// workspace for its file, or no oracle jig can resolve against the
-		// current manifest (an oracle recorded before the manifest changed,
-		// say) - can never become a fix slice on its own; jig routes it to
-		// the human as an ask instead. A zero-oracle manifest is not this
-		// case: routeRound fails the whole round with GATE_NO_ORACLE before
-		// triage ever runs, so nothing here needs to force individual
-		// findings to ask over it.
-		missingOracle := len(oracleNames) > 0 && !validOracle(f.Oracle, oracleNames)
-		missingBuildTarget := wasOpen && (f.Workspace == "" || missingOracle)
+		// workspace for its file, or no command (a recurrence whose prior
+		// never named one) - can never become a fix slice on its own; jig
+		// routes it to the human as an ask instead.
+		noWorkspace, noOracle := BuildTargetGaps(f)
+		missingBuildTarget := wasOpen && (noWorkspace || noOracle)
 		// The fix budget: once a ticket's used budget (gate rounds that
 		// queued a fix slice) equals gate.fix_rounds, a would-be open fix -
 		// one the recurrence bound, a missing build target and the risk

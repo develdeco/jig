@@ -1,5 +1,7 @@
 # The reviewer probes the critical paths, and jig keeps the probes across rounds
 
+**Amended 2026-11-18:** a probe's `command` can be the finding's own `--oracle`: the narrowest command that covers the mutated term is the narrowest that proves its fix.
+
 A gate round after the first reviews the delta since the last reviewed head (`scope: delta`), and `must_review` and `reviewed_paths` prove it read every file the delta changed. Nothing records which behavior a round tested. In jig-demo-shop's PRs #24 and #26 the same fix to `cart.Total` passed every oracle with a test suite that pinned no line total's quantity factor: dropping the factor changed no test result.
 
 - Both round-1 reviewers had `scope: full`, read all of `cart.go`, made one mutation check each (of the rounding term), found that gap and missed this one.

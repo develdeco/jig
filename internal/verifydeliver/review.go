@@ -496,6 +496,11 @@ func checkResultFinding(i int, f ResultFinding) error {
 	if _, err := normalizeRepoRelPath(f.File); err != nil {
 		return reviewInvalid(fmt.Sprintf("finding %d file %q: %v", i, f.File, err))
 	}
+	// A fix names the command that proves it fixed. A changed version of an
+	// earlier finding (prior) keeps that finding's command when it names none.
+	if f.Action == ActionFix && f.Prior == "" && strings.TrimSpace(f.Oracle) == "" {
+		return reviewInvalid(fmt.Sprintf("finding %d is a fix and names no oracle: a fix names the command that proves it fixed", i))
+	}
 	return nil
 }
 
@@ -829,15 +834,13 @@ func oraclesManifest(names []string) manifest.Manifest {
 
 // validateReviewResult checks result against req and the lease's head, the
 // rules ParseReviewResult cannot check on its own: a finding's file exists at
-// head or was deleted in the scope diff; an oracle, when given, names a
-// manifest oracle, and is required when the manifest has more than one and the
-// finding is fix or ask (no silent fallback); a prior names an id under open or
+// head or was deleted in the scope diff; a prior names an id under open or
 // dismissed, and no two findings share one; a still_present entry's prior names
 // an id under open or dismissed, no two still_present entries (nor a
 // still_present entry and a finding's own prior) share one, and that id's own
 // file exists at head or was deleted in the scope diff; reviewed_paths covers
 // every must_review path. rf is the files of the round: which repo a finding's
-// file is in, and so which oracles it can name, and the leases an absolute
+// file is in, and the leases an absolute
 // reviewed_paths entry is relativized against. atHead reports whether a
 // (normalized) file, as the round names it, exists at the commit under review,
 // and deleted holds the files, as the round names them, that the scope diff
@@ -873,15 +876,6 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, rf roundFiles,
 			if !present {
 				return reviewInvalid(fmt.Sprintf("finding %d file %q is neither present at head nor deleted in the scope diff", i, f.File))
 			}
-		}
-
-		oracleNames := rf.oracles(norm)
-		if f.Oracle != "" {
-			if !inStrings(oracleNames, f.Oracle) {
-				return reviewInvalid(fmt.Sprintf("finding %d oracle %q is not a manifest oracle", i, f.Oracle))
-			}
-		} else if len(oracleNames) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
-			return reviewInvalid(fmt.Sprintf("finding %d (action %q) must name one of the manifest's %d oracles", i, f.Action, len(oracleNames)))
 		}
 
 		if f.Prior != "" {
@@ -982,7 +976,7 @@ Tests belong at the seams the intent names: a missing test is a problem only at 
 Probe each term of every function the change adds or alters on a critical path the intent names, unless review.json's probed lists a current, caught probe of it: mutate it, run the narrowest test command that covers it (oracles_passed gives each command's seconds), put the file back, and record it in probes. A mutant that survives at a seam is a finding.
 review.json's hunks lists every hunk of the change: record in skipped each one with no code on a critical path, and why.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
-oracle: the manifest oracle from review.json that best proves the fix.
+oracle: the narrowest command that proves the fix (the test the fix adds or extends, by name), required for a fix.
 reviewed_paths: every file you read. jig rejects a result that does not include every path in must_review.
 When finished, write result.json at %s with exactly one JSON object: %s`
 
@@ -1043,9 +1037,7 @@ func absPath(p string) string {
 	return abs
 }
 
-// SortedOracleNames returns man's oracle names in sorted order. Exported so
-// cmd/jig's terminal oracle prompt can list the same names route.go's own
-// oracle resolution checks against, rather than deriving its own list.
+// SortedOracleNames returns man's oracle names in sorted order.
 func SortedOracleNames(man manifest.Manifest) []string {
 	names := make([]string, 0, len(man.Oracles))
 	for name := range man.Oracles {

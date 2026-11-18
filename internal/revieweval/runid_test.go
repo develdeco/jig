@@ -38,6 +38,7 @@ const runIDTestGateResult = `{
       "title": "Lookup dereferences a nil map entry",
       "detail": "Lookup looks up id in store and calls u.Name without checking whether the map returned nil, so an unknown id panics on the nil pointer.",
       "action": "fix",
+      "oracle": "go test ./users -run 'TestLookup'",
       "risk": "medium",
       "risk_rationale": "An unknown id crashes the caller instead of returning an empty string."
     }

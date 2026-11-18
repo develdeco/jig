@@ -20,12 +20,12 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta-test") {
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
 		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
 	}
 	change(t, fx)
-	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta-test: done with the change", "-m", "Jig-Slice: fix-2-q-beta-test")
-	verifyHere(t, fx, "fix-2-q-beta-test")
+	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta: done with the change", "-m", "Jig-Slice: fix-2-q-beta")
+	verifyHere(t, fx, "fix-2-q-beta")
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (round 2 opens)\n%s", code, out)
 	}

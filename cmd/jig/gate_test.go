@@ -166,7 +166,7 @@ func TestGateReportHintNamesTheOrderWhenFixSlicesAreQueuedToo(t *testing.T) {
 		NeedsHuman: []verifydeliver.Finding{
 			{ID: "r1-f1", File: "beta/beta.go", Line: 4, Title: "ASK-TITLE", Status: verifydeliver.StatusAsked, Risk: "medium", RiskRationale: "ASK-RATIONALE"},
 		},
-		FixSlices: []string{"fix-1-alpha-test"},
+		FixSlices: []string{"fix-1-alpha"},
 	}
 
 	lines := gateReportHint(st, fx.Ticket, report)

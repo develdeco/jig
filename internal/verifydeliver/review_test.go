@@ -215,7 +215,7 @@ Tests belong at the seams the intent names: a missing test is a problem only at 
 Probe each term of every function the change adds or alters on a critical path the intent names, unless review.json's probed lists a current, caught probe of it: mutate it, run the narrowest test command that covers it (oracles_passed gives each command's seconds), put the file back, and record it in probes. A mutant that survives at a seam is a finding.
 review.json's hunks lists every hunk of the change: record in skipped each one with no code on a critical path, and why.
 risk: "low", "medium" or "high": how much harm follows if this part of the change is wrong.
-oracle: the manifest oracle from review.json that best proves the fix.
+oracle: the narrowest command that proves the fix (the test the fix adds or extends, by name), required for a fix.
 reviewed_paths: every file you read. jig rejects a result that does not include every path in must_review.
 When finished, write result.json at /abs/result.json with exactly one JSON object: ` + schema
 
@@ -434,21 +434,25 @@ func TestValidateReviewResultRules(t *testing.T) {
 		}
 	})
 
-	t.Run("oracle not a manifest oracle", func(t *testing.T) {
+	t.Run("any text is a command", func(t *testing.T) {
 		req, result := validRequestAndResult()
-		result.Findings[0].Oracle = "lint"
-		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted)
-		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
-			t.Fatalf("err = %v, want REVIEW_INVALID", err)
+		result.Findings[0].Oracle = "go test ./internal/x -run 'TestA'"
+		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
+			t.Fatalf("validateReviewResult: %v (a command need not be a manifest oracle)", err)
 		}
 	})
 
-	t.Run("omitted oracle with more than one manifest oracle and action fix", func(t *testing.T) {
-		req, result := validRequestAndResult()
+	t.Run("a fix names a command", func(t *testing.T) {
+		_, result := validRequestAndResult()
 		result.Findings[0].Oracle = ""
-		err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"lint", "test"}), present, noDeleted)
+		result.Findings[0].Action = ActionFix
+		err := checkResultFinding(0, result.Findings[0])
 		if err == nil || reviewInvalidCode(t, err) != "REVIEW_INVALID" {
 			t.Fatalf("err = %v, want REVIEW_INVALID", err)
+		}
+		result.Findings[0].Prior = "r1-f1"
+		if err := checkResultFinding(0, result.Findings[0]); err != nil {
+			t.Fatalf("a changed version keeps its prior's command: %v", err)
 		}
 	})
 
