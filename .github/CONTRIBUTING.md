@@ -138,29 +138,25 @@ matching the directory name and a `description:` of at most 50 words.
   scenario (`fixture.Scenario`) with an equivalence test that builds it both
   ways and compares them. Write a history as one `git fast-import` stream
   rather than a command per commit.
-- Each package's git process count is compared with main's. CI's Linux leg
+- Each package's git process count is reported beside main's. CI's Linux leg
   runs every test binary through `internal/gitbudget`, which counts the
   processes git's own trace sees; the push run on main saves those counts as
   a baseline in the Actions cache, and a pull request's leg restores the
-  newest one. A package whose count rises above its baseline by more than
-  the larger of 5% and 100 processes (`.github/git-budget.yaml`) fails the
-  leg, and the job summary lists every package's baseline, count and
-  verdict. A real increase is accepted with the `git-budget-accepted` pull
-  request label and a re-run of the failed job; nothing is committed. With
-  no baseline (the cache entry is evicted after 7 unused days) the leg
-  passes and says so. Counts differ by OS, so read them from CI's Linux
+  newest one. The job summary lists every package's main count, its count
+  and the change; nothing fails and there is no label to add. With no
+  baseline (the cache entry is evicted after 7 unused days) the leg passes
+  and the summary says so. Counts differ by OS, so read them from CI's Linux
   summary, not a local run. Under the hermetic config every test binary runs
   with (`internal/gittest` lists `trace2.envVars = JIG_GIT_CALLER,JIG_GIT_DIR`),
   each trace file also names the Go function that asked `gitx` for the process
   and the directory it ran in, from which the test is derived (the nearest
   `Test`, `Fuzz`, `Example` or `Benchmark` path component, so two tests that
-  agree in their first 64 characters share a row). `check` prints the top 20
+  agree in their first 64 characters share a row). `report` prints the top 20
   callers across the packages and each package's top 10 callers and tests
   after the table, in the job summary too, and CI uploads every count as
   `callers.tsv` (the `git-callers` artifact, kept 7 days: package, `caller` or
   `test`, name, count). A process started under a config of its own records
-  no caller and counts as `(unattributed)`. The report never changes a
-  verdict.
+  no caller and counts as `(unattributed)`.
 - `e2e` records each jig run it makes, as an SVG with a tag beside it, into
   the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
   for the oracle run at a builder's green; ADR 0029). Unset, it records

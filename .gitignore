@@ -1,6 +1,8 @@
 # build artifacts (the README quickstart builds into the repo root)
 /jig
 /jig.exe
+/gitbudget
+/gitbudget.exe
 
 # goreleaser output
 /dist/

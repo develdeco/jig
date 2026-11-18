@@ -5,7 +5,7 @@ package e2e
 // ceiling a test fails over, so a change that asks git the same thing over
 // again shows up where it is made and not in the next suite's wall clock. It
 // counts what git's own trace sees (every process, the ones git starts in turn
-// included), the way internal/gitbudget does for the whole suite.
+// included), the way internal/gitbudget reports it for the whole suite.
 
 import (
 	"path/filepath"
