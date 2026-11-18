@@ -106,13 +106,10 @@ func TestTUIChartScreen(t *testing.T) {
 	screens.until("› checkout", "Tickets", "waits for "+first+" merged")
 	screens.press("\x1b")
 	// The chart's screen shows "charts" (its map's path) and "0 of 2
-	// published" too, so a frame drawn before the esc is read passes for the
-	// project's. Wait until the header no longer names the chart: a q written
-	// while the esc is still unread arrives with it as alt+q, and the screen
-	// never quits.
-	for screen := screens.until("charts", "0 of 2 published"); strings.Contains(screen, "› checkout"); {
-		screen = screens.until("charts", "0 of 2 published")
-	}
+	// published" too, so wait for the project header's counts, which only the
+	// project's screen draws: a q written while the esc is still unread
+	// arrives with it as alt+q, and the screen never quits.
+	screens.until("tickets · 1 chart", "charts", "0 of 2 published")
 	screens.press("q")
 	if res := again.Stop(); res.Code != 0 || res.Stderr != "" {
 		t.Fatalf("jig tui checkout exit = %d, want 0 and no stderr\nstderr:\n%s", res.Code, res.Stderr)
