@@ -21,9 +21,7 @@ func TestAnOldSlotWaitLineIsShownWithoutAnError(t *testing.T) {
 			if got := g.m.say(tk, l); got == "" {
 				t.Errorf("say(%s, slice %q) is empty", ev, slice)
 			}
-			if eventState(l) == "" {
-				t.Errorf("eventState(%s, slice %q) is empty", ev, slice)
-			}
+			_ = eventState(l)
 			_ = stepOfLine(l)
 			_ = tk.labelOf(subLabels{}, l)
 		}

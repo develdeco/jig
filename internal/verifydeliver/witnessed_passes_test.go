@@ -223,7 +223,7 @@ func failingOracleManifest(t *testing.T, fx *fixture.Fixture, marker string) {
 
 // TestAGateRoundRunsNoCommand: a manifest whose oracle fails and whose slice
 // names an env class still opens the round: no command ran, no env class came
-// up, no suite slot was taken and no gate-oracle line was written.
+// up, no slot line was written and no gate-oracle line was written.
 func TestAGateRoundRunsNoCommand(t *testing.T) {
 	t.Parallel()
 	fx := generateBuilt(t, "rung-a")
@@ -247,7 +247,7 @@ func TestAGateRoundRunsNoCommand(t *testing.T) {
 	}
 	for _, l := range lines {
 		switch l.Event {
-		case "gate-oracle", journal.EventEnvUp, journal.EventEnvDown, journal.EventEnvUnavailable, journal.EventSlotWait, journal.EventSlotTaken:
+		case "gate-oracle", journal.EventEnvUp, journal.EventEnvDown, journal.EventEnvUnavailable, "slot-wait", "slot-taken":
 			t.Errorf("the gate round wrote a %s line: %+v", l.Event, l)
 		}
 	}

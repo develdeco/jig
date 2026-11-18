@@ -67,13 +67,6 @@ func PoolDir(root string) string {
 	return filepath.Join(root, "pool")
 }
 
-// SlotQueueDir returns where the machine's heavy-run queue lives under the jig
-// home root: <root>/slot-queue, one entry per run that waits or holds, shared
-// by every project. It is machine state, never the store or a repo.
-func SlotQueueDir(root string) string {
-	return filepath.Join(root, "slot-queue")
-}
-
 // MachinePath returns the per-machine project mapping file path under the
 // jig home root.
 func MachinePath(root string) string {

@@ -43,8 +43,6 @@ const (
 	EventRevalidate     = "revalidate"
 	EventRoute          = "route"
 	EventSliceAdd       = "slice-add"
-	EventSlotTaken      = "slot-taken"
-	EventSlotWait       = "slot-wait"
 	EventSquash         = "squash"
 	EventStall          = "stall"
 	EventVerified       = "verified"
