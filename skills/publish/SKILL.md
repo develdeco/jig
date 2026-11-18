@@ -20,7 +20,7 @@ gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_bod
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the `pr_body` path to hand to `gh`. The branch is the ticket's recorded one, else `<id>-<slug>`. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. `--pr` posts the review notes once per content: post nothing yourself. It also reads the title and body back and journals whether they are the render's (`body_match`: `matches`, `differs`, `unknown`); on `differs`, `gh pr edit` it with the `--body` output. When the last is recorded, run the `git worktree remove` the result gives for each worktree the ticket still has (git refuses one with changes).
+The `--body` output gives the branch, base, title and the `pr_body` path to hand to `gh`. The branch is the ticket's recorded one, else `<id>-<slug>`. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. `--pr` posts the review notes once per content: post nothing yourself. It also reads the title and body back and journals whether they are the render's (`body_match`: `matches`, `differs`, `unknown`); on `differs`, `gh pr edit` it with the `--body` output. When the last is recorded, the result advises a `git worktree remove` for each worktree the ticket still has: it removes one the harness kept, or one made with no worktree method (git refuses one with changes).
 
 Or jig pushes and opens it:
 

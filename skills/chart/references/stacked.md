@@ -2,4 +2,4 @@ Stack the later (Plan order) on the earlier with `jig depend <later> --on <earli
 
 Re-read `jig next <T>` when a stacked ticket's wave starts.
 
-A `run` ticket in publish is published and behind (`state: behind`): no build subagent. For each `stack` row with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish.
+A `run` ticket in publish is published and behind (`state: behind`): no build subagent. For each `stack` row with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree, `present` in `worktrees`; else a harness worktree on that branch). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish.
