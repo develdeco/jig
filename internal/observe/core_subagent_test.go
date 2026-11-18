@@ -88,7 +88,7 @@ func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
 
 	first := r.handle(r.ev(KindStop, subagent))
 	if !strings.Contains(first.Block, "jig: this agent's claim is unattended, so it is held back from stopping") ||
-		!strings.Contains(first.Block, "commit "+sha[:12]+" for slice a is not verified") {
+		!strings.Contains(first.Block, "commit "+sha[:12]+" for slice a has no recorded result") {
 		t.Fatalf("Block = %q, want the agent's reason naming the commit", first.Block)
 	}
 	delivered := r.ledgerOf(journal.EventNoteDelivered)

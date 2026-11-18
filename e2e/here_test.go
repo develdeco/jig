@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // hereOut is the part of `jig here --json` these tests read.
@@ -97,10 +100,10 @@ func TestHereTwoRepoProject(t *testing.T) {
 		"  branch: jig/JIG-1\n",
 		"  ticket: JIG-1\n",
 		"  ticket_how: branch\n",
-		"slices[5]{id,state,attempts,blocked_by,question}:\n",
-		"  a,queued,0,-,-\n",
-		"  b,queued,0,a,-\n",
-		"  e,queued,0,-,-\n",
+		"slices[5]{id,state,covers,attempts,blocked_by,question}:\n",
+		"  a,queued,-,0,-,-\n",
+		"  b,queued,-,0,a,-\n",
+		"  e,queued,-,0,-,-\n",
 		"questions: none\n",
 		"help[1]:\n",
 	} {
@@ -169,6 +172,49 @@ func TestHereTwoRepoProject(t *testing.T) {
 	}
 	if status := gitLog(t, fx.StoreDir, "status", "--porcelain"); status != "" {
 		t.Errorf("jig here left the store dirty:\n%s", status)
+	}
+
+	// Only the second repo's branch is read from its clone. A run of slice a,
+	// which builds in the first repo, says "not checked" (its branch was never
+	// read), where one of slice e, in the second, says it has no commit there.
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := gitLog(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+	if err := st.WriteStartSHA("JIG-1", "second-repo", head); err != nil {
+		t.Fatal(err)
+	}
+	for _, slice := range []string{"a", "e"} {
+		if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventOracle, Slice: slice, Commit: head, Outcome: "pass", Attempt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r = runJig(t, env, fx.SecondRepoDir, "here")
+	for _, want := range []string{"  a,queued,not checked,0,-,-\n", "  e,queued,\"no: slice has no commit on the branch\",0,-,-\n"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Errorf("jig here lacks %q:\n%s", want, r.Stdout)
+		}
+	}
+
+	// `jig status` reads the same way: it reads the ticket's branch in the
+	// clones that have a start sha, so only the second repo's.
+	next := runJig(t, env, fx.SecondRepoDir, "next", "JIG-1")
+	b := regexp.MustCompile(`(?m)^\s*branch:\s*(\S+)`).FindStringSubmatch(next.Stdout)
+	if b == nil {
+		t.Fatalf("jig next names no branch:\n%s", next.Stdout)
+	}
+	gitLog(t, fx.SecondRepoDir, "branch", "-f", b[1], "HEAD")
+	r = runJig(t, env, fx.SecondRepoDir, "status", "JIG-1")
+	var lastRuns []string
+	for _, l := range strings.Split(r.Stdout, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "a,") || strings.HasPrefix(strings.TrimSpace(l), "e,") {
+			lastRuns = append(lastRuns, l)
+		}
+	}
+	text := strings.Join(lastRuns, "\n")
+	if !strings.Contains(text, ",pass,not checked,") || !strings.Contains(text, "\"no: slice has no commit on the branch\"") {
+		t.Errorf("jig status last_runs: a (first repo, no start sha) should say not checked and e (second repo) that it has no commit:\n%s", r.Stdout)
 	}
 }
 

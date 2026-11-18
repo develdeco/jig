@@ -102,12 +102,12 @@ func TestTheLogShowsAnAgentHeldAtItsStop(t *testing.T) {
 	g.feed(
 		jl(at(0, 0), "SHOP-2", "apply", journal.EventClaim, with("s-main", "", "", "", "", "")),
 		jl(at(0, 30), "SHOP-2", "apply", journal.EventVerifyPending, with("s-main", sha('7'), "", "", "", "")),
-		ll(at(0, 31), "SHOP-2", journal.EventNoteDelivered, held("apply", "pending:777777777777:apply", "verification of 777777777777 for slice apply is still running")),
+		ll(at(0, 31), "SHOP-2", journal.EventNoteDelivered, held("apply", "no recorded result:777777777777:apply", "commit 777777777777 for slice apply has no recorded result")),
 		ll(at(1, 0), "SHOP-2", journal.EventNoteDelivered, held("apply", "review:SHOP-2:1", "every slice is green and no review round is open")),
 	)
 	act := strings.Join(panelLines(strings.Split(g.view(), "\n"), "Activity"), "\n")
 	for _, want := range []string{
-		"09:00:31 build·apply ⏸ agent 4f2a91c0 held at its stop · verification of 777777777777 for slice apply is still running",
+		"09:00:31 build·apply ⏸ agent 4f2a91c0 held at its stop · commit 777777777777 for slice apply has no recorded result",
 		"09:01:00 review      ⏸ agent 4f2a91c0 held at its stop · every slice is green and no review round is open",
 	} {
 		if !strings.Contains(act, want) {

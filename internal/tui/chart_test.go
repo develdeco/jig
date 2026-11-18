@@ -113,7 +113,7 @@ func TestChartRowOpensTheChartScreenAndEscReturns(t *testing.T) {
 func TestTheChartCursorStartsOnTheFirstTicketNotPublishedAndATicketOpensAndReturns(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
-	if v := g.view(); !strings.Contains(v, "▸ ◑ JIG-5") {
+	if v := g.view(); !strings.Contains(v, "▸ ◐ JIG-5") {
 		t.Fatalf("the cursor is not on JIG-5, the first ticket not published:\n%s", v)
 	}
 	g.press("enter")
@@ -124,7 +124,7 @@ func TestTheChartCursorStartsOnTheFirstTicketNotPublishedAndATicketOpensAndRetur
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s after esc, want chart", g.m.Screen())
 	}
-	if v := g.view(); !strings.Contains(v, "▸ ◑ JIG-5") {
+	if v := g.view(); !strings.Contains(v, "▸ ◐ JIG-5") {
 		t.Errorf("the cursor did not stay on JIG-5:\n%s", v)
 	}
 }
@@ -175,7 +175,7 @@ func TestAChartVerbThatPrintsNoChartLeavesTheScreenWithTheListingAndNoNotice(t *
 		if g.m.notice != "" {
 			t.Errorf("a verb that printed %q left the notice %q", out, g.m.notice)
 		}
-		for _, want := range []string{"▸ ◑ JIG-5", "stacked on JIG-5", "waits for JIG-4 merged", "1 entry not graduated"} {
+		for _, want := range []string{"▸ ◐ JIG-5", "stacked on JIG-5", "waits for JIG-4 merged", "1 entry not graduated"} {
 			if !strings.Contains(v, want) {
 				t.Errorf("with the chart verb printing %q the screen lacks %q:\n%s", out, want, v)
 			}
@@ -329,7 +329,7 @@ func TestAChartScreenOpenedOnTheCommandLineWaitsForTheListing(t *testing.T) {
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart", g.m.Screen())
 	}
-	if v := g.view(); !strings.Contains(v, "▸ ◑ JIG-5") || !strings.Contains(v, "say \"Continue checkout\"") {
+	if v := g.view(); !strings.Contains(v, "▸ ◐ JIG-5") || !strings.Contains(v, "say \"Continue checkout\"") {
 		t.Errorf("the chart opened from the command line is not read and placed:\n%s", v)
 	}
 	g.press("esc")

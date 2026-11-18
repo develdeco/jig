@@ -7,7 +7,7 @@ jig  demo › JIG-1 › 2 build                                    ? build needs
        ● aaaaaaa “Greet the person by name”  09:00:21
          ● `go test ./...` passed in 15s · jig ran it
        ✓ q-000 Trim the name? → Yes, trim it.
-  ◐ b  building     2 tries  Say goodbye, politely  workspace app · oracle unit
+  ✖ b  fail         2 tries  Say goodbye, politely  workspace app · oracle unit
        ✖ bbbbbbb “Say goodbye”  09:01:40
          ✖ `go test ./...` failed in 30s · jig ran it
        ✖ eeeeeee “Say goodbye, politely”  09:02:15

@@ -31,7 +31,7 @@ func TestEveryKindOfLineNamesTheSubstepItAdvances(t *testing.T) {
 		{jl(at(1, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")), "slice a", "builder took it"},
 		{jl(at(1, 1), "JIG-6", "a", journal.EventRelease, with("s-builder", "", "", "", "", "")), "slice a", "builder let go of it"},
 		{jl(at(1, 2), "JIG-6", "a", journal.EventDispatch), "slice a", "jig started a builder"},
-		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verifying aaaaaaa"},
+		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verification requested for aaaaaaa"},
 		{jl(at(1, 4), "JIG-6", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./cart", 3 }), "slice a", "`go test ./cart` passed in 3s"},
 		{jl(at(1, 5), "JIG-6", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")), "slice a", "verified aaaaaaa"},
 		{jl(at(1, 6), "JIG-6", "a", journal.EventVerifyError, with("", "", "", "no worker", "", "")), "slice a", "could not be verified: no worker"},

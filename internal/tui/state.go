@@ -266,22 +266,6 @@ var buildEventNames = []string{
 	journal.EventFixSlice, journal.EventSliceAdd,
 }
 
-// verifying lists the slices whose latest verify-pending has had no result
-// since: a worker is running (or died; the stall shows that).
-func (t *ticket) verifying() map[string]bool {
-	out := map[string]bool{}
-	for _, slice := range t.sliceIDsFromLines() {
-		p := t.latest(slice, journal.EventVerifyPending)
-		if p < 0 {
-			continue
-		}
-		if t.latest(slice, journal.EventOracle, journal.EventVerified, journal.EventVerifyError) < p {
-			out[slice] = true
-		}
-	}
-	return out
-}
-
 // sliceIDsFromLines are the slices the journal names, in order of first
 // appearance.
 func (t *ticket) sliceIDsFromLines() []string {
@@ -543,10 +527,8 @@ var relevantSliceEvents = []string{
 }
 
 // slices are the ticket's slices: the store's list when a status has been
-// read (its states are the store's, with verifying laid over a slice a worker
-// is checking), else the slices the journal names.
+// read (its states are the store's), else the slices the journal names.
 func (t *ticket) slices(zone *time.Location) []sliceRow {
-	verifying := t.verifying()
 	var out []sliceRow
 	if t.status != nil && len(t.status.Slices) > 0 {
 		for _, s := range t.status.Slices {
@@ -562,8 +544,12 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	}
 	for i := range out {
 		r := &out[i]
-		if verifying[r.ID] && (r.State == StateQueued || r.State == StateBuilding) {
-			r.State = StateVerifying
+		if r.State == StateBuilding {
+			// The store sets a failed slice back to building; the recorded
+			// last run says it failed.
+			if run, failed := t.lastRunFailed(r.ID); failed && run.Cause == "" {
+				r.State = StateFail
+			}
 		}
 		if p := t.latest(r.ID, relevantSliceEvents...); p >= 0 {
 			l := t.lines[p]
@@ -608,7 +594,7 @@ func describe(l events.Envelope) string {
 	case journal.EventRelease:
 		return "released" + by(l.Session)
 	case journal.EventVerifyPending:
-		return "verify pending " + short(l.Commit)
+		return "verification requested for " + short(l.Commit)
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return "oracle pass " + short(l.Commit)
@@ -672,8 +658,6 @@ func eventState(l events.Envelope) string {
 	switch l.Event {
 	case journal.EventClaim, journal.EventDispatch, journal.EventRequeue, journal.EventFixSlice:
 		return StateBuilding
-	case journal.EventVerifyPending:
-		return StateVerifying
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return StateGreen
@@ -754,18 +738,12 @@ func (t *ticket) phase(zone *time.Location) (state, label string) {
 			// building the journal's lines might otherwise suggest.
 			return StateQueued, t.status.State
 		}
-		if len(t.verifying()) > 0 {
-			return StateVerifying, "verifying"
-		}
 		return StateBuilding, "building"
 	}
 	for _, id := range t.sliceIDsFromLines() {
 		if t.guessSliceState(id) == StateStalled {
 			return StateStalled, "stalled"
 		}
-	}
-	if len(t.verifying()) > 0 {
-		return StateVerifying, "verifying"
 	}
 	if build >= 0 {
 		return StateBuilding, "building"

@@ -6,7 +6,7 @@ jig  demo › JIG-1 › 2 build                                    ? build needs
 ▸ ● a  green        1 try    no goal
        ● aaaaaaa  09:00:21
          ● its oracle passed
-  ◐ b  building     2 tries  no goal
+  ✖ b  fail         2 tries  no goal
        ✖ bbbbbbb  09:01:40
          ✖ its oracle failed
            TestB: want 2, got 3

@@ -446,11 +446,14 @@ var startedEvents = map[string]bool{
 // sliceView is a slice with what the journal says of it.
 type sliceView struct {
 	Slice
-	verifying      bool
-	pendingCommit  string
 	verifiedCommit string
-	claimed        bool
-	claimedBy      string
+	// failed: the slice's latest covering run failed, judging the code, and
+	// nothing has verified it since. It only reads failed while the store has
+	// the slice building, the state `jig verify` sets a failed slice back to,
+	// as the TUI's rows do.
+	failed    bool
+	claimed   bool
+	claimedBy string
 }
 
 // publishView is what the journal says of the publish since the last round
@@ -733,30 +736,34 @@ func (d *digest) decisionOf(a Ask) Ask {
 	return a
 }
 
-// readSlices lays the journal over each slice: whether a worker is verifying
-// it, the commit that verified it, who holds it.
+// readSlices lays the journal over each slice: the commit that verified it,
+// who holds it. An old verify-pending line is read by nothing here: a commit
+// has a recorded result or none.
 func (d *digest) readSlices() {
 	for _, s := range d.f.Slices {
 		v := sliceView{Slice: s}
-		pending, resolved, claim, release := -1, -1, -1, -1
+		claim, release := -1, -1
 		for i, l := range d.lines {
 			if l.Slice != s.ID {
 				continue
 			}
 			switch l.Event {
-			case journal.EventVerifyPending:
-				pending, v.pendingCommit = i, l.Commit
 			case journal.EventVerified:
-				resolved, v.verifiedCommit = i, l.Commit
-			case journal.EventOracle, journal.EventVerifyError:
-				resolved = i
+				v.verifiedCommit = l.Commit
+				v.failed = false
+			case journal.EventOracle:
+				// The latest run that covered a commit decides (an uncovered one
+				// says nothing of a commit), and it is a failure only when it
+				// judged the code: a run a stop or a timeout ended did not.
+				if l.Uncovered == "" {
+					v.failed = l.Outcome == "fail" && l.Cause == ""
+				}
 			case journal.EventClaim:
 				claim, v.claimedBy = i, l.Session
 			case journal.EventRelease:
 				release = i
 			}
 		}
-		v.verifying = pending >= 0 && pending > resolved
 		v.claimed = claim >= 0 && claim > release
 		d.slices = append(d.slices, v)
 	}
@@ -974,8 +981,7 @@ func (d *digest) briefSubs(planned int, odd string) []Sub {
 	return subs
 }
 
-// build is the build phase and whether all its slices are green, none of them
-// being verified.
+// build is the build phase and whether all its slices are green.
 func (d *digest) build(prevDone bool) (Phase, bool) {
 	f := d.f
 	p := Phase{Name: Build}
@@ -1000,7 +1006,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 	for _, s := range d.slices {
 		state, detail := d.sliceState(s)
 		p.Subs = append(p.Subs, Sub{Key: "slice:" + s.ID, Label: sliceLabel(s.Slice), State: state, Detail: detail})
-		if s.State == sliceGreen && !s.verifying {
+		if s.State == sliceGreen {
 			green++
 		}
 		if s.FromGate > 0 {
@@ -1029,7 +1035,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 // untouched is whether no slice has been started.
 func (d *digest) untouched() bool {
 	for _, s := range d.slices {
-		if s.State != sliceQueued || s.verifying {
+		if s.State != sliceQueued {
 			return false
 		}
 	}
@@ -1045,16 +1051,16 @@ func sliceLabel(s Slice) string {
 	return "slice " + s.ID
 }
 
-// sliceState is the sub-step state and detail of a slice, with the journal's
-// word on a verification laid over the store's state.
+// sliceState is the sub-step state and detail of a slice, from the store's
+// state with the journal's word on who holds it.
 func (d *digest) sliceState(s sliceView) (state, detail string) {
 	switch {
 	case s.OpenQuestion || s.State == sliceNeedsInput:
 		return SubNeedsYou, "waits for your answer"
 	case s.State == sliceStalled:
 		return SubFailed, "stalled"
-	case s.verifying:
-		return SubActive, "verifying " + short(s.pendingCommit)
+	case s.failed && s.State == sliceBuilding:
+		return SubFailed, "failed its last run"
 	case s.State == sliceGreen:
 		return SubDone, strings.TrimSpace("verified " + short(s.verifiedCommit))
 	case s.State == sliceEnvBlocked:
@@ -1087,19 +1093,19 @@ func (d *digest) unmet(s Slice) []string {
 }
 
 // buildFocus is what matters most in a build under way: a question for the
-// person, a stall, a wait for the environment, a verification, a builder.
+// person, a stall, a wait for the environment, a builder.
 func (d *digest) buildFocus() string {
-	for _, want := range []string{"needs", "stalled", "env", "verifying", "building"} {
+	for _, want := range []string{"needs", "stalled", "failed", "env", "building"} {
 		for _, s := range d.slices {
 			switch {
 			case want == "needs" && (s.OpenQuestion || s.State == sliceNeedsInput):
 				return "slice " + s.ID + " needs your answer"
 			case want == "stalled" && s.State == sliceStalled:
 				return "slice " + s.ID + " stalled"
+			case want == "failed" && s.failed && s.State == sliceBuilding:
+				return "slice " + s.ID + " failed its last run"
 			case want == "env" && s.State == sliceEnvBlocked:
 				return "slice " + s.ID + " waits for its environment"
-			case want == "verifying" && s.verifying:
-				return "verifying slice " + s.ID + " at " + short(s.pendingCommit)
 			case want == "building" && s.State == sliceBuilding:
 				return "slice " + s.ID + " is being built"
 			}
@@ -1214,7 +1220,7 @@ func (d *digest) fixesOf(n int) (open, total int) {
 			continue
 		}
 		total++
-		if s.State != sliceGreen || s.verifying {
+		if s.State != sliceGreen {
 			open++
 		}
 	}
@@ -1443,11 +1449,6 @@ func (d *digest) builtReason() string {
 	f := d.f
 	if len(d.slices) == 0 {
 		return f.Ticket + " has no slices built yet"
-	}
-	for _, s := range d.slices {
-		if s.verifying {
-			return fmt.Sprintf("slice %s is being verified at %s", s.ID, short(s.pendingCommit))
-		}
 	}
 	green := 0
 	var behind []string

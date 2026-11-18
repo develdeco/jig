@@ -16,6 +16,14 @@
 // and changes no state; a run that could not reach its command leaves a
 // verify-error line. Plan says what a run would do and writes nothing.
 //
+// Every reader of a ticket's verification says one of two things of a commit
+// and slice: the result a run recorded for it, or that it has none. Truth is
+// what the readers share (the journal and, with one git log, the branch's
+// commits): Derive tells each commit's state and LastRuns each slice's last
+// witnessed run, covering or not, with whether it covers the slice's last
+// commit. A verify-pending line and a verify-spawned ledger line are an old
+// worker's history that nothing here reads as work in flight.
+//
 // RunFinal is `jig verify --final`: the ticket's last run, of the union of its
 // slices' commands at HEAD (every slice that builds in this worktree's repo,
 // each oracle resolved for its slice's workspace, identical text once, as one
