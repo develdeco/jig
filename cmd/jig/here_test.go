@@ -82,11 +82,11 @@ func TestParseWithPositionalsTakesThemAmongTheFlags(t *testing.T) {
 	}
 }
 
-// TestHereNamesQuestionsVerifiedAndPendingVerifications: the ticket's open
-// question, the commits that verified and the verifications still running are
-// in the text and in the JSON, and a section a later ticket registers adds to
+// TestHereNamesQuestionsAndVerified: the ticket's open question and the
+// commits that verified are in the text and in the JSON, an old pending line is
+// no verification under way, and a section a later ticket registers adds to
 // both.
-func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
+func TestHereNamesQuestionsAndVerified(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
@@ -120,8 +120,8 @@ func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
 		t.Fatalf("jig here: exit %d\n%s", code, out)
 	}
 	for _, want := range []string{
-		"  a,green,1,-,-\n",
-		"  c,needs-input,1,-,q-001\n",
+		"  a,green,-,1,-,-\n",
+		"  c,needs-input,-,1,-,q-001\n",
 		"verified[1]{slice,commit}:\n  a,0123456789ab\n",
 		"questions[1]{id,slice,question}:\n  q-001,c,Which tone?\n",
 	} {

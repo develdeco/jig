@@ -220,6 +220,18 @@ type hereSlice struct {
 	Attempts  int      `json:"attempts"`
 	BlockedBy []string `json:"blocked_by"`
 	Question  string   `json:"question,omitempty"`
+	// LastRun is the slice's last witnessed run, covering or not; absent for a
+	// slice with no oracle line.
+	LastRun *hereLastRun `json:"last_run,omitempty"`
+}
+
+// hereLastRun is a slice's last run of `jig verify` and whether it covers the
+// slice's last commit (verify.LastRun).
+type hereLastRun struct {
+	Commit  string `json:"commit"`
+	Result  string `json:"result"`
+	Covers  string `json:"covers"`
+	Seconds int    `json:"seconds,omitempty"`
 }
 
 type hereVerified struct {
@@ -274,7 +286,15 @@ func buildHereView(hc hereCtx) (hereView, error) {
 		return v, err
 	}
 	v.verified = verificationsIn(lines)
-	v.states = hereVerificationStates(hc, lines, sliceIDs(st, ticket))
+	truth := hereTruth(hc, lines, sliceIDs(st, ticket))
+	v.states = statesOf(truth.Derive())
+	for _, r := range truth.LastRuns() {
+		for i := range v.slices {
+			if v.slices[i].ID == r.Slice {
+				v.slices[i].LastRun = &hereLastRun{Commit: r.Line.Commit, Result: r.Result, Covers: r.Covers, Seconds: r.Line.Seconds}
+			}
+		}
+	}
 	// The phase is best-effort here: `jig here` runs on every session start,
 	// and a ticket it cannot derive still has its state to show.
 	if t, err := derivePhase(st, ticket); err == nil {
@@ -344,9 +364,13 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 			if s.Question != "" {
 				question = s.Question
 			}
-			rows = append(rows, []string{s.ID, s.State, fmt.Sprint(s.Attempts), blocked, question})
+			covers := "-"
+			if s.LastRun != nil {
+				covers = s.LastRun.Covers
+			}
+			rows = append(rows, []string{s.ID, s.State, covers, fmt.Sprint(s.Attempts), blocked, question})
 		}
-		blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows))
+		blocks = append(blocks, axi.Table("slices", []string{"id", "state", "covers", "attempts", "blocked_by", "question"}, rows))
 		if len(v.verified) > 0 {
 			var vrows [][]string
 			for _, x := range v.verified {

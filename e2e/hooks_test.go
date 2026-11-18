@@ -67,7 +67,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
 	got := decodeHook(t, runHookCommand(t, env.with("CLAUDE_ENV_FILE="+envFile), fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
-	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,attempts,blocked_by,question}") ||
+	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,covers,attempts,blocked_by,question}") ||
 		!strings.Contains(got.Specific.Context, "session: s-hooks") {
 		t.Fatalf("SessionStart context = %q, want %s, its slice table and the session id", got.Specific.Context, fx.Ticket)
 	}

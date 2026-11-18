@@ -125,6 +125,18 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		}
 	}
 
+	if t.status != nil {
+		if run, ok := t.status.LastRuns[s.ID]; ok && run.Result != "" {
+			// What the status says of the slice's last witnessed run, in its
+			// own words.
+			state := StateGreen
+			if run.Result != "pass" {
+				state = StateStalled
+			}
+			p.add(pre + m.st.icon(state) + " " + m.st.dim(fit("last run: "+run.Result+" · covers: "+run.Covers, room-2)))
+		}
+	}
+
 	for _, q := range t.questions(m.zone) {
 		if q.Slice != s.ID {
 			continue

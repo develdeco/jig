@@ -144,7 +144,7 @@ events --follow` prints. A ticket is four steps taken in order (brief, build,
 review, publish), each with how long it has taken (the step under way counting
 on, the steps' total in the panel's title) and its state in a few words:
 "approved by <name> (person) · 5 sections, 3 slices", "1 of 3 green ·
-verifying slice clamp at bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
+slice clamp is being built", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
 change", "pull request opened · <url>". The steps are the same answer `jig next`
 gives, so the screen and the command never disagree about where a ticket stands.
 Under them a block named after the step under the cursor lists what the step is
@@ -152,7 +152,7 @@ made of (the brief drafted, its slices written and its approval; each slice of
 the build; each review round with its asks and fixes; the publish's body, pull
 request and changelog, with your approval first when jig pushes for you), each
 with its state. The part that matters now (your turn, a failure, else the work under way)
-opens: its line shows how far it has come (`claimed ━━ committed ━━ verifying ──
+opens: its line shows how far it has come (`claimed ━━ run ──
 verified` for a slice) and how long it has run, and under it are fields that
 say what it is (a slice's goal, who holds it, what checks it and its commit; a
 round's reviewer; the brief's sections and slices; the pull request's branch)

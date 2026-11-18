@@ -26,7 +26,7 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `store` | the store's directory; `store_remote` alone means it is not cloned here - run the `git clone` the help line gives, then `jig here` again |
 | `repo`, `repo_dir`, `branch` | which repo of the project this is, its clone, the branch checked out |
 | `ticket`, `ticket_how` | the ticket the branch name leads with (`branch`: its id, an id it had before, or the number of its GitHub issue), or the one you named (`arg`) |
-| `slices` | every slice of the ticket with its state; `blocked_by` shows what each waits for |
+| `slices` | every slice of the ticket with its state and, in `last_run`, whether its last run `covers` the slice's last commit; `blocked_by` shows what each waits for |
 | `questions`, `verification_states` | open questions to answer; commits with no recorded result, or a failed one |
 
 A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which decides brief or chart and mints a ticket for a brief. `jig claim` on such a branch records it as that ticket's branch.
