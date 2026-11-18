@@ -427,8 +427,11 @@ func TestDeclaredOraclesResolveWithoutDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	ws := Workspace{ID: "alpha", Path: "alpha"}
-	if got := m.OracleCmd("lint", ws); got != "golangci-lint run ./alpha/..." {
+	if want := []Workspace{{ID: "root", Path: "."}}; !reflect.DeepEqual(m.Workspaces, want) {
+		t.Errorf("Workspaces = %v, want the root workspace %v", m.Workspaces, want)
+	}
+	ws := Workspace{ID: "alpha", Path: "src/alpha"}
+	if got := m.OracleCmd("lint", ws); got != "golangci-lint run ./src/alpha/..." {
 		t.Errorf("OracleCmd(declared) = %q", got)
 	}
 	if got := m.OracleCmd("test", ws); got != "test" {

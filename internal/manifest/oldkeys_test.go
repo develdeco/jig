@@ -15,7 +15,7 @@ func TestAManifestWithALightOrHeavyKeyStillLoadsItsOracles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	decl := "oracles:\n  test: go test ./...\n  lint: golint\nheavy: [test]\n"
+	decl := "oracles:\n  test: go test ./...\n  lint: golint\nheavy: [test]\nlight:\n  paths: [\"/abs\"]\n"
 	if err := os.WriteFile(filepath.Join(dir, ".claude", "jig.yaml"), []byte(decl), 0o644); err != nil {
 		t.Fatal(err)
 	}

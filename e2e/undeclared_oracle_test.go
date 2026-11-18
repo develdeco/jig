@@ -28,6 +28,10 @@ func TestAnUndeclaredOracleNameRunsAsALiteralCommand(t *testing.T) {
 	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
 		t.Fatalf("jig verify exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
+	header, _, _ := strings.Cut(res.Stdout, "result:")
+	if !strings.Contains(header, "command: test (the slice's oracle)") {
+		t.Errorf("the header does not name test as the command that ran:\n%s", res.Stdout)
+	}
 	line, ok := oracleLine(readJournal(t, fx, fx.Ticket), "a", sha, "fail")
 	if !ok {
 		t.Fatalf("no failed oracle line for %s", sha)
