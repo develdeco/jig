@@ -20,8 +20,10 @@ type Standing struct {
 // when no round is open, when the branch moved, and when a repo has no clone
 // to look at, which jig cannot cheaply tell. A keep a person decided after the
 // round opened is pending: the next gate queues it as a fix slice, as the
-// triage help says, so the round does not stand over it. It runs no oracle
-// and writes nothing.
+// triage help says, so the round does not stand over it. A slice short of
+// green is code still to come, so no round stands over it either: the gate
+// goes on and refuses as it would with no round open. It runs no oracle and
+// writes nothing.
 //
 // The store is synced first: the round it asks about may be one a gate on
 // another process has only just opened.
@@ -39,6 +41,19 @@ func StandingRound(d Deps, ticket string) (*Standing, error) {
 	}
 	for _, dec := range decisions {
 		if dec.Pending && dec.Outcome == TriageKeep {
+			return nil, nil
+		}
+	}
+	slices, err := d.Store.ReadSlices(ticket)
+	if err != nil {
+		return nil, fmt.Errorf("verifydeliver: standing round: read slices: %w", err)
+	}
+	for _, sl := range slices {
+		state, err := d.Store.ReadSliceState(ticket, sl.ID)
+		if err != nil {
+			return nil, fmt.Errorf("verifydeliver: standing round: read slice %s: %w", sl.ID, err)
+		}
+		if state.State != "green" {
 			return nil, nil
 		}
 	}

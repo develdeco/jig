@@ -183,4 +183,25 @@ func TestGateQueuesAKeepDecidedWhileARoundIsOpen(t *testing.T) {
 	if code != 0 || strings.Contains(out, "stands at its head") || !strings.Contains(out, "fix-2-q-alpha") {
 		t.Fatalf("jig gate: exit = %d, want the kept ask's slice queued\n%s", code, out)
 	}
+
+	// Round 2 is still open at the head, but a slice is queued and unbuilt: a
+	// plain gate refuses it as it would with no round open.
+	out, code = runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	if code != 1 || !strings.Contains(out, "GATE_NOT_GREEN") || !strings.Contains(out, "fix-2-q-alpha") || strings.Contains(out, "stands at its head") {
+		t.Fatalf("jig gate with the queued slice unbuilt: exit = %d, want 1 GATE_NOT_GREEN naming it\n%s", code, out)
+	}
+
+	// Built, the gate opens round 2 at the new head, and the next one reports it.
+	buildQueuedSlice(t, fx, "fix-2-q-alpha", "alpha/alpha.go")
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || strings.Contains(out, "stands at its head") {
+		t.Fatalf("jig gate after the slice is built: exit = %d, want round 2 opened at the new head\n%s", code, out)
+	}
+	opened := gateOpens(t, fx)
+	out, code = runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "round: 2 stands at its head (not opened again)") {
+		t.Fatalf("jig gate over the re-opened round: exit = %d, want the standing round\n%s", code, out)
+	}
+	if got := gateOpens(t, fx); got != opened {
+		t.Errorf("gate-open lines = %d, want %d: the standing report opened a round", got, opened)
+	}
 }
