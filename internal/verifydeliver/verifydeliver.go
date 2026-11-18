@@ -1,5 +1,5 @@
-// Package verifydeliver implements jig's second pipeline: gate (review +
-// re-verification rounds) and publish (the pull request body, the push and the
+// Package verifydeliver implements jig's second pipeline: gate (review
+// rounds, which run no command) and publish (the pull request body, the push and the
 // pull request). It shares no in-memory state with package frontier; the
 // store on disk is the only interface between them.
 //

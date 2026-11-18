@@ -139,7 +139,14 @@ func (f *finalRun) compose(m manifest.Manifest) (composed, why string) {
 		}
 		if !seen[cmd] {
 			seen[cmd] = true
-			parts = append(parts, "("+cmd+")")
+			// A command that holds a # may end in a comment, which would swallow
+			// its own closing parenthesis and the commands after it: it gets its
+			// own lines, as it parses alone. The rest keep the one-line form.
+			if strings.Contains(cmd, "#") {
+				parts = append(parts, "(\n"+cmd+"\n)")
+			} else {
+				parts = append(parts, "("+cmd+")")
+			}
 		}
 	}
 	f.classes = f.classes[:0]

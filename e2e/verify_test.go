@@ -58,12 +58,12 @@ func oracleLine(lines []journal.Line, slice, sha, outcome string) (journal.Line,
 	return journal.Line{}, false
 }
 
-// TestVerifyHandCommitReusedByGate: a commit made by hand on the ticket's
+// TestVerifyHandCommitIsListedByGate: a commit made by hand on the ticket's
 // branch for slice a is verified by the builder's own `jig verify`, which
-// journals the pending line, the oracle line and the verified line; the gate
-// round that follows reuses that pass for the alpha workspace's oracle instead
-// of running it again, and runs beta's, which no one verified.
-func TestVerifyHandCommitReusedByGate(t *testing.T) {
+// journals the oracle line and the verified line; the gate round that follows
+// runs nothing and lists that pass for slice a, and no row for the slices no
+// one verified.
+func TestVerifyHandCommitIsListedByGate(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "clean-round"})
 	dropEnvFromSlices(t, fx)

@@ -816,7 +816,7 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 // reaches a future reviewer source's own defer restore) can leave an untracked
 // failing test file and a tracked edit sitting in the gate lease. The next `jig
 // gate` must not have its oracles fail or get skewed by that leftover dirt -
-// Gate itself restores the lease to a pristine head before any oracle runs. The
+// Gate itself restores the lease to a pristine head before the round reads it. The
 // untracked file here is a failing test of alpha, which the fixture's "test"
 // oracle (`go test ./alpha/...`) runs for real: it is only absent from the
 // oracle's run if the restore came first.

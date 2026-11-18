@@ -53,7 +53,7 @@ func init() {
 			{"project", verifyProjectUsage, false},
 		}, false},
 		Order: 320,
-		Note:  "jig verify [<ticket>] [flags] [-- <cmd>]: the ticket defaults to the one the branch is for; `-- <cmd>` (default: the slice's oracle, verbatim) runs another command, recorded as differing and covering nothing; exit code: the command's own, 125 when jig failed before the command started",
+		Note:  "jig verify [<ticket>] [flags] [-- <cmd>]: the ticket defaults to the one the branch is for; `-- <cmd>` (default: the slice's oracle, verbatim) runs another command, recorded as differing and covering nothing; exit code: the command's own, 125 when jig failed before the command started; the command ends with jig when jig is interrupted or terminated (SIGINT, SIGTERM, SIGHUP; on Windows, any end), but on Unix a SIGKILL of jig cannot be caught and leaves it running",
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
 			return cmdVerify(e, args, stdout)
 		},

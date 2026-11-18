@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -200,6 +201,25 @@ func TestGateCoversEveryRepo(t *testing.T) {
 			t.Errorf("jig gate output lacks %q\nstdout:\n%s", want, gate.Stdout)
 		}
 	}
+
+	// The builders' last run: in each clone, `jig verify --final` is the union of
+	// the slices that build in that repo alone, recorded with the repo's name.
+	verifySlots <- struct{}{}
+	for _, c := range []struct {
+		h          *fakeHarness
+		repo, sha  string
+		slice, not string
+	}{{b.api, "api", b.shaAPI, "server", "ui"}, {b.web, "web", b.shaWeb, "ui", "server"}} {
+		res := c.h.Jig("verify", ticket, "--final")
+		if res.Code != 0 || !strings.Contains(res.Stdout, "outcome: pass") || strings.Contains(res.Stdout, c.not+",") {
+			t.Fatalf("jig verify --final in %s: exit %d, want a pass of slice %s alone\nstdout:\n%s\nstderr:\n%s", c.repo, res.Code, c.slice, res.Stdout, res.Stderr)
+		}
+		line, ok := journal.FinalRunAt(readJournal(t, b.fx, ticket), c.repo, c.sha)
+		if !ok || line.Repo != c.repo || !reflect.DeepEqual(line.Slices, []string{c.slice}) {
+			t.Errorf("FinalRunAt(%s) = %+v, %v, want a line naming the repo and slice %s", c.repo, line, ok, c.slice)
+		}
+	}
+	<-verifySlots
 
 	// jig here, from either clone, says the same of the open round: the head and
 	// the copy of each repo.

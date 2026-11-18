@@ -967,7 +967,7 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, rf roundFiles,
 
 // reviewPromptTemplate is the exact prompt rendered (via fmt.Sprintf) for
 // every gate reviewer dispatch: it states the job, what lies outside it
-// (editing, and running tests the gate's oracles already ran, but for a
+// (editing, and running tests the slices' builders already ran, but for a
 // probe's: ADRs 0017 and 0036), and the output contract, and says what jig
 // will verify. It never lists kinds of problems, coaches behavior, or
 // patches a past model mistake. The slot after "run a test only to probe." is

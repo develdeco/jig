@@ -95,15 +95,17 @@ func ownFinalRun(finals []FinalRunReport, repo string) FinalRunReport {
 // it).
 func (r FinalRunReport) Words() string {
 	head := shortSHA(r.Head)
-	command := ""
+	// The command follows its colon; one that cannot sit in a code span is left
+	// out with the colon, so the sentence ends where it should.
+	tail := ""
 	if r.Command != "" && !strings.Contains(r.Command, "`") {
-		command = "`" + r.Command + "`"
+		tail = ": `" + r.Command + "`"
 	}
 	switch r.Outcome {
 	case FinalRunPass:
-		return strings.TrimSpace(fmt.Sprintf("Final run at the reviewed head %s: pass in %d s: %s", head, r.Seconds, command))
+		return fmt.Sprintf("Final run at the reviewed head %s: pass in %d s%s", head, r.Seconds, tail)
 	case FinalRunFail:
-		return strings.TrimSpace(fmt.Sprintf("Final run at the reviewed head %s failed: %s", head, command))
+		return fmt.Sprintf("Final run at the reviewed head %s failed%s", head, tail)
 	}
 	return "No final run at the reviewed head " + head
 }

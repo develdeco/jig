@@ -246,7 +246,7 @@ func harnessOf(lines []journal.Line, session string) string {
 }
 
 // reviewedHeadOf is the head a round reviewed: the head the reviewer read, else
-// the head the gate ran its oracles on. With several repos it names each.
+// the head the round was opened on. With several repos it names each.
 func reviewedHeadOf(rep reportYAML) string {
 	heads := rep.ReviewedSHA
 	if len(heads) == 0 {

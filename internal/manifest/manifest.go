@@ -48,7 +48,7 @@ type Manifest struct {
 	// declares none, so a repo that says nothing never reuses.
 	Light Light `yaml:"light,omitempty"`
 	// Heavy names the oracles that take the project's suite slot when a slice
-	// or the gate runs them by that name; a literal command takes none, and a
+	// runs them by that name; a literal command takes none, and a
 	// manifest that names none takes no slot.
 	Heavy []string `yaml:"heavy,omitempty"`
 }

@@ -101,7 +101,7 @@ func (r *gateRun) acquire(gr *gateRepo) error {
 	gr.lease = lease
 
 	// Restore the gate lease to a pristine, known-correct head right after
-	// acquire and before any oracle runs. pool.Acquire never resets an
+	// acquire and before the round reads it. pool.Acquire never resets an
 	// existing local branch (a deliberate rule so a same-run slice's commits
 	// on it survive later acquires), so without this, a lease an earlier,
 	// killed run left dirty or ahead would have its leftovers reviewed, or on

@@ -68,6 +68,15 @@ func TestRenderVerificationSectionWithoutAReviewedHeadOrRounds(t *testing.T) {
 	if got, want := renderVerificationSection([]FinalRunReport{failed}, nil), "## Verification\n\nFinal run at the reviewed head 0123456 failed: `go test ./a/...`\n"; got != want {
 		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
 	}
+	// A command that cannot sit in a code span is left out with its colon.
+	ticked := FinalRunReport{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunPass, Seconds: 9, Command: "echo `date`"}
+	if got, want := renderVerificationSection([]FinalRunReport{ticked}, nil), "## Verification\n\nFinal run at the reviewed head 0123456: pass in 9 s\n"; got != want {
+		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
+	}
+	ticked.Outcome = FinalRunFail
+	if got, want := renderVerificationSection([]FinalRunReport{ticked}, nil), "## Verification\n\nFinal run at the reviewed head 0123456 failed\n"; got != want {
+		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
+	}
 	two := []FinalRunReport{
 		{Repo: "api", Head: "aaaaaaaaa", Outcome: FinalRunPass, Seconds: 3, Command: "go test ./api"},
 		{Repo: "web", Head: "bbbbbbbbb", Outcome: FinalRunNone},
