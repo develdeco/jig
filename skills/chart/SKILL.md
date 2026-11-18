@@ -33,7 +33,7 @@ Never publish. Never answer your own question.
 
 Read `jig skill chart multi-repo` when `jig next <T>` shows slices ready in several repos.
 
-Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the call returned one). jig holds a subagent at its stop while a verification runs, changes are uncommitted, or every slice is green with no round open: not stuck, wait.
+Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the call returned one). jig holds a subagent at its stop while a commit has no recorded result, changes are uncommitted, or every slice is green with no round open: not stuck, wait.
 
 ## Relay
 

@@ -248,11 +248,11 @@ func TestTwoRepoTicketBuildsInEachRepo(t *testing.T) {
 	// oracle. The api's session does the same in its own clone.
 	right := commitSlice(t, web2, "ui", "ui/right.go", "package ui\n\n// Right is a change in the web repo made for its own slice.\nfunc Right() {}\n")
 	if r := web2.Jig("verify"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: ui") || !strings.Contains(r.Stdout, "commit: "+right) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
+		t.Errorf("jig verify in web: exit %d, want the ui slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, right[:12], r.Stdout, r.Stderr)
 	}
 	apiSha := commitSlice(t, api2, "server", "server/more.go", "package server\n\n// More names a second thing the api serves.\nfunc More() string { return \"more\" }\n")
 	if r := api2.Jig("verify"); r.Code != 0 || !strings.Contains(r.Stdout, "slice: server") || !strings.Contains(r.Stdout, "commit: "+apiSha) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Errorf("jig verify --wait in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
+		t.Errorf("jig verify in api: exit %d, want the server slice at %s to pass\nstdout:\n%s\nstderr:\n%s", r.Code, apiSha[:12], r.Stdout, r.Stderr)
 	}
 
 	// From the orchestrator, in none of the repos, the commit has no repo to be

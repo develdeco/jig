@@ -131,13 +131,14 @@ type flowEvent struct {
 //  3. The branch to work on is the one jig next names.
 //  4. The session starts: its hook tells it the ticket.
 //  5. It claims the first slice, unattended.
-//  6. It commits slice a. Git's own hook starts a verification of the commit;
-//     the PostToolUse hook that sees the same commit starts nothing more.
-//  7. While the verification runs, the unattended session is not let stop.
+//  6. It commits slice a. Git's own hook and the PostToolUse hook that sees the
+//     same commit record it and start nothing; the session runs jig verify.
+//  7. While a commit has no recorded result, the unattended session is not let
+//     stop.
 //  8. It commits slice b, which fails its oracle the first time, and slice d.
 //  9. Slice c asks the person a question and waits; the person answers and the
 //     session is told at its next prompt; slice c is committed.
-//  10. Every verification records its outcome, and the session hears them.
+//  10. Every run of jig verify records its outcome, and the session hears them.
 //  11. With every slice green, jig next names the gate and the session opens
 //     round 1.
 //  12. A reviewer in a session of its own reads the round and reports it clean.

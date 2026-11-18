@@ -265,7 +265,7 @@ func corrMarkUnattended(t *testing.T, fx *fixture.Fixture) {
 // stall. After the second, the next prompt tells the session so, once; a
 // correction line records it; and, with a person at the keyboard, the slice is
 // left as the verifications left it. The verifications are real, run in line
-// (jig verify --wait) because the stall is what is under test and not the
+// (jig verify) because the stall is what is under test and not the
 // detached worker, which TestHooksDriveVerify covers.
 func TestCorrectionStall(t *testing.T) {
 	t.Parallel()
@@ -282,7 +282,7 @@ func TestCorrectionStall(t *testing.T) {
 		corrSliceOnly(t, "the PostToolUse of the commit of "+file, sha, hook)
 		res := h.Verify(fx.Ticket, "a")
 		if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
-			t.Fatalf("jig verify --wait exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+			t.Fatalf("jig verify exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
 		for _, l := range readJournal(t, fx, fx.Ticket) {
 			if l.Event == journal.EventOracle && l.Commit == sha {
@@ -345,7 +345,7 @@ func TestCorrectionBriefDrift(t *testing.T) {
 	sha := h.CommitScenario("a", 1)
 	res := h.Verify(fx.Ticket, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	corrEditBrief(t, fx, "Add a small percentage-range caller", "Add two small percentage-range callers")
 	ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}))

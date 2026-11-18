@@ -280,12 +280,12 @@ func TestVerifyRunsAnOracleWrittenForSh(t *testing.T) {
 	unfixed := h.Commit("a", "a: a note, not the fix", map[string]string{"notes/a.txt": "not yet"})
 	res := h.Verify(fx.Ticket, "a")
 	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
-		t.Fatalf("jig verify --wait of the unfixed commit exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		t.Fatalf("jig verify of the unfixed commit exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	fixed := h.CommitScenario("a", 1)
 	res = h.Verify(fx.Ticket, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait of the fix exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		t.Fatalf("jig verify of the fix exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 
 	lines := readJournal(t, fx, fx.Ticket)
