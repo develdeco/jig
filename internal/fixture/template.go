@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/develdeco/jig/internal/gittest"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 // A fixture is built with git once for each shape in a process and copied for
@@ -41,7 +41,7 @@ import (
 //     doubled backslashes of a git config value), which the template's scan
 //     found once, so a Build reads only the files it has to change;
 //  3. makes the commits agree with the files: for each repository whose
-//     tracked files changed, gitx.RewriteHeadCommit writes the commit a
+//     tracked files changed, gitxtest.RewriteHeadCommit writes the commit a
 //     repository built from the final files would have made, in the work tree
 //     and in its bare remote, in process.
 //
@@ -97,7 +97,7 @@ type template struct {
 	roots []string
 	subs  []string
 	// history is set for a scenario: each repository's whole history is
-	// rewritten (gitx.RewriteHistory) and the repositories are found by
+	// rewritten (gitxtest.RewriteHistory) and the repositories are found by
 	// looking, not named by the fixture's fields.
 	history bool
 	// bareDirs are the bare repositories of a scenario, as slash paths under root.
@@ -461,7 +461,7 @@ func (t *template) copyTo(targets []string) (*Fixture, error) {
 			mirrors = append(mirrors, t.abs(r.remote, targets))
 		}
 		work := t.abs(r.dir, targets)
-		if err := gitx.RewriteHeadCommit(work, r.paths, mirrors...); err != nil {
+		if err := gitxtest.RewriteHeadCommit(work, r.paths, mirrors...); err != nil {
 			return nil, fmt.Errorf("fixture: point %s at %s: %w", path.Base(r.dir), where, err)
 		}
 	}

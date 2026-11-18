@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 const (
@@ -164,7 +164,7 @@ func TestInitStandaloneIdentity(t *testing.T) {
 	}
 	global := func(t *testing.T, env jigEnv, args ...string) {
 		t.Helper()
-		if _, err := gitx.RunReplaceEnv(t.TempDir(), env.environ(), append([]string{"config", "--global"}, args...)...); err != nil {
+		if _, err := gitxtest.RunReplaceEnv(t.TempDir(), env.environ(), append([]string{"config", "--global"}, args...)...); err != nil {
 			t.Fatalf("git config --global %s: %v", strings.Join(args, " "), err)
 		}
 	}

@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/develdeco/jig/internal/gittest"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 // A scenario is a state a test package builds once for its binary and every
@@ -28,7 +28,7 @@ import (
 // directory the caller gives for it; and the files that carry a root may sit in
 // an old commit, not only in the tip (a commit made on top of the fixture's
 // leaves the fixture's manifest behind), so the copy rewrites each
-// repository's whole history (gitx.RewriteHistory), in process, and the
+// repository's whole history (gitxtest.RewriteHistory), in process, and the
 // repositories it finds (a directory with a .git, and the bare repositories its
 // remotes name) are not listed by anyone. A copy starts no git process.
 //
@@ -181,7 +181,7 @@ const maxHistoryPasses = 8
 // held a root in a file now has other content, so its id changes, and so do
 // the ids of the commits on top of it, and a file that names such a commit (a
 // journal that records the commits it saw, the start of a ticket) must name the
-// new one. So each repository is rewritten (gitx.RewriteHistoryFunc: every
+// new one. So each repository is rewritten (gitxtest.RewriteHistoryFunc: every
 // version of each file that holds a root or an old id, in every commit) with
 // the ids moved so far, and the passes repeat until none moves a commit.
 func (t *template) rewriteHistories(targets []string, roots *strings.Replacer) error {
@@ -205,7 +205,7 @@ func (t *template) rewriteHistories(targets []string, roots *strings.Replacer) e
 			transform := func(_ string, data []byte) []byte {
 				return []byte(ids.Replace(roots.Replace(string(data))))
 			}
-			got, err := gitx.RewriteHistoryFunc(work, paths, transform, mirrors...)
+			got, err := gitxtest.RewriteHistoryFunc(work, paths, transform, mirrors...)
 			if err != nil {
 				return fmt.Errorf("%s: %w", path.Base(r.dir), err)
 			}

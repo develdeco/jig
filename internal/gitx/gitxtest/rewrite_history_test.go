@@ -1,7 +1,8 @@
-package gitx
+package gitxtest
 
 import (
 	"fmt"
+	. "github.com/develdeco/jig/internal/gitx"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -191,7 +192,7 @@ func TestRewriteHistoryWithNothingToChangeTouchesNothing(t *testing.T) {
 func TestRewriteHistoryRefusals(t *testing.T) {
 	t.Run("an annotated tag", func(t *testing.T) {
 		work, _, ids := historyWithRoot(t, "/old", true)
-		repo, done, err := openStorage(filepath.Join(work, ".git"))
+		repo, done, err := OpenStorage(filepath.Join(work, ".git"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -285,7 +286,7 @@ func TestRewriteHistoryKeepsEachPathsOwnNewBytes(t *testing.T) {
 			t.Errorf("%s:%s = %q, want %q", c.rev, c.path, got, c.want)
 		}
 	}
-	idx, _, err := readIndex(filepath.Join(work, ".git"))
+	idx, _, err := ReadIndex(filepath.Join(work, ".git"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,12 +333,12 @@ func TestRewriteHistoryMovesACommitWhoseOnlyChangeIsItsParent(t *testing.T) {
 // same commit with a signature, as git writes one.
 func signedCommit(t *testing.T, dir string) {
 	t.Helper()
-	repo, done, err := openStorage(filepath.Join(dir, ".git"))
+	repo, done, err := OpenStorage(filepath.Join(dir, ".git"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer done()
-	id, _ := refValue(repo, "refs/heads/main")
+	id, _ := RefValue(repo, "refs/heads/main")
 	c, err := repo.CommitObject(id)
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +349,7 @@ func signedCommit(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := storeObject(repo, obj)
+	h, err := StoreObject(repo, obj)
 	if err != nil {
 		t.Fatal(err)
 	}

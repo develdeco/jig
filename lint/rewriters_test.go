@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// rewriters are the gitx functions that rewrite commits in a repository: for
+// rewriters are the gitxtest functions that rewrite commits in a repository: for
 // a repository a test built, whose files carry a directory it was not built
 // in. They are not a way to edit history, and no product code may call them.
 var rewriters = map[string]bool{"RewriteHeadCommit": true, "RewriteHistory": true, "RewriteHistoryFunc": true}
@@ -54,8 +54,8 @@ func TestOnlyTestsAndTheFixtureCallTheCommitRewriters(t *testing.T) {
 			if !ok || !rewriters[sel.Sel.Name] {
 				return true
 			}
-			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "gitx" {
-				violations = append(violations, relSlash+": calls gitx."+sel.Sel.Name)
+			if x, ok := sel.X.(*ast.Ident); ok && (x.Name == "gitx" || x.Name == "gitxtest") {
+				violations = append(violations, relSlash+": calls "+x.Name+"."+sel.Sel.Name)
 			}
 			return true
 		})

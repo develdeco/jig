@@ -25,7 +25,7 @@ import (
 	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitbuild"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 // sliceTrailerKey is the commit trailer that names the slice a commit is for.
@@ -80,7 +80,7 @@ func (h *fakeHarness) builder() *gitbuild.Builder {
 	b := gitbuild.New(h.t, pinnedIdentityEnv)
 	b.ChildEnv = h.gitEnv
 	b.Fallback = func(dir string, _ []string, args ...string) (string, error) {
-		return gitx.RunReplaceEnv(dir, h.gitEnv(), args...)
+		return gitxtest.RunReplaceEnv(dir, h.gitEnv(), args...)
 	}
 	return b
 }
@@ -88,7 +88,7 @@ func (h *fakeHarness) builder() *gitbuild.Builder {
 // git runs git in the clone and fails the test on an error.
 func (h *fakeHarness) git(args ...string) string {
 	h.t.Helper()
-	out, err := gitx.RunReplaceEnv(h.Clone, h.gitEnv(), args...)
+	out, err := gitxtest.RunReplaceEnv(h.Clone, h.gitEnv(), args...)
 	if err != nil {
 		h.t.Fatalf("harness git %s: %v", strings.Join(args, " "), err)
 	}
@@ -99,7 +99,7 @@ func (h *fakeHarness) git(args ...string) string {
 // HEAD when it does not exist.
 func (h *fakeHarness) Branch(name string) {
 	h.t.Helper()
-	if _, err := gitx.RunReplaceEnv(h.Clone, h.gitEnv(), "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err == nil {
+	if _, err := gitxtest.RunReplaceEnv(h.Clone, h.gitEnv(), "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err == nil {
 		h.git("checkout", name)
 		return
 	}
@@ -236,7 +236,7 @@ func (h *fakeHarness) Bash(cmd string) bashResult {
 func (h *fakeHarness) run(argv []string) jigResult {
 	h.t.Helper()
 	if argv[0] == "git" {
-		out, err := gitx.RunReplaceEnv(h.Clone, h.gitEnv(), argv[1:]...)
+		out, err := gitxtest.RunReplaceEnv(h.Clone, h.gitEnv(), argv[1:]...)
 		return jigResult{Stdout: out, Stderr: errText(err), Code: exitCodeOfErr(h.t, err)}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)

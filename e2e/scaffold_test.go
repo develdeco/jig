@@ -19,6 +19,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
@@ -117,20 +118,20 @@ func TestWithGitGlobalIsPerTest(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if _, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "core.hooksPath", "/some/hooks"); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "core.hooksPath", "/some/hooks"); err != nil {
 		t.Fatalf("git config --global: %v", err)
 	}
-	if got, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "--get", "core.hooksPath"); err != nil || got != "/some/hooks" {
+	if got, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "--get", "core.hooksPath"); err != nil || got != "/some/hooks" {
 		t.Errorf("core.hooksPath = %q, %v, want /some/hooks in the test file", got, err)
 	}
-	if got, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "--includes", "--get", "maintenance.auto"); err != nil || got != "false" {
+	if got, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "--includes", "--get", "maintenance.auto"); err != nil || got != "false" {
 		t.Errorf("maintenance.auto = %q, %v, want false through the include of the hermetic config", got, err)
 	}
 	shared := readFileOrFatal(t, hermetic)
 	if strings.Contains(string(shared), "hooksPath") {
 		t.Errorf("the shared hermetic config took the test setting:\n%s", shared)
 	}
-	if _, err := gitx.RunReplaceEnv(dir, jigEnv{home: t.TempDir()}.environ(), "config", "--global", "--get", "core.hooksPath"); err == nil {
+	if _, err := gitxtest.RunReplaceEnv(dir, jigEnv{home: t.TempDir()}.environ(), "config", "--global", "--get", "core.hooksPath"); err == nil {
 		t.Errorf("another test sees the core.hooksPath this test installed")
 	}
 }
@@ -165,7 +166,7 @@ func TestWithoutIdentityLetsConfigDecideTheAuthor(t *testing.T) {
 		{"config", "user.email", "store.person@example.invalid"},
 		{"commit", "--allow-empty", "-m", "by config"},
 	} {
-		if _, err := gitx.RunReplaceEnv(dir, bare.environ(), args...); err != nil {
+		if _, err := gitxtest.RunReplaceEnv(dir, bare.environ(), args...); err != nil {
 			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 		}
 	}

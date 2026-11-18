@@ -116,7 +116,7 @@ func TestCommitAllNothingToCommit(t *testing.T) {
 	if got := mustRun(t, dir, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("HEAD moved to %s", got)
 	}
-	idx, _, err := readIndex(filepath.Join(dir, ".git"))
+	idx, _, err := ReadIndex(filepath.Join(dir, ".git"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,9 +490,9 @@ func TestCommitAllCatchesAFileReplacedWithItsOldTime(t *testing.T) {
 	}
 }
 
-// statOf is the stat data fillStat records for info.
+// statOf is the stat data FillStat records for info.
 func statOf(info os.FileInfo) index.Entry {
 	var e index.Entry
-	fillStat(&e, info)
+	FillStat(&e, info)
 	return e
 }

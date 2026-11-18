@@ -1,4 +1,4 @@
-package gitx
+package gitxtest
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
+
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -64,7 +66,7 @@ import (
 // repository as far as it got; the caller discards it.
 func RewriteHeadCommit(dir string, paths []string, mirrors ...string) error {
 	gitDir := filepath.Join(dir, ".git")
-	repo, done, err := openStorage(gitDir)
+	repo, done, err := gitx.OpenStorage(gitDir)
 	if err != nil {
 		return fmt.Errorf("gitx: rewrite the commit in %s: %w", dir, err)
 	}
@@ -88,7 +90,7 @@ func RewriteHeadCommit(dir string, paths []string, mirrors ...string) error {
 		return fmt.Errorf("gitx: rewrite the commit in %s: HEAD is not on a branch", dir)
 	}
 	branch := head.Target()
-	oldID, err := refValue(repo, branch)
+	oldID, err := gitx.RefValue(repo, branch)
 	if err != nil {
 		return fmt.Errorf("gitx: rewrite the commit in %s: read %s: %w", dir, branch, err)
 	}
@@ -150,7 +152,7 @@ func RewriteHeadCommit(dir string, paths []string, mirrors ...string) error {
 	if err := repointRefs(gitDir, oldID, newID); err != nil {
 		return fmt.Errorf("gitx: rewrite the commit in %s: %w", dir, err)
 	}
-	if got, err := refValue(repo, branch); err != nil || got != newID {
+	if got, err := gitx.RefValue(repo, branch); err != nil || got != newID {
 		return fmt.Errorf("gitx: rewrite the commit in %s: %s is %s after the rewrite, want %s", dir, branch, got, newID)
 	}
 	if err := repointIndex(gitDir, dir, changes); err != nil {
@@ -275,7 +277,7 @@ func encodeCommit(repo *git.Repository, c *object.Commit) (plumbing.EncodedObjec
 // storeAll writes each of objs that repo does not have yet.
 func storeAll(repo *git.Repository, objs []plumbing.EncodedObject) error {
 	for _, o := range objs {
-		if _, err := storeObject(repo, o); err != nil {
+		if _, err := gitx.StoreObject(repo, o); err != nil {
 			return err
 		}
 	}
@@ -307,12 +309,12 @@ func reachable(repo *git.Repository, root plumbing.Hash) (map[plumbing.Hash]bool
 // rewriteMirror gives the bare repository mirror the new objects and moves
 // its branch from oldID to newID, which it must hold at oldID.
 func rewriteMirror(mirror string, branch plumbing.ReferenceName, oldID, newID plumbing.Hash, objs []plumbing.EncodedObject, stale []plumbing.Hash, keep map[plumbing.Hash]bool) error {
-	repo, done, err := openStorage(mirror)
+	repo, done, err := gitx.OpenStorage(mirror)
 	if err != nil {
 		return err
 	}
 	defer done()
-	if got, err := refValue(repo, branch); err != nil || got != oldID {
+	if got, err := gitx.RefValue(repo, branch); err != nil || got != oldID {
 		return fmt.Errorf("%s is %s, not the rewritten commit %s", branch, got, oldID)
 	}
 	if err := storeAll(repo, objs); err != nil {
@@ -321,7 +323,7 @@ func rewriteMirror(mirror string, branch plumbing.ReferenceName, oldID, newID pl
 	if err := repointRefs(mirror, oldID, newID); err != nil {
 		return err
 	}
-	if got, err := refValue(repo, branch); err != nil || got != newID {
+	if got, err := gitx.RefValue(repo, branch); err != nil || got != newID {
 		return fmt.Errorf("%s is %s after the rewrite, want %s", branch, got, newID)
 	}
 	return pruneLoose(mirror, stale, keep)
@@ -393,7 +395,7 @@ func repointIndex(gitDir, dir string, changes map[string]plumbing.Hash) error {
 	if !exists(filepath.Join(gitDir, "index")) {
 		return nil
 	}
-	idx, _, err := readIndex(gitDir)
+	idx, _, err := gitx.ReadIndex(gitDir)
 	if err != nil {
 		return fmt.Errorf("read the index: %w", err)
 	}
@@ -407,9 +409,9 @@ func repointIndex(gitDir, dir string, changes map[string]plumbing.Hash) error {
 			return err
 		}
 		e.Hash, e.Size, e.ModifiedAt = h, uint32(info.Size()), info.ModTime()
-		fillStat(e, info)
+		gitx.FillStat(e, info)
 	}
-	data, err := encodeIndex(idx)
+	data, err := gitx.EncodeIndex(idx)
 	if err != nil {
 		return fmt.Errorf("write the index: %w", err)
 	}
@@ -439,15 +441,15 @@ func pruneLoose(gitDir string, stale []plumbing.Hash, keep map[plumbing.Hash]boo
 
 // replaceFile replaces the file at path with data through its lock file.
 func replaceFile(path string, data []byte) error {
-	l, err := lock(path)
-	if errors.Is(err, ErrUseCLI) {
+	l, err := gitx.Lock(path)
+	if errors.Is(err, gitx.ErrUseCLI) {
 		return fmt.Errorf("%s is locked by another process", path)
 	}
 	if err != nil {
 		return err
 	}
-	defer l.release()
-	return l.commit(data)
+	defer l.Release()
+	return l.Commit(data)
 }
 
 // RewriteHistory is RewriteHeadCommit for a history: it rewrites every
@@ -506,7 +508,7 @@ func RewriteHistoryFunc(dir string, paths []string, transform func(path string, 
 // changes), and RewriteHistoryFunc otherwise.
 func rewriteHistory(dir string, paths []string, transform func(path string, data []byte) []byte, mirrors []string) (map[string]string, error) {
 	gitDir := filepath.Join(dir, ".git")
-	repo, done, err := openStorage(gitDir)
+	repo, done, err := gitx.OpenStorage(gitDir)
 	if err != nil {
 		return nil, fmt.Errorf("gitx: rewrite the history in %s: %w", dir, err)
 	}
@@ -533,7 +535,7 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 		return fail("HEAD is not on a branch")
 	}
 	branch := head.Target()
-	tipID, err := refValue(repo, branch)
+	tipID, err := gitx.RefValue(repo, branch)
 	if err != nil {
 		return fail("read %s: %w", branch, err)
 	}
@@ -641,7 +643,7 @@ func rewriteHistory(dir string, paths []string, transform func(path string, data
 	if err := repointRefsMap(gitDir, w.moved); err != nil {
 		return fail("%w", err)
 	}
-	if got, err := refValue(repo, branch); err != nil || got != newTip {
+	if got, err := gitx.RefValue(repo, branch); err != nil || got != newTip {
 		return fail("%s is %s after the rewrite, want %s", branch, got, newTip)
 	}
 	if err := repointIndex(gitDir, dir, tipChanges); err != nil {
@@ -864,7 +866,7 @@ func keepCommits(repo *git.Repository, id plumbing.Hash, keep map[plumbing.Hash]
 // descending from a rewritten one that the work tree does not know would be
 // left half rewritten, so it is an error.
 func rewriteMirrorHistory(mirror string, src *git.Repository, w *historyRewrite) error {
-	repo, done, err := openStorage(mirror)
+	repo, done, err := gitx.OpenStorage(mirror)
 	if err != nil {
 		return err
 	}

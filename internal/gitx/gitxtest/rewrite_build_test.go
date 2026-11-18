@@ -1,7 +1,8 @@
-package gitx
+package gitxtest
 
 import (
 	"fmt"
+	. "github.com/develdeco/jig/internal/gitx"
 	"io"
 	"io/fs"
 	"os"
@@ -217,7 +218,7 @@ func refsOf(t *testing.T, dir, prefix string) map[string]string {
 	if !exists(gitDir) {
 		gitDir = dir
 	}
-	repo, done, err := openStorage(gitDir)
+	repo, done, err := OpenStorage(gitDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func stateOf(t *testing.T, dir string) repoState {
 	if !exists(gitDir) {
 		gitDir = dir
 	}
-	repo, done, err := openStorage(gitDir)
+	repo, done, err := OpenStorage(gitDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func stateOf(t *testing.T, dir string) repoState {
 		return nil
 	})
 	sort.Strings(st.objects)
-	idx, _, err := readIndex(gitDir)
+	idx, _, err := ReadIndex(gitDir)
 	if err != nil {
 		t.Fatal(err)
 	}

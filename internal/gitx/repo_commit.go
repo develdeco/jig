@@ -24,10 +24,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// CommitAll stages every change and commits it to the checked-out branch,
-// as `git add -A && git commit` would, and reports whether there was
-// anything to commit. The author and committer are name and email, unless
-// GIT_AUTHOR_* or GIT_COMMITTER_* set them, as they do for the git program.
+// CommitAllAs stages every change and commits it to the checked-out branch, as
+// `git add -A && git commit` would, and reports whether there was anything to
+// commit. who gives the identity, unless GIT_AUTHOR_* or GIT_COMMITTER_* set
+// the author and committer, as they do for the git program; it is called once
+// there is something to commit, and not at all when there is none, so a lookup
+// that costs a process, or can fail, is paid only by a commit that needs it.
+// When who fails, so does CommitAllAs, having changed nothing a reader sees:
+// the objects it wrote stay unreferenced.
 //
 // It works from the index, as the git program does: a tracked file whose
 // size and modification time still match its index entry is not read, only
@@ -48,55 +52,14 @@ import (
 // .gitattributes below the root, an ignore rule beyond plain globs (see
 // readPatterns), or names that core.ignoreCase or core.precomposeUnicode
 // would match differently.
-func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
-	return r.CommitAllAs(msg, func() (Identity, error) {
-		return Identity{Name: name, Email: email}, nil
-	})
-}
-
-// CommitAllAs is CommitAll for a caller that has to look its identity up: who
-// is called once there is something to commit, and not at all when there is
-// none, so a lookup that costs a process, or can fail, is paid only by a
-// commit that needs it. When who fails, so does CommitAllAs, having changed
-// nothing a reader sees: the objects it wrote stay unreferenced.
 func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, error) {
-	return r.commitAll(msg, who, os.LookupEnv)
+	return r.CommitAllWith(msg, who, os.LookupEnv)
 }
 
-// CommitAllEnv is the commit CommitAll makes with its author, committer and
-// both dates read from env (KEY=VALUE entries, the last of a key winning, as
-// RunEnv takes them) before the process environment, so a test pins them
-// without editing the process's own. It writes what the git program writes
-// under the same environment, hash included, and returns ErrUseCLI for the
-// reasons CommitAll does, and when neither env nor the process environment
-// names the author and committer, which the git program would read from
-// configuration.
-func (r *Repo) CommitAllEnv(msg string, env []string) (bool, error) {
-	lookup := envEntries(env)
-	return r.commitAll(msg, func() (Identity, error) {
-		for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
-			if v, _ := lookup(k); v == "" {
-				return Identity{}, ErrUseCLI
-			}
-		}
-		return Identity{}, nil
-	}, lookup)
-}
-
-// envEntries answers lookups from KEY=VALUE entries, then the process
-// environment.
-func envEntries(env []string) envLookup {
-	return func(key string) (string, bool) {
-		for i := len(env) - 1; i >= 0; i-- {
-			if k, v, ok := strings.Cut(env[i], "="); ok && k == key {
-				return v, true
-			}
-		}
-		return os.LookupEnv(key)
-	}
-}
-
-func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup) (bool, error) {
+// CommitAllWith is CommitAllAs reading the author, the committer and their dates
+// from env, which answers a variable name, in place of the process environment:
+// how a test pins them without editing the process's own.
+func (r *Repo) CommitAllWith(msg string, who func() (Identity, error), env envLookup) (bool, error) {
 	authorTime, err := signatureTime("AUTHOR", env)
 	if err != nil {
 		return false, err
@@ -130,18 +93,18 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 			return false, ErrUseCLI
 		}
 	}
-	indexLock, err := lock(filepath.Join(gitDir, "index"))
+	indexLock, err := Lock(filepath.Join(gitDir, "index"))
 	if err != nil {
 		return false, err
 	}
-	defer indexLock.release()
-	branchLock, err := lock(refPath(gitDir, branch))
+	defer indexLock.Release()
+	branchLock, err := Lock(refPath(gitDir, branch))
 	if err != nil {
 		return false, err
 	}
-	defer branchLock.release()
+	defer branchLock.Release()
 
-	parent, err := refValue(repo, branch)
+	parent, err := RefValue(repo, branch)
 	if err != nil {
 		return false, err
 	}
@@ -153,7 +116,7 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 		}
 		parentTree = c.TreeHash
 	}
-	idx, indexTime, err := readIndex(gitDir)
+	idx, indexTime, err := ReadIndex(gitDir)
 	if err != nil {
 		return false, err
 	}
@@ -170,11 +133,11 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 		if !s.indexChanged {
 			return false, nil
 		}
-		indexData, err := encodeIndex(idx)
+		indexData, err := EncodeIndex(idx)
 		if err != nil {
 			return false, ErrUseCLI
 		}
-		return false, indexLock.commit(indexData)
+		return false, indexLock.Commit(indexData)
 	}
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	root, err := buildTree(repo, idx.Entries, "")
@@ -187,13 +150,13 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 	tree := root.hash
 	// Encoded before anything moves: an entry go-git cannot write (a time
 	// before 1970) leaves the whole commit to the git program.
-	indexData, err := encodeIndex(idx)
+	indexData, err := EncodeIndex(idx)
 	if err != nil {
 		return false, ErrUseCLI
 	}
 	if !parent.IsZero() && tree == parentTree {
 		if s.indexChanged {
-			return false, indexLock.commit(indexData)
+			return false, indexLock.Commit(indexData)
 		}
 		return false, nil
 	}
@@ -219,21 +182,21 @@ func (r *Repo) commitAll(msg string, who func() (Identity, error), env envLookup
 		return false, fmt.Errorf("gitx: write commit in %s: %w", r.dir, err)
 	}
 	// The git program's order: the branch moves, then the index.
-	if err := branchLock.commit([]byte(commit.String() + "\n")); err != nil {
+	if err := branchLock.Commit([]byte(commit.String() + "\n")); err != nil {
 		return false, fmt.Errorf("gitx: update %s in %s: %w", branch, r.dir, err)
 	}
-	if err := indexLock.commit(indexData); err != nil {
+	if err := indexLock.Commit(indexData); err != nil {
 		return true, fmt.Errorf("gitx: write index in %s: %w", r.dir, err)
 	}
 	return true, nil
 }
 
-// readIndex reads the index in gitDir, and its modification time; an empty
+// ReadIndex reads the index in gitDir, and its modification time; an empty
 // index when there is none. An index go-git cannot read (the git program
 // writes one under index.skipHash or core.splitIndex), or one with an entry
 // marked assume-unchanged, which go-git's decoder does not keep, returns
 // ErrUseCLI.
-func readIndex(gitDir string) (*index.Index, time.Time, error) {
+func ReadIndex(gitDir string) (*index.Index, time.Time, error) {
 	path := filepath.Join(gitDir, "index")
 	fi, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -303,10 +266,10 @@ func assumesUnchanged(data []byte) bool {
 	return false
 }
 
-// encodeIndex encodes idx as the git program writes it, sorted. go-git's
+// EncodeIndex encodes idx as the git program writes it, sorted. go-git's
 // encoder writes no extensions, so no cached tree survives to disagree with
 // the entries.
-func encodeIndex(idx *index.Index) ([]byte, error) {
+func EncodeIndex(idx *index.Index) ([]byte, error) {
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	idx.Cache, idx.ResolveUndo, idx.EndOfIndexEntry = nil, nil, nil
 	var buf bytes.Buffer
@@ -485,7 +448,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 			return err
 		}
 		entry.Hash, entry.ModifiedAt, entry.Size = h, info.ModTime(), uint32(info.Size())
-		fillStat(entry, info)
+		FillStat(entry, info)
 		s.indexChanged = true
 	}
 	return nil
@@ -501,7 +464,7 @@ func sameStat(entry *index.Entry, info os.FileInfo) bool {
 		return false
 	}
 	var now index.Entry
-	fillStat(&now, info)
+	FillStat(&now, info)
 	if !entry.CreatedAt.IsZero() && !now.CreatedAt.IsZero() && !sameTime(entry.CreatedAt, now.CreatedAt) {
 		return false
 	}
@@ -548,11 +511,11 @@ func (s *scan) writeBlob(path string) (plumbing.Hash, error) {
 	if err := w.Close(); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	return storeObject(s.repo, obj)
+	return StoreObject(s.repo, obj)
 }
 
-// storeObject writes obj unless the repository has it, and returns its hash.
-func storeObject(repo *git.Repository, obj plumbing.EncodedObject) (plumbing.Hash, error) {
+// StoreObject writes obj unless the repository has it, and returns its hash.
+func StoreObject(repo *git.Repository, obj plumbing.EncodedObject) (plumbing.Hash, error) {
 	h := obj.Hash()
 	if repo.Storer.HasEncodedObject(h) == nil {
 		return h, nil
@@ -696,7 +659,7 @@ func persistTree(repo *git.Repository, node *treeNode, known plumbing.Hash) erro
 			return err
 		}
 	}
-	_, err := storeObject(repo, node.obj)
+	_, err := StoreObject(repo, node.obj)
 	return err
 }
 

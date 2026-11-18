@@ -1,4 +1,4 @@
-package gitx
+package gitxtest
 
 import (
 	"path/filepath"

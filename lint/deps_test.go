@@ -20,6 +20,10 @@ const modulePath = "github.com/develdeco/jig"
 // anything calls it.
 var cliForbiddenDeps = []string{
 	"internal/frontier",
+	// What only tests import: history rewriting and in-process commits with a
+	// pinned environment, and a v2 store's machine mapping.
+	"internal/gitx/gitxtest",
+	"internal/project/projecttest",
 }
 
 // TestCLIDoesNotLinkSession pins that the binary links no session code: `go

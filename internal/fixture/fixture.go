@@ -18,7 +18,7 @@
 // less its Home) builds that shape once with the git program, into a temp
 // directory of its own, and every Build copies it into its directory and
 // rewrites the copy for that directory, starting no git process at all
-// (template.go has the how, and gitx.RewriteHeadCommit the commit rewrite).
+// (template.go has the how, and gitxtest.RewriteHeadCommit the commit rewrite).
 // What a caller gets is the fixture a direct build into the same directory
 // makes, commit ids included; template_test.go checks that for each shape.
 // The template directory is removed through gittest.AtExit, so a package

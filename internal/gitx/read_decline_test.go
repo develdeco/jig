@@ -460,9 +460,9 @@ func TestInProcessAnswersAreTallied(t *testing.T) {
 	work, _ := fakeRepo(t)
 	raises := func(t *testing.T, dir string, call func(dir string)) int64 {
 		t.Helper()
-		before := InProcessReads()
+		before := InProcessReadTally.Load()
 		call(dir)
-		return InProcessReads() - before
+		return InProcessReadTally.Load() - before
 	}
 	calls := map[string]func(dir string){
 		"RevParse":    func(d string) { _, _ = RevParse(d, "HEAD") },
@@ -497,9 +497,9 @@ func TestWorkTreeProbeAndDiscoveriesCountAsInProcessReads(t *testing.T) {
 		"TopLevel":      func(d string) { _, _ = TopLevel(d) },
 	}
 	raises := func(dir string, call func(dir string)) int64 {
-		before := InProcessReads()
+		before := InProcessReadTally.Load()
 		call(dir)
-		return InProcessReads() - before
+		return InProcessReadTally.Load() - before
 	}
 	work, _ := fakeRepo(t)
 	for name, call := range calls {

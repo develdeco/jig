@@ -1,7 +1,8 @@
-package gitx
+package gitxtest
 
 import (
 	"errors"
+	. "github.com/develdeco/jig/internal/gitx"
 	"io/fs"
 	"os"
 	"path/filepath"

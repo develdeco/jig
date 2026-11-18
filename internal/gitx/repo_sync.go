@@ -62,7 +62,7 @@ func localRemote(repo *git.Repository, dir, name string) (*remote, error) {
 	if !isBareRepo(path) {
 		return nil, ErrUseCLI
 	}
-	rem, done, err := openStorage(path)
+	rem, done, err := OpenStorage(path)
 	if err != nil {
 		return nil, ErrUseCLI
 	}
