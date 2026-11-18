@@ -209,20 +209,6 @@ func (t *publishTarget) storeRefs() []StoreRef {
 // directory.
 func (t *publishTarget) notesName() string { return reviewNotesFile(t.repoName, t.several()) }
 
-// report is the gate round's report as the repo's pull request shows it: when
-// the ticket publishes in several repos, with the reviewed head of this repo
-// alone.
-func (t *publishTarget) report() reportYAML {
-	rep := t.gateRep
-	if t.several() {
-		rep.ReviewedSHA = map[string]string{}
-		if sha := t.gateRep.ReviewedSHA[t.repoName]; sha != "" {
-			rep.ReviewedSHA[t.repoName] = sha
-		}
-	}
-	return rep
-}
-
 // ownFindings are the findings, and the paths the reviewer read, that belong
 // to this repo's pull request. In a project of several repos a round names a
 // file <repo>/<path>: a finding is the repo's whose name begins its file, and a
@@ -1164,8 +1150,9 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if reviewed == "" {
 		reviewed = in.head
 	}
-	rep := t.report()
-	finals := finalRunsOf(lines, t.qualified, rep.ReviewedSHA, t.repoName, reviewed)
+	// Every repo the round reviewed has its line in every body, as the findings
+	// of every repo do in the review notes.
+	finals := finalRunsOf(lines, t.qualified, t.gateRep.ReviewedSHA, t.repoName, reviewed)
 	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg, in.warn)
 	write := func(links []prLink) (string, DemoRenderResult, error) {
 		return writePRBody(d.Store, ticket, t.repoName, what, finals, rounds, picked, links, t.stack, trailer)

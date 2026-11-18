@@ -239,7 +239,7 @@ func TestShellOutputHelper(t *testing.T) {
 
 // TestShellOutputDoesNotPassOnTheRecordDirItInherited: jig can run inside a
 // recording oracle run, so its own environment may hold JIG_RECORD_DIR. A
-// command ShellOutput runs (the gate's oracle) must not see it, and a command
+// command ShellOutput runs (an oracle run) must not see it, and a command
 // ShellOutputEnv gives one must see that one and no other. The environment is
 // set on a child process, never on this one.
 func TestShellOutputDoesNotPassOnTheRecordDirItInherited(t *testing.T) {

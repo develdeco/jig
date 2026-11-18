@@ -10,7 +10,7 @@ import (
 // api ran `jig verify --final` at its reviewed head and nobody did in the web.
 // Publish's report and each pull request body then say it for each repo, by the
 // repo each final-oracle line names: the api has a pass, the web has none, and
-// each body says its own repo's.
+// every body says each repo's.
 func TestPublishNamesEachReposFinalRun(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
@@ -38,14 +38,17 @@ func TestPublishNamesEachReposFinalRun(t *testing.T) {
 			t.Errorf("jig publish --body lacks %q\n%s", want, body.Stdout)
 		}
 	}
-	// Each repo's body speaks of its own reviewed head alone.
-	for name, want := range map[string]string{
-		"api.md": "Final run at the reviewed head " + b.shaAPI[:7] + ": pass in ",
-		"web.md": "No final run at the reviewed head " + b.shaWeb[:7] + "\n",
-	} {
+	// Every body gives one line for each repo the round reviewed, whichever
+	// repo it is for.
+	for _, name := range []string{"api.md", "web.md"} {
 		text := string(readFileOrFatal(t, filepath.Join(b.st.TicketDir(ticket), "pr", name)))
-		if !strings.Contains(text, want) {
-			t.Errorf("pr/%s lacks %q:\n%s", name, want, text)
+		for _, want := range []string{
+			"- api: Final run at the reviewed head " + b.shaAPI[:7] + ": pass in ",
+			"- web: No final run at the reviewed head " + b.shaWeb[:7] + "\n",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("pr/%s lacks %q:\n%s", name, want, text)
+			}
 		}
 	}
 }

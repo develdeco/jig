@@ -165,8 +165,7 @@ func TestDigesterFlow(t *testing.T) {
 	productBefore := productTreeStatus(t)
 	fx, env := newFixture(t, fixture.Opts{})
 	env = env.withGitGlobal(t)
-	// A builder's verify brings up every env class its slice names, so slice d
-	// does not name one here.
+	// Slice d names no env class here, so no run starts the fixture's env tool.
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-flow")
 	ticket := fx.Ticket

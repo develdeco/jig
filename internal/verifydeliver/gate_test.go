@@ -896,7 +896,7 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
 			t.Fatalf("write leftover repro test: %v", err)
 		}
-		// A tracked edit left uncommitted, as an oracle rewrite or a killed
+		// A tracked edit left uncommitted, as a killed
 		// reviewer's own edit would leave behind.
 		dirty(t, "leftover reviewer edit")
 		// Advance the ticket's branch in the build lease with a commit touching the
@@ -1725,7 +1725,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 // TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
 // reproduces the wedge a text match on git's cat-file message used to fall
 // into: an open finding's file is later untracked and gitignored on the
-// ticket branch, but an oracle regenerates it on disk in the gate lease
+// ticket branch, but something regenerates it on disk in the gate lease
 // before the next round's review. FileExistsAtRev must report it absent at
 // head from the tree alone, never from what happens to sit in the working
 // tree, or every later round fails the same way and no dismissal can get

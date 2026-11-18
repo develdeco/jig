@@ -27,11 +27,10 @@ import (
 const verifyWait = 3 * time.Minute
 
 // dropEnvFromSlices removes the env class slice d names from the store's
-// slices.yaml. The gate brings up every env class a slice names and reuses an
-// oracle pass only when exactly those were up for it, so with slice d naming
-// rig an env-less pass of slice a would never stand for the gate's run. The
-// edit is a working-tree change of the store, which the next checkpoint
-// commits.
+// slices.yaml. A verify, or a final run, of a slice naming the class brings
+// it up around the command; these journeys are not about that, so slice d
+// names none and no run starts the fixture's env tool. The edit is a
+// working-tree change of the store, which the next checkpoint commits.
 func dropEnvFromSlices(t *testing.T, fx *fixture.Fixture) {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)

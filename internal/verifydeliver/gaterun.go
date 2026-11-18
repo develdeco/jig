@@ -223,8 +223,8 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	// (including whatever --intent/--doc just wrote above), else none
 	// (resolveIntent's own precedence doc comment). Resolving this before
 	// journaling means a malformed intent.md fails the round before a
-	// gate-open journal line is appended or an oracle suite runs, rather than
-	// after paying for both.
+	// gate-open journal line is appended, rather than
+	// after the round has begun.
 	r.intent, r.intentText, err = resolveIntent(d.Store, ticket)
 	if err != nil {
 		return r, err
