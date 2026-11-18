@@ -224,7 +224,7 @@ func TestValidateRestampOneUnresolved(t *testing.T) {
 func TestValidateStaleStamp(t *testing.T) {
 	t.Parallel()
 	const (
-		paste   = "replace it with the sha256 of the section it cites, from the `sections` table"
+		paste   = ", and no committed brief revision ties it to a current heading; replace it with the sha256 of the section it cites, from the `sections` table"
 		restamp = "run `jig validate DEMO-1 --restamp` if the slice's work is still right"
 		requeue = "`jig requeue DEMO-1 --from-brief-diff` to rebuild it first"
 	)
@@ -298,8 +298,8 @@ func TestValidateStaleStamp(t *testing.T) {
 		if code == 0 {
 			t.Fatalf("validate --check on stale stamps: exit 0\n%s", out)
 		}
-		check(t, line(t, out, "a", seams), []string{restamp, requeue}, nil)
-		check(t, line(t, out, "b", seams), []string{restamp}, []string{"--from-brief-diff"})
+		check(t, line(t, out, "a", seams), []string{restamp, requeue}, []string{"no committed brief revision"})
+		check(t, line(t, out, "b", seams), []string{restamp}, []string{"--from-brief-diff", "no committed brief revision"})
 		check(t, line(t, out, "b", problem), []string{paste}, []string{"--restamp", "--from-brief-diff"})
 		check(t, line(t, out, "c", problem), []string{paste, requeue}, []string{"--restamp"})
 	})
