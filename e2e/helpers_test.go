@@ -97,7 +97,7 @@ func (e jigEnv) overrides() []string {
 }
 
 // gitTraceEnv is the variable the git-process budget counts git through
-// (internal/gitbudget, .github/git-budget.yaml): git writes a trace file per
+// (internal/gitbudget, CI's git process report): git writes a trace file per
 // process into the directory it names. A test whose amount of git work is
 // decided by scheduling, such as a race's retries, runs that work without
 // it, so the count stays a function of the code.
