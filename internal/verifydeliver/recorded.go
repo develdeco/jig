@@ -197,7 +197,7 @@ func writeOpenFile(st *store.Store, of openRoundFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: create work dir: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := store.AtomicWrite(path, data); err != nil {
 		return fmt.Errorf("verifydeliver: write the open round: %w", err)
 	}
 	return nil
