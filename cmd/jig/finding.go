@@ -20,7 +20,7 @@ const (
 	findingActionUsage     = "who acts: fix (objective, does not change what the intent asks for), ask (only a person can decide) or note (nothing to change, a human reviewer should know)"
 	findingRiskUsage       = "how much harm follows if this part of the change is wrong: low, medium or high"
 	findingRationaleUsage  = "why that risk"
-	findingOracleUsage     = "the narrowest command that proves the fix, a literal (the test the fix adds or extends, by name); required for a fix"
+	findingOracleUsage     = "the narrowest command that proves the fix everywhere its rule applies, a literal (the test the fix adds or extends, by name, or a search that must come back empty); required for a fix"
 	findingPriorUsage      = "the id of the earlier finding (open or dismissed in the request) this one is a changed version of"
 	findingStillPresentUse = "instead of a new finding: the id of an earlier finding (open or dismissed in the request) that is still present and unchanged, with --line its current line"
 )

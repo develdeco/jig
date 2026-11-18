@@ -117,6 +117,7 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		kv = append(kv,
 			[2]string{"hunks", strconv.Itoa(len(req.Hunks))},
 			[2]string{"unprobed", strconv.Itoa(unprobed)},
+			[2]string{"read", fullReadLine},
 		)
 	}
 	if p.Reviewer.Known() {
