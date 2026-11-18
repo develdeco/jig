@@ -18,7 +18,9 @@ jig claim <ticket> --slice <slice>
 jig context <ticket> --slice <slice>
 ```
 
-`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. A condition the claim does not meet (a blocker not published or merged, a stacked parent with no clean gate round, a brief nobody approved) prints as a warning, and the claim goes through. **Stop on any claim warning**: tell the person what it says and give the prompt that clears it (`ask:` in the warning, such as `Plan <T> (approve its brief)`), and release the slice unless they say to go on. Pass `--unattended` when nobody is watching: the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`. A slice another session holds needs `--take`.
+`jig claim` makes the slice building and records you as its holder; set `JIG_SESSION` or pass `--session`, so `jig here` can tell which slice is yours. **Stop on any claim warning.**
+
+Read `jig skill build claim` before claiming when nobody is watching, when the claim prints a warning or is refused, when another session holds the slice, or to give a slice up.
 
 ## Read the context
 
@@ -43,11 +45,11 @@ git commit -m "<message>" -m "Jig-Slice: <slice>"
 
 ```
 jig ask --slice <slice> "<question>"          # returns at once; the slice waits on the answer
-jig ask --slice <slice> --wait "<question>"   # waits (--timeout, 10m by default) and prints the answer
-jig ask --slice <slice> --wait                # waits again on the question the slice has open
 ```
 
-Ask one question at a time, with your default. The answer says who it speaks for: `provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure. A `--wait` that runs out exits 2 and leaves the question open. Without it, carry on with what it does not block; the answer reaches you at your next prompt.
+Ask one question at a time, with your default.
+
+Read `jig skill build ask` after asking, to wait for the answer, or when an answer arrives.
 
 ## Leave a note
 
@@ -67,11 +69,7 @@ An ambiguity you settle yourself goes here, not in a note, an ask or a repo file
 
 ## Finish or let go
 
-A slice is green when a `jig verify` run covers a commit of it; you do not mark it. To give a slice up before that, so another session can take it:
-
-```
-jig claim <ticket> --slice <slice> --release   # queued again, unless it is green
-```
+A slice is green when a `jig verify` run covers a commit of it; you do not mark it. To give a slice up before that, read `jig skill build claim`.
 
 ## Handing a slice to another agent
 

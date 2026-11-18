@@ -68,10 +68,10 @@ func TestSkillsBudget(t *testing.T) {
 			}
 
 			if lines := strings.Count(string(normalizeEOL(data)), "\n"); lines > 100 {
-				t.Errorf("%s: %d lines, budget is <=100", path, lines)
+				t.Errorf("%s: %d lines, budget is <=100%s", path, lines, capRemedy)
 			}
 			if n := len(normalizeEOL(data)); n > 6000 {
-				t.Errorf("%s: %d bytes, budget is <=6000", path, n)
+				t.Errorf("%s: %d bytes, budget is <=6000%s", path, n, capRemedy)
 			}
 
 			fm := frontmatter(t, path, normalizeEOL(data))
