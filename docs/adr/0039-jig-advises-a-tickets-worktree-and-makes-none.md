@@ -22,6 +22,14 @@ jig already advises a session's context and runs none of the tools ([ADR 0034](0
 
 **git answers.** `gitx.Worktrees` runs `git worktree list --porcelain`. The advice asks it only when the ticket's branch exists in the clone, read in process, since no work tree can hold a branch that is not there, and once for each clone in a command, however many tickets it decides. An error from either question is no worktree.
 
+## Amended
+
+The commands above are advice for a harness with no worktree method of its own. A harness has one (Claude Code's Agent `isolation: worktree`, or its worktree entry), so the harness makes the worktree and jig gives what to work on: a row's `branch` and `base`, and the `dir` where a worktree holds the branch (`present`, `remove`). `command` stays on an `add` and a `remove` row, and the help lines present it as that advice, never as the way.
+
+A worktree the harness made is tied to the ticket by its branch, the one thing jig already finds a worktree by. The harness names its branch (or leaves a detached HEAD), so the session renames it inside the worktree with `git branch -m <branch>`, using the branch the row names; a branch the clone has already is switched to instead, since a branch outlives a removed worktree. A worktree the harness starts at its own HEAD is reset to the row's `base` before anything is committed there. From then on `jig next` shows the row `present` with the worktree's `dir` and `jig here` run in it binds the ticket. No jig verb renames.
+
+A subagent of a multi-repo ticket in a clone the harness's worktree does not reach runs the row's `command`. Removal is the harness's: it cleans up a worktree it made, and one it kept is removed after the publish with the advised command, never forced.
+
 ## Rejected alternatives
 
 - **A `jig worktree add` and `remove`.** jig would then own a second place where a session's checkout is made, and a removal that failed halfway would need a recovery of its own. The commands are short and git says what is wrong with them. Advising keeps jig out of the session's files, as ADR 0034 does for context tools.

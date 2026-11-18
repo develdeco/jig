@@ -51,6 +51,15 @@ func TestChartSkillHandsOff(t *testing.T) {
 			t.Errorf("the Publish section lacks %q:\n%s", want, publish)
 		}
 	}
+	builds := skillSection(t, out, "## Builds", "## Publish")
+	for _, want := range []string{"`isolation: worktree`", "you run no `add`", "`git branch -m <branch>`", "`git reset --hard <base>`", "no worktree method"} {
+		if !strings.Contains(builds, want) {
+			t.Errorf("the Builds section lacks %q:\n%s", want, builds)
+		}
+	}
+	if strings.Contains(out, "run the `add` commands") {
+		t.Errorf("jig skill chart still has the main session run the add commands")
+	}
 	for _, want := range []string{"block: true", "`ends`", "none if the call returned one", "or as `jig gate` says", "Three prompts make a chart run", "asks nothing: permission settings decide", "a refused command hands its ticket back"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig skill chart lacks %q", want)
