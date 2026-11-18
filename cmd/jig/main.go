@@ -81,14 +81,6 @@ func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, en
 	exit(exitInterrupted)
 }
 
-// Main dispatches one CLI invocation against the process's own environment
-// and working directory, and returns the process exit code. It is separated
-// from main() so a test can drive the binary's entry without spawning a
-// subprocess; a test that gives the run an environment of its own calls run.
-func Main(args []string, stdout io.Writer, stdin io.Reader) int {
-	return run(processEnv(), args, stdout, stdin)
-}
-
 // run dispatches one CLI invocation against e and returns the process exit
 // code. Everything the invocation reads from outside its arguments and
 // streams comes through e (see env), so runs in one process do not touch each
@@ -201,20 +193,6 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 		}
 	}
 	return s, "", false
-}
-
-// resolveStore resolves the store, project config and this machine's clone
-// mapping for cfg's project, honoring an explicit --store flag over cwd
-// resolution (locate.Locate's order: a jig.yaml marker, the machine map by
-// path and by remote, a store directory), and returns the jig home root it
-// read the mapping from, for
-// the packages that keep leases under it. stdout is the resolving command's
-// own writer: the checkpoint hook renders its sync report through it
-// (drift lines print in the output of the command whose checkpoint found
-// them), and a failed sync's warning lands
-// in the command's own structured output rather than bare stderr.
-func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
-	return resolveStoreChecked(e, storeFlag, stdout, false)
 }
 
 // resolveStoreChecked is resolveStore's and

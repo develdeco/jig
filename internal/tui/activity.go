@@ -658,13 +658,3 @@ func twoDigits(n int) string {
 	}
 	return strconv.Itoa(n)
 }
-
-// between is the time from one line to another, "" when either has no time.
-func between(a, b events.Envelope) string {
-	ta, okA := a.At()
-	tb, okB := b.At()
-	if !okA || !okB || tb.Before(ta) {
-		return ""
-	}
-	return span(tb.Sub(ta))
-}

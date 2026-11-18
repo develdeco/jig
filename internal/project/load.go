@@ -69,21 +69,6 @@ func LoadStoreConfig(storeRoot string) (Config, error) {
 	return Load(path)
 }
 
-// LoadConfig is LoadStoreConfig completed with the project's own part, for a
-// v3 store: the jig.yaml marker supplies the project's name and repos
-// (WithMarkerRepos). The marker is looked for at each of roots in turn (the
-// directories the caller knows the project is rooted at: Locate's root and
-// repo directory), then at the root and clones the machine map under jigHome
-// has for the project. A marker that says it is a member's is skipped: it
-// points up at the project, it does not describe it. A v2 store carries its
-// repos itself and comes back as LoadStoreConfig has it; a v3 store whose
-// marker cannot be found has no Repos, and the verbs that need one say so.
-// name is the project's name as the caller found it, used when neither the
-// store nor a marker says.
-func LoadConfig(jigHome, storeRoot, name string, roots ...string) (Config, error) {
-	return LoadConfigWith(nil, jigHome, storeRoot, name, roots...)
-}
-
 // LoadConfigWith is LoadConfig that asks the repos' origins through m, so a
 // command that loads a project's config several times asks git once.
 func LoadConfigWith(m *gitx.Memo, jigHome, storeRoot, name string, roots ...string) (Config, error) {

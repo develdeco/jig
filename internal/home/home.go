@@ -9,18 +9,10 @@ package home
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
-
-// Root returns the jig home directory: $JIG_HOME if set, else <user home>/.config/jig.
-// It reads the process's environment; a caller that holds an environment of its
-// own resolves the root from that with RootFrom.
-func Root() (string, error) {
-	return RootFrom(os.Getenv)
-}
 
 // RootFrom is Root against the environment getenv reads, in place of the
 // process's: $JIG_HOME if getenv gives one, else <user home>/.config/jig with
@@ -79,15 +71,6 @@ func MachinePath(root string) string {
 // because a transcript can hold secrets a store commit must never carry.
 func IntentExcerptDir(root string) string {
 	return filepath.Join(root, "intent-excerpts")
-}
-
-// IntentScratchDir returns the directory under the jig home root whose
-// subdirectories are the working directories of gate intent-inference
-// summarizer dispatches: one fresh, empty directory per dispatch, made and
-// removed by the caller. It lives under the jig home, never the lease (the
-// code under review) and never the store.
-func IntentScratchDir(root string) string {
-	return filepath.Join(root, "intent-scratch")
 }
 
 // The evidence tree is <root>/evidence/<storeID>/<ticket>/...: a fifth home

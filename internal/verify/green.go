@@ -43,22 +43,6 @@ func verifyGreen(leaseDir, startSHA string, res outcome.Result) (reason string, 
 	return "", true
 }
 
-// cleanHead returns dir's HEAD sha when its working tree is clean (nothing
-// modified, staged or untracked), else "": an oracle run is evidence about a
-// commit only when the tree it ran on was exactly that commit. Copied from
-// the frontier.
-func cleanHead(dir string) string {
-	status, err := gitx.Run(dir, "status", "--porcelain")
-	if err != nil || strings.TrimSpace(status) != "" {
-		return ""
-	}
-	head, err := gitx.RevParse(dir, "HEAD")
-	if err != nil {
-		return ""
-	}
-	return head
-}
-
 // startSHA is the sha a verified commit must descend from, as far as it can
 // be known: the ticket's recorded start sha for the repo (the file `jig claim`
 // or a frontier dispatch wrote), else the merge base of the commit and

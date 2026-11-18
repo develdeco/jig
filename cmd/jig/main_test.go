@@ -10,6 +10,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -630,7 +631,7 @@ func TestResolveStoreForProjectUsesMachineMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	if _, err := project.InitProject(fx.Home, fx.StoreDir, nil); err != nil {
+	if _, err := projecttest.InitProject(fx.Home, fx.StoreDir, nil); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 

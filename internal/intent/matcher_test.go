@@ -40,6 +40,12 @@ func TestMentionMatches(t *testing.T) {
 	}
 }
 
+// mentionMatches is the rule of normalizedMentionMatches over a mention and a
+// diff file as a session and a diff spell them.
+func mentionMatches(mention, diffFile string) bool {
+	return normalizedMentionMatches(normalizeMention(mention), normalizeMention(diffFile))
+}
+
 func TestBestAcceptsSingleFileMatch(t *testing.T) {
 	head := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	s := sessionAt(head, Message{Role: RoleAssistant, Text: "", FilePaths: []string{"/repo/alpha/alpha.go"}})

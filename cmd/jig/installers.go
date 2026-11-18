@@ -220,8 +220,6 @@ type skillSelection struct {
 	extras           []string
 }
 
-func (s skillSelection) empty() bool { return !s.project && !s.helpers && len(s.extras) == 0 }
-
 // resolve returns the selected skills the binary carries, each once, in the
 // order project set, helpers, extras. A name from a set the binary does not
 // carry yet (build, say, before the build skill lands) comes back in lacking;

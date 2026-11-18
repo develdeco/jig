@@ -2,9 +2,7 @@ package tui
 
 import (
 	"strings"
-	"time"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -157,21 +155,4 @@ func (m *Model) Standing(ticket string) (Standing, bool) {
 		}
 	}
 	return s, true
-}
-
-// StandingOf is the Standing of a ticket the screens would hold after reading
-// the output of `jig status <ticket>` and the ticket's journal lines: the whole
-// path from the verb's text to the Steps panel, with no terminal and no store.
-func StandingOf(ticket, status string, lines []events.Envelope) Standing {
-	m := New(Config{Zone: time.UTC})
-	m.w.apply(lines)
-	t, _ := m.w.ticketFor(ticket)
-	if status != "" {
-		t.status = parseStatus(status)
-		if t.status.Err != nil {
-			t.status = nil
-		}
-	}
-	s, _ := m.Standing(ticket)
-	return s
 }

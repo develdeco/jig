@@ -26,13 +26,6 @@ type DriftLine struct {
 	Field string
 }
 
-// String renders d the way every drift
-// line prints: "jig prints `drift, overwritten: <what>` naming the ticket or
-// chart, the issue number and the field".
-func (d DriftLine) String() string {
-	return fmt.Sprintf("drift, overwritten: %s (issue #%d): %s", d.What, d.Issue, d.Field)
-}
-
 // UpdatedIssue is one issue Sync brought up to date: its title, body or
 // open/closed state changed to match the store.
 type UpdatedIssue struct {

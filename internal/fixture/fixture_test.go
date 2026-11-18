@@ -10,6 +10,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -643,7 +644,7 @@ func TestGenerateOrchestrator(t *testing.T) {
 	if mp.Store != fx.StoreDir || mp.Root != fx.OrchestratorDir || mp.Clones["api"] != fx.NestedDirs["api"] || mp.Clones["web"] != fx.NestedDirs["web"] {
 		t.Fatalf("machine map = %+v, want the store, the orchestrator and both clones", mp)
 	}
-	cfg, err := project.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
+	cfg, err := projecttest.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}

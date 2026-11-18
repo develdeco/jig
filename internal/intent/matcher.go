@@ -170,15 +170,6 @@ func relativizeToCWD(p, cwd, topLevel string) string {
 	return rel
 }
 
-// mentionMatches reports whether mention names diffFile: equal, or a
-// "/"-bounded suffix of it - except a bare-basename diffFile (no directory
-// component, e.g. a repo-root file), which only a bare mention (no
-// directory component of its own) can name, so a nested file sharing that
-// basename never falsely stands in for the repo-root one.
-func mentionMatches(mention, diffFile string) bool {
-	return normalizedMentionMatches(normalizeMention(mention), normalizeMention(diffFile))
-}
-
 // normalizedMentionMatches is mentionMatches's own rule, given m and d
 // already normalized (normalizeMention) by the caller - scoreSession's own
 // hot loop, which normalizes once per distinct string rather than once per

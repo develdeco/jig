@@ -10,6 +10,7 @@ import (
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/setup"
 )
 
@@ -271,7 +272,7 @@ func TestHooksProjectScope(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	repo := ie.repo(t, "app")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"demo": {Store: filepath.Join(ie.root, "store"), Clones: map[string]string{"app": repo}, Root: repo},
 	}); err != nil {
 		t.Fatal(err)
@@ -333,7 +334,7 @@ func TestHooksProjectWithoutARootNeedsOneClone(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	one, a, b := ie.repo(t, "one"), ie.repo(t, "a"), ie.repo(t, "b")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"solo":  {Clones: map[string]string{"one": one}},
 		"multi": {Clones: map[string]string{"a": a, "b": b}},
 	}); err != nil {

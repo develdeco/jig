@@ -8,11 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tui"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -291,47 +289,6 @@ func TestNextNamesThePhaseAndPrompt(t *testing.T) {
 				if !strings.Contains(askedText, want) {
 					t.Errorf("%s: jig next --for %s lacks %q:\n%s", s.name, a.phase, want, askedText)
 				}
-			}
-		}
-	})
-}
-
-// TestTheScreensStandWhereJigNextDoes: at each point a ticket passes through,
-// the screens, which read `jig status` and the journal, put it where `jig next`,
-// which reads the store, does: the same current phase, the same answer to
-// whether it can start and the same state for each of the four phases. The
-// rule is internal/phase's, and internal/tui pins that the screens derive
-// nothing of their own; this is the check that what the real status prints
-// and the real store holds give both the same facts.
-func TestTheScreensStandWhereJigNextDoes(t *testing.T) {
-	t.Parallel()
-	r := newPhaseRig(t)
-	e := r.env("")
-	r.walk(t, func(s phaseStage) {
-		T := r.ticket
-		status, err := RenderStatus(r.st, T)
-		if err != nil {
-			t.Fatalf("%s: RenderStatus: %v", s.name, err)
-		}
-		lines, err := journal.Read(r.st, T)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var envs []events.Envelope
-		for _, l := range lines {
-			envs = append(envs, events.Envelope{Src: events.SrcJournal, Store: "demo", Line: l})
-		}
-		got := tui.StandingOf(T, status, envs)
-		p := r.nextJSON(t, e).Phase
-		if got.Current != s.phase || got.Ready != s.ready {
-			t.Errorf("%s: the screens stand at %s (ready %v), want %s (ready %v)", s.name, got.Current, got.Ready, s.phase, s.ready)
-		}
-		if got.Current != p.Name || got.Ready != p.Ready {
-			t.Errorf("%s: the screens stand at %s (ready %v), jig next at %s (ready %v: %s)", s.name, got.Current, got.Ready, p.Name, p.Ready, p.Reason)
-		}
-		for i, ph := range p.Phases {
-			if got.States[i] != ph.State {
-				t.Errorf("%s: the screens have %s %s, jig next %s", s.name, ph.Name, got.States[i], ph.State)
 			}
 		}
 	})

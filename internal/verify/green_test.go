@@ -123,25 +123,6 @@ func TestVerifyGreenChecksTheCommitAgainstTheStartSha(t *testing.T) {
 	}
 }
 
-// TestCleanHeadIsTheCommitOnlyForACleanTree: the evidence rule of the
-// frontier's oracle line, kept for the checkout's own check.
-func TestCleanHeadIsTheCommitOnlyForACleanTree(t *testing.T) {
-	t.Parallel()
-	g := newGreenRepo(t)
-	if got := cleanHead(g.dir); got != g.past {
-		t.Errorf("cleanHead of a clean tree = %q, want %s", got, g.past)
-	}
-	if err := os.WriteFile(filepath.Join(g.dir, "scratch.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := cleanHead(g.dir); got != "" {
-		t.Errorf("cleanHead with an untracked file = %q, want none", got)
-	}
-	if got := cleanHead(filepath.Join(g.dir, "missing")); got != "" {
-		t.Errorf("cleanHead of a missing dir = %q", got)
-	}
-}
-
 // TestStartShaPrefersTheRecordedOne: the recorded file wins, the merge base
 // with origin's target comes next, and with neither the commit is held to
 // nothing.

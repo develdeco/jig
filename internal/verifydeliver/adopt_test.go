@@ -766,7 +766,7 @@ func TestGateRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
 		fx, d, elsewhere, otherLease := setup(t)
 		// What `jig run` does before it dispatches: acquire the build lease,
 		// cut from origin's copy, which lacks the other machine's commit.
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin()); err != nil {
+		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
 			t.Fatalf("acquire the build lease: %v", err)
 		}
 		wantMissing(t, gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket}), elsewhere)
@@ -786,7 +786,7 @@ func TestGateRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
 	t.Run("and built its own commit on it", func(t *testing.T) {
 		t.Parallel()
 		fx, d, elsewhere, _ := setup(t)
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin())
+		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
 		if err != nil {
 			t.Fatalf("acquire the build lease: %v", err)
 		}
@@ -817,20 +817,19 @@ func commitLeftover(t *testing.T, dir, ticket string) string {
 	return run(t, dir, "rev-parse", "HEAD")
 }
 
-// TestGateAndBuildJudgeADivergedLeaseAlike: whether a diverged build lease is
-// jig's to keep is one rule for the build's re-cut and the gate's choice of
-// copy: it is when it holds a commit jig built that origin lacks
-// (pool.HoldsUnpushedBuilt), and not when it holds only an attempt's unverified
-// leftover, whatever else it holds. The build re-cuts such a lease from origin,
-// and the gate counts it as a lease that does not hold the branch: the round
-// reviews origin's copy, instead of refusing BRANCH_DIVERGED and sending the
+// TestGateJudgesADivergedLease: whether a diverged build lease is jig's to keep
+// is the gate's choice of copy: it is when it holds a commit jig built that
+// origin lacks (pool.HoldsUnpushedBuilt), and not when it holds only an
+// attempt's unverified leftover, whatever else it holds. The gate counts such a
+// lease as one that does not hold the branch: the round reviews origin's copy,
+// instead of refusing BRANCH_DIVERGED and sending the
 // human to merge the leftover into the branch. Two states give it: jig's
 // verified commit was built on another machine and pushed, and the lease holds
 // only the leftover; or jig's commit was built here and pushed, and the
 // leftover sits on top of it. The requirement that origin holds what jig built
 // then applies as it does to any copy: without the push, the round is refused
 // for the missing commit, not for the divergence.
-func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
+func TestGateJudgesADivergedLease(t *testing.T) {
 	t.Parallel()
 
 	const ticket, branch = "JIG-2", "add-retry"
@@ -847,7 +846,7 @@ func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
 		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
 			t.Fatalf("Gate round 1: %v", err)
 		}
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin())
+		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
 		if err != nil {
 			t.Fatalf("acquire the build lease: %v", err)
 		}
@@ -876,18 +875,6 @@ func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
 		buildLease := buildLeaseOf(t, fx, ticket)
 		if got := run(t, buildLease, "rev-parse", "HEAD"); got != leftover {
 			t.Fatalf("the build lease is at %s after the round, want the leftover %s untouched: gating changes no lease of the build", got, leftover)
-		}
-
-		// The build, on the same state, follows origin the same way.
-		lines, err := journal.Read(d.Store, ticket)
-		if err != nil {
-			t.Fatalf("journal.Read: %v", err)
-		}
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin(), pool.RecutUnlessBuilt(journal.BuiltCommits(lines))); err != nil {
-			t.Fatalf("build Acquire on the state the gate reviewed: %v", err)
-		}
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != built {
-			t.Fatalf("the build lease is at %s, want origin's head with jig's commit, %s", got, built)
 		}
 	})
 
@@ -936,17 +923,6 @@ func TestGateAndBuildJudgeADivergedLeaseAlike(t *testing.T) {
 		if got := run(t, buildLease, "rev-parse", "HEAD"); got != leftover {
 			t.Fatalf("the build lease is at %s after the round, want the leftover %s untouched: gating changes no lease of the build", got, leftover)
 		}
-
-		lines, err := journal.Read(d.Store, ticket)
-		if err != nil {
-			t.Fatalf("journal.Read: %v", err)
-		}
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin(), pool.RecutUnlessBuilt(journal.BuiltCommits(lines))); err != nil {
-			t.Fatalf("build Acquire on the state the gate reviewed: %v", err)
-		}
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != pushed {
-			t.Fatalf("the build lease is at %s, want origin's head %s: the leftover is not jig's to keep", got, pushed)
-		}
 	})
 }
 
@@ -987,7 +963,7 @@ func TestGateIgnoresACommitJigReportedButNeverVerified(t *testing.T) {
 
 	step(t, "with no build lease here", wantClean)
 	step(t, "with a build lease here", func(t *testing.T) {
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build, pool.MustExistOnOrigin()); err != nil {
+		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
 			t.Fatalf("acquire the build lease: %v", err)
 		}
 		wantClean(t)

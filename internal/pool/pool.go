@@ -71,13 +71,6 @@ type Lease struct {
 	Fetched bool
 }
 
-// Return leaves the lease directory exactly as it is: the pool never
-// deletes a worktree, so the next Acquire for the same ticket and role can
-// resume it.
-func (l Lease) Return() error {
-	return nil
-}
-
 // CheckTicket reports why ticket cannot name a ticket's leases, or nil when
 // it can. A lease key is the ticket id plus its role's suffix, used as one
 // directory name, so the id must be a single path component that does not
@@ -131,38 +124,7 @@ func Dir(jigHome, repoName, ticket string, role Role) (string, error) {
 // Option adjusts one Acquire.
 type Option func(*acquireOpts)
 
-type acquireOpts struct {
-	mustExistOnOrigin bool
-	recutUnlessBuilt  bool
-	built             []string
-}
-
-// MustExistOnOrigin makes Acquire refuse, with BRANCH_NOT_FOUND, when origin
-// has no such branch, instead of cutting the branch from the target. The
-// ordinary default branch (<ticket>-<slug>) is such a branch until a publish pushes it, and is
-// cut from the target on purpose; a branch a ticket recorded is on origin by
-// definition, so one that is not there is gone, and cutting it from the
-// target would build on something else.
-func MustExistOnOrigin() Option {
-	return func(o *acquireOpts) { o.mustExistOnOrigin = true }
-}
-
-// RecutUnlessBuilt makes Acquire follow origin over a lease of a branch that
-// has diverged from it (see syncWithOrigin): when the lease's copy holds no
-// commit of built - the commits jig built on the branch and verified - that
-// origin lacks (HoldsUnpushedBuilt, the rule the gate applies to the same
-// copy), it is re-cut from origin's tip instead of refused with
-// BRANCH_DIVERGED. Its own commits are then the history an author's rewrite
-// replaced, or an attempt's leftovers, or leftovers on top of jig's commits
-// that origin has already, and the branch is still origin's to follow: the
-// lease follows it. A copy that does hold one is refused as before, since
-// re-cutting it would discard jig's work.
-func RecutUnlessBuilt(built []string) Option {
-	return func(o *acquireOpts) {
-		o.recutUnlessBuilt = true
-		o.built = built
-	}
-}
+type acquireOpts struct{}
 
 // Acquire returns ticket's role lease of repoName in the pool under the jig
 // home root jigHome (see Dir), cloning it from remote on first use or
@@ -175,17 +137,15 @@ func RecutUnlessBuilt(built []string) Option {
 //     the branch also exists on origin, it is then synced with it (see
 //     syncWithOrigin): fast-forwarded when it has no commits of its own,
 //     kept when it is ahead of origin, and refused with BRANCH_DIVERGED
-//     when each side has commits the other lacks (RecutUnlessBuilt: or
-//     re-cut, when none of them is a commit jig built that origin lacks). A
-//     branch that does not exist on origin is left exactly as it is;
+//     when each side has commits the other lacks. A branch that does not
+//     exist on origin is left exactly as it is;
 //   - otherwise branch is created fresh with `checkout -B`, off
 //     origin/<branch> if that ref exists (continue a branch pushed by an
-//     earlier run) or else origin/<target>. MustExistOnOrigin refuses that
-//     last fallback.
+//     earlier run) or else origin/<target>.
 //
 // A reused lease fetches with --prune, so its view of origin is origin's
-// now: a branch deleted there is gone here too, and MustExistOnOrigin and
-// the sync below never act on a stale ref.
+// now: a branch deleted there is gone here too, and the sync below never acts
+// on a stale ref.
 //
 // A lease is reused only when git opens it as its own repository. What git
 // shows is not one (a .git that is not a directory, that resolves an
@@ -229,14 +189,6 @@ func Acquire(jigHome, repoName, remote, target, branch, ticket string, role Role
 		}
 		if _, err := gitx.Run(parent, "clone", remote, dir); err != nil {
 			return Lease{}, fmt.Errorf("pool: clone %s: %w", remote, err)
-		}
-	}
-
-	if o.mustExistOnOrigin && !refExists(dir, "refs/remotes/origin/"+branch) {
-		return Lease{}, &axi.Error{
-			Msg:  fmt.Sprintf("branch %q does not exist on origin", branch),
-			Code: "BRANCH_NOT_FOUND",
-			Help: []string{"Push the branch to origin, then rerun."},
 		}
 	}
 
@@ -349,11 +301,7 @@ func unfinishedError(dir, what string, err error) error {
 //     file the new commits also change);
 //   - Diverged: each side has commits the other lacks. jig merges, rebases
 //     and resets neither, so the acquire is refused with BRANCH_DIVERGED and
-//     the lease is left as it is - unless RecutUnlessBuilt says the lease
-//     holds no commit jig built that origin lacks (HoldsUnpushedBuilt), and
-//     the lease is re-cut from origin's tip (`checkout -B`, which like the
-//     fast-forward stops with git's own error over an uncommitted edit it
-//     would overwrite).
+//     the lease is left as it is.
 //
 // The rule is the branch's, not the role's: a build, gate and publish lease
 // each have a local copy that is compared with origin the same way.
@@ -372,18 +320,6 @@ func syncWithOrigin(dir string, role Role, branch string, o acquireOpts) error {
 			return fmt.Errorf("pool: fast-forward %s to %s: %w", branch, remoteRef, err)
 		}
 	case Diverged:
-		if o.recutUnlessBuilt {
-			unpushed, err := HoldsUnpushedBuilt(dir, branch, o.built)
-			if err != nil {
-				return err
-			}
-			if !unpushed {
-				if _, err := gitx.Run(dir, "checkout", "-B", branch, remoteRef); err != nil {
-					return fmt.Errorf("pool: re-cut %s from %s: %w", branch, remoteRef, err)
-				}
-				return nil
-			}
-		}
 		return DivergedError(dir, role, dir, branch)
 	}
 	return nil

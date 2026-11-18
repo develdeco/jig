@@ -13,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 )
 
 func (ie installerEnv) gitEnv() []string { return []string{"GIT_CONFIG_GLOBAL=" + ie.gitGlobal} }
@@ -81,7 +82,7 @@ func TestGithookHereAndProjectInstallPerClone(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	a, b := ie.repo(t, "a"), ie.repo(t, "b")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"demo": {Clones: map[string]string{"a": a, "b": b}},
 	}); err != nil {
 		t.Fatal(err)

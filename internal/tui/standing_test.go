@@ -158,10 +158,6 @@ func TestTheScreensStandWhereInternalPhaseSaysTheTicketStands(t *testing.T) {
 				t.Errorf("%s: the %s row says %q, phase.Derive %q", tc.name, p.Name, steps[i].Text, p.Text)
 			}
 		}
-		// The same answer by the entry point a caller with no model uses.
-		if s := StandingOf(T, statusOfFacts(tc.facts), envs); s != got {
-			t.Errorf("%s: StandingOf = %+v, the model's = %+v", tc.name, s, got)
-		}
 	}
 }
 

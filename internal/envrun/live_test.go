@@ -181,7 +181,7 @@ func TestEndAllEndsOraclesThatStartAfterIt(t *testing.T) {
 // TestStoppedMatchesErrStopped: the error of a wait that ended because jig was
 // stopped matches ErrStopped, as the error of a stopped oracle does.
 func TestStoppedMatchesErrStopped(t *testing.T) {
-	if !errors.Is(Stopped("the wait"), ErrStopped) {
+	if !errors.Is(&StoppedError{Cmd: "the wait"}, ErrStopped) {
 		t.Error("Stopped does not match ErrStopped")
 	}
 }

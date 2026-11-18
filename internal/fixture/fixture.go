@@ -26,7 +26,7 @@
 //
 // Build and Generate write the per-machine project mapping under Opts.Home,
 // the jig home root the caller hands the code under test (a test passes its
-// own t.TempDir()). Left empty, Home is home.Root(): JIG_HOME, else the real
+// own t.TempDir()). Left empty, Home is home.RootFrom(os.Getenv): JIG_HOME, else the real
 // home directory, as the jig binary resolves it, so a caller that leaves it
 // empty must set JIG_HOME first. Neither touches the environment itself.
 package fixture
@@ -51,6 +51,7 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -132,7 +133,7 @@ type Opts struct {
 	// so envtool exits 1 before writing its state file.
 	EnvFail bool
 	// Home is the jig home root the per-machine project mapping is written
-	// under. "" means home.Root() (JIG_HOME, else the real home directory).
+	// under. "" means home.RootFrom(os.Getenv) (JIG_HOME, else the real home directory).
 	Home string
 	// SecondRepo makes the project span two repos. The second, "second-repo"
 	// (Fixture.SecondRepoDir, remote SecondRepoRemote), declares one
@@ -393,14 +394,14 @@ func buildTree(dir string, opts Opts, testdataDir string) (*Fixture, error) {
 }
 
 // mapMachine writes the per-machine project mapping for fx under the jig
-// home opts names (home.Root() when it names none), which is what makes the
+// home opts names (home.RootFrom(os.Getenv) when it names none), which is what makes the
 // fixture's project known to the code under test, and sets fx.Home. It runs
 // for every fixture, copy or not, after everything else under fx.Dir exists.
 func mapMachine(fx *Fixture, opts Opts) error {
 	jigHome := opts.Home
 	if jigHome == "" {
 		var err error
-		if jigHome, err = home.Root(); err != nil {
+		if jigHome, err = home.RootFrom(os.Getenv); err != nil {
 			return fmt.Errorf("fixture: resolve jig home: %w", err)
 		}
 	}
@@ -417,7 +418,7 @@ func mapMachine(fx *Fixture, opts Opts) error {
 		if fx.SecondRepoDir != "" {
 			clones["second-repo"] = fx.SecondRepoDir
 		}
-		if _, err := project.InitProject(jigHome, fx.StoreDir, clones); err != nil {
+		if _, err := projecttest.InitProject(jigHome, fx.StoreDir, clones); err != nil {
 			return fmt.Errorf("fixture: init project machine mapping: %w", err)
 		}
 	}

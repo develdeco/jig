@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -158,22 +157,6 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 		}
 	}
 	return s
-}
-
-// roundReviewer is the session that took round n to review it: the latest
-// gate-reviewer line since the round last opened, or "". A round reopened at
-// a moved head starts with no reviewer, and one reopened at the same head
-// names its reviewer again.
-func (t *ticket) roundReviewer(n int) string {
-	for i := len(t.lines) - 1; i >= 0; i-- {
-		switch l := t.lines[i]; {
-		case l.Event == journal.EventGateOpen:
-			return ""
-		case l.Event == journal.EventGateReviewer && l.Attempt == n:
-			return l.Session
-		}
-	}
-	return ""
 }
 
 // reviewRow is the review: no round yet, a round open, findings to decide,

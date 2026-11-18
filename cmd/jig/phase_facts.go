@@ -96,15 +96,6 @@ func restackAsks(plan stack.Plan) []phase.Restack {
 	return out
 }
 
-// phaseFacts gathers what internal/phase derives a ticket's phase from, and
-// the journal lines it reads beside them. It reads the store and writes
-// nothing. Blockers are the ones a claim would be warned of or refused for
-// before any merge is read (claimProblems and `jig next` read them: see
-// phaseFactsWith), each with the prompt of the blocker's own phase.
-func phaseFacts(st *store.Store, ticket string) (phase.Facts, []journal.Line, error) {
-	return phaseFactsWith(st, ticket, nil)
-}
-
 // phaseFactsWith is phaseFacts with the blockers judged by merges, as a claim
 // judges them: a blocker is held until its work has merged. nil judges by the
 // journal alone, where a blocker is met once it published.
