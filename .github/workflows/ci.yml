@@ -137,6 +137,23 @@ jobs:
       - name: govulncheck
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      # A function only tests reach is test support, and lives where only tests
+      # import it: deadcode lists every function of the jig binary that no path
+      # from main reaches, and any line it prints fails the step. There is no
+      # exception list. The list was measured with
+      # `go run golang.org/x/tools/cmd/deadcode@v0.39.0 ./cmd/jig`, which
+      # panics building the standard library for linux with this Go
+      # (go.mod's), so the step pins the first release that does not (v0.53.0),
+      # which prints the same list on linux, darwin and windows.
+      - name: deadcode
+        if: runner.os == 'Linux'
+        run: |
+          out="$(go run golang.org/x/tools/cmd/deadcode@v0.53.0 ./cmd/jig)"
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "deadcode: the functions above are reached by tests alone. Delete them, or move them where only tests import them." >&2
+            exit 1
+          fi
       - name: actionlint
         if: runner.os == 'Linux'
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
