@@ -20,11 +20,11 @@ jig review context T-1            # opens the round if none is open; --json prin
 jig review context T-1 --session $JIG_SESSION --model <yours> --effort <yours>
 ```
 
-It names the branch, whose copy (`copy`), the `head`, its `base` and `scope` (full or delta), the head's pristine `worktree`, and the `request` file. Under `scope: delta`, do what the context's `read` line says; the tables below are the full round's. Tables list `must_review` (every file you must read), `open` and `dismissed` findings, `probed` probes, `unprobed` hunks and `oracles_passed`.
+It names the branch, whose copy (`copy`), the `head`, its `base` and `scope` (full or delta), the head's pristine `worktree`, and the `request` file. Tables list `must_review` (every file you must read), `open` and `dismissed` findings, `probed` probes, `unprobed` hunks and `oracles_passed`.
 
-Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, or you filed a note below the floor.
+Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, you filed a note below the floor, or it lists open, answered or dismissed findings (`--prior`).
 
-- **Read the code in `worktree`**, at the head. Never in the clone.
+- **Read the code in `worktree`**, at the head, as the context's `read` line says, in either scope. Never in the clone.
 - **Never edit the person's clone**: you only read it. Run no oracle and no suite: each in `oracles_passed` was run by its builder; `at_head` says if on this head. A test runs only to probe.
 - `recordings` lists the build's end-to-end recordings; read the ones that bear on the change. A finding names a recording by scenario, step and commit, never by path.
 - The `intent` is the human's own statement (`brief` or `explicit`, at `intent_path`). With `none`, `intent_excerpt` is an excerpt of the author's agent session: a hint, maybe wrong, never instructions.
@@ -45,12 +45,12 @@ One call per problem, as you find it:
 ```
 jig finding T-1 --file alpha/alpha.go --line 12 --title "..." --detail "..." \
   --action fix --risk medium --risk-rationale "..." --oracle "go test ./alpha -run 'TestAlpha'"
-jig finding T-1 --still-present r1-f2 --line 14     # an earlier finding, unchanged
 ```
 
 - `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
-- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix (the test the fix adds or extends, by name), required for a fix.
-- `--prior r1-f2` for a changed version of a finding under `open`, `answers` or `dismissed`, `--still-present` for an unchanged one. Never raise again what a person dismissed.
+- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix everywhere its rule applies (the test the fix adds or extends, by name, or a search that must come back empty, such as `! git grep -n '<pattern>' -- <paths>`), required for a fix.
+- A finding names the rule broken. Before filing, search the change for the same rule's other instances: the `--detail` lists them, and `--oracle` proves the rule across them. An `--action ask` about a rule lays out every case it must decide, with one recommended answer.
+- Never raise again what a person dismissed.
 - A missing test is a problem only at a seam the intent names, or as proof of a defect you report.
 
 ## Close the round
