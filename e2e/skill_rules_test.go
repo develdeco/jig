@@ -78,13 +78,22 @@ func TestBuildSkillCarriesItsReadAndFixRules(t *testing.T) {
 func TestBuildSkillCarriesItsClaimAndAskRules(t *testing.T) {
 	t.Parallel()
 	wantAll(t, "jig skill build", skillText(t, "build"),
+		"**Stop on any claim warning.**",
+		"Read `jig skill build claim` when the claim prints a warning or is refused",
+		"Ask one question at a time, with your default.",
+		"Read `jig skill build ask` to wait for the answer, or when an answer arrives.",
+	)
+	wantAll(t, "jig skill build claim", skillText(t, "build", "claim"),
 		"**Stop on any claim warning**",
 		"the claim is then refused with `CLAIM_BLOCKED_MERGED`, `CLAIM_STACKED_PARENT_NOT_CLEAN` or `CLAIM_NOT_APPROVED`",
 		"give the prompt that clears it (`ask:` in the warning, such as `Plan <T> (approve its brief)`)",
 		"A slice another session holds needs `--take`.",
+		"jig claim <ticket> --slice <slice> --release",
+	)
+	wantAll(t, "jig skill build ask", skillText(t, "build", "ask"),
+		"--wait",
 		"A `--wait` that runs out exits 2 and leaves the question open.",
 		"`provenance: person` was typed by a person, `agent` is an agent relaying what a person said, so treat it as less sure.",
-		"jig claim <ticket> --slice <slice> --release",
 	)
 }
 

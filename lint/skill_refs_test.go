@@ -12,6 +12,11 @@ import (
 )
 
 // refLinkRE matches a "jig skill <name> <ref>" pointer.
+// capRemedy ends every cap failure: a skill file over its budget makes room
+// by moving, because trimming a rule to fit is what the cap's history shows
+// dropping rules.
+const capRemedy = "; move a block most runs never reach into a reference linked from the core (ADR 0049), never trim a rule"
+
 var refLinkRE = regexp.MustCompile("`jig skill ([a-z0-9][a-z0-9-]*) ([a-z][a-z0-9-]*)`")
 
 // skillTreeProblems checks a skills tree (<name>/SKILL.md and
@@ -37,10 +42,10 @@ func skillTreeProblems(fsys fs.FS) []string {
 		s := string(normalizeEOL(data))
 		text[f] = s
 		if n := strings.Count(s, "\n"); n > 100 {
-			problems = append(problems, fmt.Sprintf("%s: %d lines, budget is <=100", f, n))
+			problems = append(problems, fmt.Sprintf("%s: %d lines, budget is <=100%s", f, n, capRemedy))
 		}
 		if len(s) > 6000 {
-			problems = append(problems, fmt.Sprintf("%s: %d bytes, budget is <=6000", f, len(s)))
+			problems = append(problems, fmt.Sprintf("%s: %d bytes, budget is <=6000%s", f, len(s), capRemedy))
 		}
 	}
 	for _, f := range files {
@@ -110,16 +115,16 @@ func TestSkillReferenceRules(t *testing.T) {
 			"x/references/deep.md": ref("then `jig skill x more`\n"),
 			"x/references/more.md": ref("text\n"),
 		}, "one level deep"},
-		{"core over the line cap", fstest.MapFS{"x/SKILL.md": core(lines)}, "lines"},
-		{"core over the byte cap", fstest.MapFS{"x/SKILL.md": core(bytes)}, "bytes"},
+		{"core over the line cap", fstest.MapFS{"x/SKILL.md": core(lines)}, "lines, budget is <=100" + capRemedy},
+		{"core over the byte cap", fstest.MapFS{"x/SKILL.md": core(bytes)}, "bytes, budget is <=6000" + capRemedy},
 		{"reference over the line cap", fstest.MapFS{
 			"x/SKILL.md":           core("Read `jig skill x deep` when you dig."),
 			"x/references/deep.md": ref(lines),
-		}, "lines"},
+		}, "lines, budget is <=100" + capRemedy},
 		{"reference over the byte cap", fstest.MapFS{
 			"x/SKILL.md":           core("Read `jig skill x deep` when you dig."),
 			"x/references/deep.md": ref(bytes),
-		}, "bytes"},
+		}, "bytes, budget is <=6000" + capRemedy},
 		{"bad reference name", fstest.MapFS{
 			"x/SKILL.md":             core(),
 			"x/references/Deep_1.md": ref("text\n"),
