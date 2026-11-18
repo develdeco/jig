@@ -227,15 +227,6 @@ func TestUserDirFromAgreesWithTheStdlibOnTheProcess(t *testing.T) {
 	}
 }
 
-// TestSlotQueueDirIsOneDirectoryUnderTheRoot: the machine's heavy-run queue
-// is slot-queue under the jig home root.
-func TestSlotQueueDirIsOneDirectoryUnderTheRoot(t *testing.T) {
-	root := filepath.Join("r", "home")
-	if got, want := SlotQueueDir(root), filepath.Join(root, "slot-queue"); got != want {
-		t.Errorf("SlotQueueDir = %q, want %q", got, want)
-	}
-}
-
 // TestGateDirIsOneDirectoryPerProjectUnderTheRoot: a project's gate locks
 // live in one directory of their own under the jig home.
 func TestGateDirIsOneDirectoryPerProjectUnderTheRoot(t *testing.T) {

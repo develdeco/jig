@@ -266,7 +266,7 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		return none(&axi.Error{Msg: fmt.Sprintf("%s has no commit to verify", dir), Code: "VALIDATION_ERROR"})
 	}
 	d := verify.Deps{
-		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: dir, Repo: repoName, Target: target,
+		Store: st, JigHome: jigHome, Clone: dir, Repo: repoName, Target: target,
 		Now: e.now,
 	}
 	if o.final {

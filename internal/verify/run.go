@@ -1,7 +1,6 @@
 package verify
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +17,6 @@ import (
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/scopebase"
-	"github.com/develdeco/jig/internal/slot"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -36,12 +34,6 @@ type Deps struct {
 	// own checkout, in the builder's own shell; jig makes no checkout of its
 	// own.
 	Clone string
-	// Project and Slots are the project's name and how many suite slots it has
-	// on this machine (project.Config's Name and Slots). An oracle the
-	// manifest marks heavy takes a slot of the project before it starts; with
-	// no Project it takes none.
-	Project string
-	Slots   int
 	// Repos are the project's repos with the workspaces each declares, in a
 	// project of several: they say which slices of a ticket build in Repo
 	// (ready.Place), which a final run is the union of. nil, or one repo,
@@ -583,7 +575,7 @@ func (x *run) execute() (why string, err error) {
 			}
 		}()
 	}
-	if err := x.runOracle(m, cmd, cmd == oracleCmd && x.r.Command == ""); errors.Is(err, envrun.ErrStopped) {
+	if err := x.runOracle(cmd, cmd == oracleCmd && x.r.Command == ""); errors.Is(err, envrun.ErrStopped) {
 		// jig was stopped mid-run: no verdict, and never the commit's failure.
 		return "", nil
 	} else if err != nil {
@@ -740,52 +732,20 @@ func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string
 // recorded, then the green state and the verified line, in that order (see the
 // pass below); a covering failure leaves the slice building, and a run that
 // covers nothing changes no state.
-func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err error) {
+func (x *run) runOracle(cmd string, ownOracle bool) (err error) {
 	d := x.d
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
 	var target recordTarget
 	if !x.r.NoRecord {
 		target = rec.start(x.r.Slice, x.attempt, x.sha)
 	}
-	// A run that jig's stop ended (in the command or in the wait for the slot)
-	// has nothing to record: its directory goes as a failed run's does.
+	// A run that jig's stop ended has nothing to record: its directory goes as
+	// a failed run's does.
 	defer func() {
 		if errors.Is(err, envrun.ErrStopped) {
 			_ = rec.finish(x.r.Slice, x.attempt, x.sha, target, false)
 		}
 	}()
-
-	// A heavy oracle takes the project's suite slot before it starts, so its
-	// bound (set when the command starts) and its recorded seconds count from
-	// the slot.
-	var share *slot.Share
-	if ownOracle && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
-		// The slot is the machine's, taken for the run whether or not it is
-		// recorded; its lines are the run's record, so a run that records
-		// nothing journals none.
-		journalSlot := func(event, summary string) error {
-			if x.r.NoRecord {
-				return nil
-			}
-			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
-		}
-		stopCtx, endStopCtx := envrun.StopContext(context.Background())
-		defer endStopCtx()
-		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Repo: d.Repo, Pinned: d.Slots}, func(event, summary string) error {
-			if event == journal.EventSlotWait {
-				x.logf("%s", summary)
-			}
-			return journalSlot(event, summary)
-		})
-		if err != nil {
-			if stopCtx.Err() != nil {
-				return envrun.Stopped("the wait for the suite slot")
-			}
-			return err
-		}
-		share = held
-		defer share.Release()
-	}
 
 	// The oracle line carries everything needed to run this again by hand.
 	base := func() journal.Line {
@@ -805,9 +765,6 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 		// and the slice's state stays as it was.
 		line := base()
 		line.Outcome, line.Cause, line.Summary = "fail", journal.CauseStopped, oneLine(oerr.Error())
-		if share != nil {
-			line.Shared = share.Shared()
-		}
 		if jerr := x.journal(line); jerr != nil {
 			return jerr
 		}
@@ -826,10 +783,6 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	line := base()
 	line.Seconds = seconds
 	x.res.HeadEnd, x.res.TreeAfter = line.HeadEnd, line.TreeAfter
-	if share != nil {
-		share.Record(d.now().Sub(started), use)
-		line.Shared = share.Shared()
-	}
 	line.SetUsage(use.CPU, use.PeakBytes, use.Basis)
 	line.Uncovered = x.uncoveredBecause(ownOracle, line.TreeAfter, line.HeadEnd)
 	x.res.Uncovered, x.res.Covered = line.Uncovered, line.Uncovered == ""

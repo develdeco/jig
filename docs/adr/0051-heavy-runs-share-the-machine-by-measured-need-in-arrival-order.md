@@ -1,5 +1,7 @@
 # Heavy runs share the machine by measured need, in arrival order
 
+**Superseded by [ADR 0054](0054-the-suite-slot-is-removed-and-nothing-replaces-it.md):** jig no longer admits, queues or schedules a run, so the queue, the measured need and the share rule below govern nothing in the binary. The measurement the queue read (CPU time, peak memory and basis on each witnessed run) stays in the record.
+
 A heavy oracle (`heavy:` in the manifest) took one lock file per project and slot number, and the project's marker said how many (`slots: N`, one when unset). That counted runs, not what they use: a project whose suite keeps one core busy waited for itself as long as one that keeps twenty, two projects on one machine never waited for each other, and a waiter that polled first after a release won, whoever had asked first. The oracle line now carries the CPU time and peak memory of its process tree (`internal/envrun`'s `Usage`), so a run's need can be read from the runs before it.
 
 ## Decision
