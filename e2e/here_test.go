@@ -10,7 +10,9 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // hereOut is the part of `jig here --json` these tests read.
@@ -169,6 +171,29 @@ func TestHereTwoRepoProject(t *testing.T) {
 	}
 	if status := gitLog(t, fx.StoreDir, "status", "--porcelain"); status != "" {
 		t.Errorf("jig here left the store dirty:\n%s", status)
+	}
+
+	// Only the second repo's branch is read from its clone. A run of slice a,
+	// which builds in the first repo, says "not checked" (its branch was never
+	// read), where one of slice e, in the second, says it has no commit there.
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := gitLog(t, fx.SecondRepoDir, "rev-parse", "HEAD")
+	if err := st.WriteStartSHA("JIG-1", "second-repo", head); err != nil {
+		t.Fatal(err)
+	}
+	for _, slice := range []string{"a", "e"} {
+		if err := journal.Append(st, "JIG-1", journal.Line{Event: journal.EventOracle, Slice: slice, Commit: head, Outcome: "pass", Attempt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r = runJig(t, env, fx.SecondRepoDir, "here")
+	for _, want := range []string{"  a,queued,not checked,0,-,-\n", "  e,queued,\"no: slice has no commit on the branch\",0,-,-\n"} {
+		if !strings.Contains(r.Stdout, want) {
+			t.Errorf("jig here lacks %q:\n%s", want, r.Stdout)
+		}
 	}
 }
 

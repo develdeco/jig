@@ -7,7 +7,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  ○ 4 Publish          after a clean review                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
-  │  ? slice c  waits for your answer                                          │
+  │  ✖ slice b  failed its last run                                            │
   │  +3 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you

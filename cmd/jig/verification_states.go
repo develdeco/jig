@@ -6,6 +6,7 @@ import (
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verify"
 )
@@ -77,6 +78,7 @@ func sliceIDs(st *store.Store, ticket string) []string {
 func hereTruth(hc hereCtx, lines []journal.Line, ids []string) verify.Truth {
 	w := hc.Where
 	t := verify.Truth{Ticket: w.Ticket, Lines: lines, Slices: ids}
+	read := ""
 	if (w.TicketHow == locate.HowBranch || w.TicketHow == locate.HowBranchAlias) && w.Repo != "" {
 		dir := w.Root
 		if dir == "" {
@@ -85,10 +87,45 @@ func hereTruth(hc hereCtx, lines []journal.Line, ids []string) verify.Truth {
 		if start := verify.StartSHA(hc.Store, w.Ticket, w.Repo); start != "" && dir != "" {
 			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
 				t.Commits, t.BranchKnown = c, true
+				read = w.Repo
 			}
 		}
 	}
+	if t.BranchKnown {
+		t.BranchSlices = slicesBuildingIn(hc.Store, hc.e, w, []string{read})
+	}
 	return t
+}
+
+// slicesBuildingIn names the slices that build in one of repos, for a project
+// of several repos; nil for a project of one (every slice builds there). A
+// slice no repo owns is in none: nothing was read for it.
+func slicesBuildingIn(st *store.Store, e env, w locate.Where, repos []string) map[string]bool {
+	cfg, err := project.LoadConfigWith(e.memo, w.JigHome, w.StorePath, w.Project, w.Root, w.RepoDir)
+	if err != nil || len(cfg.Repos) < 2 {
+		return nil
+	}
+	machine, _ := project.LoadMachine(w.JigHome)
+	return slicesIn(st, cfg, machine[w.Project], w.Ticket, repos)
+}
+
+// slicesIn is the slices of ticket the project places in one of repos.
+func slicesIn(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string, repos []string) map[string]bool {
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return map[string]bool{}
+	}
+	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), slices)
+	out := map[string]bool{}
+	for _, s := range slices {
+		owner := place.Repo[s.Workspace]
+		for _, r := range repos {
+			if owner == r {
+				out[s.ID] = true
+			}
+		}
+	}
+	return out
 }
 
 // statusTruth is what `jig status` reads of a ticket's verifications: the
@@ -136,6 +173,7 @@ func (s *statusTruth) read(st *store.Store, ticket string) (verify.Truth, string
 	if err != nil {
 		return t, why, nil
 	}
+	var read []string
 	for _, r := range s.cfg.Repos {
 		dir := s.mp.Clones[r.Name()]
 		if dir == "" {
@@ -150,9 +188,13 @@ func (s *statusTruth) read(st *store.Store, ticket string) (verify.Truth, string
 		for _, ref := range []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch} {
 			if c, err := verify.BranchCommits(dir, start, ref); err == nil {
 				t.Commits, t.BranchKnown = append(t.Commits, c...), true
+				read = append(read, r.Name())
 				break
 			}
 		}
+	}
+	if t.BranchKnown && len(s.cfg.Repos) > 1 {
+		t.BranchSlices = slicesIn(st, s.cfg, s.mp, ticket, read)
 	}
 	return t, why, nil
 }

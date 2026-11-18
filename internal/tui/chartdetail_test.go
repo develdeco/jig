@@ -38,7 +38,7 @@ func heldChartRig(t *testing.T) *rig {
 	t.Helper()
 	g := chartRig(t)
 	g.feed(claimLine(at(2, 1), "JIG-5", "s-builder", "agent-4f2a91c0e7", "jig claim JIG-5 --slice s2 --unattended"))
-	return g.feed(holdLine(at(2, 31), "JIG-5", "agent-4f2a91c0e7", "s2", "verification of 222222222222 for slice s2 is still running"))
+	return g.feed(holdLine(at(2, 31), "JIG-5", "agent-4f2a91c0e7", "s2", "commit 222222222222 for slice s2 has no recorded result"))
 }
 
 // onChart opens the chart screen of a rig that shows the project's list.
@@ -367,7 +367,7 @@ func wideChart(g *rig) *rig {
 func TestChartDetailShowsAHoldUntilTheTicketMoves(t *testing.T) {
 	t.Parallel()
 	g := onChart(wideChart(heldChartRig(t)))
-	const hold = "hold     ⏸ agent 4f2a91c0 held at its stop · verification of 222222222222 for slice s2 is still running"
+	const hold = "hold     ⏸ agent 4f2a91c0 held at its stop · commit 222222222222 for slice s2 has no recorded result"
 	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, hold) {
 		t.Fatalf("the panel has no hold row:\n%s", got)
 	}

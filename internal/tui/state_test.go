@@ -198,7 +198,7 @@ func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
 	for _, s := range tk.slices(time.UTC) {
 		got[s.ID] = s.State
 	}
-	want := map[string]string{"a": StateGreen, "b": StateBuilding, "c": StateNeedsInput}
+	want := map[string]string{"a": StateGreen, "b": StateFail, "c": StateNeedsInput}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("guessed states = %v, want %v", got, want)
 	}

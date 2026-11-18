@@ -68,7 +68,7 @@ func said(description string) func(*journal.Line) {
 }
 
 // cardRig is SHOP-1 at width by height: slice round green, slice clamp claimed
-// by s-b (Claude Code, Sonnet 5) and being verified, slice cart waiting, with
+// by s-b (Claude Code, Sonnet 5) and built, slice cart waiting, with
 // the commands s-b and another session ran around it.
 func cardRig(t *testing.T, width, height int) *rig {
 	t.Helper()

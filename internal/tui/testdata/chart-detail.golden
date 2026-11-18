@@ -18,7 +18,7 @@ jig  demo › checkout  Coupons at checkout                                     
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
   │  slice    s2 · claimed · builder · agent 4f2a91c0                                              │
-  │  hold     ⏸ agent 4f2a91c0 held at its stop · verification of 222222222222 for slice s2 is st… │
+  │  hold     ⏸ agent 4f2a91c0 held at its stop · commit 222222222222 for slice s2 has no recorde… │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
   │  next     say "Continue checkout"                                                              │

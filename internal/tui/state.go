@@ -544,6 +544,13 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	}
 	for i := range out {
 		r := &out[i]
+		if r.State == StateBuilding {
+			// The store sets a failed slice back to building; the recorded
+			// last run says it failed.
+			if run, failed := t.lastRunFailed(r.ID); failed && run.Cause == "" {
+				r.State = StateFail
+			}
+		}
 		if p := t.latest(r.ID, relevantSliceEvents...); p >= 0 {
 			l := t.lines[p]
 			r.Last, r.LastAt, r.LastState = describe(l), clock(l, zone), eventState(l)

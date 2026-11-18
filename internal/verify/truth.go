@@ -68,6 +68,35 @@ type Truth struct {
 	// shows is judged.
 	Commits     []phase.CommitRef
 	BranchKnown bool
+	// BranchSlices are the slices that build in a repo whose branch was read,
+	// in a project of several repos where only some branches are. nil says
+	// every slice's branch was read (when BranchKnown).
+	BranchSlices map[string]bool
+}
+
+// AtOrAfter reports whether at is commit or a commit made after it on the
+// branch: commits is the branch's log, oldest first. A run or a verified line
+// at such a commit covers a tree that holds commit. It is the one rule the
+// Stop hook (a commit is history once its slice is verified at a later one)
+// and a slice's last run (does it cover the slice's last commit) share.
+func AtOrAfter(commits []phase.CommitRef, commit, at string) bool {
+	if commit == "" || at == "" {
+		return false
+	}
+	if commit == at {
+		return true
+	}
+	seen := false
+	for _, c := range commits {
+		if c.SHA == commit {
+			seen = true
+			continue
+		}
+		if seen && c.SHA == at {
+			return true
+		}
+	}
+	return false
 }
 
 // Derive judges every (commit, slice) as phase.DeriveVerifications does, over

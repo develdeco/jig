@@ -8,7 +8,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
   │  ✓ slice a  verified aaaaaaa · took 20s                                    │
-  │  ◐ slice b  claimed by builder                                             │
+  │  ✖ slice b  failed its last run                                            │
   │  ? slice c  waits for your answer                                          │
   │  ○ slice d  waits for b, c                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯

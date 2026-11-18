@@ -166,7 +166,7 @@ func (h *handler) verificationFindings() []finding {
 	ancestry := verify.GitAncestry(h.w.RepoDir)
 	history := func(commit, slice string) bool {
 		for _, l := range lines {
-			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && ancestry(commit, l.Commit) {
+			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && (verify.AtOrAfter(truth.Commits, commit, l.Commit) || ancestry(commit, l.Commit)) {
 				return true
 			}
 		}

@@ -447,8 +447,11 @@ var startedEvents = map[string]bool{
 type sliceView struct {
 	Slice
 	verifiedCommit string
-	claimed        bool
-	claimedBy      string
+	// failed: the slice's latest covering run failed and nothing has verified
+	// it since.
+	failed    bool
+	claimed   bool
+	claimedBy string
 }
 
 // publishView is what the journal says of the publish since the last round
@@ -745,6 +748,14 @@ func (d *digest) readSlices() {
 			switch l.Event {
 			case journal.EventVerified:
 				v.verifiedCommit = l.Commit
+				v.failed = false
+			case journal.EventOracle:
+				// The latest run that covered a commit decides; a run a stop or
+				// a timeout ended judged nothing, and an uncovered one says
+				// nothing of a commit.
+				if l.Uncovered == "" && l.Cause == "" {
+					v.failed = l.Outcome == "fail"
+				}
 			case journal.EventClaim:
 				claim, v.claimedBy = i, l.Session
 			case journal.EventRelease:
@@ -968,8 +979,7 @@ func (d *digest) briefSubs(planned int, odd string) []Sub {
 	return subs
 }
 
-// build is the build phase and whether all its slices are green, none of them
-// being verified.
+// build is the build phase and whether all its slices are green.
 func (d *digest) build(prevDone bool) (Phase, bool) {
 	f := d.f
 	p := Phase{Name: Build}
@@ -1047,6 +1057,8 @@ func (d *digest) sliceState(s sliceView) (state, detail string) {
 		return SubNeedsYou, "waits for your answer"
 	case s.State == sliceStalled:
 		return SubFailed, "stalled"
+	case s.failed && s.State != sliceGreen:
+		return SubFailed, "failed its last run"
 	case s.State == sliceGreen:
 		return SubDone, strings.TrimSpace("verified " + short(s.verifiedCommit))
 	case s.State == sliceEnvBlocked:
@@ -1081,13 +1093,15 @@ func (d *digest) unmet(s Slice) []string {
 // buildFocus is what matters most in a build under way: a question for the
 // person, a stall, a wait for the environment, a builder.
 func (d *digest) buildFocus() string {
-	for _, want := range []string{"needs", "stalled", "env", "building"} {
+	for _, want := range []string{"needs", "stalled", "failed", "env", "building"} {
 		for _, s := range d.slices {
 			switch {
 			case want == "needs" && (s.OpenQuestion || s.State == sliceNeedsInput):
 				return "slice " + s.ID + " needs your answer"
 			case want == "stalled" && s.State == sliceStalled:
 				return "slice " + s.ID + " stalled"
+			case want == "failed" && s.failed && s.State != sliceGreen:
+				return "slice " + s.ID + " failed its last run"
 			case want == "env" && s.State == sliceEnvBlocked:
 				return "slice " + s.ID + " waits for its environment"
 			case want == "building" && s.State == sliceBuilding:

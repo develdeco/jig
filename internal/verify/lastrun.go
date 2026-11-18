@@ -4,8 +4,8 @@ import "github.com/develdeco/jig/internal/journal"
 
 // The words a last run says whether it covers its slice's last commit in.
 const (
-	// CoversYes: the run covers the commit the slice's latest trailer commit
-	// on the branch is.
+	// CoversYes: the run is of the slice's last commit on the branch or of a
+	// later commit (AtOrAfter), so its tree holds that commit.
 	CoversYes = "yes"
 	// CoversNotChecked: the branch was not read, so no commit is known to be
 	// the slice's last.
@@ -70,11 +70,12 @@ func (t Truth) LastRuns() []LastRun {
 		switch last, known := lastCommit[slice]; {
 		case l.Uncovered != "":
 			run.Covers = CoversNoPrefix + l.Uncovered
-		case !t.BranchKnown:
+		case !t.BranchKnown || (t.BranchSlices != nil && !t.BranchSlices[slice]):
+			// The slice's repo was not read: nothing is known of its commits.
 			run.Covers = CoversNotChecked
 		case !known:
 			run.Covers = CoversNoPrefix + "slice has no commit on the branch"
-		case last != l.Commit:
+		case !AtOrAfter(t.Commits, last, l.Commit):
 			run.Covers = CoversNoPrefix + "slice's last commit is " + short12(last)
 		default:
 			run.Covers = CoversYes
