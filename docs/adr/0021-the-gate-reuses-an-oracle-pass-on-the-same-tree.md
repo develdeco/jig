@@ -1,5 +1,7 @@
 # The gate reuses an oracle pass on the same tree
 
+**Superseded by [ADR 0053](0053-a-gate-round-and-publish-run-no-test.md):** a gate round runs no command, so there is no pass for it to reuse.
+
 The gate ran every manifest oracle in every workspace at the start of each round. jig had just run the slice's oracle itself at the builder's green (ADR 0020), often on exactly the commit the gate then reviewed. In the first measured run that rerun was about 9 minutes of every 18 to 22 minute gate round on the Windows dev machine. jig's own CLI tests also pay a real oracle run per green slice since ADR 0020, and the gate rerunning them adds the same cost again.
 
 no-mistakes keeps evidence over confidence and refuses a skipped check, and a pass recorded for the identical tree is evidence, not a skip.

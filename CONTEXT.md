@@ -79,7 +79,7 @@ A tracer-bullet unit of work with a named oracle and blocking edges to other sli
 _Avoid_: task, subtask, step
 
 **Oracle**:
-The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which jig runs itself, in the background, on each commit that names the slice (see **Verification**). It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
+The command that proves a slice done. Green is done - there is no separate test stage beyond the oracle, which the builder runs with `jig verify` on each commit that names the slice (see **Verification**); the ticket's last run is `jig verify --final`, the union of its slices' commands at the reviewed head. It is an sh command on every OS: jig runs it through sh, on Windows Git for Windows' (ADR 0042).
 _Avoid_: test suite, check
 
 **Slot**:
@@ -155,7 +155,7 @@ A session taking a slice to build it (`jig claim`): a journal line plus the slic
 _Avoid_: assign, lock
 
 **Verification**:
-One run of a slice's oracle in the builder's own worktree, in the foreground (`jig verify`, which the builder runs itself: jig starts none on a commit and only witnesses the run). It is recorded as an `oracle` line holding every input and fact needed to run it again by hand, then, when the run *covers* HEAD (the tree clean before and after, HEAD unmoved, the command the slice's own oracle, HEAD a descendant of the ticket's start sha), `recorded` and `verified` lines and the slice's state; any other run is recorded with its `uncovered` reason and changes nothing, and a run that could not reach its command is a `verify-error` line. A second run runs again. Green is what a covering verification proved, never what a session claimed. Its `oracle` line (and the gate's own `gate-oracle` line) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
+One run of a slice's oracle in the builder's own worktree, in the foreground (`jig verify`, which the builder runs itself: jig starts none on a commit and only witnesses the run). It is recorded as an `oracle` line holding every input and fact needed to run it again by hand, then, when the run *covers* HEAD (the tree clean before and after, HEAD unmoved, the command the slice's own oracle, HEAD a descendant of the ticket's start sha), `recorded` and `verified` lines and the slice's state; any other run is recorded with its `uncovered` reason and changes nothing, and a run that could not reach its command is a `verify-error` line. A second run runs again. Green is what a covering verification proved, never what a session claimed. Its `oracle` line (and the `final-oracle` line of a `jig verify --final` run) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
 _Avoid_: CI run, test run
 
 **Journal**:
@@ -255,7 +255,7 @@ A branch recorded in a ticket's `ticket.yaml` as its own: by the first `jig gate
 _Avoid_: imported branch, external branch, hand-written branch
 
 **Gate**:
-Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` opens a round and starts nothing, and a fresh-context reviewer that jig did not start closes it (see **Recorded round**).
+Out-of-band verification of a ticket's branch, run on its own lease: `jig gate` opens a round and runs no command (it lists the passes the slices' builders had witnessed), and a fresh-context reviewer that jig did not start closes it (see **Recorded round**).
 _Avoid_: code review, QA pass
 
 **Recorded round**:

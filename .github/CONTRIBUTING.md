@@ -26,10 +26,10 @@ builds differently (a `_windows` file or one with a build constraint,
 `go.mod`, `go.sum`, `.gitattributes`, a workflow); every push to main, the
 daily run and every release run it on all three, so a Windows-only failure
 shows on main and is fixed forward. A pull request that changes only docs
-runs `./lint`, whose tests are the only ones that read them. jig's gate runs
-it as this repo's `test` oracle
-(`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
-reports green.
+runs `./lint`, whose tests are the only ones that read them. The full suite
+is CI's alone: a jig gate round and publish run no test. A jig build slice's own
+oracle runs when its builder runs `jig verify`, and a ticket's last run is
+`jig verify --final`, the union of its slices' commands at the reviewed head.
 
 ## Making a change
 

@@ -1,5 +1,7 @@
 # The reviewer reads; the gate's oracles test
 
+**Amended by [ADR 0053](0053-a-gate-round-and-publish-run-no-test.md):** the reviewer reads the slices' witnessed passes, not tests the gate ran itself.
+
 A gate round runs every manifest oracle on the lease head, and stops before any reviewer if one fails. The reviewer was never told that. It ran the tests again inside the review: in one measured ticket, about 12 minutes of each 22 to 26 minute review round went to `go test` on a head the gate's oracles had just passed.
 
 no-mistakes splits the same work the same way this ADR does: its review step is a static read of the diff, "Review does not execute tests", and a separate test step produces the evidence.
