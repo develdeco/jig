@@ -128,6 +128,12 @@ func TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant(t *testin
 			pass(r, "a", u)
 			return a1
 		}, false},
+		{"slice a's oracle failing at slice b's later commit is a1's failure, not a missing result", func(r *rig) string {
+			a1 := r.commit("a", "a1.txt")
+			b1 := r.commit("b", "b1.txt")
+			r.add(journal.Line{Event: journal.EventOracle, Slice: "a", Commit: b1, Attempt: 1, Outcome: "fail", Summary: "FAIL TestA"})
+			return a1
+		}, false},
 		{"slice a verified at a merge of the target branch holds nothing for a1", func(r *rig) string {
 			a1 := r.commit("a", "a1.txt")
 			r.git("branch", "side", a1)

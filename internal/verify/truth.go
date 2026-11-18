@@ -112,32 +112,35 @@ func AtOrAfter(parents map[string][]string, commit, at string) bool {
 	return false
 }
 
+// tipOf is the slice's latest commit on the branch, "" when it has none (or
+// the branch was not read).
+func (t Truth) tipOf(slice string) string {
+	tip := ""
+	for _, c := range t.Commits { // oldest first
+		if c.Slice == slice {
+			tip = c.SHA
+		}
+	}
+	return tip
+}
+
 // History reports whether commit of slice is history, not something still to
 // be given a result: the slice has a later commit of its own on the branch
 // (the command that clears a commit runs at HEAD, so a test commit before the
-// code is history once the code exists), or the slice has a verified line at a
-// commit after it (slices verified one after the other at HEAD). Without the
-// branch nothing is history.
+// code is history once the code exists). Without the branch nothing is
+// history.
 func (t Truth) History(commit, slice string) bool {
-	latest := ""
-	for _, c := range t.Commits { // oldest first
-		if c.Slice == slice {
-			latest = c.SHA
-		}
-	}
-	if latest != "" && latest != commit {
-		return true
-	}
-	for _, l := range t.Lines {
-		if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && AtOrAfter(t.Parents, commit, l.Commit) {
-			return true
-		}
-	}
-	return false
+	tip := t.tipOf(slice)
+	return tip != "" && tip != commit
 }
 
 // Derive judges every (commit, slice) as phase.DeriveVerifications does, over
-// the commits of the ticket's own slices.
+// the commits of the ticket's own slices, except that a slice's building tip
+// is judged by the slice's latest result at the tip or at a commit that
+// descends from it (AtOrAfter over Parents): slices verified one after the
+// other at HEAD, or a failing run at HEAD, are the result of the commit made
+// before. It is the rule `covers` uses, so a run that covers a commit never
+// leaves it with no recorded result.
 func (t Truth) Derive() []phase.CommitVerification {
 	in := phase.VerifyInput{Ticket: t.Ticket, Lines: t.Lines, BranchKnown: t.BranchKnown}
 	own := map[string]bool{}
@@ -149,7 +152,36 @@ func (t Truth) Derive() []phase.CommitVerification {
 			in.Commits = append(in.Commits, c)
 		}
 	}
-	return phase.DeriveVerifications(in)
+	rows := phase.DeriveVerifications(in)
+	if !t.BranchKnown {
+		return rows
+	}
+	for i, r := range rows {
+		if t.tipOf(r.Slice) != r.Commit {
+			continue
+		}
+		at := ""
+		for _, l := range t.Lines {
+			if l.Slice != r.Slice || l.Commit == "" {
+				continue
+			}
+			if journal.VerificationState([]journal.Line{l}, l.Commit, l.Slice).State == journal.VerifyNone {
+				continue
+			}
+			if AtOrAfter(t.Parents, r.Commit, l.Commit) {
+				at = l.Commit
+			}
+		}
+		if at == "" || at == r.Commit {
+			continue
+		}
+		judged := phase.DeriveVerifications(phase.VerifyInput{Ticket: t.Ticket, Lines: t.Lines, BranchKnown: true, Commits: []phase.CommitRef{{SHA: at, Slice: r.Slice}}})
+		if len(judged) == 1 {
+			judged[0].Commit = r.Commit
+			rows[i] = judged[0]
+		}
+	}
+	return rows
 }
 
 // Outstanding is Derive's rows that are not a pass and not history: the
