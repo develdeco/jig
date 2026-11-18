@@ -24,7 +24,13 @@ func TestActivityShowsAFinalRun(t *testing.T) {
 	uncovered := jl(at(3, 3), "JIG-6", "", journal.EventFinalOracle, with("", sha('c'), "pass", "", "", ""), func(l *journal.Line) {
 		l.Command, l.Seconds, l.Uncovered = "go test ./a", 2, journal.UncoveredDirtyAfter
 	})
-	tk.lines = append(tk.lines, passed, failed, uncovered)
+	multi := jl(at(3, 4), "JIG-6", "", journal.EventFinalOracle, with("", sha('d'), "pass", "", "", ""), func(l *journal.Line) {
+		l.Command, l.Seconds = "(\necho one # note\n) && (echo two)", 5
+	})
+	tk.lines = append(tk.lines, passed, failed, uncovered, multi)
+	if got := g.m.say(tk, multi); got != "the final run passed in 5s" {
+		t.Errorf("a final run of a command on several lines says %q, want the command left out: it would take several rows", got)
+	}
 
 	if got := g.m.say(tk, passed); got != "the final run `(go test ./a) && (go test ./b)` passed in 9s" {
 		t.Errorf("a final run says %q", got)

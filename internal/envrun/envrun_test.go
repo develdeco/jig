@@ -439,7 +439,7 @@ func runShHelper(t *testing.T, set map[string]string) string {
 
 // TestWithNoShEveryCommandFails: on a machine with no sh, ShellOutput,
 // ShellOutputEnv and Shell each fail and say why, and none passes a command
-// it did not run: the gate's oracle runs and an env class's up and check
+// it did not run: a builder's verify run and an env class's up and check
 // rest on it. The child's PATH is an empty directory, so it finds neither
 // git nor sh.
 func TestWithNoShEveryCommandFails(t *testing.T) {

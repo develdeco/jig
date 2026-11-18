@@ -39,6 +39,14 @@ func TestFinalRunsOfAProjectOfSeveralRepos(t *testing.T) {
 		t.Errorf("web's final run = %+v, want none: only api's line is in the journal", got[1])
 	}
 
+	// A command on several lines (a union holding a comment) is left out of the
+	// words, never flattened into another command.
+	multi := journal.Line{Event: journal.EventFinalOracle, Commit: apiHead, Outcome: "pass", Command: "(\necho one # note\n) && (echo two)", Seconds: 2}
+	flat := finalRunsOf([]journal.Line{multi}, false, nil, "fixture-repo", apiHead)[0]
+	if flat.Command != "" || strings.Contains(flat.Words(), "echo") || !strings.HasSuffix(flat.Words(), "pass in 2 s") {
+		t.Errorf("a command on several lines is shown as %+v / %q, want it left out", flat, flat.Words())
+	}
+
 	// A project of one repo: its lines name no repo, and its report is its own.
 	plain := journal.Line{Event: journal.EventFinalOracle, Commit: apiHead, Outcome: "pass", Command: "go test ./...", Seconds: 2}
 	one := finalRunsOf([]journal.Line{plain}, false, map[string]string{"fixture-repo": apiHead}, "fixture-repo", apiHead)

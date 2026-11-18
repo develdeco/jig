@@ -40,7 +40,13 @@ func finalRunAt(lines []journal.Line, name, lineRepo, head string) FinalRunRepor
 	if !ok {
 		return r
 	}
-	r.Command, r.Seconds = strings.Join(strings.Fields(line.Command), " "), line.Seconds
+	// A command on several lines (a union with a comment in it) cannot be shown
+	// on one line without becoming another command, so it is left out, as one
+	// that cannot sit in a code span is.
+	if !strings.Contains(line.Command, "\n") {
+		r.Command = strings.Join(strings.Fields(line.Command), " ")
+	}
+	r.Seconds = line.Seconds
 	if line.Outcome == "pass" {
 		r.Outcome = FinalRunPass
 	} else {

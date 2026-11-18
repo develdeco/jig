@@ -3,7 +3,7 @@ package e2e
 // End-to-end tests of `jig verify`: the commit a person or an agent made by
 // hand, verified by the run of `jig verify` the builder makes itself, recorded
 // in the journal as the frontier records a builder's green run, so the gate
-// can reuse the pass. The harness stands for the agent session: it commits in
+// can list the pass. The harness stands for the agent session: it commits in
 // the operator clone with the Jig-Slice trailer and runs jig from there.
 
 import (

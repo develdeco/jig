@@ -165,8 +165,8 @@ func TestDigesterFlow(t *testing.T) {
 	productBefore := productTreeStatus(t)
 	fx, env := newFixture(t, fixture.Opts{})
 	env = env.withGitGlobal(t)
-	// The gate brings up every env class a slice names and reuses a pass only
-	// when exactly those were up, so slice d does not name one here.
+	// A builder's verify brings up every env class its slice names, so slice d
+	// does not name one here.
 	dropEnvFromSlices(t, fx)
 	h := newHarness(t, fx, env, "s-flow")
 	ticket := fx.Ticket

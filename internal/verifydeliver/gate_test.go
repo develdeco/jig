@@ -809,21 +809,20 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 }
 
 // TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances is the chain of what a
-// killed reviewer or oracle leaves in the gate lease, on one build whose gate
-// rounds run the real oracles: what the second round must not trip over.
+// killed reviewer leaves in the gate lease, on one build: what the second round
+// must not trip over.
 //
 // NM2 scenario A: a reviewer that outlived a killed jig (no signal handler
 // reaches a future reviewer source's own defer restore) can leave an untracked
 // failing test file and a tracked edit sitting in the gate lease. The next `jig
-// gate` must not have its oracles fail or get skewed by that leftover dirt -
+// gate` must not have its review skewed by that leftover dirt -
 // Gate itself restores the lease to a pristine head before the round reads it. The
-// untracked file here is a failing test of alpha, which the fixture's "test"
-// oracle (`go test ./alpha/...`) runs for real: it is only absent from the
-// oracle's run if the restore came first.
+// untracked file here is a failing test of alpha: it is only absent from the
+// lease the reviewer reads if the restore came first.
 //
 // NM5, a residual of NM2: leftover tracked dirt (a reviewer that outlived a
-// killed jig, or an oracle rewrite from an earlier attempt) does not get in the
-// way of an oracle run by itself, but once the ticket branch later advances past
+// killed jig, or a rewrite from an earlier attempt) does not get in the
+// way of a round by itself, but once the ticket branch later advances past
 // the same file, the checkout that runs before Gate's post-acquire restore
 // (fetchTicketBranchFromBuildLease's own final `git checkout <branch>`) refuses
 // with "local changes ... would be overwritten", and Gate would return before
@@ -889,9 +888,9 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		}
 	})
 
-	step(t, "round 2 wipes a failing repro and a tracked edit before its oracles, though the branch advanced", func(t *testing.T) {
+	step(t, "round 2 wipes a failing repro and a tracked edit before it reads the lease, though the branch advanced", func(t *testing.T) {
 		// An untracked failing test file, as a reviewer's own repro would leave
-		// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
+		// behind.
 		reproPath := filepath.Join(gateDir, "alpha", "zz_repro_test.go")
 		repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
 		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
