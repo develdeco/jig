@@ -366,7 +366,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: fix-slices") || !strings.Contains(done.Stdout, "independent: true") {
 		t.Fatalf("jig review done: exit %d, want a round with a fix slice, by a reviewer independent of the builders\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
-	for _, want := range []string{"target_sha[2]{repo,sha}:\n  api,", "\n  web,", "fix-1-web-ui-test"} {
+	for _, want := range []string{"target_sha[2]{repo,sha}:\n  api,", "\n  web,", "fix-1-web-ui"} {
 		if !strings.Contains(done.Stdout, want) {
 			t.Errorf("jig review done output lacks %q\n%s", want, done.Stdout)
 		}
@@ -375,7 +375,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	// The round is recorded with the commits of both repos, and the fix slice
 	// builds in the repo of the finding.
 	rep := b.report(t, "1")
-	if rep.Verdict != "fix-slices" || rep.Independent != true || !reflect.DeepEqual(rep.FixSlices, []string{"fix-1-web-ui-test"}) {
+	if rep.Verdict != "fix-slices" || rep.Independent != true || !reflect.DeepEqual(rep.FixSlices, []string{"fix-1-web-ui"}) {
 		t.Errorf("report.yaml of round 1 = %+v, want fix-slices, independent, with the one fix slice", rep)
 	}
 	wantReviewed := map[string]string{"api": b.shaAPI, "web": b.shaWeb}
@@ -399,8 +399,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 			fix = &slicesNow[i]
 		}
 	}
-	if fix == nil || fix.ID != "fix-1-web-ui-test" || fix.Workspace != "web/ui" || fix.Oracle != "test" || !reflect.DeepEqual(fix.Findings, []string{"r1-f1"}) {
-		t.Fatalf("the fix slice = %+v, want fix-1-web-ui-test in the workspace web/ui with the oracle test, for r1-f1", fix)
+	if fix == nil || fix.ID != "fix-1-web-ui" || fix.Workspace != "web/ui" || fix.Oracle != "test" || !reflect.DeepEqual(fix.Findings, []string{"r1-f1"}) {
+		t.Fatalf("the fix slice = %+v, want fix-1-web-ui in the workspace web/ui with the oracle test, for r1-f1", fix)
 	}
 	var findings struct {
 		Findings []struct {
@@ -422,7 +422,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	for _, batch := range nextJSON[nextRepos](t, b.env, b.fx.OrchestratorDir, ticket).Ready {
 		ready = append(ready, batch.Repo+": "+strings.Join(batch.Slices, "+"))
 	}
-	if want := []string{"web: fix-1-web-ui-test"}; !reflect.DeepEqual(ready, want) {
+	if want := []string{"web: fix-1-web-ui"}; !reflect.DeepEqual(ready, want) {
 		t.Errorf("jig next after round 1: ready %v, want %v", ready, want)
 	}
 
@@ -433,8 +433,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
-	fixed := b.web.Commit("fix-1-web-ui-test", "fix: page", map[string]string{"ui/page.go": webPageFixed})
-	verifyPasses(t, b.web, "fix-1-web-ui-test", fixed)
+	fixed := b.web.Commit("fix-1-web-ui", "fix: page", map[string]string{"ui/page.go": webPageFixed})
+	verifyPasses(t, b.web, "fix-1-web-ui", fixed)
 
 	if r := b.api.Jig("gate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "round: 2") {
 		t.Fatalf("jig gate after the fix: exit %d, want round 2\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)

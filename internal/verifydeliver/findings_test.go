@@ -183,39 +183,15 @@ func TestApplyRoundRule4NewFindingsRouteByAction(t *testing.T) {
 	}
 }
 
-// TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt: with exactly
-// one manifest oracle there is no choice to make, so a fix or ask finding
-// that leaves oracle unset still gets it recorded - never left empty on a
-// manifest that does have one.
-func TestApplyRoundRecordsTheSoleOracleWhenTheReviewerOmitsIt(t *testing.T) {
-	t.Parallel()
-
-	man := oneOracleManifest()
-	result := ReviewResult{
-		Findings: []ResultFinding{
-			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},
-		},
-		ReviewedPaths: []string{"a.go"},
-	}
-	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, alwaysGreen, man, defaultTestFixRisks(), false)
-	if err != nil {
-		t.Fatalf("ApplyRound: %v", err)
-	}
-	if reported[0].Oracle != "test" {
-		t.Errorf("Oracle = %q, want the manifest's sole oracle recorded", reported[0].Oracle)
-	}
-}
-
-// TestApplyRoundForcesAskWhenNoOracleCanBeResolved: a fix finding whose
-// oracle cannot be resolved against a multi-oracle manifest (omitted, and
-// there is no single default to fall back to) has no build target jig can
-// derive, the same as a no-workspace fix, so it routes to the human as an
-// ask instead of silently becoming a fix slice with no oracle.
+// TestApplyRoundForcesAskWhenNoOracleCanBeResolved: a fix finding with no
+// oracle (a recurrence whose prior never had one; a new fix is refused
+// upstream) has no build target jig can derive, the same as a no-workspace
+// fix, so it routes to the human as an ask instead of silently becoming a fix
+// slice with no oracle, whatever the manifest holds.
 func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
 	t.Parallel()
 
 	man := oneOracleManifest()
-	man.Oracles["lint"] = "true" // two oracles now: no single default
 	result := ReviewResult{
 		Findings: []ResultFinding{
 			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},
@@ -232,22 +208,16 @@ func TestApplyRoundForcesAskWhenNoOracleCanBeResolved(t *testing.T) {
 	}
 }
 
-// TestApplyRoundStaleOracleAfterManifestChangeForcesAsk covers a recurrence
-// whose earlier occurrence recorded an oracle the manifest no longer has
-// (removed or renamed between rounds): the recorded oracle is not a
-// manifest oracle any more, so this is the same missing-build-target case,
-// not a silent pass-through.
-func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
+// TestApplyRoundKeepsARecordedCommandTheManifestLacks covers a recurrence
+// whose earlier occurrence recorded a name the manifest no longer has: it is
+// just a command, kept as recorded, and the fix is not routed to a person.
+func TestApplyRoundKeepsARecordedCommandTheManifestLacks(t *testing.T) {
 	t.Parallel()
 
 	man := manifest.Manifest{
 		Oracles:    map[string]string{"test": "true", "vet": "true"},
 		Workspaces: []manifest.Workspace{{ID: "root", Path: "."}},
 	}
-	// Recurrences stays at 0 and no slice recorded it yet, so the recurrence
-	// bound itself has no say here; the risk clears the floor, which is
-	// decided first and would make a lower-risk finding a note. So only the
-	// stale oracle can force this to ask.
 	known := map[string]Finding{
 		"r1-f1": {ID: "r1-f1", File: "a.go", Status: StatusOpen, Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: "old"},
 	}
@@ -262,16 +232,8 @@ func TestApplyRoundStaleOracleAfterManifestChangeForcesAsk(t *testing.T) {
 		t.Fatalf("ApplyRound: %v", err)
 	}
 	f := reported[0]
-	if f.Recurrences >= 2 {
-		t.Fatalf("test setup: Recurrences = %d, want under 2 so the recurrence bound isn't what forces this", f.Recurrences)
-	}
-	if f.Status != StatusAsked || f.RoutedAs != ActionAsk {
-		t.Errorf("finding = %+v, want asked/routed_as ask (the recorded oracle is no longer a manifest oracle)", f)
-	}
-	// The stale oracle is carried forward as it was recorded, never swapped for
-	// another: a person is asked, with it still on the finding.
-	if f.Oracle != "old" || f.Triage != "" {
-		t.Errorf("finding = %+v, want the stale oracle %q still recorded and no triage decided", f, "old")
+	if f.Status != StatusOpen || f.Oracle != "old" {
+		t.Errorf("finding = %+v, want it open with the recorded command %q", f, "old")
 	}
 }
 
@@ -1361,7 +1323,6 @@ func TestApplyRoundBudgetNeverOverridesAMissingBuildTargetsOwnReason(t *testing.
 	t.Parallel()
 
 	man := oneOracleManifest()
-	man.Oracles["lint"] = "true" // two oracles now: no single default
 	result := ReviewResult{
 		Findings: []ResultFinding{
 			{File: "a.go", Title: "fix me", Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r"},

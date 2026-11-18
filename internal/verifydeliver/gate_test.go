@@ -1431,7 +1431,7 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 	if err != nil {
 		t.Fatalf("Gate: %v", err)
 	}
-	wantIDs := []string{"fix-1-alpha-test-1", "fix-1-alpha-test-2"}
+	wantIDs := []string{"fix-1-alpha-1", "fix-1-alpha-2"}
 	if !equalStrings(report.FixSlices, wantIDs) {
 		t.Fatalf("FixSlices = %v, want %v", report.FixSlices, wantIDs)
 	}
@@ -1444,10 +1444,10 @@ func TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices(t *testing
 	for _, s := range allSlices {
 		byID[s.ID] = s
 	}
-	if got := byID["fix-1-alpha-test-1"].Findings; !equalStrings(got, []string{"r1-f1", "r1-f2"}) {
+	if got := byID["fix-1-alpha-1"].Findings; !equalStrings(got, []string{"r1-f1", "r1-f2"}) {
 		t.Errorf("slice 1 (alpha/alpha.go, fits the bound) Findings = %v, want [r1-f1 r1-f2]", got)
 	}
-	if got := byID["fix-1-alpha-test-2"].Findings; !equalStrings(got, []string{"r1-f3"}) {
+	if got := byID["fix-1-alpha-2"].Findings; !equalStrings(got, []string{"r1-f3"}) {
 		t.Errorf("slice 2 (alpha/alpha_test.go, crowded out of slice 1) Findings = %v, want [r1-f3]", got)
 	}
 }
@@ -1717,8 +1717,8 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 	if f.RoutedAs != ActionAsk || f.Recurrences != 2 {
 		t.Fatalf("round 3 finding = %+v, want routed_as ask, 2 recurrences (the bound reached)", f)
 	}
-	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-alpha-test" {
-		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-alpha-test] (the ask grouped into the workspace slice)", report3.FixSlices)
+	if len(report3.FixSlices) != 1 || report3.FixSlices[0] != "fix-3-alpha" {
+		t.Fatalf("round 3 FixSlices = %v, want exactly [fix-3-alpha] (the ask grouped into the workspace slice)", report3.FixSlices)
 	}
 }
 
@@ -2043,13 +2043,11 @@ func setupStaleOracleThroughRoundTwo(t *testing.T, round3 func(req ReviewRequest
 	return d, fx, src
 }
 
-// TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle
-// proves the terminal half of the same rule: a human keeping the same
-// finding supplies the missing oracle (exactly what cmd/jig's
-// interactiveTriage prompt gathers once BuildTargetGaps reports it
-// missing), and routing builds the fix slice on that chosen oracle, not the
-// stale one the finding carried forward.
-func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *testing.T) {
+// TestGateRecurrenceKeepBuildsSliceOnTheRecordedCommand proves that a name
+// the manifest has since lost is just a command: a person keeping the
+// recurrence the bound asked about gets a fix slice on the command the
+// finding recorded, as written, and is asked for none.
+func TestGateRecurrenceKeepBuildsSliceOnTheRecordedCommand(t *testing.T) {
 	t.Parallel()
 
 	d, fx, src := setupStaleOracleThroughRoundTwo(t, func(req ReviewRequest) ReviewResult {
@@ -2063,15 +2061,13 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 		}
 	})
 
-	// The triage hook stands in for cmd/jig's interactiveTriage: a human at
-	// a terminal keeping this finding and being prompted for an oracle
-	// (its own, "vet", no longer resolves) answers "lint".
+	// The triage hook stands in for a person keeping this finding.
 	triage := func(in TriageInput) TriageResult {
 		if len(in.Asks) != 1 || in.Asks[0].ID != "r1-f1" {
 			t.Fatalf("TriageInput.Asks = %+v, want exactly [r1-f1]", in.Asks)
 		}
 		return TriageResult{Asks: map[string]AskOutcome{
-			"r1-f1": {Keep: true, Decision: "use lint here", Oracle: "lint", Human: true},
+			"r1-f1": {Keep: true, Decision: "use lint here", Human: true},
 		}}
 	}
 
@@ -2098,8 +2094,8 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 	if fs == nil {
 		t.Fatalf("appended fix slice %q not found in slices.yaml", report3.FixSlices[0])
 	}
-	if fs.Oracle != "lint" {
-		t.Fatalf("fix slice oracle = %q, want lint (the human's chosen oracle, not the stale one)", fs.Oracle)
+	if fs.Oracle != "vet" {
+		t.Fatalf("fix slice oracle = %q, want vet (the command the finding recorded, as written)", fs.Oracle)
 	}
 	if !strings.Contains(fs.Goal, "use lint here") {
 		t.Fatalf("fix slice goal missing the human's decision text:\n%s", fs.Goal)
@@ -2109,8 +2105,8 @@ func TestGateStaleOracleRecurrenceTerminalKeepBuildsSliceOnTheChosenOracle(t *te
 	if err != nil || !ok {
 		t.Fatalf("read round 3 findings.yaml: ok=%v err=%v", ok, err)
 	}
-	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "lint" || ff.Findings[0].Triage != TriageHuman {
-		t.Fatalf("round 3 finding = %+v, want open, oracle lint, triage human", ff.Findings[0])
+	if len(ff.Findings) != 1 || ff.Findings[0].Status != StatusOpen || ff.Findings[0].Oracle != "vet" || ff.Findings[0].Triage != TriageHuman {
+		t.Fatalf("round 3 finding = %+v, want open, oracle vet, triage human", ff.Findings[0])
 	}
 }
 

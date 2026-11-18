@@ -613,13 +613,6 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if _, _, ok := rf.of(file); !ok {
 			return 0, reviewInvalid(rf.unknownRepoFile(f.File))
 		}
-		oracles := rf.oracles(file)
-		if f.Oracle != "" && !inStrings(oracles, f.Oracle) {
-			return 0, reviewInvalid(fmt.Sprintf("oracle %q is not a manifest oracle (%s)", f.Oracle, strings.Join(oracles, ", ")))
-		}
-		if f.Oracle == "" && len(oracles) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
-			return 0, reviewInvalid(fmt.Sprintf("a finding with action %q must name one of the manifest's %d oracles (%s)", f.Action, len(oracles), strings.Join(oracles, ", ")))
-		}
 		if f.Prior != "" && !known[f.Prior] {
 			return 0, reviewInvalid(fmt.Sprintf("prior %q does not name a finding under open or dismissed", f.Prior))
 		}
@@ -983,8 +976,9 @@ const (
 )
 
 // TriageTarget encodes the build target a kept ask lacked (the workspace its
-// file lies in, the oracle that proves the fix), the person's choice, in the
-// triage line's Command.
+// file lies in, the command that proves the fix), the person's choice, in the
+// triage line's Command: `workspace=W` when there is one, then `oracle=` and
+// the command to the end of the line, which may hold spaces.
 func TriageTarget(workspace, oracle string) string {
 	var parts []string
 	if workspace != "" {
@@ -996,16 +990,14 @@ func TriageTarget(workspace, oracle string) string {
 	return strings.Join(parts, " ")
 }
 
-// triageTarget decodes TriageTarget.
+// triageTarget decodes TriageTarget, and a line written before the command
+// could hold spaces (`workspace=W oracle=O`, one word each) alike.
 func triageTarget(command string) (workspace, oracle string) {
-	for _, part := range strings.Fields(command) {
-		if v, ok := strings.CutPrefix(part, "workspace="); ok {
-			workspace = v
-		}
-		if v, ok := strings.CutPrefix(part, "oracle="); ok {
-			oracle = v
-		}
+	rest := command
+	if v, ok := strings.CutPrefix(rest, "workspace="); ok {
+		workspace, rest, _ = strings.Cut(v, " ")
 	}
+	oracle, _ = strings.CutPrefix(rest, "oracle=")
 	return workspace, oracle
 }
 

@@ -257,7 +257,7 @@ func TestAppendDraftHoldsADraftToTheRulesOfAResult(t *testing.T) {
 		"an unknown action":                   {Finding: &ResultFinding{File: file, Title: "t", Action: "maybe", Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown risk":                     {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: "huge", RiskRationale: "r"}},
 		"an absolute file":                    {Finding: &ResultFinding{File: "/etc/passwd", Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r"}},
-		"an unknown oracle":                   {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "nope"}},
+		"a fix naming no command":             {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown prior":                    {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"}},
 		"a still_present of an unknown prior": {StillPresent: &StillPresentEntry{Prior: "r1-f1", Line: 3}},
 		"neither":                             {},
@@ -698,7 +698,7 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 	in := TriageInput{
 		Fixes: []Finding{{ID: "r1-f9"}},
 		Asks: []Finding{
-			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha"}, {ID: "r1-f4"},
+			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha", Oracle: "test"}, {ID: "r1-f4"},
 		},
 	}
 

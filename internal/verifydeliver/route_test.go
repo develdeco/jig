@@ -2,7 +2,6 @@ package verifydeliver
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/store"
@@ -95,31 +93,26 @@ func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t
 	}
 }
 
-// TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided is the
-// oracle-side half: a workspace ask whose recorded oracle is neither valid
-// nor defaultable (more than one manifest oracle, none recorded) stays
-// undecided even though it has a workspace.
-func TestDefaultTriageLeavesAnAskWithNoResolvableOracleUndecided(t *testing.T) {
+// TestDefaultTriageLeavesAnAskWithNoCommandUndecided is the command-side
+// half: a workspace ask whose reviewer named no command stays undecided even
+// though it has a workspace and the manifest has one oracle, while one that
+// names a command (a name the manifest lacks is just a command) is kept.
+func TestDefaultTriageLeavesAnAskWithNoCommandUndecided(t *testing.T) {
 	t.Parallel()
 
-	man := oneOracleManifest()
-	man.Oracles["lint"] = "true" // now two oracles: no single default
 	in := TriageInput{
 		Asks: []Finding{
 			{ID: "r1-f1", Workspace: "root"},
-			// A recorded oracle the manifest has since lost (a rename between
-			// rounds) is no oracle jig can resolve either: it is left as it is
-			// recorded, undecided, for a person to answer, never rebuilt on some
-			// other oracle unattended.
 			{ID: "r1-f2", Workspace: "root", Oracle: "vet"},
 		},
-		Manifest: man,
+		Manifest: oneOracleManifest(),
 	}
 	out := DefaultTriage(in)
-	for _, id := range []string{"r1-f1", "r1-f2"} {
-		if _, ok := out.Asks[id]; ok {
-			t.Errorf("Asks[%s] decided, want undecided (no oracle jig can resolve)", id)
-		}
+	if _, ok := out.Asks["r1-f1"]; ok {
+		t.Error("Asks[r1-f1] decided, want undecided (it names no command)")
+	}
+	if d, ok := out.Asks["r1-f2"]; !ok || !d.Keep {
+		t.Errorf("Asks[r1-f2] = %+v, ok=%v, want kept (it names a command)", d, ok)
 	}
 }
 
@@ -150,31 +143,35 @@ func TestDefaultTriageLeavesABudgetParkedAskUndecidedEvenWithAFullBuildTarget(t 
 	}
 }
 
-// TestResolveOracleWithOneManifestOracle pins the other half of the same
-// rule: with exactly one manifest oracle there is no choice to make, so a
-// finding that records none, or records a name the manifest no longer has
-// (the manifest changed between rounds), resolves to that one oracle in
-// every mode. Only a manifest with several oracles leaves the choice to a
-// human.
-func TestResolveOracleWithOneManifestOracle(t *testing.T) {
+// TestAnOmittedOracleStaysEmpty pins that jig never picks a command for a
+// reviewer: a finding that names none stays without one, even with exactly
+// one manifest oracle, so its build target lacks the command and a person
+// supplies it.
+func TestAnOmittedOracleStaysEmpty(t *testing.T) {
 	t.Parallel()
 
-	one := []string{"test"}
-	for _, recorded := range []string{"", "vet"} {
-		got, ok := resolveOracle(recorded, one)
-		if !ok || got != "test" {
-			t.Errorf("resolveOracle(%q, [test]) = (%q, %v), want (test, true)", recorded, got, ok)
-		}
+	f := Finding{ID: "r1-f1", Workspace: "root"}
+	if noWorkspace, noOracle := BuildTargetGaps(f); noWorkspace || !noOracle {
+		t.Errorf("BuildTargetGaps with no oracle = (%v, %v), want (false, true)", noWorkspace, noOracle)
+	}
+	if noWorkspace, noOracle := BuildTargetGaps(Finding{ID: "r1-f2", Workspace: "root", Oracle: "go test ./x -run 'TestA'"}); noWorkspace || noOracle {
+		t.Errorf("BuildTargetGaps with a command = (%v, %v), want (false, false)", noWorkspace, noOracle)
+	}
+	out := DefaultTriage(TriageInput{Asks: []Finding{f}, Manifest: oneOracleManifest()})
+	if _, ok := out.Asks["r1-f1"]; ok {
+		t.Error("Asks[r1-f1] decided, want undecided: the manifest's only oracle is not a default")
 	}
 
 	man := oneOracleManifest()
-	f := Finding{ID: "r1-f1", Workspace: "root", Oracle: "vet"}
-	if noWorkspace, noOracle := BuildTargetGaps(f, man); noWorkspace || noOracle {
-		t.Errorf("BuildTargetGaps with a stale oracle and one manifest oracle = (%v, %v), want (false, false)", noWorkspace, noOracle)
+	result := ReviewResult{Findings: []ResultFinding{
+		{File: "a.go", Line: 1, Title: "t", RiskRationale: "r", Action: ActionAsk, Risk: RiskMedium},
+	}}
+	reported, err := ApplyRound(1, map[string]Finding{}, result, nil, nil, man, []string{RiskLow, RiskMedium, RiskHigh}, false)
+	if err != nil {
+		t.Fatalf("ApplyRound: %v", err)
 	}
-	out := DefaultTriage(TriageInput{Asks: []Finding{f}, Manifest: man})
-	if d, ok := out.Asks["r1-f1"]; !ok || !d.Keep {
-		t.Errorf("Asks[r1-f1] = (%+v, %v), want kept: one manifest oracle leaves no choice", d, ok)
+	if len(reported) != 1 || reported[0].Oracle != "" {
+		t.Errorf("reported = %+v, want one finding whose oracle stays empty", reported)
 	}
 }
 
@@ -197,11 +194,11 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 	if len(slices) != 2 {
 		t.Fatalf("slices = %v, want 2 (one per workspace)", sliceIDs(slices))
 	}
-	alpha := sliceByID(t, slices, "fix-1-alpha-test")
+	alpha := sliceByID(t, slices, "fix-1-alpha")
 	if !equalStrings(alpha.Findings, []string{"r1-f1", "r1-f2"}) {
 		t.Errorf("alpha slice Findings = %v, want [r1-f1 r1-f2]", alpha.Findings)
 	}
-	beta := sliceByID(t, slices, "fix-1-beta-test")
+	beta := sliceByID(t, slices, "fix-1-beta")
 	if !equalStrings(beta.Findings, []string{"r1-f3"}) {
 		t.Errorf("beta slice Findings = %v, want [r1-f3]", beta.Findings)
 	}
@@ -232,12 +229,12 @@ func TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder(t *testing.T) 
 	// alpha/b.go by id) so the test fails if packing followed id order
 	// instead of path order.
 	reported := []Finding{
-		{ID: "r1-f1", File: "alpha/a.go", Title: "a1", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f2", File: "alpha/c.go", Title: "c1", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f3", File: "alpha/a.go", Title: "a2", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f4", File: "alpha/c.go", Title: "c2", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f5", File: "alpha/b.go", Title: "b1", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f6", File: "alpha/c.go", Title: "c3", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f1", File: "alpha/a.go", Title: "a1", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f2", File: "alpha/c.go", Title: "c1", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f3", File: "alpha/a.go", Title: "a2", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f4", File: "alpha/c.go", Title: "c2", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f5", File: "alpha/b.go", Title: "b1", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f6", File: "alpha/c.go", Title: "c3", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
 	}
 	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 2)
 	if err != nil {
@@ -246,15 +243,15 @@ func TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder(t *testing.T) 
 	if len(slices) != 3 {
 		t.Fatalf("slices = %v, want 3", sliceIDs(slices))
 	}
-	a := sliceByID(t, slices, "fix-1-root-test-1")
+	a := sliceByID(t, slices, "fix-1-root-1")
 	if !equalStrings(a.Findings, []string{"r1-f1", "r1-f3"}) {
 		t.Errorf("slice 1 (alpha/a.go, fits the bound) Findings = %v, want [r1-f1 r1-f3]", a.Findings)
 	}
-	b := sliceByID(t, slices, "fix-1-root-test-2")
+	b := sliceByID(t, slices, "fix-1-root-2")
 	if !equalStrings(b.Findings, []string{"r1-f5"}) {
 		t.Errorf("slice 2 (alpha/b.go, crowded out of slice 1) Findings = %v, want [r1-f5]", b.Findings)
 	}
-	c := sliceByID(t, slices, "fix-1-root-test-3")
+	c := sliceByID(t, slices, "fix-1-root-3")
 	if !equalStrings(c.Findings, []string{"r1-f2", "r1-f4", "r1-f6"}) {
 		t.Errorf("slice 3 (alpha/c.go, over the bound alone) Findings = %v, want [r1-f2 r1-f4 r1-f6]", c.Findings)
 	}
@@ -275,8 +272,8 @@ func TestRouteRoundGoalNamesEveryFindingAndDismissedFixIsExcluded(t *testing.T) 
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Line: 3, Title: "keep me", Detail: "detail1", RiskRationale: "rationale1", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f2", File: "b.go", Line: 9, Title: "dismiss me", RiskRationale: "r2", Action: ActionFix, Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f1", File: "a.go", Line: 3, Title: "keep me", Detail: "detail1", RiskRationale: "rationale1", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
+		{ID: "r1-f2", File: "b.go", Line: 9, Title: "dismiss me", RiskRationale: "r2", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen},
 	}
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{DismissedFixIDs: map[string]bool{"r1-f2": true}, FixHuman: true}
@@ -317,7 +314,7 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r2-f3", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+		{ID: "r2-f3", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Oracle: "test", Workspace: "root", Status: StatusAsked},
 	}
 	triage := func(in TriageInput) TriageResult {
 		if len(in.Asks) != 1 || in.Asks[0].ID != "r2-f3" {
@@ -331,8 +328,8 @@ func TestRouteRoundKeptAskBecomesItsOwnSliceWithDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if len(slices) != 1 || slices[0].ID != "fix-2-root-test" {
-		t.Fatalf("slices = %v, want [fix-2-root-test]", sliceIDs(slices))
+	if len(slices) != 1 || slices[0].ID != "fix-2-root" {
+		t.Fatalf("slices = %v, want [fix-2-root]", sliceIDs(slices))
 	}
 	if !contains(slices[0].Goal, "go ahead with plan B") {
 		t.Errorf("goal missing the human's decision:\n%s", slices[0].Goal)
@@ -379,7 +376,7 @@ func TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle(t *testin
 	if len(slices) != 2 {
 		t.Fatalf("slices = %v, want 2 (one per workspace)", sliceIDs(slices))
 	}
-	alpha := sliceByID(t, slices, "fix-1-alpha-test")
+	alpha := sliceByID(t, slices, "fix-1-alpha")
 	if !equalStrings(alpha.Findings, []string{"r1-f1", "r1-f2", "r1-f3", "r1-f4"}) {
 		t.Errorf("alpha Findings = %v, want [r1-f1 r1-f2 r1-f3 r1-f4]", alpha.Findings)
 	}
@@ -399,7 +396,7 @@ func TestRouteRoundGroupsKeptAsksAndNotesWithFixesByWorkspaceAndOracle(t *testin
 	if contains(alpha.Goal, "Gate finding r1-f1") {
 		t.Errorf("a kept fix carries no kept-by header:\n%s", alpha.Goal)
 	}
-	beta := sliceByID(t, slices, "fix-1-beta-test")
+	beta := sliceByID(t, slices, "fix-1-beta")
 	if !equalStrings(beta.Findings, []string{"r1-f5"}) {
 		t.Errorf("beta Findings = %v, want [r1-f5]", beta.Findings)
 	}
@@ -413,9 +410,9 @@ func TestRouteRoundSplitsKeptAsksAndNotesUnderTheCap(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "n1", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
-		{ID: "r1-f2", File: "b.go", Title: "n2", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
-		{ID: "r1-f3", File: "a.go", Title: "n3", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted},
+		{ID: "r1-f1", File: "a.go", Title: "n1", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "root", Status: StatusNoted},
+		{ID: "r1-f2", File: "b.go", Title: "n2", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "root", Status: StatusNoted},
+		{ID: "r1-f3", File: "a.go", Title: "n3", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "root", Status: StatusNoted},
 	}
 	triage := func(in TriageInput) TriageResult {
 		notes := map[string]AskOutcome{}
@@ -431,10 +428,10 @@ func TestRouteRoundSplitsKeptAsksAndNotesUnderTheCap(t *testing.T) {
 	if len(slices) != 2 {
 		t.Fatalf("slices = %v, want 2", sliceIDs(slices))
 	}
-	if first := sliceByID(t, slices, "fix-1-root-test-1"); !equalStrings(first.Findings, []string{"r1-f1", "r1-f3"}) {
+	if first := sliceByID(t, slices, "fix-1-root-1"); !equalStrings(first.Findings, []string{"r1-f1", "r1-f3"}) {
 		t.Errorf("slice 1 Findings = %v, want [r1-f1 r1-f3] (same file together)", first.Findings)
 	}
-	if second := sliceByID(t, slices, "fix-1-root-test-2"); !equalStrings(second.Findings, []string{"r1-f2"}) {
+	if second := sliceByID(t, slices, "fix-1-root-2"); !equalStrings(second.Findings, []string{"r1-f2"}) {
 		t.Errorf("slice 2 Findings = %v, want [r1-f2]", second.Findings)
 	}
 }
@@ -449,16 +446,16 @@ func TestRouteRoundGroupedKeptRecurrenceNamesItsPreviousSlice(t *testing.T) {
 	ticket := "T-1"
 	man := oneOracleManifest()
 	existing := []store.Slice{
-		{ID: "fix-1-root-test", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1", "r1-f2"}},
+		{ID: "fix-1-root", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1", "r1-f2"}},
 	}
-	if err := st.WriteSliceState(ticket, "fix-1-root-test", store.SliceState{State: "green", Attempts: 1}); err != nil {
+	if err := st.WriteSliceState(ticket, "fix-1-root", store.SliceState{State: "green", Attempts: 1}); err != nil {
 		t.Fatalf("write slice state: %v", err)
 	}
-	if err := writeAttemptResult(t, gateWorkDir(st, ticket), "fix-1-root-test", 1, "tightened both"); err != nil {
+	if err := writeAttemptResult(t, gateWorkDir(st, ticket), "fix-1-root", 1, "tightened both"); err != nil {
 		t.Fatalf("write attempt result: %v", err)
 	}
 	reported := []Finding{
-		{ID: "r1-f2", File: "a.go", Title: "back again", RiskRationale: "r", Action: ActionNote, Workspace: "root", Status: StatusNoted, Recurrences: 1},
+		{ID: "r1-f2", File: "a.go", Title: "back again", RiskRationale: "r", Action: ActionNote, Oracle: "test", Workspace: "root", Status: StatusNoted, Recurrences: 1},
 	}
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{Notes: map[string]AskOutcome{"r1-f2": {Keep: true, Decision: "again", Human: true}}}
@@ -470,7 +467,7 @@ func TestRouteRoundGroupedKeptRecurrenceNamesItsPreviousSlice(t *testing.T) {
 	if len(slices) != 1 {
 		t.Fatalf("slices = %v, want 1", sliceIDs(slices))
 	}
-	for _, want := range []string{"Previous fix slice fix-1-root-test: tightened both", "Gate finding r1-f2, kept by the human:"} {
+	for _, want := range []string{"Previous fix slice fix-1-root: tightened both", "Gate finding r1-f2, kept by the human:"} {
 		if !contains(slices[0].Goal, want) {
 			t.Errorf("goal missing %q:\n%s", want, slices[0].Goal)
 		}
@@ -486,7 +483,7 @@ func TestRouteRoundAutoKeptAskGoalDoesNotClaimAHumanDecided(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+		{ID: "r1-f1", File: "a.go", Title: "needs a call", RiskRationale: "r", Action: ActionAsk, Oracle: "test", Workspace: "root", Status: StatusAsked},
 	}
 	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5) // nil = DefaultTriage
 	if err != nil {
@@ -513,7 +510,7 @@ func TestRouteRoundDismissedAskNeverBuildsASlice(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "ask", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+		{ID: "r1-f1", File: "a.go", Title: "ask", RiskRationale: "r", Action: ActionAsk, Oracle: "test", Workspace: "root", Status: StatusAsked},
 	}
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{Asks: map[string]AskOutcome{"r1-f1": {Keep: false, Human: true}}}
@@ -540,7 +537,7 @@ func TestRouteRoundUndecidedNoWorkspaceAskStaysAskedWithNoTriage(t *testing.T) {
 	st := newReviewStore(t)
 	man := oneOracleManifest()
 	reported := []Finding{
-		{ID: "r1-f1", File: "orphan.go", Title: "no workspace", RiskRationale: "r", Action: ActionFix, Workspace: "", Status: StatusAsked, RoutedAs: ActionAsk},
+		{ID: "r1-f1", File: "orphan.go", Title: "no workspace", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "", Status: StatusAsked, RoutedAs: ActionAsk},
 	}
 	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5) // nil = DefaultTriage
 	if err != nil {
@@ -587,15 +584,14 @@ func TestRouteRoundWorkspaceSuppliedByTriageBuildsTheSlice(t *testing.T) {
 	}
 }
 
-// TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage is the
-// oracle-side twin of the no-workspace case: a hook that declines to
-// resolve a missing oracle leaves the ask asked, with no slice built.
-func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T) {
+// TestAKeptAskWithNoCommandIsNotBuilt is the command-side twin of the
+// no-workspace case: a keep that supplies no command for an ask that has none
+// leaves the ask asked, with no slice built.
+func TestAKeptAskWithNoCommandIsNotBuilt(t *testing.T) {
 	t.Parallel()
 
 	st := newReviewStore(t)
 	man := oneOracleManifest()
-	man.Oracles["lint"] = "true" // two oracles now, so "" cannot default
 	reported := []Finding{
 		{ID: "r1-f1", File: "a.go", Title: "no oracle", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusAsked, RoutedAs: ActionAsk},
 	}
@@ -615,33 +611,33 @@ func TestRouteRoundUndecidedInvalidOracleAskStaysAskedWithNoTriage(t *testing.T)
 	}
 }
 
-// TestRouteRoundOracleSuppliedByTriageBuildsTheSlice is the oracle-side
-// half: when the hook keeps an ask whose recorded oracle is no longer valid
-// and supplies one, routing builds its slice with that oracle.
+// TestRouteRoundOracleSuppliedByTriageBuildsTheSlice is the command-side
+// half: when the hook keeps an ask that names no command and supplies one
+// (with spaces, as a command has), routing builds its slice with it.
 func TestRouteRoundOracleSuppliedByTriageBuildsTheSlice(t *testing.T) {
 	t.Parallel()
 
 	st := newReviewStore(t)
 	man := oneOracleManifest()
-	man.Oracles["lint"] = "true" // two oracles now: "old" is neither
+	const command = "go test ./a -run 'TestA|TestB'"
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "stale oracle", RiskRationale: "r", Action: ActionFix, Oracle: "old", Workspace: "root", Status: StatusAsked, RoutedAs: ActionAsk},
+		{ID: "r1-f1", File: "a.go", Title: "no command", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusAsked, RoutedAs: ActionAsk},
 	}
 	triage := func(in TriageInput) TriageResult {
 		return TriageResult{Asks: map[string]AskOutcome{
-			"r1-f1": {Keep: true, Oracle: "lint", Human: true},
+			"r1-f1": {Keep: true, Oracle: command, Human: true},
 		}}
 	}
 	routed, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if len(slices) != 1 || slices[0].Oracle != "lint" {
-		t.Fatalf("slices = %+v, want one slice with oracle lint", slices)
+	if len(slices) != 1 || slices[0].Oracle != command {
+		t.Fatalf("slices = %+v, want one slice with the person's command", slices)
 	}
 	f := findFinding(routed, "r1-f1")
-	if f.Status != StatusOpen || f.Oracle != "lint" {
-		t.Errorf("f = %+v, want open with oracle lint", f)
+	if f.Status != StatusOpen || f.Oracle != command {
+		t.Errorf("f = %+v, want open with the person's command", f)
 	}
 }
 
@@ -682,90 +678,59 @@ func TestRouteRoundNotesPassThroughUntouched(t *testing.T) {
 	}
 }
 
-// --- GATE_NO_ORACLE ----------------------------------------------------
+// --- a manifest with no oracle ---------------------------------------------
 
-func TestRouteRoundNoOracleManifestFailsGateNoOracle(t *testing.T) {
+// TestAManifestWithNoOracleStillBuildsFixSlices pins that a reviewer's command
+// is all a fix slice needs: a project whose manifest declares no oracle still
+// gets its fix slice, and the triage hook still runs.
+func TestAManifestWithNoOracleStillBuildsFixSlices(t *testing.T) {
 	t.Parallel()
 
 	st := newReviewStore(t)
 	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-	}
-	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
-		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
-	}
-}
-
-// TestOracleForFindingMultiOracleManifestNamesTheOracles is the multi-
-// oracle twin of the zero-oracle GATE_NO_ORACLE message: it must not claim
-// the manifest has no oracles when it names several, and must name them.
-func TestOracleForFindingMultiOracleManifestNamesTheOracles(t *testing.T) {
-	t.Parallel()
-
-	_, err := oracleForFinding(Finding{ID: "r1-f1"}, []string{"lint", "test"})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
-		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
-	}
-	if contains(ae.Msg, "has no oracles") {
-		t.Errorf("message = %q, want it not to claim the manifest has no oracles", ae.Msg)
-	}
-	for _, name := range []string{"lint", "test"} {
-		if !contains(ae.Msg, name) {
-			t.Errorf("message = %q, want it to name oracle %q", ae.Msg, name)
-		}
-	}
-}
-
-// TestRouteRoundNoOracleManifestFailsBeforeTriage checks that a zero-oracle
-// manifest fails GATE_NO_ORACLE before the triage hook ever runs, so a
-// human at a terminal is never asked to decide a fix or ask that can never
-// build a slice - and never has their answer discarded when routing then
-// fails anyway.
-func TestRouteRoundNoOracleManifestFailsBeforeTriage(t *testing.T) {
-	t.Parallel()
-
-	st := newReviewStore(t)
-	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
-	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen},
-		{ID: "r1-f2", File: "b.go", Title: "t2", RiskRationale: "r", Action: ActionAsk, Workspace: "root", Status: StatusAsked},
+		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionFix, Oracle: "go test ./a -run 'TestA'", Workspace: "root", Status: StatusOpen},
 	}
 	called := false
-	triage := func(TriageInput) TriageResult {
+	triage := func(in TriageInput) TriageResult {
 		called = true
-		return TriageResult{}
+		return DefaultTriage(in)
 	}
-	_, _, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" {
-		t.Fatalf("err = %v, want *axi.Error GATE_NO_ORACLE", err)
+	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, triage, oneRepoFiles(man), 0, 0, 5)
+	if err != nil {
+		t.Fatalf("routeRound: %v", err)
 	}
-	if called {
-		t.Error("the triage hook ran despite a zero-oracle manifest that can never route anything")
+	if !called {
+		t.Error("the triage hook never ran")
+	}
+	if len(slices) != 1 || slices[0].ID != "fix-1-root" || slices[0].Oracle != "go test ./a -run 'TestA'" {
+		t.Fatalf("slices = %+v, want fix-1-root with the finding's command", slices)
 	}
 }
 
-// TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail is the other half:
-// a zero-oracle manifest with nothing to route (only notes) has nothing
-// GATE_NO_ORACLE needs to protect, so it must not fail the round at all.
-func TestRouteRoundNoOracleManifestWithOnlyNotesDoesNotFail(t *testing.T) {
+// TestAFixFindingWithNoOracleIsRoutedAsAnAsk pins the recurrence whose prior
+// never named a command: it comes to a person as an ask with the build-target
+// reason, as a fix with no workspace does.
+func TestAFixFindingWithNoOracleIsRoutedAsAnAsk(t *testing.T) {
 	t.Parallel()
 
-	st := newReviewStore(t)
-	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
-	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionNote, Status: StatusNoted},
+	man := oneOracleManifest()
+	known := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Workspace: "root", Action: ActionNote, Risk: RiskMedium, Status: StatusNoted},
 	}
-	_, slices, err := routeRound(1, st, "T-1", nil, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
+	result := ReviewResult{Findings: []ResultFinding{
+		{File: "a.go", Line: 2, Title: "t", RiskRationale: "r", Action: ActionFix, Risk: RiskMedium, Prior: "r1-f1"},
+	}}
+	reported, err := ApplyRound(2, known, result, nil, nil, man, []string{RiskLow, RiskMedium, RiskHigh}, false)
 	if err != nil {
-		t.Fatalf("routeRound: %v, want no error (nothing to route)", err)
+		t.Fatalf("ApplyRound: %v", err)
 	}
-	if len(slices) != 0 {
-		t.Fatalf("slices = %v, want none", sliceIDs(slices))
+	if len(reported) != 1 {
+		t.Fatalf("reported = %+v, want one finding", reported)
+	}
+	f := reported[0]
+	if f.Status != StatusAsked || f.RoutedAs != ActionAsk || f.RoutedWhy != RoutedWhyBuildTarget {
+		t.Errorf("finding = %+v, want asked, routed as ask for the build target", f)
 	}
 }
 
@@ -778,18 +743,18 @@ func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 	ticket := "T-1"
 	man := oneOracleManifest()
 	existing := []store.Slice{
-		{ID: "fix-1-root-test", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1"}},
+		{ID: "fix-1-root", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1"}},
 	}
-	if err := st.WriteSliceState(ticket, "fix-1-root-test", store.SliceState{State: "green", Attempts: 1}); err != nil {
+	if err := st.WriteSliceState(ticket, "fix-1-root", store.SliceState{State: "green", Attempts: 1}); err != nil {
 		t.Fatalf("write slice state: %v", err)
 	}
 	resultPath := gateWorkDir(st, ticket)
-	if err := writeAttemptResult(t, resultPath, "fix-1-root-test", 1, "fixed the null check"); err != nil {
+	if err := writeAttemptResult(t, resultPath, "fix-1-root", 1, "fixed the null check"); err != nil {
 		t.Fatalf("write attempt result: %v", err)
 	}
 
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen, Recurrences: 1},
+		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen, Recurrences: 1},
 	}
 	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
@@ -798,7 +763,7 @@ func TestRouteRoundRecurrenceGoalNamesPreviousFixSlice(t *testing.T) {
 	if len(slices) != 1 {
 		t.Fatalf("slices = %v, want 1", sliceIDs(slices))
 	}
-	for _, want := range []string{"fix-1-root-test", "fixed the null check"} {
+	for _, want := range []string{"fix-1-root", "fixed the null check"} {
 		if !contains(slices[0].Goal, want) {
 			t.Errorf("goal missing %q:\n%s", want, slices[0].Goal)
 		}
@@ -814,17 +779,17 @@ func TestRouteRoundRecurrenceGoalNamesOnlyIDWhenResultMissing(t *testing.T) {
 	ticket := "T-1"
 	man := oneOracleManifest()
 	existing := []store.Slice{
-		{ID: "fix-1-root-test", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1"}},
+		{ID: "fix-1-root", Workspace: "root", Oracle: "test", Findings: []string{"r1-f1"}},
 	}
 	// No slice state / result written: previousFixSliceSummary must return "".
 	reported := []Finding{
-		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Workspace: "root", Status: StatusOpen, Recurrences: 1},
+		{ID: "r1-f1", File: "a.go", Title: "still broken", RiskRationale: "r", Action: ActionFix, Oracle: "test", Workspace: "root", Status: StatusOpen, Recurrences: 1},
 	}
 	_, slices, err := routeRound(2, st, ticket, existing, reported, nil, nil, oneRepoFiles(man), 0, 0, 5)
 	if err != nil {
 		t.Fatalf("routeRound: %v", err)
 	}
-	if !contains(slices[0].Goal, "fix-1-root-test") {
+	if !contains(slices[0].Goal, "fix-1-root") {
 		t.Errorf("goal missing the previous slice id:\n%s", slices[0].Goal)
 	}
 }

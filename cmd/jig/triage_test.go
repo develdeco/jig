@@ -27,7 +27,7 @@ func sampleTriageInput() verifydeliver.TriageInput {
 			{ID: "r1-f2", Risk: "low", Title: "fix two", RiskRationale: "r"},
 		},
 		Asks: []verifydeliver.Finding{
-			{ID: "r1-f3", Risk: "high", Title: "ask with workspace", Workspace: "alpha"},
+			{ID: "r1-f3", Risk: "high", Title: "ask with workspace", Workspace: "alpha", Oracle: "test"},
 			{ID: "r1-f4", Risk: "medium", Title: "ask with no workspace"},
 		},
 		Notes: []verifydeliver.Finding{
