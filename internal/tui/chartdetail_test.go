@@ -71,7 +71,7 @@ func TestChartDetailNamesTheHolderTheAgentAndTheStage(t *testing.T) {
 	if !strings.HasSuffix(panel[0], "JIG-5 ─╮") {
 		t.Errorf("the top edge does not end with the ticket's id:\n%s", strings.Join(panel, "\n"))
 	}
-	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice    s2 · verifying · builder · agent 4f2a91c0") {
+	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice    s2 · claimed · builder · agent 4f2a91c0") {
 		t.Errorf("the panel does not name the slice, its stage, its holder and its agent:\n%s", got)
 	}
 }
@@ -82,7 +82,7 @@ func TestChartDetailOfASessionWithNoAgent(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
 	got := strings.Join(detailPanelOf(t, g.view()), "\n")
-	if !strings.Contains(got, "s2 · verifying · builder") {
+	if !strings.Contains(got, "s2 · claimed · builder") {
 		t.Errorf("the panel does not name the slice, its stage and its holder:\n%s", got)
 	}
 	if strings.Contains(got, "agent") {

@@ -107,6 +107,9 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		// The time is the end of the line, so the commit's words give way to it.
 		when := m.commitWhen(c)
 		p.add(pre + fit(line, room-width(when)-2) + m.st.dim("  "+when))
+		if c.State == StateQueued && len(c.Runs) == 0 && c.Error == nil {
+			p.add(pre + "  " + m.st.dim(fit("no recorded result", room-4)))
+		}
 		for _, run := range c.Runs {
 			state := StateGreen
 			if run.Outcome != "pass" {

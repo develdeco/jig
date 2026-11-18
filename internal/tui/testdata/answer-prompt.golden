@@ -15,7 +15,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
   │  09:02:00 build·c ? builder asks: Formal or casual?                        │
   │  09:01:40 build·b ✖ its oracle failed: TestB: want 2, got 3                │
-  │  09:01:10 build·b ◑ verifying bbbbbbb                                      │
+  │  09:01:10 build·b · verification requested for bbbbbbb                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   slice c asked:

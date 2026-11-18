@@ -248,7 +248,7 @@ func (m *Model) moveText(t *ticket, l events.Envelope) string {
 		if l.Agent != "" {
 			who = agentName(l.Agent)
 		}
-		return m.st.state(StateVerifying, "⏸ "+who+" held at its stop") + " · " + l.Summary
+		return m.st.state(StateBuilding, "⏸ "+who+" held at its stop") + " · " + l.Summary
 	}
 	text := "$ `" + m.tildeHome(shownCommand(l.Command)) + "`"
 	if d := strings.TrimSpace(l.Description); d != "" {
@@ -427,8 +427,8 @@ func (t *ticket) checkedBy(id string) string {
 	return oracle
 }
 
-// lastCommit is the latest commit slice id put up for verification, with its
-// subject.
+// lastCommit is the latest commit slice id was run for (or, in an old journal,
+// asked to be verified), with its subject.
 func (t *ticket) lastCommit(id string) string {
 	sha := ""
 	for _, l := range t.lines {
@@ -440,7 +440,7 @@ func (t *ticket) lastCommit(id string) string {
 }
 
 // stagesOf are the stages the track of an open sub-step shows and how many of
-// them it has reached: a slice is claimed, committed, verifying and verified; a
+// them it has reached: a slice is claimed, run and verified; a
 // round opened, taken, reviewing and closed; any other sub-step is a stage of
 // its step's sub-steps, which are the track.
 func (t *ticket) stagesOf(step int, s phase.Sub, subs []phase.Sub) ([]string, int) {
@@ -459,15 +459,14 @@ func (t *ticket) stagesOf(step int, s phase.Sub, subs []phase.Sub) ([]string, in
 		reached := 0
 		switch {
 		case s.State == phase.SubDone:
-			reached = 4
-		case has(journal.EventVerifyPending):
 			reached = 3
 		case has(journal.EventOracle):
+			// A run reaches the stage whether or not it covered a commit.
 			reached = 2
 		case len(tr.own) > 0:
 			reached = 1
 		}
-		return []string{"claimed", "committed", "verifying", "verified"}, reached
+		return []string{"claimed", "run", "verified"}, reached
 	case "round":
 		reached := 0
 		switch {

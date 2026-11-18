@@ -30,7 +30,7 @@ func TestCommitWordsNameTheSubjectFromTheOracleLine(t *testing.T) {
 		t.Error("an uncovered failure was taken for the slice's latest word")
 	}
 	recs := tk.commits("a")
-	if len(recs) != 1 || recs[0].Subject != "fix Clamp" || recs[0].State != StateVerifying || len(recs[0].Runs) != 2 {
+	if len(recs) != 1 || recs[0].Subject != "fix Clamp" || recs[0].State != StateBuilding || len(recs[0].Runs) != 2 {
 		t.Errorf("commits = %+v, want one commit with its subject, both runs and the state the covered pass gave", recs)
 	}
 }

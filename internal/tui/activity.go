@@ -346,7 +346,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventDispatch:
 		return "jig started a builder"
 	case journal.EventVerifyPending:
-		return "verifying " + commitWords(t, l.Commit)
+		// An old worker's line: said as history, in no state of work in flight.
+		return "verification requested for " + commitWords(t, l.Commit)
 	case journal.EventOracle:
 		cmd := "its oracle"
 		if l.Command != "" {
