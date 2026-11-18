@@ -277,7 +277,7 @@ func TestDigesterFlow(t *testing.T) {
 		stop := h.Hook("Stop", map[string]any{"stop_hook_active": false})
 		f.hook(h.Session, "Stop", stop)
 		blocked := decodeHook(t, stop)
-		if blocked.Decision != "block" || !strings.Contains(blocked.Reason, "commit "+sha[:12]+" for slice a is not verified") ||
+		if blocked.Decision != "block" || !strings.Contains(blocked.Reason, "commit "+sha[:12]+" for slice a has no recorded result") ||
 			!strings.Contains(blocked.Reason, "jig verify "+ticket+" --slice a") || !strings.Contains(blocked.Reason, "unattended") {
 			t.Fatalf("Stop with an unverified commit = %+v, want a block naming %s and the command that verifies it", blocked, sha[:12])
 		}

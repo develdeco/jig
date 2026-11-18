@@ -67,7 +67,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 	envFile := filepath.Join(sessionDir, "sessionstart-hook-0.sh")
 	got := decodeHook(t, runHookCommand(t, env.with("CLAUDE_ENV_FILE="+envFile), fx.RepoDir, start, h.Payload("SessionStart", map[string]any{"source": "startup", "model": "claude-test"})))
-	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,attempts,blocked_by,question}") ||
+	if got.Specific.Name != "SessionStart" || !strings.Contains(got.Specific.Context, fx.Ticket) || !strings.Contains(got.Specific.Context, "slices[4]{id,state,covers,attempts,blocked_by,question}") ||
 		!strings.Contains(got.Specific.Context, "session: s-hooks") {
 		t.Fatalf("SessionStart context = %q, want %s, its slice table and the session id", got.Specific.Context, fx.Ticket)
 	}
@@ -92,7 +92,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	// Stop right after: the commit has no recorded result, and the message
 	// names the command that records one.
 	stop := decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
-	if want := "commit " + sha[:12] + " for slice a is not verified"; !strings.Contains(stop.SystemMessage, want) || stop.Decision != "" {
+	if want := "commit " + sha[:12] + " for slice a has no recorded result"; !strings.Contains(stop.SystemMessage, want) || stop.Decision != "" {
 		t.Errorf("Stop = %+v, want a message saying %q and no refusal", stop, want)
 	}
 	if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
@@ -206,7 +206,7 @@ func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 	if n := spawnedFor(readLedger(t, env), sha); n != 0 {
 		t.Fatalf("%d workers were started for %s, want none", n, sha[:12])
 	}
-	unverified := "commit " + sha[:12] + " for slice a is not verified"
+	unverified := "commit " + sha[:12] + " for slice a has no recorded result"
 
 	held := decodeHook(t, stopSub(false))
 	if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, unverified) {
@@ -322,12 +322,12 @@ func TestSubagentStopHoldsEachClaimHolder(t *testing.T) {
 		slice string
 	}{{first, "a-1", shaA, "a"}, {second, "a-2", shaC, "c"}} {
 		held := stopOf(c.h)
-		running := "commit " + c.sha[:12] + " for slice " + c.slice + " is not verified"
+		running := "commit " + c.sha[:12] + " for slice " + c.slice + " has no recorded result"
 		if held.Decision != "block" || !strings.Contains(held.Reason, "this agent's claim is unattended, so it is held back from stopping") || !strings.Contains(held.Reason, running) {
 			t.Errorf("SubagentStop of %s = %+v, want a refusal that names %q", c.agent, held, running)
 		}
 	}
-	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, "is not verified") {
+	if mainStop := decodeHook(t, main.Hook("Stop", map[string]any{"stop_hook_active": false})); mainStop.Decision != "" || !strings.Contains(mainStop.SystemMessage, "has no recorded result") {
 		t.Errorf("main Stop = %+v, want the commits said and no refusal: the claims are the subagents'", mainStop)
 	}
 }

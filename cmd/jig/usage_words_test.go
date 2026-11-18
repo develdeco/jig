@@ -100,9 +100,9 @@ func TestStatusListsTheLastRunOfEachSliceWithWhatItUsed(t *testing.T) {
 	add(journal.Line{Slice: "two", Event: journal.EventOracle, Outcome: "pass", Commit: a, Attempt: 1, Seconds: 5})
 	got := strings.Join(block(statusOf(t, fx, st), "last_runs["), "\n")
 	want := strings.Join([]string{
-		"last_runs[2]{slice,commit,seconds,cpu_seconds,peak_memory,basis}:",
-		"  one,fedcba987654,41,63.2,1.5 GiB,sampled peak",
-		"  two,0123456789ab,5,not measured,not measured,not measured",
+		"last_runs[2]{slice,commit,result,covers,seconds,cpu_seconds,peak_memory,basis}:",
+		"  one,fedcba987654,pass,not checked,41,63.2,1.5 GiB,sampled peak",
+		"  two,0123456789ab,pass,not checked,5,not measured,not measured,not measured",
 	}, "\n")
 	if got != want {
 		t.Errorf("last_runs block:\n%s\nwant:\n%s", got, want)

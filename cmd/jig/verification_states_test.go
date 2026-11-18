@@ -10,6 +10,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -59,22 +60,33 @@ type statesJSON struct {
 	} `json:"state"`
 }
 
-// TestHereNamesVerificationStates: a commit made with the slice trailer while
-// no jig ran has no verification, and `jig here` names it not verified with
-// the command that verifies it, in the text and in --json.
-func TestHereNamesVerificationStates(t *testing.T) {
+// TestHereNamesCommitsWithNoResult: a commit made with the slice trailer while
+// no `jig verify` ran has no recorded result, and `jig here` names it so with
+// the command that records one, in the text and in --json. An old worker's
+// pending line beside it changes nothing.
+func TestHereNamesCommitsWithNoResult(t *testing.T) {
 	t.Parallel()
 	fx, e := statesRig(t)
 	sha := commitWithTrailer(t, fx, "one.txt", "a")
+	// An old worker's pending line at the commit is no result.
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventVerifyPending, Slice: "a", Commit: sha, Attempt: 1}); err != nil {
+		t.Fatal(err)
+	}
 
 	out, code := runMain(t, e, "", "here")
 	if code != 0 {
 		t.Fatalf("jig here: exit %d, output %q", code, out)
 	}
-	_ = sha
 	want := "jig verify " + fx.Ticket + " --slice a"
-	if !strings.Contains(out, "verification_states[1]") || !strings.Contains(out, "not verified") || !strings.Contains(out, want) {
-		t.Errorf("jig here does not name the unverified commit with %q:\n%s", want, out)
+	if !strings.Contains(out, "verification_states[1]") || !strings.Contains(out, "no recorded result") || !strings.Contains(out, want) {
+		t.Errorf("jig here does not name the commit with no result with %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "not verified") || strings.Contains(out, "pending_verifications") {
+		t.Errorf("jig here still uses the old words:\n%s", out)
 	}
 
 	out, code = runMain(t, e, "", "here", "--json")
@@ -86,14 +98,14 @@ func TestHereNamesVerificationStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := got.State.VerificationStates
-	if len(rows) != 1 || rows[0].Slice != "a" || rows[0].Commit != sha || rows[0].State != "not verified" || rows[0].Clear != want {
-		t.Errorf("verification_states = %+v, want the one unverified commit", rows)
+	if len(rows) != 1 || rows[0].Slice != "a" || rows[0].Commit != sha || rows[0].State != "no recorded result" || rows[0].Told != "no recorded result" || rows[0].Clear != want {
+		t.Errorf("verification_states = %+v, want the one commit with no recorded result", rows)
 	}
 }
 
-// TestStatusNamesVerificationStates: `jig status` tells the same commit, and
+// TestStatusNamesCommitsWithNoResult: `jig status` tells the same commit, and
 // names none when the branch cannot be read.
-func TestStatusNamesVerificationStates(t *testing.T) {
+func TestStatusNamesCommitsWithNoResult(t *testing.T) {
 	t.Parallel()
 	fx, e := statesRig(t)
 	sha := commitWithTrailer(t, fx, "one.txt", "a")
@@ -111,8 +123,11 @@ func TestStatusNamesVerificationStates(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("jig status: exit %d, output %q", code, out)
 	}
-	if !strings.Contains(out, "verification_states[1]") || !strings.Contains(out, "not verified") || !strings.Contains(out, sha[:12]) {
-		t.Errorf("jig status does not name the unverified commit:\n%s", out)
+	if !strings.Contains(out, "verification_states[1]") || !strings.Contains(out, "no recorded result") || !strings.Contains(out, sha[:12]) {
+		t.Errorf("jig status does not name the commit with no result:\n%s", out)
+	}
+	if strings.Contains(out, "stale") || strings.Contains(out, "running") {
+		t.Errorf("jig status names a worker's state:\n%s", out)
 	}
 
 	// With no start sha there is no branch to read, so no commit is named.
@@ -125,7 +140,7 @@ func TestStatusNamesVerificationStates(t *testing.T) {
 	}
 }
 
-// TestHereVerificationStatesCostOneGitLog: finding the unverified commits
+// TestHereVerificationStatesCostOneGitLog: finding the commits with no result
 // costs one git program however many commits the branch holds.
 func TestHereVerificationStatesCostOneGitLog(t *testing.T) {
 	fx, e := startPathRig(t)
@@ -156,7 +171,7 @@ func TestHereVerificationStatesCostOneGitLog(t *testing.T) {
 		commitWithTrailer(t, fx, f, "a")
 	}
 	with := run()
-	t.Logf("jig here: %d git processes without a branch to read, %d with five unverified commits", without, with)
+	t.Logf("jig here: %d git processes without a branch to read, %d with five commits with no result", without, with)
 	if with > without+1 {
 		t.Errorf("reading five commits cost %d more git processes, want at most one", with-without)
 	}

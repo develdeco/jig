@@ -139,12 +139,12 @@ func (h *handler) markerUnattended() bool {
 }
 
 // verificationFindings tells the state of the ticket's verifications as the
-// agent is about to stop. A commit that is not verified, or whose verification
-// is stale, holds an unattended session, since no one is judging it and the
-// clearing command runs the oracle. A failed, stopped or timed-out
-// verification is told and holds nobody back: the builder may stop, and the
-// slice stays building. A verification running is not said: jig starts none,
-// so the one that runs is the builder's own, in its own shell.
+// agent is about to stop. A commit with no recorded result holds an
+// unattended session, since no run is recorded for it and the clearing command
+// runs the oracle. A failed, stopped, timed-out or could-not-run verification
+// is told and holds nobody back: the builder may stop, and the slice stays
+// building. An old verify-pending line is no result and is neither held on nor
+// said.
 func (h *handler) verificationFindings() []finding {
 	lines, err := h.journal()
 	if err != nil {
@@ -152,56 +152,35 @@ func (h *handler) verificationFindings() []finding {
 		return nil
 	}
 	truth := h.verifyTruth(lines)
-	rows := truth.Derive()
-
-	// Only a slice's latest commit on the branch is held to a result: the
-	// command that clears a commit runs at HEAD, so an older commit of the
-	// slice (a test commit before the code) is history once a later one exists,
-	// and so is a commit the slice has a verified line at a descendant of
-	// (slices verified one after the other at HEAD).
-	latest := map[string]string{}
-	for _, c := range truth.Commits { // oldest first
-		latest[c.Slice] = c.SHA
-	}
-	ancestry := verify.GitAncestry(h.w.RepoDir)
-	history := func(commit, slice string) bool {
-		for _, l := range lines {
-			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && ancestry(commit, l.Commit) {
-				return true
-			}
-		}
-		return false
-	}
+	// Only a slice's building tip is held to a result: an older commit of the
+	// slice, or one it has a verified line at or after, is history
+	// (Truth.Outstanding), the rule `jig here` and `jig status` share.
+	rows := truth.Outstanding()
 
 	var out []finding
 	for _, r := range rows {
-		if r.State == phase.VerifyRunning || !r.State.Unclear() {
+		if !r.State.Unclear() {
 			continue
 		}
-		if l, ok := latest[r.Slice]; ok && l != r.Commit {
-			continue
-		}
-		if history(r.Commit, r.Slice) {
-			continue
-		}
-		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {
+		if !r.State.Holds() && !h.building(r.Slice) {
 			// A failed or stopped run is told to a builder still on the slice;
 			// once the slice is green, stalled or parked it is history.
 			continue
 		}
 		sha := short12(r.Commit)
-		f := finding{ref: string(r.State) + ":" + sha + ":" + r.Slice, blocking: r.State.Holds()}
+		f := finding{ref: r.Told() + ":" + sha + ":" + r.Slice, blocking: r.State.Holds()}
 		switch r.State {
-		case phase.VerifyNotVerified:
-			f.text = fmt.Sprintf("commit %s for slice %s is not verified", sha, r.Slice)
+		case phase.VerifyNoResult:
+			f.text = fmt.Sprintf("commit %s for slice %s has no recorded result", sha, r.Slice)
 			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
-		case phase.VerifyStale:
-			f.text = fmt.Sprintf("verification of %s for slice %s is stale: its worker is gone", sha, r.Slice)
-			f.hint = fmt.Sprintf("run it again with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
 		case phase.VerifyFailed:
-			f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
+			if r.Cause != "" {
+				f.text = fmt.Sprintf("verification of %s for slice %s %s; run it again with `%s`", sha, r.Slice, r.Cause, r.Clear)
+			} else {
+				f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
+			}
 		default:
-			f.text = fmt.Sprintf("verification of %s for slice %s %s; run it again with `%s`", sha, r.Slice, r.State.Told(), r.Clear)
+			f.text = fmt.Sprintf("verification of %s for slice %s could not run: %s; run it again with `%s`", sha, r.Slice, r.Error, r.Clear)
 		}
 		out = append(out, f)
 	}
@@ -213,7 +192,7 @@ func (h *handler) verificationFindings() []finding {
 // branch the work is on and has a start sha; the commits are then those of that
 // branch.
 func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
-	t := verify.Truth{JigHome: h.d.JigHome, Ticket: h.w.Ticket, Lines: lines, Now: h.d.Now()}
+	t := verify.Truth{Ticket: h.w.Ticket, Lines: lines}
 	if sl, err := h.st.ReadSlices(h.w.Ticket); err == nil {
 		for _, s := range sl {
 			t.Slices = append(t.Slices, s.ID)
@@ -238,8 +217,8 @@ func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
 			}
 		}
 		if start != "" && dir != "" {
-			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
-				t.Commits, t.BranchKnown = c, true
+			if c, parents, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
+				t.Commits, t.Parents, t.BranchKnown = c, parents, true
 			}
 		}
 	}

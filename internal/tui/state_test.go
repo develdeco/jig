@@ -2,6 +2,7 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,8 +42,8 @@ func TestPhaseFollowsTheJournal(t *testing.T) {
 	}{
 		{"nothing yet", nil, StateQueued, "queued"},
 		{"a claim is building", []events.Envelope{claim}, StateBuilding, "building"},
-		{"a verify with no result is verifying", []events.Envelope{claim, pending}, StateVerifying, "verifying"},
-		{"a result ends the verifying", []events.Envelope{claim, pending, verified}, StateBuilding, "building"},
+		{"an old pending line leaves it building", []events.Envelope{claim, pending}, StateBuilding, "building"},
+		{"a result after an old pending line", []events.Envelope{claim, pending, verified}, StateBuilding, "building"},
 		{"a question nobody answered parks it", []events.Envelope{claim, ask}, StateNeedsInput, "needs input"},
 		{"the answer ends the parking", []events.Envelope{claim, ask, answer}, StateBuilding, "building"},
 		{"a stalled slice stalls the ticket", []events.Envelope{claim, stall}, StateStalled, "stalled"},
@@ -197,7 +198,7 @@ func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
 	for _, s := range tk.slices(time.UTC) {
 		got[s.ID] = s.State
 	}
-	want := map[string]string{"a": StateGreen, "b": StateBuilding, "c": StateNeedsInput}
+	want := map[string]string{"a": StateGreen, "b": StateFail, "c": StateNeedsInput}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("guessed states = %v, want %v", got, want)
 	}
@@ -207,16 +208,31 @@ func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
 	}
 }
 
-func TestVerifyingLaysOverTheStoresState(t *testing.T) {
+// TestAnOldPendingLineIsDrawnAsHistoryInNoInFlightState: a verify-pending line
+// an old worker wrote is no verification under way. The slice keeps the
+// store's state, the ticket is building, the activity line says it as history
+// and the line is drawn in no state of work in flight.
+func TestAnOldPendingLineIsDrawnAsHistoryInNoInFlightState(t *testing.T) {
 	t.Parallel()
-	tk := ticketOf("T",
-		jl(at(0, 1), "T", "b", journal.EventClaim),
-		jl(at(0, 5), "T", "b", journal.EventVerifyPending),
-	)
+	pending := jl(at(0, 5), "T", "b", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", ""))
+	tk := ticketOf("T", jl(at(0, 1), "T", "b", journal.EventClaim), pending)
 	tk.status = &statusInfo{Slices: []statusSlice{{ID: "b", State: "building"}, {ID: "c", State: "stalled"}}}
 	rows := tk.slices(time.UTC)
-	if rows[0].State != StateVerifying || rows[1].State != StateStalled {
-		t.Errorf("states = %s, %s, want verifying over building and stalled left alone", rows[0].State, rows[1].State)
+	if rows[0].State != StateBuilding || rows[1].State != StateStalled {
+		t.Errorf("states = %s, %s, want building and stalled as the store has them", rows[0].State, rows[1].State)
+	}
+	if rows[0].LastState != "" || !strings.HasPrefix(rows[0].Last, "verification requested for ") {
+		t.Errorf("the pending line's row = %q in %q, want history in no state", rows[0].Last, rows[0].LastState)
+	}
+	if state, label := tk.phase(time.UTC); state != StateBuilding || label != "building" {
+		t.Errorf("phase = %s %q, want building", state, label)
+	}
+	if got := eventState(pending); got != "" {
+		t.Errorf("a pending line is drawn in %q, want no state", got)
+	}
+	g := newRig(t, "T")
+	if got := g.m.say(tk, pending); !strings.HasPrefix(got, "verification requested for ") || strings.Contains(got, "verifying") {
+		t.Errorf("the activity feed says %q, want neutral history words", got)
 	}
 }
 
@@ -264,7 +280,7 @@ func TestDescribeAndEventStateCoverEveryJournalEvent(t *testing.T) {
 		if d := describe(l); d == "" || d == ev && ev != journal.EventNote {
 			t.Errorf("describe(%s) = %q: a line should say more than its name", ev, d)
 		}
-		if eventState(l) == "" && ev != journal.EventRelease && ev != journal.EventNote {
+		if eventState(l) == "" && ev != journal.EventRelease && ev != journal.EventNote && ev != journal.EventVerifyPending {
 			t.Errorf("event %s has no state to be drawn in", ev)
 		}
 	}

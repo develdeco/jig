@@ -68,7 +68,7 @@ func said(description string) func(*journal.Line) {
 }
 
 // cardRig is SHOP-1 at width by height: slice round green, slice clamp claimed
-// by s-b (Claude Code, Sonnet 5) and being verified, slice cart waiting, with
+// by s-b (Claude Code, Sonnet 5) and being built, slice cart waiting, with
 // the commands s-b and another session ran around it.
 func cardRig(t *testing.T, width, height int) *rig {
 	t.Helper()
@@ -113,11 +113,11 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{
 		"✓ slice round  verified aaaaaaa · took 37s",
-		"◐ slice clamp  claimed ━━ committed ━━ verifying ── verified", "57m 30s",
+		"◐ slice clamp  claimed ── run ── verified", "57m 30s",
 		"goal     Clamp negative quantities",
 		"held by  builder · Claude Code · Sonnet 5",
 		"commit   bbbbbbb “Clamp negative quantities”",
-		"now      57m 20s ◑ verifying bbbbbbb",
+		"now      57m 20s · verification requested for bbbbbbb",
 		"○ slice cart   waits for clamp",
 	} {
 		if !strings.Contains(block, want) {
@@ -130,7 +130,7 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	act := panelLines(rows, "Activity")
 	text := strings.Join(act, "\n")
 	for _, want := range []string{
-		"09:02:10 build·clamp ◑ verifying bbbbbbb",
+		"09:02:10 build·clamp · verification requested for bbbbbbb",
 		"09:02:08 build·clamp · $ `go test ./cart/...`",
 		"09:02:05 build·clamp ✗ Run the cart tests · exit 1",
 		"09:01:50 build       · $ `go test ./...`",
@@ -160,7 +160,7 @@ func TestTheOpenSubstepGivesWayOnASmallScreen(t *testing.T) {
 	}
 	v = cardRig(t, 80, 20).view()
 	block = strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
-	if strings.Contains(block, "now ") || !strings.Contains(block, "◐ slice clamp  verifying bbbbbbb") {
+	if strings.Contains(block, "now ") || !strings.Contains(block, "◐ slice clamp  claimed by builder") {
 		t.Errorf("the 80x20 block is not one line per sub-step:\n%s", v)
 	}
 }

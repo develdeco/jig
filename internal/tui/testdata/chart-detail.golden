@@ -10,15 +10,15 @@ jig  demo › checkout  Coupons at checkout                                     
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────────────────────────── 1 of 5 published ─╮
   │  ✓ JIG-4  Coupon model         ✓ ✓ ✓ ✓  published https://example.test/acme/demo/pull/7        │
-  │▸ ◑ JIG-5  Apply a coupon code  ✓ ◑ ○ ○  Build: 1 of 3 green · verifying slice s2 at 2222222    │
+  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○  Build: 1 of 3 green · slice s2 is being built          │
   │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○  ready · brief next                                     │
   │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○  stacked on JIG-5                                       │
   │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │
   │  ·        Stack two coupons    fog · not graduated                                             │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
-  │  slice    s2 · verifying · builder · agent 4f2a91c0                                            │
-  │  hold     ⏸ agent 4f2a91c0 held at its stop · verification of 222222222222 for slice s2 is st… │
+  │  slice    s2 · claimed · builder · agent 4f2a91c0                                              │
+  │  hold     ⏸ agent 4f2a91c0 held at its stop · commit 222222222222 for slice s2 has no recorde… │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
   │  next     say "Continue checkout"                                                              │

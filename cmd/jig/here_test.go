@@ -31,14 +31,10 @@ func TestVerificationsIn(t *testing.T) {
 		{Event: journal.EventVerifyPending, Slice: "d", Commit: "p4"},
 		{Event: journal.EventOracle, Slice: "other", Commit: "p4"},
 	}
-	verified, pending := verificationsIn(lines)
+	verified := verificationsIn(lines)
 	wantVerified := []hereVerified{{"a", "aaaa", 1}, {"b", "aaaa", 2}}
 	if !reflect.DeepEqual(verified, wantVerified) {
 		t.Errorf("verified = %+v, want %+v", verified, wantVerified)
-	}
-	wantPending := []herePending{{"a", "p1", "2026-01-01T00:00:00Z"}, {"d", "p4", ""}}
-	if !reflect.DeepEqual(pending, wantPending) {
-		t.Errorf("pending = %+v, want %+v", pending, wantPending)
 	}
 }
 
@@ -86,11 +82,11 @@ func TestParseWithPositionalsTakesThemAmongTheFlags(t *testing.T) {
 	}
 }
 
-// TestHereNamesQuestionsVerifiedAndPendingVerifications: the ticket's open
-// question, the commits that verified and the verifications still running are
-// in the text and in the JSON, and a section a later ticket registers adds to
+// TestHereNamesQuestionsAndVerified: the ticket's open question and the
+// commits that verified are in the text and in the JSON, an old pending line is
+// no verification under way, and a section a later ticket registers adds to
 // both.
-func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
+func TestHereNamesQuestionsAndVerified(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})
 	st, err := store.Open(fx.StoreDir)
@@ -124,15 +120,17 @@ func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
 		t.Fatalf("jig here: exit %d\n%s", code, out)
 	}
 	for _, want := range []string{
-		"  a,green,1,-,-\n",
-		"  c,needs-input,1,-,q-001\n",
+		"  a,green,-,1,-,-\n",
+		"  c,needs-input,-,1,-,q-001\n",
 		"verified[1]{slice,commit}:\n  a,0123456789ab\n",
 		"questions[1]{id,slice,question}:\n  q-001,c,Which tone?\n",
-		"pending_verifications[1]{slice,commit}:\n  b,fedcba987654\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig here lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "pending_verifications") {
+		t.Errorf("jig here names an old pending line as a verification still under way:\n%s", out)
 	}
 	if strings.Contains(out, "q-002") {
 		t.Errorf("jig here lists an answered question:\n%s", out)
@@ -145,15 +143,14 @@ func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
 	var got struct {
 		State struct {
 			Verified []struct{ Slice, Commit string }   `json:"verified"`
-			Pending  []struct{ Slice, Commit string }   `json:"pending_verifications"`
 			Question []struct{ ID, Slice, Body string } `json:"questions"`
 		} `json:"state"`
 	}
 	if err := json.Unmarshal([]byte(jsonOut), &got); err != nil {
 		t.Fatalf("jig here --json: %v\n%s", err, jsonOut)
 	}
-	if len(got.State.Verified) != 1 || got.State.Verified[0].Commit != "0123456789abcdef0123" || len(got.State.Pending) != 1 || got.State.Pending[0].Slice != "b" || len(got.State.Question) != 1 || got.State.Question[0].ID != "q-001" {
-		t.Errorf("--json state = %+v, want the verified commit in full, one pending verification and one question", got.State)
+	if len(got.State.Verified) != 1 || got.State.Verified[0].Commit != "0123456789abcdef0123" || len(got.State.Question) != 1 || got.State.Question[0].ID != "q-001" {
+		t.Errorf("--json state = %+v, want the verified commit in full and one question", got.State)
 	}
 
 	// Sections other tickets register add blocks after the ticket's, and a
