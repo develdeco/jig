@@ -18,13 +18,14 @@ import (
 // The actions of a nextWorktree row (ADR 0039).
 const (
 	// worktreeAdd: the ticket's work is wanted in the repo and no work tree
-	// holds its branch, so the row gives the git command that adds one.
+	// holds its branch, so the row names the branch and base to work on and
+	// gives the git command that adds one as advice.
 	worktreeAdd = "add"
 	// worktreePresent: the work is wanted and a work tree holds the branch,
 	// the clone's own or a linked one.
 	worktreePresent = "present"
 	// worktreeRemove: the ticket ended and a linked worktree still holds its
-	// branch, so the row gives the git command that removes it.
+	// branch, so the row gives the git command that removes it as advice.
 	worktreeRemove = "remove"
 	// worktreeNoClone: the work is wanted in a repo that has no clone on this
 	// machine.
@@ -46,7 +47,7 @@ type nextWorktree struct {
 	Clone   string `json:"clone,omitempty"`   // the repo's clone on this machine
 	Dir     string `json:"dir,omitempty"`     // where the worktree goes (add) or is (present, remove)
 	Base    string `json:"base,omitempty"`    // add of a branch the clone lacks: its start point
-	Command string `json:"command,omitempty"` // the git command to run (add, remove)
+	Command string `json:"command,omitempty"` // advice for a harness with no worktree method (add, remove)
 	Note    string `json:"note,omitempty"`    // no_clone: what to know
 }
 
@@ -315,16 +316,21 @@ func worktreeHelp(ticket string, rows []nextWorktree) []string {
 	for _, r := range rows {
 		switch r.Action {
 		case worktreeAdd:
-			work := "work on branch " + r.Branch
-			if r.Base != "" {
-				work += " from base " + r.Base
+			// The command adds with -b only when the clone lacks the branch:
+			// that one is tied by a rename, an existing one by a switch.
+			work, tie := "work on branch "+r.Branch, "`git switch "+r.Branch+"`"
+			if strings.Contains(r.Command, " -b ") {
+				tie = "`git branch -m " + r.Branch + "` (on a detached HEAD `git switch -c " + r.Branch + "`)"
+				if r.Base != "" {
+					work += " from base " + r.Base
+				}
 			}
 			help = append(help, fmt.Sprintf(
-				"Add the worktree of %s in %s: %s in a worktree your harness makes, then `git branch -m %s` inside it if it named the branch itself (`git switch %s` when the clone has the branch already); a harness with no worktree method runs `%s`",
-				ticket, r.Repo, work, r.Branch, r.Branch, r.Command))
+				"Add the worktree of %s in %s: %s in a worktree your harness makes, then %s inside it; a harness with no worktree method runs `%s`",
+				ticket, r.Repo, work, tie, r.Command))
 		case worktreeRemove:
 			help = append(help, fmt.Sprintf(
-				"Remove the worktree of %s in %s: the harness removes a worktree it made; with no method, run `%s` (git refuses one with changes)",
+				"Remove the worktree of %s in %s once published: `%s` removes a worktree the harness kept, or one made with no worktree method (git refuses one with changes)",
 				ticket, r.Repo, r.Command))
 		}
 	}

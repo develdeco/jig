@@ -38,7 +38,7 @@ func TestChartSkillHandsOff(t *testing.T) {
 	out := r.Stdout
 	briefs := skillSection(t, out, "## Briefs", "## Builds")
 	publish := skillSection(t, out, "## Publish", "## Ends")
-	skillSection(t, out, "## Builds", "## Publish")
+	builds := skillSection(t, out, "## Builds", "## Publish")
 	skillSection(t, out, "## Ends", "")
 
 	for _, want := range []string{"subagent", "intake", "never mint or approve", "jig validate <T> --check", "ADR 0035"} {
@@ -51,8 +51,13 @@ func TestChartSkillHandsOff(t *testing.T) {
 			t.Errorf("the Publish section lacks %q:\n%s", want, publish)
 		}
 	}
-	builds := skillSection(t, out, "## Builds", "## Publish")
-	for _, want := range []string{"`isolation: worktree`", "you run no `add`", "`git branch -m <branch>`", "`git reset --hard <base>`", "no worktree method"} {
+	for _, want := range []string{
+		"`isolation: worktree`", "you run no `add`", "`git branch -m <branch>`", "`git switch -c <branch>`", "`git reset --hard <base>`", "no worktree method",
+		// A row in another clone than the session's repo is not the harness's to reach.
+		"An `add` row in another clone (a single-repo ticket's too)", "the builder runs the row's `command`",
+		// A present row is worked in place, with no isolation and no tie.
+		"`present`: no isolation, it works in its `dir`", "A `present` row or another clone's: no tie, work only in its `dir`",
+	} {
 		if !strings.Contains(builds, want) {
 			t.Errorf("the Builds section lacks %q:\n%s", want, builds)
 		}

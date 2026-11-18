@@ -549,11 +549,21 @@ func TestWorktreeRenderTable(t *testing.T) {
 func TestWorktreeRenderHelp(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"Add the worktree of JIG-7 in api: work on branch " + wtBranch + " from base origin/main in a worktree your harness makes, then `git branch -m " + wtBranch + "` inside it if it named the branch itself (`git switch " + wtBranch + "` when the clone has the branch already); a harness with no worktree method runs `git -C /src/api worktree add /src/api.worktrees/JIG-7 -b " + wtBranch + " origin/main`",
-		"Remove the worktree of JIG-7 in lib: the harness removes a worktree it made; with no method, run `git -C /src/lib worktree remove /src/lib.worktrees/JIG-7` (git refuses one with changes)",
+		"Add the worktree of JIG-7 in api: work on branch " + wtBranch + " from base origin/main in a worktree your harness makes, then `git branch -m " + wtBranch + "` (on a detached HEAD `git switch -c " + wtBranch + "`) inside it; a harness with no worktree method runs `git -C /src/api worktree add /src/api.worktrees/JIG-7 -b " + wtBranch + " origin/main`",
+		"Remove the worktree of JIG-7 in lib once published: `git -C /src/lib worktree remove /src/lib.worktrees/JIG-7` removes a worktree the harness kept, or one made with no worktree method (git refuses one with changes)",
 	}
 	if got := worktreeHelp("JIG-7", wtRows()); !reflect.DeepEqual(got, want) {
 		t.Errorf("help = %q, want %q", got, want)
+	}
+	// A branch the clone has already is added with no -b and no base: its tie is
+	// a switch, and the line names no base.
+	existing := []nextWorktree{{
+		Repo: "api", Action: "add", Branch: wtBranch, Clone: "/src/api", Dir: "/src/api.worktrees/JIG-7",
+		Command: "git -C /src/api worktree add /src/api.worktrees/JIG-7 " + wtBranch,
+	}}
+	wantExisting := "Add the worktree of JIG-7 in api: work on branch " + wtBranch + " in a worktree your harness makes, then `git switch " + wtBranch + "` inside it; a harness with no worktree method runs `git -C /src/api worktree add /src/api.worktrees/JIG-7 " + wtBranch + "`"
+	if got := worktreeHelp("JIG-7", existing); !reflect.DeepEqual(got, []string{wantExisting}) {
+		t.Errorf("help for an existing branch = %q, want %q", got, wantExisting)
 	}
 	if got := worktreeHelp("JIG-7", nil); len(got) != 0 {
 		t.Errorf("help for no rows = %q", got)
@@ -579,7 +589,7 @@ func TestWorktreeRenderInNext(t *testing.T) {
 	}
 	help := out[strings.Index(out, "help["):]
 	lines := strings.Split(help, "\n")
-	if len(lines) < 4 || !strings.HasPrefix(lines[1], "  Add the worktree of JIG-7 in api: ") || !strings.HasPrefix(lines[2], "  Remove the worktree of JIG-7 in lib: ") ||
+	if len(lines) < 4 || !strings.HasPrefix(lines[1], "  Add the worktree of JIG-7 in api: ") || !strings.HasPrefix(lines[2], "  Remove the worktree of JIG-7 in lib once published: ") ||
 		!strings.Contains(lines[3], "git switch -c "+wtBranch) {
 		t.Errorf("help = %q, want the add and remove lines, then the git switch line", lines)
 	}
@@ -644,7 +654,7 @@ func TestPublishPRWorktrees(t *testing.T) {
 		want := []string{
 			head,
 			"worktrees[1]{repo,action,dir,base,command}:\n  api,remove,/src/api.worktrees/JIG-7,-,git -C /src/api worktree remove /src/api.worktrees/JIG-7",
-			"help[2]:\n  Remove the worktree of JIG-7 in api: the harness removes a worktree it made; with no method, run `" + remove.Command + "` (git refuses one with changes)\n  " + status,
+			"help[2]:\n  Remove the worktree of JIG-7 in api once published: `" + remove.Command + "` removes a worktree the harness kept, or one made with no worktree method (git refuses one with changes)\n  " + status,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("blocks:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

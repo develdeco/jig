@@ -276,7 +276,7 @@ func TestWorktreeAdviceEndsWithThePublish(t *testing.T) {
 		t.Fatalf("jig publish --pr exit = %d, want 0 and a verified pull request\nstdout:\n%s\nstderr:\n%s", rec.Code, rec.Stdout, rec.Stderr)
 	}
 	removeCmd := "git -C " + wtQuoted(clone) + " worktree remove " + wtQuoted(dir)
-	removeLine := "Remove the worktree of JIG-1 in fixture-repo: the harness removes a worktree it made; with no method, run `" + removeCmd + "` (git refuses one with changes)"
+	removeLine := "Remove the worktree of JIG-1 in fixture-repo once published: `" + removeCmd + "` removes a worktree the harness kept, or one made with no worktree method (git refuses one with changes)"
 	statusLine := "Run `jig status JIG-1` to confirm the ticket is fully green"
 	for _, want := range []string{"publish_pr:", "worktrees[1]{repo,action,dir,base,command}:", "fixture-repo,remove,", removeLine} {
 		if !strings.Contains(rec.Stdout, want) {
