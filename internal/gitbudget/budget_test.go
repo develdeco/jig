@@ -174,7 +174,7 @@ func TestWriteThenReportRoundTrip(t *testing.T) {
 		t.Errorf("baseline file:\n%s", data)
 	}
 	if code := run(append([]string{"report", path, counts}, pkgs...), func(string) string { return "" }, new(bytes.Buffer), new(bytes.Buffer)); code != 0 {
-		t.Errorf("check against the baseline just written: exit %d, want 0", code)
+		t.Errorf("report against the baseline just written: exit %d, want 0", code)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestCountDirNameAndModule(t *testing.T) {
 
 // TestCountsTheGitProcessesOfTheBinaryItRuns builds gitbudget, has it run
 // git as go test would run a test binary, in this package's directory, and
-// then writes the baseline from what it counted and checks against it.
+// then writes the baseline from what it counted and reports against it.
 func TestCountsTheGitProcessesOfTheBinaryItRuns(t *testing.T) {
 	git, err := exec.LookPath("git")
 	if err != nil {
@@ -263,13 +263,13 @@ func TestCountsTheGitProcessesOfTheBinaryItRuns(t *testing.T) {
 		t.Fatalf("write: exit %d\n%s%s", code, stdout.String(), stderr.String())
 	}
 	if code := run([]string{"report", baselineFile, counts, pkg}, noenv, &stdout, &stderr); code != 0 {
-		t.Errorf("check after write: exit %d, want 0:\n%s%s", code, stdout.String(), stderr.String())
+		t.Errorf("report after write: exit %d, want 0:\n%s%s", code, stdout.String(), stderr.String())
 	}
-	// check's own report, for a package whose path has a slash, names the
+	// report's own output, for a package whose path has a slash, names the
 	// caller and the test of the process the wrapper counted.
 	for _, want := range []string{"example.com/m/pkg.Asker", "TestWrapped", fmt.Sprintf("(%d git processes)", n)} {
 		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("check's output lacks %q:\n%s", want, stdout.String())
+			t.Errorf("report's output lacks %q:\n%s", want, stdout.String())
 		}
 	}
 	tsv, err := os.ReadFile(filepath.Join(counts, callersFile))
@@ -279,7 +279,7 @@ func TestCountsTheGitProcessesOfTheBinaryItRuns(t *testing.T) {
 	}
 	stderr.Reset()
 	if code := run([]string{"report", "-", counts, "example.com/other"}, noenv, new(bytes.Buffer), &stderr); code != 1 {
-		t.Errorf("check of a package outside the module: exit %d, want 1: %s", code, stderr.String())
+		t.Errorf("report of a package outside the module: exit %d, want 1: %s", code, stderr.String())
 	}
 }
 
@@ -387,7 +387,7 @@ func TestReportShowsCallersAndTests(t *testing.T) {
 	}
 }
 
-// A package with no trace files is omitted from callers.tsv, and a check over
+// A package with no trace files is omitted from callers.tsv, and a report over
 // untraced counts writes nothing there.
 func TestReportOmitsPackagesWithoutTraces(t *testing.T) {
 	counts := traced(t, map[string][][2]string{"e2e": {{"x.A", "/tmp/TestA1"}}, "lint": nil})
@@ -450,5 +450,19 @@ func TestReportWithoutTracesPrintsNoReport(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(counts, callersFile)); err == nil {
 		t.Error("callers.tsv written with no traces")
+	}
+}
+
+// report and write each name their arguments; too few print the usage and
+// exit 2, never a count.
+func TestReportAndWriteRefuseTooFewArguments(t *testing.T) {
+	for _, args := range [][]string{{"report"}, {"report", "-"}, {"write"}, {"write", "baseline.yaml"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, func(string) string { return "" }, &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+		if !strings.Contains(stderr.String(), "usage: gitbudget") {
+			t.Errorf("%v: stderr %q lacks the usage", args, stderr.String())
+		}
 	}
 }

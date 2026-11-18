@@ -116,7 +116,7 @@ func TestCIWorkflowCountsGitProcesses(t *testing.T) {
 	}
 	// report leaves callers.tsv in the count directory; the leg uploads it for
 	// a week, after the report and even when the report or a test failed. The
-	// report never fails a run, so unlike the budget steps this one is
+	// report never fails a run, so unlike the report step this one is
 	// allowed to fail without failing the job: an artifact service error must
 	// not fail the leg.
 	if upload, ok := stepNamed(steps, "upload who started the git processes"); !ok {
