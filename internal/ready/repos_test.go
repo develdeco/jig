@@ -43,3 +43,21 @@ func TestProjectRepos(t *testing.T) {
 		t.Errorf("docs = %+v, want no clone and so nothing declared", got[2])
 	}
 }
+
+// TestProjectReposListsNoOracleForACloneWithNoDeclaration: a clone holding a
+// go.mod and a malformed package.json but no jig.yaml lists no oracle and no
+// error, because jig detects nothing and never reads package.json.
+func TestProjectReposListsNoOracleForACloneWithNoDeclaration(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, content := range map[string]string{"go.mod": "module example.invalid/x\n\ngo 1.27\n", "package.json": "{"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := project.Config{Repos: []project.Repo{{Label: "api"}}}
+	got := ProjectRepos(cfg, map[string]string{"api": dir})
+	if len(got) != 1 || len(got[0].Oracles) != 0 || got[0].Err != nil || !got[0].Read() {
+		t.Errorf("api = %+v, want a read repo with no oracles and no error", got)
+	}
+}

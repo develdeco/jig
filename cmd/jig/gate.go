@@ -1,18 +1,14 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
 	"maps"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/envrun"
-	"github.com/develdeco/jig/internal/gatelock"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -153,14 +149,6 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
-	// A ticket's gates go one at a time: a second one waits here, before the
-	// sync and the suite, instead of running them beside the first.
-	releaseLock, waited, err := takeGateLock(e, jigHome, cfg.Name, ticket)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-	defer releaseLock()
-
 	printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)
 	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
 	opts := verifydeliver.GateOpts{
@@ -180,13 +168,13 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return printGateReport(stdout, st, ticket, report)
 	}
 
-	// A gate that waited for another has most likely been overtaken by it: the
-	// round that gate opened stands at the head, and a second one over it
-	// would only repeat the suite. A gate that did not wait is a person asking
-	// again, and gets a round.
-	// A flag that shapes the round (it records an intent, adopts a branch,
-	// gates early, keeps findings) is never dropped: the gate goes on with it.
-	if waited && !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
+	// A round still open at the branch's head is reported, not opened again:
+	// a gate run while a reviewer's round stands, or two gates started
+	// together, converge on one round. A recorded round never stands: a gate
+	// after it applies decisions and opens the next. A flag that shapes the
+	// round (it records an intent, adopts a branch, gates early, keeps
+	// findings) is never dropped: the gate goes on with it.
+	if !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
 		standing, err := verifydeliver.StandingRound(deps, ticket)
 		if err != nil {
 			return renderErr(stdout, err)
@@ -215,49 +203,10 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	return 0
 }
 
-// takeGateLock takes the ticket's gate lock, saying on stderr when it has to
-// wait for another gate and when the wait ends. waited is whether it waited.
-// A wait that jig's stop ends is an error, not a lock.
-func takeGateLock(e env, jigHome, project, ticket string) (release func(), waited bool, err error) {
-	if project == "" || jigHome == "" {
-		return func() {}, false, nil
-	}
-	stopCtx, end := envrun.StopContext(context.Background())
-	defer end()
-	var started time.Time
-	release, err = gatelock.Take(stopCtx, jigHome, project, ticket, func() {
-		waited = true
-		started = time.Now()
-		who := ""
-		if h, ok := gatelock.Holder(jigHome, project, ticket); ok {
-			who = fmt.Sprintf(" (pid %d, since %s)", h.PID, h.Since.UTC().Format(time.RFC3339))
-		}
-		fmt.Fprintf(e.stderr, "jig: gate %s waits for the gate of %s%s\n", ticket, ticket, who)
-	})
-	if err != nil {
-		if stopCtx.Err() != nil {
-			return nil, waited, envrun.Stopped("the wait for the ticket's gate")
-		}
-		return nil, waited, err
-	}
-	if waited {
-		fmt.Fprintf(e.stderr, "jig: gate %s took the lock after %ds\n", ticket, int(time.Since(started).Seconds()))
-	}
-	return release, waited, nil
-}
-
-// printStandingRound prints the round a waiting gate found at the branch's
+// printStandingRound prints the round a gate found at the branch's
 // head instead of opening another: the fields of a gate report, saying the
-// round was not opened again. An open round points at its review, a recorded
-// one shows its verdict.
+// round was not opened again, and the help that points at its review.
 func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket string, st *verifydeliver.Standing) int {
-	verdict := "open"
-	if !st.Open {
-		verdict = st.Verdict
-		if st.CarriedFrom > 0 {
-			verdict += " (carried over from round " + strconv.Itoa(st.CarriedFrom) + ")"
-		}
-	}
 	var shaRows [][]string
 	for _, repo := range slices.Sorted(maps.Keys(st.Heads)) {
 		shaRows = append(shaRows, []string{repo, st.Heads[repo]})
@@ -266,13 +215,11 @@ func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket st
 		axi.KV("gate", [][2]string{
 			{"ticket", ticket},
 			{"round", strconv.Itoa(st.Round) + " stands at its head (not opened again)"},
-			{"verdict", verdict},
+			{"verdict", "open"},
 		}),
 		axi.Table("head", []string{"repo", "sha"}, shaRows),
 	}
-	if st.Open {
-		blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
-	}
+	blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
 }

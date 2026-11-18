@@ -1,7 +1,6 @@
 package envrun
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -179,30 +178,10 @@ func TestEndAllEndsOraclesThatStartAfterIt(t *testing.T) {
 	}
 }
 
-// TestStopContextEndsWhenJigIsStopped: a wait that is not an oracle (the wait
-// for a gate's turn) ends with the oracles when jig is stopped, and is not
-// ended by cancel alone being skipped; Stopped matches ErrStopped.
-func TestStopContextEndsWhenJigIsStopped(t *testing.T) {
-	ctx, cancel := StopContext(context.Background())
-	defer cancel()
-	if ctx.Err() != nil {
-		t.Fatal("the context ended before jig was stopped")
-	}
-	endLive(false)
-	select {
-	case <-ctx.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("stopping jig did not end the wait")
-	}
+// TestStoppedMatchesErrStopped: the error of a wait that ended because jig was
+// stopped matches ErrStopped, as the error of a stopped oracle does.
+func TestStoppedMatchesErrStopped(t *testing.T) {
 	if !errors.Is(Stopped("the wait"), ErrStopped) {
 		t.Error("Stopped does not match ErrStopped")
 	}
-	cancel()
-	// A released context is forgotten: a later stop does not touch it.
-	ctx2, cancel2 := StopContext(context.Background())
-	cancel2()
-	if len(live.ends) != 0 {
-		t.Errorf("%d ends still registered after cancel", len(live.ends))
-	}
-	_ = ctx2
 }
