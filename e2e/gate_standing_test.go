@@ -15,6 +15,14 @@ import (
 func TestTwoGatesAtOnceOpenOneRound(t *testing.T) {
 	b := newBuiltTicket(t, true)
 
+	// The first gate makes the ticket's gate lease, a clone that two gates
+	// arriving together would both try to make; the branch then moves, so the
+	// two gates open a round at a new head and race only in the lease's reuse.
+	if r := b.builder.Jig("gate", b.fx.Ticket); r.Code != 0 {
+		t.Fatalf("the gate that makes the lease: exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
+	}
+	b.builder.Commit("", "the branch moves", map[string]string{"moved.txt": "moved\n"})
+
 	var wg sync.WaitGroup
 	results := make([]jigResult, 2)
 	for i := range results {

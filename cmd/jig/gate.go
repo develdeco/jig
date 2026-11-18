@@ -171,9 +171,9 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	// A round still open at the branch's head is reported, not opened again:
 	// a gate run while a reviewer's round stands, or two gates started
 	// together, converge on one round. A recorded round never stands: a gate
-	// after it applies decisions and opens the next. A flag that shapes the round (it records an
-	// intent, adopts a branch, gates early, keeps findings) is never dropped:
-	// the gate goes on with it.
+	// after it applies decisions and opens the next. A flag that shapes the
+	// round (it records an intent, adopts a branch, gates early, keeps
+	// findings) is never dropped: the gate goes on with it.
 	if !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
 		standing, err := verifydeliver.StandingRound(deps, ticket)
 		if err != nil {

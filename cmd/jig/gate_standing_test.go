@@ -117,10 +117,30 @@ func TestSecondGateWithRoundShapingFlagsGoesOnAsToday(t *testing.T) {
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("first gate: exit = %d\n%s", code, out)
 	}
-	for _, flag := range []string{"--yes", "--early"} {
-		out, code := runMain(t, e, "", "gate", fx.Ticket, flag, "--store", fx.StoreDir)
-		if code != 0 || strings.Contains(out, "stands at its head") {
-			t.Fatalf("gate with %s: exit = %d, want 0 and an ordinary report\n%s", flag, code, out)
+	doc := filepath.Join(t.TempDir(), "intent.md")
+	if err := os.WriteFile(doc, []byte("an explicit intent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Each flag is run with round 1 open at the head. --intent and --doc are
+	// refused by a ticket that has a brief, as they are with no round open;
+	// --branch refuses a ticket built on its own branch; the others open or
+	// re-open a round.
+	cases := []struct {
+		flags    []string
+		wantCode int
+		wantOut  string
+	}{
+		{[]string{"--yes"}, 0, ""},
+		{[]string{"--early"}, 0, ""},
+		{[]string{"--intent", "an explicit intent"}, 1, "INTENT_CONFLICT"},
+		{[]string{"--doc", doc}, 1, "INTENT_CONFLICT"},
+		{[]string{"--branch", ticketBranchOf(fx)}, 1, "TICKET_ALREADY_BUILT"},
+	}
+	for _, c := range cases {
+		args := append([]string{"gate", fx.Ticket}, c.flags...)
+		out, code := runMain(t, e, "", append(args, "--store", fx.StoreDir)...)
+		if code != c.wantCode || strings.Contains(out, "stands at its head") || !strings.Contains(out, c.wantOut) {
+			t.Fatalf("gate with %v: exit = %d, want %d, %q and no standing round\n%s", c.flags, code, c.wantCode, c.wantOut, out)
 		}
 	}
 }
@@ -138,5 +158,29 @@ func TestReviewContextOpensARoundWithNoGateRunning(t *testing.T) {
 	}
 	if n := gateOpens(t, fx); n != 1 {
 		t.Errorf("gate-open lines = %d, want 1", n)
+	}
+}
+
+// TestGateQueuesAKeepDecidedWhileARoundIsOpen: a round opened after one that
+// left an ask, and the person keeps the ask while it is open; the next plain
+// gate queues the keep as a fix slice, as the triage help says, instead of
+// reporting the open round.
+func TestGateQueuesAKeepDecidedWhileARoundIsOpen(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
+	e := testEnv(fx.Home).atTerminal()
+	buildFixtureTicket(t, fx)
+	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
+		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "round: 2") {
+		t.Fatalf("gate opening round 2: exit = %d\n%s", code, out)
+	}
+	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
+	}
+	out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	if code != 0 || strings.Contains(out, "stands at its head") || !strings.Contains(out, "fix-2-q-alpha") {
+		t.Fatalf("jig gate: exit = %d, want the kept ask's slice queued\n%s", code, out)
 	}
 }

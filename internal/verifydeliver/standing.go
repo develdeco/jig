@@ -18,8 +18,10 @@ type Standing struct {
 // has not moved off it: every repo the round covers has the ticket's branch,
 // in the operator's clone, at the head the round opened at. It returns nil
 // when no round is open, when the branch moved, and when a repo has no clone
-// to look at, which jig cannot cheaply tell. It runs no oracle and writes
-// nothing.
+// to look at, which jig cannot cheaply tell. A keep a person decided after the
+// round opened is pending: the next gate queues it as a fix slice, as the
+// triage help says, so the round does not stand over it. It runs no oracle
+// and writes nothing.
 //
 // The store is synced first: the round it asks about may be one a gate on
 // another process has only just opened.
@@ -30,6 +32,15 @@ func StandingRound(d Deps, ticket string) (*Standing, error) {
 	p, ok, err := CurrentRound(d, ticket)
 	if err != nil || !ok {
 		return nil, err
+	}
+	decisions, err := ReadTriageDecisions(d.Store, ticket)
+	if err != nil {
+		return nil, err
+	}
+	for _, dec := range decisions {
+		if dec.Pending && dec.Outcome == TriageKeep {
+			return nil, nil
+		}
 	}
 	st := &Standing{Round: p.Round, Prepared: p, Heads: map[string]string{}}
 	branch := p.Branch
