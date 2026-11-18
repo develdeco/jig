@@ -10,10 +10,13 @@ import (
 // statusInfo is `jig status <ticket>`, read: the store's word on the ticket's
 // slices, its questions and the asks a gate round left for a person.
 type statusInfo struct {
-	State     string // new, queued, building, parked, stalled, env-blocked, green or closed
-	Branch    string
-	Closed    string // how a closed ticket was closed, such as "covered by develdeco/jig#82"; "" when open
-	Slices    []statusSlice
+	State  string // new, queued, building, parked, stalled, env-blocked, green or closed
+	Branch string
+	Closed string // how a closed ticket was closed, such as "covered by develdeco/jig#82"; "" when open
+	Slices []statusSlice
+	// LastRuns are the status's last_runs table by slice: each slice's last
+	// witnessed run and whether it covers the slice's last commit.
+	LastRuns  map[string]statusLastRun
 	Questions []statusQuestion
 	Stalled   []statusStalled
 	Asks      []statusAsk
@@ -42,6 +45,11 @@ type statusSlice struct {
 	FromGate          int
 	Attempts          int
 }
+
+// statusLastRun is a row of the status's last_runs table in its own words:
+// Result is pass, fail, stopped or timed out, and Covers is yes, "no: <why>" or
+// not checked.
+type statusLastRun struct{ Result, Covers string }
 
 // statusRound is a row of the status's rounds table: a recorded gate round, who
 // reported it and what it reviewed. A cell the status did not know is "".
@@ -118,6 +126,12 @@ func parseStatus(out string) *statusInfo {
 			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]), Goal: dash(r["goal"]),
 			Workspace: dash(r["workspace"]), Oracle: dash(r["oracle"]), FromGate: atoi(r["from_gate"]),
 		})
+	}
+	for _, r := range doc.Tables["last_runs"].Maps() {
+		if info.LastRuns == nil {
+			info.LastRuns = map[string]statusLastRun{}
+		}
+		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
 	}
 	info.FixBudget = doc.Scalars["fix_budget"]
 	if kv, ok := doc.KV["closed"]; ok {

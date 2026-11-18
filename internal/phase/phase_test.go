@@ -136,7 +136,7 @@ func TestDerive(t *testing.T) {
 		{"a decision spent by a later round", asked, append([]journal.Line{ln(journal.EventTriage, ref("r1-f2"), outcome("keep"))}, round1Verified...), Review, false, CodeAsksUndecided, "Review SHOP-1"},
 		{"a clean round on this head", allGreen(), clean, Publish, true, "", "Publish SHOP-1"},
 		{"a clean round on a moved head", allGreen(), moved, Review, true, "", "Review SHOP-1"},
-		{"a verification in flight after green", allGreen(), append(built(), ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))), Build, true, "", "Build SHOP-1"},
+		{"an old pending line after green", allGreen(), append(built(), ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))), Review, true, "", "Review SHOP-1"},
 		{"published", published, append(clean, ln(journal.EventPublishDone)), Publish, false, CodeDone, ""},
 		{"an adopted branch", adopted, nil, Review, true, "", "Review SHOP-1"},
 	} {
@@ -219,7 +219,7 @@ func TestForNamesWhatAPhaseWaitsFor(t *testing.T) {
 		{"build with no brief", noBrief, nil, Build, false, CodeBriefNotApproved, "SHOP-1 has no brief yet"},
 		{"review before the build is done", approved(), nil, Review, false, CodeNotBuilt, "0 of 3 slices are green; a, b, c are not"},
 		{"publish before the build is done", withState(approved(), "a", "green"), built()[:3], Publish, false, CodeNotBuilt, "1 of 3 slices are green; b, c are not"},
-		{"review while a verification runs", allGreen(), append(built(), ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))), Review, false, CodeNotBuilt, "slice a is being verified at 0badf00"},
+		{"review with an old pending line on a green slice", allGreen(), append(built(), ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))), Review, true, "", ""},
 		{"publish with no round", allGreen(), built(), Publish, false, CodeNotReviewed, "no gate round has reviewed SHOP-1 yet"},
 		{"publish while a round is open", open, built(), Publish, false, CodeRoundOpen, "round 2 of SHOP-1 is open: session s-review is reading the change"},
 		{"publish after a round of findings", allGreen(), findings, Publish, false, CodeNotReviewed, "round 1 of SHOP-1 found things to fix"},
@@ -349,7 +349,7 @@ func TestBuildSubStepsFollowTheSlices(t *testing.T) {
 	b := Derive(f, lines).Of(Build)
 	want := []Sub{
 		{"slice:a", "slice a", SubDone, "verified d7101d0"},
-		{"slice:b", "slice b", SubActive, "verifying 9999999"},
+		{"slice:b", "slice b", SubActive, "claimed by session 01234567"},
 		{"slice:c", "slice c", SubWaiting, "waits for b"},
 		{"slice:d", "slice d", SubPending, "ready to build"},
 		{"slice:e", "slice e", SubNeedsYou, "waits for your answer"},
@@ -1025,5 +1025,40 @@ func TestDerivePublishedWithRestacksIsBehind(t *testing.T) {
 	}
 	if text := got.Of(Publish).Text; strings.Contains(text, "behind") {
 		t.Errorf("publish text of an unpublished ticket = %q", text)
+	}
+}
+
+// TestAPendingLineMakesNoSliceVerifying: a verify-pending line is an old
+// worker's and no result: it makes no slice, sub-step or build reason a
+// verification under way. A slice not green is building, a green one counts
+// green, and the line still shows the slice was taken up.
+func TestAPendingLineMakesNoSliceVerifying(t *testing.T) {
+	t.Parallel()
+	f := approved()
+	f.Slices = []Slice{{ID: "a", State: "green"}, {ID: "b", State: "building"}}
+	lines := []journal.Line{
+		ln(journal.EventClaim, onSlice("a"), by("s-first")), ln(journal.EventVerified, onSlice("a"), commit("d7101d0aaaa")),
+		ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11")),
+		ln(journal.EventClaim, onSlice("b"), by("s-first")), ln(journal.EventVerifyPending, onSlice("b"), commit("9999999bbb")),
+	}
+	tk := Derive(f, lines)
+	b := tk.Of(Build)
+	for _, sub := range b.Subs {
+		if strings.Contains(sub.Detail, "verifying") {
+			t.Errorf("sub-step %+v says verifying", sub)
+		}
+	}
+	if b.Subs[0].State != SubDone || b.Subs[1].State != SubActive {
+		t.Errorf("sub-steps = %+v, want a done and b active", b.Subs)
+	}
+	if b.Text != "1 of 2 green · slice b is being built" {
+		t.Errorf("build text = %q, want the builder named and no verification", b.Text)
+	}
+	if got := tk.For(Review); got.Ready || strings.Contains(got.Reason, "verified at") || strings.Contains(got.Reason, "being verified") {
+		t.Errorf("review = %+v, want not built with no verification named", got)
+	}
+	// A slice with only a pending line was still taken up.
+	if !EverClaimed([]journal.Line{ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))}) {
+		t.Errorf("an old pending line no longer shows a slice was taken up")
 	}
 }

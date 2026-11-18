@@ -17,9 +17,11 @@ import (
 // every run of the oracle against it.
 type commitRecord struct {
 	SHA, Subject string
-	// State is how the commit stands: StateVerifying until a run ends,
-	// StateGreen once verified, StateStalled when the latest run failed or the
-	// verification could not run.
+	// State is how the commit stands: StateQueued while it has no recorded
+	// result (an old pending line is no result), StateBuilding once a run
+	// passed and no verified line follows, StateGreen once verified,
+	// StateStalled when the latest run failed or the verification could not
+	// run.
 	State string
 	// At is when the verification was asked for, and Verified when it passed.
 	At, Verified events.Envelope
@@ -42,7 +44,7 @@ func (t *ticket) commits(slice string) []commitRecord {
 			return &out[i]
 		}
 		at[sha] = len(out)
-		out = append(out, commitRecord{SHA: sha, State: StateVerifying})
+		out = append(out, commitRecord{SHA: sha, State: StateQueued})
 		return &out[len(out)-1]
 	}
 	for _, l := range t.lines {
@@ -61,7 +63,7 @@ func (t *ticket) commits(slice string) []commitRecord {
 			switch {
 			case l.Uncovered != "":
 			case l.Outcome == "pass":
-				c.State = StateVerifying
+				c.State = StateBuilding
 			default:
 				c.State = StateStalled
 			}

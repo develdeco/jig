@@ -107,6 +107,9 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		// The time is the end of the line, so the commit's words give way to it.
 		when := m.commitWhen(c)
 		p.add(pre + fit(line, room-width(when)-2) + m.st.dim("  "+when))
+		if c.State == StateQueued && len(c.Runs) == 0 && c.Error == nil {
+			p.add(pre + "  " + m.st.dim(fit("no recorded result", room-4)))
+		}
 		for _, run := range c.Runs {
 			state := StateGreen
 			if run.Outcome != "pass" {
@@ -119,6 +122,18 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		}
 		if c.Error != nil {
 			p.add(pre + "  " + m.st.icon(StateStalled) + " " + m.st.dim(fit("could not be verified: "+firstOf(c.Error.Summary, "no reason recorded"), room-4)))
+		}
+	}
+
+	if t.status != nil {
+		if run, ok := t.status.LastRuns[s.ID]; ok && run.Result != "" {
+			// What the status says of the slice's last witnessed run, in its
+			// own words.
+			state := StateGreen
+			if run.Result != "pass" {
+				state = StateStalled
+			}
+			p.add(pre + m.st.icon(state) + " " + m.st.dim(fit("last run: "+run.Result+" · covers: "+run.Covers, room-2)))
 		}
 	}
 

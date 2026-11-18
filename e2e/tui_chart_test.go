@@ -240,7 +240,7 @@ func TestTUIChartScreenDetailsTheTicketUnderTheCursor(t *testing.T) {
 	// The chart screen, with the cursor on the chart's only ticket, details it.
 	tui := startJig(t, env, fx.RepoDir, "tui", "checkout")
 	screens := tuiScreens{t: t, p: tui}
-	screen := screens.until("› checkout", "╭─ Detail", "╭─ Run", "agent a-1 held at its stop", "commit "+sha[:12]+" for slice a is not verified")
+	screen := screens.until("› checkout", "╭─ Detail", "╭─ Run", "agent a-1 held at its stop", "commit "+sha[:12]+" for slice a has no")
 	if edge := detailPanelOf(screen); !strings.HasSuffix(strings.SplitN(edge, "\n", 2)[0], fx.Ticket+" ─╮") {
 		t.Errorf("the Detail panel's top edge does not end with the ticket %s:\n%s", fx.Ticket, screen)
 	}

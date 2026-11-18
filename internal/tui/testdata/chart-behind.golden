@@ -10,7 +10,7 @@ jig  demo › checkout  Coupons at checkout                                     
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────────────────────────── 0 of 5 published ─╮
   │▸ ◆ JIG-4  Coupon model         ✓ ✓ ✓ ◆  behind · owes a merge, then a publish                  │
-  │  ◑ JIG-5  Apply a coupon code  ✓ ◑ ○ ○  Build: 1 of 3 green · verifying slice s2 at 2222222    │
+  │  ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○  Build: 1 of 3 green · slice s2 is being built          │
   │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○  ready · brief next                                     │
   │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○  stacked on JIG-5                                       │
   │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │

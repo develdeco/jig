@@ -162,7 +162,7 @@ func TestHooksLive(t *testing.T) {
 	mu.Lock()
 	got := strings.Join(seen, "\n--- message ---\n")
 	mu.Unlock()
-	for _, want := range []string{fx.Ticket, "slices[4]{id,state,attempts,blocked_by,question}"} {
+	for _, want := range []string{fx.Ticket, "slices[4]{id,state,covers,attempts,blocked_by,question}"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the requests to the API lack the SessionStart context %q:\n%s", want, got)
 		}

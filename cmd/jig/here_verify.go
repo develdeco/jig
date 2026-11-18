@@ -9,7 +9,7 @@ import (
 )
 
 // init registers `jig here`'s verification section (sections.go). `jig here`
-// itself lists the commits that verified and those still being verified
+// itself lists the commits that verified
 // (verificationsIn); this section adds how the located slice stands at the
 // repo's HEAD, which it cannot show: a failed verification, a verification
 // that could not run, and the time and summary of each.
