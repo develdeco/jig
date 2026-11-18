@@ -7,13 +7,11 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -532,80 +530,4 @@ func startReaped(t *testing.T, cmd *exec.Cmd) (*exec.Cmd, <-chan struct{}) {
 		<-done
 	})
 	return cmd, done
-}
-
-// TestHarnessWaitVerifiers pins WaitVerifiers against the ledger: a worker
-// that has exited is waited for without complaint, one still running when
-// the wait is out is reported and killed, and nothing is left to report on a
-// second call.
-func TestHarnessWaitVerifiers(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-wait")
-	h.VerifierWait = 400 * time.Millisecond
-	var reports []string
-	h.reportf = func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }
-
-	h.WaitVerifiers() // no ledger at all
-	if len(reports) != 0 {
-		t.Fatalf("WaitVerifiers with no workers reported %q", reports)
-	}
-
-	quick, quickDone := shortLived(t)
-	stuck, stuckDone := longLived(t)
-	<-quickDone
-	for _, pid := range []int{quick.Process.Pid, stuck.Process.Pid} {
-		if err := ledger.Append(env.home, journal.Line{Event: journal.EventVerifySpawned, PID: pid}); err != nil {
-			t.Fatalf("ledger.Append: %v", err)
-		}
-	}
-
-	h.WaitVerifiers()
-	if len(reports) != 1 || !strings.Contains(reports[0], strconv.Itoa(stuck.Process.Pid)) {
-		t.Fatalf("WaitVerifiers reported %q, want exactly the worker still running (%d)", reports, stuck.Process.Pid)
-	}
-	select {
-	case <-stuckDone:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the worker still running was not killed")
-	}
-
-	h.WaitVerifiers()
-	if len(reports) != 1 {
-		t.Errorf("a second WaitVerifiers reported again: %q", reports)
-	}
-}
-
-// TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord: a verify-spawned
-// line names a pid, and the pid can belong to another process by the time a
-// test ends (Windows reuses them at once). A process that started after the
-// line was written is not the worker: the harness neither waits for it nor
-// kills it.
-func TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-reused")
-	h.VerifierWait = 400 * time.Millisecond
-	var reports []string
-	h.reportf = func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }
-
-	other, otherDone := longLived(t)
-	earlier := time.Now().Add(-time.Minute)
-	if err := ledger.Append(env.home, journal.Line{TS: ledger.Stamp(earlier), Event: journal.EventVerifySpawned, PID: other.Process.Pid}); err != nil {
-		t.Fatalf("ledger.Append: %v", err)
-	}
-
-	h.WaitVerifiers()
-	h.killVerifiers()
-	if len(reports) != 0 {
-		t.Errorf("WaitVerifiers reported %q for a process that started after the worker's line", reports)
-	}
-	select {
-	case <-otherDone:
-		t.Fatal("the harness killed a process that started after the worker's line")
-	case <-time.After(500 * time.Millisecond):
-	}
-	if !pidAlive(other.Process.Pid) {
-		t.Fatal("the later process is gone")
-	}
 }

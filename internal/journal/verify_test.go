@@ -120,3 +120,23 @@ func TestNextAttemptIgnoresFixSliceLines(t *testing.T) {
 		t.Errorf("NextAttempt after a first verification = %d, want 2", got)
 	}
 }
+
+// TestVerificationStateSkipsAnUncoveredLine: a run that covers no commit is
+// recorded and says nothing of the commit: it neither makes a failure nor a
+// pass of it, and a covering line before or after it stands as if it were not
+// there.
+func TestVerificationStateSkipsAnUncoveredLine(t *testing.T) {
+	const sha = "abc123"
+	uncovered := Line{Event: EventOracle, Outcome: "pass", Slice: "a", Commit: sha, Attempt: 2, Uncovered: UncoveredDirtyBefore}
+	if v := VerificationState([]Line{uncovered}, sha, "a"); v.State != VerifyNone {
+		t.Errorf("an uncovered pass alone = %+v, want no verification", v)
+	}
+	fail := Line{Event: EventOracle, Outcome: "fail", Slice: "a", Commit: sha, Attempt: 3, Uncovered: UncoveredOtherCmd}
+	covering := Line{Event: EventOracle, Outcome: "pass", Slice: "a", Commit: sha, Attempt: 1}
+	if v := VerificationState([]Line{covering, fail}, sha, "a"); v.State != VerifyPass || v.Attempt != 1 {
+		t.Errorf("a pass then an uncovered failure = %+v, want the pass", v)
+	}
+	if got := BuiltCommits([]Line{uncovered}); len(got) != 0 {
+		t.Errorf("BuiltCommits of an uncovered run = %v, want none: no verified line is written for it", got)
+	}
+}

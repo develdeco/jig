@@ -131,17 +131,11 @@ func TestCleanHeadIsTheCommitOnlyForACleanTree(t *testing.T) {
 	if got := cleanHead(g.dir); got != g.past {
 		t.Errorf("cleanHead of a clean tree = %q, want %s", got, g.past)
 	}
-	if got := dirtyTree(g.dir); got != "" {
-		t.Errorf("dirtyTree of a clean tree = %q", got)
-	}
 	if err := os.WriteFile(filepath.Join(g.dir, "scratch.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := cleanHead(g.dir); got != "" {
 		t.Errorf("cleanHead with an untracked file = %q, want none", got)
-	}
-	if got := dirtyTree(g.dir); !strings.Contains(got, "scratch.txt") {
-		t.Errorf("dirtyTree = %q, want it to name scratch.txt", got)
 	}
 	if got := cleanHead(filepath.Join(g.dir, "missing")); got != "" {
 		t.Errorf("cleanHead of a missing dir = %q", got)

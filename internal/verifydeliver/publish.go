@@ -2143,7 +2143,7 @@ func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) 
 	lightDelta := map[string]bool{}
 	notes := map[key]string{}
 	for _, l := range lines {
-		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
+		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" || l.Uncovered != "" {
 			continue
 		}
 		name, workspace := l.Oracle, l.Workspace

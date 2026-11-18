@@ -1,13 +1,13 @@
 ---
 name: build
-description: Builds a ticket's slices in the repo clone you work in - claim a slice, pull its context, commit with the slice trailer so jig verifies each commit, ask the person when stuck, release when done. Use when asked to build, implement or continue a ticket or slice.
+description: Builds a ticket's slices in the repo clone you work in - claim a slice, pull its context, commit with the slice trailer, run jig verify to prove it, ask the person when stuck, release when done. Use when asked to build, implement or continue a ticket or slice.
 ---
 
 # build
 
 Run `jig next <T>`. If the phase it names is not build, tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-You build in the person's own clone with your own tools. jig does not start you or wait on you: it keeps each slice's state in the store, verifies every commit, and carries questions and answers between you and the person.
+You build in the person's own clone with your own tools. jig does not start you or wait on you: it keeps each slice's state in the store, records the runs of your tests, and carries questions and answers between you and the person.
 
 ## Start
 
@@ -26,14 +26,15 @@ jig context <ticket> --slice <slice>
 
 ## Build
 
-- Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change: jig runs the oracle on each commit.
+- Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change.
 - Commit as you land, each commit with the trailer that ties it to the slice:
 
 ```
 git commit -m "<message>" -m "Jig-Slice: <slice>"
 ```
 
-  The trailer is how jig finds the commit to verify, and how the next slice's context finds what this one built. `jig here` shows what is verified; `jig verify` runs the oracle on a commit by hand.
+  The trailer names the slice for `jig verify`, and is how the next slice's context finds what this one built. `jig here` shows what is verified.
+- When the slice's work is committed, run `jig verify` in your own worktree, in the foreground or as the harness's background task. jig starts nothing on a commit: `jig verify` runs the slice's oracle where you are, in your environment, shows its output, and records the run. Read that output and fix until the footer says `covers: yes`. A slice is green only on that covering pass at your last commit, so commit first and leave the tree alone while it runs. `--dry-run` shows what would run, and `--no-record` is for exploring: it writes nothing.
 - Never edit the store's files by hand. A slice needing more work is `jig slice add <T> --id --goal --oracle`.
 
 ## Stuck? Ask
@@ -64,7 +65,7 @@ An ambiguity you settle yourself goes here, not in a note, an ask or a repo file
 
 ## Finish or let go
 
-A slice is green when jig has verified a commit of it; you do not mark it. To give a slice up before that, so another session can take it:
+A slice is green when a `jig verify` run covers a commit of it; you do not mark it. To give a slice up before that, so another session can take it:
 
 ```
 jig claim <ticket> --slice <slice> --release   # queued again, unless it is green
@@ -74,7 +75,7 @@ jig claim <ticket> --slice <slice> --release   # queued again, unless it is gree
 
 To have a subagent or another session build a slice, read `jig skill build handoff` and give it that prompt.
 
-With `--unattended`, jig holds the session back from stopping while a verification runs, tracked changes are uncommitted, every slice is green and no round is open (open the gate and review it), or an approved ticket is not yet published.
+With `--unattended`, jig holds the session back from stopping while a commit has no recorded result, tracked changes are uncommitted, every slice is green and no round is open (open the gate and review it), or an approved ticket is not yet published.
 
 ## Then
 

@@ -9,7 +9,7 @@ import (
 
 func TestObserveBuildsTheEventFromFlagsForAScript(t *testing.T) {
 	t.Parallel()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	out, code := runMain(t, e, "", "observe", "--event", "session-start", "--session", "crew-1", "--cwd", fx.RepoDir, "--model", "m")
 	if code != 0 {
 		t.Fatalf("exit %d, output %q", code, out)

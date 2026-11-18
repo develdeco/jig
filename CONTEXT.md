@@ -155,7 +155,7 @@ A session taking a slice to build it (`jig claim`): a journal line plus the slic
 _Avoid_: assign, lock
 
 **Verification**:
-One run of a slice's oracle on a commit, in a detached worktree of the operator's clone and a detached process (`jig verify`), started by git's post-commit hook or the harness's PostToolUse. It is recorded as `verify-pending`, `oracle`, `recorded` and `verified` (or `verify-error`) lines, keyed by (commit, slice) and idempotent. Green is what a verification proved, never what a session claimed. Its `oracle` line (and the gate's own `gate-oracle` line) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
+One run of a slice's oracle in the builder's own worktree, in the foreground (`jig verify`, which the builder runs itself: jig starts none on a commit and only witnesses the run). It is recorded as an `oracle` line holding every input and fact needed to run it again by hand, then, when the run *covers* HEAD (the tree clean before and after, HEAD unmoved, the command the slice's own oracle, HEAD a descendant of the ticket's start sha), `recorded` and `verified` lines and the slice's state; any other run is recorded with its `uncovered` reason and changes nothing, and a run that could not reach its command is a `verify-error` line. A second run runs again. Green is what a covering verification proved, never what a session claimed. Its `oracle` line (and the gate's own `gate-oracle` line) also carries what the run's whole process tree used: `cpu_ms` (CPU time in whole milliseconds), `peak_bytes` (the most memory held at once) and `peak_basis` (`job`, exact committed memory of a Windows job, or `sampled`, a once-a-second lower bound on Linux and macOS); each is omitted when it could not be measured, and a missing figure never changes the verdict.
 _Avoid_: CI run, test run
 
 **Journal**:
@@ -315,7 +315,7 @@ The per-dispatch model ladder jig used while it chose models: the first rung fir
 _Avoid_: model tiering, escalation policy
 
 **Stall**:
-The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. When the command has passed on this machine and the failed run printed something that pass did not, the signature is built from those new lines only (otherwise from the end of the output), so the same failure matches and two different ones do not. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
+The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. The signature is built from the end of the failed run's output, so the same failure matches and two different ones do not; a run that covers no commit never counts. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.
 _Avoid_: retry loop, flaky failure
 
 **Chart**:

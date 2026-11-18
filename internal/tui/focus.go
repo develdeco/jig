@@ -432,7 +432,7 @@ func (t *ticket) checkedBy(id string) string {
 func (t *ticket) lastCommit(id string) string {
 	sha := ""
 	for _, l := range t.lines {
-		if l.Event == journal.EventVerifyPending && l.Slice == id && l.Commit != "" {
+		if (l.Event == journal.EventVerifyPending || l.Event == journal.EventOracle) && l.Slice == id && l.Commit != "" {
 			sha = l.Commit
 		}
 	}
@@ -462,6 +462,8 @@ func (t *ticket) stagesOf(step int, s phase.Sub, subs []phase.Sub) ([]string, in
 			reached = 4
 		case has(journal.EventVerifyPending):
 			reached = 3
+		case has(journal.EventOracle):
+			reached = 2
 		case len(tr.own) > 0:
 			reached = 1
 		}

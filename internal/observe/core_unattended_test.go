@@ -16,34 +16,33 @@ func TestStopHoldsAnUnattendedSessionBackOncePerFinding(t *testing.T) {
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
 	r.unattendedClaim("a")
+	r.recordStart()
 	sha := r.commit("a", "a.txt")
-	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: "a", Commit: sha, Attempt: 1})
 
 	first := r.handle(r.ev(KindStop))
-	if !strings.Contains(first.Block, "unattended") || !strings.Contains(first.Block, "verification of "+sha[:12]+" for slice a is still running") ||
-		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" "+sha[:12]+" --slice a --wait") {
-		t.Fatalf("Block = %q, want the reason with the pending verification and how to wait for it", first.Block)
+	if !strings.Contains(first.Block, "unattended") || !strings.Contains(first.Block, "commit "+sha[:12]+" for slice a is not verified") ||
+		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" --slice a") {
+		t.Fatalf("Block = %q, want the reason with the commit that has no result and how to verify it", first.Block)
 	}
 	delivered := r.ledgerOf(journal.EventNoteDelivered)
 	if len(delivered) != 1 || delivered[0].Outcome != "stop-block" || delivered[0].Session != "s1" {
 		t.Fatalf("note-delivered lines = %+v, want the refusal recorded", delivered)
 	}
-	// The agent continues; at its next Stop the same verification is still
-	// running and there is nothing new, so it may stop.
+	// The agent continues; at its next Stop the same commit still has no
+	// result and there is nothing new, so it may stop.
 	again := r.handle(r.ev(KindStop, func(e *Event) { e.StopActive = true }))
 	if again.Block != "" || again.Message == "" {
 		t.Errorf("Stop while continuing with nothing new = %+v, want a message and no block", again)
 	}
 	// A new fact holds the session back again, even while it continues.
 	sha2 := r.commit("b", "b.txt")
-	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: "b", Commit: sha2, Attempt: 1})
 	third := r.handle(r.ev(KindStop, func(e *Event) { e.StopActive = true }))
 	if !strings.Contains(third.Block, sha2[:12]) {
-		t.Errorf("Stop while continuing with a new pending verification = %+v, want a block that names it", third)
+		t.Errorf("Stop while continuing with a new unverified commit = %+v, want a block that names it", third)
 	}
 	// At the end of a new turn, whatever is still outstanding holds it.
 	if fresh := r.handle(r.ev(KindStop)); fresh.Block == "" {
-		t.Errorf("Stop at the end of a new turn with verifications running = %+v, want a block", fresh)
+		t.Errorf("Stop at the end of a new turn with commits unverified = %+v, want a block", fresh)
 	}
 }
 
@@ -95,8 +94,8 @@ func TestAReleasedClaimIsNotUnattended(t *testing.T) {
 	r.handle(r.ev(KindSessionStart))
 	r.unattendedClaim("a")
 	r.add(journal.Line{Event: journal.EventRelease, Slice: "a", Session: "s1"})
-	sha := r.commit("a", "a.txt")
-	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: "a", Commit: sha, Attempt: 1})
+	r.recordStart()
+	r.commit("a", "a.txt")
 	if res := r.handle(r.ev(KindStop)); res.Block != "" {
 		t.Errorf("Stop after the claim was released = %+v, want no block", res)
 	}
@@ -107,8 +106,8 @@ func TestTheJigYamlDefaultMakesASessionUnattended(t *testing.T) {
 	r := newRig(t)
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
-	sha := r.commit("a", "a.txt")
-	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: "a", Commit: sha, Attempt: 1})
+	r.recordStart()
+	r.commit("a", "a.txt")
 	if res := r.handle(r.ev(KindStop)); res.Block != "" {
 		t.Fatalf("Stop without a default = %+v, want no block", res)
 	}

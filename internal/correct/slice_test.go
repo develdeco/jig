@@ -152,7 +152,7 @@ func TestSliceTextNamesTheSliceTheCandidatesOrNone(t *testing.T) {
 		not   []string
 	}{
 		{"one", SliceGuess{Commit: sha, Owners: []SliceWorkspace{{"clamp", "cart"}}, Paths: []string{"cart", "ui"}},
-			[]string{"commit 0123456789ab on SHOP-1 names no slice", "jig verifies nothing for it", "It touched cart/ (slice clamp's workspace)", "amend it with `Jig-Slice: clamp`", "`jig verify SHOP-1 0123456789ab --slice <slice>`"},
+			[]string{"commit 0123456789ab on SHOP-1 names no slice", "jig verifies nothing for it", "It touched cart/ (slice clamp's workspace)", "amend it with `Jig-Slice: clamp`", "`jig verify SHOP-1 --slice <slice>`"},
 			[]string{"no slice's workspace"}},
 		{"several", SliceGuess{Commit: sha, Owners: []SliceWorkspace{{"clamp", "cart"}, {"view", "ui"}}, Paths: []string{"cart", "ui"}},
 			[]string{"names no slice", "the workspaces of slices clamp (cart/), view (ui/)", "amend it with `Jig-Slice: <slice>`"},

@@ -24,4 +24,4 @@ questions[1]{id,status,question,answer,provenance,kind}:
 help[3]:
   Claim it first: `jig claim JIG-1 --slice b`
   Find the code the goal touches with your own tools (search, a code graph, your editor's symbols), starting from the files the earlier slices changed
-  Test at the seams and commit with the trailer `Jig-Slice: b`; jig runs the oracle on each commit. `jig ask` takes a question to the person
+  Test at the seams and commit with the trailer `Jig-Slice: b`, then run `jig verify` in your worktree to prove it. `jig ask` takes a question to the person

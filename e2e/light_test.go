@@ -1,12 +1,10 @@
 package e2e
 
-// End-to-end test of the light delta: a slice verified by the whole
-// suite, a Markdown-only commit verified with the manifest's light oracle
-// alone, and a gate that reuses the earlier whole-suite pass; and a delta with
-// one non-light file, which runs the slice's oracle.
+// End-to-end tests of what a light rule in the manifest changes for `jig
+// verify`: nothing. A slice's own oracle runs in full for a Markdown-only
+// commit and for a delta with one non-light file alike.
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +34,7 @@ func declareLightInClone(t *testing.T, fx *fixture.Fixture) {
 // line it journaled.
 func verifyWaiting(t *testing.T, h *fakeHarness, fx *fixture.Fixture, sha, slice string) journal.Line {
 	t.Helper()
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", slice, "--wait")
+	res := h.Verify(fx.Ticket, slice)
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify %s exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", sha, res.Code, res.Stdout, res.Stderr)
 	}
@@ -47,11 +45,11 @@ func verifyWaiting(t *testing.T, h *fakeHarness, fx *fixture.Fixture, sha, slice
 	return l
 }
 
-// TestLightDeltaChainThroughTheBinary: the whole-suite pass of slice a stands
-// for a later Markdown-only commit, which runs the lint alone and is green, and
-// the gate reuses the whole-suite pass without running it, naming its origin
-// and the light command.
-func TestLightDeltaChainThroughTheBinary(t *testing.T) {
+// TestVerifyRunsTheSlicesOwnOracleWhateverTheDelta: a Markdown-only commit
+// after a whole-suite pass runs the slice's own oracle in full, light rule or
+// not: `jig verify` substitutes nothing, so its oracle line names no light
+// command and no earlier run it stands on.
+func TestVerifyRunsTheSlicesOwnOracleWhateverTheDelta(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "clean-round"})
 	dropEnvFromSlices(t, fx)
@@ -68,9 +66,9 @@ func TestLightDeltaChainThroughTheBinary(t *testing.T) {
 
 	notes := h.Commit("a", "notes", map[string]string{"README.md": "notes\n", "docs/adr/0100-x.md": "x\n"})
 	h.Push(fx.Branch)
-	light := verifyWaiting(t, h, fx, notes, "a")
-	if light.Ran != e2eLightOracle || light.ReusedFrom != full || light.Command != fullLine.Command {
-		t.Fatalf("the notes oracle line = %+v, want the light oracle reusing %s under the slice's command", light, full)
+	again := verifyWaiting(t, h, fx, notes, "a")
+	if again.Ran != "" || again.ReusedFrom != "" || again.Command != fullLine.Command || again.Seconds < 1 {
+		t.Fatalf("the notes oracle line = %+v, want the slice's own oracle %q run in full", again, fullLine.Command)
 	}
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
@@ -78,38 +76,6 @@ func TestLightDeltaChainThroughTheBinary(t *testing.T) {
 	}
 	if ss, err := st.ReadSliceState(fx.Ticket, "a"); err != nil || ss.State != "green" {
 		t.Errorf("slice a state = %+v, %v, want green", ss, err)
-	}
-	status := runJig(t, env, fx.StoreDir, "status", fx.Ticket)
-	if want := "lint only, reusing " + full[:12]; !strings.Contains(status.Stdout, want) {
-		t.Errorf("jig status lacks %q:\n%s", want, status.Stdout)
-	}
-
-	gate := runJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
-	if gate.Code != 0 || !strings.Contains(gate.Stdout, "round: 1") {
-		t.Fatalf("jig gate exit = %d, want round 1\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-	var review struct {
-		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			ReusedFrom string `json:"reused_from"`
-			Ran        string `json:"ran"`
-		} `json:"oracles_passed"`
-	}
-	data := readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "work", "gate.round-1.review.json"))
-	if err := json.Unmarshal(data, &review); err != nil {
-		t.Fatalf("parse review.json: %v\n%s", err, data)
-	}
-	found := false
-	for _, r := range review.OraclesPassed {
-		if r.Workspace == "alpha" {
-			found = true
-			if r.ReusedFrom != full || r.Ran != e2eLightOracle {
-				t.Errorf("alpha = %+v, want reused from %s with %q ran", r, full, e2eLightOracle)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("oracles_passed has no alpha row: %s", data)
 	}
 }
 

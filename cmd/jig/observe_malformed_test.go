@@ -15,7 +15,7 @@ import (
 // nothing a harness could take for context, and leaves the reason in the log.
 func TestObserveNeverFailsTheHarness(t *testing.T) {
 	t.Parallel()
-	fx, e, rec := observeRig(t)
+	fx, e := observeRig(t)
 	claude := []string{"--harness", "claude"}
 	cases := []struct {
 		name   string
@@ -54,9 +54,6 @@ func TestObserveNeverFailsTheHarness(t *testing.T) {
 	if got := strings.Count(string(data), "\n"); got != failures {
 		t.Errorf("observe.log has %d lines for %d failures:\n%s", got, failures, data)
 	}
-	if len(rec.Specs()) != 0 {
-		t.Errorf("a malformed call started %v", rec.Specs())
-	}
 	if lines := ledgerEvents(t, fx.Home, journal.EventSessionStart); len(lines) != 0 {
 		t.Errorf("a malformed call wrote %+v", lines)
 	}
@@ -64,7 +61,7 @@ func TestObserveNeverFailsTheHarness(t *testing.T) {
 
 func TestObserveIgnoresAnEventOfTheHarnessItDoesNotActOn(t *testing.T) {
 	t.Parallel()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	out, code := runMain(t, e, hookPayload(t, fx, "Notification", nil), "observe", "--harness", "claude")
 	if out != "" || code != 0 {
 		t.Errorf("exit %d, output %q, want silence", code, out)
@@ -77,7 +74,7 @@ func TestObserveIgnoresAnEventOfTheHarnessItDoesNotActOn(t *testing.T) {
 // A person who runs it by hand is at a terminal, where the reason belongs.
 func TestObserveTellsAPersonAtATerminalWhatIsWrong(t *testing.T) {
 	t.Parallel()
-	_, e, _ := observeRig(t)
+	_, e := observeRig(t)
 	e.stdinIsTerminal = func(io.Reader) bool { return true }
 	for name, args := range map[string][]string{
 		"no harness":        {"observe"},

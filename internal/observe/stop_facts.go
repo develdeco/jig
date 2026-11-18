@@ -138,19 +138,13 @@ func (h *handler) markerUnattended() bool {
 	return false
 }
 
-// inFlightWindow is how long a worker the ledger says was started is taken
-// to be running when the journal has no outcome of it: the worker has not
-// yet written its first line.
-const inFlightWindow = 10 * time.Minute
-
 // verificationFindings tells the state of the ticket's verifications as the
-// agent is about to stop. A verification under way (a pending line whose
-// worker is alive, or a worker the ledger started a moment ago that has not
-// yet written to the journal) holds an unattended session as it always did. A
-// commit that is not verified, or whose verification is stale, holds it too,
-// since no one is judging it and the clearing command runs the oracle. A
-// failed, stopped or timed-out verification is told and holds nobody back:
-// the builder may stop, and the slice stays building.
+// agent is about to stop. A commit that is not verified, or whose verification
+// is stale, holds an unattended session, since no one is judging it and the
+// clearing command runs the oracle. A failed, stopped or timed-out
+// verification is told and holds nobody back: the builder may stop, and the
+// slice stays building. A verification running is not said: jig starts none,
+// so the one that runs is the builder's own, in its own shell.
 func (h *handler) verificationFindings() []finding {
 	lines, err := h.journal()
 	if err != nil {
@@ -160,32 +154,34 @@ func (h *handler) verificationFindings() []finding {
 	truth := h.verifyTruth(lines)
 	rows := truth.Derive()
 
-	var out []finding
-	underWay := map[phase.CommitRef]bool{}
-	for _, r := range rows {
-		if r.State == phase.VerifyRunning {
-			underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] = true
-			out = append(out, h.runningFinding(r.Commit, r.Slice))
-		}
+	// Only a slice's latest commit on the branch is held to a result: the
+	// command that clears a commit runs at HEAD, so an older commit of the
+	// slice (a test commit before the code) is history once a later one exists,
+	// and so is a commit the slice has a verified line at a descendant of
+	// (slices verified one after the other at HEAD).
+	latest := map[string]string{}
+	for _, c := range truth.Commits { // oldest first
+		latest[c.Slice] = c.SHA
 	}
-	cutoff := h.d.Now().Add(-inFlightWindow)
-	h.fail(ledger.ReadBackward(h.d.JigHome, spawnWindow, func(l journal.Line) bool {
-		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil && at.Before(cutoff) {
-			return false
+	ancestry := verify.GitAncestry(h.w.RepoDir)
+	history := func(commit, slice string) bool {
+		for _, l := range lines {
+			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && ancestry(commit, l.Commit) {
+				return true
+			}
 		}
-		if l.Event != journal.EventVerifySpawned || l.Ticket != h.w.Ticket || l.Commit == "" {
-			return true
-		}
-		p := phase.CommitRef{SHA: l.Commit, Slice: l.Slice}
-		if journal.VerificationState(lines, l.Commit, l.Slice).State == journal.VerifyNone && !underWay[p] {
-			underWay[p] = true
-			out = append(out, h.runningFinding(l.Commit, l.Slice))
-		}
-		return true
-	}))
+		return false
+	}
 
+	var out []finding
 	for _, r := range rows {
-		if underWay[phase.CommitRef{SHA: r.Commit, Slice: r.Slice}] || r.State == phase.VerifyRunning || !r.State.Unclear() {
+		if r.State == phase.VerifyRunning || !r.State.Unclear() {
+			continue
+		}
+		if l, ok := latest[r.Slice]; ok && l != r.Commit {
+			continue
+		}
+		if history(r.Commit, r.Slice) {
 			continue
 		}
 		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {
@@ -198,10 +194,10 @@ func (h *handler) verificationFindings() []finding {
 		switch r.State {
 		case phase.VerifyNotVerified:
 			f.text = fmt.Sprintf("commit %s for slice %s is not verified", sha, r.Slice)
-			f.hint = fmt.Sprintf("verify it with `%s`", r.Clear)
+			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
 		case phase.VerifyStale:
 			f.text = fmt.Sprintf("verification of %s for slice %s is stale: its worker is gone", sha, r.Slice)
-			f.hint = fmt.Sprintf("run it again with `%s`", r.Clear)
+			f.hint = fmt.Sprintf("run it again with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
 		case phase.VerifyFailed:
 			f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
 		default:
@@ -210,16 +206,6 @@ func (h *handler) verificationFindings() []finding {
 		out = append(out, f)
 	}
 	return out
-}
-
-func (h *handler) runningFinding(commit, slice string) finding {
-	sha := short12(commit)
-	return finding{
-		ref:      "pending:" + sha + ":" + slice,
-		text:     fmt.Sprintf("verification of %s for slice %s is still running", sha, slice),
-		hint:     fmt.Sprintf("wait for it with `jig verify %s %s --slice %s --wait`", h.w.Ticket, sha, slice),
-		blocking: true,
-	}
 }
 
 // verifyTruth gathers what the derivation of the ticket's verifications reads.
@@ -238,13 +224,42 @@ func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
 		if dir == "" {
 			dir = h.w.RepoDir
 		}
-		if start := verify.StartSHA(h.st, h.w.Ticket, h.w.Repo); start != "" && dir != "" {
+		repo, target := h.repoAndTarget()
+		start := verify.StartSHA(h.st, h.w.Ticket, repo)
+		if start == "" && dir != "" && target != "" {
+			// A branch no claim started from (the work was begun by hand) has
+			// no recorded start: its commits are those past the target branch,
+			// as origin has it, else as the clone has it.
+			for _, ref := range []string{"refs/remotes/origin/" + target, "refs/heads/" + target} {
+				if base, err := gitx.MergeBase(dir, "HEAD", ref); err == nil && base != "" {
+					start = base
+					break
+				}
+			}
+		}
+		if start != "" && dir != "" {
 			if c, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
 				t.Commits, t.BranchKnown = c, true
 			}
 		}
 	}
 	return t
+}
+
+// repoAndTarget is the located repo name in the project and its target
+// branch. A repo the project does not list has no target (a commit with no
+// known fork point is not held to one); the project's only repo is the repo
+// of a Locate that named none.
+func (h *handler) repoAndTarget() (name, target string) {
+	for _, r := range h.cfg.Repos {
+		if h.w.Repo != "" && r.Name() == h.w.Repo {
+			return r.Name(), r.TargetBranch()
+		}
+	}
+	if len(h.cfg.Repos) == 1 {
+		return h.cfg.Repos[0].Name(), h.cfg.Repos[0].TargetBranch()
+	}
+	return h.w.Repo, ""
 }
 
 // dirtyTracked lists the tracked files of the session directory that have

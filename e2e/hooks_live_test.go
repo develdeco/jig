@@ -45,13 +45,13 @@ const (
 // the SessionStart context, the ticket and its slice table, reaches the API
 // request, that the session's Bash commands run with JIG_SESSION set to the
 // harness's session id, and that the scripted Bash `git commit` leaves a ledger tool line
-// and, since only the PostToolUse hook saw the commit, a journal verify-pending
-// line from the worker that hook started. The project defaults to unattended,
-// so the Stop hook refuses to let the session end while that verification
-// runs, and the reason it gives must come back to the model. A subagent the
-// session starts commits a slice of its own: its tool call reaches the ledger
-// with its agent id, and its SubagentStop is held back, with a reason that
-// comes back to the subagent, while that verification runs.
+// and no verification: a commit starts nothing. The project defaults to
+// unattended, so the Stop hook refuses to let the session end while the
+// commit has no recorded result, and the reason it gives must come back to the
+// model. A subagent the session starts commits a slice of its own: its tool
+// call reaches the ledger with its agent id, and its SubagentStop is held
+// back, with a reason that comes back to the subagent, while that commit has
+// no recorded result.
 //
 // A subagent that starts a subagent of its own is TestHooksLiveNested.
 //
@@ -78,7 +78,7 @@ func TestHooksLive(t *testing.T) {
 
 	mustExitZero(t, runJig(t, env, fx.RepoDir, "hooks", "--here", "--yes"), "jig hooks --here")
 	// The project defaults to unattended, so Stop holds the session back while
-	// the verification of its commit is still running.
+	// its commit has no recorded result.
 	cfg, err := project.Load(filepath.Join(fx.StoreDir, "project.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -197,11 +197,10 @@ func TestHooksLive(t *testing.T) {
 	if got := script.Results()[1].Content; start.Session == "" || !strings.Contains(got, start.Session) {
 		t.Errorf("printenv JIG_SESSION in the session printed %q, want the harness session id %q", got, start.Session)
 	}
-	pending := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerifyPending && l.Commit == sha
-	})
-	if pending.Slice != "a" || pending.Session != start.Session {
-		t.Errorf("verify-pending line = %+v, want slice a asked for by session %s", pending, start.Session)
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		if l.Event == journal.EventVerifyPending && l.Commit == sha {
+			t.Errorf("verify-pending line = %+v, want none: a commit starts no verification", l)
+		}
 	}
 
 	// The subagent: its tool calls carry its agent id (the main session's
@@ -226,7 +225,6 @@ func TestHooksLive(t *testing.T) {
 	if !strings.Contains(got, "this agent's claim is unattended, so it is held back from stopping") {
 		t.Errorf("no request to the API carries the reason jig gave for holding the subagent back:\n%s", got)
 	}
-	h.WaitVerifiers()
 }
 
 // TestHooksLiveNested is the live proof that a nested subagent carries its own
@@ -368,9 +366,11 @@ func TestHooksLiveNested(t *testing.T) {
 	if sha == "" {
 		t.Fatalf("NESTED_STEPS_MISSING: the builder's commit printed %q, want its sha", builderScript.Results()[1].Content)
 	}
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerifyPending && l.Commit == sha
-	})
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		if l.Event == journal.EventVerifyPending && l.Commit == sha {
+			t.Errorf("verify-pending line = %+v, want none: a commit starts no verification", l)
+		}
+	}
 
 	var start, ticketTool, claimTool, commitTool journal.Line
 	lines := readLedger(t, env)
@@ -420,7 +420,6 @@ func TestHooksLiveNested(t *testing.T) {
 	if !strings.Contains(got, "this agent's claim is unattended, so it is held back from stopping") {
 		t.Errorf("no request to the API carries the reason jig gave for holding the builder back:\n%s", got)
 	}
-	h.WaitVerifiers()
 }
 
 // stepProbe collects what Session.Check would report, so the test can put a

@@ -113,6 +113,24 @@ type Line struct {
 	// omitted for a run that ended with the test's own result, and on every line
 	// written before the field existed.
 	Cause string `json:"cause,omitempty"`
+	// The fields below are an oracle line's record of the run `jig verify`
+	// witnessed, which holds every input and fact needed to run it again by
+	// hand: Dir is the directory the command ran in, Flags the flags and the
+	// `--` command `jig verify` was given, Commit HEAD when the run started and
+	// HeadEnd HEAD when it ended, TreeBefore and TreeAfter whether the working
+	// tree was clean (TreeClean) or not (TreeDirty) then. Uncovered is why the
+	// run covers no commit (the Uncovered constants): every reader of
+	// verification state skips a line that has it. Each is omitted when empty,
+	// so a line an older jig wrote reads back with none.
+	Dir string `json:"dir,omitempty"`
+	// Subject is the first line of the message of the commit an oracle line's
+	// run was of, so a reader of the journal can name the change.
+	Subject    string `json:"subject,omitempty"`
+	Flags      string `json:"flags,omitempty"`
+	HeadEnd    string `json:"head_end,omitempty"`
+	TreeBefore string `json:"tree_before,omitempty"`
+	TreeAfter  string `json:"tree_after,omitempty"`
+	Uncovered  string `json:"uncovered,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
 	// Approval is the publish approval a pr line's head had when the pull

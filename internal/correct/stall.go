@@ -52,7 +52,9 @@ func Stalls(lines []journal.Line) []Stall {
 		case journal.EventVerified, journal.EventRequeue:
 			delete(seen, l.Slice)
 		case journal.EventOracle:
-			if l.Outcome != "fail" || l.Signature == "" {
+			// A run that covers no commit (a dirty tree, another command) is
+			// no failure of the slice's work, so it never counts toward a stall.
+			if l.Outcome != "fail" || l.Signature == "" || l.Uncovered != "" {
 				continue
 			}
 			bySig := seen[l.Slice]

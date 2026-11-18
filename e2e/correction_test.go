@@ -265,7 +265,7 @@ func corrMarkUnattended(t *testing.T, fx *fixture.Fixture) {
 // stall. After the second, the next prompt tells the session so, once; a
 // correction line records it; and, with a person at the keyboard, the slice is
 // left as the verifications left it. The verifications are real, run in line
-// (jig verify --wait) because the stall is what is under test and not the
+// (jig verify) because the stall is what is under test and not the
 // detached worker, which TestHooksDriveVerify covers.
 func TestCorrectionStall(t *testing.T) {
 	t.Parallel()
@@ -280,9 +280,9 @@ func TestCorrectionStall(t *testing.T) {
 		t.Helper()
 		sha, hook := corrCommit(t, h, file, "")
 		corrSliceOnly(t, "the PostToolUse of the commit of "+file, sha, hook)
-		res := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
+		res := h.Verify(fx.Ticket, "a")
 		if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
-			t.Fatalf("jig verify --wait exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+			t.Fatalf("jig verify exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
 		for _, l := range readJournal(t, fx, fx.Ticket) {
 			if l.Event == journal.EventOracle && l.Commit == sha {
@@ -343,9 +343,9 @@ func TestCorrectionBriefDrift(t *testing.T) {
 	t.Parallel()
 	fx, env, h := corrRig(t)
 	sha := h.CommitScenario("a", 1)
-	res := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
+	res := h.Verify(fx.Ticket, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	corrEditBrief(t, fx, "Add a small percentage-range caller", "Add two small percentage-range callers")
 	ctx := corrContext(t, h.Hook("UserPromptSubmit", map[string]any{"prompt": "go on"}))
@@ -640,7 +640,7 @@ func TestCommitWithoutSliceGetsANote(t *testing.T) {
 	ctx := corrContext(t, hook)
 	for _, want := range []string{
 		"commit " + first[:12] + " on " + fx.Ticket + " names no slice", "jig verifies nothing for it", "delta/ (slice e's workspace)",
-		"amend it with `Jig-Slice: e`", "jig verify " + fx.Ticket + " " + first[:12] + " --slice <slice>",
+		"amend it with `Jig-Slice: e`", "jig verify " + fx.Ticket + " --slice <slice>",
 	} {
 		if !strings.Contains(ctx, want) {
 			t.Errorf("PostToolUse context = %q, want %q", ctx, want)
@@ -666,10 +666,13 @@ func TestCommitWithoutSliceGetsANote(t *testing.T) {
 		t.Errorf("slice e = %+v, %v, want queued: the guess moves nothing", ss, err)
 	}
 
-	// The trailer names the slice: jig verifies the commit, and says nothing.
+	// The trailer names the slice: the commit says nothing, and the builder's
+	// own jig verify records it against that slice.
 	withTrailer, hook := corrCommit(t, h, "delta/trailer.txt", "e")
 	corrSilent(t, "the PostToolUse of a commit with the trailer", hook)
-	h.WaitVerifiers()
+	if res := h.Verify(fx.Ticket, "e"); res.Code != 0 {
+		t.Fatalf("jig verify exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	if lines := corrVerifyLines(t, fx, withTrailer); len(lines) == 0 {
 		t.Errorf("a commit with the trailer was not verified: no journal line for %s", withTrailer)
 	}
@@ -708,13 +711,10 @@ func TestCommitWithoutSliceGetsANote(t *testing.T) {
 	if ctx := corrContext(t, hook); !strings.Contains(ctx, "commit "+third[:12]+" on") {
 		t.Errorf("PostToolUse context = %q, want the note of %s", ctx, third)
 	}
-	if res := h.Jig("verify", fx.Ticket, third, "--slice", "e", "--wait"); res.Code != 0 {
-		t.Fatalf("jig verify --wait exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	if res := h.Verify(fx.Ticket, "e"); res.Code != 0 {
+		t.Fatalf("jig verify exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	stop = decodeHook(t, h.Hook("Stop", map[string]any{"stop_hook_active": false}))
-	if stop.Decision != "" || stop.Reason != "" || strings.Contains(stop.SystemMessage, "names no slice") {
-		t.Errorf("Stop after the commit was verified for its slice = %+v, want no refusal and no note that it names no slice", stop)
-	}
+	corrSilent(t, "the Stop after the commit was verified for its slice", h.Hook("Stop", map[string]any{"stop_hook_active": false}))
 	if got := len(corrSliceLines(t, fx)); got != 3 {
 		t.Errorf("slice-missing lines = %d, want 3, one for each commit without the trailer", got)
 	}

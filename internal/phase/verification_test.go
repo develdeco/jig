@@ -28,7 +28,7 @@ func derive(in VerifyInput) map[string]CommitVerification {
 
 func TestACommitWithNoLineIsNotVerified(t *testing.T) {
 	r := derive(VerifyInput{BranchKnown: true, Commits: []CommitRef{{shaA, "s"}}})["a"]
-	if r.State != VerifyNotVerified || r.Clear != "jig verify T-1 aaaaaaaaaaaa --slice s --wait" {
+	if r.State != VerifyNotVerified || r.Clear != "jig verify T-1 --slice s" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -79,9 +79,6 @@ func TestStoppedErrorAndTimedOutAreToldApart(t *testing.T) {
 	got := derive(VerifyInput{BranchKnown: true, Lines: lines, Commits: []CommitRef{{shaA, "s"}, {shaB, "s"}, {shaC, "s"}}})
 	if got["a"].State != VerifyStopped || got["b"].State != VerifyStopped || got["c"].State != VerifyTimedOut {
 		t.Fatalf("%+v", got)
-	}
-	if got["c"].State.StandsAside() || !got["a"].State.StandsAside() {
-		t.Fatal("stood aside wrongly")
 	}
 	if got["a"].State.Told() != "stopped, not counted" || got["c"].State.Told() != "timed out, not counted" {
 		t.Fatal("words")

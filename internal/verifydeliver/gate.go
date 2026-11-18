@@ -607,7 +607,7 @@ func reusablePasses(d Deps, ticket, dir string, man manifest.Manifest, slices []
 	for _, l := range lines {
 		// The gate's own verdicts stand beside a slice's: a pass or failure
 		// the gate journaled is as much a run of the command on its tree.
-		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Commit == "" || l.Command == "" {
+		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Commit == "" || l.Command == "" || l.Uncovered != "" {
 			continue
 		}
 		exact := sameTree(l.Commit)

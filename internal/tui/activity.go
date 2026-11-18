@@ -176,12 +176,16 @@ func (t *ticket) goal(id string) string {
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
-// verify writes on its verify-pending line.
+// verify writes on its oracle line (an older journal had it on a
+// verify-pending line).
 func (t *ticket) subjects() map[string]string {
 	out := map[string]string{}
 	for _, l := range t.lines {
-		if l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "" {
+		switch {
+		case l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "":
 			out[l.Commit] = l.Summary
+		case l.Event == journal.EventOracle && l.Commit != "" && l.Subject != "":
+			out[l.Commit] = l.Subject
 		}
 	}
 	return out

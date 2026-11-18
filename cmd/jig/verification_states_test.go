@@ -17,7 +17,7 @@ import (
 // start sha recorded, as a claim records it.
 func statesRig(t *testing.T) (*fixture.Fixture, env) {
 	t.Helper()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	start, err := gitx.RevParse(fx.RepoDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,8 @@ func TestHereNamesVerificationStates(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("jig here: exit %d, output %q", code, out)
 	}
-	want := "jig verify " + fx.Ticket + " " + sha[:12] + " --slice a --wait"
+	_ = sha
+	want := "jig verify " + fx.Ticket + " --slice a"
 	if !strings.Contains(out, "verification_states[1]") || !strings.Contains(out, "not verified") || !strings.Contains(out, want) {
 		t.Errorf("jig here does not name the unverified commit with %q:\n%s", want, out)
 	}

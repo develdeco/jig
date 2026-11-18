@@ -50,18 +50,22 @@ func (r *rig) projectName(t *testing.T) string {
 	return cfg.Name
 }
 
-// pending commits to slice and leaves its verification running.
-func (r *rig) pending(slice, name string) string {
+// unverified commits to slice and leaves the commit with no recorded result,
+// as a builder's commit is until it runs `jig verify`. The ticket's start is
+// recorded before the first, as a claim does.
+func (r *rig) unverified(slice, name string) string {
 	r.t.Helper()
-	sha := r.commit(slice, name)
-	r.add(journal.Line{Event: journal.EventVerifyPending, Slice: slice, Commit: sha, Attempt: 1})
-	return sha
+	if !r.startSet {
+		r.recordStart()
+		r.startSet = true
+	}
+	return r.commit(slice, name)
 }
 
 // TestTheHoldFallsOnTheAgentThatClaimed: a subagent's unattended claim holds
 // that subagent at its own stop and nobody else. The main session and a
 // sibling (a reviewer nested in the builder, say) are told and never held; the
-// claim holder is held once for each loose end: the running verification, a
+// claim holder is held once for each loose end: the unverified commit, a
 // second one, uncommitted tracked files. A later interactive claim of the same
 // agent only tells it.
 func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
@@ -70,10 +74,10 @@ func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
 	r.claimBy("a-7", "a", true)
-	sha := r.pending("a", "a.txt")
+	sha := r.unverified("a", "a.txt")
 
 	if main := r.handle(r.ev(KindStop)); main.Block != "" || !strings.Contains(main.Message, sha[:12]) {
-		t.Errorf("main Stop = %+v, want the verification said and no block", main)
+		t.Errorf("main Stop = %+v, want the commit said and no block", main)
 	}
 	if sibling := r.handle(r.ev(KindStop, func(e *Event) { e.Agent = "a-9" })); sibling.Block != "" {
 		t.Errorf("Stop of a subagent that holds no claim = %+v, want no block", sibling)
@@ -84,8 +88,8 @@ func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
 
 	first := r.handle(r.ev(KindStop, subagent))
 	if !strings.Contains(first.Block, "jig: this agent's claim is unattended, so it is held back from stopping") ||
-		!strings.Contains(first.Block, "verification of "+sha[:12]+" for slice a is still running") {
-		t.Fatalf("Block = %q, want the agent's reason naming the verification", first.Block)
+		!strings.Contains(first.Block, "commit "+sha[:12]+" for slice a is not verified") {
+		t.Fatalf("Block = %q, want the agent's reason naming the commit", first.Block)
 	}
 	delivered := r.ledgerOf(journal.EventNoteDelivered)
 	if len(delivered) != 1 || delivered[0].Outcome != "stop-block" || delivered[0].Agent != "a-7" {
@@ -95,7 +99,7 @@ func TestTheHoldFallsOnTheAgentThatClaimed(t *testing.T) {
 	if again.Block != "" || again.Message == "" {
 		t.Errorf("Stop while continuing with nothing new = %+v, want a message and no block", again)
 	}
-	sha2 := r.pending("b", "b.txt")
+	sha2 := r.unverified("b", "b.txt")
 	if third := r.handle(r.ev(KindStop, subagent, func(e *Event) { e.StopActive = true })); !strings.Contains(third.Block, sha2[:12]) {
 		t.Errorf("Stop while continuing with a new pending verification = %+v, want a block that names it", third)
 	}
@@ -122,7 +126,7 @@ func TestAClaimWhoseHolderIsUnknownHoldsTheSession(t *testing.T) {
 	r.onTicketBranch()
 	r.handle(r.ev(KindSessionStart))
 	r.unattendedClaim("a")
-	r.pending("a", "a.txt")
+	r.unverified("a", "a.txt")
 	if res := r.handle(r.ev(KindStop)); res.Block == "" {
 		t.Errorf("main Stop with a claim of an unknown holder = %+v, want the session held, as before", res)
 	}
@@ -155,7 +159,7 @@ func TestARefusalOfASubagentDoesNotMarkTheMainSession(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(r.fx.RepoDir, "jig.yaml"), []byte(marker), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sha := r.pending("a", "a.txt")
+	sha := r.unverified("a", "a.txt")
 	if res := r.handle(r.ev(KindStop, subagent)); !strings.Contains(res.Block, sha[:12]) {
 		t.Fatalf("subagent Stop = %+v, want a block", res)
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/setup"
-	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -23,7 +22,7 @@ import (
 // the working directory it resolves the store, the repo and every relative path
 // flag against, and the seams (the terminal checks,
 // the flag-set hook, the mirror's GitHub client, the chart write, and the
-// context, clock, process spawner, executable and PATH lookups below). run
+// context, clock, executable and PATH lookups below). run
 // hands it to every command, and cmd/jig reads those only through it, never
 // through os.Getenv, os.Getwd, os.UserHomeDir, time.Now or a package-level
 // variable. The binary runs on processEnv; a test builds an env of its own,
@@ -31,7 +30,7 @@ import (
 // parallel.
 //
 // env does not reach what a run starts or calls into: the child processes it
-// spawns (git, the oracles, the verification workers, and the `gh auth token`
+// spawns (git, the oracles, and the `gh auth token`
 // the mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
 // process's environment and working directory. A test must not use env to
 // set those.
@@ -67,11 +66,8 @@ type env struct {
 	ctx context.Context
 	// now is the clock: time.Now in production.
 	now func() time.Time
-	// spawn starts a detached process that outlives this one and returns its
-	// pid: spawn.Detached in production. A test env refuses.
-	spawn func(spawn.Spec) (int, error)
 	// executable is the path of the running jig binary, as os.Executable
-	// gives it, for a command that starts itself as a detached worker.
+	// gives it, for a command that names the binary it runs as.
 	executable func() (string, error)
 	// lookPath finds a program on PATH as exec.LookPath does.
 	lookPath func(file string) (string, error)
@@ -104,7 +100,6 @@ func processEnv() env {
 
 		ctx:              context.Background(),
 		now:              time.Now,
-		spawn:            spawn.Detached,
 		executable:       os.Executable,
 		lookPath:         exec.LookPath,
 		stdoutIsTerminal: stdoutIsTerminal,

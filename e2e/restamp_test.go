@@ -54,13 +54,9 @@ func TestRestampKeepsAGreenSliceGreenAndSliceAddNeedsNoHandEdit(t *testing.T) {
 	h.Branch(fx.Branch)
 	sha := h.CommitScenario("a", 1)
 	h.Push(fx.Branch)
-	if r := h.Jig("verify", fx.Ticket, sha, "--slice", "a"); r.Code != 0 {
+	if r := h.Verify(fx.Ticket, "a"); r.Code != 0 {
 		t.Fatalf("jig verify: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
 	}
-	waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-		return l.Event == journal.EventVerified && l.Slice == "a" && l.Commit == sha
-	})
-	h.WaitVerifiers()
 
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {

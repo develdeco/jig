@@ -17,8 +17,8 @@ before reporting, since the issue may already be fixed.
 jig attaches to the coding agent session you already run. It starts no coding
 session and links none of the code that does (`lint/deps_test.go` pins that).
 What it does on your machine is bounded: it runs `git` and `gh`, the oracle
-commands of your own repo's manifest in a detached worktree of a commit, and
-itself, detached (`jig verify --worker`); it edits your harness settings files,
+commands of your own repo's manifest (`jig verify` runs one in your worktree,
+in the foreground, when you or your agent run it); it edits your harness settings files,
 memory files and git's global `core.hooksPath` when you ask it to; and it reads
 your local agent transcripts for two things, a gate round's intent excerpt and a
 session's spend. See the Safety section of

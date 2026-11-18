@@ -31,7 +31,7 @@ func uncountedBlocks(st *store.Store, ticket string) ([]string, error) {
 	last := map[string]latest{} // slice -> its latest oracle or verified line
 	var order []string
 	for _, l := range lines {
-		if l.Slice == "" || l.Commit == "" || (l.Event != journal.EventOracle && l.Event != journal.EventVerified) {
+		if l.Slice == "" || l.Commit == "" || (l.Event != journal.EventOracle && l.Event != journal.EventVerified) || l.Uncovered != "" {
 			continue
 		}
 		if _, ok := last[l.Slice]; !ok {
