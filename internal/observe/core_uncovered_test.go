@@ -52,3 +52,27 @@ func TestStopHoldsOnlyOnASlicesLatestCommit(t *testing.T) {
 		t.Errorf("Block = %q, want the older commit of the slice left out", res.Block)
 	}
 }
+
+// TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant: slice a committed, then
+// slice b, then both verified at HEAD (the plain order of a multi-slice
+// ticket): slice a's commit is history, for `jig verify` at HEAD records a
+// verification of HEAD and could never clear it.
+func TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	r.unattendedClaim("a")
+	r.recordStart()
+	a1 := r.commit("a", "a1.txt")
+	b1 := r.commit("b", "b1.txt")
+	for _, slice := range []string{"a", "b"} {
+		r.add(journal.Line{Event: journal.EventOracle, Slice: slice, Commit: b1, Attempt: 1, Outcome: "pass"})
+		r.add(journal.Line{Event: journal.EventVerified, Slice: slice, Commit: b1, Attempt: 1})
+	}
+
+	res := r.handle(r.ev(KindStop))
+	if strings.Contains(res.Block, a1[:12]) || strings.Contains(res.Message, a1[:12]) {
+		t.Errorf("Stop = %+v, want no hold naming slice a's commit: it is verified at a descendant", res)
+	}
+}

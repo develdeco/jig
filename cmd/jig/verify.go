@@ -25,7 +25,7 @@ const (
 	verifySessionUsage  = "harness session id recorded on the lines (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 	verifyStoreUsage    = "explicit store path"
 	verifyProjectUsage  = "project name, resolved via the machine mapping"
-	verifyDirUsage      = "where the command runs (default: the worktree's root)"
+	verifyDirUsage      = "where the command runs (default: the worktree's root); a run in another work tree covers nothing"
 	verifyTimeoutUsage  = "end the command after this long (default: none; the harness owns time)"
 	verifyDryRunUsage   = "print the header and the record that would be written; run and write nothing"
 	verifyNoRecordUsage = "run and print, and write no line, state or push (an exploratory run)"

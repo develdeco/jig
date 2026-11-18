@@ -53,3 +53,22 @@ func TestSupersededFollowsTheCommitsNotTheJournal(t *testing.T) {
 		t.Error("with no way to order commits, nothing is history")
 	}
 }
+
+// TestSupersededSkipsAnUncoveredRun: a run that covers nothing at a newer
+// commit (a dirty-tree try after a red covered run) is the outcome of no
+// commit, so it does not make the older commit's failure history.
+func TestSupersededSkipsAnUncoveredRun(t *testing.T) {
+	t.Parallel()
+	isAncestor := func(a, d string) bool { return a == "c1" && d == "c2" }
+	lines := []journal.Line{
+		{Event: journal.EventOracle, Slice: "b", Commit: "c1", Outcome: "fail"},
+		{Event: journal.EventOracle, Slice: "b", Commit: "c2", Outcome: "pass", Uncovered: journal.UncoveredDirtyBefore},
+	}
+	if Superseded(lines, "b", "c1", isAncestor) {
+		t.Error("an uncovered run at a newer commit made the older failure history")
+	}
+	lines[1].Uncovered = ""
+	if !Superseded(lines, "b", "c1", isAncestor) {
+		t.Error("a covered run at a newer commit left the older failure standing")
+	}
+}

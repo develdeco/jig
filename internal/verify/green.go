@@ -59,16 +59,6 @@ func cleanHead(dir string) string {
 	return head
 }
 
-// dirtyTree returns dir's uncommitted changes (git status, untracked files
-// included) for a message, or "" when there are none or git cannot say.
-func dirtyTree(dir string) string {
-	status, err := gitx.Run(dir, "status", "--porcelain")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(status)
-}
-
 // startSHA is the sha a verified commit must descend from, as far as it can
 // be known: the ticket's recorded start sha for the repo (the file `jig claim`
 // or a frontier dispatch wrote), else the merge base of the commit and

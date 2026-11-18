@@ -156,10 +156,21 @@ func (h *handler) verificationFindings() []finding {
 
 	// Only a slice's latest commit on the branch is held to a result: the
 	// command that clears a commit runs at HEAD, so an older commit of the
-	// slice (a test commit before the code) is history once a later one exists.
+	// slice (a test commit before the code) is history once a later one exists,
+	// and so is a commit the slice has a verified line at a descendant of
+	// (slices verified one after the other at HEAD).
 	latest := map[string]string{}
 	for _, c := range truth.Commits { // oldest first
 		latest[c.Slice] = c.SHA
+	}
+	ancestry := verify.GitAncestry(h.w.RepoDir)
+	history := func(commit, slice string) bool {
+		for _, l := range lines {
+			if l.Event == journal.EventVerified && l.Slice == slice && l.Commit != "" && l.Commit != commit && ancestry(commit, l.Commit) {
+				return true
+			}
+		}
+		return false
 	}
 
 	var out []finding
@@ -168,6 +179,9 @@ func (h *handler) verificationFindings() []finding {
 			continue
 		}
 		if l, ok := latest[r.Slice]; ok && l != r.Commit {
+			continue
+		}
+		if history(r.Commit, r.Slice) {
 			continue
 		}
 		if !r.State.Holds() && r.State != phase.VerifyStale && !h.building(r.Slice) {

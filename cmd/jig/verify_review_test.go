@@ -40,6 +40,27 @@ func TestVerifyDirOutsideTheWorktreeCoversNothing(t *testing.T) {
 		t.Errorf("slice a state = %+v, %v, want %+v", after, err, before)
 	}
 
+	// So do the worktree's parent and a checkout nested in an ignored
+	// directory of it: the work tree is what counts, not the path prefix.
+	nested := filepath.Join(r.fx.RepoDir, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitMust(t, nested, "init", "-q")
+	exclude := filepath.Join(r.fx.RepoDir, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exclude, []byte("nested/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, dir := range map[string]string{"a nested checkout": nested, "the worktree's parent": filepath.Dir(r.fx.RepoDir)} {
+		out, code := r.run("verify", "--dir", dir)
+		if code != 0 || !strings.Contains(out, "covers: no") || !strings.Contains(out, "uncovered: another directory") {
+			t.Errorf("verify --dir at %s: exit %d, want it to cover nothing: another directory\n%s", name, code, out)
+		}
+	}
+
 	// A directory inside the worktree still covers.
 	if err := os.MkdirAll(filepath.Join(r.fx.RepoDir, "alpha"), 0o755); err != nil {
 		t.Fatal(err)
@@ -69,6 +90,18 @@ func TestVerifyDirThatDoesNotExistIsJigsOwnFailure(t *testing.T) {
 	}
 	if got := len(r.journal()); got != lines {
 		t.Errorf("the journal grew by %d lines, want none", got-lines)
+	}
+	// A file is no directory to run in either.
+	file := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code = r.run("verify", "--dir", file)
+	if code != 125 || strings.Contains(out, "result:") {
+		t.Errorf("verify --dir <file>: exit %d, want 125 and no footer\n%s", code, out)
+	}
+	if got := len(r.journal()); got != lines {
+		t.Errorf("a file as --dir grew the journal by %d lines, want none", got-lines)
 	}
 	if after, _ := r.st.ReadSliceState(r.fx.Ticket, "a"); after != before {
 		t.Errorf("slice a state = %+v, want %+v", after, before)

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -173,8 +172,11 @@ type run struct {
 	cmdDir  string // where the command runs
 	subject string // HEAD's subject
 	pre     string // why the run cannot cover, known before it starts
-	attempt int
-	res     Result
+
+	descent     string // why HEAD does not descend from the start sha, once asked
+	descentDone bool
+	attempt     int
+	res         Result
 }
 
 func (d Deps) now() time.Time {
@@ -290,8 +292,8 @@ func (d Deps) prepare(r Request) (*run, error) {
 // that holds every input and fact needed to run it again by hand.
 //
 // A run covers HEAD when the tree was clean before and after, HEAD did not
-// move, the command was the slice's own oracle and HEAD descends from the
-// ticket's start sha. A covering pass marks the slice green and writes the
+// move, the command was the slice's own oracle, it ran in the worktree (not
+// another work tree) and HEAD descends from the ticket's start sha. A covering pass marks the slice green and writes the
 // verified line after the oracle line (and the recorded line before them
 // when the scenarios recorded), a covering failure leaves the slice
 // building; any other run is recorded with the reason it covers nothing
@@ -508,19 +510,17 @@ func treeState(dir string) string {
 	return journal.TreeClean
 }
 
-// within reports whether dir is root or inside it.
-func within(root, dir string) bool {
-	resolve := func(p string) string {
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-		if real, err := filepath.EvalSymlinks(p); err == nil {
-			p = real
-		}
-		return filepath.Clean(p)
+// sameWorktree reports whether dir is in the work tree whose root is root: git
+// says dir's top level is that checkout, so a checkout nested in the worktree
+// (an ignored directory holding another worktree), its parent and an unrelated
+// directory are not.
+func sameWorktree(root, dir string) bool {
+	rootTop, err := gitx.TopLevel(root)
+	if err != nil {
+		return false
 	}
-	rel, err := filepath.Rel(resolve(root), resolve(dir))
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	top, err := gitx.TopLevel(dir)
+	return err == nil && gitx.SameDir(rootTop, top)
 }
 
 // execute does the run: the env class up, the command, the record. It returns
@@ -550,9 +550,6 @@ func (x *run) execute() (why string, err error) {
 	// is brought up, so a class that will not come up leaves the slice alone.
 	x.res.TreeBefore = treeState(x.dir)
 	x.pre = x.uncoveredBecause(x.r.Command == "", x.res.TreeBefore, x.sha)
-	if x.pre == journal.UncoveredNotDescend {
-		x.pre = ""
-	}
 
 	down, why, err := x.bringUpEnv(m)
 	if why != "" || err != nil {
@@ -578,6 +575,16 @@ func (x *run) execute() (why string, err error) {
 // verifyGreen did: HEAD must be new work on the ticket's branch. It returns
 // why not, "" when it does or when no start is known.
 func (x *run) descendsFromStart() string {
+	if x.descentDone {
+		return x.descent
+	}
+	x.descent, x.descentDone = x.descentFromStart(), true
+	return x.descent
+}
+
+// descentFromStart asks git, once per run: it is fixed before the command
+// starts, since HEAD at the start and the start sha do not move under it.
+func (x *run) descentFromStart() string {
 	start := x.startSHA()
 	if start == "" {
 		return ""
@@ -688,7 +695,7 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 
 // uncoveredBecause says why a run that left the tree as treeAfter and HEAD at
 // headEnd covers nothing, in the journal's words, or "" when it covers HEAD:
-// the first of the five reasons that holds.
+// the first of the six reasons that holds.
 func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string {
 	switch {
 	case x.res.TreeBefore != journal.TreeClean:
@@ -699,7 +706,7 @@ func (x *run) uncoveredBecause(ownOracle bool, treeAfter, headEnd string) string
 		return journal.UncoveredHeadMoved
 	case !ownOracle:
 		return journal.UncoveredOtherCmd
-	case !within(x.dir, x.cmdDir):
+	case !sameWorktree(x.dir, x.cmdDir):
 		return journal.UncoveredOtherDir
 	case x.descendsFromStart() != "":
 		return journal.UncoveredNotDescend
