@@ -207,4 +207,100 @@ func TestValidateRestampOneUnresolved(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "unresolved[1]{id,hash}") || !strings.Contains(out, "d,"+zero) || !strings.Contains(out, "no committed brief revision") {
 		t.Fatalf("exit %d, want the one unresolved row and the unresolved-hash message\n%s", code, out)
 	}
+	// The remedy is pasting the section's hash, so the hashes are beside it.
+	for _, want := range []string{"sections[2]{heading,sha256}", "Seams," + r.sectionHash(t, "Seams"), "Replace each unresolved hash with the sha256 of the section the slice cites, from the `sections` table, or add a replacement slice with `jig slice add DEMO-1`"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestValidateStaleStamp: each from_brief hash no current section has gets
+// the remedy that works for it. --restamp only for a stamp the brief's
+// committed history ties to a heading the brief still has; any other (a
+// draft's, a placeholder, a removed heading's) is pasted from the sections
+// table, which validate prints even when it fails. Only a slice with work
+// behind it is offered the requeue that rebuilds it.
+func TestValidateStaleStamp(t *testing.T) {
+	t.Parallel()
+	const (
+		paste   = ", and no committed brief revision ties it to a current heading; replace it with the sha256 of the section it cites, from the `sections` table"
+		restamp = "run `jig validate DEMO-1 --restamp` if the slice's work is still right"
+		requeue = "`jig requeue DEMO-1 --from-brief-diff` to rebuild it first"
+	)
+	// line is the output line about slice's stale hash.
+	line := func(t *testing.T, out, slice, hash string) string {
+		t.Helper()
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, "slice "+slice+": from_brief hash "+hash+" ") {
+				return l
+			}
+		}
+		t.Fatalf("no line for slice %s's hash %s:\n%s", slice, hash, out)
+		return ""
+	}
+	check := func(t *testing.T, l string, want, not []string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(l, w) {
+				t.Errorf("line lacks %q: %s", w, l)
+			}
+		}
+		for _, n := range not {
+			if strings.Contains(l, n) {
+				t.Errorf("line names %q: %s", n, l)
+			}
+		}
+	}
+
+	t.Run("draft", func(t *testing.T) {
+		t.Parallel()
+		// A brief never committed, and a never-built slice stamped with a
+		// placeholder and with a hash the draft had before an edit.
+		r := newSliceRig(t, true)
+		before := r.sectionHash(t, "Seams")
+		r.setBrief(t, sliceTestBrief+"\nMore seams.\n")
+		st := &store.Store{Root: r.storeDir}
+		if err := st.AppendSlices("DEMO-1", []store.Slice{{ID: "a", Workspace: "root", Goal: "g", Oracle: "true", BlockedBy: []string{}, FromBrief: []string{"placeholder", before}}}); err != nil {
+			t.Fatal(err)
+		}
+		out, code := r.jig(t, "validate", "DEMO-1", "--check")
+		if code == 0 {
+			t.Fatalf("validate --check on a draft's stale stamps: exit 0\n%s", out)
+		}
+		seams := r.sectionHash(t, "Seams")
+		if !strings.Contains(out, "sections[2]{heading,sha256}") || !strings.Contains(out, "Seams,"+seams) {
+			t.Errorf("a failed --check does not print the section hashes to paste:\n%s", out)
+		}
+		for _, h := range []string{"placeholder", before} {
+			check(t, line(t, out, "a", h), []string{paste}, []string{"--restamp", "--from-brief-diff"})
+		}
+
+		// Pasting the printed hash is the whole remedy: nothing emptied or committed.
+		if err := st.RestampSlices("DEMO-1", map[string][]string{"a": {seams}}); err != nil {
+			t.Fatal(err)
+		}
+		if out, code := r.jig(t, "validate", "DEMO-1", "--check"); code != 0 || !strings.Contains(out, "valid: yes") {
+			t.Fatalf("validate --check after pasting the printed hash: exit %d\n%s", code, out)
+		}
+	})
+
+	t.Run("committed", func(t *testing.T) {
+		t.Parallel()
+		// a (green) and b (queued) cite Seams, which is edited; b and c
+		// (green) cite Problem, which is removed. The edit is committed.
+		r := restampRig(t)
+		seams, problem := r.sectionHash(t, "Seams"), r.sectionHash(t, "Problem")
+		r.setBrief(t, "# DEMO-1: t\n\n## Seams\n\nThe seams, edited.\n")
+		gitBuilder(t).Commit(r.storeDir, "edit the brief")
+
+		out, code := r.jig(t, "validate", "DEMO-1", "--check")
+		if code == 0 {
+			t.Fatalf("validate --check on stale stamps: exit 0\n%s", out)
+		}
+		check(t, line(t, out, "a", seams), []string{restamp, requeue}, []string{"no committed brief revision"})
+		check(t, line(t, out, "b", seams), []string{restamp}, []string{"--from-brief-diff", "no committed brief revision"})
+		check(t, line(t, out, "b", problem), []string{paste}, []string{"--restamp", "--from-brief-diff"})
+		check(t, line(t, out, "c", problem), []string{paste, requeue}, []string{"--restamp"})
+	})
 }
