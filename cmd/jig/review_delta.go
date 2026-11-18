@@ -20,7 +20,12 @@ const deltaMaxLines = 400
 // deltaReadLine is the `read` line of a delta round's context: what to read,
 // in one sentence. The rule lives here, in jig's output, and not in the review
 // skill.
-const deltaReadLine = "this is a delta round: read the delta block and the answers; for each function or constant the delta changes in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show"
+const deltaReadLine = "this is a delta round: read the delta block and the answers; for each function or constant the delta changes in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show; make independent reads in one step"
+
+// fullReadLine is the `read` line of a full round's context: the same rule as
+// the delta's, over the whole change. A file whose diff and touched code were
+// read counts as read for --reviewed.
+const fullReadLine = "this is a full round: read the change as its diff from base to head in the worktree, with enough context to see each changed function whole; then, for each function or constant the change alters in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show; make independent reads in one step; a file whose diff and touched code you read counts as read for --reviewed"
 
 // deltaDiff is one repo's delta as a delta round's context shows it: the diff
 // base..head, printed when short and held in Path when long, and the files it
