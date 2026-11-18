@@ -65,26 +65,16 @@ func TestHereVerifySectionShowsHowHeadStandsForTheLocatedSlice(t *testing.T) {
 		}
 	}
 
-	// A worker has started on HEAD.
+	// An old worker's pending line at HEAD is no result: the section says
+	// nothing of it.
 	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1}); err != nil {
 		t.Fatal(err)
 	}
-	blocks, err := section.Blocks(hereVerifyCtx(r, "a"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Join(blocks, "\n")
-	for _, want := range []string{"verification:", "slice: a", "commit: " + shortSHA(sha), "state: pending", "attempt: 1"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("section lacks %q:\n%s", want, text)
-		}
-	}
-	// Another slice at the same HEAD is not that verification.
-	if blocks, err := section.Blocks(hereVerifyCtx(r, "b")); err != nil || len(blocks) != 0 {
-		t.Errorf("slice b at a's HEAD: Blocks = %v, %v, want none", blocks, err)
+	if blocks, err := section.Blocks(hereVerifyCtx(r, "a")); err != nil || len(blocks) != 0 {
+		t.Errorf("an old pending line: Blocks = %v, %v, want none", blocks, err)
 	}
 
-	// The worker's failure, with its time and summary.
+	// A failure, with its time and summary.
 	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Commit: sha, Attempt: 1, Seconds: 9, Summary: "FAIL TestClamp"}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,31 +96,37 @@ func TestHereVerifySectionShowsHowHeadStandsForTheLocatedSlice(t *testing.T) {
 	if got.Slice != "a" || got.Commit != sha || got.State != "fail" || got.Summary != "FAIL TestClamp" || got.Attempt != 1 || got.Seconds != 9 {
 		t.Errorf("section JSON = %s, want a's failure at %s", data, sha)
 	}
-	blocks, err = section.Blocks(hereVerifyCtx(r, "a"))
+	blocks, err := section.Blocks(hereVerifyCtx(r, "a"))
 	if err != nil || !strings.Contains(strings.Join(blocks, "\n"), "summary: FAIL TestClamp") {
 		t.Errorf("section after the failure: %v, %v, want the summary", blocks, err)
 	}
 }
 
 // TestHereShowsTheVerifySection: through the verb, `jig here --slice` in a
-// clone prints the section after its own pending_verifications table.
+// clone prints the section after its own tables, and no old pending line is
+// told as a verification under way.
 func TestHereShowsTheVerifySection(t *testing.T) {
 	t.Parallel()
 	r := newVerifyRig(t)
 	sha := r.fixClamp()
-	if err := journal.Append(r.st, r.fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1}); err != nil {
-		t.Fatal(err)
+	for _, l := range []journal.Line{
+		{Slice: "a", Event: journal.EventVerifyPending, Commit: sha, Attempt: 1},
+		{Slice: "a", Event: journal.EventOracle, Outcome: "fail", Commit: sha, Attempt: 1, Seconds: 4, Summary: "FAIL TestClamp"},
+	} {
+		if err := journal.Append(r.st, r.fx.Ticket, l); err != nil {
+			t.Fatal(err)
+		}
 	}
 	out, code := r.run("here", "--slice", "a")
 	if code != 0 {
 		t.Fatalf("jig here exit = %d\n%s", code, out)
 	}
-	for _, want := range []string{"pending_verifications[1]", "verification:", "state: pending", "commit: " + shortSHA(sha)} {
+	for _, want := range []string{"verification:", "state: fail", "commit: " + shortSHA(sha)} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig here lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Index(out, "pending_verifications") > strings.Index(out, "verification:") {
-		t.Errorf("the verify section should follow here's own tables:\n%s", out)
+	if strings.Contains(out, "pending_verifications") || strings.Contains(out, "state: pending") {
+		t.Errorf("jig here tells an old pending line as work in flight:\n%s", out)
 	}
 }

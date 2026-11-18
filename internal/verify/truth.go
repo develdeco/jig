@@ -2,7 +2,6 @@ package verify
 
 import (
 	"strings"
-	"time"
 
 	"github.com/develdeco/jig/internal/fileshare"
 	"github.com/develdeco/jig/internal/gitx"
@@ -55,11 +54,10 @@ func StartSHA(st *store.Store, ticket, repo string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// Truth is what the readers of a ticket's verifications share: the journal,
-// the ledger and, when the branch is known, one git log.
+// Truth is what the readers of a ticket's verifications share: the journal
+// and, when the branch is known, one git log.
 type Truth struct {
-	JigHome string
-	Ticket  string
+	Ticket string
 	// Lines are the ticket's journal lines.
 	Lines []journal.Line
 	// Slices are the ids of the ticket's slices: a commit whose trailer names
@@ -70,18 +68,12 @@ type Truth struct {
 	// shows is judged.
 	Commits     []phase.CommitRef
 	BranchKnown bool
-	Now         time.Time
-	// Alive is the worker liveness check; nil is the operating system's.
-	Alive func(pid int, notBefore time.Time) bool
 }
 
-// Derive judges every (commit, slice) as phase.DeriveVerifications does, with
-// the spawned lines of the pending ones read from the ledger once.
+// Derive judges every (commit, slice) as phase.DeriveVerifications does, over
+// the commits of the ticket's own slices.
 func (t Truth) Derive() []phase.CommitVerification {
-	in := phase.VerifyInput{Ticket: t.Ticket, Lines: t.Lines, BranchKnown: t.BranchKnown, Now: t.Now, Alive: t.Alive}
-	if in.Alive == nil {
-		in.Alive = Alive
-	}
+	in := phase.VerifyInput{Ticket: t.Ticket, Lines: t.Lines, BranchKnown: t.BranchKnown}
 	own := map[string]bool{}
 	for _, s := range t.Slices {
 		own[s] = true
@@ -91,10 +83,5 @@ func (t Truth) Derive() []phase.CommitVerification {
 			in.Commits = append(in.Commits, c)
 		}
 	}
-	var pending []phase.CommitRef
-	for _, p := range journal.Pending(t.Lines) {
-		pending = append(pending, phase.CommitRef{SHA: p.Commit, Slice: p.Slice})
-	}
-	in.Spawned, _ = LatestSpawned(t.JigHome, t.Ticket, pending)
 	return phase.DeriveVerifications(in)
 }

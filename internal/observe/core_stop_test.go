@@ -45,7 +45,7 @@ func TestStopDoesNotNameARunningVerification(t *testing.T) {
 	}
 	// The commit that has no recorded result is still named, with the command
 	// that clears it.
-	if !strings.Contains(res.Block, "commit "+sha2[:12]+" for slice b is not verified") ||
+	if !strings.Contains(res.Block, "commit "+sha2[:12]+" for slice b has no recorded result") ||
 		!strings.Contains(res.Block, "jig verify "+r.fx.Ticket+" --slice b") {
 		t.Errorf("Block = %q, want the commit with no result held with the command that verifies it", res.Block)
 	}

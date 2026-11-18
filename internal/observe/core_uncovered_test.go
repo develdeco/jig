@@ -47,7 +47,7 @@ func TestACommitWithATrailerAndNoRecordedResultHoldsAnUnattendedStop(t *testing.
 		t.Fatal(err)
 	}
 	res := r.handle(r.ev(KindStop))
-	if !strings.Contains(res.Block, "commit "+sha[:12]+" for slice a is not verified") {
+	if !strings.Contains(res.Block, "commit "+sha[:12]+" for slice a has no recorded result") {
 		t.Errorf("Block = %q, want the commit with no recorded result held", res.Block)
 	}
 }
@@ -67,7 +67,7 @@ func TestStopHoldsOnlyOnASlicesLatestCommit(t *testing.T) {
 	second := r.commit("a", "a2.txt")
 
 	res := r.handle(r.ev(KindStop))
-	if !strings.Contains(res.Block, "commit "+second[:12]+" for slice a is not verified") {
+	if !strings.Contains(res.Block, "commit "+second[:12]+" for slice a has no recorded result") {
 		t.Fatalf("Block = %q, want the latest commit held to a result", res.Block)
 	}
 	if strings.Contains(res.Block, first[:12]) {
@@ -129,7 +129,7 @@ func TestStopHoldsOnlyOnASlicesLatestCommitUnlessVerifiedAtADescendant(t *testin
 			commit := c.build(r)
 
 			res := r.handle(r.ev(KindStop))
-			held := strings.Contains(res.Block, "commit "+commit[:12]+" for slice a is not verified")
+			held := strings.Contains(res.Block, "commit "+commit[:12]+" for slice a has no recorded result")
 			if held != c.wantHeld {
 				t.Errorf("Stop = %+v, commit %s held = %v, want %v", res, commit[:12], held, c.wantHeld)
 			}

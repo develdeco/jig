@@ -20,7 +20,7 @@ func TestStopHoldsAnUnattendedSessionBackOncePerFinding(t *testing.T) {
 	sha := r.commit("a", "a.txt")
 
 	first := r.handle(r.ev(KindStop))
-	if !strings.Contains(first.Block, "unattended") || !strings.Contains(first.Block, "commit "+sha[:12]+" for slice a is not verified") ||
+	if !strings.Contains(first.Block, "unattended") || !strings.Contains(first.Block, "commit "+sha[:12]+" for slice a has no recorded result") ||
 		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" --slice a") {
 		t.Fatalf("Block = %q, want the reason with the commit that has no result and how to verify it", first.Block)
 	}

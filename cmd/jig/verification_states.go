@@ -15,12 +15,15 @@ import (
 type hereVerificationState struct {
 	Slice  string `json:"slice"`
 	Commit string `json:"commit"`
-	// State is the state's name; Told is its words beside the slice.
+	// State is the state's name; Told is its words beside the slice (a failed
+	// run that judged nothing says why).
 	State string `json:"state"`
 	Told  string `json:"told"`
 	Clear string `json:"clear,omitempty"`
-	// Fail is a failed run's first FAIL line.
-	Fail string `json:"fail,omitempty"`
+	// Fail is a failed run's first FAIL line; Error a could-not-run
+	// verification's summary.
+	Fail  string `json:"fail,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 func statesOf(rows []phase.CommitVerification) []hereVerificationState {
@@ -29,19 +32,22 @@ func statesOf(rows []phase.CommitVerification) []hereVerificationState {
 		if !r.State.Unclear() {
 			continue
 		}
-		out = append(out, hereVerificationState{Slice: r.Slice, Commit: r.Commit, State: string(r.State), Told: r.State.Told(), Clear: r.Clear, Fail: r.FailLine})
+		out = append(out, hereVerificationState{Slice: r.Slice, Commit: r.Commit, State: string(r.State), Told: r.Told(), Clear: r.Clear, Fail: r.FailLine, Error: r.Error})
 	}
 	return out
 }
 
 // statesTable renders the states as the verification_states table: the state
-// cell carries a failed run's first FAIL line.
+// cell carries a failed run's first FAIL line, or a could-not-run summary.
 func statesTable(states []hereVerificationState) string {
 	var rows [][]string
 	for _, s := range states {
 		told := s.Told
-		if s.Fail != "" {
+		switch {
+		case s.State == string(phase.VerifyFailed) && s.Fail != "" && s.Told == s.State:
 			told = "failed: " + s.Fail
+		case s.State == string(phase.VerifyCouldNotRun) && s.Error != "":
+			told = "could not run: " + s.Error
 		}
 		clear := s.Clear
 		if clear == "" {
@@ -70,7 +76,7 @@ func sliceIDs(st *store.Store, ticket string) []string {
 // the journal shows.
 func hereVerificationStates(hc hereCtx, lines []journal.Line, ids []string) []hereVerificationState {
 	w := hc.Where
-	t := verify.Truth{JigHome: hc.JigHome, Ticket: w.Ticket, Lines: lines, Slices: ids, Now: hc.e.now()}
+	t := verify.Truth{Ticket: w.Ticket, Lines: lines, Slices: ids}
 	if (w.TicketHow == locate.HowBranch || w.TicketHow == locate.HowBranchAlias) && w.Repo != "" {
 		dir := w.Root
 		if dir == "" {
@@ -87,15 +93,15 @@ func hereVerificationStates(hc hereCtx, lines []journal.Line, ids []string) []he
 
 // verificationStatesBlocks is the status section that tells the commits of the
 // ticket whose verification is not clear. It reads each repo's clone for the
-// ticket's branch; without a branch to read it says the not-verified check was
-// not done rather than that nothing is unverified.
-func verificationStatesBlocks(e env, jigHome string, cfg project.Config, mp project.MachineProject) func(*store.Store, string) ([]string, error) {
+// ticket's branch; without a branch to read it says the check for a missing result was
+// not done rather than that every commit has one.
+func verificationStatesBlocks(cfg project.Config, mp project.MachineProject) func(*store.Store, string) ([]string, error) {
 	return func(st *store.Store, ticket string) ([]string, error) {
 		lines, err := journal.Read(st, ticket)
 		if err != nil {
 			return nil, err
 		}
-		t := verify.Truth{JigHome: jigHome, Ticket: ticket, Lines: lines, Slices: sliceIDs(st, ticket), Now: e.now()}
+		t := verify.Truth{Ticket: ticket, Lines: lines, Slices: sliceIDs(st, ticket)}
 		why := "no clone"
 		if rec, err := st.ReadTicket(ticket); err == nil {
 			if branch, err := ticketBranch(st, cfg, ticket, rec); err == nil {
@@ -121,7 +127,7 @@ func verificationStatesBlocks(e env, jigHome string, cfg project.Config, mp proj
 		}
 		var blocks []string
 		if !t.BranchKnown && why == "no clone" {
-			blocks = append(blocks, "not verified: not checked ("+why+")")
+			blocks = append(blocks, "no recorded result: not checked ("+why+")")
 		}
 		if states := statesOf(t.Derive()); len(states) > 0 {
 			blocks = append(blocks, statesTable(states))

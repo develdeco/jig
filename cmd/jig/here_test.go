@@ -31,14 +31,10 @@ func TestVerificationsIn(t *testing.T) {
 		{Event: journal.EventVerifyPending, Slice: "d", Commit: "p4"},
 		{Event: journal.EventOracle, Slice: "other", Commit: "p4"},
 	}
-	verified, pending := verificationsIn(lines)
+	verified := verificationsIn(lines)
 	wantVerified := []hereVerified{{"a", "aaaa", 1}, {"b", "aaaa", 2}}
 	if !reflect.DeepEqual(verified, wantVerified) {
 		t.Errorf("verified = %+v, want %+v", verified, wantVerified)
-	}
-	wantPending := []herePending{{"a", "p1", "2026-01-01T00:00:00Z"}, {"d", "p4", ""}}
-	if !reflect.DeepEqual(pending, wantPending) {
-		t.Errorf("pending = %+v, want %+v", pending, wantPending)
 	}
 }
 
@@ -128,11 +124,13 @@ func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
 		"  c,needs-input,1,-,q-001\n",
 		"verified[1]{slice,commit}:\n  a,0123456789ab\n",
 		"questions[1]{id,slice,question}:\n  q-001,c,Which tone?\n",
-		"pending_verifications[1]{slice,commit}:\n  b,fedcba987654\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig here lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "pending_verifications") {
+		t.Errorf("jig here names an old pending line as a verification still under way:\n%s", out)
 	}
 	if strings.Contains(out, "q-002") {
 		t.Errorf("jig here lists an answered question:\n%s", out)
@@ -145,15 +143,14 @@ func TestHereNamesQuestionsVerifiedAndPendingVerifications(t *testing.T) {
 	var got struct {
 		State struct {
 			Verified []struct{ Slice, Commit string }   `json:"verified"`
-			Pending  []struct{ Slice, Commit string }   `json:"pending_verifications"`
 			Question []struct{ ID, Slice, Body string } `json:"questions"`
 		} `json:"state"`
 	}
 	if err := json.Unmarshal([]byte(jsonOut), &got); err != nil {
 		t.Fatalf("jig here --json: %v\n%s", err, jsonOut)
 	}
-	if len(got.State.Verified) != 1 || got.State.Verified[0].Commit != "0123456789abcdef0123" || len(got.State.Pending) != 1 || got.State.Pending[0].Slice != "b" || len(got.State.Question) != 1 || got.State.Question[0].ID != "q-001" {
-		t.Errorf("--json state = %+v, want the verified commit in full, one pending verification and one question", got.State)
+	if len(got.State.Verified) != 1 || got.State.Verified[0].Commit != "0123456789abcdef0123" || len(got.State.Question) != 1 || got.State.Question[0].ID != "q-001" {
+		t.Errorf("--json state = %+v, want the verified commit in full and one question", got.State)
 	}
 
 	// Sections other tickets register add blocks after the ticket's, and a
