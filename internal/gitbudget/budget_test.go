@@ -456,7 +456,12 @@ func TestReportWithoutTracesPrintsNoReport(t *testing.T) {
 // report and write each name their arguments; too few print the usage and
 // exit 2, never a count.
 func TestReportAndWriteRefuseTooFewArguments(t *testing.T) {
-	for _, args := range [][]string{{"report"}, {"report", "-"}, {"write"}, {"write", "baseline.yaml"}} {
+	dir := t.TempDir()
+	baseline := filepath.Join(dir, "baseline.yaml")
+	for _, args := range [][]string{
+		{"report"}, {"report", "-"}, {"report", "-", dir},
+		{"write"}, {"write", baseline}, {"write", baseline, dir},
+	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, func(string) string { return "" }, &stdout, &stderr); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
