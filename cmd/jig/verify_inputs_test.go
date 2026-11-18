@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -29,12 +30,27 @@ func TestVerifyHeaderAndFooterNameWhatRanAndWhatWasRecorded(t *testing.T) {
 		t.Fatalf("output has no footer:\n%s", out)
 	}
 	for _, want := range []string{
-		"verify:", "command:", "(the slice's oracle)", "dir: ", r.fx.RepoDir, "commit: " + sha, "slice: a (the Jig-Slice trailer of HEAD)", "tree: clean",
+		"verify:", "command:", "(the slice's oracle)", "dir: ", "commit: " + sha, "slice: a (the Jig-Slice trailer of HEAD)", "tree: clean",
 		"flags:", "timeout: none (default)", "dry-run: off (default)", "no-record: off (default)", "json: off (default)", "slice: a (default)",
 	} {
 		if !strings.Contains(header, want) {
 			t.Errorf("the header lacks %q:\n%s", want, header)
 		}
+	}
+	// The header names the worktree root as git reports it, which on Windows
+	// can be the long spelling of a short temp path: the same directory, not
+	// the same text.
+	var dir string
+	for _, line := range strings.Split(header, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "dir: "); ok {
+			dir = strings.Trim(v, `"`)
+			break
+		}
+	}
+	got, err1 := os.Stat(dir)
+	want, err2 := os.Stat(r.fx.RepoDir)
+	if err1 != nil || err2 != nil || !os.SameFile(got, want) {
+		t.Errorf("the header's dir %q is not the worktree %q (%v, %v)", dir, r.fx.RepoDir, err1, err2)
 	}
 	for _, want := range []string{"outcome: pass", "exit: 0", "seconds: ", "covers: yes", "head: " + sha[:12], "recorded: oracle verified", "in: the journal of JIG-1", "pushed: yes"} {
 		if !strings.Contains(rest, want) {
