@@ -11,7 +11,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -93,6 +92,9 @@ type oracleStub struct {
 	err     error
 	elapsed time.Duration
 	files   map[string]string // written into JIG_RECORD_DIR
+	// during, when set, runs inside the oracle with the directory it ran in:
+	// a command that leaves a file behind or moves HEAD.
+	during func(dir string)
 
 	mu    sync.Mutex
 	calls []oracleCall
@@ -110,6 +112,9 @@ func (o *oracleStub) run(cmd, dir string, env []string, limit time.Duration) (st
 	o.mu.Lock()
 	o.calls = append(o.calls, call)
 	o.mu.Unlock()
+	if o.during != nil {
+		o.during(dir)
+	}
 	if o.clock != nil {
 		o.clock.advance(o.elapsed)
 	}
@@ -220,37 +225,12 @@ func (r *rig) state(slice string) store.SliceState {
 	return st
 }
 
-// request is a request for the fixture's ticket.
+// request is a request for the fixture's ticket. A run is of the worktree's
+// HEAD, so sha must be it: the test commits and then runs.
 func (r *rig) request(slice, sha string) Request {
-	return Request{Ticket: r.fx.Ticket, Slice: slice, SHA: sha, Session: "s-1", Agent: "agent-1"}
-}
-
-// worktreeDir is where a verification of sha for slice puts its worktree.
-func (r *rig) worktreeDir(sha, slice string) string {
 	r.t.Helper()
-	id, err := r.st.ID()
-	if err != nil {
-		r.t.Fatal(err)
+	if head, err := gitx.RevParse(r.fx.RepoDir, "HEAD"); err != nil || head != sha {
+		r.t.Fatalf("test setup: %s is not the worktree's HEAD (%s, %v): a run is of HEAD", sha, head, err)
 	}
-	dir, err := home.VerifyWorktreeDir(r.fx.Home, id, r.fx.Ticket, sha, slice)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	return dir
-}
-
-// worktreesOf lists the clone's worktrees by path, the main one included.
-func worktreesOf(t *testing.T, clone string) []string {
-	t.Helper()
-	out, err := gitx.Run(clone, "worktree", "list", "--porcelain")
-	if err != nil {
-		t.Fatalf("git worktree list: %v", err)
-	}
-	var paths []string
-	for _, line := range strings.Split(out, "\n") {
-		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree "); ok {
-			paths = append(paths, p)
-		}
-	}
-	return paths
+	return Request{Ticket: r.fx.Ticket, Slice: slice, Session: "s-1", Agent: "agent-1"}
 }

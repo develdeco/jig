@@ -67,7 +67,7 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 		t.Fatalf("jig session start exit = %d\n%s%s", res.Code, res.Stdout, res.Stderr)
 	}
 	sha := h.CommitScenario("a", 1)
-	if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	// What the PostToolUse hook leaves once `jig observe` is in: a tool line
@@ -86,7 +86,7 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 	}
 	envs := parseEnvelopes(t, res.Stdout)
 
-	if got, want := eventsOf(envs, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
+	if got, want := eventsOf(envs, events.SrcJournal), []string{"oracle", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events = %v, want %v", got, want)
 	}
 	// A commit's verification starts nothing, so the ledger holds only the
@@ -133,7 +133,7 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 	if got, want := eventsOf(allEnvs, events.SrcLedger), []string{"session-start", "tool"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("--all ledger events = %v, want %v", got, want)
 	}
-	if got, want := eventsOf(allEnvs, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
+	if got, want := eventsOf(allEnvs, events.SrcJournal), []string{"oracle", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("--all journal events = %v, want %v", got, want)
 	}
 
@@ -144,9 +144,9 @@ func TestEventsReadsHarnessRun(t *testing.T) {
 }
 
 // TestEventsFollowSeesAForegroundVerification: jig events --follow, running
-// before the commit, prints the verification as it is recorded: the
-// verify-pending line first, then the oracle line, then verified - each as
-// the foreground `jig verify` writes it - and no ledger line of a spawn.
+// before the commit, prints the verification as it is recorded: the oracle
+// line, then verified - each as the foreground `jig verify` writes it, with
+// no pending line before them - and no ledger line of a spawn.
 func TestEventsFollowSeesAForegroundVerification(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
@@ -157,7 +157,7 @@ func TestEventsFollowSeesAForegroundVerification(t *testing.T) {
 	follow := startJig(t, env, fx.RepoDir, "events", "--follow", fx.Ticket)
 
 	sha := h.CommitScenario("a", 1)
-	if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 
@@ -176,12 +176,12 @@ func TestEventsFollowSeesAForegroundVerification(t *testing.T) {
 		seen = append(seen, parseEnvelopes(t, line)...)
 	}
 
-	if got, want := eventsOf(seen, events.SrcJournal), []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(got, want) {
+	if got, want := eventsOf(seen, events.SrcJournal), []string{"oracle", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events followed = %v, want %v", got, want)
 	}
-	pending, oracle := indexOfEvent(seen, journal.EventVerifyPending), indexOfEvent(seen, journal.EventOracle)
-	if pending < 0 || oracle < 0 || pending >= oracle {
-		t.Fatalf("verify-pending at %d and oracle at %d in %v, want pending first", pending, oracle, eventsOf(seen, ""))
+	oracle := indexOfEvent(seen, journal.EventOracle)
+	if oracle < 0 || hasEvent(seen, journal.EventVerifyPending) {
+		t.Fatalf("oracle at %d in %v, want an oracle line and no pending line", oracle, eventsOf(seen, ""))
 	}
 	if o := seen[oracle]; o.Outcome != "pass" || o.Commit != sha || o.Slice != "a" || o.Src != events.SrcJournal {
 		t.Errorf("oracle envelope = %+v, want a journal pass of slice a at %s", o, sha)

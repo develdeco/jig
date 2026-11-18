@@ -25,7 +25,8 @@ oracles:
 `
 
 // slotRig is a rig whose project has one suite slot and whose manifest marks
-// the oracle heavy (or not), with commits of slices a and b to verify.
+// the oracle heavy (or not), with a commit to verify for slices a and b: a run
+// is of HEAD, so both are the one commit.
 func slotRig(t *testing.T, heavy bool) (*rig, [2]string) {
 	t.Helper()
 	r := newRig(t, fixture.Opts{})
@@ -34,9 +35,9 @@ func slotRig(t *testing.T, heavy bool) (*rig, [2]string) {
 	if heavy {
 		manifest += "heavy: [test]\n"
 	}
-	a := r.commit("a", "declare", map[string]string{".claude/jig.yaml": manifest, "a.txt": "a"})
-	b := r.commit("b", "second", map[string]string{"b.txt": "b"})
-	return r, [2]string{a, b}
+	r.commit("a", "declare", map[string]string{".claude/jig.yaml": manifest, "a.txt": "a"})
+	head := r.commit("b", "second", map[string]string{"b.txt": "b"})
+	return r, [2]string{head, head}
 }
 
 // runBoth verifies slices a and b at once and returns the most oracles that

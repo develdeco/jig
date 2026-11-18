@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -214,14 +215,26 @@ func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string,
 // reached no verdict, has none, and neither has a run whose figures could not
 // be read. A figure that cannot be read never changes the run's result.
 func ShellOutputUsage(cmd, dir string, limit time.Duration, env []string) (string, Usage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	var buf bytes.Buffer
+	use, err := ShellStream(cmd, dir, limit, env, &buf)
+	return buf.String(), use, err
+}
+
+// ShellStream is ShellOutputUsage that hands the command's combined stdout and
+// stderr to w as it is produced, instead of returning it. A limit of 0 or less
+// bounds nothing. The process tree is guarded as ever: ended with the jig
+// process that runs it, and killed at its limit.
+func ShellStream(cmd, dir string, limit time.Duration, env []string, w io.Writer) (Usage, error) {
+	ctx, cancel := context.Background(), func() {}
+	if limit > 0 {
+		ctx, cancel = context.WithTimeout(ctx, limit)
+	}
 	defer cancel()
 	c, err := shCommand(ctx, cmd, dir, env)
 	if err != nil {
-		return "", Usage{}, err
+		return Usage{}, err
 	}
-	var buf bytes.Buffer
-	c.Stdout, c.Stderr = &buf, &buf
+	c.Stdout, c.Stderr = w, w
 	g := newGuard(c)
 	c.WaitDelay = 10 * time.Second
 	var use Usage
@@ -231,17 +244,16 @@ func ShellOutputUsage(cmd, dir string, limit time.Duration, env []string) (strin
 		use = g.usage()
 		g.release()
 	}
-	out := buf.Bytes()
 	if g.stopped.Load() {
-		return string(out), Usage{}, &StoppedError{Cmd: cmd}
+		return Usage{}, &StoppedError{Cmd: cmd}
 	}
 	if ctx.Err() != nil {
-		return string(out), use, &TimedOutError{Cmd: cmd, Limit: limit}
+		return use, &TimedOutError{Cmd: cmd, Limit: limit}
 	}
 	if err != nil {
-		return string(out), use, fmt.Errorf("shell %q: %w", cmd, err)
+		return use, fmt.Errorf("shell %q: %w", cmd, err)
 	}
-	return string(out), use, nil
+	return use, nil
 }
 
 // Sh is the sh every command of this package runs through, on every OS, so

@@ -15,7 +15,7 @@ import (
 
 // TestVerifyOfAHeavyOracleWaitsForTheProjectsSlotAndHereShowsIt: the project
 // wiring end to end. A slice's oracle the manifest marks heavy, verified with
-// `jig verify --wait` while another run holds the project's slot, journals
+// `jig verify` while another run holds the project's slot, journals
 // slot-wait, shows as a waiting row in `jig here` and `jig status`, runs only
 // once the slot is free, and journals slot-taken before it passes.
 func TestVerifyOfAHeavyOracleWaitsForTheProjectsSlotAndHereShowsIt(t *testing.T) {
@@ -49,7 +49,7 @@ func TestVerifyOfAHeavyOracleWaitsForTheProjectsSlotAndHereShowsIt(t *testing.T)
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, code := r.run("verify", "--wait")
+		out, code := r.run("verify")
 		done <- result{out, code}
 	}()
 
@@ -79,7 +79,7 @@ func TestVerifyOfAHeavyOracleWaitsForTheProjectsSlotAndHereShowsIt(t *testing.T)
 	released = true
 	res := <-done
 	if res.code != 0 {
-		t.Fatalf("verify --wait exit = %d\n%s", res.code, res.out)
+		t.Fatalf("verify exit = %d\n%s", res.code, res.out)
 	}
 	var order []string
 	for _, l := range r.journal() {
@@ -122,7 +122,7 @@ func TestAnUnsetMarkerSlotsMakesAProjectWaitForAnotherProjectsRun(t *testing.T) 
 	}()
 	done := make(chan int, 1)
 	go func() {
-		_, code := r.run("verify", "--wait")
+		_, code := r.run("verify")
 		done <- code
 	}()
 	has := func(event string) bool {
@@ -145,6 +145,6 @@ func TestAnUnsetMarkerSlotsMakesAProjectWaitForAnotherProjectsRun(t *testing.T) 
 	release()
 	released = true
 	if code := <-done; code != 0 {
-		t.Fatalf("verify --wait exit = %d", code)
+		t.Fatalf("verify exit = %d", code)
 	}
 }

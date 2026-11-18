@@ -103,35 +103,34 @@ func (r *verifyRig) run(args ...string) (string, int) {
 	return runMain(r.t, r.e, "", args...)
 }
 
-// TestVerifySplitsItsPositionals: a ticket id and a revision, each optional, in
-// either order, neither twice.
+// TestVerifySplitsItsPositionals: a ticket id, optional and given once. A run
+// is of the worktree's HEAD, so a commit is no positional.
 func TestVerifySplitsItsPositionals(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name         string
 		pos          []string
-		ticket, rev  string
+		ticket       string
 		wantErrMatch string
 	}{
-		{"none", nil, "", "", ""},
-		{"a ticket", []string{"JIG-1"}, "JIG-1", "", ""},
-		{"a sha", []string{"abc1234"}, "", "abc1234", ""},
-		{"HEAD", []string{"HEAD"}, "", "HEAD", ""},
-		{"a ticket and a sha", []string{"JIG-1", "abc1234"}, "JIG-1", "abc1234", ""},
-		{"a sha and a ticket", []string{"abc1234", "JIG-1"}, "JIG-1", "abc1234", ""},
-		{"a branch named for a ticket is a revision", []string{"JIG-1-fix"}, "", "JIG-1-fix", ""},
-		{"two tickets", []string{"JIG-1", "JIG-2"}, "", "", "one ticket"},
-		{"two commits", []string{"abc1234", "def5678"}, "", "", "one commit"},
+		{"none", nil, "", ""},
+		{"a ticket", []string{"JIG-1"}, "JIG-1", ""},
+		{"a sha", []string{"abc1234"}, "", "takes no commit"},
+		{"HEAD", []string{"HEAD"}, "", "takes no commit"},
+		{"a ticket and a sha", []string{"JIG-1", "abc1234"}, "", "takes no commit"},
+		{"a branch named for a ticket is no ticket", []string{"JIG-1-fix"}, "", "takes no commit"},
+		{"two tickets", []string{"JIG-1", "JIG-2"}, "", "one ticket"},
+		{"an option", []string{"--all"}, "", "is not a ticket"},
 	} {
-		ticket, rev, err := splitVerifyArgs(c.pos)
+		ticket, err := splitVerifyArgs(c.pos)
 		if c.wantErrMatch != "" {
 			if err == nil || !strings.Contains(err.Error(), c.wantErrMatch) {
 				t.Errorf("%s: err = %v, want one saying %q", c.name, err, c.wantErrMatch)
 			}
 			continue
 		}
-		if err != nil || ticket != c.ticket || rev != c.rev {
-			t.Errorf("%s: = %q, %q, %v, want %q, %q", c.name, ticket, rev, err, c.ticket, c.rev)
+		if err != nil || ticket != c.ticket {
+			t.Errorf("%s: = %q, %v, want %q", c.name, ticket, err, c.ticket)
 		}
 	}
 }
@@ -149,7 +148,7 @@ func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify exit = %d, want 0:\n%s", code, out)
 	}
-	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pass", "help[1]:"} {
+	for _, want := range []string{"verify:", "ticket: JIG-1", "slice: a", "commit: " + sha, "state: pass", "covers: yes", "help[1]:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -161,7 +160,7 @@ func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 	for _, l := range r.journal() {
 		kinds = append(kinds, l.Event)
 	}
-	if want := []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
+	if want := []string{"oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
 		t.Errorf("journal events = %v, want %v", kinds, want)
 	}
 	led, err := ledger.Read(r.fx.Home)
@@ -172,24 +171,6 @@ func TestVerifyStartsNoWorkerForTheCommitAtHead(t *testing.T) {
 		if l.Event == journal.EventVerifySpawned {
 			t.Errorf("ledger holds a verify-spawned line: %+v", l)
 		}
-	}
-}
-
-// TestVerifyRerunRunsTheOracleAgainHere: --rerun is another run, in this
-// process, as the slice's next attempt.
-func TestVerifyRerunRunsTheOracleAgainHere(t *testing.T) {
-	t.Parallel()
-	r := newVerifyRig(t)
-	sha := r.fixClamp()
-	if out, code := r.run("verify", "JIG-1", sha, "--wait"); code != 0 {
-		t.Fatalf("first verify exit = %d\n%s", code, out)
-	}
-	out, code := r.run("verify", "JIG-1", sha, "--rerun")
-	if code != 0 || !strings.Contains(out, "attempt: 2") || strings.Contains(out, "existing: true") {
-		t.Errorf("verify --rerun: exit %d, want a second attempt run here\n%s", code, out)
-	}
-	if n := len(r.spawn.Specs()); n != 0 {
-		t.Errorf("started %d processes, want none", n)
 	}
 }
 

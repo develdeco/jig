@@ -39,14 +39,14 @@ func TestStopDoesNotNameARunningVerification(t *testing.T) {
 
 	res := r.handle(r.ev(KindStop))
 	for _, text := range []string{res.Message, res.Block} {
-		if strings.Contains(text, "still running") || strings.Contains(text, "--slice a --wait` to wait") {
+		if strings.Contains(text, "still running") || strings.Contains(text, "--slice a` to wait") {
 			t.Errorf("Stop = %+v, want no running verification named", res)
 		}
 	}
 	// The commit that has no recorded result is still named, with the command
 	// that clears it.
 	if !strings.Contains(res.Block, "commit "+sha2[:12]+" for slice b is not verified") ||
-		!strings.Contains(res.Block, "jig verify "+r.fx.Ticket+" --slice b --wait") {
+		!strings.Contains(res.Block, "jig verify "+r.fx.Ticket+" --slice b") {
 		t.Errorf("Block = %q, want the commit with no result held with the command that verifies it", res.Block)
 	}
 }

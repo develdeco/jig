@@ -193,7 +193,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if got := h.git("rev-parse", "HEAD~1"); got != authorNext {
 		t.Fatalf("the fix commit's parent is %s, want the author's latest tip %s: the fix was not built on top of the author's commits, the mid-loop push included", got, authorNext)
 	}
-	if verify := h.Verify(ticket, jigFix, "fix-1"); verify.Code != 0 || !strings.Contains(verify.Stdout, "state: pass") {
+	if verify := h.Verify(ticket, "fix-1"); verify.Code != 0 || !strings.Contains(verify.Stdout, "state: pass") {
 		t.Fatalf("jig verify fix-1 exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", verify.Code, verify.Stdout, verify.Stderr)
 	}
 	// The author's branch on origin is untouched: jig's commits stay in the

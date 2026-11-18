@@ -25,8 +25,7 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 	}
 	change(t, fx)
 	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta-test: done with the change", "-m", "Jig-Slice: fix-2-q-beta-test")
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	verifyHere(t, fx, "fix-2-q-beta-test", sha)
+	verifyHere(t, fx, "fix-2-q-beta-test")
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (round 2 opens)\n%s", code, out)
 	}
@@ -114,8 +113,7 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 			t.Fatal(err)
 		}
 		gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: long change"+"\n\n"+"Jig-Slice: d")
-		sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-		verifyHere(t, fx, "d", sha)
+		verifyHere(t, fx, "d")
 	})
 	if strings.Contains(out, "filler line") || strings.Contains(out, "  diff: |") {
 		t.Errorf("a long delta's context prints the diff\n%s", out)

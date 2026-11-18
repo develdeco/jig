@@ -169,10 +169,10 @@ func (h *handler) verificationFindings() []finding {
 		switch r.State {
 		case phase.VerifyNotVerified:
 			f.text = fmt.Sprintf("commit %s for slice %s is not verified", sha, r.Slice)
-			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s --wait`", h.w.Ticket, r.Slice)
+			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
 		case phase.VerifyStale:
 			f.text = fmt.Sprintf("verification of %s for slice %s is stale: its worker is gone", sha, r.Slice)
-			f.hint = fmt.Sprintf("run it again with `jig verify %s --slice %s --wait`", h.w.Ticket, r.Slice)
+			f.hint = fmt.Sprintf("run it again with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
 		case phase.VerifyFailed:
 			f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
 		default:

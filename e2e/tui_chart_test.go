@@ -251,7 +251,7 @@ func TestTUIChartScreenDetailsTheTicketUnderTheCursor(t *testing.T) {
 	// The subagent runs jig verify and it lands: the hold is over, so the
 	// Detail panel no longer says it (the Activity panel keeps the history of
 	// it).
-	if res := sub.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := sub.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	if screen = screens.until("1 of 4 green"); strings.Contains(detailPanelOf(screen), "held at its stop") {

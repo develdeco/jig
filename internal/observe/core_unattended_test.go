@@ -21,7 +21,7 @@ func TestStopHoldsAnUnattendedSessionBackOncePerFinding(t *testing.T) {
 
 	first := r.handle(r.ev(KindStop))
 	if !strings.Contains(first.Block, "unattended") || !strings.Contains(first.Block, "commit "+sha[:12]+" for slice a is not verified") ||
-		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" --slice a --wait") {
+		!strings.Contains(first.Block, "jig verify "+r.fx.Ticket+" --slice a") {
 		t.Fatalf("Block = %q, want the reason with the commit that has no result and how to verify it", first.Block)
 	}
 	delivered := r.ledgerOf(journal.EventNoteDelivered)

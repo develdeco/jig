@@ -95,7 +95,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	if want := "commit " + sha[:12] + " for slice a is not verified"; !strings.Contains(stop.SystemMessage, want) || stop.Decision != "" {
 		t.Errorf("Stop = %+v, want a message saying %q and no refusal", stop, want)
 	}
-	if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 
@@ -122,7 +122,7 @@ func TestHooksDriveVerify(t *testing.T) {
 	}
 
 	// The session verifies the second commit too, and the journal says so.
-	if res := h.Verify(fx.Ticket, sha2, "c"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := h.Verify(fx.Ticket, "c"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 
@@ -219,7 +219,7 @@ func TestSubagentStopHoldsOnlyTheClaimHolder(t *testing.T) {
 		t.Errorf("SubagentStop while continuing = %+v, want a message and no second refusal for the same fact", again)
 	}
 
-	if res := sub.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+	if res := sub.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 

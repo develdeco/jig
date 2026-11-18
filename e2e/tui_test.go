@@ -157,8 +157,8 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	func() {
 		verifySlots <- struct{}{}
 		defer func() { <-verifySlots }()
-		sha := h.CommitScenario("a", 1)
-		if res := h.Verify(fx.Ticket, sha, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		h.CommitScenario("a", 1)
+		if res := h.Verify(fx.Ticket, "a"); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 			t.Fatalf("jig verify a exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 		}
 		screens.untilWithin(verifyWait, "1 of 4 green")
@@ -190,7 +190,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		attempt int
 	}{{"b", 2}, {"c", 2}, {"d", 1}} {
 		last = h.CommitScenario(s.slice, s.attempt)
-		if res := h.Verify(fx.Ticket, last, s.slice); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+		if res := h.Verify(fx.Ticket, s.slice); res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
 		}
 	}
@@ -252,7 +252,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("\x7f")
 	screens.press("\x1b[A")
 	screens.press("\r")
-	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "fix budget 0 of 3 rounds used")
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
 	screens.press("\x7f")

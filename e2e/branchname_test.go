@@ -323,7 +323,7 @@ func TestPublishBodyTargetsRecordedName(t *testing.T) {
 		defer func() { <-verifySlots }()
 		prove := func(slice string, attempt int) {
 			sha = h.CommitScenario(slice, attempt)
-			res := h.Verify(fx.Ticket, sha, slice)
+			res := h.Verify(fx.Ticket, slice)
 			if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 				t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
 			}

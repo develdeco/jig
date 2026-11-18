@@ -1,10 +1,6 @@
 package verify
 
 import (
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,10 +10,10 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// TestRunRecordsPendingBeforeItDoesAnything pins "pending first": when the
-// oracle starts, the pending line is already in the journal and the slice is
-// not yet green.
-func TestRunRecordsPendingBeforeItDoesAnything(t *testing.T) {
+// TestRunWritesNothingBeforeTheCommandEnds: nothing is pending while a
+// foreground command runs, so when the oracle starts the journal holds no
+// line and the slice is not yet green.
+func TestRunWritesNothingBeforeTheCommandEnds(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, fixture.Opts{})
 	sha := r.fixClamp()
@@ -31,8 +27,8 @@ func TestRunRecordsPendingBeforeItDoesAnything(t *testing.T) {
 	if _, err := Run(r.deps, r.request("a", sha)); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if want := []string{"verify-pending"}; !reflect.DeepEqual(atOracle, want) {
-		t.Errorf("journal when the oracle started = %v, want %v", atOracle, want)
+	if len(atOracle) != 0 {
+		t.Errorf("journal when the oracle started = %v, want no line: nothing is pending", atOracle)
 	}
 	if stateAtOracle != "queued" {
 		t.Errorf("slice state when the oracle started = %q, want it untouched (queued)", stateAtOracle)
@@ -98,52 +94,6 @@ func TestRunMovesTheSliceStateAsTheDesignSays(t *testing.T) {
 	}
 }
 
-// TestAnOlderCommitFinishingLastLeavesTheNewerOnesState: workers finish in
-// any order. When the run of an older commit of a slice ends after a newer
-// commit's, the slice keeps the state the newer one gave it, pass or fail.
-func TestAnOlderCommitFinishingLastLeavesTheNewerOnesState(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name       string
-		newerFails bool
-		olderFails bool
-		want       string
-	}{
-		{"an older failure after a newer pass leaves it green", false, true, "green"},
-		{"an older pass after a newer failure leaves it building", true, false, "building"},
-	}
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			r := newRig(t, fixture.Opts{})
-			older := r.fixClamp()
-			newer := r.commit("a", "a: and a note", map[string]string{"alpha/NOTE.txt": "x\n"})
-			setOutcome := func(fail bool) {
-				r.oracle.err, r.oracle.out = nil, ""
-				if fail {
-					r.oracle.err, r.oracle.out = errExit, "FAIL"
-				}
-			}
-			setOutcome(c.newerFails)
-			if _, err := Run(r.deps, r.request("a", newer)); err != nil {
-				t.Fatalf("Run newer: %v", err)
-			}
-			setOutcome(c.olderFails)
-			if _, err := Run(r.deps, r.request("a", older)); err != nil {
-				t.Fatalf("Run older: %v", err)
-			}
-			got := r.state("a")
-			if got.State != c.want {
-				t.Errorf("state after the older commit finished last = %q, want %q (the newer commit's)", got.State, c.want)
-			}
-			if got.Attempts != 2 {
-				t.Errorf("attempts = %d, want 2: both runs count", got.Attempts)
-			}
-		})
-	}
-}
-
 // TestTheSliceIsGreenBeforeTheVerifiedLineSaysSo pins the order of a pass's
 // last two writes: a reader that the verified line wakes (jig events, the
 // TUI, a hook) reads the slice's state next, so the state must already be
@@ -191,89 +141,4 @@ func TestTheSliceIsGreenBeforeTheVerifiedLineSaysSo(t *testing.T) {
 	if got, ok := stateAt[at.UTC()]; !ok || got != "green" {
 		t.Errorf("slice a when its verified line was written = %q (stamped %v), want green", got, ok)
 	}
-}
-
-// TestAPassStoppedBeforeItsVerifiedLineIsFinished: a run that stopped between
-// marking the slice green and writing the verified line leaves a green slice
-// and an oracle pass line with no verified line. The next jig verify of the
-// commit writes that line, once, with the pass's attempt and session; a slice
-// that is not green is left alone.
-func TestAPassStoppedBeforeItsVerifiedLineIsFinished(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, fixture.Opts{})
-	sha := r.fixClamp()
-	if res, err := Run(r.deps, r.request("a", sha)); err != nil || res.State != journal.VerifyPass {
-		t.Fatalf("Run = %+v, %v, want a pass", res, err)
-	}
-	// The run that stopped: the same journal without its verified line.
-	path := filepath.Join(r.st.TicketDir(r.fx.Ticket), "journal.ndjson")
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var kept []string
-	for _, line := range strings.SplitAfter(string(body), "\n") {
-		if !strings.Contains(line, `"event":"verified"`) {
-			kept = append(kept, line)
-		}
-	}
-	if err := os.WriteFile(path, []byte(strings.Join(kept, "")), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	verifiedLines := func() []journal.Line {
-		var out []journal.Line
-		for _, l := range r.lines() {
-			if l.Event == journal.EventVerified && l.Commit == sha && l.Slice == "a" {
-				out = append(out, l)
-			}
-		}
-		return out
-	}
-
-	// A slice that is not green is not this case: nothing is written.
-	if err := r.st.WriteSliceState(r.fx.Ticket, "a", store.SliceState{State: "building", Attempts: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing {
-		t.Fatalf("Run on a building slice = %+v, %v, want the existing pass", res, err)
-	}
-	if got := verifiedLines(); len(got) != 0 {
-		t.Fatalf("verified lines with the slice building = %+v, want none", got)
-	}
-
-	// The green slice: the next jig verify finishes the pass, once.
-	if err := r.st.WriteSliceState(r.fx.Ticket, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if res, err := Run(r.deps, Request{Ticket: r.fx.Ticket, Slice: "a", SHA: sha, Session: "s-2"}); err != nil || !res.Existing || res.State != journal.VerifyPass {
-		t.Fatalf("Run on the finished pass = %+v, %v, want the existing pass", res, err)
-	}
-	got := verifiedLines()
-	if len(got) != 1 || got[0].Attempt != 1 || got[0].Session != "s-1" || got[0].Agent != "agent-1" {
-		t.Errorf("verified lines = %+v, want one, of attempt 1 by s-1 and agent-1 (the pass's)", got)
-	}
-	if r.state("a").State != "green" {
-		t.Errorf("slice a = %+v, want it still green", r.state("a"))
-	}
-}
-
-// TestThePendingLineNamesTheCommit: the verify-pending line carries the
-// commit's subject, so a reader of the journal can say which change is being
-// verified.
-func TestThePendingLineNamesTheCommit(t *testing.T) {
-	t.Parallel()
-	r := newRig(t, fixture.Opts{})
-	sha := r.fixClamp()
-	if _, err := Run(r.deps, r.request("a", sha)); err != nil {
-		t.Fatal(err)
-	}
-	for _, l := range r.lines() {
-		if l.Event == journal.EventVerifyPending && l.Commit == sha {
-			if l.Summary != "fix Clamp" {
-				t.Errorf("verify-pending summary = %q, want the commit's subject", l.Summary)
-			}
-			return
-		}
-	}
-	t.Fatal("no verify-pending line")
 }

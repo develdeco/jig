@@ -69,8 +69,7 @@ func buildQueuedSlice(t *testing.T, fx *fixture.Fixture, slice, file string) {
 		t.Fatal(err)
 	}
 	gitBuilder(t).Commit(fx.RepoDir, "build "+slice+"\n\n"+"Jig-Slice: "+slice)
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	verifyHere(t, fx, slice, sha)
+	verifyHere(t, fx, slice)
 }
 
 // TestGateQueuesAKeptNoteBeforeTheNextRoundOpens pins the point at which a

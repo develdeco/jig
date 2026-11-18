@@ -81,7 +81,7 @@ type builtOrchestrator struct {
 // oracle, and fails the test unless slice passed at sha.
 func verifyPasses(t *testing.T, h *fakeHarness, slice, sha string) {
 	t.Helper()
-	r := h.Jig("verify", "--wait")
+	r := h.Jig("verify")
 	if r.Code != 0 || !strings.Contains(r.Stdout, "slice: "+slice+"\n") || !strings.Contains(r.Stdout, "commit: "+sha) || !strings.Contains(r.Stdout, "state: pass") {
 		t.Fatalf("jig verify --wait in %s: exit %d, want slice %s to pass at %s\nstdout:\n%s\nstderr:\n%s", h.Clone, r.Code, slice, sha, r.Stdout, r.Stderr)
 	}

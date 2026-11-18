@@ -28,7 +28,7 @@ func derive(in VerifyInput) map[string]CommitVerification {
 
 func TestACommitWithNoLineIsNotVerified(t *testing.T) {
 	r := derive(VerifyInput{BranchKnown: true, Commits: []CommitRef{{shaA, "s"}}})["a"]
-	if r.State != VerifyNotVerified || r.Clear != "jig verify T-1 aaaaaaaaaaaa --slice s --wait" {
+	if r.State != VerifyNotVerified || r.Clear != "jig verify T-1 --slice s" {
 		t.Fatalf("%+v", r)
 	}
 }

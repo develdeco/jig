@@ -169,7 +169,7 @@ func journalPairs(lines []journal.Line) []CommitRef {
 func (in VerifyInput) judge(p CommitRef) CommitVerification {
 	v := journal.VerificationState(in.Lines, p.SHA, p.Slice)
 	row := CommitVerification{Slice: p.Slice, Commit: p.SHA, Attempt: v.Attempt}
-	rerun := "jig verify " + in.Ticket + " " + shortSHA(p.SHA) + " --slice " + p.Slice + " --wait"
+	rerun := "jig verify " + in.Ticket + " --slice " + p.Slice
 	switch v.State {
 	case journal.VerifyNone:
 		row.State, row.Clear = VerifyNotVerified, rerun
@@ -182,7 +182,7 @@ func (in VerifyInput) judge(p CommitRef) CommitVerification {
 		case journal.CauseStopped:
 			row.State, row.Clear = VerifyStopped, rerun
 		case journal.CauseTimeout:
-			row.State, row.Clear = VerifyTimedOut, rerun+" --rerun"
+			row.State, row.Clear = VerifyTimedOut, rerun
 		default:
 			row.State, row.Clear = VerifyFailed, "fix it and commit with the trailer Jig-Slice: "+p.Slice
 			row.FailLine = FailLine(v.Summary)

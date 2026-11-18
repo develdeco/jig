@@ -179,8 +179,7 @@ func changeBeta(t *testing.T, fx *fixture.Fixture) {
 		t.Fatal(err)
 	}
 	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: touch beta"+"\n\n"+"Jig-Slice: d")
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	verifyHere(t, fx, "d", sha)
+	verifyHere(t, fx, "d")
 }
 
 // reviewRoundResult opens the next round and writes res to a result file whose

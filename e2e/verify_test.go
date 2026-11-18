@@ -8,7 +8,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -74,7 +73,7 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	sha := h.CommitScenario("a", 1)
 	h.Push(branch)
 
-	res := h.Verify(fx.Ticket, sha, "a")
+	res := h.Verify(fx.Ticket, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
@@ -88,7 +87,7 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	for _, l := range lines {
 		kinds = append(kinds, l.Event)
 	}
-	if want := []string{"verify-pending", "oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
+	if want := []string{"oracle", "verified"}; !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("journal events = %v, want %v", kinds, want)
 	}
 	if oracle.Source != "jig" || oracle.Session != h.Session || oracle.Attempt != 1 || oracle.Command == "" || oracle.Seconds < 1 || oracle.Env != "" {
@@ -141,44 +140,31 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	}
 }
 
-// TestVerifyIdempotent: a second `jig verify` of a commit that has a
-// verification reports the existing one and adds nothing: no journal line, no
-// ledger line, no worker. --rerun is the way to run it again, as the slice's
-// next attempt.
-func TestVerifyIdempotent(t *testing.T) {
+// TestVerifyRunsAgainEveryTime: a second `jig verify` of a commit that has a
+// verification runs the oracle again, as the slice's next attempt: nothing
+// stands in its way, no existing answer, no lock, no pending line, and no
+// worker or ledger line is added by a foreground run.
+func TestVerifyRunsAgainEveryTime(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-idem")
+	h := newHarness(t, fx, env, "s-again")
 	branch := fx.Branch
 	h.Branch(branch)
 	sha := h.CommitScenario("a", 1)
-
-	first := h.Verify(fx.Ticket, sha, "a")
-	if first.Code != 0 || !strings.Contains(first.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", first.Code, first.Stdout, first.Stderr)
-	}
-	journalBefore := readJournal(t, fx, fx.Ticket)
 	ledgerBefore := readLedger(t, env)
 
-	second := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--wait")
-	if second.Code != 0 || !strings.Contains(second.Stdout, "existing: true") || !strings.Contains(second.Stdout, "state: pass") {
-		t.Fatalf("second jig verify exit = %d, want 0 and the existing pass\nstdout:\n%s\nstderr:\n%s", second.Code, second.Stdout, second.Stderr)
+	first := h.Verify(fx.Ticket, "a")
+	if first.Code != 0 || !strings.Contains(first.Stdout, "state: pass") || !strings.Contains(first.Stdout, "attempt: 1") {
+		t.Fatalf("jig verify exit = %d, want 0 and a first-attempt pass\nstdout:\n%s\nstderr:\n%s", first.Code, first.Stdout, first.Stderr)
+	}
+	second := h.Verify(fx.Ticket, "a")
+	if second.Code != 0 || !strings.Contains(second.Stdout, "attempt: 2") || strings.Contains(second.Stdout, "existing") {
+		t.Fatalf("second jig verify exit = %d, want a second attempt run again\nstdout:\n%s\nstderr:\n%s", second.Code, second.Stdout, second.Stderr)
 	}
 	// The slice and the commit come from the commit's trailer and HEAD alike.
 	third := h.Jig("verify")
-	if third.Code != 0 || !strings.Contains(third.Stdout, "existing: true") {
-		t.Fatalf("bare jig verify exit = %d, want the existing pass of HEAD\nstdout:\n%s\nstderr:\n%s", third.Code, third.Stdout, third.Stderr)
-	}
-	if got := readJournal(t, fx, fx.Ticket); !reflect.DeepEqual(got, journalBefore) {
-		t.Errorf("the journal changed on a repeat: %d lines, were %d", len(got), len(journalBefore))
-	}
-	if got := readLedger(t, env); !reflect.DeepEqual(got, ledgerBefore) {
-		t.Errorf("the ledger changed on a repeat: %+v", got)
-	}
-
-	rerun := h.Jig("verify", fx.Ticket, sha, "--slice", "a", "--rerun", "--wait")
-	if rerun.Code != 0 || !strings.Contains(rerun.Stdout, "attempt: 2") || strings.Contains(rerun.Stdout, "existing: true") {
-		t.Fatalf("jig verify --rerun --wait exit = %d, want a second attempt\nstdout:\n%s\nstderr:\n%s", rerun.Code, rerun.Stdout, rerun.Stderr)
+	if third.Code != 0 || !strings.Contains(third.Stdout, "attempt: 3") || !strings.Contains(third.Stdout, "commit: "+sha) {
+		t.Fatalf("bare jig verify exit = %d, want a third attempt at HEAD\nstdout:\n%s\nstderr:\n%s", third.Code, third.Stdout, third.Stderr)
 	}
 	var attempts []int
 	for _, l := range readJournal(t, fx, fx.Ticket) {
@@ -186,15 +172,18 @@ func TestVerifyIdempotent(t *testing.T) {
 			attempts = append(attempts, l.Attempt)
 		}
 	}
-	if !reflect.DeepEqual(attempts, []int{1, 2}) {
-		t.Errorf("oracle attempts of slice a = %v, want [1 2]", attempts)
+	if !reflect.DeepEqual(attempts, []int{1, 2, 3}) {
+		t.Errorf("oracle attempts of slice a = %v, want [1 2 3]", attempts)
+	}
+	if got := readLedger(t, env); !reflect.DeepEqual(got, ledgerBefore) {
+		t.Errorf("the ledger changed: %+v, was %+v", got, ledgerBefore)
 	}
 }
 
 // TestVerifyFailPersistsSignature: slice b's first attempt, made without the
 // fix slice a brings, fails its test. `jig verify` exits 1, journals the
 // failed oracle line with the flattened tail of the output and the stall
-// signature built from it, the full tail is in the run's log, no verified
+// signature built from it, the output reached the stream, no verified
 // line is written, and the slice is building.
 func TestVerifyFailPersistsSignature(t *testing.T) {
 	t.Parallel()
@@ -204,7 +193,7 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 	h.Branch(branch)
 	sha := h.CommitScenario("b", 1)
 
-	res := h.Verify(fx.Ticket, sha, "b")
+	res := h.Verify(fx.Ticket, "b")
 	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
 		t.Fatalf("jig verify exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
@@ -237,16 +226,10 @@ func TestVerifyFailPersistsSignature(t *testing.T) {
 	if ss, err := st.ReadSliceState(fx.Ticket, "b"); err != nil || ss.State != "building" || ss.Attempts != 1 {
 		t.Errorf("slice b state = %+v, %v, want building after 1 attempt", ss, err)
 	}
-	logs := filepath.Join(env.home, "logs", "verify")
-	var logBody string
-	_ = filepath.WalkDir(logs, func(path string, d os.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".log") {
-			logBody += string(readFileOrFatal(t, path))
-		}
-		return nil
-	})
-	if !strings.Contains(logBody, "the oracle failed") || !strings.Contains(logBody, "FAIL") {
-		t.Errorf("the run's log under %s lacks the oracle's output tail:\n%s", logs, logBody)
+	// The output tail is on the stream the command wrote it to, with the
+	// report after it.
+	if !strings.Contains(res.Stdout, "FAIL") {
+		t.Errorf("the output of the run lacks the oracle's output tail:\n%s", res.Stdout)
 	}
 }
 
@@ -295,12 +278,12 @@ func TestVerifyRunsAnOracleWrittenForSh(t *testing.T) {
 	h.Branch(fx.Branch)
 
 	unfixed := h.Commit("a", "a: a note, not the fix", map[string]string{"notes/a.txt": "not yet"})
-	res := h.Verify(fx.Ticket, unfixed, "a")
+	res := h.Verify(fx.Ticket, "a")
 	if res.Code != 1 || !strings.Contains(res.Stdout, "state: fail") {
 		t.Fatalf("jig verify --wait of the unfixed commit exit = %d, want 1 and a failure\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	fixed := h.CommitScenario("a", 1)
-	res = h.Verify(fx.Ticket, fixed, "a")
+	res = h.Verify(fx.Ticket, "a")
 	if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 		t.Fatalf("jig verify --wait of the fix exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}

@@ -3,17 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -23,9 +19,7 @@ import (
 // The usage lines of `jig verify`'s flags: the help row and the FlagSet carry
 // the same text, which the help parity test compares.
 const (
-	verifySliceUsage   = "slice to verify (default: the commit's Jig-Slice trailer, then the slice your session claimed)"
-	verifyWaitUsage    = "run the oracle here and wait for its outcome"
-	verifyRerunUsage   = "verify again a commit that already has a verification"
+	verifySliceUsage   = "slice to verify (default: HEAD's Jig-Slice trailer, then the slice your session claimed)"
 	verifySessionUsage = "harness session id recorded on the lines (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 	verifyStoreUsage   = "explicit store path"
 	verifyProjectUsage = "project name, resolved via the machine mapping"
@@ -38,10 +32,8 @@ const verifySliceTrailer = "Jig-Slice"
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"verify", "run a slice's oracle on a commit in a detached worktree, recording the outcome", []flagSpec{
+		Spec: cmdSpec{"verify", "run a slice's oracle in this worktree, in the foreground, and record the run (exit code: the command's own, 125 when jig failed before it started)", []flagSpec{
 			{"slice", verifySliceUsage, false},
-			{"wait", verifyWaitUsage, false},
-			{"rerun", verifyRerunUsage, false},
 			{"session", verifySessionUsage, false},
 			{"store", verifyStoreUsage, false},
 			{"project", verifyProjectUsage, false},
@@ -56,22 +48,21 @@ func init() {
 // verifyOpts is what `jig verify` was asked, after its flags and positionals
 // are parsed.
 type verifyOpts struct {
-	ticket, rev            string
+	ticket                 string
 	slice, session         string
 	storeFlag, projectFlag string
-	wait, rerun            bool
 }
 
-// cmdVerify implements `jig verify [T] [sha] [--slice S] [--wait] [--rerun]
-// [--session ID]`: run slice S's oracle on commit sha of ticket T in a
-// detached worktree and record the outcome in the ticket's journal. Without
-// --wait the run is in this process, and starts nothing; the ticket defaults
-// to the one the clone's branch is for, the commit to HEAD, the slice to the
-// commit's Jig-Slice trailer and then the slice the session claimed.
+// cmdVerify implements `jig verify [T] [--slice S] [--session ID]`: run slice
+// S's oracle in this worktree, in the foreground and the caller's
+// environment, stream its output, and record the run in the ticket's journal.
+// jig starts nothing and waits for nothing: the exit code is the command's
+// own, and 125 when jig failed before the command started. The ticket
+// defaults to the one the branch is for, the slice to HEAD's Jig-Slice
+// trailer and then the slice the session claimed.
 func cmdVerify(e env, args []string, stdout io.Writer) int {
-	// The positionals come first (`jig verify T-1 <sha> --slice a`) or last;
-	// the flag package stops at the first of them, so the leading ones are
-	// taken out here.
+	// The positional comes first (`jig verify T-1 --slice a`) or last; the flag
+	// package stops at the first flag, so the leading ones are taken out here.
 	var pos []string
 	rest := args
 	for len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
@@ -82,68 +73,72 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "verify")
 	var o verifyOpts
 	fs.StringVar(&o.slice, "slice", "", verifySliceUsage)
-	fs.BoolVar(&o.wait, "wait", false, verifyWaitUsage)
-	fs.BoolVar(&o.rerun, "rerun", false, verifyRerunUsage)
 	fs.StringVar(&o.session, "session", "", verifySessionUsage)
 	fs.StringVar(&o.storeFlag, "store", "", verifyStoreUsage)
 	fs.StringVar(&o.projectFlag, "project", "", verifyProjectUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
 		return 0
 	} else if err != nil {
-		return renderErr(stdout, err)
+		return unrun(stdout, err)
 	}
 	pos = append(pos, fs.Args()...)
 
 	var err error
-	if o.ticket, o.rev, err = splitVerifyArgs(pos); err != nil {
-		return renderErr(stdout, err)
+	if o.ticket, err = splitVerifyArgs(pos); err != nil {
+		return unrun(stdout, err)
 	}
 	if o.session == "" {
 		o.session = envSession(e)
 	}
 	if o.storeFlag, err = e.abs(o.storeFlag); err != nil {
-		return renderErr(stdout, err)
+		return unrun(stdout, err)
 	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, o.projectFlag, o.storeFlag, stdout)
 	if err != nil {
-		return renderErr(stdout, err)
+		return unrun(stdout, err)
 	}
 	d, req, err := resolveVerify(e, o, st, cfg, mp, jigHome, stdout)
 	if err != nil {
-		return renderErr(stdout, err)
+		return unrun(stdout, err)
 	}
-
-	return runVerifyWait(e, d, req, stdout)
+	return runVerify(d, req, stdout)
 }
 
-// splitVerifyArgs tells the positionals apart: a ticket id (a key and a
-// number, which is all a ticket's name is) and a revision (anything else a
-// clone can resolve to a commit). Each is optional, and neither can be given
-// twice.
-func splitVerifyArgs(pos []string) (ticket, rev string, err error) {
+// unrun reports an error of jig's own, before the command started, and is the
+// exit code of such a run.
+func unrun(stdout io.Writer, err error) int {
+	renderErr(stdout, err)
+	return verify.ExitUnrun
+}
+
+// splitVerifyArgs reads the positionals: the ticket id (a key and a number,
+// which is all a ticket's name is), optional and given once. A run is of the
+// worktree's HEAD, so a commit is not a positional.
+func splitVerifyArgs(pos []string) (ticket string, err error) {
 	for _, p := range pos {
 		switch {
-		case store.BranchLeadID(p) == p:
-			if ticket != "" {
-				return "", "", &axi.Error{Msg: fmt.Sprintf("jig verify takes one ticket, got %s and %s", ticket, p), Code: "VALIDATION_ERROR"}
+		case strings.HasPrefix(p, "-"):
+			return "", &axi.Error{Msg: fmt.Sprintf("%q is not a ticket", p), Code: "VALIDATION_ERROR"}
+		case store.BranchLeadID(p) != p:
+			return "", &axi.Error{
+				Msg:  fmt.Sprintf("%q is not a ticket: jig verify runs the worktree's HEAD, so it takes no commit", p),
+				Code: "VALIDATION_ERROR",
+				Help: []string{"Check the commit out and run `jig verify` in it"},
 			}
-			ticket = p
-		default:
-			if rev != "" {
-				return "", "", &axi.Error{Msg: fmt.Sprintf("jig verify takes one commit, got %s and %s", rev, p), Code: "VALIDATION_ERROR"}
-			}
-			rev = p
+		case ticket != "":
+			return "", &axi.Error{Msg: fmt.Sprintf("jig verify takes one ticket, got %s and %s", ticket, p), Code: "VALIDATION_ERROR"}
 		}
+		ticket = p
 	}
-	return ticket, rev, nil
+	return ticket, nil
 }
 
 // resolveVerify turns the parsed command into what verify runs on: the
-// clone the commit is checked out from, the ticket, the commit, and the
-// slice. Each has a default so the common call is bare `jig verify`. Where
-// the work is comes from locate, as for `jig here`: the repo and its clone,
-// the ticket the branch binds, the session and the slice it claimed.
+// worktree the command runs in, the ticket and the slice. Each has a default
+// so the common call is bare `jig verify`. Where the work is comes from
+// locate, as for `jig here`: the repo, the ticket the branch binds, the
+// session and the slice it claimed.
 func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string, stdout io.Writer) (verify.Deps, verify.Request, error) {
 	none := func(err error) (verify.Deps, verify.Request, error) { return verify.Deps{}, verify.Request{}, err }
 	cwd, err := e.getwd()
@@ -180,23 +175,15 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	if err != nil {
 		return none(err)
 	}
-	clone, workDir, err := verifyClone(e.memo, cwd, where.RepoDir, mp.Clones[repoName])
+	dir, err := verifyDir(e.memo, cwd)
 	if err != nil {
 		return none(err)
 	}
-
-	rev := o.rev
-	if rev == "" {
-		rev = "HEAD"
-	}
-	if strings.HasPrefix(rev, "-") {
-		return none(&axi.Error{Msg: fmt.Sprintf("%q is not a commit", rev), Code: "VALIDATION_ERROR"})
-	}
-	sha, err := gitx.RevParse(workDir, rev+"^{commit}")
+	sha, err := gitx.RevParse(dir, "HEAD")
 	if err != nil {
-		return none(&axi.Error{Msg: fmt.Sprintf("commit %s is not in %s", rev, workDir), Code: "VALIDATION_ERROR"})
+		return none(&axi.Error{Msg: fmt.Sprintf("%s has no commit to verify", dir), Code: "VALIDATION_ERROR"})
 	}
-	slice, err := verifySlice(st, ticket, clone, sha, o, where.Slice)
+	slice, err := verifySlice(st, ticket, dir, sha, o, where.Slice)
 	if err != nil {
 		return none(err)
 	}
@@ -205,10 +192,10 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	}
 
 	d := verify.Deps{
-		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: clone, Repo: repoName, Target: target,
+		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: dir, Repo: repoName, Target: target,
 		Now: e.now,
 	}
-	return d, verify.Request{Ticket: ticket, Slice: slice, SHA: sha, Session: o.session, Rerun: o.rerun}, nil
+	return d, verify.Request{Ticket: ticket, Slice: slice, Session: o.session}, nil
 }
 
 // verifyRepo is the repo the commit is in, by its name in the project, and its
@@ -272,40 +259,22 @@ func verifySliceRepo(st *store.Store, cfg project.Config, mp project.MachineProj
 	return nil
 }
 
-// verifyClone finds the operator's clone to check the commit out from and the
-// directory to resolve the commit in. The clone is the one locate found the
-// working directory in, else the
-// project's mapped clone of the repo, else the repository around the working
-// directory. The directory is where the command runs when that is a checkout
-// of the same repository (a linked worktree has a HEAD of its own), else the
-// clone itself.
-func verifyClone(m *gitx.Memo, cwd, located, mapped string) (clone, workDir string, err error) {
-	switch {
-	case located != "":
-		clone = located
-	case mapped != "":
-		clone = mapped
-	default:
-		if clone, err = m.TopLevel(cwd); err != nil {
-			return "", "", &axi.Error{
-				Msg:  "no clone of the project's repo is known on this machine, and this directory is not in a git repository",
-				Code: "VALIDATION_ERROR",
-				Help: []string{"Run `jig verify` from inside the repo's clone"},
-			}
+// verifyDir is the worktree the run is of: the root of the checkout the
+// command is run from. The builder's own worktree is where its commits are,
+// so it is where the oracle runs.
+func verifyDir(m *gitx.Memo, cwd string) (string, error) {
+	top, err := m.TopLevel(cwd)
+	if err != nil {
+		return "", &axi.Error{
+			Msg:  "this directory is not in a git worktree, so there is no commit to verify",
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Run `jig verify` from inside the worktree the slice's work is committed in"},
 		}
 	}
-	workDir = clone
-	if top, terr := m.TopLevel(cwd); terr == nil {
-		theirs, e1 := m.CommonDir(top)
-		ours, e2 := m.CommonDir(clone)
-		if e1 == nil && e2 == nil && gitx.SameDir(theirs, ours) {
-			workDir = top
-		}
-	}
-	return clone, workDir, nil
+	return top, nil
 }
 
-// verifySlice picks the slice to verify: the --slice flag, else the commit's
+// verifySlice picks the slice to verify: the --slice flag, else HEAD's
 // Jig-Slice trailer, else the one locate found for the session (JIG_SLICE, or
 // the slice its latest claim holds). A trailer or a located slice that names a
 // slice the ticket does not have is passed over; a flag that does is refused,
@@ -346,16 +315,15 @@ func verifySlice(st *store.Store, ticket, clone, sha string, o verifyOpts, locat
 	}
 }
 
-// verifyReport is what a `jig verify` call prints, whichever way it ran.
+// verifyReport is what a `jig verify` call prints after the command's output.
 type verifyReport struct {
 	ticket, slice, sha, state string
-	attempt, seconds, pid     int
-	existing                  bool
+	attempt, seconds          int
+	covered                   bool
+	uncovered                 string
 	command, env              string
 	summary, signature        string
-	log                       string
-	pushErr, warning          string
-	light                     string
+	pushErr                   string
 }
 
 // blocks renders the report as the verify block, a warning block when there
@@ -369,133 +337,60 @@ func (r verifyReport) blocks(help string) []string {
 	if r.attempt > 0 {
 		kv = append(kv, [2]string{"attempt", strconv.Itoa(r.attempt)})
 	}
-	if r.existing {
-		kv = append(kv, [2]string{"existing", "true"})
-	}
-	if r.pid > 0 {
-		kv = append(kv, [2]string{"pid", strconv.Itoa(r.pid)})
-	}
 	if r.seconds > 0 {
 		kv = append(kv, [2]string{"seconds", strconv.Itoa(r.seconds)})
 	}
-	for _, f := range [][2]string{{"pass", r.light}, {"command", r.command}, {"env", r.env}, {"summary", r.summary}, {"signature", r.signature}, {"log", r.log}} {
+	covers := "no"
+	if r.covered {
+		covers = "yes"
+	}
+	kv = append(kv, [2]string{"covers", covers})
+	for _, f := range [][2]string{{"uncovered", r.uncovered}, {"command", r.command}, {"env", r.env}, {"summary", r.summary}, {"signature", r.signature}} {
 		if f[1] != "" {
 			kv = append(kv, f)
 		}
 	}
 	blocks := []string{axi.KV("verify", kv)}
-	var warn [][2]string
-	if r.warning != "" {
-		warn = append(warn, [2]string{"message", r.warning})
-	}
 	if r.pushErr != "" {
-		warn = append(warn, [2]string{"message", "the verification is recorded here but could not be pushed to the store (the next checkpoint will): " + r.pushErr})
-	}
-	if len(warn) > 0 {
-		blocks = append(blocks, axi.KV("warning", warn))
+		blocks = append(blocks, axi.KV("warning", [][2]string{{"message", "the run is recorded here but could not be pushed to the store (the next checkpoint will): " + r.pushErr}}))
 	}
 	return append(blocks, axi.Help(help))
 }
 
-// exitCode is 1 for a verification that failed or could not run, else 0.
-func (r verifyReport) exitCode() int {
-	if r.state == journal.VerifyFail || r.state == journal.VerifyError {
-		return 1
-	}
-	return 0
-}
-
-// verifyReportOf is the report of a verification that ran here.
-func verifyReportOf(res verify.Result, log string) verifyReport {
+// verifyReportOf is the report of a run.
+func verifyReportOf(res verify.Result) verifyReport {
 	return verifyReport{
 		ticket: res.Ticket, slice: res.Slice, sha: res.SHA, state: res.State, attempt: res.Attempt, seconds: res.Seconds,
-		existing: res.Existing, command: res.Command, env: res.Env, summary: res.Summary, signature: res.Signature,
-		log: log, pushErr: res.PushErr, light: lightWords(res.Ran, res.ReusedFrom),
+		covered: res.Covered, uncovered: res.Uncovered, command: res.Command, env: res.Env, summary: res.Summary, signature: res.Signature,
+		pushErr: res.PushErr,
 	}
 }
 
-// runVerifyWait verifies in this process and waits for the outcome: it runs
-// the oracle itself, or, when a worker is already on the commit, waits for that
-// worker's. The failed oracle's output tail is in the log it names.
-func runVerifyWait(e env, d verify.Deps, req verify.Request, stdout io.Writer) int {
-	log, logFile := openVerifyLog(d, req)
-	if logFile != nil {
-		defer logFile.Close()
-		d.Log = logFile
-	}
+// runVerify runs the oracle in this process, in the foreground: the command's
+// output goes to stdout as it is produced, the report follows it, and the
+// exit code is the command's own (125 when it never started, 1 for a run jig
+// stopped).
+func runVerify(d verify.Deps, req verify.Request, stdout io.Writer) int {
+	// A git hook that started jig leaves the repo variables in its
+	// environment; main cleared them for this process already, and this keeps
+	// the run honest if it is ever called in-process.
+	gitx.ClearRepoEnv()
+	d.Out = stdout
 	res, err := verify.Run(d, req)
 	if err != nil {
-		return renderErr(stdout, err)
+		return unrun(stdout, err)
 	}
-	if res.Existing && res.State == journal.VerifyPending {
-		res = waitForVerification(e, d, res)
-	}
-	rep := verifyReportOf(res, log)
+	rep := verifyReportOf(res)
 	help := fmt.Sprintf("Run `jig status %s` to see the slice states", res.Ticket)
-	switch {
-	case res.State == journal.VerifyPending:
-		help = fmt.Sprintf("Still pending: a worker is on it. Run `jig verify %s %s --slice %s --wait` to keep waiting", res.Ticket, shortSHA(res.SHA), res.Slice)
-	case res.Existing:
-		help = fmt.Sprintf("Run `jig verify %s %s --slice %s --rerun` to verify it again", res.Ticket, shortSHA(res.SHA), res.Slice)
+	if !res.Covered && res.Ran {
+		help = "This run covers no commit (" + res.Uncovered + "): commit or discard the changes, then run `jig verify` again"
 	}
 	axi.Render(stdout, rep.blocks(help)...)
-	return rep.exitCode()
-}
-
-// openVerifyLog opens the verification's log for append and returns its path,
-// or "" and nil when it cannot (the log is for the person; the verification
-// does not depend on it).
-func openVerifyLog(d verify.Deps, req verify.Request) (string, *os.File) {
-	sha, err := gitx.RevParse(d.Clone, req.SHA+"^{commit}")
-	if err != nil {
-		return "", nil
+	switch {
+	case res.State == journal.VerifyError:
+		return verify.ExitUnrun
+	case !res.Ran || res.State == "":
+		return 1
 	}
-	path, err := verify.LogPath(d, req.Ticket, sha, req.Slice)
-	if err != nil || os.MkdirAll(filepath.Dir(path), 0o755) != nil {
-		return "", nil
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return "", nil
-	}
-	return path, f
-}
-
-// verifyPoll is how often waitForVerification looks at the journal.
-const verifyPoll = 500 * time.Millisecond
-
-// waitForVerification waits for the worker that holds a verification to
-// record its outcome: it reads the journal until the verification is no
-// longer pending, the interrupt cancels e.ctx, or the longest an oracle may
-// run (the clone's manifest timeout, else the default) and a grace have
-// passed. The result is the outcome it found, or the pending result it was
-// given.
-func waitForVerification(e env, d verify.Deps, res verify.Result) verify.Result {
-	limit := manifest.DefaultOracleLimit
-	if m, err := manifest.Resolve(d.Clone); err == nil {
-		limit = m.OracleLimit()
-	}
-	deadline := e.now().Add(limit + 5*time.Minute)
-	for {
-		if lines, err := journal.Read(d.Store, res.Ticket); err == nil {
-			if cur := journal.VerificationState(lines, res.SHA, res.Slice); cur.State != journal.VerifyPending && cur.State != journal.VerifyNone {
-				res.State, res.Attempt, res.Seconds, res.Summary = cur.State, cur.Attempt, cur.Seconds, cur.Summary
-				return res
-			}
-		}
-		if e.now().After(deadline) {
-			return res
-		}
-		select {
-		case <-e.ctx.Done():
-			return res
-		case <-time.After(verifyPoll):
-		}
-	}
-}
-
-// lightWords is how a light pass is told: "lint only, reusing <sha>", "" when
-// the verification ran the slice's own oracle.
-func lightWords(ran, reusedFrom string) string {
-	return journal.Verification{State: journal.VerifyPass, Ran: ran, ReusedFrom: reusedFrom}.LightWords()
+	return res.Code
 }

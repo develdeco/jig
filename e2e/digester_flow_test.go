@@ -267,7 +267,7 @@ func TestDigesterFlow(t *testing.T) {
 		if between != nil {
 			between(sha)
 		}
-		res := h.Verify(ticket, sha, slice)
+		res := h.Verify(ticket, slice)
 		f.say("jig verify: slice %s at %s exit %d", slice, sha[:12], res.Code)
 		return sha
 	}
@@ -278,7 +278,7 @@ func TestDigesterFlow(t *testing.T) {
 		f.hook(h.Session, "Stop", stop)
 		blocked := decodeHook(t, stop)
 		if blocked.Decision != "block" || !strings.Contains(blocked.Reason, "commit "+sha[:12]+" for slice a is not verified") ||
-			!strings.Contains(blocked.Reason, "jig verify "+ticket+" --slice a --wait") || !strings.Contains(blocked.Reason, "unattended") {
+			!strings.Contains(blocked.Reason, "jig verify "+ticket+" --slice a") || !strings.Contains(blocked.Reason, "unattended") {
 			t.Fatalf("Stop with an unverified commit = %+v, want a block naming %s and the command that verifies it", blocked, sha[:12])
 		}
 		// Told once for that fact: a session that stops again because of it,
@@ -482,7 +482,7 @@ func TestDigesterFlow(t *testing.T) {
 		f.t.Logf("    %-8s %-20s %-3s %s", ev.Src, ev.Event, ev.Slice, ev.Outcome)
 	}
 	want := []string{
-		journal.EventClaim, journal.EventVerifyPending, journal.EventOracle, journal.EventVerified,
+		journal.EventClaim, journal.EventOracle, journal.EventVerified,
 		journal.EventGateOpen, journal.EventGateClean, journal.EventPrBody, journal.EventPublishApproved,
 		journal.EventPr, journal.EventPublishDone,
 	}

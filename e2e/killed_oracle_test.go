@@ -66,7 +66,7 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 				pids := filepath.Join(t.TempDir(), "pids")
 				env = env.with("ORACLE_PIDS=" + pids)
 				h.Branch(fx.Branch)
-				sha := h.Commit("a", "slow oracle", map[string]string{
+				h.Commit("a", "slow oracle", map[string]string{
 					".claude/jig.yaml": oracleManifest,
 					"oracle.sh":        oracleScript,
 				})
@@ -77,8 +77,8 @@ func TestKilledJigStopsItsOracle(t *testing.T) {
 				case "gate":
 					p = startJig(t, env, fx.StoreDir, "gate", fx.Ticket, "--early")
 				default:
-					p = startJig(t, env, h.Clone, "verify", fx.Ticket, sha,
-						"--slice", "a", "--wait", "--store", fx.StoreDir)
+					p = startJig(t, env, h.Clone, "verify", fx.Ticket,
+						"--slice", "a", "--store", fx.StoreDir)
 				}
 
 				waitFor(t, 2*time.Minute, "the oracle to start its child", func() bool {

@@ -39,15 +39,15 @@ func TestRunBringsUpTheSlicesEnvClass(t *testing.T) {
 		t.Errorf("the rig env class was left up: %v", err)
 	}
 	lines := r.lines()
-	want := []string{"verify-pending", "env-up", "oracle:pass", "verified", "env-down"}
+	want := []string{"env-up", "oracle:pass", "verified", "env-down"}
 	if got := events(lines); !reflect.DeepEqual(got, want) {
 		t.Fatalf("journal events = %v, want %v", got, want)
 	}
-	if lines[2].Env != "rig" || lines[2].Slice != "d" {
-		t.Errorf("oracle line = %+v, want Env rig", lines[2])
+	if lines[1].Env != "rig" || lines[1].Slice != "d" {
+		t.Errorf("oracle line = %+v, want Env rig", lines[1])
 	}
 	// The env lines are the shape the frontier gave them.
-	for _, l := range []journal.Line{lines[1], lines[4]} {
+	for _, l := range []journal.Line{lines[0], lines[3]} {
 		if l.Slice != "d" || l.Commit != "" || l.Attempt != 0 || l.Session != "" {
 			t.Errorf("env line = %+v, want the slice and the event alone", l)
 		}
@@ -69,7 +69,7 @@ func TestRunParksTheSliceWhenItsEnvClassWillNotComeUp(t *testing.T) {
 	if res.State != journal.VerifyError || !strings.Contains(res.Summary, `the env class "rig" is unavailable`) {
 		t.Errorf("Result = %+v, want an error naming the env class", res)
 	}
-	if got, want := events(r.lines()), []string{"verify-pending", "env-unavailable:defer-ci", "verify-error:error"}; !reflect.DeepEqual(got, want) {
+	if got, want := events(r.lines()), []string{"env-unavailable:defer-ci", "verify-error:error"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events = %v, want %v", got, want)
 	}
 	if st := r.state("d"); st.State != "env-blocked" || st.Reason != "env-up-failed" || st.Attempts != 1 {
@@ -101,10 +101,10 @@ func TestRunRecordsWhatTheScenariosWrote(t *testing.T) {
 	if res, err := Run(r.deps, r.request("a", sha)); err != nil || res.State != journal.VerifyPass {
 		t.Fatalf("Run = %+v, %v", res, err)
 	}
-	if got, want := events(r.lines()), []string{"verify-pending", "oracle:pass", "recorded:dropped: notes.txt", "verified"}; !reflect.DeepEqual(got, want) {
+	if got, want := events(r.lines()), []string{"oracle:pass", "recorded:dropped: notes.txt", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("journal events = %v, want %v", got, want)
 	}
-	rec := r.lines()[2]
+	rec := r.lines()[1]
 	if rec.Slice != "a" || rec.Commit != sha || rec.Attempt != 1 || rec.RecordRun != "a-v1" || rec.Outcome != "dropped: notes.txt" {
 		t.Errorf("recorded line = %+v", rec)
 	}
@@ -122,10 +122,9 @@ func TestRunRecordsWhatTheScenariosWrote(t *testing.T) {
 		t.Errorf("the recording is not where the journal says: %v", err)
 	}
 
-	// A rerun records into a directory of its own and leaves the first alone.
-	rq := r.request("a", sha)
-	rq.Rerun = true
-	if _, err := Run(r.deps, rq); err != nil {
+	// A second run records into a directory of its own and leaves the first
+	// alone.
+	if _, err := Run(r.deps, r.request("a", sha)); err != nil {
 		t.Fatal(err)
 	}
 	second := r.lines()[len(r.lines())-2]

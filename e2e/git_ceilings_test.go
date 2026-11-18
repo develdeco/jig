@@ -92,10 +92,10 @@ func TestGitProcessCeilings(t *testing.T) {
 		checkCeiling(t, "claim", path)
 
 		h.Branch(fx.Branch)
-		sha := h.CommitScenario("a", 1)
+		h.CommitScenario("a", 1)
 
 		th, path = traceOf("verify")
-		must(th.Verify(ticket, sha, "a"), "jig verify")
+		must(th.Verify(ticket, "a"), "jig verify")
 		checkCeiling(t, "verify", path)
 
 		th, path = traceOf("gate")

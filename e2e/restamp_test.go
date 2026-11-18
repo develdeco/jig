@@ -54,7 +54,7 @@ func TestRestampKeepsAGreenSliceGreenAndSliceAddNeedsNoHandEdit(t *testing.T) {
 	h.Branch(fx.Branch)
 	sha := h.CommitScenario("a", 1)
 	h.Push(fx.Branch)
-	if r := h.Verify(fx.Ticket, sha, "a"); r.Code != 0 {
+	if r := h.Verify(fx.Ticket, "a"); r.Code != 0 {
 		t.Fatalf("jig verify: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
 	}
 

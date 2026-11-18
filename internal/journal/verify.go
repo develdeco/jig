@@ -26,6 +26,23 @@ const (
 	VerifyError = "error"
 )
 
+// The states of a working tree an oracle line records (Line.TreeBefore and
+// TreeAfter).
+const (
+	TreeClean = "clean"
+	TreeDirty = "dirty"
+)
+
+// Why a run of `jig verify` covers no commit (Line.Uncovered). A line that
+// carries one is recorded and read by no reader of verification state.
+const (
+	UncoveredDirtyBefore = "tree dirty before"
+	UncoveredDirtyAfter  = "tree dirty after"
+	UncoveredHeadMoved   = "head moved"
+	UncoveredOtherCmd    = "another command"
+	UncoveredNotDescend  = "not a descendant of the start sha"
+)
+
 // Verification is the latest record of verifying one commit for one slice.
 type Verification struct {
 	// State is one of the Verify constants.
@@ -101,6 +118,10 @@ func verificationLine(l Line) (state string, ok bool) {
 	case EventVerifyError:
 		return VerifyError, true
 	case EventOracle:
+		if l.Uncovered != "" {
+			// A run that covers no commit: recorded, and says nothing of one.
+			return "", false
+		}
 		switch l.Outcome {
 		case "pass":
 			return VerifyPass, true

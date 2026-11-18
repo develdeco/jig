@@ -67,7 +67,7 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	prove := func(slice string, attempt int) {
 		t.Helper()
 		last = h.CommitScenario(slice, attempt)
-		res := h.Verify(fx.Ticket, last, slice)
+		res := h.Verify(fx.Ticket, slice)
 		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
 		}
@@ -99,7 +99,7 @@ func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
 	var sha string
 	for _, s := range slices {
 		sha = b.builder.CommitScenario(s, 1)
-		res := b.builder.Verify(b.fx.Ticket, sha, s)
+		res := b.builder.Verify(b.fx.Ticket, s)
 		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
 			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s, res.Code, res.Stdout, res.Stderr)
 		}
