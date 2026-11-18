@@ -38,8 +38,8 @@ const worktreesDirSuffix = ".worktrees/"
 
 // nextWorktree is one repo's worktree of a ticket as jig advises it. jig adds
 // and removes none and the harness makes the worktree: Branch and Base say what
-// to work on and from where, and Command is advice for a harness with no
-// worktree method (ADR 0039).
+// to work on and from where. An add's Command is advice for a harness with no
+// worktree method; a remove's removes a worktree the harness kept (ADR 0039).
 type nextWorktree struct {
 	Repo    string `json:"repo"`
 	Action  string `json:"action"`            // add, present, remove or no_clone

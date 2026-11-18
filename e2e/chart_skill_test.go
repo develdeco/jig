@@ -55,16 +55,46 @@ func TestChartSkillHandsOff(t *testing.T) {
 		"`isolation: worktree`", "you run no `add`", "`git branch -m <branch>`", "`git switch -c <branch>`", "`git reset --hard <base>`", "no worktree method",
 		// A row in another clone than the session's repo is not the harness's to reach.
 		"An `add` row in this session's repo (its `clone`): start the subagent with `isolation: worktree`",
-		"An `add` row in another clone (a single-repo ticket's too), or any `add` with no worktree method (no Agent isolation, no EnterWorktree): you run its `command`, one at a time, then start the subagent with no isolation, in its `dir`",
-		// A present row is worked in place, with no isolation and no tie.
-		"`present`: no isolation, it works in its `dir`",
-		// Only a worktree the harness made for the builder is renamed or reset.
-		"A worktree the harness made for you starts at its HEAD: tie it",
-		"With no harness worktree (a `present` row, another clone's, no worktree method): never rename or reset, work only in its `dir`",
+		"A single-repo ticket's `add` row in another clone, or any `add` with no worktree method (no Agent isolation, no EnterWorktree): you run its `command`, one at a time, then start the subagent with no isolation.",
+		// A multi-repo ticket's other clones are its nested builders'; its own subagent is isolated.
+		"A multi-repo ticket's other clones are its nested builders'; its own subagent takes isolation for its row in this repo.",
+		// A present row is worked in place, with no isolation.
+		"`present`: no isolation.",
+		// The main session states each builder's case; the builder never infers it.
+		"The prompt states the builder's case, which it never infers from where it finds itself.",
 	} {
 		if !strings.Contains(builds, want) {
 			t.Errorf("the Builds section lacks %q:\n%s", want, builds)
 		}
+	}
+	// The tie is only in the isolated case: the no-isolation prompt names its
+	// dir, says never to rename or reset, and carries no tie.
+	const noIso = `with no isolation: "`
+	i := strings.Index(builds, noIso)
+	if i < 0 {
+		t.Fatalf("the Builds section has no no-isolation prompt:\n%s", builds)
+	}
+	isolated, bare := builds[:i], builds[i+len(noIso):]
+	if j := strings.Index(bare, "\"\n"); j >= 0 {
+		bare = bare[:j]
+	} else if j := strings.Index(bare, "\" Its prompt"); j >= 0 {
+		bare = bare[:j]
+	}
+	for _, want := range []string{"Work only in <dir>", "the row's `dir`", "never rename or reset"} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("the no-isolation prompt lacks %q: %q", want, bare)
+		}
+	}
+	for _, tie := range []string{"git branch -m", "git switch", "git reset --hard"} {
+		if strings.Contains(bare, tie) {
+			t.Errorf("the no-isolation prompt carries the tie %q: %q", tie, bare)
+		}
+		if !strings.Contains(isolated, "with isolation: \"Tie your worktree") || !strings.Contains(isolated, tie) {
+			t.Errorf("the tie %q is not in the isolated prompt: %q", tie, isolated)
+		}
+	}
+	if strings.Count(builds, "git branch -m") != 1 {
+		t.Errorf("the tie `git branch -m` is in the Builds section %d times, want once (the isolated prompt)", strings.Count(builds, "git branch -m"))
 	}
 	if strings.Contains(out, "run the `add` commands") {
 		t.Errorf("jig skill chart still has the main session run the add commands")
