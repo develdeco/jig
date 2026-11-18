@@ -499,32 +499,6 @@ func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 	}
 }
 
-// TestDefaultTriageJudgesAFindingByItsRepo: the build target of an ask in a round
-// over several repos is read from the manifest of the repo its file begins with.
-func TestDefaultTriageJudgesAFindingByItsRepo(t *testing.T) {
-	t.Parallel()
-	rf := twoRepoFiles("", "")
-	repos := map[string]manifest.Manifest{"api": rf.repos[0].Man, "web": rf.repos[1].Man}
-	in := TriageInput{
-		Repos: repos,
-		Asks: []Finding{
-			{ID: "r1-f1", File: "web/ui/page.go", Workspace: "web/ui", Oracle: "test"},
-			{ID: "r1-f2", File: "api/server/handler.go", Workspace: "api/server", Oracle: ""}, // api has two oracles, none named
-			{ID: "r1-f3", File: "api/server/handler.go", Workspace: "api/server", Oracle: "lint"},
-		},
-	}
-	out := DefaultTriage(in)
-	if d, ok := out.Asks["r1-f1"]; !ok || !d.Keep {
-		t.Errorf("Asks[r1-f1] = %+v, %v, want kept: web's one oracle resolves", d, ok)
-	}
-	if _, ok := out.Asks["r1-f2"]; ok {
-		t.Error("Asks[r1-f2] decided, want undecided: api has two oracles and the finding names none")
-	}
-	if d, ok := out.Asks["r1-f3"]; !ok || !d.Keep {
-		t.Errorf("Asks[r1-f3] = %+v, %v, want kept: lint is one of api's oracles", d, ok)
-	}
-}
-
 // TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral: the open record of a
 // round in a project of one repo has that repo's settings at the top, as it
 // always had, and no list of repos; the record of a round in a project of

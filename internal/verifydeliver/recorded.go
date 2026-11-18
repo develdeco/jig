@@ -576,8 +576,7 @@ func (dr Draft) kinds() int {
 
 // AppendDraft checks d against the open round and appends it to the round's
 // findings drafts. What it checks is what needs no other draft: the fields
-// ParseReviewResult checks of a finding, a probe or a skip, an oracle that is
-// one of the manifest's, a prior that names a finding under open or
+// ParseReviewResult checks of a finding, a probe or a skip, a prior that names a finding under open or
 // dismissed, and a file of a probe or a skip in a repo of the round. That the
 // file exists at the head, that no two drafts share a prior and that the
 // reviewed paths cover must_review are checked when the round is done. It
@@ -603,8 +602,7 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultFinding(len(existing), f); err != nil {
 			return 0, err
 		}
-		// A round over several repos names a file "<repo>/<path>", and the
-		// oracles a finding can name are those of its repo.
+		// A round over several repos names a file "<repo>/<path>".
 		rf := p.Request.files()
 		file, err := normalizeRepoRelPath(f.File)
 		if err != nil {
@@ -721,15 +719,6 @@ func marshalResult(r ReviewResult) ([]byte, error) {
 		r.ReviewedPaths = []string{}
 	}
 	return json.MarshalIndent(r, "", "  ")
-}
-
-func inStrings(list []string, s string) bool {
-	for _, have := range list {
-		if have == s {
-			return true
-		}
-	}
-	return false
 }
 
 // GateFinish closes the open round p with the reviewer's report rr, which the

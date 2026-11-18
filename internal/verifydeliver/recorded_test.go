@@ -716,7 +716,6 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 
 	// With --yes the asks nobody decided that have a full build target are kept
 	// as DefaultTriage keeps them; r1-f4 has no workspace and stays undecided.
-	in.Manifest.Oracles = map[string]string{"test": "true"}
 	res = recordedTriage(d, fx.Ticket, true)(in)
 	if got := res.Asks["r1-f3"]; !got.Keep || got.Human {
 		t.Errorf("Asks[r1-f3] with --yes = %+v, want kept by default, not by a human", got)

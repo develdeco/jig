@@ -33,10 +33,6 @@ func sampleTriageInput() verifydeliver.TriageInput {
 		Notes: []verifydeliver.Finding{
 			{ID: "r1-f5", Risk: "low", Title: "just fyi"},
 		},
-		Manifest: manifest.Manifest{
-			Oracles:    map[string]string{"test": "true"},
-			Workspaces: []manifest.Workspace{{ID: "alpha", Path: "alpha"}, {ID: "beta", Path: "beta"}},
-		},
 	}
 }
 

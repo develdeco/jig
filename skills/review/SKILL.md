@@ -44,7 +44,7 @@ One call per problem, as you find it:
 
 ```
 jig finding T-1 --file alpha/alpha.go --line 12 --title "..." --detail "..." \
-  --action fix --risk medium --risk-rationale "..." --oracle test
+  --action fix --risk medium --risk-rationale "..." --oracle "go test ./alpha -run 'TestAlpha'"
 jig finding T-1 --still-present r1-f2 --line 14     # an earlier finding, unchanged
 ```
 

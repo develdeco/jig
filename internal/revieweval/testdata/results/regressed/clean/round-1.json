@@ -6,6 +6,7 @@
       "title": "Reverse allocates unnecessarily",
       "detail": "Reverse allocates a new rune slice on every call instead of operating in place on the input.",
       "action": "fix",
+      "oracle": "go test ./... -run 'TestCase'",
       "risk": "low",
       "risk_rationale": "Not a correctness issue, but an avoidable allocation."
     }

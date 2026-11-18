@@ -37,7 +37,7 @@ func TestAFixSliceJoinsTheCommandsOfItsFindingsOnce(t *testing.T) {
 	st := newReviewStore(t)
 	reported := []Finding{
 		fixFinding("r1-f3", "c.go", "root", "go test ./c -run 'TestC'"),
-		fixFinding("r1-f1", "a.go", "root", "go test ./a -run 'TestA' # the a test"),
+		fixFinding("r1-f1", "z.go", "root", "go test ./a -run 'TestA' # the a test"),
 		fixFinding("r1-f2", "b.go", "root", "go test ./c -run 'TestC'"),
 		fixFinding("r1-f4", "d.go", "root", "go vet ./d"),
 	}
@@ -108,12 +108,10 @@ func TestAFixSliceIdCarriesNoCommand(t *testing.T) {
 	if got := sliceIDs(slices); !equalStrings(got, []string{"fix-2-root-1", "fix-2-root-2"}) {
 		t.Errorf("ids = %v, want fix-2-root-1 and fix-2-root-2", got)
 	}
-	for _, s := range slices {
-		for _, f := range s.Findings {
-			cmd := "go test ./" + map[string]string{"r1-f1": "a", "r1-f2": "b", "r1-f3": "c"}[f]
-			if !strings.Contains(s.Oracle, cmd) {
-				t.Errorf("slice %s oracle %q lacks its finding %s's command %q", s.ID, s.Oracle, f, cmd)
-			}
+	// Each split slice carries its own findings' commands and no others.
+	for id, want := range map[string]string{"fix-2-root-1": "(go test ./a) && (go test ./b)", "fix-2-root-2": "go test ./c"} {
+		if got := sliceByID(t, slices, id).Oracle; got != want {
+			t.Errorf("slice %s oracle = %q, want exactly %q", id, got, want)
 		}
 	}
 
@@ -224,5 +222,51 @@ func TestRecordedFindingAcceptsAnyCommand(t *testing.T) {
 	drafts, err := ReadDrafts(p)
 	if err != nil || len(drafts) != 3 || drafts[1].Finding.Oracle != "go test ./internal/x -run 'TestA'" {
 		t.Errorf("drafts = %+v (%v), want the three, each command as written", drafts, err)
+	}
+}
+
+// TestAManifestWithNoOracleStillQueuesAPersonsKeep: a keep a person recorded
+// is queued as a fix slice on a manifest that declares no oracle, since the
+// command it names is all the slice needs.
+func TestAManifestWithNoOracleStillQueuesAPersonsKeep(t *testing.T) {
+	t.Parallel()
+
+	st := newReviewStore(t)
+	man := manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}} // zero oracles
+	cum := map[string]Finding{
+		"r1-f1": {ID: "r1-f1", File: "a.go", Title: "t", RiskRationale: "r", Action: ActionAsk, Oracle: "go test ./a -run 'TestA'", Workspace: "root", Status: StatusAsked},
+	}
+	decisions := map[string]TriageDecision{"r1-f1": {Ref: "r1-f1", Outcome: TriageKeep, Provenance: "person", Pending: true}}
+	slices, kept, err := queueKeeps(1, st, "T-1", nil, cum, decisions, oneRepoFiles(man), 5)
+	if err != nil {
+		t.Fatalf("queueKeeps: %v", err)
+	}
+	if len(slices) != 1 || slices[0].ID != "fix-1-q-root" || slices[0].Oracle != "go test ./a -run 'TestA'" || !equalStrings(kept, []string{"r1-f1"}) {
+		t.Fatalf("slices = %+v, kept = %v, want one fix-1-q-root with the command", slices, kept)
+	}
+}
+
+// TestABlankCommandIsNoCommand: a command of only spaces names none, in every
+// place that judges a build target: the gaps of a finding, a person's keep as
+// status shows it, and the round that applies it.
+func TestABlankCommandIsNoCommand(t *testing.T) {
+	t.Parallel()
+
+	f := Finding{ID: "r1-f1", Workspace: "root", Oracle: "  "}
+	if _, noOracle := BuildTargetGaps(f); !noOracle {
+		t.Error("BuildTargetGaps: a blank command is a command")
+	}
+	d := TriageDecision{Outcome: TriageKeep, Oracle: " "}
+	if !d.KeepLacksTarget(Finding{ID: "r1-f1", Workspace: "root"}) {
+		t.Error("KeepLacksTarget: a keep with a blank command reads as a full keep")
+	}
+	if d.KeepLacksTarget(Finding{ID: "r1-f1", Workspace: "root", Oracle: "go vet ./a"}) {
+		t.Error("KeepLacksTarget: a finding that names a command needs none from the keep")
+	}
+	if _, kept, applied := decideFinding(Finding{ID: "r1-f1", Workspace: "root"}, AskOutcome{Keep: true, Oracle: "  "}); kept || applied {
+		t.Errorf("decideFinding with a blank command: kept = %v, applied = %v, want neither", kept, applied)
+	}
+	if got := fixSliceOracle([]Finding{fixFinding("r1-f1", "a.go", "root", "  go vet ./a  ")}, oneRepoFiles(oneOracleManifest())); got != "go vet ./a" {
+		t.Errorf("fixSliceOracle = %q, want the command trimmed", got)
 	}
 }

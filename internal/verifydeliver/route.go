@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/outcome"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -21,9 +20,7 @@ import (
 // what the round reported as a note and StandingNotes the noted findings of
 // earlier rounds it did not report again: a person may keep or dismiss either
 // with `jig triage` (TriageResult.Notes), and a note nobody decided stays a
-// note, so no default decides one. Manifest is
-// offered so a hook can list workspace ids and oracle names when keeping an
-// ask needs one it lacks.
+// note, so no default decides one.
 type TriageInput struct {
 	Fixes []Finding
 	Asks  []Finding
@@ -31,12 +28,6 @@ type TriageInput struct {
 	// StandingNotes are the earlier rounds' noted findings this round's
 	// reviewer did not report again.
 	StandingNotes []Finding
-	Manifest      manifest.Manifest
-	// Repos are the manifests of a round in a project of several repos, by repo
-	// name: a finding's file begins with its repo's name, and its workspace and
-	// oracle are those of that repo's manifest. Manifest is empty then, and
-	// Repos is nil for a round over one repo.
-	Repos map[string]manifest.Manifest
 	// BudgetUsed and BudgetLimit are this ticket's fix budget state (the
 	// gate's earlier fix-appending rounds, and gate.fix_rounds), carried so
 	// a hook can phrase the header it shows Asks' own budget-parked
@@ -50,7 +41,7 @@ type TriageInput struct {
 // it. Decision is the human's text for a kept ask, carried into
 // its fix slice's goal. Workspace and Oracle are required only when Keep is
 // true and the finding itself is missing that part of its build target (no
-// derived workspace, or no oracle jig can resolve): the hook must resolve
+// derived workspace, or no command its reviewer named): the hook must resolve
 // whichever is missing, since jig never substitutes a silent default for
 // that judgment. Human records whether a person at a terminal decided it,
 // as opposed to --yes or a non-terminal stdin.
@@ -117,9 +108,9 @@ func DefaultTriage(in TriageInput) TriageResult {
 // person's choice before f can become a fix slice; jig never picks a command
 // for a reviewer. This is the one mechanism every caller that has to
 // decide whether a fix or kept ask has a full build target shares:
-// DefaultTriage above, routeRound's kept-ask handling, and cmd/jig's
-// terminal triage prompt and its stdin-closed count - none of them
-// re-derives either rule on its own.
+// DefaultTriage above, routeRound's kept-ask handling and
+// TriageDecision.KeepLacksTarget - none of them re-derives either rule on its
+// own.
 func BuildTargetGaps(f Finding) (workspace, oracle bool) {
 	return f.Workspace == "", strings.TrimSpace(f.Oracle) == ""
 }
@@ -157,8 +148,8 @@ func sortByRiskThenID(fs []Finding) {
 //
 // files is the files of the round, which say which repo's manifest a finding
 // is routed against: a round over several repos routes a finding in
-// web/ui/page.go into a fix slice that builds in the workspace web/ui, with an
-// oracle of web's manifest (roundrepos.go).
+// web/ui/page.go into a fix slice that builds in the workspace web/ui
+// (roundrepos.go).
 //
 // budgetUsed and budgetLimit are this ticket's own fix budget state
 // (Gate's own UsedFixBudget and gate.fix_rounds), passed through to the
@@ -203,14 +194,6 @@ func routeRound(round int, st *store.Store, ticket string, existingSlices []stor
 	sortByRiskThenID(standingNotes)
 
 	in := TriageInput{Fixes: fixes, Asks: asks, Notes: notes, StandingNotes: standingNotes, BudgetUsed: budgetUsed, BudgetLimit: budgetLimit}
-	if files.qualified {
-		in.Repos = make(map[string]manifest.Manifest, len(files.repos))
-		for _, r := range files.repos {
-			in.Repos[r.Name] = r.Man
-		}
-	} else {
-		in.Manifest = files.repos[0].Man
-	}
 	result := triage(in)
 
 	fixTriage := TriageAuto
@@ -396,7 +379,7 @@ func findingGoalBlock(f Finding, st *store.Store, ticket string, existingSlices 
 }
 
 // sanitizeSliceID replaces every character outside [A-Za-z0-9._-] with "-":
-// a manifest workspace id, an oracle name, or a finding id can legally
+// a manifest workspace id or a finding id can legally
 // contain a character (e.g. "/", ":") that is not safe in a slice id, since
 // it becomes part of slices/<id>.state and work/<id>.attempt-N.* paths.
 func sanitizeSliceID(id string) string {
@@ -411,7 +394,7 @@ func sanitizeSliceID(id string) string {
 }
 
 // disambiguateFixSliceIDs breaks ties between two synthesized slices that
-// computed the same id - in practice, two workspace/oracle names that
+// computed the same id - in practice, two workspace ids that
 // sanitizeSliceID maps to the same string - and against any id the
 // ticket's slices.yaml already has (existingSlices, as of before this
 // round): AppendSlices refuses a duplicate id outright, which would
@@ -444,7 +427,7 @@ func disambiguateFixSliceIDs(slices []store.Slice, existingSlices []store.Slice)
 	}
 }
 
-// splitFixGroupIntoSlices packs one (workspace, oracle) group's kept
+// splitFixGroupIntoSlices packs one workspace's kept
 // findings, already sorted by id, into one or more fix slices bounded by
 // fixSliceFindings findings each ("Fix slices sized to one session"):
 // findings in the same file always share a slice; files are taken in path

@@ -16,6 +16,7 @@
       "title": "CountAvailable still indexes past the end",
       "detail": "The loop condition still lets i reach len(items), one past the last valid index.",
       "action": "fix",
+      "oracle": "go test ./... -run 'TestCase'",
       "risk": "medium",
       "risk_rationale": "A non-empty items slice would panic."
     }

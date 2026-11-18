@@ -1397,7 +1397,7 @@ func TestGateFixBudgetTerminalKeepStillQueuesAFixAndBudgetStaysReached(t *testin
 // TestGateFixSliceSizeCapSplitsAnOversizedGroupAndNumbersItsSlices pins
 // "Fix slices sized to one session" through the full Gate round:
 // gate.fix_slice_findings threads from project.yaml down to the appended
-// slices, a (workspace, oracle) group over the bound splits into several
+// slices, a workspace group over the bound splits into several
 // fix slices, each carrying only its own subset, and the split slices are
 // numbered "-1", "-2" from 1. A group that fits in one slice keeps today's
 // unsuffixed id, already pinned by TestGateCleanRound2; the packing

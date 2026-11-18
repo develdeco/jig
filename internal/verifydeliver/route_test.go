@@ -78,7 +78,6 @@ func TestDefaultTriageKeepsFixesAndWorkspaceAsksLeavesNoWorkspaceAsksUndecided(t
 			{ID: "r1-f2", Workspace: "alpha", Oracle: "test"},
 			{ID: "r1-f3", Workspace: ""},
 		},
-		Manifest: oneOracleManifest(),
 	}
 	out := DefaultTriage(in)
 	if out.DismissedFixIDs["r1-f1"] {
@@ -105,7 +104,6 @@ func TestDefaultTriageLeavesAnAskWithNoCommandUndecided(t *testing.T) {
 			{ID: "r1-f1", Workspace: "root"},
 			{ID: "r1-f2", Workspace: "root", Oracle: "vet"},
 		},
-		Manifest: oneOracleManifest(),
 	}
 	out := DefaultTriage(in)
 	if _, ok := out.Asks["r1-f1"]; ok {
@@ -131,7 +129,6 @@ func TestDefaultTriageLeavesABudgetParkedAskUndecidedEvenWithAFullBuildTarget(t 
 			{ID: "r1-f1", Workspace: "alpha", Oracle: "test", RoutedWhy: RoutedWhyBudget},
 			{ID: "r1-f2", Workspace: "alpha", Oracle: "test"},
 		},
-		Manifest: oneOracleManifest(),
 	}
 	out := DefaultTriage(in)
 	if _, ok := out.Asks["r1-f1"]; ok {
@@ -157,7 +154,7 @@ func TestAnOmittedOracleStaysEmpty(t *testing.T) {
 	if noWorkspace, noOracle := BuildTargetGaps(Finding{ID: "r1-f2", Workspace: "root", Oracle: "go test ./x -run 'TestA'"}); noWorkspace || noOracle {
 		t.Errorf("BuildTargetGaps with a command = (%v, %v), want (false, false)", noWorkspace, noOracle)
 	}
-	out := DefaultTriage(TriageInput{Asks: []Finding{f}, Manifest: oneOracleManifest()})
+	out := DefaultTriage(TriageInput{Asks: []Finding{f}})
 	if _, ok := out.Asks["r1-f1"]; ok {
 		t.Error("Asks[r1-f1] decided, want undecided: the manifest's only oracle is not a default")
 	}
@@ -214,7 +211,7 @@ func TestRouteRoundGroupsFixesByWorkspaceAndOracle(t *testing.T) {
 }
 
 // TestRouteRoundSplitsAFixGroupPackingFilesGreedilyByPathOrder pins "Fix
-// slices sized to one session": a (workspace, oracle) group over the
+// slices sized to one session": a workspace group over the
 // fix_slice_findings bound splits into several slices, same-file findings
 // always sharing one, files packed greedily in path order (not finding id
 // order), a file over the bound getting a slice of its own, and the

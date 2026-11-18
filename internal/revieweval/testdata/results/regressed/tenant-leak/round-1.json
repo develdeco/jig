@@ -6,6 +6,7 @@
       "title": "ForTenant ignores tenantID",
       "detail": "ForTenant returns the whole package-level invoices slice regardless of the tenantID argument, so a caller for one tenant sees every tenant's invoices.",
       "action": "fix",
+      "oracle": "go test ./... -run 'TestCase'",
       "risk": "high",
       "risk_rationale": "One tenant can read another tenant's billing data."
     },
@@ -15,6 +16,7 @@
       "title": "Summarize leaks tenant data across the shared slice",
       "detail": "Summarize ranges over the package-level invoices slice, which holds every tenant's invoices.",
       "action": "fix",
+      "oracle": "go test ./... -run 'TestCase'",
       "risk": "high",
       "risk_rationale": "Summarize's log line could include another tenant's counts."
     }
