@@ -171,16 +171,16 @@ func TestFetchTicketBranchFromBuildLeaseTakesOneProcessWhenTheLeaseIsOnTheBranch
 }
 
 // TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt: the
-// restore a round starts with is for what the oracles may have left in the
-// lease. A round whose lease was restored and had nothing run in it since
-// (the gate says so, RoundInput.Pristine) starts no reset; one whose oracle
-// ran does. Not parallel.
+// restore a round starts with is for what may have been left in the lease. A
+// round whose lease was restored and had nothing run in it since (the gate
+// says so, RoundInput.Pristine) starts no reset; one that was not does. Not
+// parallel.
 func TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		pristine bool
 		resets   int
-	}{{"nothing ran in the lease", true, 0}, {"an oracle ran in the lease", false, 1}} {
+	}{{"the lease was restored just before", true, 0}, {"the lease was not restored", false, 1}} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := newReviewLease(t, "main")
 			writeReviewFile(t, dir, "alpha.go", "package alpha\n")
@@ -210,12 +210,10 @@ func TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt(t *te
 }
 
 // TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt counts the hard resets
-// one recorded gate call starts in its lease: the one before the lease is
-// re-acquired (dirt would block the checkout), the one that restores it at the
-// copy it points at, and, only when the gate ran an oracle in it, the one
-// before the review. A round that reuses a pass runs nothing in the lease, so
-// it starts none for the review. Not parallel: it counts through the
-// process's trace.
+// one recorded gate call starts in its lease: the one before an existing lease
+// is re-acquired (dirt would block the checkout) and the one that restores it
+// at the copy it points at. The round runs nothing in the lease, so it starts
+// none for the review. Not parallel: it counts through the process's trace.
 func TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt(t *testing.T) {
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
 	d := newDeps(t, fx)
@@ -238,37 +236,14 @@ func TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt(t *testing.T) {
 		}
 		return n
 	}
-	// The lease is new and the gate runs the suite in it: the restore at the
-	// copy, and the one for what the suite left.
-	if got := resets(); got != 2 {
-		t.Errorf("a first call started %d resets of the gate lease, want 2", got)
+	// The lease is new: the restore at the copy is all there is, since the round
+	// runs nothing in the lease for a review reset to undo.
+	if got := resets(); got != 1 {
+		t.Errorf("a first call started %d resets of the gate lease, want 1", got)
 	}
-	// The head has not moved, so the suite's pass stands and nothing runs: the
-	// restore before the acquire and the one at the copy are all there is.
+	// The lease exists now: the restore before the acquire and the one at the
+	// copy are all there is.
 	if got := resets(); got != 2 {
-		t.Errorf("a call that reused the pass started %d resets of the gate lease, want 2", got)
-	}
-}
-
-// TestRanNothingKeepsTheReviewResetAfterAnyRunInTheLease: only passes reused
-// as they were recorded leave a lease untouched; a run the gate made, and the
-// light command it ran in a reused pass's place (which may write tracked
-// files), do not.
-func TestRanNothingKeepsTheReviewResetAfterAnyRunInTheLease(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name string
-		runs []OracleRun
-		want bool
-	}{
-		{"no oracle", nil, true},
-		{"a reused pass", []OracleRun{{Command: "test", ReusedFrom: "abc"}}, true},
-		{"a run of the gate's own", []OracleRun{{Command: "test"}}, false},
-		{"a reused pass with the light command run", []OracleRun{{Command: "test", ReusedFrom: "abc", Ran: "lint"}}, false},
-		{"a reuse beside a run", []OracleRun{{Command: "a", ReusedFrom: "abc"}, {Command: "b"}}, false},
-	} {
-		if got := ranNothing(c.runs); got != c.want {
-			t.Errorf("%s: ranNothing = %v, want %v", c.name, got, c.want)
-		}
+		t.Errorf("a second call started %d resets of the gate lease, want 2", got)
 	}
 }

@@ -113,30 +113,26 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	if gate.Code != 0 || !strings.Contains(gate.Stdout, "round: 1") {
 		t.Fatalf("jig gate exit = %d, want 0 and round 1 open\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
-	// review.json is what the reviewer is handed; its oracles_passed says which
-	// runs the gate made and which it reused.
+	// review.json is what the reviewer is handed; its oracles_passed lists the
+	// passes jig witnessed for the slices, since the gate runs nothing.
 	var review struct {
 		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			Command    string `json:"command"`
-			ReusedFrom string `json:"reused_from"`
+			Slice     string `json:"slice"`
+			Workspace string `json:"workspace"`
+			Command   string `json:"command"`
+			Commit    string `json:"commit"`
+			AtHead    string `json:"at_head"`
 		} `json:"oracles_passed"`
 	}
 	data := readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "work", "gate.round-1.review.json"))
 	if err := json.Unmarshal(data, &review); err != nil {
 		t.Fatalf("parse review.json: %v\n%s", err, data)
 	}
-	reused := map[string]string{}
-	commands := map[string]string{}
-	for _, r := range review.OraclesPassed {
-		reused[r.Workspace] = r.ReusedFrom
-		commands[r.Workspace] = r.Command
+	if len(review.OraclesPassed) != 1 {
+		t.Fatalf("oracles_passed = %+v, want one row: slice a's witnessed pass", review.OraclesPassed)
 	}
-	if reused["alpha"] != sha || commands["alpha"] != oracle.Command {
-		t.Errorf("alpha: reused_from %q with command %q, want it reused from %s with slice a's command %q", reused["alpha"], commands["alpha"], sha, oracle.Command)
-	}
-	if rf, ok := reused["beta"]; !ok || rf != "" {
-		t.Errorf("beta: reused_from %q (present %v), want it run by the gate: no one verified it", rf, ok)
+	if r := review.OraclesPassed[0]; r.Slice != "a" || r.Workspace != "alpha" || r.Commit != sha || r.Command != oracle.Command || r.AtHead != "yes" {
+		t.Errorf("oracles_passed row = %+v, want slice a's pass in alpha at %s with command %q, at the head", r, sha, oracle.Command)
 	}
 }
 

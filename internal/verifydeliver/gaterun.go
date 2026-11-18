@@ -271,15 +271,14 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	}
 	r.journaled = true
 
-	// Every repo's oracles run in its own lease, against its own manifest, for
-	// the slices that build in it.
+	// A round runs no command: it reads each repo's own manifest and the
+	// passes its slices' builders had witnessed (review.json's oracles_passed).
 	for _, gr := range repos {
 		gr.man, err = manifest.Resolve(gr.lease.Dir)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
 		}
-		gr.oracleRuns, err = runGateOracles(d, ticket, gr.name, gr.lease.Dir, gr.man, gr.slices)
-		gr.pristine = gr.pristine && ranNothing(gr.oracleRuns)
+		gr.slicePasses, err = witnessedPasses(d.Store, ticket, gr.name, gr.lease.Dir, gr.man, gr.slices)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
 		}
@@ -381,14 +380,14 @@ func (r *gateRun) roundInput() RoundInput {
 	if !r.qualified {
 		gr := r.repos[0]
 		in.LeaseDir, in.RepoName, in.Target, in.MergeRef = gr.lease.Dir, gr.name, gr.target, gr.mergeRef
-		in.OperatorClone, in.Manifest, in.OracleRuns = operatorClone(r.d, gr.name), gr.man, gr.oracleRuns
+		in.OperatorClone, in.Manifest, in.SlicePasses = operatorClone(r.d, gr.name), gr.man, gr.slicePasses
 		in.Pristine = gr.pristine
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
 			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir,
-			OperatorClone: operatorClone(r.d, gr.name), Manifest: gr.man, OracleRuns: gr.oracleRuns, Pristine: gr.pristine,
+			OperatorClone: operatorClone(r.d, gr.name), Manifest: gr.man, SlicePasses: gr.slicePasses, Pristine: gr.pristine,
 		})
 	}
 	return in
@@ -421,8 +420,8 @@ func (r *gateRun) copies() string {
 
 // Gate runs one gate round for ticket on a source that supplies its review
 // itself: the scripted source a scenario plays back, or a reviewer session
-// jig launches. It re-verifies every manifest oracle in a fresh gate lease
-// checked out to the ticket's branch, then asks src for this round's review
+// jig launches. It runs no command: it reads the ticket's branch in a fresh gate lease,
+// lists the passes the slices' builders had witnessed, then asks src for this round's review
 // content, and records the round (finish).
 //
 // `jig gate` does not use it for a real review: a person's or an agent's
@@ -727,16 +726,3 @@ func errNoOpenRound(ticket string) error {
 
 // isNotExist reports whether err is, or wraps, a missing file.
 func isNotExist(err error) bool { return errors.Is(err, os.ErrNotExist) }
-
-// ranNothing reports whether the gate ran no command in the lease for runs:
-// every one is a pass jig recorded earlier and reused, with no light command
-// run in its place. Anything the gate ran may have left tracked files changed,
-// which the restore before a review round is for.
-func ranNothing(runs []OracleRun) bool {
-	for _, r := range runs {
-		if r.ReusedFrom == "" || r.Ran != "" {
-			return false
-		}
-	}
-	return true
-}

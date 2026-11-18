@@ -393,18 +393,9 @@ func runRound(workDir, judgeRoot string, st *store.Store, c Case, ticket string,
 	if merr != nil {
 		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: resolve manifest: %w", c.Name, n, merr)
 	}
-	// Gate runs the oracles before it dispatches a reviewer and hands it the
-	// runs; the eval does the same, so its reviewer reads the round with
-	// what a gate reviewer knows. A case whose oracle fails is one no gate
-	// would ever review.
-	oracleRuns, oerr := verifydeliver.RunOracleSuite(repoDir, man)
-	if oerr != nil {
-		return RoundScore{}, head, fmt.Errorf("revieweval: case %s round %d: the oracles fail, so no gate would review this round: %w", c.Name, n, oerr)
-	}
-
 	rnd, ok, rerr := reviewerSource(backend).Round(verifydeliver.RoundInput{
 		Store: st, Ticket: ticket, Round: n, LeaseDir: repoDir, RepoName: evalRepoName, Target: evalTarget,
-		Model: model, Effort: project.Config{}.ReviewEffortFor, Intent: intent, Manifest: man, OracleRuns: oracleRuns, Open: fold.Open, Dismissed: fold.Dismissed,
+		Model: model, Effort: project.Config{}.ReviewEffortFor, Intent: intent, Manifest: man, Open: fold.Open, Dismissed: fold.Dismissed,
 		Probes: fold.Probes, Skips: fold.Skips,
 	})
 	if rerr != nil {

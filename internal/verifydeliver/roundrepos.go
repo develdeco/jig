@@ -44,9 +44,9 @@ type gateRepo struct {
 
 	lease pool.Lease
 	// copy says whose copy of the branch the lease was left at.
-	copy       branchCopy
-	man        manifest.Manifest
-	oracleRuns []OracleRun
+	copy        branchCopy
+	man         manifest.Manifest
+	slicePasses []SlicePass
 	// pristine says the lease was restored to its head when it was pointed at
 	// its copy and nothing has run in it since, so the restore a review round
 	// starts with would have nothing to undo (RoundRepo.Pristine).

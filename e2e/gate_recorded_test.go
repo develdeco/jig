@@ -214,8 +214,8 @@ func (b builtTicket) reviewedClean(t *testing.T, round int) jigResult {
 
 // TestGateReviewsClonesCopy: a branch built by hand in the operator clone and
 // not pushed anywhere is what `jig gate` reviews: it reads the clone's
-// committed copy, re-verifies it (reusing the pass `jig verify` recorded),
-// opens the round without making a gate/round-N directory, and hands the
+// committed copy, runs nothing (the request lists the pass `jig verify`
+// witnessed for each slice), opens the round without making a gate/round-N directory, and hands the
 // reviewer a request. A reviewer in a session of its own reads it, reads the
 // code, and ends the round with `jig review done`: clean, and independent of the
 // builder.
@@ -258,23 +258,22 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		}
 	}
 	lease := filepath.Join(b.env.home, filepath.FromSlash(open.Lease))
-	// The oracle pass jig verify recorded stands for the gate's run of alpha's
-	// oracle; beta's, which no one verified, the gate ran itself.
+	// The round ran no command: oracles_passed is the pass `jig verify`
+	// witnessed for slice a, at the head; the other workspace has no row.
 	var req struct {
 		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			ReusedFrom string `json:"reused_from"`
+			Slice     string `json:"slice"`
+			Workspace string `json:"workspace"`
+			Commit    string `json:"commit"`
+			AtHead    string `json:"at_head"`
 		} `json:"oracles_passed"`
 	}
 	if err := json.Unmarshal(readFileOrFatal(t, b.workFile("gate.round-1.review.json")), &req); err != nil {
 		t.Fatal(err)
 	}
-	reused := map[string]string{}
-	for _, o := range req.OraclesPassed {
-		reused[o.Workspace] = o.ReusedFrom
-	}
-	if reused["alpha"] != b.sha || reused["beta"] != "" {
-		t.Errorf("oracles_passed reused_from = %v, want alpha reused from %s and beta run by the gate", reused, b.sha)
+	if len(req.OraclesPassed) != 1 || req.OraclesPassed[0].Slice != "a" || req.OraclesPassed[0].Workspace != "alpha" ||
+		req.OraclesPassed[0].Commit != b.sha || req.OraclesPassed[0].AtHead != "yes" {
+		t.Errorf("oracles_passed = %+v, want slice a's pass in alpha at %s, at the head", req.OraclesPassed, b.sha)
 	}
 	// The reviewer reads the code at the head in the worktree the open round
 	// names, which is jig's, not the clone.

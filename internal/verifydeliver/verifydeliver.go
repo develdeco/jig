@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
@@ -65,12 +64,6 @@ type Deps struct {
 	FetchOrigin func(dir string) error
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)
-	// Oracle runs one of the gate's own oracle commands in a lease and
-	// returns its combined output, the way a verification runs a slice's
-	// oracle at a commit. nil means the real run, bounded by oracleLimit
-	// with its process tree killed past it; a test that is not about the
-	// gate's oracle run hands one that passes.
-	Oracle func(cmd, dir string) (string, error)
 	// Prompt is what to ask an agent to move ticket on, in the words of the
 	// phase the ticket is at ("Build SHOP-1"): a refusal that sends a person
 	// back to an earlier phase names it. nil, or "", names none.
@@ -81,18 +74,6 @@ type Deps struct {
 	// says so. nil reads none, so every pull request goes into its repo's
 	// target.
 	Stack func(ticket string) (stack.Plan, error)
-}
-
-// oracle is d.Oracle, or the real run when it is nil.
-func (d Deps) oracle() oracleFunc {
-	if d.Oracle != nil {
-		// An injected oracle measures nothing.
-		return func(cmd, dir string) (string, envrun.Usage, error) {
-			out, err := d.Oracle(cmd, dir)
-			return out, envrun.Usage{}, err
-		}
-	}
-	return shellOracle
 }
 
 // publishHost is the host d hands Publish for the repo it ships: d.Host when

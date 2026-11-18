@@ -256,7 +256,7 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 		SlicesPath:    "/store/JIG-1/slices.yaml",
 		JournalPath:   "/store/JIG-1/journal.ndjson",
 		Oracles:       []string{"lint", "test"},
-		OraclesPassed: []OracleRun{{Oracle: "test", Workspace: "alpha", Command: "go test ./alpha/...", ReusedFrom: "cccc", Seconds: 4, Slices: []string{"a"}}},
+		OraclesPassed: []SlicePass{{Slice: "a", Workspace: "alpha", Command: "go test ./alpha/...", Commit: "cccc", AtHead: "no", Seconds: 4}},
 		Open:          []OpenFinding{{ID: "r1-f1", File: "alpha/a.go", Line: 3, Title: "t", Detail: "d", Action: "fix", Risk: "high", RiskRationale: "r", Oracle: "test", Recurrences: 1}},
 		MustReview:    []string{"alpha/a.go", "beta/b.go"},
 		Probed: []ProbedEntry{{Round: 1, ResultProbe: ResultProbe{
@@ -289,14 +289,12 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   ],
   "oracles_passed": [
     {
-      "oracle": "test",
+      "slice": "a",
       "workspace": "alpha",
       "command": "go test ./alpha/...",
-      "reused_from": "cccc",
-      "seconds": 4,
-      "slices": [
-        "a"
-      ]
+      "commit": "cccc",
+      "at_head": "no",
+      "seconds": 4
     }
   ],
   "open": [
