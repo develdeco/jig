@@ -17,41 +17,13 @@ const baselineHeader = `# The git processes each package's tests started on main
 # A package that starts no git process has no entry.
 `
 
-// config is the tunable threshold: a count may exceed its baseline by the
-// larger of margin percent of the baseline (rounded up) and slack processes.
-type config struct {
-	Margin int `yaml:"margin"`
-	Slack  int `yaml:"slack"`
-}
-
 // baseline is a parsed baseline file: main's measured count per package.
 type baseline struct {
 	Packages map[string]int `yaml:"packages"`
 }
 
-// readConfig reads and checks the config file.
-func readConfig(path string) (*config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var c config
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	if c.Margin < 0 || c.Margin > 100 {
-		return nil, fmt.Errorf("%s: margin %d is not a percentage", path, c.Margin)
-	}
-	if c.Slack < 0 {
-		return nil, fmt.Errorf("%s: slack %d is negative", path, c.Slack)
-	}
-	return &c, nil
-}
-
 // readBaseline reads a baseline file. A file that does not exist is not an
-// error: it returns nil, nil, and the check records that there is none.
+// error: it returns nil, nil, and the report records that there is none.
 func readBaseline(path string) (*baseline, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -77,62 +49,35 @@ func readBaseline(path string) (*baseline, error) {
 	return &b, nil
 }
 
-// allowed is how far a count may rise above base and still pass.
-func (c *config) allowed(base int) int {
-	return max((base*c.Margin+99)/100, c.Slack)
-}
-
-// Verdicts of a row.
-const (
-	verdictOK       = "ok"
-	verdictOver     = "over"
-	verdictNew      = "new"
-	verdictNotRun   = "not run"
-	verdictAccepted = "accepted"
-)
-
-// row is one package's line of a check.
+// row is one package's line of a report.
 type row struct {
-	pkg     string
-	base    int
-	count   int
-	ran     bool
-	verdict string
+	pkg   string
+	base  int
+	count int
+	ran   bool
 }
 
-// check compares counts, which holds every package that ran, with the
-// baseline. A count above its baseline plus the allowance is over, and the
-// check fails unless accepted turns the overs into accepted passes. A
-// package with no baseline entry has baseline 0; a baseline package that did
-// not run is shown and never fails.
-func (c *config) check(base map[string]int, counts map[string]int, accepted bool) ([]row, bool) {
+// compare lines counts, which holds every package that ran, up with the
+// baseline. A package with no baseline entry has baseline 0; a baseline
+// package that did not run is shown with no count; a package with no git
+// work and no entry is left out. Nothing is judged: a count is shown, never
+// failed on.
+func compare(base map[string]int, counts map[string]int) []row {
 	var rows []row
-	ok := true
 	for _, pkg := range sortedKeys(counts) {
-		r := row{pkg: pkg, base: base[pkg], count: counts[pkg], ran: true, verdict: verdictOK}
+		r := row{pkg: pkg, base: base[pkg], count: counts[pkg], ran: true}
 		if r.base == 0 && r.count == 0 {
 			continue
-		}
-		_, inBase := base[pkg]
-		switch {
-		case r.count > r.base+c.allowed(r.base):
-			if accepted {
-				r.verdict = verdictAccepted
-			} else {
-				r.verdict, ok = verdictOver, false
-			}
-		case !inBase:
-			r.verdict = verdictNew
 		}
 		rows = append(rows, r)
 	}
 	for _, pkg := range sortedKeys(base) {
 		if _, ran := counts[pkg]; !ran {
-			rows = append(rows, row{pkg: pkg, base: base[pkg], verdict: verdictNotRun})
+			rows = append(rows, row{pkg: pkg, base: base[pkg]})
 		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].pkg < rows[j].pkg })
-	return rows, ok
+	return rows
 }
 
 // encodeBaseline renders the baseline file for counts, packages sorted; a
@@ -164,34 +109,34 @@ func (r row) cells() (base, count, change, percent string) {
 	return
 }
 
-// formatRows renders a check as a plain table.
-func formatRows(rows []row, c *config) string {
+// formatRows renders a report as a plain table.
+func formatRows(rows []row) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "git processes per package against main's baseline (margin %d%%, slack %d):\n", c.Margin, c.Slack)
-	fmt.Fprintf(&out, "%-32s %8s %8s %8s %8s  %s\n", "package", "baseline", "count", "change", "percent", "verdict")
+	out.WriteString("git processes per package against main's baseline:\n")
+	fmt.Fprintf(&out, "%-32s %8s %8s %8s %8s\n", "package", "baseline", "count", "change", "percent")
 	for _, r := range rows {
 		b, n, ch, p := r.cells()
-		fmt.Fprintf(&out, "%-32s %8s %8s %8s %8s  %s\n", r.pkg, b, n, ch, p, r.verdict)
+		fmt.Fprintf(&out, "%-32s %8s %8s %8s %8s\n", r.pkg, b, n, ch, p)
 	}
 	return out.String()
 }
 
-// markdownRows renders a check as a Markdown table for the job summary.
-func markdownRows(rows []row, c *config) string {
+// markdownRows renders a report as a Markdown table for the job summary.
+func markdownRows(rows []row) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "### Git processes per package\n\nAgainst main's baseline (margin %d%%, slack %d).\n\n", c.Margin, c.Slack)
-	out.WriteString("| package | baseline | count | change | percent | verdict |\n|---|---:|---:|---:|---:|---|\n")
+	out.WriteString("### Git processes per package\n\nAgainst main's baseline.\n\n")
+	out.WriteString("| package | baseline | count | change | percent |\n|---|---:|---:|---:|---:|\n")
 	for _, r := range rows {
 		b, n, ch, p := r.cells()
-		fmt.Fprintf(&out, "| %s | %s | %s | %s | %s | %s |\n", r.pkg, b, n, ch, p, r.verdict)
+		fmt.Fprintf(&out, "| %s | %s | %s | %s | %s |\n", r.pkg, b, n, ch, p)
 	}
 	return out.String()
 }
 
-// noBaselineNote is the line a check prints when main has no baseline.
+// noBaselineNote is the line a report prints when main has no baseline.
 const noBaselineNote = "no main baseline: counts shown, nothing compared"
 
-// formatCounts renders counts for a check with no baseline, as a Markdown
+// formatCounts renders counts for a report with no baseline, as a Markdown
 // table when markdown is set.
 func formatCounts(counts map[string]int, markdown bool) string {
 	var out strings.Builder

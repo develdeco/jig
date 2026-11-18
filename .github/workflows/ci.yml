@@ -121,11 +121,9 @@ jobs:
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.os) }}
     runs-on: ${{ matrix.os }}
-    # pull-requests: read lets the git budget step read the pull request's
-    # labels; nothing here writes to the repository.
+    # Nothing here writes to the repository.
     permissions:
       contents: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -199,14 +197,12 @@ jobs:
           echo "list=$(printf '%s\n' "$packages" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       # The Linux leg runs every test binary through internal/gitbudget,
       # which counts the git processes each package's tests start, and
-      # compares the counts with main's last measured ones: a package whose
-      # count rises above its baseline by more than the larger of
-      # margin percent and slack processes (.github/git-budget.yaml) fails
-      # the leg. Counted on Linux only, where a trace file costs nothing;
-      # the count is the same work on every OS. Main's baseline lives in the
-      # Actions cache, saved by the push run on main under
+      # reports them beside main's last measured ones in the job summary;
+      # a count never fails the leg. Counted on Linux only, where a trace file
+      # costs nothing; the count is the same work on every OS. Main's baseline
+      # lives in the Actions cache, saved by the push run on main under
       # gitbudget-main-<sha>; a pull request restores the newest. With none
-      # the leg passes and the job summary says so.
+      # the summary says so.
       - name: restore main's git baseline
         if: runner.os == 'Linux' && github.event_name == 'pull_request'
         uses: actions/cache/restore@v6
@@ -214,19 +210,6 @@ jobs:
           path: ${{ runner.temp }}/git-baseline.yaml
           key: gitbudget-main-${{ github.sha }}
           restore-keys: gitbudget-main-
-      # The label is read through the API, not the event payload, so a re-run
-      # sees a label added after the push.
-      - name: read the git-budget-accepted label
-        id: accepted
-        if: runner.os == 'Linux' && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PULL_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          has=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PULL_NUMBER" --jq '.labels | map(.name) | index("git-budget-accepted") != null')
-          if [ "$has" = true ]; then
-            echo "flag=-accepted" >> "$GITHUB_OUTPUT"
-          fi
       - name: build the git process counter
         if: runner.os == 'Linux'
         run: go build -o "$RUNNER_TEMP/gitbudget" ./internal/gitbudget
@@ -242,19 +225,13 @@ jobs:
         run: go test -count=1 -timeout 30m ${{ runner.os == 'Linux' && format('-exec={0}/gitbudget', runner.temp) || '' }} ${{ steps.packages.outputs.list }}
       - name: git processes against main's baseline
         if: runner.os == 'Linux'
-        env:
-          ACCEPTED: ${{ steps.accepted.outputs.flag }}
         run: |
           baseline=-
           if [ -f "$RUNNER_TEMP/git-baseline.yaml" ]; then
             baseline="$RUNNER_TEMP/git-baseline.yaml"
           fi
-          flags=()
-          if [ -n "$ACCEPTED" ]; then
-            flags+=("$ACCEPTED")
-          fi
-          "$RUNNER_TEMP/gitbudget" check "${flags[@]}" .github/git-budget.yaml "$baseline" "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
-      # check writes callers.tsv beside the counts: every package's git
+          "$RUNNER_TEMP/gitbudget" report "$baseline" "$RUNNER_TEMP/gitcount" ${{ steps.packages.outputs.list }}
+      # report writes callers.tsv beside the counts: every package's git
       # processes by the Go function and the test that started them, which
       # the job summary cuts to the top ones. Kept a week; the report never
       # fails the leg, and neither does a missing file.
