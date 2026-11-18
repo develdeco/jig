@@ -126,8 +126,8 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	const branch = "add-retry"
 
 	// The fixture repo's own alpha.go fails its Clamp test at main (a build
-	// slice fixes it), so the author's branch fixes it first: the gate runs
-	// every oracle over the branch it reviews, and this one has to pass them.
+	// slice fixes it), so the author's branch fixes it first: the builder's
+	// verify of the slices has to pass on the branch the gate reviews.
 	alpha, err := os.ReadFile(filepath.Join(fx.RepoDir, "alpha", "alpha.go"))
 	if err != nil {
 		t.Fatalf("read the fixture's alpha.go: %v", err)

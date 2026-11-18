@@ -21,7 +21,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -89,6 +88,10 @@ type PublishReport struct {
 	Picks PicksReport
 	// What is repo -> what the publish did with the What of its pull request.
 	What map[string]WhatReport
+	// FinalRun is repo -> what the repo's reviewed head has for a final run
+	// (`jig verify --final`). Publish says it and never refuses for lack of
+	// one.
+	FinalRun map[string]FinalRunReport
 	// Pending names the repos of the ticket that have no pull request
 	// recorded when the publish ended, in the project's order: the ones a
 	// publish narrowed with --repo left alone. The ticket is published when
@@ -205,20 +208,6 @@ func (t *publishTarget) storeRefs() []StoreRef {
 // notesName is the name of the repo's review notes in the ticket's pr
 // directory.
 func (t *publishTarget) notesName() string { return reviewNotesFile(t.repoName, t.several()) }
-
-// report is the gate round's report as the repo's pull request shows it: when
-// the ticket publishes in several repos, with the reviewed head of this repo
-// alone.
-func (t *publishTarget) report() reportYAML {
-	rep := t.gateRep
-	if t.several() {
-		rep.ReviewedSHA = map[string]string{}
-		if sha := t.gateRep.ReviewedSHA[t.repoName]; sha != "" {
-			rep.ReviewedSHA[t.repoName] = sha
-		}
-	}
-	return rep
-}
 
 // ownFindings are the findings, and the paths the reviewer read, that belong
 // to this repo's pull request. In a project of several repos a round names a
@@ -782,7 +771,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	report = PublishReport{
-		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, What: map[string]WhatReport{}, PRURL: map[string]string{},
+		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, What: map[string]WhatReport{}, FinalRun: map[string]FinalRunReport{}, PRURL: map[string]string{},
 		PRUpdated: map[string]bool{}, PRRetargeted: map[string]string{}, PRNote: map[string]string{},
 		ReviewNotes: map[string]ReviewNotesReport{},
 	}
@@ -814,6 +803,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		report.Head[pt.repoName] = sh.head
 		report.PRBody[pt.repoName] = sh.pub.prPath
 		report.What[pt.repoName] = sh.pub.what
+		report.FinalRun[pt.repoName] = sh.pub.final
 		report.PRURL[pt.repoName] = prURL
 		report.PRUpdated[pt.repoName] = prOutcome == "updated"
 		if retargeted != "" {
@@ -1020,10 +1010,12 @@ type renderInput struct {
 // body at prPath (store-relative), the media a pick staged, and the pick's
 // report.
 type publication struct {
-	prPath     string
-	title      string
-	picks      PicksReport
-	what       WhatReport
+	prPath string
+	title  string
+	picks  PicksReport
+	what   WhatReport
+	// final is what the repo's reviewed head has for a final run.
+	final      FinalRunReport
 	picked     *DemoRenderResult
 	demoResult DemoRenderResult
 	mediaDir   string
@@ -1150,20 +1142,20 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	// The commands the oracles ran, from the journal's oracle lines for the
-	// reviewed head (the exact command that ran), never from a working tree,
+	// What the reviewed head has for a final run, from the journal's
+	// final-oracle lines at exactly that commit, never from a working tree,
 	// which may be another branch or a later head when the gate lease is gone.
-	// An oracle no line carries a command for is listed by its name alone.
+	// Publish runs nothing: it says what a builder's `jig verify --final` left.
 	reviewed := t.reviewedHead()
 	if reviewed == "" {
 		reviewed = in.head
 	}
-	commands, reuse := oracleRan(lines, t.slices, in.dir, reviewed)
+	// Every repo the round reviewed has its line in every body, as the findings
+	// of every repo do in the review notes.
+	finals := finalRunsOf(lines, t.qualified, t.gateRep.ReviewedSHA, t.repoName, reviewed)
 	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg, in.warn)
-	rep := t.report()
-	rep.Reuse = reuse
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, rep, in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
+		return writePRBody(d.Store, ticket, t.repoName, what, finals, rounds, picked, links, t.stack, trailer)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {
@@ -1230,7 +1222,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		return publication{}, err
 	}
 	return publication{
-		prPath: prPath, title: t.title, picks: picksReport, what: whatReport, picked: picked, demoResult: demoResult,
+		prPath: prPath, title: t.title, picks: picksReport, what: whatReport, final: ownFinalRun(finals, t.repoName), picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
 		notesName:  t.notesName(),
 		writeNotes: writeNotes,
@@ -1442,6 +1434,8 @@ type RepoBody struct {
 	Title       string
 	// What is what the render did with the What of the pull request.
 	What WhatReport
+	// FinalRun is what the reviewed head has for a final run.
+	FinalRun FinalRunReport
 }
 
 // BodyReport is PublishBody's result.
@@ -1543,7 +1537,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoBody{
-			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title, What: r.what,
+			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title, What: r.what, FinalRun: r.final,
 			ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", r.notesName)),
 		})
 		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {
@@ -1651,6 +1645,8 @@ type RecordReport struct {
 	// Readback is what reading the pull request's title and body back from the
 	// host found against the render.
 	Readback Readback
+	// FinalRun is what the reviewed head has for a final run.
+	FinalRun FinalRunReport
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
@@ -1806,13 +1802,15 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback, FinalRun: finalRunAt(lines, pt.repoName, pt.lineRepo(), reviewed)}, nil
 }
 
 // RepoHead is the head a repo's pull request ships.
 type RepoHead struct {
 	Repo string
 	Head string
+	// FinalRun is what the head has for a final run, said and never required.
+	FinalRun FinalRunReport
 }
 
 // ApproveReport is PublishApprove's result.
@@ -1845,13 +1843,17 @@ func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, er
 		}
 	}
 	report := ApproveReport{Branch: targets[0].branch, Provenance: provenance}
+	prior, err := journal.Read(d.Store, o.Ticket)
+	if err != nil {
+		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
 	for _, pt := range targets {
 		head := pt.reviewedHead()
 		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
 		if err := journal.Append(d.Store, o.Ticket, line); err != nil {
 			return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 		}
-		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head})
+		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head, FinalRun: finalRunAt(prior, pt.repoName, pt.lineRepo(), head)})
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish approved", o.Ticket)); err != nil {
 		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
@@ -2100,108 +2102,4 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 			next,
 		},
 	}
-}
-
-// oracleCommandsRan is, for each oracle name, the commands that ran for it, one
-// for each workspace (the latest passing line for the oracle in that workspace)
-// and each distinct, in the order the journal first records the workspaces,
-// which for the gate's own runs is the manifest's: lines recorded at the
-// reviewed head or at a commit with the same tree (the rule the gate reuses a
-// pass by). They are the oracle line of a slice that names the oracle (a pass
-// the gate reused, in the slice's workspace) and the gate-oracle line of a run
-// the gate made itself (with its workspace). The line carries the exact command
-// that ran, so nothing here reads a manifest.
-func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed string) map[string][]string {
-	commands, _ := oracleRan(lines, built, dir, reviewed)
-	return commands
-}
-
-// oracleRan is oracleCommandsRan and, for each oracle name whose latest pass
-// stands on an earlier whole-suite run through the manifest's light rule, the
-// words that say so: the origin run it reused and the light command that ran.
-// A pass on a commit that differs from the reviewed head only in light paths
-// counts, so a head after a Markdown-only change still names its oracles; a
-// pass on the exact tree is never replaced by one of those.
-func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) (map[string][]string, map[string]string) {
-	if reviewed == "" {
-		return nil, nil
-	}
-	type sliceOf struct{ oracle, workspace string }
-	byID := map[string]sliceOf{}
-	for _, s := range built {
-		byID[s.ID] = sliceOf{s.Oracle, s.Workspace}
-	}
-	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
-	var light manifest.Light
-	if man, err := manifest.Resolve(dir); err == nil {
-		light = man.Light
-	}
-	type key struct{ oracle, workspace string }
-	var order []key
-	latest := map[key]string{}
-	exact := map[key]bool{}
-	lightDelta := map[string]bool{}
-	notes := map[key]string{}
-	for _, l := range lines {
-		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" || l.Uncovered != "" {
-			continue
-		}
-		name, workspace := l.Oracle, l.Workspace
-		if l.Event == journal.EventOracle {
-			name, workspace = byID[l.Slice].oracle, byID[l.Slice].workspace
-		}
-		if name == "" {
-			continue
-		}
-		sameTree := l.Commit == reviewed
-		if !sameTree {
-			other, found, _ := gitx.Resolve(dir, l.Commit+"^{tree}")
-			sameTree = haveTree && found && other == tree
-		}
-		ran := l.Ran
-		if !sameTree {
-			// Without a light rule no other tree can stand: no diff to take.
-			if !light.Declared() {
-				continue
-			}
-			ok, seen := lightDelta[l.Commit]
-			if !seen {
-				files, err := gitx.DiffNameOnly(dir, l.Commit, reviewed, "ACDMRTUXB")
-				ok = err == nil && light.Matches(files)
-				lightDelta[l.Commit] = ok
-			}
-			if !ok {
-				continue
-			}
-			ran = light.Oracle
-		}
-		k := key{name, workspace}
-		if exact[k] && !sameTree {
-			continue
-		}
-		if _, seen := latest[k]; !seen {
-			order = append(order, k)
-		}
-		latest[k] = l.Command
-		exact[k] = sameTree && l.Ran == ""
-		delete(notes, k)
-		if ran != "" {
-			origin := l.Commit
-			if l.ReusedFrom != "" {
-				origin = l.ReusedFrom
-			}
-			notes[k] = fmt.Sprintf("reused the whole-suite pass of %s, and the light oracle ran: `%s`", shortSHA(origin), strings.Join(strings.Fields(ran), " "))
-		}
-	}
-	commands := map[string][]string{}
-	reuse := map[string]string{}
-	for _, k := range order {
-		if !slices.Contains(commands[k.oracle], latest[k]) {
-			commands[k.oracle] = append(commands[k.oracle], latest[k])
-		}
-		if n, ok := notes[k]; ok {
-			reuse[k.oracle] = n
-		}
-	}
-	return commands, reuse
 }

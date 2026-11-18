@@ -189,6 +189,11 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			hint = "Only a person at a terminal stands in for the confirmation: this approval was recorded as an agent's, and `jig publish` still asks (or takes --yes)"
 		}
 		blocks := []string{axi.KV("publish_approved", approvedRows(ticket, report))}
+		approvedRuns := make([]verifydeliver.FinalRunReport, len(report.Repos))
+		for i, r := range report.Repos {
+			approvedRuns[i] = r.FinalRun
+		}
+		blocks = append(blocks, finalRunTable(ticket, approvedRuns))
 		if len(report.Repos) > 1 {
 			rows := make([][]string, len(report.Repos))
 			for i, r := range report.Repos {
@@ -218,6 +223,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	axi.Render(stdout,
 		axi.KV("publish", append(append(head, picksRows(report.Picks)...), whatRows(report.What)...)),
 		pushedTable(report),
+		finalRunTable(ticket, finalRunsByRepo(report.FinalRun)),
 		axi.Table("pr_body", []string{"repo", "path"}, prRows),
 		prURLTable(report),
 		reviewNotesTable(ticket, report),
@@ -249,6 +255,9 @@ func recordedBlocks(ticket string, report verifydeliver.RecordReport, rows []nex
 		kv = append(kv, [2]string{"body_match", readbackWords(report.Readback)})
 	}
 	blocks := []string{axi.KV("publish_pr", kv)}
+	if report.FinalRun.Outcome != "" {
+		blocks = append(blocks, finalRunTable(ticket, []verifydeliver.FinalRunReport{report.FinalRun}))
+	}
 	var lead []string
 	if report.Readback.Match == journal.BodyDiffers {
 		lead = append(lead, "The pull request does not carry the render: update it with the title and body `jig publish "+ticket+" --body` reports (gh pr edit <url> --title <title> --body-file <pr_body>), then record it again")
@@ -294,6 +303,7 @@ func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.Bo
 		}
 		axi.Render(stdout,
 			axi.KV("publish_body", kv),
+			finalRunTable(ticket, bodyFinalRuns(report)),
 			axi.Help(
 				append(whatHelp(ticket, report), []string{
 					fmt.Sprintf("Push %s to origin, open the pull request with the title and body above (gh pr create --head %s --base %s --title <title> --body-file <pr_body>), then record it: `jig publish %s --pr <url>%s`", report.Branch, report.Branch, r.Target, ticket, record),
@@ -310,6 +320,7 @@ func renderBodies(stdout io.Writer, root, ticket string, report verifydeliver.Bo
 	axi.Render(stdout,
 		axi.KV("publish_body", append(append([][2]string{{"ticket", ticket}, {"branch", report.Branch}}, picksRows(report.Picks)...), whatRows(bodyWhat(report))...)),
 		axi.Table("bodies", []string{"repo", "base", "head", "title", "pr_body", "review_notes"}, rows),
+		finalRunTable(ticket, bodyFinalRuns(report)),
 		axi.Help(
 			append(whatHelp(ticket, report), []string{
 				fmt.Sprintf("Push %s to origin in each repo, open a pull request in each with its title and body above (gh pr create --head %s --base <base> --title <title> --body-file <pr_body>), then record each: `jig publish %s --pr <url> --repo <repo>`", report.Branch, report.Branch, ticket),
@@ -384,6 +395,51 @@ func approvedRows(ticket string, report verifydeliver.ApproveReport) [][2]string
 		return [][2]string{{"ticket", ticket}, {"repo", r.Repo}, {"branch", report.Branch}, {"head", r.Head}, {"provenance", report.Provenance}}
 	}
 	return [][2]string{{"ticket", ticket}, {"branch", report.Branch}, {"provenance", report.Provenance}}
+}
+
+// finalRunTable is the report's row for each repo's reviewed head and what it
+// has for a final run: `pass` with the seconds and the command, `fail` with the
+// command, or `none at the reviewed head <sha>` with the line to run in the
+// worktree at that head. Publish says it and never refuses or holds on it.
+func finalRunTable(ticket string, runs []verifydeliver.FinalRunReport) string {
+	rows := make([][]string, len(runs))
+	for i, r := range runs {
+		outcome, seconds, run := r.Outcome, "", ""
+		switch r.Outcome {
+		case verifydeliver.FinalRunPass:
+			seconds = strconv.Itoa(r.Seconds)
+		case verifydeliver.FinalRunNone:
+			outcome = "none at the reviewed head " + shortSHA(r.Head)
+		}
+		if r.Outcome != verifydeliver.FinalRunPass {
+			run = r.RunHint(ticket)
+		}
+		rows[i] = []string{r.Repo, outcome, seconds, r.Command, run}
+	}
+	return axi.Table("final_run", []string{"repo", "outcome", "seconds", "command", "run"}, rows)
+}
+
+// finalRunsByRepo lists a publish report's final runs in repo order.
+func finalRunsByRepo(byRepo map[string]verifydeliver.FinalRunReport) []verifydeliver.FinalRunReport {
+	repos := make([]string, 0, len(byRepo))
+	for repo := range byRepo {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	out := make([]verifydeliver.FinalRunReport, len(repos))
+	for i, repo := range repos {
+		out[i] = byRepo[repo]
+	}
+	return out
+}
+
+// bodyFinalRuns are the final runs of the bodies a render covered.
+func bodyFinalRuns(report verifydeliver.BodyReport) []verifydeliver.FinalRunReport {
+	out := make([]verifydeliver.FinalRunReport, len(report.Repos))
+	for i, r := range report.Repos {
+		out[i] = r.FinalRun
+	}
+	return out
 }
 
 // joinWords lists words in prose: "a", "a and b", "a, b and c".

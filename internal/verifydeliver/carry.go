@@ -1,8 +1,7 @@
 package verifydeliver
 
 // A carried round: a head that only merges the target into the head
-// a reviewer read has nothing new to read, so the gate runs the oracles, as it
-// always does, and records the round itself with the verdict of the round that
+// a reviewer read has nothing new to read, so the gate, which runs no command, records the round itself with the verdict of the round that
 // was really reviewed. No reviewer is opened and no file is left to close.
 
 import (

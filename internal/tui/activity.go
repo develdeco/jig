@@ -370,6 +370,20 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 			return cmd + " passed" + took(l.Seconds)
 		}
 		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		cmd := "the final run"
+		// A command on several lines would take several rows of the page: left out.
+		if l.Command != "" && !strings.Contains(l.Command, "\n") {
+			cmd = "the final run `" + l.Command + "`"
+		}
+		covered := ""
+		if l.Uncovered != "" {
+			covered = " (covers nothing: " + l.Uncovered + ")"
+		}
+		if l.Outcome == "pass" {
+			return cmd + " passed" + took(l.Seconds) + covered
+		}
+		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + covered + ": " + firstOf(l.Summary, l.Signature))
 	case journal.EventGateOracle:
 		cmd := "its oracle"
 		if l.Command != "" {

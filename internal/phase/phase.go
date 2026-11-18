@@ -291,7 +291,7 @@ type Facts struct {
 	Notes    []Ask
 	Blockers []Blocker
 	// Open is the round open now, nil when none is. The journal's gate-open
-	// line is not enough: a gate that failed on its oracles wrote it and
+	// line is not enough: a gate that failed before its round opened wrote it and
 	// opened nothing. OpenRoundIn reads the journal for a caller that has no
 	// store to ask.
 	Open      *OpenRound
@@ -517,7 +517,7 @@ type digest struct {
 // with no gate-round or gate-clean line after it, its number, and the session
 // of the latest gate-reviewer line for it ("" when none). A caller that can
 // read the store asks it instead (verifydeliver.ReadStatus), since a gate that
-// failed on its oracles leaves a gate-open line and no open round.
+// failed before its round opened leaves a gate-open line and no open round.
 func OpenRoundIn(lines []journal.Line) *OpenRound {
 	open, closed, closedN := -1, -1, 0
 	for i, l := range lines {

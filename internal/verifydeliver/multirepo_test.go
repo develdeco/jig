@@ -189,14 +189,8 @@ func TestPublishTargetShowsItsOwnRepo(t *testing.T) {
 
 	rep := reportYAML{ReviewedSHA: map[string]string{"api": "aaa", "web": "bbb"}, OracleNames: []string{"lint", "test"}}
 	web.gateRep, alone.gateRep = rep, rep
-	if got := web.report().ReviewedSHA; !reflect.DeepEqual(got, map[string]string{"web": "bbb"}) {
-		t.Errorf("the web's report shows reviewed heads %v, want its own alone", got)
-	}
 	if got := web.reviewedHead(); got != "bbb" {
 		t.Errorf("the web's reviewed head = %q, want bbb", got)
-	}
-	if got := alone.report().ReviewedSHA; !reflect.DeepEqual(got, rep.ReviewedSHA) {
-		t.Errorf("a ticket in one repo shows reviewed heads %v, want the round's as they are", got)
 	}
 	// The round's oracle names are the union of the repos'; a pull request names
 	// those its own manifest declares.

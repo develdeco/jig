@@ -3,7 +3,7 @@ package e2e
 // End-to-end tests of `jig verify`: the commit a person or an agent made by
 // hand, verified by the run of `jig verify` the builder makes itself, recorded
 // in the journal as the frontier records a builder's green run, so the gate
-// can reuse the pass. The harness stands for the agent session: it commits in
+// can list the pass. The harness stands for the agent session: it commits in
 // the operator clone with the Jig-Slice trailer and runs jig from there.
 
 import (
@@ -27,11 +27,10 @@ import (
 const verifyWait = 3 * time.Minute
 
 // dropEnvFromSlices removes the env class slice d names from the store's
-// slices.yaml. The gate brings up every env class a slice names and reuses an
-// oracle pass only when exactly those were up for it, so with slice d naming
-// rig an env-less pass of slice a would never stand for the gate's run. The
-// edit is a working-tree change of the store, which the next checkpoint
-// commits.
+// slices.yaml. A verify, or a final run, of a slice naming the class brings
+// it up around the command; these journeys are not about that, so slice d
+// names none and no run starts the fixture's env tool. The edit is a
+// working-tree change of the store, which the next checkpoint commits.
 func dropEnvFromSlices(t *testing.T, fx *fixture.Fixture) {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -58,12 +57,12 @@ func oracleLine(lines []journal.Line, slice, sha, outcome string) (journal.Line,
 	return journal.Line{}, false
 }
 
-// TestVerifyHandCommitReusedByGate: a commit made by hand on the ticket's
+// TestVerifyHandCommitIsListedByGate: a commit made by hand on the ticket's
 // branch for slice a is verified by the builder's own `jig verify`, which
-// journals the pending line, the oracle line and the verified line; the gate
-// round that follows reuses that pass for the alpha workspace's oracle instead
-// of running it again, and runs beta's, which no one verified.
-func TestVerifyHandCommitReusedByGate(t *testing.T) {
+// journals the oracle line and the verified line; the gate round that follows
+// runs nothing and lists that pass for slice a, and no row for the slices no
+// one verified.
+func TestVerifyHandCommitIsListedByGate(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{ScenarioBranch: "clean-round"})
 	dropEnvFromSlices(t, fx)
@@ -113,30 +112,26 @@ func TestVerifyHandCommitReusedByGate(t *testing.T) {
 	if gate.Code != 0 || !strings.Contains(gate.Stdout, "round: 1") {
 		t.Fatalf("jig gate exit = %d, want 0 and round 1 open\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
-	// review.json is what the reviewer is handed; its oracles_passed says which
-	// runs the gate made and which it reused.
+	// review.json is what the reviewer is handed; its oracles_passed lists the
+	// passes jig witnessed for the slices, since the gate runs nothing.
 	var review struct {
 		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			Command    string `json:"command"`
-			ReusedFrom string `json:"reused_from"`
+			Slice     string `json:"slice"`
+			Workspace string `json:"workspace"`
+			Command   string `json:"command"`
+			Commit    string `json:"commit"`
+			AtHead    string `json:"at_head"`
 		} `json:"oracles_passed"`
 	}
 	data := readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "work", "gate.round-1.review.json"))
 	if err := json.Unmarshal(data, &review); err != nil {
 		t.Fatalf("parse review.json: %v\n%s", err, data)
 	}
-	reused := map[string]string{}
-	commands := map[string]string{}
-	for _, r := range review.OraclesPassed {
-		reused[r.Workspace] = r.ReusedFrom
-		commands[r.Workspace] = r.Command
+	if len(review.OraclesPassed) != 1 {
+		t.Fatalf("oracles_passed = %+v, want one row: slice a's witnessed pass", review.OraclesPassed)
 	}
-	if reused["alpha"] != sha || commands["alpha"] != oracle.Command {
-		t.Errorf("alpha: reused_from %q with command %q, want it reused from %s with slice a's command %q", reused["alpha"], commands["alpha"], sha, oracle.Command)
-	}
-	if rf, ok := reused["beta"]; !ok || rf != "" {
-		t.Errorf("beta: reused_from %q (present %v), want it run by the gate: no one verified it", rf, ok)
+	if r := review.OraclesPassed[0]; r.Slice != "a" || r.Workspace != "alpha" || r.Commit != sha || r.Command != oracle.Command || r.AtHead != "yes" {
+		t.Errorf("oracles_passed row = %+v, want slice a's pass in alpha at %s with command %q, at the head", r, sha, oracle.Command)
 	}
 }
 

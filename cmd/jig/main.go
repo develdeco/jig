@@ -35,7 +35,7 @@ func main() {
 	// this process is running, then makes sure a command that does not watch
 	// the context still ends, as it did when an interrupt simply killed the
 	// process. A SIGKILL cannot be handled: on Unix it leaves a running oracle
-	// behind (see `jig gate --help`); on Windows the oracle's job object ends
+	// behind (see `jig verify --help`); on Windows the oracle's job object ends
 	// it with jig.
 	ctx, stop := signal.NotifyContext(context.Background(), stopSignals(signal.Ignored)...)
 	go endAfterInterrupt(ctx, stop, interruptGrace, envrun.EndAll, os.Exit)

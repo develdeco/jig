@@ -58,14 +58,14 @@ func TestStringListSplitsOnCommasAndCollectsRepeats(t *testing.T) {
 
 // TestReviewContextShowsTheProbeLedger (ADR 0036): the full view of an open
 // round counts the change's hunks and the unprobed ones, gives each oracle
-// that passed its seconds and slices, lists earlier rounds' probes with their
+// that passed its seconds, lists earlier rounds' probes with their
 // state, and lists the unprobed hunks as the sweep's work list.
 func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 	p := verifydeliver.Prepared{
 		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "full", Lease: "/lease",
 		Request: verifydeliver.ReviewRequest{
 			MustReview:    []string{"a/a.go"},
-			OraclesPassed: []verifydeliver.OracleRun{{Oracle: "test", Workspace: "a", Command: "go test ./a/...", Seconds: 4, Slices: []string{"s1", "s2"}}},
+			OraclesPassed: []verifydeliver.SlicePass{{Slice: "s1", Workspace: "a", Command: "go test ./a/...", Commit: "cccccccccccccccccccccccccccccccccccccccc", AtHead: "no", Seconds: 4}},
 			Probed: []verifydeliver.ProbedEntry{
 				{Round: 1, ResultProbe: verifydeliver.ResultProbe{Seam: "a total", File: "a/a.go", Line: 3, Mutation: "drop the factor", Outcome: verifydeliver.ProbeCaught}, State: verifydeliver.ProbeCurrent},
 				{Round: 1, ResultProbe: verifydeliver.ResultProbe{Seam: "a total", File: "a/b.go", Line: 7, Mutation: "negate it", Outcome: verifydeliver.ProbeSurvived}, State: verifydeliver.ProbeStale},
@@ -81,7 +81,7 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 	for _, want := range []string{
 		"hunks: 3",
 		"unprobed: 1",
-		"oracles_passed[1]{oracle,workspace,seconds,slices,reused_from,ran}:\n  test,a,4,\"s1,s2\",,",
+		"oracles_passed[1]{slice,workspace,command,commit,at_head,seconds}:\n  s1,a,go test ./a/...,cccccccccccc,no,4",
 		"probed[2]{round,file:line,outcome,state,seam,mutation}:\n  1,\"a/a.go:3\",caught,current,a total,drop the factor\n  1,\"a/b.go:7\",survived,stale,a total,negate it",
 		"unprobed[1]{hunk}:\n  \"a/b.go:6-8\"",
 	} {

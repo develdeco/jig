@@ -53,7 +53,7 @@ func orchestratorTicket(t *testing.T, repos ...string) orchestrated {
 	if err != nil {
 		t.Fatalf("project.LoadMachine: %v", err)
 	}
-	d := Deps{Store: st, Cfg: cfg, Machine: machine[fixture.OrchestratorName], Home: fx.Home, Oracle: passingOracle}
+	d := Deps{Store: st, Cfg: cfg, Machine: machine[fixture.OrchestratorName], Home: fx.Home}
 
 	const ticket = "JIG-2"
 	built, err := d.Store.ReadSlices(fx.Ticket)

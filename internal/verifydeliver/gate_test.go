@@ -69,7 +69,6 @@ func TestGateCleanRound2(t *testing.T) {
 	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	src := NewFakeGateSource(fx.ScenarioDir)
 	if err := d.Store.WriteIntent(fx.Ticket, store.Intent{Source: IntentSourceExplicit, Text: "stale explicit intent"}); err != nil {
 		t.Fatalf("WriteIntent: %v", err)
@@ -674,50 +673,6 @@ func reviewJSONIntent(t *testing.T, d Deps, ticket string, opts GateOpts) Intent
 	return gateReviewRequest(t, d, ticket, opts).Intent
 }
 
-// TestGateHandsTheReviewerTheOraclesItRan: review.json's oracles_passed
-// lists every oracle run the gate made before dispatching the reviewer -
-// one per oracle per workspace, workspaces in manifest order and oracles by
-// name - so the reviewer has the oracle's result and reads instead of
-// retesting (ADR 0017). Two oracles make the order observable: map order
-// would put vet before test about half the time.
-func TestGateHandsTheReviewerTheOraclesItRan(t *testing.T) {
-	t.Parallel()
-
-	fx := generateBuilt(t, "rung-a")
-	addSecondOracle(t, buildLeaseDir(t, fx), ticketBranch(fx.Ticket))
-	d := newDeps(t, fx)
-	rec := &oracleRecorder{}
-	d.Oracle = rec.run
-
-	got := gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed
-	// The fixture repo's jig.yaml declares test as "@GO test ./{path}/..."
-	// over workspaces alpha and beta; addSecondOracle adds vet beside it.
-	want := []struct{ oracle, workspace, suffix string }{
-		{"test", "alpha", " test ./alpha/..."},
-		{"vet", "alpha", " vet ./alpha/..."},
-		{"test", "beta", " test ./beta/..."},
-		{"vet", "beta", " vet ./beta/..."},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("review.json oracles_passed = %+v, want %d runs", got, len(want))
-	}
-	for i, w := range want {
-		if got[i].Oracle != w.oracle || got[i].Workspace != w.workspace || !strings.HasSuffix(got[i].Command, w.suffix) {
-			t.Errorf("oracles_passed[%d] = %+v, want oracle %s, workspace %s, a command ending %q", i, got[i], w.oracle, w.workspace, w.suffix)
-		}
-	}
-	// Every entry is a run the gate made, in the order it made them.
-	ran := rec.ran()
-	if len(ran) != len(got) {
-		t.Fatalf("the gate ran %q, want the %d runs oracles_passed lists", ran, len(got))
-	}
-	for i := range got {
-		if ran[i] != got[i].Command {
-			t.Errorf("run %d = %q, want %q, oracles_passed's entry %d", i, ran[i], got[i].Command, i)
-		}
-	}
-}
-
 // TestGateRefusesAnIntentMDItCannotBind checks that resolveIntent refuses
 // a ticket's intent.md when it binds nothing jig could stand behind, each
 // with its own code and before the round's gate-open journal line, and that
@@ -854,21 +809,20 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 }
 
 // TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances is the chain of what a
-// killed reviewer or oracle leaves in the gate lease, on one build whose gate
-// rounds run the real oracles: what the second round must not trip over.
+// killed reviewer leaves in the gate lease, on one build: what the second round
+// must not trip over.
 //
 // NM2 scenario A: a reviewer that outlived a killed jig (no signal handler
 // reaches a future reviewer source's own defer restore) can leave an untracked
 // failing test file and a tracked edit sitting in the gate lease. The next `jig
-// gate` must not have its oracles fail or get skewed by that leftover dirt -
-// Gate itself restores the lease to a pristine head before any oracle runs. The
-// untracked file here is a failing test of alpha, which the fixture's "test"
-// oracle (`go test ./alpha/...`) runs for real: it is only absent from the
-// oracle's run if the restore came first.
+// gate` must not have its review skewed by that leftover dirt -
+// Gate itself restores the lease to a pristine head before the round reads it. The
+// untracked file here is a failing test of alpha: it is only absent from the
+// lease the reviewer reads if the restore came first.
 //
 // NM5, a residual of NM2: leftover tracked dirt (a reviewer that outlived a
-// killed jig, or an oracle rewrite from an earlier attempt) does not get in the
-// way of an oracle run by itself, but once the ticket branch later advances past
+// killed jig, or a rewrite from an earlier attempt) does not get in the
+// way of a round by itself, but once the ticket branch later advances past
 // the same file, the checkout that runs before Gate's post-acquire restore
 // (fetchTicketBranchFromBuildLease's own final `git checkout <branch>`) refuses
 // with "local changes ... would be overwritten", and Gate would return before
@@ -886,7 +840,6 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 	fx := generateBuilt(t, "rung-a")
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	var gateDir string
 	trackedPath := func() string { return filepath.Join(gateDir, "alpha", "alpha.go") }
 	var orig []byte
@@ -935,15 +888,15 @@ func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
 		}
 	})
 
-	step(t, "round 2 wipes a failing repro and a tracked edit before its oracles, though the branch advanced", func(t *testing.T) {
+	step(t, "round 2 wipes a failing repro and a tracked edit before it reads the lease, though the branch advanced", func(t *testing.T) {
 		// An untracked failing test file, as a reviewer's own repro would leave
-		// behind: the fixture's "test" oracle runs `go test ./alpha/...`.
+		// behind.
 		reproPath := filepath.Join(gateDir, "alpha", "zz_repro_test.go")
 		repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
 		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
 			t.Fatalf("write leftover repro test: %v", err)
 		}
-		// A tracked edit left uncommitted, as an oracle rewrite or a killed
+		// A tracked edit left uncommitted, as a killed
 		// reviewer's own edit would leave behind.
 		dirty(t, "leftover reviewer edit")
 		// Advance the ticket's branch in the build lease with a commit touching the
@@ -1772,7 +1725,7 @@ func TestGateRecurrenceBoundSurvivesANoteInBetween(t *testing.T) {
 // TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerated
 // reproduces the wedge a text match on git's cat-file message used to fall
 // into: an open finding's file is later untracked and gitignored on the
-// ticket branch, but an oracle regenerates it on disk in the gate lease
+// ticket branch, but something regenerates it on disk in the gate lease
 // before the next round's review. FileExistsAtRev must report it absent at
 // head from the tree alone, never from what happens to sit in the working
 // tree, or every later round fails the same way and no dismissal can get
@@ -1792,7 +1745,6 @@ func TestGateReviewerRoundsProceedWhenAnOpenFindingsFileBecomesIgnoredAndGenerat
 	builder(t).Push(buildDir, "origin", branch)
 
 	d := newDeps(t, fx)
-	d.Oracle = nil // the real oracle run is what this test is about
 	round := 0
 	backend := stubBackend{run: func(sd session.Dispatch) error {
 		round++

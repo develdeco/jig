@@ -222,3 +222,28 @@ func NextAttempt(lines []Line, slice string) int {
 	}
 	return highest + 1
 }
+
+// FinalRunAt is the final run `jig verify --final` recorded at exactly head
+// for repo: the latest final-oracle line of that repo whose commit is head,
+// that covers it (no Uncovered reason) and judged the code (a pass or a fail,
+// not a run jig's stop ended). repo is "" in a project of one repo, whose
+// lines carry none. A run at another commit stands for nothing, even one with
+// the same tree: nothing borrows a pass. ok is false when there is none.
+func FinalRunAt(lines []Line, repo, head string) (line Line, ok bool) {
+	if head == "" {
+		return Line{}, false
+	}
+	for _, l := range lines {
+		if l.Event != EventFinalOracle || l.Commit != head || l.Repo != repo || l.Uncovered != "" {
+			continue
+		}
+		if l.Outcome != "pass" && l.Outcome != "fail" {
+			continue
+		}
+		if l.Cause == CauseStopped {
+			continue
+		}
+		line, ok = l, true
+	}
+	return line, ok
+}

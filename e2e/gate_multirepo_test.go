@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -48,10 +49,11 @@ type gateRequest struct {
 	Oracles       []string `json:"oracles"`
 	MustReview    []string `json:"must_review"`
 	OraclesPassed []struct {
-		Oracle     string   `json:"oracle"`
-		Workspace  string   `json:"workspace"`
-		ReusedFrom string   `json:"reused_from"`
-		Slices     []string `json:"slices"`
+		Slice     string `json:"slice"`
+		Workspace string `json:"workspace"`
+		Command   string `json:"command"`
+		Commit    string `json:"commit"`
+		AtHead    string `json:"at_head"`
 	} `json:"oracles_passed"`
 	Probed []struct {
 		File  string `json:"file"`
@@ -200,6 +202,25 @@ func TestGateCoversEveryRepo(t *testing.T) {
 		}
 	}
 
+	// The builders' last run: in each clone, `jig verify --final` is the union of
+	// the slices that build in that repo alone, recorded with the repo's name.
+	verifySlots <- struct{}{}
+	for _, c := range []struct {
+		h          *fakeHarness
+		repo, sha  string
+		slice, not string
+	}{{b.api, "api", b.shaAPI, "server", "ui"}, {b.web, "web", b.shaWeb, "ui", "server"}} {
+		res := c.h.Jig("verify", ticket, "--final")
+		if res.Code != 0 || !strings.Contains(res.Stdout, "outcome: pass") || strings.Contains(res.Stdout, c.not+",") {
+			t.Fatalf("jig verify --final in %s: exit %d, want a pass of slice %s alone\nstdout:\n%s\nstderr:\n%s", c.repo, res.Code, c.slice, res.Stdout, res.Stderr)
+		}
+		line, ok := journal.FinalRunAt(readJournal(t, b.fx, ticket), c.repo, c.sha)
+		if !ok || line.Repo != c.repo || !reflect.DeepEqual(line.Slices, []string{c.slice}) {
+			t.Errorf("FinalRunAt(%s) = %+v, %v, want a line naming the repo and slice %s", c.repo, line, ok, c.slice)
+		}
+	}
+	<-verifySlots
+
 	// jig here, from either clone, says the same of the open round: the head and
 	// the copy of each repo.
 	for _, h := range []*fakeHarness{b.api, b.web} {
@@ -232,19 +253,20 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if want := []string{"api/server/handler.go", "web/ui/page.go"}; !reflect.DeepEqual(req.MustReview, want) {
 		t.Errorf("review.json must_review = %v, want the files of both repos, named by their repo: %v", req.MustReview, want)
 	}
-	// The pass jig verify recorded stands for the gate's run of the workspace it
-	// verified, in each repo; the lib workspaces nobody verified the gate ran.
-	reused, slicesOf := map[string]string{}, map[string]string{}
+	// The round ran no command: oracles_passed lists the pass `jig verify`
+	// witnessed for each slice, in its repo's workspace named by the repo, at
+	// the commit the slice was verified at; the lib workspaces no slice builds
+	// in have no row.
+	type passRow struct{ workspace, commit, atHead string }
+	passes := map[string]passRow{}
 	for _, o := range req.OraclesPassed {
-		reused[o.Workspace] = o.ReusedFrom
-		slicesOf[o.Workspace] = strings.Join(o.Slices, ",")
+		if o.Command == "" {
+			t.Errorf("oracles_passed row %+v has no command", o)
+		}
+		passes[o.Slice] = passRow{o.Workspace, o.Commit, o.AtHead}
 	}
-	if want := (map[string]string{"api/server": b.shaAPI, "api/lib": "", "web/ui": b.shaWeb, "web/lib": ""}); !reflect.DeepEqual(reused, want) {
-		t.Errorf("oracles_passed reused_from = %v, want %v", reused, want)
-	}
-	// Each run names the slices whose oracle it is in its workspace.
-	if want := (map[string]string{"api/server": "server", "api/lib": "", "web/ui": "ui", "web/lib": ""}); !reflect.DeepEqual(slicesOf, want) {
-		t.Errorf("oracles_passed slices = %v, want %v", slicesOf, want)
+	if want := (map[string]passRow{"server": {"api/server", b.shaAPI, "yes"}, "ui": {"web/ui", b.shaWeb, "yes"}}); !reflect.DeepEqual(passes, want) {
+		t.Errorf("oracles_passed rows = %v, want %v", passes, want)
 	}
 	var open struct {
 		Head  string `yaml:"head"`

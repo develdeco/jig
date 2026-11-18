@@ -677,8 +677,6 @@ func TestPublishFullChain(t *testing.T) {
 		advanceTarget(t, fx)
 
 		dd := d
-		oracles := &oracleRecorder{}
-		dd.Oracle = oracles.run
 		var gotBranch, gotPR string
 		var gotHasHost bool
 		dd.Confirm = func(branch, _, openPR string, hasHost bool) bool {
@@ -696,9 +694,6 @@ func TestPublishFullChain(t *testing.T) {
 		}
 		if report.Tier != "none" {
 			t.Fatalf("Tier = %q, want none: publish revalidates nothing", report.Tier)
-		}
-		if ran := oracles.ran(); len(ran) != 0 {
-			t.Fatalf("publish ran oracles %v, want none", ran)
 		}
 		if head := report.Head["fixture-repo"]; head != buildHead {
 			t.Fatalf("Head[fixture-repo] = %q, want the reviewed head %s", head, buildHead)

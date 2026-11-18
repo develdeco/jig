@@ -30,15 +30,10 @@ const (
 	gateProjectUsage  = "project name, resolved via the machine mapping"
 )
 
-// gateNote is the limit of the gate's oracle runs that its help states: jig
-// ends the oracle it runs when it is stopped, but a Unix process cannot catch
-// SIGKILL.
-const gateNote = "the oracles a gate runs end with it when it is interrupted or terminated (SIGINT, SIGTERM, SIGHUP; on Windows, any end); on Unix a SIGKILL of jig cannot be caught and leaves a running oracle behind"
-
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"gate", "open a gate round: re-verify the branch and hand a reviewer what to review", []flagSpec{
+		Spec: cmdSpec{"gate", "open a gate round on the branch: it runs no command, and hands a reviewer what to review", []flagSpec{
 			{"early", gateEarlyUsage, false},
 			{"branch", gateBranchUsage, false},
 			{"intent", gateIntentUsage, false},
@@ -49,7 +44,7 @@ func init() {
 			{"project", gateProjectUsage, false},
 		}, false},
 		Order: 160,
-		Note:  gateNote,
+		Note:  "a gate round runs no command: the request lists the pass `jig verify` witnessed for each slice, and a ticket's last run is `jig verify --final`",
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return cmdGate(e, args, stdout, stdin)
 		},
@@ -60,9 +55,9 @@ func init() {
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
 // <text> | --doc <path>] [--yes]`: open a gate round over the ticket's branch.
 // The branch is read from the operator's clone (committed work only), or
-// origin's copy when that is the newer; the oracles are re-verified on its
-// head, reusing the passes `jig verify` recorded; and the request a
-// reviewer reads is written. jig starts no reviewer: a fresh-context agent
+// origin's copy when that is the newer; no command is run: the request a
+// reviewer reads lists the passes each slice's builder had witnessed with
+// `jig verify`, and is written. jig starts no reviewer: a fresh-context agent
 // reads the round with `jig review context`, reports findings with `jig
 // finding` and ends with `jig review done`, which records the round.
 //

@@ -25,6 +25,7 @@ const (
 	verifySessionUsage  = "harness session id recorded on the lines (default: $JIG_SESSION, else CLAUDE_CODE_SESSION_ID)"
 	verifyStoreUsage    = "explicit store path"
 	verifyProjectUsage  = "project name, resolved via the machine mapping"
+	verifyFinalUsage    = "run the union of the ticket's slice commands at HEAD, the ticket's last run (no --slice, no -- <cmd>)"
 	verifyDirUsage      = "where the command runs (default: the worktree's root); a run in another work tree covers nothing"
 	verifyTimeoutUsage  = "end the command after this long (default: none; the harness owns time)"
 	verifyDryRunUsage   = "print the header and the record that would be written; run and write nothing"
@@ -39,8 +40,9 @@ const verifySliceTrailer = "Jig-Slice"
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"verify", "run a slice's oracle in this worktree, in the foreground, and record the run; `-- <cmd>` runs another command, which covers nothing (exit code: the command's own, 125 when jig failed before it started)", []flagSpec{
+		Spec: cmdSpec{"verify", "run a slice's oracle in this worktree, in the foreground, and record the run; `-- <cmd>` runs another command, which covers nothing; `--final` runs the union of the ticket's slice commands, the ticket's last run (exit code: the command's own, 125 when jig failed before it started)", []flagSpec{
 			{"slice", verifySliceUsage, false},
+			{"final", verifyFinalUsage, false},
 			{"dir", verifyDirUsage, false},
 			{"timeout", verifyTimeoutUsage, false},
 			{"dry-run", verifyDryRunUsage, false},
@@ -51,7 +53,7 @@ func init() {
 			{"project", verifyProjectUsage, false},
 		}, false},
 		Order: 320,
-		Note:  "jig verify [<ticket>] [flags] [-- <cmd>]: the ticket defaults to the one the branch is for; `-- <cmd>` (default: the slice's oracle, verbatim) runs another command, recorded as differing and covering nothing; exit code: the command's own, 125 when jig failed before the command started",
+		Note:  "jig verify [<ticket>] [flags] [-- <cmd>]: the ticket defaults to the one the branch is for; `-- <cmd>` (default: the slice's oracle, verbatim) runs another command, recorded as differing and covering nothing; exit code: the command's own, 125 when jig failed before the command started; the command ends with jig when jig is interrupted or terminated (SIGINT, SIGTERM, SIGHUP; on Windows, any end), but on Unix a SIGKILL of jig cannot be caught and leaves it running",
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
 			return cmdVerify(e, args, stdout)
 		},
@@ -67,6 +69,9 @@ type verifyOpts struct {
 	dir                    string
 	timeout                time.Duration
 	dryRun, noRecord, json bool
+	// final is --final: the run is of the union of the ticket's slice
+	// commands, not of one slice's oracle.
+	final bool
 	// command is what followed `--`, joined: another command to run in the
 	// place of the slice's oracle, "" for none. args is the command line as
 	// given, which the oracle line records.
@@ -104,6 +109,7 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 
 	fs := newFlagSet(e, "verify")
 	fs.StringVar(&o.slice, "slice", "", verifySliceUsage)
+	fs.BoolVar(&o.final, "final", false, verifyFinalUsage)
 	fs.StringVar(&o.dir, "dir", "", verifyDirUsage)
 	fs.DurationVar(&o.timeout, "timeout", 0, verifyTimeoutUsage)
 	fs.BoolVar(&o.dryRun, "dry-run", false, verifyDryRunUsage)
@@ -134,6 +140,16 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	}
 	if o.timeout < 0 {
 		return unrun(stdout, &axi.Error{Msg: "--timeout is not a negative time", Code: "VALIDATION_ERROR"})
+	}
+	if o.final {
+		// The union is the ticket's own commands: another command or one
+		// slice is a different run, so the two are refused before anything runs.
+		if o.slice != "" {
+			return unrun(stdout, &axi.Error{Msg: "--final and --slice cannot be given together: --final runs every slice's command", Code: "VALIDATION_ERROR"})
+		}
+		if o.command != "" {
+			return unrun(stdout, &axi.Error{Msg: "--final and -- <cmd> cannot be given together: --final runs the slices' own commands", Code: "VALIDATION_ERROR"})
+		}
 	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, o.projectFlag, o.storeFlag, stdout)
@@ -249,6 +265,19 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 	if err != nil {
 		return none(&axi.Error{Msg: fmt.Sprintf("%s has no commit to verify", dir), Code: "VALIDATION_ERROR"})
 	}
+	d := verify.Deps{
+		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: dir, Repo: repoName, Target: target,
+		Now: e.now,
+	}
+	if o.final {
+		// A union is of every slice that builds in this repo: no slice is
+		// picked, and a project of several repos says which are this one's.
+		if len(cfg.Repos) > 1 {
+			d.Repos = ready.ProjectRepos(cfg, mp.Clones)
+		}
+		req := verify.Request{Ticket: ticket, Session: o.session, Flags: o.args, Timeout: o.timeout, Dir: o.dir, NoRecord: o.noRecord}
+		return d, req, "--final", nil
+	}
 	slice, source, err := verifySlice(st, ticket, dir, sha, o, where.Slice)
 	if err != nil {
 		return none(err)
@@ -257,10 +286,6 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		return none(err)
 	}
 
-	d := verify.Deps{
-		Store: st, JigHome: jigHome, Project: cfg.Name, Slots: cfg.PinnedSlots(), Clone: dir, Repo: repoName, Target: target,
-		Now: e.now,
-	}
 	req := verify.Request{
 		Ticket: ticket, Slice: slice, Session: o.session, Command: o.command, Flags: o.args, Timeout: o.timeout,
 		Dir: o.dir, NoRecord: o.noRecord,
@@ -403,6 +428,9 @@ func runVerify(e env, d verify.Deps, req verify.Request, o verifyOpts, source st
 	stream := stdout
 	if o.json && e.stderr != nil {
 		stream = e.stderr
+	}
+	if o.final {
+		return runFinal(d, req, o, stream, stdout)
 	}
 	plan, err := verify.Plan(d, req)
 	if err != nil {

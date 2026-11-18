@@ -618,6 +618,8 @@ func describe(l events.Envelope) string {
 			return "oracle pass " + short(l.Commit)
 		}
 		return strings.TrimSpace("oracle " + l.Outcome + " " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		return strings.TrimSpace("final run " + l.Outcome + " " + short(l.Commit))
 	case journal.EventVerified:
 		return "verified " + short(l.Commit)
 	case journal.EventVerifyError:
@@ -678,6 +680,11 @@ func eventState(l events.Envelope) string {
 		return StateVerifying
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
+			return StateGreen
+		}
+		return StateStalled
+	case journal.EventFinalOracle:
+		if l.Outcome == "pass" && l.Uncovered == "" {
 			return StateGreen
 		}
 		return StateStalled
