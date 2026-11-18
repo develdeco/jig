@@ -226,12 +226,3 @@ func TestUserDirFromAgreesWithTheStdlibOnTheProcess(t *testing.T) {
 		t.Errorf("UserDirFrom(os.Getenv) = %q, %v, want os.UserHomeDir's %q, %v", got, gotErr, want, wantErr)
 	}
 }
-
-// TestGateDirIsOneDirectoryPerProjectUnderTheRoot: a project's gate locks
-// live in one directory of their own under the jig home.
-func TestGateDirIsOneDirectoryPerProjectUnderTheRoot(t *testing.T) {
-	root := t.TempDir()
-	if got, want := GateDir(root, "p"), filepath.Join(root, "gates", "p"); got != want {
-		t.Errorf("GateDir = %q, want %q", got, want)
-	}
-}

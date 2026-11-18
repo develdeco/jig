@@ -22,6 +22,14 @@ jig already advises a session's context and runs none of the tools ([ADR 0034](0
 
 **git answers.** `gitx.Worktrees` runs `git worktree list --porcelain`. The advice asks it only when the ticket's branch exists in the clone, read in process, since no work tree can hold a branch that is not there, and once for each clone in a command, however many tickets it decides. An error from either question is no worktree.
 
+## Amended
+
+The add command above is advice for a harness with no worktree method of its own; the remove command removes a worktree the harness kept, whatever the harness. A harness has one (Claude Code's Agent `isolation: worktree`, or its worktree entry), so the harness makes the worktree and jig gives what to work on: a row's `branch` and `base`, and the `dir` where a worktree holds the branch (`present`, `remove`). `command` stays on an `add` and a `remove` row: the help lines present an add's as advice for a harness with no method, never as the way, and a remove's as what removes a kept worktree.
+
+A worktree the harness made is tied to the ticket by its branch, the one thing jig already finds a worktree by. The harness names its branch (or leaves a detached HEAD), so the session renames it inside the worktree with `git branch -m <branch>` (on a detached HEAD, which git refuses to rename, `git switch -c <branch>`), using the branch the row names; a branch the clone has already is switched to instead, since a branch outlives a removed worktree. A worktree the harness starts at its own HEAD is reset to the row's `base` before anything is committed there. From then on `jig next` shows the row `present` with the worktree's `dir` and `jig here` run in it binds the ticket. No jig verb renames.
+
+A row in a clone the harness's worktree does not reach (another repo than the session's, or a harness with no worktree method) is added with the row's `command`: the main session runs these one at a time, since git's records of a repository's worktrees are not safe against parallel adds, and a nested builder of a multi-repo ticket runs its own repo's. A builder with no harness worktree never renames or resets in the person's clone. Removal is the harness's for a clean worktree; one it kept is removed after the publish with the `remove` command, never forced.
+
 ## Rejected alternatives
 
 - **A `jig worktree add` and `remove`.** jig would then own a second place where a session's checkout is made, and a removal that failed halfway would need a recovery of its own. The commands are short and git says what is wrong with them. Advising keeps jig out of the session's files, as ADR 0034 does for context tools.

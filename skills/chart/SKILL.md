@@ -21,10 +21,10 @@ Before the first wave, ask once to allow what the builds run (`jig`, `git`, the 
 
 Before each wave read `jig skill chart stacked`: it says how overlaps and a published ticket that is behind are handled.
 
-Go through `run` wave by wave (no edge lies inside one). Start a subagent per wave ticket (`subagent_type: general-purpose`, `model: sonnet` unless the person named another, background), each in its own worktree: run the `add` commands of the ticket's `worktrees` (`jig next <T>`, or the chart's), one at a time. `present`: use its `dir`. `no_clone`: tell the person; do not start it. Its prompt:
+Go through `run` wave by wave (no edge lies inside one). Start a subagent per wave ticket (`subagent_type: general-purpose`, `model: sonnet` unless the person named another, background). Read the ticket's `worktrees` (`jig next <T>`, or the chart's). An `add` row in this session's repo (its `clone`): start the subagent with `isolation: worktree` (you run no `add`), from the row's `branch` and `base`. A single-repo ticket's `add` row in another clone, or any `add` with no worktree method (no Agent isolation, no EnterWorktree): you run its `command`, one at a time, then start the subagent with no isolation. A multi-repo ticket's other clones are its nested builders'; its own subagent takes isolation for its row in this repo. `present`: no isolation. `no_clone`: tell the person; do not start it. The prompt states the builder's case, which it never infers from where it finds itself. `<where>` is, with isolation: "Tie your worktree to the ticket first with `git branch -m <branch>` (detached HEAD: `git switch -c <branch>`; the clone has the branch: `git switch <branch>`; it lacks it: also `git reset --hard <base>`). Work only there, on branch <branch>."; with no isolation: "Work only in <dir> (the row's `dir`), on branch <branch>; never rename or reset." Its prompt:
 
 ```
-You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
+You are building ticket <T>. <where> Run every command there.
 Build it with `jig skill build`: claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
 Stuck: `jig ask --slice <slice> "<question>"` with your default, then end your turn with the question, id and default. I answer and resume you.
 When every slice is green, open the gate (`jig gate <T>`) and have your own reviewer subagent review it if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them, have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or as `jig gate` says.
@@ -41,7 +41,7 @@ A subagent's question: put it to the person with its default, record it with `ji
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. Remove a ticket's worktrees only once published, one at a time, with the `remove` commands of `jig publish --pr` or `jig next <T>`; git refuses one with changes: commit or discard, never force.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. A clean harness worktree is the harness's to clean up; one it kept is removed only once published, one at a time, with the `remove` command of `jig publish --pr` or `jig next <T>` as advice; git refuses one with changes: commit or discard, never force.
 
 ## Ends
 
