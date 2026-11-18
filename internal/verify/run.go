@@ -87,6 +87,11 @@ type Request struct {
 	// Timeout bounds the command when it is above 0; the run is unbounded
 	// otherwise.
 	Timeout time.Duration
+	// Dir is where the command runs; the worktree's root when empty.
+	Dir string
+	// NoRecord runs the command and writes nothing: no line, no state, no
+	// recording directory, no push. An exploratory run.
+	NoRecord bool
 }
 
 // Result is what a verification found.
@@ -133,6 +138,7 @@ type Result struct {
 	// why not, "" when they did: the lines are recorded and stay local until
 	// the next checkpoint pushes them. Recorded names the lines the run wrote.
 	PushErr  string
+	Pushed   bool
 	Recorded []string
 }
 
@@ -162,6 +168,7 @@ type run struct {
 
 	storeID string
 	dir     string // the worktree
+	cmdDir  string // where the command runs
 	attempt int
 	res     Result
 }
@@ -223,7 +230,7 @@ func (t *tailWriter) String() string { return string(t.buf) }
 // what the run needs before it touches the journal: HEAD's full sha and the
 // slice. It records nothing.
 func (d Deps) prepare(r Request) (*run, error) {
-	x := &run{d: d, r: r, res: Result{Ticket: r.Ticket, Slice: r.Slice, Dir: d.Clone}}
+	x := &run{d: d, r: r, res: Result{Ticket: r.Ticket, Slice: r.Slice}}
 	switch {
 	case d.Store == nil:
 		return x, errors.New("verify: no store")
@@ -240,6 +247,11 @@ func (d Deps) prepare(r Request) (*run, error) {
 		return x, fmt.Errorf("verify: HEAD of %s: %w", d.Clone, err)
 	}
 	x.sha, x.res.SHA, x.dir = sha, sha, d.Clone
+	x.cmdDir = d.Clone
+	if r.Dir != "" {
+		x.cmdDir = r.Dir
+	}
+	x.res.Dir = x.cmdDir
 
 	slices, err := d.Store.ReadSlices(r.Ticket)
 	if err != nil {
@@ -304,9 +316,46 @@ func Run(d Deps, r Request) (Result, error) {
 		if err := x.journal(journal.Line{Event: journal.EventVerifyError, Outcome: "error", Summary: x.res.Summary}); err != nil {
 			return x.res, err
 		}
-		x.res.Recorded = append(x.res.Recorded, journal.EventVerifyError)
+		x.recordedLine(journal.EventVerifyError)
 		x.push("could not verify")
 	}
+	return x.res, nil
+}
+
+// Plan says what Run would do for r, and runs and writes nothing: the commit,
+// the command and the directory it would run in, the env class, the attempt
+// it would take, the tree as it is now, and the reason it would cover nothing
+// when that is already so (Result.Uncovered; one that only the run can bring
+// about, a tree left dirty or a HEAD moved, is not foretold).
+func Plan(d Deps, r Request) (Result, error) {
+	x, err := d.prepare(r)
+	if err != nil {
+		return x.res, err
+	}
+	lines, err := journal.Read(d.Store, r.Ticket)
+	if err != nil {
+		return x.res, fmt.Errorf("verify: read the journal of %s: %w", r.Ticket, err)
+	}
+	x.attempt = journal.NextAttempt(lines, r.Slice)
+	x.res.Attempt = x.attempt
+	m, err := manifest.Resolve(x.dir)
+	if err != nil {
+		return x.res, fmt.Errorf("verify: the manifest at %s does not resolve: %w", short(x.sha), err)
+	}
+	ws, _ := m.WorkspaceIn(x.d.Repo, x.sl.Workspace)
+	oracleCmd := m.OracleCmd(x.sl.Oracle, ws)
+	if strings.TrimSpace(oracleCmd) == "" {
+		return x.res, fmt.Errorf("verify: slice %s has no oracle to run", r.Slice)
+	}
+	x.res.Command, x.res.Env = oracleCmd, x.sl.Env
+	if r.Command != "" {
+		x.res.Command = r.Command
+	}
+	x.res.TreeBefore = treeState(x.dir)
+	x.res.HeadEnd = x.sha
+	x.res.TreeAfter = x.res.TreeBefore
+	x.res.Uncovered = x.uncoveredBecause(r.Command == "", x.res.TreeBefore, x.sha)
+	x.res.Covered = x.res.Uncovered == ""
 	return x.res, nil
 }
 
@@ -345,6 +394,9 @@ func exitCodeOf(err error) int {
 // claim or an answer made meanwhile by another process is not overwritten by
 // a stale copy.
 func (x *run) setState(change func(*store.SliceState) bool) error {
+	if x.r.NoRecord {
+		return nil
+	}
 	release, err := x.d.Store.LockCheckpoint()
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
@@ -368,6 +420,9 @@ func (x *run) setState(change func(*store.SliceState) bool) error {
 // the frontier gave them), its attempt and commit. The lines that say who
 // asked carry the session and agent of the request.
 func (x *run) journal(l journal.Line) error {
+	if x.r.NoRecord {
+		return nil
+	}
 	l.Slice = x.r.Slice
 	l.TS = x.d.now().UTC().Format(time.RFC3339Nano)
 	switch l.Event {
@@ -391,6 +446,10 @@ func (x *run) journal(l journal.Line) error {
 // never goes through is not a failure of the verification: the lines are
 // written and the next checkpoint carries them.
 func (x *run) push(what string) {
+	if x.r.NoRecord {
+		return
+	}
+	x.res.Pushed = true
 	msg := fmt.Sprintf("%s: verify %s %s: %s", x.r.Ticket, x.r.Slice, short(x.sha), what)
 	var err error
 	for i := 0; i < pushTries; i++ {
@@ -403,6 +462,7 @@ func (x *run) push(what string) {
 		}
 	}
 	x.res.PushErr = err.Error()
+	x.res.Pushed = false
 	x.logf("push failed after %d tries; the lines stay local for the next checkpoint: %v", pushTries, err)
 }
 
@@ -552,7 +612,7 @@ func (x *run) bringUpEnv(m manifest.Manifest) (down func() error, why string, er
 	if !ok {
 		return nil, fmt.Sprintf("slice %s names the env class %q, which the manifest at %s does not declare", x.r.Slice, x.sl.Env, short(x.sha)), nil
 	}
-	h, uerr := envrun.Up(ec, x.r.Ticket, x.dir)
+	h, uerr := envrun.Up(ec, x.r.Ticket, x.cmdDir)
 	if uerr != nil {
 		var unavail *envrun.Unavailable
 		if !errors.As(uerr, &unavail) {
@@ -613,7 +673,10 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	d := x.d
 	x.res.TreeBefore = treeState(x.dir)
 	rec := recorder{home: d.JigHome, storeID: x.storeID, ticket: x.r.Ticket, journal: x.journal, changed: x.changedFiles}
-	target := rec.start(x.r.Slice, x.attempt, x.sha)
+	var target recordTarget
+	if !x.r.NoRecord {
+		target = rec.start(x.r.Slice, x.attempt, x.sha)
+	}
 	// A run that jig's stop ended (in the command or in the wait for the slot)
 	// has nothing to record: its directory goes as a failed run's does.
 	defer func() {
@@ -627,13 +690,22 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	// the slot.
 	var share *slot.Share
 	if ownOracle && d.Project != "" && m.IsHeavy(x.sl.Oracle) {
+		// The slot is the machine's, taken for the run whether or not it is
+		// recorded; its lines are the run's record, so a run that records
+		// nothing journals none.
+		journalSlot := func(event, summary string) error {
+			if x.r.NoRecord {
+				return nil
+			}
+			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
+		}
 		stopCtx, endStopCtx := envrun.StopContext(context.Background())
 		defer endStopCtx()
 		held, err := slot.Hold(stopCtx, d.JigHome, slot.Request{Project: d.Project, Who: slot.Who(x.r.Ticket, x.r.Slice), Oracle: x.sl.Oracle, Command: cmd, Repo: d.Repo, Pinned: d.Slots}, func(event, summary string) error {
 			if event == journal.EventSlotWait {
 				x.logf("%s", summary)
 			}
-			return x.journal(journal.Line{Event: event, Oracle: x.sl.Oracle, Command: cmd, Summary: summary})
+			return journalSlot(event, summary)
 		})
 		if err != nil {
 			if stopCtx.Err() != nil {
@@ -648,7 +720,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	// The oracle line carries everything needed to run this again by hand.
 	base := func() journal.Line {
 		return journal.Line{Event: journal.EventOracle, Commit: x.sha, Command: cmd, Env: x.sl.Env, Source: "jig",
-			Dir: x.dir, Flags: x.r.Flags, HeadEnd: x.headNow(), TreeBefore: x.res.TreeBefore, TreeAfter: treeState(x.dir)}
+			Dir: x.cmdDir, Flags: x.r.Flags, HeadEnd: x.headNow(), TreeBefore: x.res.TreeBefore, TreeAfter: treeState(x.dir)}
 	}
 	tail := &tailWriter{}
 	w := io.Writer(tail)
@@ -657,7 +729,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	}
 	started := d.now()
 	x.res.Ran = true
-	use, oerr := d.oracle(cmd, x.dir, target.env(), x.r.Timeout, w)
+	use, oerr := d.oracle(cmd, x.cmdDir, target.env(), x.r.Timeout, w)
 	if errors.Is(oerr, envrun.ErrStopped) {
 		// No verdict: the line says the run ended without judging the code,
 		// and the slice's state stays as it was.
@@ -669,7 +741,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 		if jerr := x.journal(line); jerr != nil {
 			return jerr
 		}
-		x.res.Recorded = append(x.res.Recorded, journal.EventOracle)
+		x.recordedLine(journal.EventOracle)
 		return oerr
 	}
 	// Rounded up, so every run records at least a second and 0 keeps meaning
@@ -704,7 +776,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	if err := x.journal(line); err != nil {
 		return err
 	}
-	x.res.Recorded = append(x.res.Recorded, journal.EventOracle)
+	x.recordedLine(journal.EventOracle)
 	if err := rec.finish(x.r.Slice, x.attempt, x.sha, target, oerr == nil && x.res.Covered); err != nil {
 		return err
 	}
@@ -750,7 +822,7 @@ func (x *run) runOracle(m manifest.Manifest, cmd string, ownOracle bool) (err er
 	if err := x.journal(journal.Line{Event: journal.EventVerified, Commit: x.sha}); err != nil {
 		return err
 	}
-	x.res.Recorded = append(x.res.Recorded, journal.EventVerified)
+	x.recordedLine(journal.EventVerified)
 	x.push("oracle passed")
 	return nil
 }
@@ -762,4 +834,11 @@ func (x *run) headNow() string {
 		return ""
 	}
 	return head
+}
+
+// recordedLine notes that the run wrote a line of kind, unless it writes none.
+func (x *run) recordedLine(kind string) {
+	if !x.r.NoRecord {
+		x.res.Recorded = append(x.res.Recorded, kind)
+	}
 }

@@ -94,7 +94,7 @@ func TestVerifyRefusesWhatItCannotPlace(t *testing.T) {
 		{"no slice anywhere", []string{"verify", "JIG-1"}, []string{"cannot tell which slice", "Jig-Slice", "a, b, c, d"}},
 		{"a flag for a slice the ticket lacks", []string{"verify", "JIG-1", "--slice", "zz"}, []string{`has no slice "zz"`, "a, b, c, d"}},
 		{"a commit, which a run has no place for", []string{"verify", "JIG-1", "0123456789012345678901234567890123456789", "--slice", "a"}, []string{"takes no commit"}},
-		{"an option where a ticket goes", []string{"verify", "JIG-1", "--", "--all"}, []string{"is not a ticket"}},
+		{"an option where a ticket goes", []string{"verify", "--all"}, []string{"flag provided but not defined"}},
 		{"two tickets", []string{"verify", "JIG-1", "JIG-2"}, []string{"one ticket"}},
 		{"an unknown ticket", []string{"verify", "JIG-99"}, []string{"JIG-99"}},
 	} {
@@ -127,7 +127,7 @@ func TestVerifyRefusesWhatItCannotPlace(t *testing.T) {
 func TestVerifyHelpListsItsFlags(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(flagsBlockFor("verify"), "\n")
-	for _, want := range []string{"--slice", "--session", "--store", "--project"} {
+	for _, want := range []string{"--slice", "--dir", "--timeout", "--dry-run", "--no-record", "--json", "--session", "--store", "--project"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("jig verify -h lacks %s:\n%s", want, got)
 		}

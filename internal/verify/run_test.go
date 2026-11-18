@@ -387,3 +387,43 @@ func TestRunRefusesWhatItCannotSetUp(t *testing.T) {
 		t.Errorf("a refused request left a trace: journal %v, oracle calls %d", events(r.lines()), len(r.oracle.seen()))
 	}
 }
+
+// TestRunWithNoRecordWritesNothing: the command runs and its result is
+// returned, and no line, state or push is written.
+func TestRunWithNoRecordWritesNothing(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	before := r.state("a")
+	rq := r.request("a", sha)
+	rq.NoRecord = true
+	res, err := Run(r.deps, rq)
+	if err != nil || res.State != journal.VerifyPass || res.Pushed || len(res.Recorded) != 0 {
+		t.Fatalf("Run = %+v, %v, want a pass that recorded nothing", res, err)
+	}
+	if len(r.lines()) != 0 || !reflect.DeepEqual(r.state("a"), before) {
+		t.Errorf("--no-record wrote %v, state %+v", events(r.lines()), r.state("a"))
+	}
+	if rd := envValue(r.oracle.seen()[0].env, recordDirEnv); rd != "" {
+		t.Errorf("a run that records nothing was given a recording directory: %s", rd)
+	}
+}
+
+// TestPlanSaysWhatARunWouldDoAndDoesNothing: the command, the directory, the
+// commit and the tree are known before the run, and nothing runs or is written.
+func TestPlanSaysWhatARunWouldDoAndDoesNothing(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, fixture.Opts{})
+	sha := r.fixClamp()
+	writeIn(t, r, "scratch.txt", "x")
+	res, err := Plan(r.deps, r.request("a", sha))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if res.SHA != sha || res.Command == "" || res.Attempt != 1 || res.TreeBefore != journal.TreeDirty || res.Uncovered != journal.UncoveredDirtyBefore || res.Covered {
+		t.Errorf("Plan = %+v, want the commit, the command, attempt 1 and a run that would cover nothing: a dirty tree", res)
+	}
+	if len(r.oracle.seen()) != 0 || len(r.lines()) != 0 {
+		t.Errorf("Plan ran or wrote: oracle calls %d, journal %v", len(r.oracle.seen()), events(r.lines()))
+	}
+}
