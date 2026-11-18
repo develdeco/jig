@@ -557,13 +557,13 @@ ask. An ask finding keeps its routing at any risk.
 
 **`fix_slice_findings`** is the maximum number of findings one fix slice can
 carry. A round's kept fixes, kept asks and kept notes, grouped together by
-(workspace, oracle), are packed into slices greedily by file, taken in path
+workspace, are packed into slices greedily by file, taken in path
 order: findings in the same file always share a slice, and a file with more
 findings than the bound gets one slice of its own, over the bound, rather than
 being split itself. A group that fits in one slice keeps its existing id,
-`fix-<round>-<workspace>-<oracle>`, or `fix-<round>-q-<workspace>-<oracle>` for a
+`fix-<round>-<workspace>`, or `fix-<round>-q-<workspace>` for a
 keep queued at `jig gate` before the round opens, so the round's own findings
-of that workspace and oracle never take a `-2` from it; a split group's slices
+of that workspace never take a `-2` from it; a split group's slices
 are numbered `-1`, `-2`, ... from 1. Must be at least 1. Invalid values are refused at
 load time.
 

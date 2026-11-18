@@ -1,5 +1,7 @@
 # Gate fix budget and risk floor: bound the fix loop, size fix slices to one session
 
+**Amended 2026-11-18:** a fix slice groups its kept findings by workspace alone, and its oracle is the commands its findings named, in finding-id order and each once, joined as `(a) && (b)`. Its id is `fix-<round>-<workspace>[-N]`, or `fix-<round>-q-<workspace>[-N]` for a keep queued before the round opens: where this record says `-<oracle>` in an id or a group, read none.
+
 **Amended by grouping kept asks and notes:** a kept ask or note no longer gets a slice of its own; it joins the kept fixes of its workspace and oracle, and the group is split under the same bound.
 
 The gate's fix loop has no budget. Every finding the reviewer routes as a fix

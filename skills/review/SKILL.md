@@ -33,7 +33,7 @@ Read `jig skill review rounds` when the report is refused or stale, the round ha
 
 Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current` and `caught`:
 
-- Mutate it in `worktree`, run the narrowest test that covers it (by `seconds`), put the file back. Failing or timing out is `caught`, passing `survived`.
+- Mutate it in `worktree`, run the narrowest test that covers it (by `seconds`), put the file back: one script per function, one mutate-run-restore loop with a command per mutant, not a call per term. Failing or timing out is `caught`, passing `survived`.
 - `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
 - `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.
 - A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none.
@@ -49,7 +49,7 @@ jig finding T-1 --still-present r1-f2 --line 14     # an earlier finding, unchan
 ```
 
 - `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
-- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the manifest oracle that best proves the fix (required with more than one oracle, for a fix or an ask).
+- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix (the test the fix adds or extends, by name), required for a fix.
 - `--prior r1-f2` for a changed version of a finding under `open`, `answers` or `dismissed`, `--still-present` for an unchanged one. Never raise again what a person dismissed.
 - A missing test is a problem only at a seam the intent names, or as proof of a defect you report.
 
