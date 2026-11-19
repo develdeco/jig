@@ -94,11 +94,11 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		blocks = append(blocks, axi.Table("restamped", []string{"id", "state", "sections"}, res.restamped))
 		if len(res.unresolved) > 0 {
 			blocks = append(blocks, axi.Table("unresolved", []string{"id", "hash"}, res.unresolved))
-			axi.Render(stdout, blocks...)
+			axi.Render(stdout, append(blocks, sectionsTable(st, ticket)...)...)
 			return renderErr(stdout, &axi.Error{
 				Msg:  fmt.Sprintf("ticket %s has stamps that no committed brief revision or current heading explains", ticket),
 				Code: "VALIDATION_ERROR",
-				Help: []string{fmt.Sprintf("Add a replacement with `jig slice add %s`, or fix the stamp by hand", ticket)},
+				Help: []string{fmt.Sprintf("Replace each unresolved hash with the sha256 of the section the slice cites, from the `sections` table, or add a replacement slice with `jig slice add %s`", ticket)},
 			})
 		}
 	}
@@ -111,6 +111,9 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	if len(problems) > 0 {
+		// The section hashes are printed beside the problems: a stale stamp's
+		// remedy can be to paste one of them.
+		axi.Render(stdout, append(blocks, sectionsTable(st, ticket)...)...)
 		return renderErr(stdout, &axi.Error{
 			Msg:  fmt.Sprintf("ticket %s failed validation", ticket),
 			Code: "VALIDATION_ERROR",
@@ -147,25 +150,37 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			{"provenance", approval.Provenance}, {"brief_sha256", approval.BriefSHA256},
 		}))
 	}
-	if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
-		hashes := store.BriefSectionHashes(data)
-		headings := make([]string, 0, len(hashes))
-		for h := range hashes {
-			headings = append(headings, h)
-		}
-		sort.Strings(headings)
-		rows := make([][]string, 0, len(headings))
-		for _, h := range headings {
-			rows = append(rows, []string{h, hashes[h]})
-		}
-		blocks = append(blocks, axi.Table("sections", []string{"heading", "sha256"}, rows))
-	}
+	blocks = append(blocks, sectionsTable(st, ticket)...)
 	if table := advisoryTable(advisories); table != "" {
 		blocks = append(blocks, table)
 	}
 	blocks = append(blocks, axi.Help(nextLines...))
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// sectionsTable is the block of ticket's brief sections and their hashes, the
+// ones a slice's from_brief cites: one block, or none when brief.md cannot be
+// read or has no sections.
+func sectionsTable(st *store.Store, ticket string) []string {
+	data, err := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md"))
+	if err != nil {
+		return nil
+	}
+	hashes := store.BriefSectionHashes(data)
+	if len(hashes) == 0 {
+		return nil
+	}
+	headings := make([]string, 0, len(hashes))
+	for h := range hashes {
+		headings = append(headings, h)
+	}
+	sort.Strings(headings)
+	rows := make([][]string, 0, len(headings))
+	for _, h := range headings {
+		rows = append(rows, []string{h, hashes[h]})
+	}
+	return []string{axi.Table("sections", []string{"heading", "sha256"}, rows)}
 }
 
 // validateChart implements `jig validate <chart>`: every problem of the chart's
@@ -288,11 +303,34 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 
 	problems = append(problems, validateWorkspaces(ready.ProjectRepos(cfg, mp.Clones), slices)...)
 
+	var staleHashes []string
 	for _, sl := range slices {
 		for _, h := range sl.FromBrief {
 			if !hashExists(h) {
-				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section; run `jig validate %s --restamp` if the slice's work is still right, or `jig requeue %s --from-brief-diff` to rebuild it first", sl.ID, h, ticket, ticket))
+				staleHashes = append(staleHashes, h)
 			}
+		}
+	}
+	var restampable map[string]string
+	if len(staleHashes) > 0 {
+		restampable = resolveStamps(st, ticket, hashes, staleHashes)
+	}
+
+	for _, sl := range slices {
+		built, read := false, false
+		for _, h := range sl.FromBrief {
+			if hashExists(h) {
+				continue
+			}
+			if !read {
+				state, err := st.ReadSliceState(ticket, sl.ID)
+				if err != nil {
+					return nil, err
+				}
+				built, read = state.State != "queued", true
+			}
+			_, canRestamp := restampable[h]
+			problems = append(problems, staleStampProblem(ticket, sl.ID, h, canRestamp, built))
 		}
 		for _, b := range sl.BlockedBy {
 			if !ids[b] {
@@ -309,6 +347,27 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 
 	return problems, nil
+}
+
+// staleStampProblem is validate's line for a from_brief hash of slice that no
+// current brief section has, naming the remedy that works for it. --restamp
+// fixes it only when canRestamp (resolveStamps ties it to a current heading);
+// any other stamp, a draft's never committed, a placeholder or a removed
+// heading's, takes the section's hash from the sections table validate prints.
+// A built slice (its state is not queued) is also offered the requeue that
+// rebuilds it, which runs first because it finds the slice by its stale stamp.
+func staleStampProblem(ticket, slice, hash string, canRestamp, built bool) string {
+	line := fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section", slice, hash)
+	remedy := "replace it with the sha256 of the section it cites, from the `sections` table"
+	if canRestamp {
+		remedy = fmt.Sprintf("run `jig validate %s --restamp` if the slice's work is still right", ticket)
+	} else {
+		line += ", and no committed brief revision ties it to a current heading"
+	}
+	if built {
+		remedy += fmt.Sprintf(", or `jig requeue %s --from-brief-diff` to rebuild it first", ticket)
+	}
+	return line + "; " + remedy
 }
 
 // findBlockedByCycle runs a DFS over slices' blocked_by edges and returns a
