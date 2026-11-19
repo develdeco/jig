@@ -183,6 +183,11 @@ func TestPublishRecordPR(t *testing.T) {
 	}
 
 	addEnv("GH_STUB_HEAD_OID=" + head)
+	// An agent's approval of the head is journaled on the pr line, which is
+	// what status shows as who approved the pull request.
+	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "agent"); err != nil {
+		t.Fatalf("PublishApprove: %v", err)
+	}
 	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
 	if err != nil {
 		t.Fatalf("PublishRecordPR: %v", err)
@@ -201,6 +206,9 @@ func TestPublishRecordPR(t *testing.T) {
 		if l.Event == journal.EventPr {
 			prLine = l
 		}
+	}
+	if prLine.Approval != approvalAgent {
+		t.Errorf("pr line approval = %q, want %q: the approval the head had", prLine.Approval, approvalAgent)
 	}
 	if prLine.URL != prURL || prLine.Branch != branch || prLine.Commit != head || prLine.Outcome != "recorded" || !events[journal.EventPublishDone] || !events[journal.EventChangelog] {
 		t.Errorf("pr line = %+v, events = %v, want the pr line, the changelog line and publish-done", prLine, events)
@@ -615,12 +623,15 @@ func TestPublishRecordPRPostsTheSameNotesOncePerPullRequest(t *testing.T) {
 			t.Fatalf("--pr %s: review notes %q, want %q", url, report.ReviewNotes.Status, want)
 		}
 	}
-	record(prURL, ReviewNotesPosted)
-	for _, spelled := range []string{prURL + "/", prURL + "/files", prURL + "#issuecomment-1", "http://github.com/owner/fixture-repo/pull/7"} {
+	// The first record is given a non-canonical spelling: the journal keeps the
+	// canonical one, and a spelling that differs in case is the same pull
+	// request.
+	record(prURL+"/files", ReviewNotesPosted)
+	for _, spelled := range []string{prURL, prURL + "/", prURL + "#issuecomment-1", "http://github.com/owner/fixture-repo/pull/7", "https://GitHub.com/Owner/Fixture-Repo/pull/7"} {
 		record(spelled, ReviewNotesAlreadyPosted)
 	}
 	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
-		t.Fatalf("five spellings of one pull request posted %d comment(s), want 1", n)
+		t.Fatalf("six spellings of one pull request posted %d comment(s), want 1", n)
 	}
 	if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 1 || posted[0].URL != prURL {
 		t.Fatalf("review-notes lines = %+v, want one with the canonical url %s", posted, prURL)
