@@ -549,6 +549,11 @@ func TestPublishPushesTheReviewedHeadFromTheClone(t *testing.T) {
 	fx, d, head := reviewedInTheClone(t)
 	branch := ticketBranch(fx.Ticket)
 	useGithubHost(t, &d, "", "")
+	// The clone is checked out on the target, as a person's is once the ticket's
+	// branch lives in a worktree: publish reads the head it ships, not the
+	// checkout (with the checkout read, the branch would change nothing against
+	// the target).
+	run(t, fx.RepoDir, "checkout", "main")
 	var pushes [][3]string
 	d.GuardedPush = func(dir, remote, refspec string, confirmed bool) error {
 		pushes = append(pushes, [3]string{dir, remote, refspec})

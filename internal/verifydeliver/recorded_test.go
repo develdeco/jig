@@ -149,11 +149,9 @@ func TestGatePrepareRefusesWhatHasNoCopy(t *testing.T) {
 		journalBuilt(t, d.Store, ticket, "fix-1", elsewhere, 1)
 
 		_, err := GatePrepare(d, GateOpts{Ticket: ticket})
-		// The code is BUILD_LEASE_MISSING until the gate stops using leases,
-		// BUILT_COMMITS_MISSING after: the refusal is what this pins.
 		var ae *axi.Error
-		if !errors.As(err, &ae) || (ae.Code != "BUILD_LEASE_MISSING" && ae.Code != "BUILT_COMMITS_MISSING") {
-			t.Fatalf("GatePrepare: err = %v, want a refusal for the missing built commit", err)
+		if !errors.As(err, &ae) || ae.Code != "BUILT_COMMITS_MISSING" {
+			t.Fatalf("GatePrepare: err = %v, want an *axi.Error BUILT_COMMITS_MISSING", err)
 		}
 		if len(ae.Help) == 0 || !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, elsewhere[:7]) {
 			t.Fatalf("refusal = %+v, want it to name the branch and the missing commit %s, and carry help", ae, elsewhere[:7])
@@ -195,6 +193,15 @@ func TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins(t *testing.T) {
 		{"in step", func(t *testing.T, fx *fixture.Fixture, clone string) {
 			builder(t).Push(clone, "origin", branch)
 		}, string(clonesCopy), func(clone, _ string) string { return clone }},
+		{"origin's branch rewritten since the clone last fetched it", func(t *testing.T, fx *fixture.Fixture, clone string) {
+			builder(t).Push(clone, "origin", branch)
+			run(t, clone, "fetch", "origin")
+			other := cloneFrom(t, fx.RepoRemote)
+			run(t, other, "checkout", branch)
+			run(t, other, "reset", "--hard", "HEAD~1")
+			writeAndCommit(t, other, "rewritten.txt", "origin's rewrite", "a commit that replaces the clone's tip on origin")
+			run(t, other, "push", "--force", "origin", branch)
+		}, "", nil},
 		{"diverged", func(t *testing.T, fx *fixture.Fixture, clone string) {
 			builder(t).Push(clone, "origin", branch)
 			other := cloneFrom(t, fx.RepoRemote)

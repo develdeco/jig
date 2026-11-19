@@ -39,7 +39,7 @@ func TestRelativizeReviewedPathShortLease(t *testing.T) {
 		t.Skipf("the volume holding %s makes no 8.3 short names", long)
 	}
 
-	if got, ok := relativizeReviewedPath(short, filepath.Join(long, "a.go")); !ok || got != "a.go" {
-		t.Errorf("relativizeReviewedPath(%s, long a.go) = %q, %v, want a.go", short, got, ok)
+	if got, ok := relativizeAbsolute(short, filepath.Join(long, "a.go")); !ok || got != "a.go" {
+		t.Errorf("relativizeAbsolute(%s, long a.go) = %q, %v, want a.go", short, got, ok)
 	}
 }

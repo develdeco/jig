@@ -370,7 +370,7 @@ func (r *gateRun) roundInput() RoundInput {
 func (r *gateRun) reviewFiles(rv *Review) roundFiles {
 	rf := roundFiles{qualified: r.qualified}
 	for _, gr := range r.repos {
-		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: rv.headOf(gr.name), Worktree: ReviewWorktreeDir(gr.dir, r.ticket), Man: gr.man})
+		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: rv.headOf(gr.name), Worktrees: reviewerWorktrees(gr.dir, r.ticket), Man: gr.man})
 	}
 	return rf
 }

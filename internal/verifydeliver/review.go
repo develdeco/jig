@@ -736,35 +736,15 @@ func normalizeRepoRelPath(p string) (string, error) {
 	return q, nil
 }
 
-// relativizeReviewedPath resolves one reviewed_paths entry for coverage. A
-// plain repo-relative path normalizes as usual. review.json hands the
-// reviewer several absolute paths to read - review.json itself, intent's own
-// path, slices_path, journal_path - and the prompt asks for "every file you
-// read", so an absolute path inside the lease worktree is relativized to it
-// rather than rejected: strict parsing has no rule against a reviewed_paths
-// entry beyond coverage, only against a finding's file.
-// Any other entry that still cannot be normalized (absolute outside the
-// worktree, a ".." segment) is ignored rather than failing the round: it
-// can never match a must_review path either way, so rejecting the whole
-// result over it would fail a reviewer that followed the prompt exactly.
-//
-// The session may spell the worktree differently from jig: the headless
-// backend hands it the long spelling of a path jig reached through a
-// Windows 8.3 short name, and a reviewer may report a directory reached
-// through a symlink resolved. An absolute path that is not inside the
-// worktree as spelled is therefore compared once more with both sides
-// resolved, which compares the files rather than their spellings.
-func relativizeReviewedPath(cloneDir, p string) (string, bool) {
-	if norm, err := normalizeRepoRelPath(p); err == nil {
-		return norm, true
-	}
-	return relativizeAbsolute(cloneDir, p)
-}
-
-// relativizeAbsolute is relativizeReviewedPath's reading of an absolute path:
-// p relative to cloneDir, normalized, when it is inside the lease as spelled or
-// once both are resolved. A path that is not absolute, or is not inside the
-// lease, or a lease that is not given, is false.
+// relativizeAbsolute reads an absolute reviewed path: p relative to cloneDir,
+// normalized, when it is inside it as spelled or once both are resolved. The
+// session may spell the worktree differently from jig: the headless backend
+// hands it the long spelling of a path jig reached through a Windows 8.3 short
+// name, and a reviewer may report a directory reached through a symlink
+// resolved, so a path that is not inside the directory as spelled is compared
+// once more with both sides resolved, which compares the files rather than
+// their spellings. A path that is not absolute, or is not inside the
+// directory, or a directory that is not given, is false.
 func relativizeAbsolute(cloneDir, p string) (string, bool) {
 	if cloneDir == "" || !filepath.IsAbs(p) {
 		return "", false
@@ -1366,7 +1346,7 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 	if !in.qualified() {
 		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.CloneDir, req.HeadSHA
 		if in.CloneDir != "" {
-			rf.repos[0].Worktree = ReviewWorktreeDir(in.CloneDir, in.Ticket)
+			rf.repos[0].Worktrees = reviewerWorktrees(in.CloneDir, in.Ticket)
 		}
 		return rf
 	}
@@ -1375,7 +1355,7 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 			if r.Name == rf.repos[i].Name {
 				rf.repos[i].Dir = r.CloneDir
 				if r.CloneDir != "" {
-					rf.repos[i].Worktree = ReviewWorktreeDir(r.CloneDir, in.Ticket)
+					rf.repos[i].Worktrees = reviewerWorktrees(r.CloneDir, in.Ticket)
 				}
 			}
 		}

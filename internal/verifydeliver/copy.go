@@ -122,6 +122,28 @@ func ReviewWorktreeDir(clone, ticket string) string {
 	return filepath.ToSlash(filepath.Clean(clone)) + ".worktrees/" + ticket + reviewWorktreeSuffix
 }
 
+// reviewerWorktrees are the directories a reviewer of the ticket may read the
+// head in, so that a reviewed path it reports as absolute is read as the file
+// of the repo it is in: the directory jig advises (ReviewWorktreeDir) and every
+// linked worktree of the clone, which is where a harness that makes the
+// reviewer's worktree puts it (Claude Code's `isolation: worktree` does, under
+// the clone). The clone's own work tree is not one: the reviewer never reads
+// there. A clone that cannot list its worktrees has the advised directory
+// alone.
+func reviewerWorktrees(clone, ticket string) []string {
+	dirs := []string{ReviewWorktreeDir(clone, ticket)}
+	trees, err := gitx.Worktrees(clone)
+	if err != nil {
+		return dirs
+	}
+	for _, w := range trees {
+		if !w.Main && !w.Prunable && w.Dir != "" {
+			dirs = append(dirs, w.Dir)
+		}
+	}
+	return dirs
+}
+
 // fetchOriginRefs brings origin's branches into the clone's remote-tracking
 // refs (refs/remotes/origin/*) and drops the ones origin no longer has, so a
 // branch deleted there is not read from a stale tip. It touches nothing else of

@@ -239,7 +239,7 @@ A would-be open fix the fix budget routed to asked instead of a fix slice, recor
 _Avoid_: blocked finding, deferred fix
 
 **Copy of a branch**:
-The commit a gate round reviews and a publish ships, chosen in the repo's mapped clone after origin's refs are fetched into it: the clone's branch when it is ahead of origin's or origin has none, origin's when it is ahead of or level with the clone's (or the clone has none), refused as diverged when both sides have commits the other lacks. It holds every commit the journal records jig built, or the command is refused. The round reads it from git's objects and publish pushes it by its sha: the clone's checkout and local branches are never touched. jig keeps no lease, no worktree of its own for a gate or a publish ([ADR 0056](docs/adr/0056-a-gate-round-and-publish-work-in-no-lease-of-jigs.md)).
+The commit a gate round reviews and a publish ships, chosen in the repo's mapped clone after origin's refs are fetched into it: the clone's branch when it is ahead of or level with origin's or origin has none, origin's when it is ahead of the clone's (or the clone has none), refused as diverged when both sides have commits the other lacks. It holds every commit the journal records jig built, or the command is refused. The round reads it from git's objects and publish pushes it by its sha: the clone's checkout and local branches are never touched. jig keeps no lease, no worktree of its own for a gate or a publish ([ADR 0056](docs/adr/0056-a-gate-round-and-publish-work-in-no-lease-of-jigs.md)).
 _Avoid_: lease, checkout, sandbox
 
 **Ticket worktree**:

@@ -157,11 +157,11 @@ type roundRepo struct {
 	// commit under review there.
 	Dir  string
 	Head string
-	// Worktree is where the reviewer reads the head, when jig knows: the
-	// directory it advised (reviewWorktreeDir). A reviewed path that is
-	// absolute and inside it is that repo's file. "" when it is not known.
-	Worktree string
-	Man      manifest.Manifest
+	// Worktrees are the directories the reviewer may read the head in
+	// (reviewerWorktrees). A reviewed path that is absolute and inside one is
+	// that repo's file. None when they are not known.
+	Worktrees []string
+	Man       manifest.Manifest
 }
 
 // roundFiles reads the file names of a gate round (see the top of this file):
@@ -278,19 +278,29 @@ func (rf roundFiles) byRepo(files []string) map[string][]string {
 	return out
 }
 
-// relativize reads one reviewed_paths entry (relativizeReviewedPath) against
-// the reviewer's worktrees of the round: a relative path is taken as the round
-// names it, an absolute one inside a repo's worktree becomes that repo's file.
+// relativize reads one reviewed_paths entry against the reviewer's worktrees of
+// the round. A plain repo-relative path normalizes as usual. review.json hands
+// the reviewer several absolute paths to read - review.json itself, intent's own
+// path, slices_path, journal_path - and the prompt asks for "every file you
+// read", so an absolute path inside a repo's worktree is that repo's file
+// rather than rejected: strict parsing has no rule against a reviewed_paths
+// entry beyond coverage, only against a finding's file. Any other entry that
+// still cannot be normalized (absolute outside every worktree, a ".." segment)
+// is ignored rather than failing the round: it can never match a must_review
+// path either way, so rejecting the whole result over it would fail a reviewer
+// that followed the prompt exactly.
 func (rf roundFiles) relativize(p string) (string, bool) {
-	if !rf.qualified {
-		return relativizeReviewedPath(rf.repos[0].Worktree, p)
-	}
 	if norm, err := normalizeRepoRelPath(p); err == nil {
 		return norm, true
 	}
 	for _, r := range rf.repos {
-		if rel, ok := relativizeAbsolute(r.Worktree, p); ok {
-			return rf.qualify(r.Name, rel), true
+		for _, w := range r.Worktrees {
+			if rel, ok := relativizeAbsolute(w, p); ok {
+				if rf.qualified {
+					return rf.qualify(r.Name, rel), true
+				}
+				return rel, true
+			}
 		}
 	}
 	return "", false
