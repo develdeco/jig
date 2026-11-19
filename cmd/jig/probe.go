@@ -27,7 +27,7 @@ const (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"probe", "record a probe of a critical path's term in the open gate round (a builder's own, for its claimed slice, with none open), or set aside code on no critical path", []flagSpec{
+		Spec: cmdSpec{"probe", "record a probe of a critical path's term in the open gate round, or set aside code on no critical path", []flagSpec{
 			{"seam", probeSeamUsage, false},
 			{"file", probeFileUsage, false},
 			{"line", probeLineUsage, false},
@@ -117,6 +117,14 @@ func cmdProbe(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if !open {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("no review round is open for %s", ticket),
+			Code: "REVIEW_NOT_OPEN",
+			Help: []string{fmt.Sprintf("Open one with `jig gate %s` (or `jig review context %s`)", ticket, ticket)},
+		})
+	}
+
 	kind := "probe"
 	var dr verifydeliver.Draft
 	if *skip != "" {
@@ -128,9 +136,6 @@ func cmdProbe(e env, args []string, stdout io.Writer) int {
 		dr.Probe = &verifydeliver.ResultProbe{
 			Seam: *seam, File: *file, Line: *line, Mutation: *mutation, Command: *command, Outcome: *outcome,
 		}
-	}
-	if !open {
-		return recordBuilderProbe(e, stdout, st, cfg, jigHome, ticket, dr)
 	}
 	n, err := verifydeliver.AppendDraft(deps, p, dr)
 	if err != nil {

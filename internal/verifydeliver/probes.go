@@ -24,14 +24,7 @@ import (
 // whether a later head still has the code it probed. Round is the round that
 // made it, set when the ledger is read back and never written.
 type ProbeRecord struct {
-	Round int `yaml:"-"`
-	// Slice, After and At are set on a builder's probe, read from the journal
-	// and never written to findings.yaml: the slice it was made for, how many
-	// rounds had closed when it was made, and when (Unix nanoseconds). A
-	// reviewer's probe has none of them.
-	Slice    string `yaml:"-"`
-	After    int    `yaml:"-"`
-	At       int64  `yaml:"-"`
+	Round    int    `yaml:"-"`
 	Seam     string `yaml:"seam"`
 	File     string `yaml:"file"`
 	Line     int    `yaml:"line"`
@@ -49,9 +42,7 @@ func (p ProbeRecord) result() ResultProbe {
 // SkipRecord is one skip as findings.yaml keeps it, with its file's blob at
 // the round's head; Round as for a ProbeRecord.
 type SkipRecord struct {
-	Round int `yaml:"-"`
-	// Slice is the slice a builder's skip was made for: "" for a reviewer's.
-	Slice string `yaml:"-"`
+	Round int    `yaml:"-"`
 	File  string `yaml:"file"`
 	From  int    `yaml:"from,omitempty"`
 	To    int    `yaml:"to,omitempty"`
@@ -191,8 +182,7 @@ func recordLedger(rf roundFiles, probes []ResultProbe, skips []ResultSkip) ([]Pr
 }
 
 // ledgerBefore reads the probes and skips of every gate/round-<n>/findings.yaml
-// for ticket with n < round, oldest first, each with its round, then the
-// probes and skips builders recorded in the ticket's journal.
+// for ticket with n < round, oldest first, each with its round.
 func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []SkipRecord, error) {
 	var probes []ProbeRecord
 	var skips []SkipRecord
@@ -213,27 +203,23 @@ func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []S
 			skips = append(skips, s)
 		}
 	}
-	bp, bs, err := builderLedger(st, ticket)
-	if err != nil {
-		return nil, nil, err
-	}
-	return append(probes, bp...), append(skips, bs...), nil
+	return probes, skips, nil
 }
 
 // currentLedger splits the ledger by its files' blobs at the head under
 // review: probed is every probe, current or stale, and current and skips are
 // the probes and skips that are current. A probe is current while its file's
-// blob is the one it recorded and nothing made later probed the same line: the
-// latest probe of a line, a round's or a builder's by when it was made, says
-// what it is now, so a survivor that a later probe covered again after its fix
-// does not still read as current.
+// blob is the one it recorded and no later round probed the same line: the
+// latest round to probe a line says what it is now, so a survivor that a
+// later round probed again after its fix does not still read as current.
 func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (probed []ProbedEntry, current []ResultProbe, currentSkips []ResultSkip, err error) {
 	var files []string
-	byLine := map[string][]ProbeRecord{}
+	latest := map[string]int{}
 	for _, p := range probes {
 		files = append(files, p.File)
-		at := fmt.Sprintf("%s:%d", p.File, p.Line)
-		byLine[at] = append(byLine[at], p)
+		if at := fmt.Sprintf("%s:%d", p.File, p.Line); p.Round > latest[at] {
+			latest[at] = p.Round
+		}
 	}
 	for _, s := range skips {
 		files = append(files, s.File)
@@ -244,18 +230,11 @@ func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (pro
 	}
 	for _, p := range probes {
 		state := ProbeStale
-		replaced := false
-		for _, q := range byLine[fmt.Sprintf("%s:%d", p.File, p.Line)] {
-			replaced = replaced || q.supersedes(p)
-		}
-		if b, ok := blobs[p.File]; ok && b == p.Blob && !replaced {
+		if b, ok := blobs[p.File]; ok && b == p.Blob && p.Round == latest[fmt.Sprintf("%s:%d", p.File, p.Line)] {
 			state = ProbeCurrent
-			if p.Outcome == ProbeCaught {
-				// A survivor is probed again: only a caught probe covers its term.
-				current = append(current, p.result())
-			}
+			current = append(current, p.result())
 		}
-		probed = append(probed, ProbedEntry{Round: p.Round, Slice: p.Slice, ResultProbe: p.result(), State: state})
+		probed = append(probed, ProbedEntry{Round: p.Round, ResultProbe: p.result(), State: state})
 	}
 	for _, s := range skips {
 		if b, ok := blobs[s.File]; ok && b == s.Blob {

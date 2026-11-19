@@ -157,9 +157,6 @@ func (s ResultSkip) covers(file string, from, to int) bool {
 // probe, and whether it is still current at this round's head.
 type ProbedEntry struct {
 	Round int `json:"round"`
-	// Slice names the slice a builder's probe was made for: empty for a
-	// reviewer's, whose Round says where it was made. A builder's has Round 0.
-	Slice string `json:"slice,omitempty"`
 	ResultProbe
 	State string `json:"state"`
 }

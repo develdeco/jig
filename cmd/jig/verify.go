@@ -160,11 +160,7 @@ func cmdVerify(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return unrun(stdout, err)
 	}
-	code := runVerify(e, d, req, o, source, stdout)
-	if code != verify.ExitUnrun && !o.dryRun && !o.final && !o.json {
-		showSliceProbes(d, req, st, cfg, stdout)
-	}
-	return code
+	return runVerify(e, d, req, o, source, stdout)
 }
 
 // joinCommand is the words after `--` as the one command line sh runs: a

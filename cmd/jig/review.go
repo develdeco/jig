@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -120,9 +119,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 			[2]string{"read", fullReadLine},
 		)
 	}
-	if line := builderProbeLine(req.Probed); line != "" {
-		kv = append(kv, [2]string{"builder_probes", line})
-	}
 	if p.Reviewer.Known() {
 		kv = append(kv, [2]string{"reviewer", reviewerLabel(p.Reviewer)})
 	}
@@ -187,13 +183,9 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 			covered++
 			continue
 		}
-		round := strconv.Itoa(pr.Round)
-		if pr.Slice != "" {
-			round = "-" // a builder's probe belongs to a slice, not a round
-		}
-		probedRows = append(probedRows, []string{round, fmt.Sprintf("%s:%d", pr.File, pr.Line), pr.Outcome, pr.State, pr.Seam, pr.Mutation, pr.Slice})
+		probedRows = append(probedRows, []string{strconv.Itoa(pr.Round), fmt.Sprintf("%s:%d", pr.File, pr.Line), pr.Outcome, pr.State, pr.Seam, pr.Mutation})
 	}
-	blocks = append(blocks, axi.Table("probed", []string{"round", "file:line", "outcome", "state", "seam", "mutation", "slice"}, probedRows))
+	blocks = append(blocks, axi.Table("probed", []string{"round", "file:line", "outcome", "state", "seam", "mutation"}, probedRows))
 	if delta {
 		blocks = append(blocks, fmt.Sprintf("probed_current_caught: %d", covered))
 	}
@@ -205,30 +197,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	}
 	blocks = append(blocks, axi.Table("unprobed", []string{"hunk"}, unprobedRows))
 	return blocks
-}
-
-// builderProbeLine says how many of the probed entries a builder made and for
-// which slices, "" when none: the round's view names the slice whose probes it
-// reads, as the table of a full view does row by row.
-func builderProbeLine(probed []verifydeliver.ProbedEntry) string {
-	n := 0
-	seen := map[string]bool{}
-	var slices []string
-	for _, pr := range probed {
-		if pr.Slice == "" {
-			continue
-		}
-		n++
-		if !seen[pr.Slice] {
-			seen[pr.Slice] = true
-			slices = append(slices, pr.Slice)
-		}
-	}
-	if n == 0 {
-		return ""
-	}
-	sort.Strings(slices)
-	return fmt.Sprintf("%d (slice %s)", n, strings.Join(slices, ", "))
 }
 
 // staleText says that the branch moved since the round opened, and in which
