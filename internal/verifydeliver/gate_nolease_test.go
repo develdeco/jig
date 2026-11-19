@@ -160,7 +160,9 @@ func TestAReviewedPathInAWorktreeOfTheCloneCountsAsRead(t *testing.T) {
 // TestReviewerWorktreesAreTheAdvisedDirAndTheLinkedOnesOfTheClone: a clone that
 // cannot list its worktrees (it is no repository) has the directory jig advised
 // alone, and one that can lists the linked worktrees after it, never the
-// clone's own.
+// clone's own. git lists a worktree resolved (macOS's /private/var for /var, a
+// Windows short name spelled long), so the linked one is compared as a
+// directory, not as a spelling.
 func TestReviewerWorktreesAreTheAdvisedDirAndTheLinkedOnesOfTheClone(t *testing.T) {
 	t.Parallel()
 	notARepo := t.TempDir()
@@ -171,7 +173,7 @@ func TestReviewerWorktreesAreTheAdvisedDirAndTheLinkedOnesOfTheClone(t *testing.
 	linked := filepath.ToSlash(filepath.Join(t.TempDir(), "linked"))
 	run(t, clone, "worktree", "add", "--detach", linked)
 	got := reviewerWorktrees(clone, "T-1")
-	if len(got) != 2 || got[0] != ReviewWorktreeDir(clone, "T-1") || filepath.ToSlash(got[1]) != linked {
+	if len(got) != 2 || got[0] != ReviewWorktreeDir(clone, "T-1") || !sameDir(t, got[1], linked) {
 		t.Errorf("reviewerWorktrees = %v, want the advised directory then %s", got, linked)
 	}
 }

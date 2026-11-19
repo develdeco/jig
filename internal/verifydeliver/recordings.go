@@ -195,15 +195,20 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 
 // reviewerHostDirs are the directories of this machine that a reviewer's
 // words, which reach the store, must not name: the clones it reads and the
-// worktrees jig advises for it, the jig home (the recordings and everything
-// else jig keeps there) and the store.
+// worktrees it may read in, the jig home (the recordings and everything else
+// jig keeps there) and the store. git lists a worktree resolved, so each is
+// also spelled through the clone's own aliases (respell), the way a reviewer
+// whose environment names the clone's path may name it.
 func reviewerHostDirs(in RoundInput) []hostDir {
 	var dirs []hostDir
 	for _, r := range in.repoList() {
 		dirs = append(dirs, hostDir{r.CloneDir, "<clone>"})
 		if r.CloneDir != "" {
+			aliases := pathAliases(r.CloneDir)
 			for _, w := range reviewerWorktrees(r.CloneDir, in.Ticket) {
-				dirs = append(dirs, hostDir{w, "<worktree>"})
+				for _, sp := range respell(w, aliases) {
+					dirs = append(dirs, hostDir{sp, "<worktree>"})
+				}
 			}
 		}
 	}

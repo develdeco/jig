@@ -2,6 +2,8 @@ package verifydeliver
 
 import (
 	"path/filepath"
+	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +73,71 @@ func hostPathSpellings(withWSL bool, dirs ...hostDir) []hostPathSpelling {
 	}
 	sort.SliceStable(all, func(i, j int) bool { return len(all[i].text) > len(all[j].text) })
 	return all
+}
+
+// pathAlias is a directory as jig was given it and as it resolves (symlinks
+// followed, Windows 8.3 short names spelled long), both with forward slashes,
+// for a directory whose two spellings differ.
+type pathAlias struct{ spelled, resolved string }
+
+// pathAliases are the ancestors of dir, dir among them, that resolve to a
+// different spelling: macOS's /var, which is /private/var, or a short name such
+// as C:\Users\RUNNER~1. An ancestor that does not exist is skipped.
+func pathAliases(dir string) []pathAlias {
+	if dir == "" {
+		return nil
+	}
+	var out []pathAlias
+	for a := absPath(dir); ; {
+		if r, err := filepath.EvalSymlinks(a); err == nil {
+			if s, rs := filepath.ToSlash(a), filepath.ToSlash(r); s != rs {
+				out = append(out, pathAlias{s, rs})
+			}
+		}
+		parent := filepath.Dir(a)
+		if parent == a {
+			return out
+		}
+		a = parent
+	}
+}
+
+// respell returns dir, a directory in its resolved spelling (the one git lists
+// a worktree in), and the spelling each alias gives it when dir is inside the
+// alias's resolved directory. A session on this machine names directories the
+// way its environment does, the way jig was given the clone's path, so a
+// worktree git lists resolved may be named in the session's words through the
+// same symlink or short name.
+func respell(dir string, aliases []pathAlias) []string {
+	out := []string{dir}
+	d := filepath.ToSlash(dir)
+	for _, a := range aliases {
+		rest, ok := cutPathPrefix(d, a.resolved)
+		if !ok {
+			continue
+		}
+		if sp := a.spelled + rest; !slices.Contains(out, sp) {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+// cutPathPrefix returns p's part after dir when p is dir or inside it, both
+// with forward slashes; Windows compares the letters without case, as its
+// filesystems do.
+func cutPathPrefix(p, dir string) (string, bool) {
+	if len(p) < len(dir) {
+		return "", false
+	}
+	head, rest := p[:len(dir)], p[len(dir):]
+	if head != dir && !(runtime.GOOS == "windows" && strings.EqualFold(head, dir)) {
+		return "", false
+	}
+	if rest != "" && rest[0] != '/' {
+		return "", false
+	}
+	return rest, true
 }
 
 // wslMountPath mechanically converts a Windows path (`C:\Users\x`) to its WSL
