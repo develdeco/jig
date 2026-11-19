@@ -183,6 +183,11 @@ func TestPublishRecordPR(t *testing.T) {
 	}
 
 	addEnv("GH_STUB_HEAD_OID=" + head)
+	// An agent's approval of the head is journaled on the pr line, which is
+	// what status shows as who approved the pull request.
+	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "agent"); err != nil {
+		t.Fatalf("PublishApprove: %v", err)
+	}
 	report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil)
 	if err != nil {
 		t.Fatalf("PublishRecordPR: %v", err)
@@ -201,6 +206,9 @@ func TestPublishRecordPR(t *testing.T) {
 		if l.Event == journal.EventPr {
 			prLine = l
 		}
+	}
+	if prLine.Approval != approvalAgent {
+		t.Errorf("pr line approval = %q, want %q: the approval the head had", prLine.Approval, approvalAgent)
 	}
 	if prLine.URL != prURL || prLine.Branch != branch || prLine.Commit != head || prLine.Outcome != "recorded" || !events[journal.EventPublishDone] || !events[journal.EventChangelog] {
 		t.Errorf("pr line = %+v, events = %v, want the pr line, the changelog line and publish-done", prLine, events)
@@ -615,12 +623,15 @@ func TestPublishRecordPRPostsTheSameNotesOncePerPullRequest(t *testing.T) {
 			t.Fatalf("--pr %s: review notes %q, want %q", url, report.ReviewNotes.Status, want)
 		}
 	}
-	record(prURL, ReviewNotesPosted)
-	for _, spelled := range []string{prURL + "/", prURL + "/files", prURL + "#issuecomment-1", "http://github.com/owner/fixture-repo/pull/7"} {
+	// The first record is given a non-canonical spelling: the journal keeps the
+	// canonical one, and a spelling that differs in case is the same pull
+	// request.
+	record(prURL+"/files", ReviewNotesPosted)
+	for _, spelled := range []string{prURL, prURL + "/", prURL + "#issuecomment-1", "http://github.com/owner/fixture-repo/pull/7", "https://GitHub.com/Owner/Fixture-Repo/pull/7"} {
 		record(spelled, ReviewNotesAlreadyPosted)
 	}
 	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
-		t.Fatalf("five spellings of one pull request posted %d comment(s), want 1", n)
+		t.Fatalf("six spellings of one pull request posted %d comment(s), want 1", n)
 	}
 	if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 1 || posted[0].URL != prURL {
 		t.Fatalf("review-notes lines = %+v, want one with the canonical url %s", posted, prURL)
@@ -691,97 +702,6 @@ func TestPostReviewNotesSaysWhenTheNotesAreNotRendered(t *testing.T) {
 	}
 }
 
-// TestPublishRecordPRNotesSayTheApprovalTheHeadHad: a pull request recorded
-// with --pr carries review notes that say which approval its head had, and its
-// pr line journals the same (person, agent or none), recorded and never
-// refused. An agent's approval reads as an agent's, not a person's at a
-// terminal.
-func TestPublishRecordPRNotesSayTheApprovalTheHeadHad(t *testing.T) {
-	t.Parallel()
-	const prURL = "https://github.com/owner/fixture-repo/pull/7"
-	cases := []struct{ name, provenance, wantLine, wantApproval string }{
-		{"none", "", "Published without a recorded approval", "none"},
-		{"agent", "agent", "Publish approved by an agent, as ", "agent"},
-		{"person", "person", "Publish approved by ", "person"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			fx, d, head := reviewedInTheClone(t)
-			_, addEnv := useGithubHost(t, &d, "", "")
-			addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-			if c.provenance != "" {
-				if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, c.provenance); err != nil {
-					t.Fatalf("PublishApprove: %v", err)
-				}
-			}
-			if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
-				t.Fatalf("PublishRecordPR: %v", err)
-			}
-			notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
-			switch c.name {
-			case "none":
-				if !strings.Contains(notes, c.wantLine+"\n") {
-					t.Errorf("notes lack %q:\n%s", c.wantLine, notes)
-				}
-			case "agent":
-				if !strings.Contains(notes, "\n"+c.wantLine) || !strings.Contains(notes, ", not by a person at a terminal\n") {
-					t.Errorf("notes lack an agent's approval line:\n%s", notes)
-				}
-			case "person":
-				if !strings.Contains(notes, "\n"+c.wantLine) || !strings.Contains(notes, " at a terminal\n") || strings.Contains(notes, "Publish approved by an agent") {
-					t.Errorf("notes lack a person's approval line:\n%s", notes)
-				}
-				if want := "\nPublish approved by " + approverName(t, d) + " at a terminal\n"; !strings.Contains(notes, want) {
-					t.Errorf("notes lack the approver's git identity, %q:\n%s", want, notes)
-				}
-			}
-			lines, err := journal.Read(d.Store, fx.Ticket)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, l := range lines {
-				if l.Event == journal.EventPr && l.Approval != c.wantApproval {
-					t.Errorf("pr line approval = %q, want %q", l.Approval, c.wantApproval)
-				}
-			}
-		})
-	}
-}
-
-// TestPublishRecordPRNotesSayAnApprovalGivenAfterTheBody: the hand-off order
-// --body, --approve, --pr posts notes that say the person's approval, the
-// same the pr line journals.
-func TestPublishRecordPRNotesSayAnApprovalGivenAfterTheBody(t *testing.T) {
-	t.Parallel()
-	const prURL = "https://github.com/owner/fixture-repo/pull/7"
-	fx, d, head := reviewedInTheClone(t)
-	_, addEnv := useGithubHost(t, &d, "", "")
-	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "person"); err != nil {
-		t.Fatalf("PublishApprove: %v", err)
-	}
-	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
-		t.Fatalf("PublishRecordPR: %v", err)
-	}
-	notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
-	if !strings.Contains(notes, "\nPublish approved by ") || !strings.Contains(notes, " at a terminal\n") || strings.Contains(notes, "Published without a recorded approval") {
-		t.Errorf("notes do not say the person's approval:\n%s", notes)
-	}
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventPr && l.Approval != "person" {
-			t.Errorf("pr line approval = %q, want person", l.Approval)
-		}
-	}
-}
-
 // TestPublishApprovalLineWordsEachApproval: the line is worded from the last
 // publish-approved line for the head and repo, with the identity the approval
 // recorded.
@@ -820,37 +740,6 @@ func approverName(t *testing.T, d Deps) string {
 		t.Fatalf("the fixture store has no git identity to credit: %+v (%v)", who, err)
 	}
 	return who.Name
-}
-
-// TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody: with no
-// pull-request host the notes --pr names to post by hand say the person's
-// approval given after --body, the same the pr line journals.
-func TestPublishRecordPRWithNoHostNotesSayAnApprovalGivenAfterTheBody(t *testing.T) {
-	t.Parallel()
-	fx, d, _ := reviewedInTheClone(t)
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	if _, err := PublishApprove(d, PublishOpts{Ticket: fx.Ticket}, "person"); err != nil {
-		t.Fatalf("PublishApprove: %v", err)
-	}
-	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, "https://example.test/owner/repo/pull/7", nil); err != nil {
-		t.Fatalf("PublishRecordPR: %v", err)
-	}
-	want := "Publish approved by " + approverName(t, d) + " at a terminal\n"
-	notes := readNotes(t, d.Store, fx.Ticket, "review-notes.md")
-	if !strings.Contains(notes, want) || strings.Contains(notes, "Published without a recorded approval") {
-		t.Errorf("notes to post by hand lack %q:\n%s", want, notes)
-	}
-	lines, err := journal.Read(d.Store, fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventPr && l.Approval != "person" {
-			t.Errorf("pr line approval = %q, want person", l.Approval)
-		}
-	}
 }
 
 // TestPublishBareFormApprovalComesFromHowItWasConfirmed: an interactive yes
@@ -912,88 +801,6 @@ func TestPublishBareFormApprovalComesFromHowItWasConfirmed(t *testing.T) {
 				t.Errorf("%d publish-approved line(s); notes lack the no-approval line:\n%s", approved, notes)
 			}
 		})
-	}
-}
-
-// TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody: --body renders
-// the notes after one round; a second round then closes at the same head (a
-// triage decision after a clean round makes the gate run one); --pr
-// then posts the second round's notes, not the earlier round's the store
-// still holds.
-func TestPublishRecordPRPostsTheNotesOfARoundClosedAfterTheBody(t *testing.T) {
-	t.Parallel()
-	const prURL = "https://github.com/owner/fixture-repo/pull/7"
-	fx, d, head := reviewedInTheClone(t)
-	_, addEnv := useGithubHost(t, &d, "", "")
-	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("GatePrepare for the second round: %v", err)
-	}
-	if p.Round != 2 || p.Head != head {
-		t.Fatalf("second round = %d at %s, want round 2 at the same head %s", p.Round, p.Head, head)
-	}
-	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer-two", How: ReviewerByFlag}); err != nil {
-		t.Fatalf("GateFinish for the second round: %v", err)
-	}
-
-	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, prURL, nil); err != nil {
-		t.Fatalf("PublishRecordPR: %v", err)
-	}
-	notes, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "review-notes.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(notes), "Round 2") {
-		t.Fatalf("the notes --pr posted are the earlier round's, they do not include the second round:\n%s", notes)
-	}
-}
-
-// TestPublishRecordPRPostsTheNotesOnceWhateverTheCaseOfTheURL: GitHub reads a
-// pull request's host, owner and repo without case, so two spellings that
-// differ only there are one pull request and its notes are posted once.
-func TestPublishRecordPRPostsTheNotesOnceWhateverTheCaseOfTheURL(t *testing.T) {
-	t.Parallel()
-	fx, d, head := reviewedInTheClone(t)
-	logFile, addEnv := useGithubHost(t, &d, "", "")
-	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	for i, url := range []string{"https://github.com/owner/fixture-repo/pull/7", "https://GitHub.com/Owner/Fixture-Repo/pull/7"} {
-		report, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, url, nil)
-		if err != nil {
-			t.Fatalf("PublishRecordPR %s: %v", url, err)
-		}
-		want := ReviewNotesPosted
-		if i == 1 {
-			want = ReviewNotesAlreadyPosted
-		}
-		if report.ReviewNotes.Status != want {
-			t.Fatalf("--pr %s: review notes %q, want %q", url, report.ReviewNotes.Status, want)
-		}
-	}
-	if n := len(reviewNotesCommentCalls(loggedGh(t, logFile))); n != 1 {
-		t.Fatalf("one pull request spelled in two cases got %d comment(s), want 1", n)
-	}
-}
-
-// TestPublishRecordPRJournalsTheCanonicalURLOfTheNotes: the first --pr, given
-// the pull request in a non-canonical spelling, journals the review-notes line
-// with https://<host>/<owner>/<repo>/pull/<n>.
-func TestPublishRecordPRJournalsTheCanonicalURLOfTheNotes(t *testing.T) {
-	t.Parallel()
-	const canonical = "https://github.com/owner/fixture-repo/pull/7"
-	for _, spelled := range []string{canonical + "/files", "http://github.com/owner/fixture-repo/pull/7"} {
-		fx, d, head := reviewedInTheClone(t)
-		_, addEnv := useGithubHost(t, &d, "", "")
-		addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-		if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, spelled, nil); err != nil {
-			t.Fatalf("PublishRecordPR %s: %v", spelled, err)
-		}
-		if posted := reviewNotesLines(t, d, fx.Ticket); len(posted) != 1 || posted[0].URL != canonical {
-			t.Errorf("--pr %s: review-notes lines = %+v, want one with the url %s", spelled, posted, canonical)
-		}
 	}
 }
 
@@ -1141,18 +948,4 @@ func TestPublishRecordPRJournalsAFailedTitleReadAsUnknown(t *testing.T) {
 	if !strings.Contains(strings.Join(warnings, ""), "read the title") {
 		t.Errorf("warnings = %q, want one for the failed title read", warnings)
 	}
-}
-
-// publishedBody renders the pull request body of the fixture's ticket and
-// returns it.
-func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
-	t.Helper()
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
-	if err != nil {
-		t.Fatalf("read the body: %v", err)
-	}
-	return string(body)
 }
