@@ -109,6 +109,13 @@ func FromLines(lines []journal.Line) Totals {
 	var t Totals
 	models, unpriced := map[string]bool{}, map[string]bool{}
 	sessions := map[string]bool{}
+	for _, l := range lines {
+		// A peak only grows: the largest of every spend line, so a later line
+		// that lacks it, or holds a lower one, never lowers it.
+		if l.Event == journal.EventSpend && l.Session != "" && l.Spend != nil {
+			t.Peak = max(t.Peak, l.Spend.Peak)
+		}
+	}
 	for _, l := range Latest(lines) {
 		sessions[l.Session] = true
 		if l.Agent != "" {
@@ -147,6 +154,7 @@ func Sum(ts ...Totals) Totals {
 		out.Output += t.Output
 		out.CacheRead += t.CacheRead
 		out.CacheWrite += t.CacheWrite
+		out.Peak = max(out.Peak, t.Peak)
 		out.USD += t.USD
 		out.Sessions += t.Sessions
 		out.Agents += t.Agents
