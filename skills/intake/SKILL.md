@@ -11,7 +11,7 @@ Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). 
 
 ## Recall, then grill
 
-Before round one run `jig recall <the work, briefly>`. It lists open tickets and edges, naming those near your words (extend or block on one; never mint twice), and each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
+Before round one run `jig recall <the work, briefly>`. It lists open tickets and edges, naming those near your words (extend or block on one; never mint twice), and each chart's fog, platform documents, shipped answers, and the last shipped tickets' files, bytes and builder peak. A settled question is not asked again. Size each ticket from the code it will touch (the files and their bytes, read while scouting) against those receipts: where it would touch more than the recent tickets whose builders kept a low peak, split by area into tickets that each build and verify alone. The table advises; nothing refuses a size. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
 
 ## Three shapes
 

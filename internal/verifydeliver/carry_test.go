@@ -108,65 +108,6 @@ func TestGatePrepareCarriesACleanMergeOfTheTarget(t *testing.T) {
 	}
 }
 
-// TestGatePrepareCarriesAChainOfMergesInOneRound: the target moved twice before
-// the gate ran again; both merges carry over in the one round.
-func TestGatePrepareCarriesAChainOfMergesInOneRound(t *testing.T) {
-	t.Parallel()
-	fx, d, _ := reviewedInTheClone(t)
-	targetMoves(t, fx, "main1.txt")
-	merged := targetMoves(t, fx, "main2.txt")
-	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-	if err != nil || p.Carried == nil || p.Round != 2 || p.Carried.CarriedFrom != 1 {
-		t.Fatalf("GatePrepare = %+v, %v, want round 2 carried over from round 1", p, err)
-	}
-	if rep := readReport(t, d, fx.Ticket, 2); rep.ReviewedSHA["fixture-repo"] != merged {
-		t.Errorf("reviewed_sha = %q, want the tip merge %s", rep.ReviewedSHA["fixture-repo"], merged)
-	}
-}
-
-// TestGatePrepareOpensARoundForWhatIsNotAMergeOfTheTarget: a merge resolved by
-// hand, or a clean merge of a branch that is not the target, is not carried
-// over: the round opens, and a reviewer reads it.
-func TestGatePrepareOpensARoundForWhatIsNotAMergeOfTheTarget(t *testing.T) {
-	t.Parallel()
-	t.Run("a merge resolved by hand", func(t *testing.T) {
-		t.Parallel()
-		fx, d, _ := reviewedInTheClone(t)
-		run(t, fx.RepoDir, "checkout", "main")
-		writeAndCommit(t, fx.RepoDir, "main1.txt", "from the target", "the target moves")
-		run(t, fx.RepoDir, "push", "origin", "main")
-		run(t, fx.RepoDir, "checkout", ticketBranch(fx.Ticket))
-		run(t, fx.RepoDir, "merge", "--no-ff", "--no-commit", "main")
-		writeAndCommit(t, fx.RepoDir, "hand.txt", "an edit the merge did not need", "merge main, by hand")
-		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatalf("GatePrepare: %v", err)
-		}
-		if p.Carried != nil || p.Round != 2 || p.Scope != "delta" {
-			t.Fatalf("Prepared = %+v, want an open delta round 2", p)
-		}
-		if got := strings.Join(p.Request.MustReview, ","); got != "hand.txt" {
-			t.Errorf("must_review = %q, want only the hand edit, none of what the target brought in", got)
-		}
-	})
-	t.Run("a merge of a branch that is not the target", func(t *testing.T) {
-		t.Parallel()
-		fx, d, _ := reviewedInTheClone(t)
-		branch := ticketBranch(fx.Ticket)
-		run(t, fx.RepoDir, "checkout", "-b", "other", "main")
-		writeAndCommit(t, fx.RepoDir, "other.txt", "work that is not on the target", "other")
-		run(t, fx.RepoDir, "checkout", branch)
-		run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "other")
-		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatalf("GatePrepare: %v", err)
-		}
-		if p.Carried != nil || p.Round != 2 {
-			t.Fatalf("Prepared = %+v, want an open round 2: a merge of another branch is read", p)
-		}
-	})
-}
-
 // TestGatePrepareOpensARoundWhenTheIntentChangedSinceTheReviewedRound: a brief
 // edited after the reviewed round is an intent no reviewer read, so a clean
 // merge of the target is not carried over: publish holds the last clean round

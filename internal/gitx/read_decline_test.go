@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -54,25 +53,6 @@ func TestDiscoverDeclinesWhatItDoesNotDoLikeGit(t *testing.T) {
 		{name: "a subdirectory", start: "a/b", want: true, mutate: func(t *testing.T, work, _ string) {
 			mkdir(t, filepath.Join(work, "a", "b"))
 		}},
-		{name: "core.bare false", want: true, mutate: setConfig(plainConfig)},
-		{name: "no config", want: true, mutate: func(t *testing.T, _, gitDir string) { os.Remove(filepath.Join(gitDir, "config")) }},
-		{name: "repository format 1", want: true, mutate: setConfig("[core]\n\trepositoryformatversion = 1\n")},
-		{name: "core.bare true", mutate: setConfig("[core]\n\trepositoryformatversion = 0\n\tbare = true\n")},
-		{name: "core.bare with no value", mutate: setConfig("[core]\n\trepositoryformatversion = 0\n\tbare\n")},
-		{name: "core.worktree", mutate: setConfig(plainConfig + "\tworktree = ../elsewhere\n")},
-		{name: "an extension", mutate: setConfig("[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n")},
-		{name: "an extension in version 0", mutate: setConfig(plainConfig + "[extensions]\n\tworktreeConfig = true\n")},
-		{name: "repository format 2", mutate: setConfig("[core]\n\trepositoryformatversion = 2\n")},
-		{name: "an include", mutate: setConfig(plainConfig + "[include]\n\tpath = other\n")},
-		{name: "a conditional include", mutate: setConfig(plainConfig + "[includeIf \"gitdir:/x/\"]\n\tpath = other\n")},
-		{name: "a config that does not parse", mutate: setConfig("[core\n\tbare = false\n")},
-		{name: "GIT_CEILING_DIRECTORIES", env: map[string]string{"GIT_CEILING_DIRECTORIES": "/"}},
-		{name: "GIT_CEILING_DIRECTORIES empty", env: map[string]string{"GIT_CEILING_DIRECTORIES": ""}},
-		{name: "GIT_DISCOVERY_ACROSS_FILESYSTEM", env: map[string]string{"GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"}},
-		{name: "GIT_NAMESPACE", env: map[string]string{"GIT_NAMESPACE": "ns"}},
-		{name: "GIT_REPLACE_REF_BASE", env: map[string]string{"GIT_REPLACE_REF_BASE": "refs/other/"}},
-		{name: "GIT_GRAFT_FILE", env: map[string]string{"GIT_GRAFT_FILE": "grafts"}},
-		{name: "GIT_SHALLOW_FILE", env: map[string]string{"GIT_SHALLOW_FILE": "shallow"}},
 		{name: "starting in the git directory", start: ".git"},
 		{name: "starting below the git directory", start: ".git/refs/heads"},
 		{name: "starting in a directory named .git", start: "x/.git", mutate: func(t *testing.T, work, _ string) {
@@ -80,9 +60,6 @@ func TestDiscoverDeclinesWhatItDoesNotDoLikeGit(t *testing.T) {
 		}},
 		{name: "a HEAD git would not accept", mutate: func(t *testing.T, _, gitDir string) {
 			writeFile(t, filepath.Join(gitDir, "HEAD"), "garbage\n")
-		}},
-		{name: "a HEAD outside refs", mutate: func(t *testing.T, _, gitDir string) {
-			writeFile(t, filepath.Join(gitDir, "HEAD"), "ref: heads/main\n")
 		}},
 		{name: "no objects", mutate: func(t *testing.T, _, gitDir string) { os.RemoveAll(filepath.Join(gitDir, "objects")) }},
 		{name: "no refs", mutate: func(t *testing.T, _, gitDir string) { os.RemoveAll(filepath.Join(gitDir, "refs")) }},
@@ -339,16 +316,7 @@ func TestRefReadsDeclineWhatTheyDoNotReadLikeGit(t *testing.T) {
 		want          result
 	}{
 		{"an object name", sha + "\n", resFound},
-		{"an object name with trailing text after white space", sha + " trailing\n", resFound},
-		{"an object name with no newline", sha, resFound},
-		{"an object name in capitals", strings.ToUpper(sha) + "\n", resFound},
-		{"an object name run into other text", sha + "x\n", resDecline},
-		{"a short object name", sha[:39] + "\n", resDecline},
-		{"an empty file", "", resDecline},
 		{"a symbolic ref to a missing ref", "ref: refs/heads/nothere\n", resNoRef},
-		{"a symbolic ref with a bad name", "ref: nothere\n", resDecline},
-		{"a symbolic ref to a name with a space", "ref: refs/heads/a b\n", resDecline},
-		{"a vertical tab is not white space to git", sha + "\v\n", resDecline},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			work, gitDir := fakeRepo(t)

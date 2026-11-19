@@ -20,7 +20,6 @@ var debtList = map[string]bool{
 	"internal/fixture/fixture_test.go":   true,
 	"internal/gittest/gittest_test.go":   true,
 	"internal/gitx/gitx_test.go":         true,
-	"internal/gitx/repo_commit_test.go":  true,
 	"internal/home/home_test.go":         true,
 	"internal/repohost/repohost_test.go": true,
 	"internal/store/checkpoint_test.go":  true,

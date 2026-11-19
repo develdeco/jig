@@ -170,6 +170,9 @@ type Line struct {
 	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
+	// Change is the size of the change a publish-done line shipped. A line
+	// without it is of a publish that recorded none.
+	Change *ChangeSize `json:"change,omitempty"`
 	// Probe and Skip are a builder-probe line's probe or skip: what the
 	// builder reported, with the git blob of its file in the builder's
 	// worktree when it was recorded. Exactly one is set on such a line.
@@ -202,14 +205,27 @@ type SkipNote struct {
 	Blob string `json:"blob"`
 }
 
+// ChangeSize is how much code a published change touched: the files it
+// changed, and their bytes at the merge base with the publish base (a file the
+// change adds has none there and counts with 0). A ticket in several repos
+// records the sum over its repos.
+type ChangeSize struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+}
+
 // Spend is a spend line's cost: the token counts a transcript's usage
 // records sum to, and the dollars they priced at.
 type Spend struct {
-	Input      int64   `json:"input,omitempty"`
-	Output     int64   `json:"output,omitempty"`
-	CacheRead  int64   `json:"cache_read,omitempty"`
-	CacheWrite int64   `json:"cache_write,omitempty"`
-	USD        float64 `json:"usd,omitempty"`
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cache_read,omitempty"`
+	CacheWrite int64 `json:"cache_write,omitempty"`
+	// Peak is the largest single request of the session's or agent's
+	// transcript (input, cache reads and cache writes of one message). A line
+	// without it, or with 0, has no known peak.
+	Peak int64   `json:"peak,omitempty"`
+	USD  float64 `json:"usd,omitempty"`
 }
 
 // Recording is one file a scenario recorded: its name inside the recording

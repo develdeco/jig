@@ -23,6 +23,11 @@ type Totals struct {
 	Output     int64
 	CacheRead  int64
 	CacheWrite int64
+	// Peak is the largest single request of the transcripts: the input, cache
+	// reads and cache writes of one API message (output is not context). Zero
+	// is unknown, not none: a line written before the figure existed has no
+	// peak, and a ticket's Peak is the largest of the lines it adds up.
+	Peak int64
 	// USD is the cost of the priced models' usage at list price.
 	USD float64
 	// Messages counts the distinct API messages a transcript held; Sessions
@@ -47,7 +52,7 @@ func (t Totals) Tokens() int64 {
 
 // Spend is t as a spend line records it.
 func (t Totals) Spend() journal.Spend {
-	return journal.Spend{Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, USD: t.USD}
+	return journal.Spend{Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Peak: t.Peak, USD: t.USD}
 }
 
 // syntheticModel is the model Claude Code names the messages it writes itself
@@ -66,12 +71,16 @@ type message struct {
 	cacheWrite int64 // all cache writes
 	write1h    int64 // the part of cacheWrite that went to the 1 hour cache
 	cost       *float64
+	// own says the message is in the first transcript read, the one whose
+	// peak the totals report.
+	own bool
 }
 
 func (m *message) merge(o message) {
 	if m.model == "" {
 		m.model = o.model
 	}
+	m.own = m.own || o.own
 	m.in, m.out = max(m.in, o.in), max(m.out, o.out)
 	m.cacheRead, m.cacheWrite, m.write1h = max(m.cacheRead, o.cacheRead), max(m.cacheWrite, o.cacheWrite), max(m.write1h, o.write1h)
 	if o.cost != nil && (m.cost == nil || *o.cost > *m.cost) {
@@ -185,8 +194,11 @@ func AgentsOnDisk(path string) []string {
 func sumFiles(files []string, session string, prices Prices) (Totals, error) {
 	byID := map[string]*message{}
 	var anonymous []message
-	for _, f := range files {
-		if err := readUsage(f, session, byID, &anonymous); err != nil {
+	for i, f := range files {
+		// The first file is the transcript the totals are of; the others are
+		// its subagents', whose tokens are counted but whose requests are
+		// not the transcript's own peak.
+		if err := readUsage(f, session, i == 0, byID, &anonymous); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
@@ -205,6 +217,9 @@ func sumFiles(files []string, session string, prices Prices) (Totals, error) {
 		t.Output += m.out
 		t.CacheRead += m.cacheRead
 		t.CacheWrite += m.cacheWrite
+		if m.own {
+			t.Peak = max(t.Peak, m.in+m.cacheRead+m.cacheWrite)
+		}
 		if m.model != "" && m.model != syntheticModel {
 			models[m.model] = true
 		}
@@ -230,7 +245,7 @@ func sumFiles(files []string, session string, prices Prices) (Totals, error) {
 
 // readUsage reads the usage records of one transcript file into byID (the
 // messages that have an id, merged) and anonymous (those that have none).
-func readUsage(path, session string, byID map[string]*message, anonymous *[]message) error {
+func readUsage(path, session string, own bool, byID map[string]*message, anonymous *[]message) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -246,7 +261,7 @@ func readUsage(path, session string, byID map[string]*message, anonymous *[]mess
 		if len(line) > 0 && bytes.Contains(line, needle) {
 			var tl transcriptLine
 			if json.Unmarshal(line, &tl) == nil {
-				addLine(tl, session, byID, anonymous)
+				addLine(tl, session, own, byID, anonymous)
 			}
 		}
 		if err != nil {
@@ -258,12 +273,12 @@ func readUsage(path, session string, byID map[string]*message, anonymous *[]mess
 	}
 }
 
-func addLine(tl transcriptLine, session string, byID map[string]*message, anonymous *[]message) {
+func addLine(tl transcriptLine, session string, own bool, byID map[string]*message, anonymous *[]message) {
 	u := tl.Message.Usage
 	if u == nil || (session != "" && tl.SessionID != "" && tl.SessionID != session) {
 		return
 	}
-	m := message{model: tl.Message.Model, in: u.Input, out: u.Output, cacheRead: u.CacheRead, cacheWrite: u.CacheWrite, cost: tl.CostUSD}
+	m := message{model: tl.Message.Model, in: u.Input, out: u.Output, cacheRead: u.CacheRead, cacheWrite: u.CacheWrite, cost: tl.CostUSD, own: own}
 	if u.CacheCreation != nil {
 		m.write1h = u.CacheCreation.Write1h
 	}

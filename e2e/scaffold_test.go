@@ -8,9 +8,7 @@ package e2e
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -488,47 +486,4 @@ func TestHarnessBashRunsTheCommandInTheClone(t *testing.T) {
 	if res := h.Bash("go version"); res.Code != 0 || !strings.HasPrefix(res.Stdout, "go version") {
 		t.Errorf("Bash(go version) = exit %d, %q, want the go toolchain answered", res.Code, res.Stdout)
 	}
-}
-
-// longLived starts a process that stays up until it is killed, and returns it
-// with a channel closed once it has exited and been reaped.
-func longLived(t *testing.T) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "120", "127.0.0.1")
-	} else {
-		cmd = exec.Command("sleep", "120")
-	}
-	return startReaped(t, cmd)
-}
-
-// shortLived starts a process that exits at once, and returns it with a
-// channel closed once it has exited and been reaped.
-func shortLived(t *testing.T) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", "exit", "0")
-	} else {
-		cmd = exec.Command("true")
-	}
-	return startReaped(t, cmd)
-}
-
-func startReaped(t *testing.T, cmd *exec.Cmd) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start %v: %v", cmd.Args, err)
-	}
-	done := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cmd.Process.Kill()
-		<-done
-	})
-	return cmd, done
 }
