@@ -26,7 +26,7 @@ var processCeilings = map[string]struct {
 }{
 	"status": {2, "status reads the store and the branch from the files, and starts no git process"},
 	"claim":  {9, "the identity, the config read for the writer, the claim line's add, check and commit, and the two ancestry questions of the claim check"},
-	"verify": {13, "the identity, a worktree add and its checkout, a status, the two ancestry questions about the commit, and the one prune that takes the worktree away; and for the files that still hold text the change removed, the merge base of the change, its one diff and the one search of the head"},
+	"verify": {9, "the identity, a worktree add and its checkout, a status, the two ancestry questions about the commit, and the one prune that takes the worktree away"},
 	"gate":   {20, "the first lease's clone and checkout, the fetch of the branch (with the processes git starts for it), the restore at the copy and the one before the review, the scope diff and the hunks of the round, and the identity"},
 	"setup":  {5, "the global and the system read of core.hooksPath, and the write of it"},
 
@@ -92,16 +92,7 @@ func TestGitProcessCeilings(t *testing.T) {
 		checkCeiling(t, "claim", path)
 
 		h.Branch(fx.Branch)
-		// The change removes a sentence another file still quotes, the worst
-		// case of the files `jig verify` names: its look takes the sentence.
-		const sentence = "Every retry waits twice as long as the attempt before it did."
-		h.Commit("", "setup: a doc and a guide that quotes it", map[string]string{
-			"docs/retries.md": "# Retries\n" + sentence + "\n",
-			"docs/guide.md":   "The rule, as written: " + sentence + "\n",
-		})
-		h.git("update-ref", "refs/remotes/origin/main", "HEAD")
 		h.CommitScenario("a", 1)
-		h.Commit("a", "trim the retries doc", map[string]string{"docs/retries.md": "# Retries\n"})
 
 		th, path = traceOf("verify")
 		must(th.Verify(ticket, "a"), "jig verify")

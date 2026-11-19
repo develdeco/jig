@@ -460,7 +460,6 @@ func runVerify(e env, d verify.Deps, req verify.Request, o verifyOpts, source st
 	if res.State == "" {
 		code = 1
 	}
-	res.Pinned = verify.PinnedText(d, res.Ticket, pinnedHead(res))
 	if o.json {
 		out, err := json.Marshal(verifyJSONOf(res, req, code))
 		if err != nil {
@@ -581,7 +580,6 @@ func verifyFooter(res verify.Result, req verify.Request, code int) []string {
 	if res.PushErr != "" {
 		blocks = append(blocks, axi.KV("warning", [][2]string{{"message", "the run is recorded here but could not be pushed to the store (the next checkpoint will): " + res.PushErr}}))
 	}
-	blocks = append(blocks, pinnedBlocks(res.Pinned)...)
 	help := "Run `jig status " + res.Ticket + "` to see the slice states"
 	if !res.Covered {
 		help = "This run covers no commit: commit or discard the changes, then run `jig verify` again"
@@ -628,7 +626,6 @@ type verifyJSON struct {
 	PushError  string   `json:"push_error,omitempty"`
 	Summary    string   `json:"summary,omitempty"`
 	Signature  string   `json:"signature,omitempty"`
-	pinnedJSON
 }
 
 func verifyJSONOf(res verify.Result, req verify.Request, code int) verifyJSON {
@@ -645,6 +642,5 @@ func verifyJSONOf(res verify.Result, req verify.Request, code int) verifyJSON {
 		Dir: res.Dir, Outcome: outcome, Exit: code, Seconds: res.Seconds, Covered: res.Covered, Uncovered: res.Uncovered,
 		TreeBefore: res.TreeBefore, TreeAfter: res.TreeAfter, Recorded: recorded, NoRecord: req.NoRecord,
 		Pushed: res.Pushed && res.PushErr == "", PushError: res.PushErr, Summary: res.Summary, Signature: res.Signature,
-		pinnedJSON: pinnedJSONOf(res.Pinned),
 	}
 }
