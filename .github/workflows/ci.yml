@@ -175,37 +175,20 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
-      # The packages to test: go list ./... less SKIP_PACKAGE, the package
-      # the Windows leg leaves to a job of its own (windows-verifydeliver,
-      # below); every other leg tests every package. lint/workflow_test.go
-      # checks that a job tests each skipped package on the same OS.
-      # go test starts packages in the order it is given them, a few at a
-      # time, and go list orders them by import path. Putting the
-      # longest-running package first once saved the Windows step 10%, but
-      # that package, verifydeliver, is the one that leg now skips, and the
-      # other legs end in about 200 s and 400 s, far under Windows. The step
-      # fails when go list does (bash runs it with -e), when the skipped
-      # package is not named exactly once (a renamed package would be tested
-      # by no job), and when no package is left. A docs-only pull request
+      # The packages to test: go list ./..., on every leg. go test starts
+      # packages in the order it is given them, a few at a time, and go list
+      # orders them by import path. The step fails when go list does (bash
+      # runs it with -e) and when no package is left. A docs-only pull request
       # tests ./lint alone, the one package whose tests read the docs.
       - name: list the packages to test
         id: packages
         shell: bash
         env:
-          SKIP_PACKAGE: ${{ runner.os == 'Windows' && 'github.com/develdeco/jig/internal/verifydeliver' || '' }}
           DOCS_ONLY: ${{ needs.plan.outputs.docs }}
         run: |
           packages=$(go list ./...)
           if [ "$DOCS_ONLY" = true ]; then
             packages=$(go list ./lint)
-          fi
-          if [ -n "$SKIP_PACKAGE" ]; then
-            found=$(printf '%s\n' "$packages" | awk '$0 == ENVIRON["SKIP_PACKAGE"] { n++ } END { print n + 0 }')
-            if [ "$found" -ne 1 ]; then
-              echo "go list ./... names $SKIP_PACKAGE $found times, want once"
-              exit 1
-            fi
-            packages=$(printf '%s\n' "$packages" | awk '$0 != ENVIRON["SKIP_PACKAGE"]')
           fi
           if [ -z "$packages" ]; then
             echo "no package to test"
@@ -236,7 +219,7 @@ jobs:
       # its tests open or stat, and go test checks that log path by path
       # after the binary exits, for a result no run here reuses (setup-go
       # saves its cache once per go.sum, and no Windows run on main reused
-      # one). That check was 110-210 s of windows-verifydeliver's step.
+      # one). That check was 110-210 s of a Windows package's step.
       - name: go test
         env:
           GITBUDGET_DIR: ${{ runner.os == 'Linux' && format('{0}/gitcount', runner.temp) || '' }}
@@ -275,30 +258,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/git-baseline.yaml
           key: gitbudget-main-${{ github.sha }}
-
-  # The package the test job's Windows leg skips, on a Windows runner of its
-  # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
-  # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
-  # cmd/jig and e2e land; until then cmd/jig bounds the
-  # step and the saving does not show. A package alone on the runner runs
-  # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
-  # step). It runs when the test job's Windows leg does. Main's ruleset does
-  # not require this check by name: ci ok needs it, as it needs every job
-  # that runs on pull requests.
-  windows-verifydeliver:
-    needs: plan
-    if: needs.plan.outputs.windows == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      # The test job's step of this name, for the reason given there.
-      - name: git's own binary first on PATH
-        shell: pwsh
-        run: (git --exec-path) -replace '/', '\' | Add-Content -Path $env:GITHUB_PATH
-      - run: go test -count=1 -timeout 30m ./internal/verifydeliver
 
   # This job runs the real Claude Code CLI, at the latest release (the one
   # users' CLIs update to), with jig's hooks installed, against a scripted
@@ -353,7 +312,7 @@ jobs:
   ci-ok:
     name: ci ok
     if: always()
-    needs: [plan, test, windows-verifydeliver, claude-cli]
+    needs: [plan, test, claude-cli]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -362,7 +321,6 @@ jobs:
           RESULTS: >-
             ${{ needs.plan.result }}
             ${{ needs.test.result }}
-            ${{ needs.windows-verifydeliver.result == 'skipped' && needs.plan.outputs.windows == 'false' && 'success' || needs.windows-verifydeliver.result }}
             ${{ needs.claude-cli.result == 'skipped' && needs.plan.outputs.docs == 'true' && 'success' || needs.claude-cli.result }}
         run: |
           echo "needed jobs: $RESULTS"

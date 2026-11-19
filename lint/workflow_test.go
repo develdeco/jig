@@ -207,13 +207,12 @@ func TestCIWorkflowTestJob(t *testing.T) {
 }
 
 // planJob is the ci.yml job that names a run's test legs, planMatrixOS the
-// test job's matrix that reads them, and windowsPlanned the job-level if of
-// a job that runs when, and only when, the plan includes the Windows leg.
+// test job's matrix that reads them, and codePlanned the job-level if of
+// a job that runs when, and only when, the plan includes code changes.
 const (
-	planJob        = "plan"
-	planMatrixOS   = "${{ fromJSON(needs.plan.outputs.os) }}"
-	windowsPlanned = "needs.plan.outputs.windows == 'true'"
-	codePlanned    = "needs.plan.outputs.docs == 'false'"
+	planJob      = "plan"
+	planMatrixOS = "${{ fromJSON(needs.plan.outputs.os) }}"
+	codePlanned  = "needs.plan.outputs.docs == 'false'"
 )
 
 // planOutcome is what the plan job's step wrote to GITHUB_OUTPUT.
@@ -957,9 +956,9 @@ var (
 
 // TestCIWorkflowTestsEveryPackageOnEveryOS asserts every package is tested
 // on every OS. The test job's go test step runs the list its list step
-// prints: go list ./... less the leg's matrix skip-package. So that step
-// pair must stay intact, and each skipped package must be tested on the
-// same OS by a job of its own (ci ok needing it is TestCIWorkflowGateJob's).
+// prints: go list ./..., on every leg of the matrix. So that step pair must
+// stay intact: the list is filtered by nothing, and a package left out of it
+// would be tested by no job.
 func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	root := repoRoot(t)
 	jobs := workflowJobs(t, root, "ci.yml")
@@ -988,14 +987,15 @@ func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	}
 	listRun, _ := yamlString(list["run"])
 	env, _ := yamlMap(list["env"])
-	skipExpr, _ := yamlString(env["SKIP_PACKAGE"])
-	skip := skipPackageExpr.FindStringSubmatch(skipExpr)
-	if !strings.Contains(listRun, "$(go list ./...)") || !strings.Contains(listRun, "list=") || skip == nil {
-		t.Errorf("ci.yml: step %q does not print go list ./... as an output named list, less the SKIP_PACKAGE its env names for one runner OS (${{ runner.os == '<OS>' && '<package>' || '' }}), so a leg would test the wrong packages", id)
+	if !strings.Contains(listRun, "$(go list ./...)") || !strings.Contains(listRun, "list=") {
+		t.Errorf("ci.yml: step %q does not print go list ./... as an output named list, so a leg would test the wrong packages", id)
+	}
+	if _, skips := env["SKIP_PACKAGE"]; skips {
+		t.Errorf("ci.yml: step %q names a SKIP_PACKAGE, so a leg would leave a package to a job of its own: every leg tests every package", id)
 	}
 	for _, line := range strings.Split(listRun, "\n") {
-		if listFilter.MatchString(line) && !strings.Contains(line, `ENVIRON["SKIP_PACKAGE"]`) {
-			t.Errorf("ci.yml: step %q filters its list with %q, which is not by SKIP_PACKAGE, so a leg could drop a package no job tests", id, strings.TrimSpace(line))
+		if listFilter.MatchString(line) {
+			t.Errorf("ci.yml: step %q filters its list with %q, so a leg could drop a package no job tests", id, strings.TrimSpace(line))
 		}
 	}
 	// A docs-only pull request tests lint alone: the list is replaced only
@@ -1005,70 +1005,12 @@ func TestCIWorkflowTestsEveryPackageOnEveryOS(t *testing.T) {
 	if docsOnly != "${{ needs."+planJob+".outputs.docs }}" || replaced != 2 || !strings.Contains(listRun, "if [ \"$DOCS_ONLY\" = true ]; then\n  packages=$(go list ./lint)\nfi") {
 		t.Errorf("ci.yml: step %q does not replace its list with go list ./lint exactly when DOCS_ONLY, the plan's docs output, is true, and nowhere else, so a leg could test fewer packages than its change needs", id)
 	}
-
-	gomod, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	module := regexp.MustCompile(`(?m)^module\s+(\S+)`).FindStringSubmatch(string(gomod))[1]
-	if skip == nil {
-		return
-	}
-	leg, pkg := runnerLeg[skip[1]], skip[2]
-	switch {
-	case !strings.HasPrefix(pkg, module+"/"):
-		t.Errorf("ci.yml: the test job's %s leg skips %q, which is not an import path under %s, so go list never names it and the list step fails", leg, pkg, module)
-	case !testedByAnotherJob(jobs, leg, pkg, "./"+strings.TrimPrefix(pkg, module+"/")):
-		t.Errorf("ci.yml: the test job's %s leg skips %s, but no job that runs whenever that leg does tests it on a %s runner (an unconditional go test step naming it, with no -run or -skip), so it would merge untested there", leg, pkg, strings.SplitN(leg, "-", 2)[0])
-	}
-}
-
-// skipPackageExpr matches the test job's SKIP_PACKAGE: the package one
-// runner OS leaves to a job of its own, or none. runnerLeg maps runner.os
-// to that leg's label.
-var (
-	skipPackageExpr = regexp.MustCompile(`^\$\{\{ runner\.os == '(Windows|Linux|macOS)' && '([^']+)' \|\| '' \}\}$`)
-	runnerLeg       = map[string]string{"Windows": "windows-latest", "Linux": "ubuntu-latest", "macOS": "macos-latest"}
-)
-
-// testedByAnotherJob reports whether a job other than test - with no
-// continue-on-error, on a runner of the leg's OS, and with no job-level
-// "if" but, for the Windows leg, windowsPlanned, under which it runs
-// whenever that leg does - has an unconditional step whose go test line
-// names pkg (as an import path or as rel) without -run or -skip.
-func testedByAnotherJob(jobs map[string]interface{}, leg, pkg, rel string) bool {
-	narrows := func(w string) bool { return strings.HasPrefix(w, "-run") || strings.HasPrefix(w, "-skip") }
-	for name, jv := range jobs {
-		job, _ := yamlMap(jv)
-		runsOn, _ := yamlString(job["runs-on"])
-		ifExpr, conditional := job["if"]
-		withLeg := !conditional || (strings.HasPrefix(leg, "windows-") && ifExpr == windowsPlanned)
-		if name == "test" || !withLeg || hasContinueOnError(job) || !strings.HasPrefix(runsOn, strings.SplitN(leg, "-", 2)[0]+"-") {
-			continue
-		}
-		steps, _ := yamlSlice(job["steps"])
-		for _, sv := range steps {
-			step, _ := yamlMap(sv)
-			if _, hasIf := step["if"]; hasIf || hasContinueOnError(step) {
-				continue
-			}
-			run, _ := yamlString(step["run"])
-			for _, line := range strings.Split(run, "\n") {
-				words := strings.Fields(line)
-				if len(words) > 2 && words[0] == "go" && words[1] == "test" && !slices.ContainsFunc(words, narrows) &&
-					(slices.Contains(words, pkg) || slices.Contains(words, rel)) {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 // TestWorkflowsReuseNoTestResult asserts every go test a workflow runs
 // passes -count=1. A cacheable go test has each test binary log every file
 // its tests open or stat, and checks that log path by path after the binary
-// exits, which on Windows took 110-210 s of windows-verifydeliver's step,
+// exits, which on Windows took 110-210 s of a package's step,
 // for a result no CI run reuses: setup-go saves its cache once per go.sum.
 // A go test is found in each command of a line, after any prefix such as
 // env, a variable assignment or a cd joined by &&.
