@@ -176,17 +176,6 @@ func TestReviewerWorktreesAreTheAdvisedDirAndTheLinkedOnesOfTheClone(t *testing.
 	}
 }
 
-func declareTestOracle(t *testing.T, dir string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".claude", "jig.yaml"), []byte("oracles:\n  test: echo test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	builder(t).Commit(dir, "declare the test oracle")
-}
-
 // TestWorktreesAreAskedOfGitOnlyForAnAbsolutePathAndOnce: the worktrees of the
 // clone cost a git process, so a reviewed path that is relative never asks for
 // them, and the ones that are absolute ask once between them.
@@ -238,7 +227,6 @@ func TestARoundOverSeveralReposReadsEachReposHeadNotItsCheckout(t *testing.T) {
 	if _, err := GateFinish(o.d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
 		t.Fatalf("GateFinish: %v", err)
 	}
-
 }
 
 // TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts: a round that recorded no oracle
@@ -276,6 +264,7 @@ func TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts(t *testing.T) {
 				if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
 					t.Fatalf("PublishBody: %v", err)
 				}
+				wantNotesListTheHeadsFile(t, d, fx.Ticket)
 				if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, "https://github.com/owner/fixture-repo/pull/7", nil); err != nil {
 					t.Fatalf("PublishRecordPR: %v", err)
 				}
@@ -289,6 +278,42 @@ func TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// wantNotesListTheHeadsFile requires the review notes under pr/ to list
+// .claude/jig.yaml, the file the head changes and the checkout's commit does
+// not, among the files the change touched.
+func wantNotesListTheHeadsFile(t *testing.T, d Deps, ticket string) {
+	t.Helper()
+	notes, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "pr", "review-notes.md"))
+	if err != nil {
+		t.Fatalf("read the review notes: %v", err)
+	}
+	if !strings.Contains(string(notes), ".claude/jig.yaml") {
+		t.Errorf("the review notes do not list the head's touched file .claude/jig.yaml:\n%s", notes)
+	}
+}
+
+// TestPublishBodyNamesTheHeadsOraclesNotTheCheckoutsRecorded: for a round that
+// recorded the head it reviewed, the body's notes list the files that head
+// touched, though the clone is checked out on the target.
+func TestPublishBodyNamesTheHeadsOraclesNotTheCheckoutsRecorded(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	declareHeadOnlyOracle(t, fx.RepoDir)
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatal(err)
+	}
+	run(t, fx.RepoDir, "checkout", "main")
+	useGithubHost(t, &d, "", "")
+	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+		t.Fatalf("PublishBody: %v", err)
+	}
+	wantNotesListTheHeadsFile(t, d, fx.Ticket)
 }
 
 // headOnlyOracle is an oracle only the ticket's head declares.
