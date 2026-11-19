@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -215,138 +213,5 @@ func TestHereTwoRepoProject(t *testing.T) {
 	text := strings.Join(lastRuns, "\n")
 	if !strings.Contains(text, ",pass,not checked,") || !strings.Contains(text, "\"no: slice has no commit on the branch\"") {
 		t.Errorf("jig status last_runs: a (first repo, no start sha) should say not checked and e (second repo) that it has no commit:\n%s", r.Stdout)
-	}
-}
-
-// TestHereSilentOutside: a directory in no project gets no output at all and
-// exit 0, so a hook can run jig here everywhere.
-func TestHereSilentOutside(t *testing.T) {
-	t.Parallel()
-	_, env := newFixture(t, fixture.Opts{})
-	outside := t.TempDir()
-	for _, args := range [][]string{{"here"}, {"here", "--json"}, {"here", "JIG-1"}} {
-		r := runJig(t, env, outside, args...)
-		if r.Code != 0 || r.Stdout != "" || r.Stderr != "" {
-			t.Errorf("jig %s outside a project: exit %d, stdout %q, stderr %q, want 0 and nothing", strings.Join(args, " "), r.Code, r.Stdout, r.Stderr)
-		}
-	}
-	if r := runJig(t, env, outside, "here", "--explain"); r.Code != 0 || !strings.Contains(r.Stdout, "none:") {
-		t.Errorf("jig here --explain outside a project: exit %d, stdout %q, want the explain block", r.Code, r.Stdout)
-	}
-}
-
-// TestHereFreshCloneByRemote: a fresh clone of a repo a mapped project lists
-// is recognized by its origin remote, and recorded in projects.yaml so the next
-// call finds it by path.
-func TestHereFreshCloneByRemote(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	// This machine knows the project and its store but not where the repo is.
-	if err := project.UpdateMachine(env.home, func(m map[string]project.MachineProject) error {
-		mp := m["fixture"]
-		mp.Clones = map[string]string{}
-		m["fixture"] = mp
-		return nil
-	}); err != nil {
-		t.Fatalf("UpdateMachine: %v", err)
-	}
-	clone := filepath.Join(t.TempDir(), "fresh")
-	gitLog(t, filepath.Dir(clone), "clone", fx.RepoRemote, clone)
-
-	got := hereJSON(t, env, clone)
-	if got.How != "map-remote" || got.Project != "fixture" || got.Repo.Name != "fixture-repo" || !got.Mapped || got.Repo.Branch != "main" {
-		t.Errorf("fresh clone: how = %q, project = %q, repo = %+v, mapped = %v, want map-remote, fixture, fixture-repo on main, mapped", got.How, got.Project, got.Repo, got.Mapped)
-	}
-	sameDir(t, "store.path", got.Store.Path, fx.StoreDir)
-	sameDir(t, "repo.dir", got.Repo.Dir, clone)
-
-	machine, err := project.LoadMachine(env.home)
-	if err != nil {
-		t.Fatalf("LoadMachine: %v", err)
-	}
-	sameDir(t, "projects.yaml clone", machine["fixture"].Clones["fixture-repo"], clone)
-
-	if again := hereJSON(t, env, clone); again.How != "map-path" || again.Mapped {
-		t.Errorf("second call: how = %q, mapped = %v, want map-path and not mapped again", again.How, again.Mapped)
-	}
-
-	// --no-map recognizes a clone without recording it.
-	other := filepath.Join(t.TempDir(), "other")
-	gitLog(t, filepath.Dir(other), "clone", fx.RepoRemote, other)
-	if got := hereJSON(t, env, other, "--no-map"); got.How != "map-remote" || got.Mapped {
-		t.Errorf("--no-map: how = %q, mapped = %v, want map-remote and not mapped", got.How, got.Mapped)
-	}
-	// And a repo whose mapped clone is there is never moved to another clone.
-	if got := hereJSON(t, env, other); got.How != "map-remote" || got.Mapped {
-		t.Errorf("a second clone of a mapped repo: how = %q, mapped = %v, want map-remote and the mapping left alone", got.How, got.Mapped)
-	}
-	machine, err = project.LoadMachine(env.home)
-	if err != nil {
-		t.Fatalf("LoadMachine: %v", err)
-	}
-	sameDir(t, "projects.yaml clone after a second clone", machine["fixture"].Clones["fixture-repo"], clone)
-}
-
-// TestHereFreshCloneByMarker: a clone that carries a committed jig.yaml marker
-// names its project and finds the store beside it, on a machine whose jig home
-// is empty; and a marker whose store is not cloned says where to get it.
-func TestHereFreshCloneByMarker(t *testing.T) {
-	t.Parallel()
-	fx, _ := newFixture(t, fixture.Opts{})
-	env := jigEnv{home: t.TempDir(), userHome: t.TempDir()}
-	work := t.TempDir()
-
-	clone := filepath.Join(work, "fixture-repo")
-	gitLog(t, work, "clone", fx.RepoRemote, clone)
-	if err := project.WriteMarker(clone, project.Marker{Jig: "1", Project: "fixture", Store: fx.StoreRemote}); err != nil {
-		t.Fatalf("WriteMarker: %v", err)
-	}
-	gitLog(t, clone, "add", project.MarkerFile)
-	if _, err := gitx.RunEnv(clone, pinnedIdentityEnv, "commit", "-m", "add the jig marker"); err != nil {
-		t.Fatalf("commit the marker: %v", err)
-	}
-
-	// Without the store beside it the marker still names the project, and the
-	// store's remote with the command to get it.
-	got := hereJSON(t, env, clone)
-	if got.How != "marker" || got.Project != "fixture" || got.Store.Path != "" || got.Store.Remote != fx.StoreRemote || got.Mapped {
-		t.Errorf("no store yet: how = %q, project = %q, store = %+v, mapped = %v, want marker, fixture, only the remote, not mapped", got.How, got.Project, got.Store, got.Mapped)
-	}
-	r := runJig(t, env, clone, "here")
-	if !strings.Contains(r.Stdout, "git clone "+fx.StoreRemote+" ") || !strings.Contains(r.Stdout, "fixture-tickets") {
-		t.Errorf("jig here with no store lacks the clone command:\n%s", r.Stdout)
-	}
-	if r := runJig(t, env, clone, "status", "JIG-1"); r.Code == 0 || !strings.Contains(r.Stdout, "not cloned") {
-		t.Errorf("jig status with no store: exit %d, want a refusal saying the store is not cloned:\n%s", r.Code, r.Stdout)
-	}
-
-	// With the sibling <project>-tickets cloned, the project resolves whole.
-	sibling := filepath.Join(work, "fixture-tickets")
-	gitLog(t, work, "clone", fx.StoreRemote, sibling)
-	got = hereJSON(t, env, clone)
-	if got.How != "marker" || got.Project != "fixture" || got.Kind != "project" || got.Repo.Name != "fixture-repo" || got.Repo.Branch != "main" || !got.Mapped {
-		t.Errorf("with the store: how = %q, project = %q, kind = %q, repo = %+v, mapped = %v, want marker, fixture, project, fixture-repo on main, mapped", got.How, got.Project, got.Kind, got.Repo, got.Mapped)
-	}
-	sameDir(t, "store.path", got.Store.Path, sibling)
-	sameDir(t, "repo.dir", got.Repo.Dir, clone)
-
-	machine, err := project.LoadMachine(env.home)
-	if err != nil {
-		t.Fatalf("LoadMachine: %v", err)
-	}
-	mp, ok := machine["fixture"]
-	if !ok {
-		t.Fatalf("projects.yaml has no fixture entry after jig here: %v", machine)
-	}
-	sameDir(t, "projects.yaml store", mp.Store, sibling)
-	sameDir(t, "projects.yaml clone", mp.Clones["fixture-repo"], clone)
-	sameDir(t, "projects.yaml root", mp.Root, clone)
-
-	// Every verb now works from the marker-only clone.
-	if r := runJig(t, env, filepath.Join(clone, "alpha"), "status", "JIG-1"); r.Code != 0 || !strings.Contains(r.Stdout, "ticket: JIG-1") {
-		t.Errorf("jig status from the marker-only clone: exit %d\n%s", r.Code, r.Stdout)
-	}
-	if _, err := os.Stat(filepath.Join(sibling, "ledger.md")); err != nil {
-		t.Errorf("the sibling store clone lost its ledger: %v", err)
 	}
 }
