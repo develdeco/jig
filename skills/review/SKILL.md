@@ -36,7 +36,6 @@ Every round, probe each term (operand, operator, condition, constant, call, retu
 - Mutate it in your worktree, run the narrowest test that covers it (by `seconds`), put the file back: one script per function, one mutate-run-restore loop with a command per mutant, not a call per term. Failing or timing out is `caught`, passing `survived`.
 - `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
 - `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.
-- `probed` also lists the probes the builder recorded, with their `slice`: a current, caught one covers its term, a survivor you probe again.
 - A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none.
 
 ## Report
@@ -52,7 +51,7 @@ jig finding T-1 --file alpha/alpha.go --line 12 --title "..." --detail "..." \
 - `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix everywhere its rule applies (the test the fix adds or extends, by name, or a search that must come back empty, such as `! git grep -n '<pattern>' -- <paths>`), required for a fix.
 - A finding names the rule broken. Before filing, search the change for the same rule's other instances: the `--detail` lists them, and `--oracle` proves the rule across them. An `--action ask` about a rule lays out every case it must decide, with one recommended answer.
 - Never raise again what a person dismissed.
-- A missing test is a problem only at a seam the intent names, or as proof of a defect you report.
+- A missing test is a problem only at a seam the intent names, or as proof of a defect you report. A finding about a missing or weak test names the mutant its test must catch and the assertion that catches it.
 
 ## Close the round
 

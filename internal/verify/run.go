@@ -133,9 +133,6 @@ type Result struct {
 	Summary   string
 	Signature string
 	Tail      string
-	// Pinned is the files that still hold text the change removed, set by the
-	// caller that shows it (PinnedText); a run itself leaves it empty.
-	Pinned Pinned
 	// Pushed is whether the run's lines went to the store's remote; PushErr is
 	// why not, "" when they did: the lines are recorded and stay local until
 	// the next checkpoint pushes them. Recorded names the lines the run wrote.

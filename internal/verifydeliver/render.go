@@ -1101,11 +1101,7 @@ func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRo
 		} else {
 			b.WriteString("Probes current at the reviewed head:\n\n")
 			for _, p := range behavior.Probes {
-				by := fmt.Sprintf("round %d", p.Round)
-				if p.Slice != "" {
-					by = "builder, slice " + p.Slice
-				}
-				fmt.Fprintf(&b, "- %s:%d %s: %s (%s; %s)\n", p.File, p.Line, p.Outcome, p.Mutation, p.Seam, by)
+				fmt.Fprintf(&b, "- %s:%d %s: %s (%s; round %d)\n", p.File, p.Line, p.Outcome, p.Mutation, p.Seam, p.Round)
 			}
 			b.WriteString("\n")
 		}

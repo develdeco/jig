@@ -34,3 +34,28 @@ func TestAnOldJournalWithSlotLinesStillReads(t *testing.T) {
 		t.Errorf("oracle line = %+v, want its seconds and measurement", o)
 	}
 }
+
+// TestReadKeepsALineOfAnEventThisVersionDoesNotKnow: a journal a newer version
+// wrote holds a event-from-a-later-version line, whose event and keys this version does not
+// know; it reads without error, keeps the line with its event, and the lines
+// around it.
+func TestReadKeepsALineOfAnEventThisVersionDoesNotKnow(t *testing.T) {
+	st := newTestStore(t)
+	if err := os.MkdirAll(st.TicketDir("JIG-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newer := `{"ts":"2026-11-01T10:00:00Z","ticket":"JIG-1","slice":"a","event":"claim","session":"s"}
+{"ts":"2026-11-01T10:01:00Z","ticket":"JIG-1","slice":"a","event":"event-from-a-later-version","session":"s","probe":{"seam":"x","file":"a.go","line":3,"mutation":"m","outcome":"caught","blob":"b"}}
+{"ts":"2026-11-01T10:02:00Z","ticket":"JIG-1","slice":"a","event":"verified","commit":"abc"}
+`
+	if err := os.WriteFile(filepath.Join(st.TicketDir("JIG-1"), "journal.ndjson"), []byte(newer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := Read(st, "JIG-1")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(lines) != 3 || lines[0].Event != "claim" || lines[1].Event != "event-from-a-later-version" || lines[2].Event != "verified" || lines[2].Commit != "abc" {
+		t.Fatalf("lines = %+v, want the claim, the event-from-a-later-version and the verified line", lines)
+	}
+}
