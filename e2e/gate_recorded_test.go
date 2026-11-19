@@ -137,7 +137,6 @@ type reviewRequest struct {
 	HeadSHA    string   `json:"head_sha"`
 	BaseSHA    string   `json:"base_sha"`
 	Scope      string   `json:"scope"`
-	Worktree   string   `json:"worktree"`
 	MustReview []string `json:"must_review"`
 }
 

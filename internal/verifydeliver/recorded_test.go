@@ -68,8 +68,8 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if p.Round != 1 || p.Head != head || p.Branch != ticketBranch(fx.Ticket) || p.Copy != string(clonesCopy) || p.Scope != "full" {
 		t.Fatalf("Prepared = round %d at %s on %s from %s (%s), want round 1 at %s on the ticket's branch from the clone's copy, full", p.Round, p.Head, p.Branch, p.Copy, p.Scope, head)
 	}
-	if got := run(t, p.Lease, "rev-parse", "HEAD"); got != head || p.Request.Worktree != p.Lease || p.Lease != gateLeaseOf(t, fx, fx.Ticket) {
-		t.Fatalf("lease %q (request worktree %q) at %s, want the gate lease checked out at the clone's head %s", p.Lease, p.Request.Worktree, got, head)
+	if got := run(t, p.Lease, "rev-parse", "HEAD"); got != head || p.Lease != gateLeaseOf(t, fx, fx.Ticket) {
+		t.Fatalf("lease %q at %s, want the gate lease checked out at the clone's head %s", p.Lease, got, head)
 	}
 	if originRef(t, fx.RepoRemote, "refs/heads/"+p.Branch) != "" {
 		t.Fatal("the gate pushed the branch to origin")
@@ -102,7 +102,6 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("CurrentRound = ok %v, %v, want the round just opened", ok, err)
 	}
-	again.Request.Worktree = p.Request.Worktree
 	if !reflect.DeepEqual(again.Request, p.Request) || again.Lease != p.Lease || again.Head != head {
 		t.Errorf("CurrentRound = %+v, want what GatePrepare returned: %+v", again, p)
 	}

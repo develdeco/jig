@@ -183,10 +183,7 @@ func (h HunkEntry) Unprobed() bool { return h.Probes == 0 && h.Skip == "" }
 // named as the round names every file, "<repo>/<path>", so MustReview is what
 // the reviewer reports in reviewed_paths.
 type RepoRequest struct {
-	Repo string `json:"repo"`
-	// Worktree is a pristine checkout of the repo's HeadSHA that belongs to
-	// jig (ReviewRequest.Worktree).
-	Worktree   string   `json:"worktree,omitempty"`
+	Repo       string   `json:"repo"`
 	Branch     string   `json:"branch"`
 	Scope      string   `json:"scope"` // full|delta
 	BaseSHA    string   `json:"base_sha"`
@@ -210,10 +207,7 @@ type ReviewRequest struct {
 	Scope   string        `json:"scope,omitempty"` // full|delta
 	BaseSHA string        `json:"base_sha,omitempty"`
 	HeadSHA string        `json:"head_sha,omitempty"`
-	// Worktree is a pristine checkout of HeadSHA that belongs to jig: the
-	// reviewer reads the code there, and edits nothing in it.
-	Worktree string `json:"worktree,omitempty"`
-	Intent   Intent `json:"intent"`
+	Intent  Intent        `json:"intent"`
 	// IntentExcerpt is the path of an excerpt of the operator's own agent
 	// session behind this change: a session the machine ledger records as
 	// having worked the ticket, else the local session that best matches the
@@ -1665,11 +1659,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		prep.Request.Scope, prep.Request.BaseSHA, prep.Request.HeadSHA = prep.Scope, prep.Base, prep.Head
 		prep.Request.Oracles = SortedOracleNames(in.Manifest)
 		prep.Request.OraclesPassed = in.SlicePasses
-		// A recorded round's reviewer is not started in the lease, so its
-		// request says where to read.
-		if in.Recorded {
-			prep.Request.Worktree = absPath(in.LeaseDir)
-		}
 	} else {
 		prep.Request.Oracles = files.allOracles()
 		for i, r := range repos {
@@ -1677,9 +1666,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 			rr := RepoRequest{
 				Repo: r.Name, Branch: in.Branch, Scope: rp.Scope, BaseSHA: rp.Base, HeadSHA: rp.Head,
 				Oracles: SortedOracleNames(r.Manifest), MustReview: rp.MustReview,
-			}
-			if in.Recorded {
-				rr.Worktree = absPath(r.LeaseDir)
 			}
 			prep.Request.Repos = append(prep.Request.Repos, rr)
 			for _, run := range r.SlicePasses {
@@ -1714,8 +1700,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	stored := prep.Request
 	prep.RequestPath = prep.ReviewPath
 	if in.Home != "" {
-		stored.Worktree, stored.IntentExcerpt, stored.Recordings = "", "", ""
-		stored.Repos = withoutWorktrees(stored.Repos)
+		stored.IntentExcerpt, stored.Recordings = "", ""
 		if in.Recorded || prep.Request.IntentExcerpt != "" {
 			if prep.RequestPath, err = writeReviewerRequest(in, prep.Request); err != nil {
 				return ReviewPrep{}, err
@@ -1738,20 +1723,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		return ReviewPrep{}, fmt.Errorf("verifydeliver: review: remove stale result.json: %w", err)
 	}
 	return prep, nil
-}
-
-// withoutWorktrees is repos with no directory of this machine named: a copy,
-// since the reviewer's own request keeps them.
-func withoutWorktrees(repos []RepoRequest) []RepoRequest {
-	if repos == nil {
-		return nil
-	}
-	out := make([]RepoRequest, len(repos))
-	for i, r := range repos {
-		r.Worktree = ""
-		out[i] = r
-	}
-	return out
 }
 
 // reviewRequestFile is the reviewer's copy of a round's request, in the round's

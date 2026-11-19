@@ -235,11 +235,11 @@ func TestBuiltInTheCommitsOfTheSlicesOfARepo(t *testing.T) {
 
 // TestReviewRequestOfOneRepoMatchesItsGolden: the request of a round in a
 // project of one repo is what it has always been, byte for byte: its scope,
-// base, head and worktree at the top, and no list of repos.
+// base and head at the top, and no list of repos.
 func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
-		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb", Worktree: "/lease/JIG-1-gate",
+		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb",
 		Intent:        Intent{Source: "brief", Path: "/store/JIG-1/brief.md"},
 		IntentExcerpt: "/home/excerpt.md",
 		Recordings:    "/home/recordings.json",
@@ -264,7 +264,6 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   "scope": "delta",
   "base_sha": "aaaa",
   "head_sha": "bbbb",
-  "worktree": "/lease/JIG-1-gate",
   "intent": {
     "source": "brief",
     "path": "/store/JIG-1/brief.md"
@@ -340,15 +339,15 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 }
 
 // TestReviewRequestOfSeveralReposListsThem: a round in a project of several
-// repos lists each repo with its own worktree, branch, scope, base, head,
-// oracles and files to cover, and names no scope, base, head or worktree at the
+// repos lists each repo with its own branch, scope, base, head,
+// oracles and files to cover, and names no scope, base or head at the
 // top; a repo with nothing to cover still lists its files as [].
 func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
 		Ticket: "JIG-1", Round: 1,
 		Repos: []RepoRequest{
-			{Repo: "api", Worktree: "/lease/api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
+			{Repo: "api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
 			{Repo: "web", Branch: "jig/JIG-1", Scope: "delta", BaseSHA: "w1", HeadSHA: "w1", Oracles: []string{"test"}},
 		},
 		MustReview: []string{"api/server/handler.go"},
@@ -361,7 +360,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"scope", "base_sha", "head_sha", "worktree"} {
+	for _, key := range []string{"scope", "base_sha", "head_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the request names %q at the top, want it only in each repo:\n%s", key, data)
 		}
@@ -370,7 +369,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Repos) != 2 || back.Repos[0].Worktree != "/lease/api" || back.Repos[1].Repo != "web" {
+	if len(back.Repos) != 2 || back.Repos[0].Repo != "api" || back.Repos[1].Repo != "web" {
 		t.Fatalf("repos = %+v, want api and web", back.Repos)
 	}
 	var listed struct {

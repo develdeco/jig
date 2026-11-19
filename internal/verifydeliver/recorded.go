@@ -232,7 +232,6 @@ func homeAbs(jigHome, rel string) string {
 // this machine.
 func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewRequest) Prepared {
 	opened, _ := time.Parse(time.RFC3339Nano, of.Opened)
-	req.Worktree = homeAbs(jigHome, of.Lease)
 	req.IntentExcerpt = homeAbs(jigHome, of.IntentExcerpt)
 	req.Recordings = homeAbs(jigHome, of.Recordings)
 	requestPath := homeAbs(jigHome, of.Request)
@@ -241,26 +240,19 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 	}
 	var repos []PreparedRepo
 	if len(of.Repos) > 0 {
-		req.Repos = append([]RepoRequest(nil), req.Repos...)
-		leases := map[string]string{}
 		for _, r := range of.Repos {
-			lease := homeAbs(jigHome, r.Lease)
-			leases[r.Repo] = lease
 			repos = append(repos, PreparedRepo{
 				Repo: r.Repo, Copy: r.Copy, Head: r.Head, Base: r.Base, Scope: r.Scope,
-				Target: r.Target, TargetSHA: r.TargetSHA, Lease: lease,
+				Target: r.Target, TargetSHA: r.TargetSHA, Lease: homeAbs(jigHome, r.Lease),
 				Carried: r.Carried, CarriedRef: r.CarriedRef,
 			})
-		}
-		for i := range req.Repos {
-			req.Repos[i].Worktree = leases[req.Repos[i].Repo]
 		}
 	}
 	return Prepared{
 		Ticket: of.Ticket, Round: of.Round, Repo: of.Repo, Branch: of.Branch, Copy: of.Copy,
 		Head: of.Head, Base: of.Base, Scope: of.Scope, Target: of.Target, TargetSHA: of.TargetSHA,
 		CarriedMerge: of.Carried, CarriedRef: of.CarriedRef,
-		Lease: req.Worktree, Repos: repos, Adopted: of.Adopted,
+		Lease: homeAbs(jigHome, of.Lease), Repos: repos, Adopted: of.Adopted,
 		Intent: req.Intent, IntentSHA256: of.Intent.SHA256, IntentNote: of.IntentNote,
 		Yes: of.Yes, Opened: opened, Reviewer: of.Reviewer, Request: req,
 		RequestPath: requestPath,
