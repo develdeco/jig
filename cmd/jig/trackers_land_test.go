@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/mirror/github"
 )
 
 // leaveASpendLine appends, to ticket's journal, a spend line as the observe
@@ -23,6 +25,26 @@ func leaveASpendLine(t *testing.T, clone, ticket string) {
 	if _, err := f.WriteString(`{"ts":"2026-10-28T10:00:00Z","ticket":"` + ticket + `","event":"spend","session":"s-1"}` + "\n"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// treeProbeClient is a stubGitHub that looks at the store's working tree every
+// time the sync asks GitHub to place a board item, which the sync does after
+// the record it just wrote.
+type treeProbeClient struct {
+	stubGitHub
+	clone  string
+	probes int
+	dirty  []string
+}
+
+func (c *treeProbeClient) PlaceItem(ctx context.Context, p github.ProjectV2, nodeID, itemID, status string) (string, error) {
+	c.probes++
+	if status, err := gitx.Run(c.clone, "status", "--porcelain"); err != nil {
+		c.dirty = append(c.dirty, err.Error())
+	} else if status != "" {
+		c.dirty = append(c.dirty, status)
+	}
+	return c.stubGitHub.PlaceItem(ctx, p, nodeID, itemID, status)
 }
 
 // TestTrackersSyncLeavesNothingUncommittedOrUnpushed: the store is left behind
@@ -44,12 +66,22 @@ func TestTrackersSyncLeavesNothingUncommittedOrUnpushed(t *testing.T) {
 	}
 	leaveASpendLine(t, clone, "DEMO-1")
 
-	e.mirrorClient = &stubGitHub{}
+	probe := &treeProbeClient{clone: clone}
+	e.mirrorClient = probe
 	buf.Reset()
 	if code := run(e, []string{"trackers", "sync", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
 		t.Fatalf("jig trackers sync: exit %d\n%s", code, buf.String())
 	}
 
+	// While the sync runs its records are not yet in the working tree, so
+	// another builder's claim on the same clone never meets them unstaged:
+	// the command holds its writes until the landing.
+	if probe.probes == 0 {
+		t.Fatal("the sync never placed a board item, so the working tree was never looked at")
+	}
+	if len(probe.dirty) != 0 {
+		t.Errorf("the working tree held the sync's writes before the landing:\n%s", strings.Join(probe.dirty, "\n"))
+	}
 	if status, err := gitx.Run(clone, "status", "--porcelain"); err != nil {
 		t.Fatal(err)
 	} else if status != "" {
