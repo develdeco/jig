@@ -115,8 +115,8 @@ type Prepared struct {
 	Round  int
 	Repo   string
 	Branch string
-	// Copy names whose copy of the branch the round reviews: "the clone's",
-	// "origin's" or "the build lease's".
+	// Copy names whose copy of the branch the round reviews: "the clone's" or
+	// "origin's".
 	Copy string
 	// Head is the commit under review; Base and Scope say what it is reviewed
 	// against.

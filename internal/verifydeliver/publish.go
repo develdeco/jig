@@ -7,7 +7,7 @@ package verifydeliver
 // of the same hand-off between jig and an agent that does the git and gh work:
 //
 //   - PublishBody renders the pull request body and the review notes for the
-//     reviewed head, and changes no lease and no branch;
+//     reviewed head, and changes no clone and no branch;
 //   - PublishRecordPR records a pull request somebody opened, after checking
 //     it is the ticket's branch;
 //   - PublishApprove records that a person approves the reviewed head;
@@ -31,7 +31,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
@@ -436,7 +435,8 @@ type publishFuncs struct {
 	guardedPush func(dir, remote, branch string, confirmed bool) error
 	fetchOrigin func(dir string) error
 	// injectedFetch says fetchOrigin is the caller's own (Deps.FetchOrigin), not
-	// the default, which a lease that has just fetched makes redundant.
+	// the default, which the choice of the copy that has just fetched makes
+	// redundant.
 	injectedFetch bool
 	warn          func(format string, args ...any)
 }
@@ -461,10 +461,7 @@ func (d Deps) publishFuncs() publishFuncs {
 		f.guardedPush = gitx.GuardedPush
 	}
 	if f.fetchOrigin == nil {
-		f.fetchOrigin = func(dir string) error {
-			_, err := gitx.Run(dir, "fetch", "origin")
-			return err
-		}
+		f.fetchOrigin = fetchOriginRefs
 	}
 	if f.warn == nil {
 		f.warn = func(format string, args ...any) {
@@ -474,12 +471,12 @@ func (d Deps) publishFuncs() publishFuncs {
 	return f
 }
 
-// shipment is one repo's publish while it is under way: the lease that holds
+// shipment is one repo's publish while it is under way: the clone that holds
 // the head to ship, what was learned of the repo before anything was written,
 // and the pull request body rendered for it.
 type shipment struct {
 	pt       *publishTarget
-	lease    pool.Lease
+	dir      string
 	shipping branchCopy
 	head     string
 	host     repohost.Host
@@ -491,46 +488,35 @@ type shipment struct {
 	pub         publication
 	// linked are the other repos' pull requests as the body on disk names them.
 	linked []prLink
+	// onOrigin says origin holds the head to ship already, so nothing is pushed.
+	onOrigin bool
 }
 
-// prepareShipment points a publish lease at the copy of the repo's branch
-// publish ships and checks everything that can refuse the publish, writing
-// nothing to the store: a refusal here leaves it as it was. built are the
-// commits jig built in the repo, which its copy of the branch must hold.
+// prepareShipment chooses the copy of the repo's branch publish ships, in the
+// repo's mapped clone, and checks everything that can refuse the publish,
+// writing nothing to the store and nothing in the clone: a refusal here leaves
+// both as they were. built are the commits jig built in the repo, which its
+// copy of the branch must hold.
 func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string) (*shipment, error) {
 	ticket, branch, repoName, target := pt.ticket, pt.branch, pt.repoName, pt.target
-	// The publish lease is re-pointed at the copy publish ships right after
-	// the acquire below, so its own copy of the branch is disposable: one left
-	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
-	// commits nobody keeps, which it does once the branch has reached origin
-	// another way.
-	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
-		return nil, err
-	}
-	lease, err := pool.Acquire(d.Home, repoName, pt.repo.Remote, target, branch, ticket, pool.Publish)
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
-	}
-	// The lease is pointed at the copy of the branch the gate reviewed, by the
-	// same function the gate uses: the clone's when it has the newer, origin's
-	// otherwise.
-	shipping, err := pointAtBranchCopy(d, lease.Dir, repoName, ticket, branch, pt.rec.Adopted(), built, "publish")
+	// The copy is chosen by the same function the gate uses: the clone's when
+	// it has the newer, origin's otherwise.
+	rc, err := chooseCopy(d, repoName, branch, built, "publish")
 	if err != nil {
 		return nil, err
 	}
-	// Acquire fetched origin a moment ago, so a lease it made has the view of
-	// origin this publish needs, and asking again is a second process for the
-	// same answer. A publish whose caller supplies its own fetch (Deps.FetchOrigin)
-	// keeps it, and a lease that did not fetch gets exactly one.
-	if !lease.Fetched || fn.injectedFetch {
-		if err := fn.fetchOrigin(lease.Dir); err != nil {
+	// The choice has just fetched origin, and asking again is a second process
+	// for the same answer. A publish whose caller supplies its own fetch
+	// (Deps.FetchOrigin) keeps it.
+	if fn.injectedFetch {
+		if err := fn.fetchOrigin(rc.Dir); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
 		}
 	}
 	// A pull request into the branch of the parent the ticket is stacked on
 	// needs that branch on the origin: jig pushes no branch but the ticket's.
 	if base := pt.base(); base != target {
-		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+base); err != nil {
+		if _, err := gitx.RevParse(rc.Dir, "refs/remotes/origin/"+base); err != nil {
 			return nil, &axi.Error{
 				Msg:  fmt.Sprintf("%s is stacked on %s, whose branch %s is not on the origin of %s, so no pull request can go into it", ticket, pt.stack.Parent, base, repoName),
 				Code: "PUBLISH_PARENT_NOT_PUSHED",
@@ -544,22 +530,16 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// commit that landed on the branch since would go out under a verdict that
 	// never saw it. Checked ahead of everything that writes, so a refusal
 	// leaves the store untouched.
-	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
-	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir, "origin/"+pt.base()); err != nil {
+	shipHead := rc.Head
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, rc.Dir, "origin/"+pt.base()); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
 	// is already there must be a fast-forward from where it stands. Checked
 	// here for the same reason as above - git would refuse the push, but only
 	// after publish had written the store.
-	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
+	onOrigin, err := requireFastForward(rc.Dir, shipHead, branch, ticket, rc.Copy)
 	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
-	}
-	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
 		return nil, err
 	}
 	// Build the repo host from the repo's remote (or take the one d hands
@@ -581,7 +561,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 		}
 	}
 
-	touchedFiles, err := diffFiles(lease.Dir, target, "HEAD")
+	touchedFiles, err := diffFiles(rc.Dir, target, shipHead)
 	if err != nil {
 		return nil, err
 	}
@@ -591,17 +571,17 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 			Code: "PUBLISH_NO_DIVERGENCE",
 		}
 	}
-	if err := checkNonEmptyRange(lease.Dir, target, "HEAD"); err != nil {
+	if err := checkNonEmptyRange(rc.Dir, target, shipHead); err != nil {
 		return nil, err
 	}
 
-	man, err := manifest.Resolve(lease.Dir)
+	man, err := manifest.ResolveAt(rc.Dir, shipHead)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
 	}
 	return &shipment{
-		pt: pt, lease: lease, shipping: shipping, head: shipHead, host: host, openPR: openPR,
-		touched: touchedFiles, oracleNames: pt.oracleNames(man),
+		pt: pt, dir: rc.Dir, shipping: rc.Copy, head: shipHead, host: host, openPR: openPR,
+		touched: touchedFiles, oracleNames: pt.oracleNames(man), onOrigin: onOrigin,
 	}, nil
 }
 
@@ -689,7 +669,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		sh.linked = linksFor(sh.pt, known)
 		sh.pub, err = renderPublication(d, sh.pt, renderInput{
-			dir: sh.lease.Dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
+			dir: sh.dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
 			picks: picks, what: what, warn: fn.warn, links: sh.linked,
 		})
 		if err != nil {
@@ -785,8 +765,13 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			}
 			sh.linked = links
 		}
-		if err := fn.guardedPush(sh.lease.Dir, "origin", pt.branch, confirmed); err != nil {
-			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+		// The reviewed head is pushed as it is, by its sha, from the clone: the
+		// clone's checkout and branches are not touched, and nothing is pushed
+		// when origin holds the head already.
+		if !sh.onOrigin {
+			if err := fn.guardedPush(sh.dir, "origin", sh.head+":refs/heads/"+pt.branch, confirmed); err != nil {
+				return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+			}
 		}
 		prURL, prOutcome, retargeted, err := openOrUpdatePR(d, sh.host, pt, sh.pub, sh.openPR, fn.warn)
 		if err != nil {
@@ -1129,7 +1114,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 	picksReport, picked, err := publishPicks(picksStep{
 		d: d, result: in.picks, ticket: ticket, repoName: t.repoName,
-		leaseDir: in.dir, head: in.head, lines: lines, own: own, warn: in.warn,
+		cloneDir: in.dir, head: in.head, lines: lines, own: own, warn: in.warn,
 	})
 	if err != nil {
 		return publication{}, err
@@ -1551,18 +1536,15 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 }
 
 // readerDir is a repository to read the reviewed head from without changing
-// it: the gate lease the last round reviewed in, else the operator's clone.
+// it: the operator's clone, where the gate read it.
 func readerDir(d Deps, t *publishTarget) (string, error) {
-	if dir, err := pool.Dir(d.Home, t.repoName, t.ticket, pool.Gate); err == nil && pool.Usable(dir) {
-		return dir, nil
-	}
 	if clone := operatorClone(d, t.repoName); clone != "" {
 		return clone, nil
 	}
 	return "", &axi.Error{
-		Msg:  fmt.Sprintf("no checkout of %s holds the reviewed head: the gate lease is gone and no clone is mapped", t.repoName),
+		Msg:  fmt.Sprintf("no checkout of %s holds the reviewed head: no clone is mapped", t.repoName),
 		Code: "PUBLISH_NO_CHECKOUT",
-		Help: []string{fmt.Sprintf("Run `jig gate %s` again, or map the clone with `jig map %s=<path>`", t.ticket, t.repoName)},
+		Help: []string{fmt.Sprintf("Map the clone with `jig map %s=<path>`, then publish again", t.repoName)},
 	}
 }
 
@@ -1574,8 +1556,7 @@ type branchTip struct {
 
 // branchTips are the commits the ticket's branch is at in the places a
 // reviewed head can be found: the operator's clone (its branch, and its last
-// view of origin's), the repository dir reads from (its view of origin's) and,
-// for work an earlier jig built, the build lease.
+// view of origin's) and the repository dir reads from (its view of origin's).
 func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
 	var tips []branchTip
 	add := func(repo, ref string) {
@@ -1590,9 +1571,6 @@ func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
 	add(clone, "refs/heads/"+t.branch)
 	add(clone, "refs/remotes/origin/"+t.branch)
 	add(dir, "refs/remotes/origin/"+t.branch)
-	if buildDir, err := pool.Dir(d.Home, t.repoName, t.ticket, pool.Build); err == nil && pool.Usable(buildDir) {
-		add(buildDir, "refs/heads/"+t.branch)
-	}
 	return tips
 }
 
@@ -2046,54 +2024,57 @@ func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
 	}
 }
 
-// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of branch
-// from dir that would not fast-forward origin's copy: origin has commits the
-// branch lacks, whether or not the branch has some origin lacks in turn. dir's
-// origin/<branch> is as of the fetch just made. A branch origin does not have
-// is a new branch, which has nothing to fast-forward. Publish pushes without
-// force, so git would refuse such a push in the end; this is the refusal made
-// early, with both sides counted, before publish writes to the store.
+// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of head to
+// branch that would not fast-forward origin's copy: origin has commits head
+// lacks, whether or not head has some origin lacks in turn. dir's origin/<branch>
+// is as of the fetch just made. A branch origin does not have is a new branch,
+// which has nothing to fast-forward. It reports whether origin holds head
+// already, in which case there is nothing to push. Publish pushes without force,
+// so git would refuse such a push in the end; this is the refusal made early,
+// with both sides counted, before publish writes to the store.
 //
-// The copy publish ships was compared with origin's when the lease was pointed
-// at it (pointAtTicketBranch), and is refused there when neither holds the
-// other; what this catches is a push since, between the acquire's fetch and the
-// one publish makes right after.
+// The copy publish ships was compared with origin's when it was chosen
+// (chooseCopy), and is refused there when neither holds the other; what this
+// catches is a push since, between the choice's fetch and the one publish makes
+// right after.
 //
-// What to do about it depends on whose copy publish would ship (shipping).
-// The build lease's, at buildDir, is where jig's commits wait, so that is where
-// the two are integrated: jig merges nothing that is not its own. Origin's own
-// copy has nothing to integrate in anywhere - origin moved since the round, by
-// a push between publish's two fetches - and the way on is a round over the
-// branch as it is now.
-func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCopy) error {
+// What to do about it depends on whose copy publish would ship (shipping). The
+// clone's is the person's, so that is where the two are joined: jig merges
+// nothing that is not its own. Origin's own copy has nothing to join in
+// anywhere - origin moved since the round, by a push between publish's two
+// fetches - and the way on is a round over the branch as it is now.
+func requireFastForward(dir, head, branch, ticket string, shipping branchCopy) (onOrigin bool, err error) {
 	remoteRef := "refs/remotes/origin/" + branch
 	tip, err := originsTip(dir, branch)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: %w", err)
+		return false, fmt.Errorf("verifydeliver: publish: %w", err)
 	}
 	if tip == "" {
-		return nil
+		return false, nil
 	}
-	ok, err := gitx.IsAncestor(dir, remoteRef, "refs/heads/"+branch)
+	if tip == head {
+		return true, nil
+	}
+	ok, err := gitx.IsAncestor(dir, remoteRef, head)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
 	}
 	if ok {
-		return nil
+		return false, nil
 	}
-	theirs, err := gitx.CommitsIn(dir, "refs/heads/"+branch+".."+remoteRef)
+	theirs, err := gitx.CommitsIn(dir, head+".."+remoteRef)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
 	}
-	ours, err := gitx.CommitsIn(dir, remoteRef+"..refs/heads/"+branch)
+	ours, err := gitx.CommitsIn(dir, remoteRef+".."+head)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
 	}
 	next := fmt.Sprintf("Origin's %s moved since the round: run `jig gate %s` to review it as it is now, then publish again", branch, ticket)
-	if shipping == buildLeasesCopy {
-		next = fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket)
+	if shipping == clonesCopy {
+		next = fmt.Sprintf("Join them in your clone (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", dir, dir, branch, ticket)
 	}
-	return &axi.Error{
+	return false, &axi.Error{
 		Msg: fmt.Sprintf("pushing %s would not be a fast-forward: origin/%s has %d commit(s) the branch lacks, and the branch has %d commit(s) origin lacks",
 			branch, branch, len(theirs), len(ours)),
 		Code: "PUBLISH_NOT_FAST_FORWARD",

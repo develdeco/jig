@@ -628,3 +628,38 @@ func TestPublishBare(t *testing.T) {
 		t.Errorf("pr line = %+v, publish-done = %v, want an opened pull request for %s from %s", prLine, done, b.sha, b.branch)
 	}
 }
+
+// TestAGateRoundAndAPublishCreateNoPoolDirectory: a ticket built in a clone is
+// gated, reviewed and published, and the pull request's branch is at the head
+// the round reviewed, and nothing under the jig home is a pool: the gate reads
+// the clone and publish pushes from it.
+func TestAGateRoundAndAPublishCreateNoPoolDirectory(t *testing.T) {
+	t.Parallel()
+	b := newBuiltTicket(t, true)
+	env, log := githubClone(t, b)
+	b.env = env
+	b.builder.env = env
+	gate := b.openRound(t)
+	if !strings.Contains(gate.Stdout, "head: "+b.sha) {
+		t.Fatalf("jig gate opened the round at another head than the clone's %s\nstdout:\n%s", b.sha, gate.Stdout)
+	}
+	b.reviewedClean(t, 1)
+
+	pub := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket, "--yes")
+	if pub.Code != 0 || !strings.Contains(pub.Stdout, "opened") {
+		t.Fatalf("jig publish --yes exit = %d, want 0 and an opened pull request\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
+	}
+	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != b.sha {
+		t.Errorf("the pull request's branch %s is at %s, want the reviewed head %s", b.branch, got, b.sha)
+	}
+	var created bool
+	for _, call := range ghCalls(t, log) {
+		created = created || strings.HasPrefix(call, "pr create")
+	}
+	if !created {
+		t.Errorf("publish opened no pull request: %v", ghCalls(t, log))
+	}
+	if _, err := os.Stat(filepath.Join(env.home, "pool")); !os.IsNotExist(err) {
+		t.Errorf("%s exists after a gate round and a publish (stat err %v)", filepath.Join(env.home, "pool"), err)
+	}
+}

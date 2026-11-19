@@ -519,7 +519,7 @@ func (pf *picksFixture) step(t *testing.T, result *PicksResult) picksStep {
 	}
 	return picksStep{
 		d: pf.d, result: result, ticket: pf.fx.Ticket, repoName: "fixture-repo",
-		leaseDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, own: map[string]bool{pf.owned: true}, warn: pf.d.Warn,
+		cloneDir: buildLeaseDir(t, pf.fx), head: pf.head, lines: lines, own: map[string]bool{pf.owned: true}, warn: pf.d.Warn,
 	}
 }
 
@@ -802,7 +802,7 @@ func TestStagingLeavesNothingOfAnEarlierPickOfTheSameHead(t *testing.T) {
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
 	s := pf.step(t, nil)
-	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.cloneDir, s.head, s.own)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -847,7 +847,7 @@ func TestStagingNeverWritesThroughALink(t *testing.T) {
 	pf := newPicksFixture(t)
 	pf.onboardingRecordings(t)
 	s := pf.step(t, nil)
-	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
+	cands, _, err := pickCandidates(s.d, s.ticket, s.lines, s.cloneDir, s.head, s.own)
 	if err != nil {
 		t.Fatal(err)
 	}

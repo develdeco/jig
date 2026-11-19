@@ -9,9 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -151,8 +149,8 @@ type GateReport struct {
 	Independent Independence
 	// OracleNames are the manifest's oracle names at this round.
 	OracleNames []string
-	// Copy says whose copy of the branch the round reviewed: the clone's,
-	// origin's or (for work an earlier jig built) the build lease's.
+	// Copy says whose copy of the branch the round reviewed: the clone's or
+	// origin's.
 	Copy string
 	// ReviewedSHA is repoName -> the head sha a reviewer round reviewed, on
 	// every reviewer round, clean or not - the anchor the next round's
@@ -359,20 +357,6 @@ func checkFrontier(d Deps, ticket string, slices []store.Slice, early bool) erro
 	return nil
 }
 
-// fetchTicketBranchFromBuildLease points the lease's ticket branch, branch
-// (the name the caller resolved for the ticket once), at the build lease's
-// copy, in the pool under the jig home root jigHome: gate and publish leases
-// are separate clones, and the ticket branch exists only in the build lease
-// until publish pushes it. Like fetchBranchFrom it leaves a lease on the branch
-// with its old tree for the restore the caller makes next.
-func fetchTicketBranchFromBuildLease(jigHome, leaseDir, repoName, ticket, branch string) error {
-	buildLeaseDir, err := pool.Dir(jigHome, repoName, ticket, pool.Build)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: resolve build lease: %w", err)
-	}
-	return fetchBranchCopy(leaseDir, buildLeaseDir, "build lease", branch)
-}
-
 // writeNoRound writes the files for a round that never ran while something
 // was still outstanding: the source had nothing to review for this round
 // number, but the fold still holds an open or asked finding. It records
@@ -550,72 +534,6 @@ func writeDiffChangelog(d Deps, ticket, dir string, n int) error {
 	content := journal.RenderDiffChangelog(lines, n)
 	if err := os.WriteFile(filepath.Join(dir, "diff-changelog.md"), []byte(content), 0o644); err != nil {
 		return fmt.Errorf("verifydeliver: gate: write diff-changelog.md: %w", err)
-	}
-	return nil
-}
-
-// resetLeasePristine hard-resets leaseDir to head and removes every
-// untracked file and directory. It never uses `clean -x`, so ignored build
-// caches (e.g. node_modules) survive; only content git itself would track or
-// that a reviewer left behind is wiped.
-func resetLeasePristine(leaseDir, head string) error {
-	if _, err := gitx.Run(leaseDir, "reset", "--hard", head); err != nil {
-		return err
-	}
-	if _, err := gitx.Run(leaseDir, "clean", "-fd"); err != nil {
-		return err
-	}
-	return nil
-}
-
-// restoreLeaseBeforeAcquire readies the ticket's gate or publish lease, if
-// there is one, for the Acquire that follows: it restores the lease pristine
-// at its current HEAD and forgets its own copy of branch (dropLeaseBranch).
-// Both roles re-point the lease at the copy they work on right after
-// acquiring it, so neither keeps anything of its own on the branch.
-//
-// The restore comes first. A reviewer that outlived a killed jig, or an oracle
-// rewrite left over from an earlier attempt, can leave tracked dirt in the
-// lease; if the ticket branch later advances past whatever file that dirt
-// touched, Acquire's own `git checkout` (and, in normal mode,
-// fetchTicketBranchFromBuildLease's checkout right after) refuses with "local
-// changes ... would be overwritten" before any restore after the acquire ever
-// runs, wedging every later attempt at the same point. It is best-effort and
-// runs only in a pool.Usable lease: a reset where git resolves an enclosing
-// repository would discard that repository's work, and one on an unborn HEAD
-// would fail. Anything else is left to Acquire, which refuses a bad ticket id,
-// clones where there is no lease yet, and moves aside anything git shows is
-// not a repository of its own.
-func restoreLeaseBeforeAcquire(jigHome, repoName, ticket string, role pool.Role, branch string) error {
-	leaseDir, err := pool.Dir(jigHome, repoName, ticket, role)
-	if err != nil || !pool.Usable(leaseDir) {
-		return nil
-	}
-	if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-		return fmt.Errorf("verifydeliver: %s: restore existing lease before acquire: %w", role, err)
-	}
-	if err := dropLeaseBranch(leaseDir, branch); err != nil {
-		return fmt.Errorf("verifydeliver: %s: drop the lease's own %s before acquire: %w", role, branch, err)
-	}
-	return nil
-}
-
-// dropLeaseBranch forgets a gate or publish lease's own local copy of branch,
-// leaving its HEAD detached. Neither lease keeps commits of its own on the
-// branch - Gate and Publish each re-point the lease at the copy they work on
-// right after acquiring it - so its copy is disposable; left in place, one
-// that fell behind or diverged from origin's since the last round would fail
-// Acquire's sync with the branch (BRANCH_DIVERGED) before the command could
-// replace it, over commits that are not the lease's to keep.
-func dropLeaseBranch(leaseDir, branch string) error {
-	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
-		return fmt.Errorf("detach HEAD: %w", err)
-	}
-	if _, found, _ := gitx.Resolve(leaseDir, "refs/heads/"+branch); !found {
-		return nil // no local copy
-	}
-	if _, err := gitx.Run(leaseDir, "branch", "-D", branch); err != nil {
-		return fmt.Errorf("delete branch %s: %w", branch, err)
 	}
 	return nil
 }

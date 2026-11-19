@@ -539,6 +539,53 @@ func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 	}
 }
 
+// TestPublishPushesTheReviewedHeadFromTheClone: publish pushes the head the
+// round reviewed by its sha, from the mapped clone, to the ticket's branch on
+// origin, and touches nothing of the clone: its checkout, its local branches
+// and its files are as they were, and no directory is made under the jig home's
+// pool. A second publish, with origin holding the head, pushes nothing.
+func TestPublishPushesTheReviewedHeadFromTheClone(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	branch := ticketBranch(fx.Ticket)
+	useGithubHost(t, &d, "", "")
+	var pushes [][3]string
+	d.GuardedPush = func(dir, remote, refspec string, confirmed bool) error {
+		pushes = append(pushes, [3]string{dir, remote, refspec})
+		return gitx.GuardedPush(dir, remote, refspec, true)
+	}
+	// What the person has in progress in the clone.
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "scratch.txt"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := [3]string{run(t, fx.RepoDir, "status", "--porcelain"), run(t, fx.RepoDir, "for-each-ref", "refs/heads"), run(t, fx.RepoDir, "rev-parse", "HEAD")}
+
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(pushes) != 1 || pushes[0][0] != fx.RepoDir || pushes[0][1] != "origin" || pushes[0][2] != head+":refs/heads/"+branch {
+		t.Fatalf("pushes = %v, want one push of %s:refs/heads/%s from the clone %s to origin", pushes, head, branch, fx.RepoDir)
+	}
+	if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
+		t.Fatalf("origin's %s = %s, want exactly the reviewed head %s", branch, got, head)
+	}
+	after := [3]string{run(t, fx.RepoDir, "status", "--porcelain"), run(t, fx.RepoDir, "for-each-ref", "refs/heads"), run(t, fx.RepoDir, "rev-parse", "HEAD")}
+	if after != before {
+		t.Fatalf("the clone changed:\nbefore %v\nafter  %v", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Fatal("publish made a pool directory under the jig home")
+	}
+
+	// Origin holds the head: nothing is pushed.
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("Publish again: %v", err)
+	}
+	if len(pushes) != 1 {
+		t.Fatalf("a publish with origin at the head pushed again: %v", pushes)
+	}
+}
+
 // TestPublishRecordPRPostsTheSameNotesOncePerPullRequest: one pull request is
 // one pull request however its url is spelled (a trailing slash, /files, a
 // fragment, http), and the journal keeps the canonical url; the same notes

@@ -228,40 +228,6 @@ func TestPublishOfAnAdoptedBranchHoldsTheHeadToTheReview(t *testing.T) {
 	})
 }
 
-// pointAt points a publish lease at the copy of branch the way publish does, after
-// dropping the lease's own copy (publish re-points it at the copy it ships, so
-// what an earlier call left there must not stand in a later one's way), and
-// returns the copy pointAtTicketBranch chose, or its refusal.
-func pointAt(t *testing.T, d Deps, fx *fixture.Fixture, ticket, branch string, adopted bool) (branchCopy, error) {
-	t.Helper()
-	if dir, err := pool.Dir(fx.Home, "fixture-repo", ticket, pool.Publish); err != nil {
-		t.Fatalf("resolve the publish lease: %v", err)
-	} else if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the publish lease: %v", err)
-	}
-	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Publish)
-	if err != nil {
-		t.Fatalf("acquire the publish lease: %v", err)
-	}
-	lines, err := journal.Read(d.Store, ticket)
-	if err != nil {
-		t.Fatalf("journal.Read: %v", err)
-	}
-	return pointAtTicketBranch(d, lease.Dir, "fixture-repo", ticket, branch, adopted, journal.BuiltCommits(lines), "publish")
-}
-
-// wantCopy requires pointAtTicketBranch to choose want.
-func wantCopy(t *testing.T, d Deps, fx *fixture.Fixture, ticket, branch string, adopted bool, want branchCopy, why string) {
-	t.Helper()
-	got, err := pointAt(t, d, fx, ticket, branch, adopted)
-	if err != nil {
-		t.Fatalf("pointAtTicketBranch: %v", err)
-	}
-	if got != want {
-		t.Errorf("copy = %v, want %v: %s", got, want, why)
-	}
-}
-
 // TestPublishUpdatesThePRTheAuthorOpened: the author opened a pull request for
 // their branch before handing it to jig. Publish updates that one - its body,
 // through `gh pr edit` - and opens no second, and the branch it pushes to is
