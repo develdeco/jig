@@ -138,3 +138,70 @@ func (p ProbeRecord) rankKey() int {
 	}
 	return 2*p.After + 1
 }
+
+// SliceProbeRow is one probe of a slice that `jig verify` shows: one that is
+// stale at the head, or a current survivor.
+type SliceProbeRow struct {
+	File     string
+	Line     int
+	Outcome  string
+	State    string
+	Mutation string
+}
+
+// SliceProbes is what a slice's recorded probes come to at a head: how many are
+// current, stale and survived (the current survivors), and a row for each stale
+// or surviving one. Total is how many the slice has recorded.
+type SliceProbes struct {
+	Total, Current, Stale, Survived int
+	Rows                            []SliceProbeRow
+}
+
+// BuilderProbesAt reads the probes recorded for slice of ticket and judges
+// them against head, a commit of the clone dir of repo: a probe is stale once
+// its file's blob at head differs from the one it recorded, or a later probe
+// of the same line exists, a reviewer's round or another of the builder's.
+// qualified says files are named <repo>/<path>, as in a project of several
+// repos. It is a fact to show: nothing here refuses.
+func BuilderProbesAt(st *store.Store, ticket, slice, repo, dir, head string, qualified bool) (SliceProbes, error) {
+	rounds, err := existingGateRounds(st, ticket)
+	if err != nil {
+		return SliceProbes{}, fmt.Errorf("verifydeliver: probes: count rounds: %w", err)
+	}
+	probes, _, err := ledgerBefore(st, ticket, rounds+1)
+	if err != nil {
+		return SliceProbes{}, err
+	}
+	rf := roundFiles{qualified: qualified, repos: []roundRepo{{Name: repo, Dir: dir, Head: head}}}
+	var mine []ProbeRecord
+	for _, p := range probes {
+		if _, _, ok := rf.of(p.File); ok {
+			mine = append(mine, p)
+		}
+	}
+	probed, _, _, err := currentLedger(rf, mine, nil)
+	if err != nil {
+		return SliceProbes{}, err
+	}
+	var out SliceProbes
+	for _, p := range probed {
+		if p.Slice != slice {
+			continue
+		}
+		out.Total++
+		survivor := p.State == ProbeCurrent && p.Outcome == ProbeSurvived
+		switch {
+		case p.State == ProbeStale:
+			out.Stale++
+		default:
+			out.Current++
+		}
+		if survivor {
+			out.Survived++
+		}
+		if p.State == ProbeStale || survivor {
+			out.Rows = append(out.Rows, SliceProbeRow{File: p.File, Line: p.Line, Outcome: p.Outcome, State: p.State, Mutation: p.Mutation})
+		}
+	}
+	return out, nil
+}
