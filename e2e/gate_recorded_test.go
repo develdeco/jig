@@ -88,25 +88,6 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: last, st: st}
 }
 
-// buildFix has the builder commit the scenario's patch for each slice given -
-// gate fix slices a round queued, which the scenario builds - and have the
-// commits verified, the way newBuiltTicket builds the ticket. It returns the
-// head the builder is at afterwards.
-func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
-	t.Helper()
-	verifySlots <- struct{}{}
-	defer func() { <-verifySlots }()
-	var sha string
-	for _, s := range slices {
-		sha = b.builder.CommitScenario(s, 1)
-		res := b.builder.Verify(b.fx.Ticket, s)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", s, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	return sha
-}
-
 // workFile is a file of the ticket's work directory in the store.
 func (b builtTicket) workFile(name string) string {
 	return filepath.Join(b.st.TicketDir(b.fx.Ticket), "work", name)

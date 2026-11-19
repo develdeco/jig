@@ -81,19 +81,6 @@ func (c chartOut) reachOf(t *testing.T, id string) string {
 	return ""
 }
 
-// alsoInBeta gives ticket id a second slice in workspace beta, so the project's
-// slices name two workspaces and the workspace rule has something to say: with
-// one workspace in the whole project it lists nothing.
-func alsoInBeta(t *testing.T, st *store.Store, id string) {
-	t.Helper()
-	path := filepath.Join(st.TicketDir(id), "slices.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFileOrFatal(t, path, append(data, []byte("  - id: b\n    workspace: beta\n    goal: Build it too.\n    oracle: test\n    blocked_by: []\n    from_brief: []\n")...))
-}
-
 // briefed gives ticket id a brief and one slice and records a person's approval
 // of the brief, as `jig validate` does once the person confirmed it.
 func briefed(t *testing.T, st *store.Store, id string) {

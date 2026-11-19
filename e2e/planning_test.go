@@ -3,7 +3,6 @@ package e2e
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -11,28 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
-
-// ticketIDRE reads the id out of the ticket block jig ticket new prints.
-var ticketIDRE = regexp.MustCompile(`(?m)^  id: (\S+)$`)
-
-// mintTicket mints a ticket through the CLI, as a person would, and returns
-// its id.
-func mintTicket(t *testing.T, env jigEnv, dir, title, body string) string {
-	t.Helper()
-	args := []string{"ticket", "new", "--title", title}
-	if body != "" {
-		args = append(args, "--body", body)
-	}
-	r := runJig(t, env, dir, args...)
-	if r.Code != 0 {
-		t.Fatalf("jig ticket new %q exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", title, r.Code, r.Stdout, r.Stderr)
-	}
-	m := ticketIDRE.FindStringSubmatch(r.Stdout)
-	if m == nil {
-		t.Fatalf("jig ticket new printed no id:\n%s", r.Stdout)
-	}
-	return m[1]
-}
 
 // TestValidateRecordsTheApproval: a valid brief is approved by the person
 // whose identity git resolves in the store, with who vouched for it, an

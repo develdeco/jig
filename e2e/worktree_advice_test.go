@@ -1,12 +1,9 @@
 package e2e
 
-// End-to-end tests of the worktree advice (ADR 0039): jig makes no worktree and
-// has no verb for one, it advises. `jig next <ticket>` gives, for each repo the
-// ticket builds in, the git command that adds the ticket's worktree beside the
-// clone, and later the command that removes it; `jig next <chart>` carries the
-// advice for each ticket of the run; `jig publish --pr` says the removal the
-// moment the last pull request is recorded. Each test runs the commands jig
-// prints, as the session would, and asks again.
+// End-to-end test of the worktree advice (ADR 0039) for a harness that makes
+// the ticket's worktree by its own method: jig advises an add until the session
+// renames the harness's branch to the ticket's, and from then on `jig next`
+// finds the worktree by its branch and `jig here` run in it binds the ticket.
 
 import (
 	"path/filepath"

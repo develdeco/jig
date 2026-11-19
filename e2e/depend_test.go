@@ -1,9 +1,8 @@
 package e2e
 
-// End-to-end tests of `jig depend` through the real binary: an edge written
-// to a standalone ticket is read by `jig next` like one `jig graduate` wrote
-// (the wait, the stack plan and the branch to merge), a merged edge cleared
-// releases the ticket, and a refused edge leaves ticket.yaml as it was.
+// End-to-end test of `jig depend` through the real binary: an edge to a
+// ticket whose branch already exists is advice, not a branch moved, and `jig
+// next` reads the ticket as behind with the merge that brings it up.
 
 import (
 	"strings"
