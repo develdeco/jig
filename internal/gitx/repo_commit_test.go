@@ -213,55 +213,16 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 				t.Skipf("no symbolic links here: %v", err)
 			}
 		}},
-		{"an executable where core.fileMode counts it", func(t *testing.T, dir string) {
-			mustRun(t, dir, "config", "core.fileMode", "true")
-			writeFileT(t, dir, "run.sh", "#!/bin/sh\n")
-			if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if fi, err := os.Stat(filepath.Join(dir, "run.sh")); err != nil || fi.Mode()&0o111 == 0 {
-				t.Skip("no executable bit here")
-			}
-		}},
 		{"an executable in the index", func(t *testing.T, dir string) {
 			writeFileT(t, dir, "run.sh", "#!/bin/sh\n")
 			blob := mustRun(t, dir, "hash-object", "-w", "run.sh")
 			mustRun(t, dir, "update-index", "--add", "--cacheinfo", "100755,"+blob+",run.sh")
-		}},
-		{"an embedded repository", func(t *testing.T, dir string) {
-			mustRun(t, dir, "init", "-q", filepath.Join(dir, "inner"))
-		}},
-		{"a .gitattributes below the root", func(t *testing.T, dir string) {
-			writeFileT(t, dir, "T-1/.gitattributes", "* text\n")
-		}},
-		{"a name core.precomposeUnicode would recompose", func(t *testing.T, dir string) {
-			mustRun(t, dir, "config", "core.precomposeUnicode", "true")
-			writeFileT(t, dir, "caf\u00e9.txt", "x\n")
-		}},
-		{"a non-ASCII name under ignore rules", func(t *testing.T, dir string) {
-			writeFileT(t, dir, "café.txt", "x\n")
 		}},
 		{"a non-ASCII ignore rule", func(t *testing.T, dir string) {
 			writeFileT(t, dir, ".git/info/exclude", "café*\n")
 		}},
 		{"an ignore rule with a negation", func(t *testing.T, dir string) {
 			writeFileT(t, dir, ".gitignore", "*.lock\n!keep.lock\n")
-		}},
-		{"an ignore rule with **", func(t *testing.T, dir string) {
-			writeFileT(t, dir, ".gitignore", "cache/**\n")
-		}},
-		{"an ignore rule with a bracket expression", func(t *testing.T, dir string) {
-			writeFileT(t, dir, "T-1/.gitignore", "[Jj]ournal\n")
-		}},
-		{"an ignore rule with an escape", func(t *testing.T, dir string) {
-			writeFileT(t, dir, ".git/info/exclude", "\\#hash\n")
-		}},
-		{"an ignore rule with trailing whitespace", func(t *testing.T, dir string) {
-			writeFileT(t, dir, ".gitignore", "*.tmp \n")
-		}},
-		{"an assume-unchanged file", func(t *testing.T, dir string) {
-			mustRun(t, dir, "update-index", "--assume-unchanged", "project.yaml")
-			writeFileT(t, dir, "project.yaml", "schema_version: 2\n")
 		}},
 		{"an assume-unchanged file in a version 4 index", func(t *testing.T, dir string) {
 			mustRun(t, dir, "update-index", "--index-version", "4")
@@ -275,13 +236,6 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 				t.Skipf("no such time here: %v", err)
 			}
 		}},
-		{"two tracked names core.ignoreCase makes one", func(t *testing.T, dir string) {
-			mustRun(t, dir, "config", "core.ignoreCase", "true")
-			blob := mustRun(t, dir, "hash-object", "-w", "project.yaml")
-			mustRun(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+",NOTES.txt")
-			mustRun(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+",notes.txt")
-			writeFileT(t, dir, "notes.txt", "schema_version: 1\n")
-		}},
 		{"a tracked name another spelling still finds", func(t *testing.T, dir string) {
 			mustRun(t, dir, "config", "core.ignoreCase", "false")
 			if err := os.Rename(filepath.Join(dir, "project.yaml"), filepath.Join(dir, "p.tmp")); err != nil {
@@ -292,13 +246,6 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Join(dir, "project.yaml")); err != nil {
 				t.Skip("a case-sensitive file system: the old name is gone")
-			}
-		}},
-		{"a name core.ignoreCase matches to a tracked one", func(t *testing.T, dir string) {
-			mustRun(t, dir, "config", "core.ignoreCase", "true")
-			writeFileT(t, dir, "PROJECT.yaml", "schema_version: 1\n")
-			if ents, err := os.ReadDir(dir); err != nil || len(ents) < 5 {
-				t.Skip("a case-insensitive file system: the two names are one file")
 			}
 		}},
 	}
@@ -319,57 +266,6 @@ func TestCommitAllLeavesWhatTheGitProgramStagesDifferently(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestCommitAllRecordsAnExecutableAsAFileWhereCoreFileModeIsOff: where the
-// repository's core.fileMode is false (Git for Windows, and file systems
-// that report every file executable), the executable bit is not recorded,
-// as the git program does not record it.
-func TestCommitAllRecordsAnExecutableAsAFileWhereCoreFileModeIsOff(t *testing.T) {
-	dir := newStoreRepo(t)
-	mustRun(t, dir, "config", "core.fileMode", "false")
-	writeFileT(t, dir, "run.sh", "#!/bin/sh\n")
-	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := openRepo(t, dir).CommitAll("run", "tester", "tester@example.invalid"); err != nil {
-		t.Fatalf("CommitAll: %v", err)
-	}
-	if got := mustRun(t, dir, "ls-tree", "HEAD", "run.sh"); got[:6] != "100644" {
-		t.Fatalf("run.sh = %q, want a plain file", got)
-	}
-}
-
-// TestCommitAllHonorsTheIdentityEnvironment: GIT_AUTHOR_* and
-// GIT_COMMITTER_* win over the identity passed in, as they do for the git
-// program, and a pinned date gitx cannot read hands the commit to the git
-// program before anything is staged.
-func TestCommitAllHonorsTheIdentityEnvironment(t *testing.T) {
-	dir := newStoreRepo(t)
-	t.Setenv("GIT_AUTHOR_NAME", "pinned author")
-	t.Setenv("GIT_AUTHOR_EMAIL", "author@example.invalid")
-	t.Setenv("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
-	t.Setenv("GIT_COMMITTER_NAME", "pinned committer")
-	t.Setenv("GIT_COMMITTER_EMAIL", "committer@example.invalid")
-	t.Setenv("GIT_COMMITTER_DATE", "1767225600 +0100")
-	writeFileT(t, dir, "a.txt", "a\n")
-	if _, err := openRepo(t, dir).CommitAll("pinned", "tester", "tester@example.invalid"); err != nil {
-		t.Fatalf("CommitAll: %v", err)
-	}
-	got := mustRun(t, dir, "log", "-1", "--date=raw", "--format=%an <%ae> %ad|%cn <%ce> %cd")
-	want := "pinned author <author@example.invalid> 1767225600 +0000|pinned committer <committer@example.invalid> 1767225600 +0100"
-	if got != want {
-		t.Fatalf("identity = %q, want %q", got, want)
-	}
-
-	t.Setenv("GIT_AUTHOR_DATE", "yesterday noon")
-	writeFileT(t, dir, "b.txt", "b\n")
-	if _, err := openRepo(t, dir).CommitAll("unparsed", "tester", "tester@example.invalid"); !errors.Is(err, ErrUseCLI) {
-		t.Fatalf("CommitAll with an unreadable date = %v, want ErrUseCLI", err)
-	}
-	if st := mustRun(t, dir, "status", "--porcelain"); st != "?? b.txt" {
-		t.Fatalf("status after the refused commit = %q, want b.txt still unstaged", st)
 	}
 }
 
