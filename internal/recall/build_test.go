@@ -91,7 +91,7 @@ func TestReportMarshalsEmptyListsAsArrays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"tickets":[],"shipped":0,"edges":[],"duplicates":[],"fog":[],"platform":[],"answers":[]}`
+	want := `{"tickets":[],"shipped":0,"edges":[],"duplicates":[],"fog":[],"platform":[],"answers":[],"receipts":[]}`
 	if string(data) != want {
 		t.Errorf("an empty report = %s, want %s", data, want)
 	}
