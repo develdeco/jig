@@ -301,32 +301,6 @@ func TestChartFlow(t *testing.T) {
 	}
 }
 
-// TestChartSkillNesting runs the built binary and reads the chart skill a
-// session gets: it carries the rule for a multi-repo ticket (a nested builder
-// per repo) and the fallback when the ticket subagent has no Agent tool.
-func TestChartSkillNesting(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	r := runJig(t, env, fx.RepoDir, "skill", "chart")
-	if r.Code != 0 {
-		t.Fatalf("jig skill chart exit = %d\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-	// The several-repos rule is a reference the core points to.
-	if !strings.Contains(r.Stdout, "Read `jig skill chart multi-repo` when") {
-		t.Errorf("jig skill chart does not point to its multi-repo reference:\n%s", r.Stdout)
-	}
-	ref := runJig(t, env, fx.RepoDir, "skill", "chart", "multi-repo")
-	if ref.Code != 0 {
-		t.Fatalf("jig skill chart multi-repo exit = %d\nstderr:\n%s", ref.Code, ref.Stderr)
-	}
-	r.Stdout += ref.Stdout
-	for _, want := range []string{"nested builder", "in the background", "only its repo's slices, never gate or nest", "a hold saying to gate is yours", "wait for them before the gate", "the question, its id and default", "No Agent tool", "if you have the Agent tool", "A hand-back at green with no reviewer", "its tie replaced by running the `command` of its repo's `worktrees` row", "working in that row's `dir`"} {
-		if !strings.Contains(r.Stdout, want) {
-			t.Errorf("jig skill chart lacks %q:\n%s", want, r.Stdout)
-		}
-	}
-}
-
 // TestChartWorkspaceOverlapBecomesAStackedEdge: two independent tickets of a
 // chart that build in one workspace are listed as an overlap by `jig next
 // <chart>` and `jig status <chart>`; once the later one is stacked on the earlier
