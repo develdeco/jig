@@ -521,11 +521,11 @@ func TestDefaultedDecisions(t *testing.T) {
 		{"decisions after a closed code fence", "# T-1: x\n\n## Decision\n\n```\n- fenced (defaulted)\n```\n\n- After the fence. (defaulted 2026-11-06)\n- And another. (defaulted 2026-11-06)\n", 2},
 		{"indented list item under a tagged parent", "# T-1: x\n\n## Decision\n\n- The parent. (defaulted 2026-11-03)\n  - The child. (defaulted 2026-11-03)\n", 2},
 		{"backticked prose with a dated tag", "# T-1: x\n\nThe tag reads `defaulted 2026-11-02 (owner: proceed with the plan)` in a brief.\n", 0},
-		{"a convention line and a quoted ask are mentions", "# T-1: x\n\nShape: bug. Each decision below is tagged `(user-confirmed)` or `(defaulted)`.\n\nThe ask read \"Show the person the brief and ask about its decisions (N are tagged defaulted)\".\n\n## Decisions\n\n1. **A** (defaulted). a.\n2. **B** (user-confirmed). b.\n3. **C** (defaulted). c.\n4. **D** (defaulted). d.\n", 3},
-		{"a decision holding a code span and a quotation, tagged outside them", "# T-1: x\n\n## Decision\n\n- It runs `jig validate` and prints \"valid\". (defaulted 2026-11-19)\n", 1},
-		{"a code span closes only at a run of its own length", "# T-1: x\n\nThe tag reads ``a ` (defaulted) `` or `b `` (defaulted)` in a brief.\n", 0},
-		{"a curly-quoted tag", "# T-1: x\n\nThe ask read “(N are tagged defaulted)” then.\n", 0},
-		{"an unclosed backtick or quote drops nothing", "# T-1: x\n\n## Decision\n\n- A stray ` backtick. (defaulted)\n- A stray \" quote. (defaulted)\n", 2},
+		{"a convention line and a quoted ask are mentions", "Shape: bug. Each decision below is tagged `(user-confirmed)` or `(defaulted)`.\n\nThe ask read \"Show the person the brief and ask about its decisions (N are tagged defaulted)\".\n\n## Decisions\n\n1. **A** (defaulted). a.\n2. **B** (user-confirmed). b.\n3. **C** (defaulted). c.\n4. **D** (defaulted). d.\n", 3},
+		{"a decision holding a code span and a quotation, tagged outside them", "## Decision\n\n- It runs `jig validate` and prints \"valid\". (defaulted 2026-11-19)\n", 1},
+		{"a code span closes only at a run of its own length", "The tag reads ``a ` (defaulted) `` or `b `` (defaulted)` in a brief.\n", 0},
+		{"a curly-quoted tag", "The ask read “(N are tagged defaulted)” then.\n", 0},
+		{"an unclosed backtick or quote drops nothing", "## Decision\n\n- A stray ` backtick. (defaulted)\n- A stray \" quote. (defaulted)\n", 2},
 		{"no decisions", "# T-1: x\n\n## Goal\n\nx\n", 0},
 	}
 	for _, c := range cases {
