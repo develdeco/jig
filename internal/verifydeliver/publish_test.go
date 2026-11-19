@@ -13,7 +13,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -180,16 +179,6 @@ func journalLen(t *testing.T, d Deps, ticket string) int {
 		t.Fatalf("journal.Read: %v", err)
 	}
 	return len(lines)
-}
-
-// publishLeaseDir returns the fixture ticket's publish lease directory.
-func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
-	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish)
-	if err != nil {
-		t.Fatalf("resolve publish lease: %v", err)
-	}
-	return dir
 }
 
 // TestPublishFullChain is the one chain of the publish: a ticket gated clean by
@@ -477,7 +466,7 @@ func TestPublishFullChain(t *testing.T) {
 		if len(pushes.confirmed) != 1 || !pushes.confirmed[0] {
 			t.Fatalf("guardedPush confirmed = %v, want true after an accepted prompt", pushes.confirmed)
 		}
-		if prompted != branch || len(pushes.branches) != 1 || pushes.branches[0] != branch {
+		if prompted != branch || len(pushes.branches) != 1 || !strings.HasSuffix(pushes.branches[0], ":refs/heads/"+branch) {
 			t.Fatalf("prompt named branch %q and push named %q, want both to name the ticket's own branch %q", prompted, pushes.branches, branch)
 		}
 		if promptedTicket != fx.Ticket {
@@ -799,27 +788,39 @@ func TestPublishFullChain(t *testing.T) {
 		}
 	})
 
-	step(t, "the build lease is in step with the branch publish pushed", func(t *testing.T) {
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Build)
-		if err != nil {
-			t.Fatalf("build Acquire after a publish: %v, want the build lease in step with origin's branch", err)
-		}
-		standing, err := pool.Compare(lease.Dir, branch)
-		if err != nil || standing != pool.InStep {
-			t.Fatalf("the build lease stands %v against origin (%v), want in step", standing, err)
+	step(t, "the clone is in step with the branch publish pushed", func(t *testing.T) {
+		ahead, behind, err := gitx.Standing(fx.RepoDir, "refs/heads/"+branch, "refs/remotes/origin/"+branch)
+		if err != nil || ahead != 0 || behind != 0 {
+			t.Fatalf("the clone's %s stands %d ahead and %d behind origin's (%v), want in step", branch, ahead, behind, err)
 		}
 	})
 
-	step(t, "the branch's copy is origin's once a publish pushed it", func(t *testing.T) {
-		wantCopy(t, d, fx, fx.Ticket, branch, false, originsCopy, "publish pushed the build lease's head as it is, so the two are one")
+	step(t, "the branch's copy is the clone's once a publish pushed it, at the published head", func(t *testing.T) {
+		wantCopyAt(t, d, fx, branch, clonesCopy, originRef(t, fx.RepoRemote, "refs/heads/"+branch), "publish pushed the clone's head as it is, so the two are one")
 	})
 
-	step(t, "and with no build lease here", func(t *testing.T) {
-		if err := os.RemoveAll(buildLeaseOf(t, fx, fx.Ticket)); err != nil {
-			t.Fatalf("remove the build lease: %v", err)
-		}
-		wantCopy(t, d, fx, fx.Ticket, branch, false, originsCopy, "it holds every commit jig built, exactly as it built them")
+	step(t, "and with the branch in no clone", func(t *testing.T) {
+		run(t, fx.RepoDir, "checkout", "--detach", "origin/main")
+		run(t, fx.RepoDir, "branch", "-D", branch)
+		wantCopyAt(t, d, fx, branch, originsCopy, originRef(t, fx.RepoRemote, "refs/heads/"+branch), "it holds every commit jig built, exactly as it built them")
 	})
+}
+
+// wantCopyAt requires the gate's and publish's choice of copy of branch to be
+// want, at the head wantHead.
+func wantCopyAt(t *testing.T, d Deps, fx *fixture.Fixture, branch string, want branchCopy, wantHead, why string) {
+	t.Helper()
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	got, err := chooseCopy(d, "fixture-repo", branch, journal.BuiltCommits(lines), "publish")
+	if err != nil {
+		t.Fatalf("chooseCopy: %v", err)
+	}
+	if got.Copy != want || got.Head != wantHead {
+		t.Errorf("copy = %v at %s, want %v at %s: %s", got.Copy, got.Head, want, wantHead, why)
+	}
 }
 
 // TestPublishTitlesThePullRequestWithTheRecordedTitle: the pull request opened

@@ -159,7 +159,6 @@ func TestChartNewRefusals(t *testing.T) {
 		{"a leading dash", []string{"chart", "new", "--title", "T", "--store", gone, "./-x"}, `is not valid: ` + rule},
 		{"a trailing dash", []string{"chart", "new", "fresh-", "--title", "T", "--store", gone}, `chart name "fresh-" is not valid: ` + rule},
 		{"too long", []string{"chart", "new", longName, "--title", "T", "--store", gone}, "is not valid: " + rule},
-		{"a lease suffix", []string{"chart", "new", "fresh-gate", "--title", "T", "--store", gone}, `chart name "fresh-gate" is not valid: a name that ends in`},
 		{"another subcommand", []string{"chart", "list", "--store", gone}, `unknown chart subcommand "list"; only "new" is supported`},
 		{"a chart that exists", []string{"chart", "new", "taken", "--title", "T", "--store", clone}, `chart "taken" already exists in the store at `},
 		{"a ticket alias", []string{"chart", "new", "oldname", "--title", "T", "--store", clone}, `"oldname" is a ticket of the store: a ticket id or alias wins over a chart name, so choose another name`},

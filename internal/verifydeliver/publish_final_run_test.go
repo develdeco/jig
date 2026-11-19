@@ -75,7 +75,7 @@ func TestPublishBodySaysWhenTheFinalRunFailed(t *testing.T) {
 func TestAFinalRunAtAnotherCommitIsNone(t *testing.T) {
 	t.Parallel()
 	fx, d, head := reviewedInTheClone(t)
-	lease := gateLeaseOf(t, fx, fx.Ticket)
+	lease := fx.RepoDir
 	base := run(t, lease, "rev-parse", head+"^")
 	sameTree := run(t, lease, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit-tree", head+"^{tree}", "-p", head, "-m", "same tree")
 	recordFinalRun(t, d, fx.Ticket, sameTree, "pass", 9, "ran-at-the-same-tree")

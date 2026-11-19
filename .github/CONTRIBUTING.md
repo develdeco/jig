@@ -123,7 +123,7 @@ matching the directory name and a `description:` of at most 50 words.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `home.MachinePath`), and a test passes a `t.TempDir()`.
   `cmd/jig` takes what it reads from the process (the environment, the
   working directory, the terminal check, the clock, the process spawner) as an `env`
   per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)

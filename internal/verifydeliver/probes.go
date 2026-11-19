@@ -303,7 +303,7 @@ type behaviorCoverage struct {
 	Unprobed []HunkEntry
 }
 
-// publishCoverage is t's behavior coverage at head, read in the lease at dir:
+// publishCoverage is t's behavior coverage at head, read in the repository at dir:
 // every round's probes and skips up to the last, current by their files' blobs
 // at head, against the hunks of the change from its merge base with the
 // target. The probes and skips of the ticket's other repos are left out.

@@ -10,7 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -22,7 +21,7 @@ import (
 const VerdictNotIndependent = "not-independent"
 
 // gateRun is one gate round as far as its review: every precondition has
-// passed, each lease is on the copy of the branch the round works on, the
+// passed, each repo's copy of the branch the round works on is chosen, the
 // oracles passed on its head, and the round is numbered and journaled as
 // opened. A recorded round (GatePrepare) stops here and hands the review to
 // an agent; a scripted one (Gate) asks its source; either way
@@ -80,41 +79,20 @@ func (r *gateRun) pushFailure(err error) {
 	_ = r.d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", r.ticket, r.n, failureCode(err)))
 }
 
-// acquire gives the round a gate lease on the ticket's branch in one of its
-// repos, pointed at the copy of the branch the round works on.
-func (r *gateRun) acquire(gr *gateRepo) error {
-	d, ticket := r.d, r.ticket
-	// An existing gate lease is restored pristine, and forgets its own copy of
-	// the branch, before Acquire ever touches it (restoreLeaseBeforeAcquire):
-	// the round re-points the lease at its source below whatever the copy
-	// holds.
-	if err := restoreLeaseBeforeAcquire(d.Home, gr.name, ticket, pool.Gate, r.branch); err != nil {
+// choose settles the copy of the ticket's branch the round works on in one of
+// its repos: in the repo's mapped clone, which the round reads from git's
+// objects and never changes. The branch is not required to be on origin: the
+// work may be committed in the clone and not pushed yet, and a branch no copy
+// has is refused (BRANCH_NOT_FOUND). The copy the round reviews is the clone's
+// when the clone has the branch and its copy is the newer, else origin's
+// (chooseCopy).
+func (r *gateRun) choose(gr *gateRepo) error {
+	rc, err := chooseCopy(r.d, gr.name, r.branch, gr.built, "gate")
+	if err != nil {
 		return err
 	}
-	// The branch is not required to be on origin: the work may be committed
-	// in the operator's clone and not pushed yet, and pointAtBranchCopy
-	// refuses (BRANCH_NOT_FOUND) a branch no copy has.
-	lease, err := pool.Acquire(d.Home, gr.name, gr.repo.Remote, gr.target, r.branch, ticket, pool.Gate)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: gate: acquire lease: %w", err)
-	}
-	gr.lease = lease
-
-	// Restore the gate lease to a pristine, known-correct head right after
-	// acquire and before the round reads it. pool.Acquire never resets an
-	// existing local branch (a deliberate rule so a same-run slice's commits
-	// on it survive later acquires), so without this, a lease an earlier,
-	// killed run left dirty or ahead would have its leftovers reviewed, or on
-	// an adopted branch would make this gate review the stale local copy
-	// instead of the branch as it stands now.
-	//
-	// The copy the round reviews is the clone's when the clone has the branch
-	// and its copy is the newer, else origin's, else - for work an earlier
-	// jig built - the build lease's (pointAtBranchCopy).
-	gr.copy, err = pointAtBranchCopy(d, lease.Dir, gr.name, ticket, r.branch, r.gb.Adopted, gr.built, "gate")
-	// Every way of pointing the lease ends in a hard reset and a clean.
-	gr.pristine = err == nil
-	return err
+	gr.dir, gr.copy, gr.head = rc.Dir, rc.Copy, rc.Head
+	return nil
 }
 
 // gatePrepare runs a gate round up to its review. It always returns the run
@@ -162,7 +140,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 			}
 		}
 	}
-	// Resolved once: every lease and every copy of the branch name this one
+	// Resolved once: every clone and every copy of the branch name this one
 	// branch. The ticket's own record names it, or --branch adopts one
 	// (resolveGateBranch); an adoption is recorded further down, once every
 	// precondition of the round has passed.
@@ -186,7 +164,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 		repos[0].built = gb.Built
 	}
 	for _, gr := range repos {
-		if err := r.acquire(gr); err != nil {
+		if err := r.choose(gr); err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
 		}
 	}
@@ -205,7 +183,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	// so a refusal on either still leaves no trace: not a written intent.md,
 	// not a journal line, for a plain rerun to be the whole recovery. It is a
 	// ticket-level record, not specific to this round's branch or frontier
-	// state, so nothing here reads lease or branch state; the write only needs
+	// state, so nothing here reads clone or branch state; the write only needs
 	// to happen after every precondition that can still refuse the round. No
 	// separate push: the write is a tracked change like any other this round
 	// makes, carried by the round's own end-of-round push on success, or by
@@ -238,17 +216,13 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	// it, not the target's: what jig builds on the branch descends from the
 	// tip, and verification holds it to that. It replaces any start sha an
 	// earlier dispatch left before jig had built anything, which
-	// resolveGateBranch has established. The lease's HEAD is the tip of the
-	// copy it was just pointed at, in each repo the round covers. The start
+	// resolveGateBranch has established. The head is the tip of the copy
+	// the round chose, in each repo the round covers. The start
 	// shas are written first: a failure between the writes leaves a start sha
 	// no record points at, which rerunning the adoption replaces.
 	if gb.Adopting {
 		for _, gr := range repos {
-			tip, err := gitx.RevParse(gr.lease.Dir, "HEAD")
-			if err != nil {
-				return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve the tip of %s: %w", r.branch, err))
-			}
-			if err := d.Store.WriteStartSHA(ticket, gr.name, tip); err != nil {
+			if err := d.Store.WriteStartSHA(ticket, gr.name, gr.head); err != nil {
 				return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: record the start sha: %w", err))
 			}
 		}
@@ -274,11 +248,11 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	// A round runs no command: it reads each repo's own manifest and the
 	// passes its slices' builders had witnessed (review.json's oracles_passed).
 	for _, gr := range repos {
-		gr.man, err = manifest.Resolve(gr.lease.Dir)
+		gr.man, err = manifest.ResolveAt(gr.dir, gr.head)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
 		}
-		gr.slicePasses, err = witnessedPasses(d.Store, ticket, gr.name, gr.lease.Dir, gr.man, gr.slices)
+		gr.slicePasses, err = witnessedPasses(d.Store, ticket, gr.name, gr.dir, gr.head, gr.man, gr.slices)
 		if err != nil {
 			return r, inRepo(r.qualified, gr.name, err)
 		}
@@ -330,11 +304,11 @@ func (r *gateRun) queueKeptFindings() error {
 	}
 	files := roundFiles{qualified: r.qualified}
 	for _, gr := range r.repos {
-		man, err := manifest.Resolve(gr.lease.Dir)
+		man, err := manifest.ResolveAt(gr.dir, gr.head)
 		if err != nil {
 			return inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve manifest: %w", err))
 		}
-		files.repos = append(files.repos, roundRepo{Name: gr.name, Dir: gr.lease.Dir, Man: man})
+		files.repos = append(files.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: gr.head, Man: man})
 	}
 	fixSliceFindings := *d.Cfg.ResolvedGateConfig().FixSliceFindings
 	slices, kept, err := queueKeeps(r.n, d.Store, ticket, r.slices, cum, decisions, files, fixSliceFindings)
@@ -378,26 +352,25 @@ func (r *gateRun) roundInput() RoundInput {
 	}
 	if !r.qualified {
 		gr := r.repos[0]
-		in.LeaseDir, in.RepoName, in.Target, in.MergeRef = gr.lease.Dir, gr.name, gr.target, gr.mergeRef
-		in.OperatorClone, in.Manifest, in.SlicePasses = operatorClone(r.d, gr.name), gr.man, gr.slicePasses
-		in.Pristine = gr.pristine
+		in.CloneDir, in.Head, in.RepoName, in.Target, in.MergeRef = gr.dir, gr.head, gr.name, gr.target, gr.mergeRef
+		in.OperatorClone, in.Manifest, in.SlicePasses = gr.dir, gr.man, gr.slicePasses
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
-			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir,
-			OperatorClone: operatorClone(r.d, gr.name), Manifest: gr.man, SlicePasses: gr.slicePasses, Pristine: gr.pristine,
+			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, CloneDir: gr.dir, Head: gr.head,
+			OperatorClone: gr.dir, Manifest: gr.man, SlicePasses: gr.slicePasses,
 		})
 	}
 	return in
 }
 
 // reviewFiles is the files of the round as the review read them: each repo's
-// lease, manifest and the commit the reviewer read it at.
+// clone, manifest and the commit the reviewer read it at.
 func (r *gateRun) reviewFiles(rv *Review) roundFiles {
 	rf := roundFiles{qualified: r.qualified}
 	for _, gr := range r.repos {
-		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.lease.Dir, Head: rv.headOf(gr.name), Man: gr.man})
+		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: rv.headOf(gr.name), Man: gr.man})
 	}
 	return rf
 }
@@ -418,7 +391,7 @@ func (r *gateRun) copies() string {
 }
 
 // Gate runs one gate round for ticket on a source that supplies its review
-// itself: the scripted source a scenario plays back. It runs no command: it reads the ticket's branch in a fresh gate lease,
+// itself: the scripted source a scenario plays back. It runs no command: it reads the ticket's branch in the repo's clone,
 // lists the passes the slices' builders had witnessed, then asks src for this round's review
 // content, and records the round (finish).
 //
@@ -486,7 +459,7 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 
 	targetSHA := map[string]string{}
 	for _, gr := range r.repos {
-		sha, err := gitx.RevParse(gr.lease.Dir, "origin/"+gr.target)
+		sha, err := gitx.RevParse(gr.dir, "origin/"+gr.target)
 		if err != nil {
 			return GateReport{}, inRepo(r.qualified, gr.name, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", gr.target, err))
 		}

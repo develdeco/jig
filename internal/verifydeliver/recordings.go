@@ -82,7 +82,7 @@ type ReviewRecordings struct {
 // pushed. The reviewer reads the files by those paths; a headless session's
 // Read, Glob and Grep reach any path the screen does not name a credential
 // location (ADR 0008), as they already reach review.json, the intent and the
-// journal outside the lease, so no grant is added for them. The same screen
+// journal outside the worktree, so no grant is added for them. The same screen
 // refuses a file whose name looks like a credential (".env*", "*_key*"), so
 // such a recording is left out of the list and counted in Omitted rather than
 // listed as evidence the reviewer cannot read.
@@ -194,12 +194,23 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 }
 
 // reviewerHostDirs are the directories of this machine that a reviewer's
-// words, which reach the store, must not name: the lease it works in, the jig
-// home (the recordings and everything else jig keeps there) and the store.
+// words, which reach the store, must not name: the clones it reads and the
+// worktrees it may read in, the jig home (the recordings and everything else
+// jig keeps there) and the store. git lists a worktree resolved, so each is
+// also spelled through the clone's own aliases (respell), the way a reviewer
+// whose environment names the clone's path may name it.
 func reviewerHostDirs(in RoundInput) []hostDir {
 	var dirs []hostDir
 	for _, r := range in.repoList() {
-		dirs = append(dirs, hostDir{r.LeaseDir, "<lease>"})
+		dirs = append(dirs, hostDir{r.CloneDir, "<clone>"})
+		if r.CloneDir != "" {
+			aliases := pathAliases(r.CloneDir)
+			for _, w := range reviewerWorktrees(r.CloneDir, in.Ticket) {
+				for _, sp := range respell(w, aliases) {
+					dirs = append(dirs, hostDir{sp, "<worktree>"})
+				}
+			}
+		}
 	}
 	dirs = append(dirs, hostDir{in.Home, "<jig home>"})
 	if in.Store != nil {
@@ -223,7 +234,7 @@ func leaveOutSessionHostPaths(s string, dirs ...hostDir) string {
 // finding's title, detail and risk rationale, each probe's seam, mutation and
 // command, each skip's reason, and the summary. A finding that cites a
 // recording by its path (the prompt asks for its scenario, step and commit
-// instead), or a probe's command run from the lease, would otherwise commit the
+// instead), or a probe's command run from the worktree, would otherwise commit the
 // operator's directories. The paths the result names as files are jig's to
 // check, not text, and are left as they are: a finding's file and
 // reviewed_paths are relativized or refused as before.

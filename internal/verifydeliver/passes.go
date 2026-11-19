@@ -39,22 +39,18 @@ const (
 
 // witnessedPasses lists, for each slice of the ticket that builds in the repo
 // (fix slices included), its latest covering oracle pass whose commit is in
-// the history of dir's HEAD, in slice order. A slice with no such pass has no
+// the history of head in dir, in slice order. A slice with no such pass has no
 // row: a pass that covers nothing (it names an Uncovered reason), a failure,
 // and a pass on a commit that is not in the head's history stand for nothing.
 // repo and man place each slice's workspace as the manifest names it.
-func witnessedPasses(st *store.Store, ticket, repo, dir string, man manifest.Manifest, slices []store.Slice) ([]SlicePass, error) {
+func witnessedPasses(st *store.Store, ticket, repo, dir, head string, man manifest.Manifest, slices []store.Slice) ([]SlicePass, error) {
 	lines, err := journal.Read(st, ticket)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: gate: read the journal for the slices' passes: %w", err)
 	}
-	head, err := gitx.RevParse(dir, "HEAD")
+	headTree, err := gitx.RevParse(dir, head+"^{tree}")
 	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: gate: resolve HEAD for the slices' passes: %w", err)
-	}
-	headTree, err := gitx.RevParse(dir, "HEAD^{tree}")
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: gate: resolve HEAD's tree: %w", err)
+		return nil, fmt.Errorf("verifydeliver: gate: resolve the head's tree: %w", err)
 	}
 	inHistory := map[string]bool{}
 	history := func(commit string) bool {

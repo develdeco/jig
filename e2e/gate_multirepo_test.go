@@ -32,13 +32,11 @@ const (
 // gateRequest is the part of a round's review.json that the tests of a gate
 // over several repos read.
 type gateRequest struct {
-	Scope    string `json:"scope"`
-	BaseSHA  string `json:"base_sha"`
-	HeadSHA  string `json:"head_sha"`
-	Worktree string `json:"worktree"`
-	Repos    []struct {
+	Scope   string `json:"scope"`
+	BaseSHA string `json:"base_sha"`
+	HeadSHA string `json:"head_sha"`
+	Repos   []struct {
 		Repo       string   `json:"repo"`
-		Worktree   string   `json:"worktree"`
 		Branch     string   `json:"branch"`
 		Scope      string   `json:"scope"`
 		BaseSHA    string   `json:"base_sha"`
@@ -194,7 +192,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 		t.Fatalf("jig gate: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
 	for _, want := range []string{
-		"round: 1", "branch: " + b.branch, "repos[2]{repo,copy,head,base,scope,worktree,must_review}:",
+		"round: 1", "branch: " + b.branch, "repos[2]{repo,copy,head,base,scope,must_review}:",
 		"  api,the clone's," + b.shaAPI + ",", "  web,the clone's," + b.shaWeb + ",",
 	} {
 		if !strings.Contains(gate.Stdout, want) {
@@ -235,15 +233,15 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	// One lease, base, head, scope and list of files for each repo. The request
 	// the store keeps names no top-level head, and no directory of this machine.
 	req := b.request(t, "1")
-	if req.Scope != "" || req.BaseSHA != "" || req.HeadSHA != "" || req.Worktree != "" {
-		t.Errorf("review.json names a scope, base, head or worktree at the top (%+v), want them only in its repos", req)
+	if req.Scope != "" || req.BaseSHA != "" || req.HeadSHA != "" {
+		t.Errorf("review.json names a scope, base or head at the top (%+v), want them only in its repos", req)
 	}
 	if len(req.Repos) != 2 || req.Repos[0].Repo != "api" || req.Repos[1].Repo != "web" {
 		t.Fatalf("review.json repos = %+v, want api and web", req.Repos)
 	}
 	for i, want := range []struct{ head, mustReview string }{{b.shaAPI, "api/server/handler.go"}, {b.shaWeb, "web/ui/page.go"}} {
 		r := req.Repos[i]
-		if r.HeadSHA != want.head || r.BaseSHA == "" || r.BaseSHA == want.head || r.Scope != "full" || r.Branch != b.branch || r.Worktree != "" {
+		if r.HeadSHA != want.head || r.BaseSHA == "" || r.BaseSHA == want.head || r.Scope != "full" || r.Branch != b.branch {
 			t.Errorf("review.json repo %s = %+v, want a full scope from its base to %s on %s", r.Repo, r, want.head, b.branch)
 		}
 		if !reflect.DeepEqual(r.MustReview, []string{want.mustReview}) || !reflect.DeepEqual(r.Oracles, []string{"test"}) {
@@ -270,29 +268,26 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 	var open struct {
 		Head  string `yaml:"head"`
-		Lease string `yaml:"lease"`
 		Repos []struct {
-			Repo  string `yaml:"repo"`
-			Copy  string `yaml:"copy"`
-			Head  string `yaml:"head"`
-			Lease string `yaml:"lease"`
+			Repo string `yaml:"repo"`
+			Copy string `yaml:"copy"`
+			Head string `yaml:"head"`
 		} `yaml:"repos"`
 	}
 	openData := readFileOrFatal(t, b.workFile("gate.round-1.open.yaml"))
 	if err := yaml.Unmarshal(openData, &open); err != nil {
 		t.Fatalf("parse the open record: %v", err)
 	}
-	if open.Head != "" || open.Lease != "" || len(open.Repos) != 2 {
+	if open.Head != "" || len(open.Repos) != 2 {
 		t.Fatalf("open record = %+v, want the settings of each repo in its repos and none at the top", open)
 	}
 	for i, repo := range []string{"api", "web"} {
 		r := open.Repos[i]
-		lease := filepath.Join(home, filepath.FromSlash(r.Lease))
-		if r.Repo != repo || r.Copy != "the clone's" || r.Lease != "pool/"+repo+"/"+ticket+"-gate" {
-			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy in its own lease", i, r, repo)
+		if r.Repo != repo || r.Copy != "the clone's" {
+			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy", i, r, repo)
 		}
-		if head := gitLog(t, lease, "rev-parse", "HEAD"); head != r.Head {
-			t.Errorf("the lease of %s is at %s, want the head the round opened on, %s", repo, head, r.Head)
+		if head := gitLog(t, b.fx.NestedDirs[repo], "rev-parse", "refs/heads/"+b.branch); head != r.Head {
+			t.Errorf("the clone of %s has the branch at %s, want the head the round opened on, %s", repo, head, r.Head)
 		}
 	}
 	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {
@@ -318,10 +313,16 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if j := rev.Jig("review", "context", ticket, "--json"); j.Code != 0 || json.Unmarshal([]byte(j.Stdout), &full) != nil || len(full.Repos) != 2 {
 		t.Fatalf("jig review context --json: exit %d, want the request with both repos\n%s", j.Code, j.Stdout)
 	}
+	// The request names no worktree of jig's. The context advises one worktree
+	// for each repo, at its head, beside the clone.
+	if j := rev.Jig("review", "context", ticket, "--json"); strings.Contains(j.Stdout, `"worktree"`) {
+		t.Errorf("review context --json names a worktree:\n%s", j.Stdout)
+	}
 	for i, repo := range []string{"api", "web"} {
-		sameDir(t, "worktree of "+repo, full.Repos[i].Worktree, filepath.Join(home, "pool", repo, ticket+"-gate"))
-		if head := gitLog(t, full.Repos[i].Worktree, "rev-parse", "HEAD"); head != req.Repos[i].HeadSHA {
-			t.Errorf("the worktree of %s is at %s, want %s", repo, head, req.Repos[i].HeadSHA)
+		clone := filepath.ToSlash(b.fx.NestedDirs[repo])
+		want := "git -C " + clone + " worktree add --detach " + clone + ".worktrees/" + ticket + "-review " + req.Repos[i].HeadSHA
+		if !strings.Contains(ctx.Stdout, want) {
+			t.Errorf("review context lacks the worktree advice of %s:\n%s\nstdout:\n%s", repo, want, ctx.Stdout)
 		}
 	}
 	rev.Bash("git status --short")

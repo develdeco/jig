@@ -86,7 +86,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 			[2]string{"head", p.Head},
 			[2]string{"base", p.Base},
 			[2]string{"scope", p.Scope},
-			[2]string{"worktree", p.Lease},
 		)
 	}
 	kv = append(kv,
@@ -140,9 +139,9 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		}
 		var repoRows [][]string
 		for _, r := range p.Repos {
-			repoRows = append(repoRows, []string{r.Repo, r.Copy, r.Head, r.Base, r.Scope, r.Lease, strconv.Itoa(mustBy[r.Repo])})
+			repoRows = append(repoRows, []string{r.Repo, r.Copy, r.Head, r.Base, r.Scope, strconv.Itoa(mustBy[r.Repo])})
 		}
-		blocks = append(blocks, axi.Table("repos", []string{"repo", "copy", "head", "base", "scope", "worktree", "must_review"}, repoRows))
+		blocks = append(blocks, axi.Table("repos", []string{"repo", "copy", "head", "base", "scope", "must_review"}, repoRows))
 	}
 	if !full {
 		return blocks
@@ -341,19 +340,20 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	p.Request.Hunks = verifydeliver.HunksWithDrafts(p, drafts)
-	deltas, err := computeDeltaDiffs(p)
+	deltas, err := computeDeltaDiffs(p, mp.Clones)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	blocks := roundBlocks(p, moved, true, deltas)
+	blocks = append(blocks, reviewerWorktreeBlocks(p, mp.Clones, dirExists)...)
 	help := []string{
-		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in the worktree, putting the file back",
+		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in your worktree, putting the file back",
 		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current, caught probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
 	}
 	if len(p.Repos) > 0 {
-		help = append([]string{help[0], fmt.Sprintf("This round covers the repos %s: read each in its own worktree (the repos table), and name every file as <repo>/<path>, as the must_review paths do - in --file, in --reviewed and in a result file", repoNames(p.Repos))}, help[1:]...)
+		help = append([]string{help[0], fmt.Sprintf("This round covers the repos %s: read each in its own worktree (one for each repo in the worktree table), and name every file as <repo>/<path>, as the must_review paths do - in --file, in --reviewed and in a result file", repoNames(p.Repos))}, help[1:]...)
 	}
 	blocks = append(blocks, axi.Help(help...))
 	axi.Render(stdout, blocks...)

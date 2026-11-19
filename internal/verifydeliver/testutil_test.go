@@ -16,7 +16,6 @@ import (
 	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -125,14 +124,19 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Home: fx.Home}
+	clones := map[string]string{"fixture-repo": fx.RepoDir}
+	if fx.SecondRepoDir != "" {
+		clones["second-repo"] = fx.SecondRepoDir
+	}
+	return Deps{Store: st, Cfg: cfg, Home: fx.Home, Machine: project.MachineProject{Clones: clones}}
 }
 
-// buildLeaseDir returns the build lease directory frontier would use for the
-// fixture's ticket: <pool>/fixture-repo/<ticket>, checked out on the branch
-// frontier would resolve for it, so a test that records a branch in the
-// fixture's ticket.yaml before driving the build gets a build lease on that
-// branch, and one that records none gets the "jig/<ticket>" default.
+// buildLeaseDir returns the directory a test builds the fixture's ticket in: the
+// operator's clone (fx.RepoDir), checked out on the branch the ticket resolves
+// to (cut from origin's main when the clone has none), so a test that records
+// a branch in the fixture's ticket.yaml before driving the build builds on that
+// branch, and one that records none gets the default. The work is built in the
+// clone, as a builder's is (ADR 0039).
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -143,11 +147,13 @@ func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	if err != nil {
 		t.Fatalf("resolve %s's branch: %v", fx.Ticket, err)
 	}
-	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Build)
-	if err != nil {
-		t.Fatalf("pool.Acquire build lease: %v", err)
+	run(t, fx.RepoDir, "fetch", "origin")
+	if _, found, _ := gitx.Resolve(fx.RepoDir, "refs/heads/"+branch); found {
+		run(t, fx.RepoDir, "checkout", branch)
+	} else {
+		run(t, fx.RepoDir, "checkout", "-b", branch, "origin/main")
 	}
-	return lease.Dir
+	return fx.RepoDir
 }
 
 // marshalReviewResult marshals result as result.json's bytes, filling a nil

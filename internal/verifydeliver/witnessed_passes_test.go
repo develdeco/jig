@@ -186,6 +186,9 @@ func TestOraclesPassedSaysWhetherThePassWasAtTheHeadsTree(t *testing.T) {
 	head := commitInBuildLease(t, fx, map[string]string{"alpha/note.txt": "the code at the head\n"})
 	recordPass(t, d, fx.Ticket, "a", a, alpha, 3, "")
 	recordPass(t, d, fx.Ticket, "b", head, alpha, 3, "")
+	// The clone is checked out on the earlier commit: the head's tree is the
+	// one the table compares with, not the checkout's.
+	run(t, fx.RepoDir, "checkout", "--detach", a)
 
 	rows := passRows(gateReviewRequest(t, d, fx.Ticket, GateOpts{}).OraclesPassed)
 	if rows["a"].AtHead != "no" || rows["b"].AtHead != "yes" || rows["b"].Commit != head {

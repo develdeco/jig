@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/develdeco/jig/internal/gitx"
 )
 
 // Workspace is one buildable unit within a repo.
@@ -68,24 +70,47 @@ const declaredPath = ".claude/jig.yaml"
 // oracle name nothing declares is run as a literal command (OracleCmd). Keys
 // the file holds that nothing reads are ignored.
 func Resolve(repoDir string) (Manifest, error) {
+	declFile := filepath.Join(repoDir, filepath.FromSlash(declaredPath))
+	data, err := os.ReadFile(declFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fromDeclaration(nil, declFile)
+		}
+		return Manifest{}, fmt.Errorf("manifest: read %s: %w", declFile, err)
+	}
+	return fromDeclaration(data, declFile)
+}
+
+// ResolveAt is Resolve for the commit rev names in the repository at repoDir,
+// read from the repository's objects: the manifest a checkout of rev would
+// resolve, with no checkout made, and whatever the working tree holds never
+// read.
+func ResolveAt(repoDir, rev string) (Manifest, error) {
+	data, found, err := gitx.BlobAt(repoDir, rev, declaredPath)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("manifest: read %s at %s: %w", declaredPath, rev, err)
+	}
+	if !found {
+		data = nil
+	}
+	return fromDeclaration(data, declaredPath+" at "+rev)
+}
+
+// fromDeclaration builds the manifest of a repo whose declaration holds data
+// (nil when it declares nothing); from names the declaration in an error.
+func fromDeclaration(data []byte, from string) (Manifest, error) {
 	m := Manifest{
 		Workspaces: []Workspace{{ID: "root", Path: "."}},
 		Oracles:    map[string]string{},
 		Envs:       map[string]EnvClass{},
 	}
-
-	declFile := filepath.Join(repoDir, filepath.FromSlash(declaredPath))
-	data, err := os.ReadFile(declFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return m, nil
-		}
-		return Manifest{}, fmt.Errorf("manifest: read %s: %w", declFile, err)
+	if data == nil {
+		return m, nil
 	}
 
 	var declared Manifest
 	if err := yaml.Unmarshal(data, &declared); err != nil {
-		return Manifest{}, fmt.Errorf("manifest: parse %s: %w", declFile, err)
+		return Manifest{}, fmt.Errorf("manifest: parse %s: %w", from, err)
 	}
 
 	if len(declared.Workspaces) > 0 {

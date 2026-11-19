@@ -1,5 +1,7 @@
 # jig advises a ticket's worktree and makes none
 
+**Amended by [ADR 0056](0056-a-gate-round-and-publish-work-in-no-lease-of-jigs.md):** its clause "never in jig's pool, whose leases are for jig's phases" has nothing left to say, since jig keeps no pool and no lease for any phase, and the reviewer's worktree (`<clone>.worktrees/<TICKET>-review`) is the second one jig advises. The rest stands.
+
 [ADR 0037](0037-a-chart-is-run-from-the-main-session.md) had each build subagent of a chart run work in its own worktree, and left the git to the skill. The `chart` skill spelled out `git worktree add <dir> -b <branch> <base>`, so every run worked out three things for itself: where the folder goes, what the base is (the parent's branch for a stacked ticket, the target otherwise, and `jig next` already knew it), and whether the branch exists already. A ticket that builds in two repos needed two folders that never collide. Nothing ever removed a worktree, so a finished chart left one folder for each ticket beside the clone. And a chart run starts several subagents at once, each wanting its own approval for git and the oracles, so the person was asked the same thing once for every parallel subagent.
 
 jig already advises a session's context and runs none of the tools ([ADR 0034](0034-jig-advises-context-and-runs-no-context-tool.md)). A worktree is the same kind of thing: the session's own checkout, made with the session's own tools.

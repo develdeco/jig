@@ -183,10 +183,7 @@ func (h HunkEntry) Unprobed() bool { return h.Probes == 0 && h.Skip == "" }
 // named as the round names every file, "<repo>/<path>", so MustReview is what
 // the reviewer reports in reviewed_paths.
 type RepoRequest struct {
-	Repo string `json:"repo"`
-	// Worktree is a pristine checkout of the repo's HeadSHA that belongs to
-	// jig (ReviewRequest.Worktree).
-	Worktree   string   `json:"worktree,omitempty"`
+	Repo       string   `json:"repo"`
 	Branch     string   `json:"branch"`
 	Scope      string   `json:"scope"` // full|delta
 	BaseSHA    string   `json:"base_sha"`
@@ -210,10 +207,7 @@ type ReviewRequest struct {
 	Scope   string        `json:"scope,omitempty"` // full|delta
 	BaseSHA string        `json:"base_sha,omitempty"`
 	HeadSHA string        `json:"head_sha,omitempty"`
-	// Worktree is a pristine checkout of HeadSHA that belongs to jig: the
-	// reviewer reads the code there, and edits nothing in it.
-	Worktree string `json:"worktree,omitempty"`
-	Intent   Intent `json:"intent"`
+	Intent  Intent        `json:"intent"`
 	// IntentExcerpt is the path of an excerpt of the operator's own agent
 	// session behind this change: a session the machine ledger records as
 	// having worked the ticket, else the local session that best matches the
@@ -374,7 +368,7 @@ type reviewResultWire struct {
 // known action and risk on every finding, non-empty title and
 // risk_rationale, a non-negative line, and repo-relative file syntax on
 // every finding, and a non-empty prior and non-negative line on every
-// still_present entry. The rules that need the request or the lease's
+// still_present entry. The rules that need the request or the round's
 // head - oracle membership, prior identity (a finding's or a still_present
 // entry's), reviewed_paths coverage, file existence - are checked
 // separately by validateReviewResult, once the caller has that context.
@@ -742,47 +736,27 @@ func normalizeRepoRelPath(p string) (string, error) {
 	return q, nil
 }
 
-// relativizeReviewedPath resolves one reviewed_paths entry for coverage. A
-// plain repo-relative path normalizes as usual. review.json hands the
-// reviewer several absolute paths to read - review.json itself, intent's own
-// path, slices_path, journal_path - and the prompt asks for "every file you
-// read", so an absolute path inside the lease worktree is relativized to it
-// rather than rejected: strict parsing has no rule against a reviewed_paths
-// entry beyond coverage, only against a finding's file.
-// Any other entry that still cannot be normalized (absolute outside the
-// worktree, a ".." segment) is ignored rather than failing the round: it
-// can never match a must_review path either way, so rejecting the whole
-// result over it would fail a reviewer that followed the prompt exactly.
-//
-// The session may spell the worktree differently from jig: the headless
-// backend hands it the long spelling of a path jig reached through a
-// Windows 8.3 short name, and a reviewer may report a directory reached
-// through a symlink resolved. An absolute path that is not inside the
-// worktree as spelled is therefore compared once more with both sides
-// resolved, which compares the files rather than their spellings.
-func relativizeReviewedPath(leaseDir, p string) (string, bool) {
-	if norm, err := normalizeRepoRelPath(p); err == nil {
-		return norm, true
-	}
-	return relativizeAbsolute(leaseDir, p)
-}
-
-// relativizeAbsolute is relativizeReviewedPath's reading of an absolute path:
-// p relative to leaseDir, normalized, when it is inside the lease as spelled or
-// once both are resolved. A path that is not absolute, or is not inside the
-// lease, or a lease that is not given, is false.
-func relativizeAbsolute(leaseDir, p string) (string, bool) {
-	if leaseDir == "" || !filepath.IsAbs(p) {
+// relativizeAbsolute reads an absolute reviewed path: p relative to cloneDir,
+// normalized, when it is inside it as spelled or once both are resolved. The
+// session may spell the worktree differently from jig: the headless backend
+// hands it the long spelling of a path jig reached through a Windows 8.3 short
+// name, and a reviewer may report a directory reached through a symlink
+// resolved, so a path that is not inside the directory as spelled is compared
+// once more with both sides resolved, which compares the files rather than
+// their spellings. A path that is not absolute, or is not inside the
+// directory, or a directory that is not given, is false.
+func relativizeAbsolute(cloneDir, p string) (string, bool) {
+	if cloneDir == "" || !filepath.IsAbs(p) {
 		return "", false
 	}
-	absLease, err := filepath.Abs(leaseDir)
+	absClone, err := filepath.Abs(cloneDir)
 	if err != nil {
 		return "", false
 	}
-	if norm, ok := relativeInside(absLease, p); ok {
+	if norm, ok := relativeInside(absClone, p); ok {
 		return norm, true
 	}
-	resolvedLease, err := filepath.EvalSymlinks(absLease)
+	resolvedClone, err := filepath.EvalSymlinks(absClone)
 	if err != nil {
 		return "", false
 	}
@@ -790,7 +764,7 @@ func relativizeAbsolute(leaseDir, p string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return relativeInside(resolvedLease, resolved)
+	return relativeInside(resolvedClone, resolved)
 }
 
 // relativeInside returns p relative to dir, normalized, when p is inside
@@ -832,7 +806,7 @@ func oraclesManifest(names []string) manifest.Manifest {
 	return manifest.Manifest{Oracles: oracles}
 }
 
-// validateReviewResult checks result against req and the lease's head, the
+// validateReviewResult checks result against req and the round's head, the
 // rules ParseReviewResult cannot check on its own: a finding's file exists at
 // head or was deleted in the scope diff; a prior names an id under open or
 // dismissed, and no two findings share one; a still_present entry's prior names
@@ -840,7 +814,7 @@ func oraclesManifest(names []string) manifest.Manifest {
 // still_present entry and a finding's own prior) share one, and that id's own
 // file exists at head or was deleted in the scope diff; reviewed_paths covers
 // every must_review path. rf is the files of the round: which repo a finding's
-// file is in, and the leases an absolute
+// file is in, and the reviewer's worktrees an absolute
 // reviewed_paths entry is relativized against. atHead reports whether a
 // (normalized) file, as the round names it, exists at the commit under review,
 // and deleted holds the files, as the round names them, that the scope diff
@@ -1051,15 +1025,15 @@ func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, err
 //
 // Beside the scope and base it says how the head relates to the head the delta
 // starts from (kind) and that head (prior): lineOther and "" for a full scope.
-func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
+func resolveScope(st *store.Store, ticket, cloneDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
 			return "", "", lineOther, "", "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
 		}
 		if prior != "" {
-			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
-				kind, ownTree, merge, lerr := classifyLineCarried(leaseDir, prior, head, targetRef)
+			if isAnc, ancErr := gitx.IsAncestor(cloneDir, prior, head); ancErr == nil && isAnc {
+				kind, ownTree, merge, lerr := classifyLineCarried(cloneDir, prior, head, targetRef)
 				if lerr != nil {
 					return "", "", lineOther, "", "", lerr
 				}
@@ -1074,29 +1048,11 @@ func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target
 		}
 	}
 
-	base, err = scopebase.Resolve(st, ticket, leaseDir, repoName, target, head)
+	base, err = scopebase.Resolve(st, ticket, cloneDir, repoName, target, head)
 	if err != nil {
 		return "", "", lineOther, "", "", err
 	}
 	return "full", base, lineOther, "", "", nil
-}
-
-// leaseChanged is the read-only guard a session that must never edit is held
-// to: it reports whether leaseDir's HEAD is no longer head, or any tracked
-// file differs from it. Untracked files are left out on purpose - a session
-// is expected to leave scratch behind, and the caller restores the lease
-// pristine afterwards. The reviewer round uses it and prefixes the errors with
-// its own name.
-func leaseChanged(leaseDir, head string) (bool, error) {
-	headAfter, err := gitx.RevParse(leaseDir, "HEAD")
-	if err != nil {
-		return false, fmt.Errorf("resolve HEAD after dispatch: %w", err)
-	}
-	statusOut, err := gitx.Run(leaseDir, "status", "--porcelain", "--untracked-files=no")
-	if err != nil {
-		return false, fmt.Errorf("git status after dispatch: %w", err)
-	}
-	return headAfter != head || statusOut != "", nil
 }
 
 // scopeDiff is the scope diff's coverage lists: Changed is every file
@@ -1115,8 +1071,8 @@ type scopeDiff struct {
 // a round with no open findings yet (round 1, or every round
 // before the first one that reports any) passes nil. Only the reviewer
 // source (below) ever calls this; the scripted source never does.
-func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
-	changed, deleted, err := gitx.DiffNameStatus(leaseDir, base, head)
+func computeScopeDiff(cloneDir, base, head string, openFiles []string) (scopeDiff, error) {
+	changed, deleted, err := gitx.DiffNameStatus(cloneDir, base, head)
 	if err != nil {
 		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed and deleted files: %w", err)
 	}
@@ -1137,7 +1093,7 @@ func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDif
 	}
 	// One question for every open file: a repository gitx reads itself answers
 	// them in process, and one it leaves to git costs one process, not two a file.
-	exist, err := gitx.FilesAtRev(leaseDir, head, norms)
+	exist, err := gitx.FilesAtRev(cloneDir, head, norms)
 	if err != nil {
 		return scopeDiff{}, fmt.Errorf("verifydeliver: review: check the open finding files at head: %w", err)
 	}
@@ -1271,15 +1227,18 @@ type RoundRepo struct {
 	// stacked ticket's parent branch while the parent has not merged, "" for
 	// origin/<Target>.
 	MergeRef string
-	LeaseDir string
+	// CloneDir is the repository the round reads the repo in: its clone, which
+	// the round never changes. Head is the commit of the branch the round
+	// reviews there ("" reads the repository's HEAD, which a test of the
+	// request alone leaves at the head).
+	CloneDir string
+	Head     string
 	// OperatorClone is the operator's mapped clone of the repo, or "".
 	OperatorClone string
 	Manifest      manifest.Manifest
 	// SlicePasses are the witnessed passes of the slices that build in this
 	// repo (witnessedPasses): review.json's oracles_passed.
 	SlicePasses []SlicePass
-	// Pristine is RoundInput.Pristine for this repo's lease.
-	Pristine bool
 }
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
@@ -1290,17 +1249,19 @@ type RoundInput struct {
 	Store    *store.Store
 	Ticket   string
 	Round    int
-	LeaseDir string
+	CloneDir string
+	// Head is RoundRepo.Head of the one repo.
+	Head     string
 	RepoName string
 	Target   string
 	// MergeRef is RoundRepo.MergeRef of the one repo.
 	MergeRef string
 	// Repos are the repos of a round in a project of several repos. When set
-	// they replace LeaseDir, RepoName, Target, OperatorClone, Manifest and
+	// they replace CloneDir, RepoName, Target, OperatorClone, Manifest and
 	// SlicePasses, which describe the one repo of a round over one, and the
 	// round names its files "<repo>/<path>" (roundrepos.go).
 	Repos []RoundRepo
-	// Branch is the ticket's branch the lease is checked out to. The intent
+	// Branch is the ticket's branch the round reviews. The intent
 	// lookup reads it to find the ledger's lines for the ticket that name the
 	// branch and not the ticket; "" means none.
 	Branch string
@@ -1331,11 +1292,6 @@ type RoundInput struct {
 	// written even when there is nothing to review, since someone still has
 	// to say so.
 	Recorded bool
-	// Pristine says the caller restored the lease (LeaseDir; a round over several
-	// repos says it in each RoundRepo) to its head just before, and nothing has
-	// run in it since (a gate round runs nothing), so the restore a round starts
-	// with has nothing to undo and is left out.
-	Pristine bool
 	Manifest manifest.Manifest
 	// SlicePasses are the witnessed passes of the slices that build in the repo
 	// (witnessedPasses); review.json hands them to the reviewer as
@@ -1365,8 +1321,8 @@ func (in RoundInput) repoList() []RoundRepo {
 		return in.Repos
 	}
 	return []RoundRepo{{
-		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir,
-		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses, Pristine: in.Pristine,
+		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, CloneDir: in.CloneDir, Head: in.Head,
+		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses,
 	}}
 }
 
@@ -1384,17 +1340,23 @@ func (req ReviewRequest) files() roundFiles {
 }
 
 // requestFiles is the files of the round as req, the request it was handed,
-// describes them, with each repo's lease and the commit under review there.
+// describes them, with each repo's clone and the commit under review there.
 func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 	rf := req.files()
 	if !in.qualified() {
-		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.LeaseDir, req.HeadSHA
+		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.CloneDir, req.HeadSHA
+		if in.CloneDir != "" {
+			rf.repos[0].Worktrees = lazyWorktrees(in.CloneDir, in.Ticket)
+		}
 		return rf
 	}
 	for i := range rf.repos {
 		for _, r := range in.Repos {
 			if r.Name == rf.repos[i].Name {
-				rf.repos[i].Dir = r.LeaseDir
+				rf.repos[i].Dir = r.CloneDir
+				if r.CloneDir != "" {
+					rf.repos[i].Worktrees = lazyWorktrees(r.CloneDir, in.Ticket)
+				}
 			}
 		}
 		rf.repos[i].Head = req.repo(rf.repos[i].Name).HeadSHA
@@ -1406,7 +1368,7 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 // handed, worked out and written, before anyone reviews. A recorded round
 // (GatePrepare) keeps it for the agent that reads `jig review context`.
 type ReviewPrep struct {
-	// Head is the lease's HEAD the round reviews, Scope and Base what the diff
+	// Head is the commit the round reviews, Scope and Base what the diff
 	// is taken from (resolveScope). They are those of the one repo of a
 	// round over one; a round over several has them in Repos instead.
 	Head, Scope, Base string
@@ -1465,11 +1427,11 @@ type RepoPrep struct {
 }
 
 // forRepo is the input of a round over one repo, r, made from the input of a
-// round over several: what the helpers that read one repo's lease take.
+// round over several: what the helpers that read one repo's clone take.
 func (in RoundInput) forRepo(r RoundRepo) RoundInput {
 	one := in
 	one.Repos = nil
-	one.LeaseDir, one.RepoName, one.Target, one.MergeRef = r.LeaseDir, r.Name, r.Target, r.MergeRef
+	one.CloneDir, one.RepoName, one.Target, one.MergeRef = r.CloneDir, r.Name, r.Target, r.MergeRef
 	one.OperatorClone, one.Manifest, one.SlicePasses = r.OperatorClone, r.Manifest, r.SlicePasses
 	return one
 }
@@ -1502,15 +1464,24 @@ func roundIntentExcerpt(in RoundInput, repos []RepoPrep, changed map[string][]st
 	return "", note
 }
 
+// orHEAD is rev, or HEAD when rev is empty.
+func orHEAD(rev string) string {
+	if rev == "" {
+		return "HEAD"
+	}
+	return rev
+}
+
 // PrepareReviewRequest works out and writes one round's review.json, the pre-
-// dispatch half of a review round. The lease is restored pristine first; the head, the scope and
+// dispatch half of a review round. It reads each repo at its head and changes
+// nothing in it; the head, the scope and
 // base (resolveScope), the scope diff and must_review follow, then the
 // intent excerpt when nothing states an intent, the build's recordings, and
 // the request itself under the store's work directory. It never starts a
 // session and never touches the store's findings: the caller decides what
 // reads the request.
 //
-// A round over several repos (RoundInput.Repos) does that for the lease of
+// A round over several repos (RoundInput.Repos) does that for the clone of
 // each, and writes one request that lists them (ReviewRequest.Repos) and names
 // every file "<repo>/<path>".
 //
@@ -1524,20 +1495,15 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	files := roundFiles{qualified: qualified}
 	var prep ReviewPrep
 	for _, r := range repos {
-		if r.Pristine {
-			// Restored and untouched since: the reset would only repeat itself.
-		} else if err := resetLeasePristine(r.LeaseDir, "HEAD"); err != nil {
-			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: restore lease before round: %w", err))
-		}
-		head, err := gitx.RevParse(r.LeaseDir, "HEAD")
+		head, err := gitx.RevParse(r.CloneDir, orHEAD(r.Head))
 		if err != nil {
-			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err))
+			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve the head: %w", err))
 		}
-		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
+		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.CloneDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
-		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.LeaseDir, Head: head, Man: r.Manifest})
+		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.CloneDir, Head: head, Man: r.Manifest})
 		carriedRef := ""
 		if carried != "" {
 			carriedRef = mergeRefOf(r.MergeRef, r.Target)
@@ -1583,7 +1549,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	changedAny := false
 	for i, r := range repos {
 		rp := &prep.Repos[i]
-		diff, err := computeScopeDiff(r.LeaseDir, rp.Base, rp.Head, openByRepo[r.Name])
+		diff, err := computeScopeDiff(r.CloneDir, rp.Base, rp.Head, openByRepo[r.Name])
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
@@ -1628,7 +1594,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		rp := prep.Repos[i]
 		fullBases[r.Name] = rp.Base
 		if rp.Scope != "full" {
-			if fullBases[r.Name], err = scopebase.Resolve(in.Store, in.Ticket, r.LeaseDir, r.Name, r.Target, rp.Head); err != nil {
+			if fullBases[r.Name], err = scopebase.Resolve(in.Store, in.Ticket, r.CloneDir, r.Name, r.Target, rp.Head); err != nil {
 				return ReviewPrep{}, inRepo(qualified, r.Name, err)
 			}
 		}
@@ -1640,7 +1606,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	// The store references of the whole change, from the same bases.
 	var refRepos []storeRefRepo
 	for i, r := range repos {
-		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.LeaseDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
+		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.CloneDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
 	}
 	prep.StoreRefs, err = storeRefsOf(in.Store, in.Ticket, in.Round, refRepos)
 	if err != nil {
@@ -1665,11 +1631,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		prep.Request.Scope, prep.Request.BaseSHA, prep.Request.HeadSHA = prep.Scope, prep.Base, prep.Head
 		prep.Request.Oracles = SortedOracleNames(in.Manifest)
 		prep.Request.OraclesPassed = in.SlicePasses
-		// A recorded round's reviewer is not started in the lease, so its
-		// request says where to read.
-		if in.Recorded {
-			prep.Request.Worktree = absPath(in.LeaseDir)
-		}
 	} else {
 		prep.Request.Oracles = files.allOracles()
 		for i, r := range repos {
@@ -1677,9 +1638,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 			rr := RepoRequest{
 				Repo: r.Name, Branch: in.Branch, Scope: rp.Scope, BaseSHA: rp.Base, HeadSHA: rp.Head,
 				Oracles: SortedOracleNames(r.Manifest), MustReview: rp.MustReview,
-			}
-			if in.Recorded {
-				rr.Worktree = absPath(r.LeaseDir)
 			}
 			prep.Request.Repos = append(prep.Request.Repos, rr)
 			for _, run := range r.SlicePasses {
@@ -1714,8 +1672,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	stored := prep.Request
 	prep.RequestPath = prep.ReviewPath
 	if in.Home != "" {
-		stored.Worktree, stored.IntentExcerpt, stored.Recordings = "", "", ""
-		stored.Repos = withoutWorktrees(stored.Repos)
+		stored.IntentExcerpt, stored.Recordings = "", ""
 		if in.Recorded || prep.Request.IntentExcerpt != "" {
 			if prep.RequestPath, err = writeReviewerRequest(in, prep.Request); err != nil {
 				return ReviewPrep{}, err
@@ -1738,20 +1695,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		return ReviewPrep{}, fmt.Errorf("verifydeliver: review: remove stale result.json: %w", err)
 	}
 	return prep, nil
-}
-
-// withoutWorktrees is repos with no directory of this machine named: a copy,
-// since the reviewer's own request keeps them.
-func withoutWorktrees(repos []RepoRequest) []RepoRequest {
-	if repos == nil {
-		return nil
-	}
-	out := make([]RepoRequest, len(repos))
-	for i, r := range repos {
-		r.Worktree = ""
-		out[i] = r
-	}
-	return out
 }
 
 // reviewRequestFile is the reviewer's copy of a round's request, in the round's

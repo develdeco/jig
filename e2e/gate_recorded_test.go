@@ -137,7 +137,6 @@ type reviewRequest struct {
 	HeadSHA    string   `json:"head_sha"`
 	BaseSHA    string   `json:"base_sha"`
 	Scope      string   `json:"scope"`
-	Worktree   string   `json:"worktree"`
 	MustReview []string `json:"must_review"`
 }
 
@@ -242,22 +241,20 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		Round int    `yaml:"round"`
 		Head  string `yaml:"head"`
 		Copy  string `yaml:"copy"`
-		Lease string `yaml:"lease"`
 	}
 	if err := yaml.Unmarshal(openData, &open); err != nil {
 		t.Fatalf("parse the open record: %v", err)
 	}
-	if open.Round != 1 || open.Head != b.sha || open.Copy != "the clone's" || open.Lease == "" {
-		t.Errorf("open record = %+v, want round 1 at %s, the clone's copy and a lease", open, b.sha)
+	if open.Round != 1 || open.Head != b.sha || open.Copy != "the clone's" {
+		t.Errorf("open record = %+v, want round 1 at %s and the clone's copy", open, b.sha)
 	}
 	// The store is shared: neither the open record nor the request names a
-	// directory of this machine's jig home. The lease is written relative to it.
+	// directory of this machine's jig home.
 	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {
 		if strings.Contains(strings.ReplaceAll(string(readFileOrFatal(t, b.workFile(name))), `\\`, `\`), b.env.home) {
 			t.Errorf("%s names the jig home %s", name, b.env.home)
 		}
 	}
-	lease := filepath.Join(b.env.home, filepath.FromSlash(open.Lease))
 	// The round ran no command: oracles_passed is the pass `jig verify`
 	// witnessed for slice a, at the head; the other workspace has no row.
 	var req struct {
@@ -275,17 +272,12 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		req.OraclesPassed[0].Commit != b.sha || req.OraclesPassed[0].AtHead != "yes" {
 		t.Errorf("oracles_passed = %+v, want slice a's pass in alpha at %s, at the head", req.OraclesPassed, b.sha)
 	}
-	// The reviewer reads the code at the head in the worktree the open round
-	// names, which is jig's, not the clone.
-	if head := gitLog(t, lease, "rev-parse", "HEAD"); head != b.sha {
-		t.Errorf("the open round's worktree is at %s, want %s", head, b.sha)
-	}
 
 	// jig review context again prints the open round and opens no other.
 	r2 := newHarness(t, b.fx, b.env, "s-reviewer")
 	ctx := r2.Jig("review", "context", b.fx.Ticket, "--model", "test-model")
-	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, lease) {
-		t.Fatalf("jig review context exit = %d, want 0, the open round and its worktree %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, lease, ctx.Stdout, ctx.Stderr)
+	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, b.sha) {
+		t.Fatalf("jig review context exit = %d, want 0, the open round and its head %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, b.sha, ctx.Stdout, ctx.Stderr)
 	}
 	r2.Bash("git log --oneline -3")
 
@@ -484,11 +476,7 @@ func TestPublishBodyThenPR(t *testing.T) {
 	b.openRound(t)
 	b.reviewedClean(t, 1)
 
-	gateLease := filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-gate")
-	if _, err := os.Stat(gateLease); err != nil {
-		t.Fatalf("test setup: the gate lease is not at %s: %v", gateLease, err)
-	}
-	leaseHead := gitLog(t, gateLease, "rev-parse", "HEAD")
+	cloneHead := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch)
 	originBefore := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch)
 	callsBefore := len(ghCalls(t, log))
 
@@ -510,8 +498,8 @@ func TestPublishBodyThenPR(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-publish")); err == nil {
 		t.Errorf("--body made a publish lease")
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != leaseHead {
-		t.Errorf("the gate lease moved from %s to %s", leaseHead, got)
+	if got := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch); got != cloneHead {
+		t.Errorf("the clone's %s moved from %s to %s", b.branch, cloneHead, got)
 	}
 	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != originBefore {
 		t.Errorf("origin's %s went from %q to %q", b.branch, originBefore, got)
@@ -638,5 +626,40 @@ func TestPublishBare(t *testing.T) {
 	}
 	if prLine.Outcome != "opened" || prLine.Commit != b.sha || prLine.Branch != b.branch || !strings.Contains(prLine.URL, "/pull/") || !done {
 		t.Errorf("pr line = %+v, publish-done = %v, want an opened pull request for %s from %s", prLine, done, b.sha, b.branch)
+	}
+}
+
+// TestAGateRoundAndAPublishCreateNoPoolDirectory: a ticket built in a clone is
+// gated, reviewed and published, and the pull request's branch is at the head
+// the round reviewed, and nothing under the jig home is a pool: the gate reads
+// the clone and publish pushes from it.
+func TestAGateRoundAndAPublishCreateNoPoolDirectory(t *testing.T) {
+	t.Parallel()
+	b := newBuiltTicket(t, true)
+	env, log := githubClone(t, b)
+	b.env = env
+	b.builder.env = env
+	gate := b.openRound(t)
+	if !strings.Contains(gate.Stdout, "head: "+b.sha) {
+		t.Fatalf("jig gate opened the round at another head than the clone's %s\nstdout:\n%s", b.sha, gate.Stdout)
+	}
+	b.reviewedClean(t, 1)
+
+	pub := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket, "--yes")
+	if pub.Code != 0 || !strings.Contains(pub.Stdout, "opened") {
+		t.Fatalf("jig publish --yes exit = %d, want 0 and an opened pull request\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
+	}
+	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != b.sha {
+		t.Errorf("the pull request's branch %s is at %s, want the reviewed head %s", b.branch, got, b.sha)
+	}
+	var created bool
+	for _, call := range ghCalls(t, log) {
+		created = created || strings.HasPrefix(call, "pr create")
+	}
+	if !created {
+		t.Errorf("publish opened no pull request: %v", ghCalls(t, log))
+	}
+	if _, err := os.Stat(filepath.Join(env.home, "pool")); !os.IsNotExist(err) {
+		t.Errorf("%s exists after a gate round and a publish (stat err %v)", filepath.Join(env.home, "pool"), err)
 	}
 }

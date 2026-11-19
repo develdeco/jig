@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -242,13 +241,13 @@ func validateChart(st *store.Store, cfg project.Config, chart string, stdout io.
 // the repos its slices build in agree, returning every problem found (nil
 // means valid). Two ids around a ticket are reserved by jig's own machinery
 // and reported as problems on their own: the ticket id, which names the
-// ticket's pool leases (see pool.CheckTicket for the suffixes it refuses), and
-// the slice id "gate", which the gate reviewer's dispatch uses as its own
-// session slice name (checked below, alongside every other slice id).
+// ticket's folder (see store.CheckTicketID), and the slice id "gate", which the
+// gate reviewer's dispatch uses as its own session slice name (checked below,
+// alongside every other slice id).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
-	// An id that cannot name its leases is the only problem worth reporting
+	// An id that cannot name its folder is the only problem worth reporting
 	// on its own: every path below is derived from it.
-	if err := pool.CheckTicket(ticket); err != nil {
+	if err := store.CheckTicketID(ticket); err != nil {
 		return []string{err.Error()}, nil
 	}
 
@@ -503,7 +502,7 @@ func validateTicketClosed(st *store.Store, ticket string) []string {
 }
 
 // validateTicketBranch checks ticket's optional recorded branch through the
-// same Store.TicketBranch validation every build lease, gate round and
+// same Store.TicketBranch validation every build, gate round and
 // publish runs, so a bad hand-edited branch (equal to the target of one of the
 // project's repos, or not a name git itself would accept) is reported here,
 // where it is cheap to fix, before one of those fails on it. The branch has
@@ -541,7 +540,7 @@ func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBl
 			return d
 		}
 		var d []store.TicketBlockedBy
-		if pool.CheckTicket(id) == nil {
+		if store.CheckTicketID(id) == nil {
 			d, _ = st.ReadTicketDeps(id)
 		}
 		if id == ticket && prospective != nil {

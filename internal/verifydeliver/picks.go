@@ -201,7 +201,7 @@ var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
 // pickCandidates returns the recordings a publish of head offers its pick:
 // every file of a "recorded" line that wrote some and was not refused, whose
-// commit is head or an ancestor of it in leaseDir (a recording of a commit the
+// commit is head or an ancestor of it in cloneDir (a recording of a commit the
 // branch no longer holds shows something it does not ship), and of the files
 // sharing a flow, scenario and step those of the latest such line (all of them:
 // one step can be two files, a screenshot and a video), since a
@@ -212,8 +212,8 @@ var hexSHA = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // otherwise. The candidates come back in a
 // stable order, flow then step then scenario, with ids r1, r2, ... in that
 // order, so the same set of recordings always reads the same.
-func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head string, own map[string]bool) (cands []pickCandidate, dropped []string, err error) {
-	all, err := recordedCandidates(d, lines, leaseDir, head)
+func pickCandidates(d Deps, ticket string, lines []journal.Line, cloneDir, head string, own map[string]bool) (cands []pickCandidate, dropped []string, err error) {
+	all, err := recordedCandidates(d, lines, cloneDir, head)
 	if err != nil || len(all) == 0 {
 		return nil, nil, err
 	}
@@ -225,15 +225,15 @@ func pickCandidates(d Deps, ticket string, lines []journal.Line, leaseDir, head 
 }
 
 // ownSources returns the files the ticket's commits added, modified or
-// changed the type of in leaseDir: those from the merge base of head and
+// changed the type of in cloneDir: those from the merge base of head and
 // origin/base up to head. Renames are off, so a renamed test file counts under
 // its new path and a deleted one is not in the set.
-func ownSources(leaseDir, base, head string) (map[string]bool, error) {
-	mb, err := gitx.MergeBase(leaseDir, head, "origin/"+base)
+func ownSources(cloneDir, base, head string) (map[string]bool, error) {
+	mb, err := gitx.MergeBase(cloneDir, head, "origin/"+base)
 	if err != nil {
 		return nil, fmt.Errorf("find where %s leaves origin/%s: %w", head, base, err)
 	}
-	files, err := gitx.DiffNameOnly(leaseDir, mb, head, "AMT")
+	files, err := gitx.DiffNameOnly(cloneDir, mb, head, "AMT")
 	if err != nil {
 		return nil, fmt.Errorf("list the files the ticket changed: %w", err)
 	}
@@ -263,7 +263,7 @@ func ownRecordings(all []pickCandidate, own map[string]bool) []pickCandidate {
 // order (flow, step, scenario) that gives them their ids. A caller that wants
 // fewer than all of them, or another order, chooses before verifiedCandidates
 // pays for the check of each.
-func recordedCandidates(d Deps, lines []journal.Line, leaseDir, head string) ([]pickCandidate, error) {
+func recordedCandidates(d Deps, lines []journal.Line, cloneDir, head string) ([]pickCandidate, error) {
 	// Recordings are kept under the jig home, so with none there are none: a
 	// relative evidence path would be read from wherever jig happens to run.
 	if d.Home == "" {
@@ -285,7 +285,7 @@ func recordedCandidates(d Deps, lines []journal.Line, leaseDir, head string) ([]
 	if len(recorded) == 0 {
 		return nil, nil
 	}
-	missing, err := gitx.Missing(leaseDir, head, commits)
+	missing, err := gitx.Missing(cloneDir, head, commits)
 	if err != nil {
 		return nil, fmt.Errorf("check which recorded commits the branch holds: %w", err)
 	}

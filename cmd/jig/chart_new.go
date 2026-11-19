@@ -147,8 +147,7 @@ func withHelp(err error, line string) error {
 // checkNewChartName refuses a name `jig chart new` cannot give a chart: one
 // validateChartName refuses, one outside chartNameRule or longer than
 // maxChartNameLen, and one checkTicketID refuses, because chartNamed never
-// reads such a word as a chart (a name ending in a lease suffix such as
-// "-gate" would be a chart that `jig next` could not reach).
+// reads such a word as a chart.
 func checkNewChartName(name string) error {
 	invalid := func(reason string) error {
 		return &axi.Error{
@@ -160,9 +159,6 @@ func checkNewChartName(name string) error {
 	const rule = `use lower-case letters, digits, "-" and "_", starting and ending with a letter or digit, at most 64 characters`
 	if validateChartName(name) != nil || len(name) > maxChartNameLen || !chartNameRule.MatchString(name) {
 		return invalid(rule)
-	}
-	if err := checkTicketID(name); err != nil {
-		return invalid("a name that ends in \"-gate\" or \"-publish\" is reserved for a ticket's leases, so `jig next` could not reach the chart by it")
 	}
 	return nil
 }

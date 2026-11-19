@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/repohost"
 )
 
@@ -66,8 +65,7 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	t.Parallel()
 	fx, d, head := reviewedInTheClone(t)
 	logFile, _ := useGithubHost(t, &d, "", "")
-	gateLease := gateLeaseOf(t, fx, fx.Ticket)
-	gateHead := run(t, gateLease, "rev-parse", "HEAD")
+	cloneHead := run(t, fx.RepoDir, "rev-parse", "HEAD")
 
 	report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -92,11 +90,11 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.Store.Root, filepath.FromSlash(repo.ReviewNotes))); err != nil {
 		t.Errorf("no review notes: %v", err)
 	}
-	if _, err := os.Stat(publishLeaseDir(t, fx)); err == nil {
-		t.Error("--body made a publish lease")
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Error("--body made a pool directory")
 	}
-	if got := run(t, gateLease, "rev-parse", "HEAD"); got != gateHead {
-		t.Errorf("the gate lease moved from %s to %s", gateHead, got)
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != cloneHead {
+		t.Errorf("the clone moved from %s to %s", cloneHead, got)
 	}
 	if got := originRef(t, fx.RepoRemote, "refs/heads/"+report.Branch); got != "" {
 		t.Errorf("origin has %s at %s after --body", report.Branch, got)
@@ -502,7 +500,7 @@ func TestPublishApproveAndTheConfirmation(t *testing.T) {
 }
 
 // TestPublishShipsTheClonesCopyUnchanged: the branch only the operator's clone
-// has is pushed from the publish lease as it stands - the same sha, no commit
+// has is pushed as it stands - the same sha, no commit
 // on top - and a clone that moved on since the round is refused.
 func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 	t.Parallel()
@@ -535,10 +533,61 @@ func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 	if n := publishPrCalls(t, logFile); n != 1 {
 		t.Fatalf("pull requests opened = %d, want 1", n)
 	}
-	if lease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish); err != nil {
+	// The clone's own branch and checkout are where the person left them.
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("the clone is at %s after the publish, want %s untouched", got, head)
+	}
+}
+
+// TestPublishPushesTheReviewedHeadFromTheClone: publish pushes the head the
+// round reviewed by its sha, from the mapped clone, to the ticket's branch on
+// origin, and touches nothing of the clone: its checkout, its local branches
+// and its files are as they were, and no directory is made under the jig home's
+// pool. A second publish, with origin holding the head, pushes nothing.
+func TestPublishPushesTheReviewedHeadFromTheClone(t *testing.T) {
+	t.Parallel()
+	fx, d, head := reviewedInTheClone(t)
+	branch := ticketBranch(fx.Ticket)
+	useGithubHost(t, &d, "", "")
+	// The clone is checked out on the target, as a person's is once the ticket's
+	// branch lives in a worktree: publish reads the head it ships, not the
+	// checkout (with the checkout read, the branch would change nothing against
+	// the target).
+	run(t, fx.RepoDir, "checkout", "main")
+	var pushes [][3]string
+	d.GuardedPush = func(dir, remote, refspec string, confirmed bool) error {
+		pushes = append(pushes, [3]string{dir, remote, refspec})
+		return gitx.GuardedPush(dir, remote, refspec, true)
+	}
+	// What the person has in progress in the clone.
+	if err := os.WriteFile(filepath.Join(fx.RepoDir, "scratch.txt"), []byte("notes\n"), 0o644); err != nil {
 		t.Fatal(err)
-	} else if got := run(t, lease, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("the publish lease is at %s, want the reviewed head %s", got, head)
+	}
+	before := [3]string{run(t, fx.RepoDir, "status", "--porcelain"), run(t, fx.RepoDir, "for-each-ref", "refs/heads"), run(t, fx.RepoDir, "rev-parse", "HEAD")}
+
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(pushes) != 1 || pushes[0][0] != fx.RepoDir || pushes[0][1] != "origin" || pushes[0][2] != head+":refs/heads/"+branch {
+		t.Fatalf("pushes = %v, want one push of %s:refs/heads/%s from the clone %s to origin", pushes, head, branch, fx.RepoDir)
+	}
+	if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
+		t.Fatalf("origin's %s = %s, want exactly the reviewed head %s", branch, got, head)
+	}
+	after := [3]string{run(t, fx.RepoDir, "status", "--porcelain"), run(t, fx.RepoDir, "for-each-ref", "refs/heads"), run(t, fx.RepoDir, "rev-parse", "HEAD")}
+	if after != before {
+		t.Fatalf("the clone changed:\nbefore %v\nafter  %v", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Fatal("publish made a pool directory under the jig home")
+	}
+
+	// Origin holds the head: nothing is pushed.
+	if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+		t.Fatalf("Publish again: %v", err)
+	}
+	if len(pushes) != 1 {
+		t.Fatalf("a publish with origin at the head pushed again: %v", pushes)
 	}
 }
 

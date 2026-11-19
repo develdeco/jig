@@ -317,7 +317,7 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 	deps := verifydeliver.Deps{Store: r.st, Home: r.home}
 
 	spawn := []string{
-		"spawn a subagent to review", "Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
+		"spawn a subagent to review", "Agent tool", "subagent_type: general-purpose", "model: opus", "isolation: worktree",
 		"`run_in_background: false` where the tool takes it", "TaskOutput (`block: true`", "the harness's notice that the subagent finished is the wait", "hand back at once, saying the round is open", "Never schedule a wakeup or call another tool to stall",
 		"You did not build " + T, "jig skill review", "jig review context " + T, "Reply with the verdict line only",
 		"must not run `jig review context` itself",

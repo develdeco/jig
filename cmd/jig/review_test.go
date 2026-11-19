@@ -62,7 +62,7 @@ func TestStringListSplitsOnCommasAndCollectsRepeats(t *testing.T) {
 // state, and lists the unprobed hunks as the sweep's work list.
 func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 	p := verifydeliver.Prepared{
-		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "full", Lease: "/lease",
+		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "full",
 		Request: verifydeliver.ReviewRequest{
 			MustReview:    []string{"a/a.go"},
 			OraclesPassed: []verifydeliver.SlicePass{{Slice: "s1", Workspace: "a", Command: "go test ./a/...", Commit: "cccccccccccccccccccccccccccccccccccccccc", AtHead: "no", Seconds: 4}},

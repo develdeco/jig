@@ -28,8 +28,8 @@ func TestRelativizeReviewedPathAcrossSpellings(t *testing.T) {
 		{"lease through a link, file resolved", link, resolved},
 		{"lease resolved, file through the link", real, filepath.Join(link, "a.go")},
 	} {
-		if got, ok := relativizeReviewedPath(c.lease, c.reported); !ok || got != "a.go" {
-			t.Errorf("%s: relativizeReviewedPath(%s, %s) = %q, %v, want a.go", c.name, c.lease, c.reported, got, ok)
+		if got, ok := relativizeAbsolute(c.lease, c.reported); !ok || got != "a.go" {
+			t.Errorf("%s: relativizeAbsolute(%s, %s) = %q, %v, want a.go", c.name, c.lease, c.reported, got, ok)
 		}
 	}
 
@@ -37,7 +37,7 @@ func TestRelativizeReviewedPathAcrossSpellings(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("package b\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := relativizeReviewedPath(link, outside); ok {
-		t.Errorf("relativizeReviewedPath(%s, %s) = %q, want a path outside the lease left out", link, outside, got)
+	if got, ok := relativizeAbsolute(link, outside); ok {
+		t.Errorf("relativizeAbsolute(%s, %s) = %q, want a path outside the directory left out", link, outside, got)
 	}
 }

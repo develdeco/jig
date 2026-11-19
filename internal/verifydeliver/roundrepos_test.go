@@ -19,16 +19,19 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// worktreesOf is the Worktrees of a roundRepo that has exactly these.
+func worktreesOf(dirs ...string) func() []string { return func() []string { return dirs } }
+
 // twoRepoFiles is the files of a round over the repos api (workspaces server
 // and lib, oracles test and lint) and web (workspaces ui and lib, oracle test),
 // read in apiDir and webDir.
 func twoRepoFiles(apiDir, webDir string) roundFiles {
 	return roundFiles{qualified: true, repos: []roundRepo{
-		{Name: "api", Dir: apiDir, Head: "api-head", Man: manifest.Manifest{
+		{Name: "api", Dir: apiDir, Worktrees: worktreesOf(apiDir), Head: "api-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "server", Path: "server"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/...", "lint": "go vet ./{path}/..."},
 		}},
-		{Name: "web", Dir: webDir, Head: "web-head", Man: manifest.Manifest{
+		{Name: "web", Dir: webDir, Worktrees: worktreesOf(webDir), Head: "web-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "ui", Path: "ui"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/..."},
 		}},
@@ -235,11 +238,11 @@ func TestBuiltInTheCommitsOfTheSlicesOfARepo(t *testing.T) {
 
 // TestReviewRequestOfOneRepoMatchesItsGolden: the request of a round in a
 // project of one repo is what it has always been, byte for byte: its scope,
-// base, head and worktree at the top, and no list of repos.
+// base and head at the top, and no list of repos.
 func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
-		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb", Worktree: "/lease/JIG-1-gate",
+		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb",
 		Intent:        Intent{Source: "brief", Path: "/store/JIG-1/brief.md"},
 		IntentExcerpt: "/home/excerpt.md",
 		Recordings:    "/home/recordings.json",
@@ -264,7 +267,6 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   "scope": "delta",
   "base_sha": "aaaa",
   "head_sha": "bbbb",
-  "worktree": "/lease/JIG-1-gate",
   "intent": {
     "source": "brief",
     "path": "/store/JIG-1/brief.md"
@@ -340,15 +342,15 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 }
 
 // TestReviewRequestOfSeveralReposListsThem: a round in a project of several
-// repos lists each repo with its own worktree, branch, scope, base, head,
-// oracles and files to cover, and names no scope, base, head or worktree at the
+// repos lists each repo with its own branch, scope, base, head,
+// oracles and files to cover, and names no scope, base or head at the
 // top; a repo with nothing to cover still lists its files as [].
 func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
 		Ticket: "JIG-1", Round: 1,
 		Repos: []RepoRequest{
-			{Repo: "api", Worktree: "/lease/api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
+			{Repo: "api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
 			{Repo: "web", Branch: "jig/JIG-1", Scope: "delta", BaseSHA: "w1", HeadSHA: "w1", Oracles: []string{"test"}},
 		},
 		MustReview: []string{"api/server/handler.go"},
@@ -361,7 +363,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"scope", "base_sha", "head_sha", "worktree"} {
+	for _, key := range []string{"scope", "base_sha", "head_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the request names %q at the top, want it only in each repo:\n%s", key, data)
 		}
@@ -370,7 +372,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Repos) != 2 || back.Repos[0].Worktree != "/lease/api" || back.Repos[1].Repo != "web" {
+	if len(back.Repos) != 2 || back.Repos[0].Repo != "api" || back.Repos[1].Repo != "web" {
 		t.Fatalf("repos = %+v, want api and web", back.Repos)
 	}
 	var listed struct {
@@ -508,14 +510,14 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	intent := reportIntentYAML{Source: "brief", SHA256: "x"}
 	one := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Repo: "app", Branch: "jig/JIG-1", Copy: "origin's", Head: "h1", Base: "b1", Scope: "full",
-		Target: "main", TargetSHA: "t1", Lease: "pool/app/JIG-1-gate", Intent: intent, Opened: "2026-01-01T00:00:00Z",
+		Target: "main", TargetSHA: "t1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 	}
 	data, err := yaml.Marshal(one)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const golden = "round: 1\nticket: JIG-1\nrepo: app\nbranch: jig/JIG-1\ncopy: origin's\nhead: h1\nbase: b1\nscope: full\n" +
-		"target: main\ntarget_sha: t1\nlease: pool/app/JIG-1-gate\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
+		"target: main\ntarget_sha: t1\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
 	if string(data) != golden {
 		t.Errorf("the open record of a round over one repo changed:\n%s\nwant:\n%s", data, golden)
 	}
@@ -526,8 +528,8 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	several := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Branch: "jig/JIG-1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 		Repos: []openRepoFile{
-			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta", Lease: "pool/api/JIG-1-gate"},
-			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw", Lease: "pool/web/JIG-1-gate"},
+			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta"},
+			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw"},
 		},
 	}
 	data, err = yaml.Marshal(several)
@@ -538,7 +540,7 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha", "lease"} {
+	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the open record of a round over several repos has %q at the top:\n%s", key, data)
 		}
@@ -552,10 +554,10 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	}
 }
 
-// oneRepoIn is the files of a round over one repo read in leaseDir, whose
+// oneRepoIn is the files of a round over one repo read in cloneDir, whose
 // manifest declares the oracles named.
-func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
-	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
+func oneRepoIn(cloneDir string, oracleNames []string) roundFiles {
+	return roundFiles{repos: []roundRepo{{Dir: cloneDir, Worktrees: worktreesOf(cloneDir), Man: oraclesManifest(oracleNames)}}}
 }
 
 // TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a

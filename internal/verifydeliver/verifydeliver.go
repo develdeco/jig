@@ -34,9 +34,9 @@ type Deps struct {
 	Store   *store.Store
 	Cfg     project.Config
 	Machine project.MachineProject
-	// Home is the jig home root whose pool holds the gate and publish
-	// leases: the binary's env resolves it (cmd/jig/env.go), a test's own
-	// directory in tests.
+	// Home is the jig home root, under which the evidence and the reviewer's
+	// copy of a request are kept: the binary's env resolves it
+	// (cmd/jig/env.go), a test's own directory in tests.
 	Home string
 	// UserHome is the operator's own home directory, where their local
 	// agent sessions keep transcripts (the binary's env resolves it, as
@@ -58,8 +58,8 @@ type Deps struct {
 	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
 	GuardedPush func(dir, remote, branch string, confirmed bool) error
 	// FetchOrigin refreshes the view of origin. nil means the default fetch,
-	// which a publish skips for a lease Acquire has just fetched; one set here
-	// is always called.
+	// which a publish skips because choosing the copy to ship has just fetched;
+	// one set here is always called.
 	FetchOrigin func(dir string) error
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)

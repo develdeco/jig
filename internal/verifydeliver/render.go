@@ -395,15 +395,15 @@ type authorCommit struct {
 // branch's tip as the author left it when the ticket adopted it
 // (store.WriteStartSHA/StartSHAPath). Nil when there is nothing before that
 // point (the branch forked from origin/target at exactly startSHA).
-func adoptedAuthorCommits(leaseDir, target, startSHA string) ([]authorCommit, error) {
-	base, err := gitx.MergeBase(leaseDir, "origin/"+target, startSHA)
+func adoptedAuthorCommits(cloneDir, target, startSHA string) ([]authorCommit, error) {
+	base, err := gitx.MergeBase(cloneDir, "origin/"+target, startSHA)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: render: merge-base origin/%s %s: %w", target, startSHA, err)
 	}
 	if base == startSHA {
 		return nil, nil
 	}
-	out, err := gitx.Run(leaseDir, "log", "--reverse", "--format=%H%x09%s", base+".."+startSHA)
+	out, err := gitx.Run(cloneDir, "log", "--reverse", "--format=%H%x09%s", base+".."+startSHA)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: render: list author commits %s..%s: %w", base, startSHA, err)
 	}

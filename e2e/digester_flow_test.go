@@ -358,7 +358,7 @@ func TestDigesterFlow(t *testing.T) {
 	// review, and `jig gate` says the same as it opens the round.
 	spawn := []string{
 		"spawn a subagent to review", "claimed slice a", "approved the brief",
-		"Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
+		"Agent tool", "subagent_type: general-purpose", "model: opus", "isolation: worktree",
 		"TaskOutput (`block: true`", "the harness's notice that the subagent finished is the wait", "Never schedule a wakeup or call another tool to stall",
 		"You did not build " + ticket, "jig skill review", "jig review context " + ticket, "Reply with the verdict line only",
 		"must not run `jig review context` itself",

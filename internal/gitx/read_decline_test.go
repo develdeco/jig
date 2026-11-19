@@ -487,14 +487,13 @@ func TestInProcessAnswersAreTallied(t *testing.T) {
 	}
 }
 
-// TestWorkTreeProbeAndDiscoveriesCountAsInProcessReads: the work-tree probe,
-// CommonDir and TopLevel answer from discovery alone, so each adds one to the
-// tally the session-start ceilings read, and none when gitx declines.
-func TestWorkTreeProbeAndDiscoveriesCountAsInProcessReads(t *testing.T) {
+// TestDiscoveriesCountAsInProcessReads: CommonDir and TopLevel answer from
+// discovery alone, so each adds one to the tally the session-start ceilings
+// read, and none when gitx declines.
+func TestDiscoveriesCountAsInProcessReads(t *testing.T) {
 	calls := map[string]func(dir string){
-		"WorkTreeProbe": func(d string) { _, _ = WorkTreeProbe(d) },
-		"CommonDir":     func(d string) { _, _ = CommonDir(d) },
-		"TopLevel":      func(d string) { _, _ = TopLevel(d) },
+		"CommonDir": func(d string) { _, _ = CommonDir(d) },
+		"TopLevel":  func(d string) { _, _ = TopLevel(d) },
 	}
 	raises := func(dir string, call func(dir string)) int64 {
 		before := InProcessReadTally.Load()

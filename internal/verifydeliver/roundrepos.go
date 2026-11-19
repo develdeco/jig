@@ -3,7 +3,7 @@ package verifydeliver
 // A gate round covers the repos a ticket's slices build in. In a project of
 // one repo that is the repo, and a round works as it always has: a finding's
 // file is a path in the repo. In a project of several repos a round has a
-// lease, a base, a head and a scope diff for each repo the ticket touches, and
+// clone, a base, a head and a scope diff for each repo the ticket touches, and
 // names a file as "<repo>/<path>" everywhere a round names one - a finding's
 // file, reviewed_paths, must_review - so one list of files covers all the repos
 // and a file says which repo's code it is. A workspace is named the same way
@@ -13,6 +13,7 @@ package verifydeliver
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -20,14 +21,14 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // gateRepo is one repo a gate round covers: the slices that build in it, the
-// lease the round reads it in and what the round learned of it there.
+// copy of the branch the round reads in the repo's clone and what the round
+// learned of it there.
 type gateRepo struct {
 	repo   project.Repo
 	name   string
@@ -39,18 +40,17 @@ type gateRepo struct {
 	// included.
 	slices []store.Slice
 	// built is the commits the journal records jig built in the repo: the ones
-	// its copy of the branch must hold (chooseBuiltCopy).
+	// its copy of the branch must hold (chooseCopy).
 	built []string
 
-	lease pool.Lease
-	// copy says whose copy of the branch the lease was left at.
+	// dir is the repo's clone, which the round reads and never changes, and
+	// head the commit of the branch's copy under review there.
+	dir  string
+	head string
+	// copy says whose copy of the branch the round reviews.
 	copy        branchCopy
 	man         manifest.Manifest
 	slicePasses []SlicePass
-	// pristine says the lease was restored to its head when it was pointed at
-	// its copy and nothing has run in it since, so the restore a review round
-	// starts with would have nothing to undo (RoundRepo.Pristine).
-	pristine bool
 }
 
 // gateRepos are the repos a gate round covers, in the project's order. A
@@ -154,11 +154,16 @@ func inRepo(qualified bool, name string, err error) error {
 // manifest.
 type roundRepo struct {
 	Name string
-	// Dir is the gate lease the round reads the repo in, Head the commit
-	// under review there.
+	// Dir is the repository the round reads the repo in (its clone), Head the
+	// commit under review there.
 	Dir  string
 	Head string
-	Man  manifest.Manifest
+	// Worktrees asks for the directories the reviewer may read the head in
+	// (reviewerWorktrees), when a reviewed path needs them: one that is
+	// absolute and inside one is that repo's file. nil when they are not
+	// known.
+	Worktrees func() []string
+	Man       manifest.Manifest
 }
 
 // roundFiles reads the file names of a gate round (see the top of this file):
@@ -275,19 +280,32 @@ func (rf roundFiles) byRepo(files []string) map[string][]string {
 	return out
 }
 
-// relativize reads one reviewed_paths entry (relativizeReviewedPath) against
-// the leases of the round: a relative path is taken as the round names it, an
-// absolute one inside a repo's lease becomes that repo's file.
+// relativize reads one reviewed_paths entry against the reviewer's worktrees of
+// the round. A plain repo-relative path normalizes as usual. review.json hands
+// the reviewer several absolute paths to read - review.json itself, intent's own
+// path, slices_path, journal_path - and the prompt asks for "every file you
+// read", so an absolute path inside a repo's worktree is that repo's file
+// rather than rejected: strict parsing has no rule against a reviewed_paths
+// entry beyond coverage, only against a finding's file. Any other entry that
+// still cannot be normalized (absolute outside every worktree, a ".." segment)
+// is ignored rather than failing the round: it can never match a must_review
+// path either way, so rejecting the whole result over it would fail a reviewer
+// that followed the prompt exactly.
 func (rf roundFiles) relativize(p string) (string, bool) {
-	if !rf.qualified {
-		return relativizeReviewedPath(rf.repos[0].Dir, p)
-	}
 	if norm, err := normalizeRepoRelPath(p); err == nil {
 		return norm, true
 	}
 	for _, r := range rf.repos {
-		if rel, ok := relativizeAbsolute(r.Dir, p); ok {
-			return rf.qualify(r.Name, rel), true
+		if r.Worktrees == nil || !filepath.IsAbs(p) {
+			continue
+		}
+		for _, w := range r.Worktrees() {
+			if rel, ok := relativizeAbsolute(w, p); ok {
+				if rf.qualified {
+					return rf.qualify(r.Name, rel), true
+				}
+				return rel, true
+			}
 		}
 	}
 	return "", false
@@ -296,7 +314,7 @@ func (rf roundFiles) relativize(p string) (string, bool) {
 // normalizeReviewed relativizes and normalizes every reviewed_paths entry
 // exactly once, right after validateReviewResult has accepted the result.
 // Coverage, clearing and persistence all read this one normalized list
-// afterward, so an absolute in-lease path that counted as coverage also counts
+// afterward, so an absolute in-worktree path that counted as coverage also counts
 // as clearing evidence and is never written to findings.yaml as a host path. An
 // entry that cannot be normalized was already ignored by the coverage check, so
 // it is dropped here too.

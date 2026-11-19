@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // intentInferExcerptMarker is a token only the synthetic transcript holds, in
@@ -52,18 +51,6 @@ func writeSyntheticClaudeSession(t *testing.T, home, sessionID, cwd string, ment
 	if err := os.Chtimes(path, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// gateLeaseDir is the path of the fixture ticket's gate lease. The intent
-// summarizer's working directory is not the lease, so a test that plays a
-// summarizer reaching the lease anyway names it here.
-func gateLeaseDir(t *testing.T, fx *fixture.Fixture) string {
-	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("pool.Dir: %v", err)
-	}
-	return dir
 }
 
 // storeRemoteHistory returns every commit, with its patch, on every ref of

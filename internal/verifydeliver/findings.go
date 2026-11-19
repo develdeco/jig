@@ -385,7 +385,7 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // ClearingAfterTriage computes rule 3's clearing set: known's open
 // findings not present in reported (id-wise) clear when this
 // round reviewed their file, or their file no longer exists at head
-// (existsAtHead checks the lease directly, whatever the scope diff says -
+// (existsAtHead checks the head directly, whatever the scope diff says -
 // a file gone before this round's base, or never in a full-scope diff
 // after a rebase, clears a finding on it just the same). An asked finding
 // never clears here: only a person keeping or dismissing it moves it out

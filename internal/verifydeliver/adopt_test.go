@@ -11,56 +11,67 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
-// gateLeaseOf is the gate lease directory of ticket in fx's pool.
-func gateLeaseOf(t *testing.T, fx *fixture.Fixture, ticket string) string {
+// reviewedHead is the head a gate round over ticket's branch reviews in the
+// fixture's repo: the head of the copy the round chooses (chooseCopy), which
+// the round reads at, so a test says what a round reviewed without reading a
+// checkout.
+func reviewedHead(t *testing.T, d Deps, ticket string) string {
 	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", ticket, pool.Gate)
+	branch, err := d.Store.TicketBranch(ticket, "main")
 	if err != nil {
-		t.Fatalf("resolve the gate lease: %v", err)
+		t.Fatalf("resolve %s's branch: %v", ticket, err)
 	}
-	return dir
+	lines, err := journal.Read(d.Store, ticket)
+	if err != nil {
+		t.Fatalf("read %s's journal: %v", ticket, err)
+	}
+	rc, err := chooseCopy(d, "fixture-repo", branch, journal.BuiltCommits(lines), "gate")
+	if err != nil {
+		t.Fatalf("choose the copy of %s: %v", branch, err)
+	}
+	return rc.Head
 }
 
-// jigBuildsOn plays a build session on branch for ticket on this machine: see
-// jigBuildsOnAt.
+// jigBuildsOn plays a build session on branch for ticket on this machine: the
+// operator's clone is put on the branch (cut from origin's copy of it, else
+// from origin's main), one commit is made there, and the journal records it the
+// way frontier does. It returns the commit. Nothing is pushed: jig's commits
+// stay in the clone until someone pushes them.
 func jigBuildsOn(t *testing.T, d Deps, fx *fixture.Fixture, ticket, branch string) string {
 	t.Helper()
-	return jigBuildsOnAt(t, d, fx, fx.Home, ticket, branch)
-}
-
-// jigBuildsOnAt plays a build session on branch for ticket in the pool under
-// jigHome: the build lease is acquired (so it holds branch, on whatever
-// Acquire's sync makes of it), one commit is made there, and the journal
-// records it the way frontier does. It returns the commit. Nothing is pushed:
-// jig's commits stay in the build lease until someone pushes them. A jigHome
-// other than the fixture's is another machine's.
-func jigBuildsOnAt(t *testing.T, d Deps, fx *fixture.Fixture, jigHome, ticket, branch string) string {
-	t.Helper()
-	lease, err := pool.Acquire(jigHome, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
-	if err != nil {
-		t.Fatalf("acquire the build lease: %v", err)
+	run(t, fx.RepoDir, "fetch", "origin")
+	switch {
+	case func() bool { _, found, _ := gitx.Resolve(fx.RepoDir, "refs/heads/"+branch); return found }():
+		run(t, fx.RepoDir, "checkout", branch)
+	case func() bool { _, found, _ := gitx.Resolve(fx.RepoDir, "refs/remotes/origin/"+branch); return found }():
+		run(t, fx.RepoDir, "checkout", "-b", branch, "origin/"+branch)
+	default:
+		run(t, fx.RepoDir, "checkout", "-b", branch, "origin/main")
 	}
-	if err := os.WriteFile(filepath.Join(lease.Dir, "fix.txt"), []byte("jig's fix\n"), 0o644); err != nil {
-		t.Fatalf("write fix.txt: %v", err)
-	}
-	builder(t).Commit(lease.Dir, ticket+" fix-1: jig's fix")
-	commit := run(t, lease.Dir, "rev-parse", "HEAD")
+	commit := writeAndCommit(t, fx.RepoDir, "fix.txt", "jig's fix\n", ticket+" fix-1: jig's fix")
 	journalBuilt(t, d.Store, ticket, "fix-1", commit, 1)
 	return commit
 }
 
-// buildLeaseOf is the build lease directory of ticket on this machine.
+// commitLeftover leaves what a build attempt that never verified leaves in a
+// clone: one commit no journal line records. It returns the commit.
+func commitLeftover(t *testing.T, dir, ticket string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "leftover.txt"), []byte("an attempt's leftover\n"), 0o644); err != nil {
+		t.Fatalf("write leftover.txt: %v", err)
+	}
+	builder(t).Commit(dir, ticket+" attempt: never verified")
+	return run(t, dir, "rev-parse", "HEAD")
+}
+
+// buildLeaseOf is the directory a ticket is built in on this machine: the
+// operator's clone.
 func buildLeaseOf(t *testing.T, fx *fixture.Fixture, ticket string) string {
 	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", ticket, pool.Build)
-	if err != nil {
-		t.Fatalf("resolve the build lease: %v", err)
-	}
-	return dir
+	return fx.RepoDir
 }
 
 // TestGateAdoptsTheBranchItReviews is the adoption itself, and the chain of
@@ -110,10 +121,10 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 	if err := d.Store.WriteStartSHA(ticket, "fixture-repo", movedMain); err != nil {
 		t.Fatalf("WriteStartSHA: %v", err)
 	}
-	// reviewed is the head the gate lease holds after a round.
+	// reviewed is the head a round reviews now.
 	reviewed := func(t *testing.T) string {
 		t.Helper()
-		return run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD")
+		return reviewedHead(t, d, ticket)
 	}
 	wantStartSHA := func(t *testing.T, want string) {
 		t.Helper()
@@ -180,18 +191,7 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 		wantStartSHA(t, tip)
 	})
 
-	step(t, "a leftover local commit is discarded and the author's next push is what is reviewed", func(t *testing.T) {
-		// A killed reviewer's leftover commit in the gate lease: a local commit
-		// ahead of origin, never pushed.
-		lease := gateLeaseOf(t, fx, ticket)
-		if err := os.WriteFile(filepath.Join(lease, "leftover.txt"), []byte("leftover reviewer commit\n"), 0o644); err != nil {
-			t.Fatalf("write leftover file: %v", err)
-		}
-		builder(t).Commit(lease, "leftover reviewer commit")
-		if leftover := run(t, lease, "rev-parse", "HEAD"); leftover == pushed {
-			t.Fatal("test setup: leftover commit did not move HEAD")
-		}
-
+	step(t, "the author's next push is what is reviewed", func(t *testing.T) {
 		// The author pushes again.
 		advanced := authorPush(t, fx, branch, "advance.txt")
 		if advanced == pushed {
@@ -207,7 +207,7 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 			t.Fatalf("report on %q, want the adopted %q", report.Branch, branch)
 		}
 		if head := reviewed(t); head != advanced {
-			t.Fatalf("gate lease HEAD = %s, want the advanced origin/%s = %s (a stale local copy, or the leftover commit, must not survive)", head, branch, advanced)
+			t.Fatalf("the round reviewed %s, want the advanced origin/%s = %s", head, branch, advanced)
 		}
 		pushed = advanced
 	})
@@ -293,8 +293,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				newAdoptTicket(t, d, "JIG-3")
 				return GateOpts{Ticket: "JIG-3", Branch: "main"}, ""
 			},
-			want:      "TICKET_BRANCH_INVALID",
-			leaseless: true,
+			want: "TICKET_BRANCH_INVALID",
 		},
 		{
 			name: "a name git rejects",
@@ -302,30 +301,14 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				newAdoptTicket(t, d, "JIG-4")
 				return GateOpts{Ticket: "JIG-4", Branch: "bad..name"}, ""
 			},
-			want:      "TICKET_BRANCH_INVALID",
-			leaseless: true,
+			want: "TICKET_BRANCH_INVALID",
 		},
 		{
-			name: "a ticket the journal says jig built on, with its build lease",
+			name: "a ticket the journal says jig built on",
 			setup: func(t *testing.T) (GateOpts, string) {
 				return GateOpts{Ticket: fx.Ticket, Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
-		},
-		{
-			// The store is the judge, never this machine's lease: a lease
-			// shows what one machine has, and the ticket may have been built
-			// on another.
-			name: "a ticket the journal says jig built on, with no build lease here",
-			setup: func(t *testing.T) (GateOpts, string) {
-				if err := os.RemoveAll(buildLeaseDir(t, fx)); err != nil {
-					t.Fatalf("remove the build lease: %v", err)
-				}
-				return GateOpts{Ticket: fx.Ticket, Branch: "add-retry"}, ""
-			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// One commit is enough to strand: the rule is any, not several,
@@ -336,8 +319,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				journalBuilt(t, d.Store, "JIG-5", "a", "1111111111111111111111111111111111111111", 1)
 				return GateOpts{Ticket: "JIG-5", Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// A jig that never journaled verified lines (v0.1.x, whose tickets
@@ -363,8 +345,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				}
 				return GateOpts{Ticket: fx.Ticket, Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// The same journal after `jig requeue --from-brief-diff`, which
@@ -397,8 +378,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				}
 				return GateOpts{Ticket: fx.Ticket, Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// The claims are the only read that answers for a journal with no
@@ -415,8 +395,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				}
 				return GateOpts{Ticket: "JIG-6", Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// A verified line is a fact of its own too: the frontier journals
@@ -431,8 +410,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				}
 				return GateOpts{Ticket: "JIG-7", Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 		{
 			// A slice in state green is a fact of its own: the journal that
@@ -459,8 +437,7 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 				}
 				return GateOpts{Ticket: fx.Ticket, Branch: "add-retry"}, ""
 			},
-			want:      "TICKET_ALREADY_BUILT",
-			leaseless: true,
+			want: "TICKET_ALREADY_BUILT",
 		},
 	} {
 		step(t, tc.name, func(t *testing.T) {
@@ -485,445 +462,11 @@ func TestGateRefusesAnAdoptionThatCannotStand(t *testing.T) {
 			if (startErr == nil) != (afterErr == nil) || string(startBefore) != string(startAfter) {
 				t.Fatalf("the start sha changed over a refusal: %q (%v) -> %q (%v)", startBefore, startErr, startAfter, afterErr)
 			}
-			if tc.leaseless {
-				if _, serr := os.Stat(gateLeaseOf(t, fx, opts.Ticket)); !os.IsNotExist(serr) {
-					t.Fatalf("the refusal left a gate lease behind (stat err %v)", serr)
-				}
+			if _, serr := os.Stat(filepath.Join(fx.Home, "pool")); !os.IsNotExist(serr) {
+				t.Fatalf("the refusal left a pool directory behind (stat err %v)", serr)
 			}
 		})
 	}
-}
-
-// TestGateReviewsTheBuildLeaseCopyOnceJigBuilt: jig's commits on an adopted
-// branch stay in the build lease until someone pushes them, so while origin
-// lacks them the round reviews the build lease's copy, which holds them. The
-// author pushing after that leaves the two diverged: neither copy holds both
-// jig's commits and the author's, so the round refuses with BRANCH_DIVERGED, as
-// the next build does, instead of saying "clean" over a head that is not the
-// branch's. The refusal leaves everything as it was: no journal line, the
-// build lease and origin untouched, and its help - fetch, then merge, in the
-// build lease - is a way forward: the round then reviews the merged lease.
-//
-// An adopted branch is on origin by definition, whether or not jig has built on
-// it. When it is gone (the last step) the round refuses with BRANCH_NOT_FOUND
-// instead of reviewing the build lease's copy of a branch nobody can open a
-// pull request from.
-func TestGateReviewsTheBuildLeaseCopyOnceJigBuilt(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	newAdoptTicket(t, d, ticket)
-	tip := authorBranch(t, fx, branch)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	built := jigBuildsOn(t, d, fx, ticket, branch)
-	if built == tip {
-		t.Fatal("test setup: jig's commit did not move the branch")
-	}
-	var pushed string
-
-	step(t, "while origin lacks jig's commit the round reviews the build lease's copy", func(t *testing.T) {
-		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket}); err != nil {
-			t.Fatalf("Gate round 2: %v", err)
-		}
-		if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != built {
-			t.Fatalf("round 2 reviewed %s, want the build lease's copy with jig's commit, %s", head, built)
-		}
-		if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != tip {
-			t.Fatalf("origin's %s = %s, want the author's %s untouched: gating pushes nothing", branch, got, tip)
-		}
-	})
-
-	step(t, "an author's push beside jig's unpushed commit is refused BRANCH_DIVERGED", func(t *testing.T) {
-		// The author pushes while jig's commit is still unpushed.
-		pushed = authorPush(t, fx, branch, "more.txt")
-		err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		var ae *axi.Error
-		if !errors.As(err, &ae) || ae.Code != "BRANCH_DIVERGED" {
-			t.Fatalf("Gate over a diverged branch: err = %v, want an *axi.Error BRANCH_DIVERGED", err)
-		}
-		buildLease := buildLeaseOf(t, fx, ticket)
-		for _, want := range []string{"the build lease at " + buildLease, "1 commit(s) origin/" + branch + " lacks", "has 1 the lease lacks"} {
-			if !strings.Contains(ae.Msg, want) {
-				t.Errorf("BRANCH_DIVERGED message %q does not name %q", ae.Msg, want)
-			}
-		}
-		// The round compared the two copies in its own lease and never fetched
-		// into the build lease, whose view of origin still predates the author's
-		// push: the help fetches before it merges, or its merge would integrate
-		// nothing.
-		if _, err := gitx.Run(buildLease, "cat-file", "-e", pushed+"^{commit}"); err == nil {
-			t.Fatal("test setup: the build lease already has the author's commit")
-		}
-		if help, want := strings.Join(ae.Help, "\n"), "git -C "+buildLease+" fetch origin && git -C "+buildLease+" merge origin/"+branch; !strings.Contains(help, want) {
-			t.Errorf("BRANCH_DIVERGED help %q does not give %q", help, want)
-		}
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != built {
-			t.Fatalf("the build lease is at %s after the refusal, want jig's %s untouched", got, built)
-		}
-		if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != pushed {
-			t.Fatalf("origin's %s = %s, want the author's %s untouched", branch, got, pushed)
-		}
-		// The build would refuse the same way.
-		_, err = pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
-		wantAxiCode(t, err, "BRANCH_DIVERGED")
-	})
-
-	step(t, "following the help integrates them, and the round reviews the merged lease", func(t *testing.T) {
-		buildLease := buildLeaseOf(t, fx, ticket)
-		run(t, buildLease, "fetch", "origin")
-		if _, err := gitx.RunEnv(buildLease, buildGitEnv, "merge", "--no-edit", "origin/"+branch); err != nil {
-			t.Fatalf("merge origin/%s in the build lease: %v", branch, err)
-		}
-		merged := run(t, buildLease, "rev-parse", "HEAD")
-		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		if err != nil {
-			t.Fatalf("Gate after integrating: %v", err)
-		}
-		if r.Verdict != "clean" {
-			t.Fatalf("verdict = %q after integrating, want clean", r.Verdict)
-		}
-		if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != merged {
-			t.Fatalf("the round reviewed %s, want the merged lease's copy, %s", head, merged)
-		}
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
-			t.Fatalf("build Acquire after integrating: %v", err)
-		}
-	})
-
-	step(t, "a branch deleted on origin is refused BRANCH_NOT_FOUND, whatever the build lease holds", func(t *testing.T) {
-		run(t, fx.RepoRemote, "branch", "-D", branch)
-		err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		wantAxiCode(t, err, "BRANCH_NOT_FOUND")
-	})
-}
-
-// TestGateReviewsOriginOnceItHoldsWhatJigBuilt: once jig's commits are pushed
-// - by a publish, or by the human opening the pull request by hand -
-// origin holds everything the build lease does, so it is origin's copy the
-// round reviews, with whatever the author added on top since; the build lease's
-// older copy is not the branch's head, and a clean round over it would say
-// nothing of the author's newer commit. The same when this machine has no
-// build lease at all: the refusal for a missing lease is only for commits
-// origin lacks. The steps run in that order on one build of jig's, each on what
-// the one before left.
-func TestGateReviewsOriginOnceItHoldsWhatJigBuilt(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	newAdoptTicket(t, d, ticket)
-	authorBranch(t, fx, branch)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	built := jigBuildsOn(t, d, fx, ticket, branch)
-	// reviewsOrigin runs a round and requires it to review want, which origin
-	// holds and the round pushes nothing to.
-	reviewsOrigin := func(t *testing.T, want string) {
-		t.Helper()
-		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		if err != nil {
-			t.Fatalf("Gate over a branch origin holds jig's commits of: %v", err)
-		}
-		if r.Verdict != "clean" || r.Branch != branch {
-			t.Fatalf("report = %q on %q, want a clean round on %q", r.Verdict, r.Branch, branch)
-		}
-		head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD")
-		if head != want {
-			t.Fatalf("the round reviewed %s, want origin's head %s (jig built %s)", head, want, built)
-		}
-		if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != want {
-			t.Fatalf("origin's %s = %s after the round, want %s untouched: gating pushes nothing", branch, got, want)
-		}
-	}
-
-	var pushed string
-	step(t, "the human pushed jig's commits", func(t *testing.T) {
-		run(t, buildLeaseOf(t, fx, ticket), "push", "origin", branch)
-		reviewsOrigin(t, built)
-	})
-	step(t, "and the author pushed on top", func(t *testing.T) {
-		pushed = authorPush(t, fx, branch, "more.txt")
-		reviewsOrigin(t, pushed)
-	})
-	step(t, "and this machine has no build lease", func(t *testing.T) {
-		if err := os.RemoveAll(buildLeaseOf(t, fx, ticket)); err != nil {
-			t.Fatalf("remove the build lease: %v", err)
-		}
-		reviewsOrigin(t, pushed)
-	})
-}
-
-// TestGateRefusesWhenJigBuiltOnAnAdoptedBranchAndThisMachineHasNoCopy: the
-// journal records commits jig built on the adopted branch, but this machine's
-// build lease does not hold them - it is missing, or holds another branch - and
-// origin lacks them too: they are on another machine, unpushed. The round
-// refuses instead of silently reviewing less than the ticket built. The steps
-// run in order on the one build another machine made, each leaving this
-// machine's pool as the next expects it.
-func TestGateRefusesWhenJigBuiltOnAnAdoptedBranchAndThisMachineHasNoCopy(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	newAdoptTicket(t, d, ticket)
-	authorBranch(t, fx, branch)
-	if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	// Another machine's build, still unpushed there: the journal has the commit,
-	// this machine has nothing, origin's branch has nothing.
-	other := t.TempDir()
-	elsewhere := jigBuildsOnAt(t, d, fx, other, ticket, branch)
-	otherLease, err := pool.Dir(other, "fixture-repo", ticket, pool.Build)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantMissing := func(t *testing.T) {
-		t.Helper()
-		err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		var ae *axi.Error
-		if !errors.As(err, &ae) || ae.Code != "BUILD_LEASE_MISSING" {
-			t.Fatalf("Gate: err = %v, want an *axi.Error BUILD_LEASE_MISSING", err)
-		}
-		if len(ae.Help) == 0 || !strings.Contains(ae.Msg, branch) {
-			t.Fatalf("BUILD_LEASE_MISSING = %+v, want it to name the branch and carry help", ae)
-		}
-		if _, err := gitx.Run(fx.RepoRemote, "merge-base", "--is-ancestor", elsewhere, "refs/heads/"+branch); err == nil {
-			t.Fatalf("test setup: origin's %s holds the commit %s, so nothing is missing", branch, elsewhere)
-		}
-	}
-
-	step(t, "no build lease", func(t *testing.T) {
-		wantMissing(t)
-	})
-	step(t, "a build lease on another branch", func(t *testing.T) {
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(ticket), ticket, pool.Build); err != nil {
-			t.Fatalf("acquire the build lease: %v", err)
-		}
-		wantMissing(t)
-	})
-	step(t, "origin holds the commit on another branch only", func(t *testing.T) {
-		if err := os.RemoveAll(buildLeaseOf(t, fx, ticket)); err != nil {
-			t.Fatalf("remove the build lease: %v", err)
-		}
-		// The commit is in this machine's repository once it fetches, but the
-		// adopted branch does not hold it.
-		run(t, otherLease, "push", "origin", "HEAD:refs/heads/somewhere-else")
-		wantMissing(t)
-	})
-}
-
-// TestGateRefusesABuildLeaseThatLacksWhatJigBuilt: the journal records a commit
-// jig built on the adopted branch on another machine, and it is still in that
-// machine's build lease. A build lease on this machine - cut afterwards, as a
-// `jig run` whose attempt parked does - holds the branch as origin has it, so it
-// lacks the commit too, and so may one that has built commits of its own on top:
-// a round over either says clean over less than the ticket built. The round is
-// refused (BUILD_LEASE_MISSING) whatever the lease is like, as it is when this
-// machine has none, and the way forward the help gives - push the commit from
-// the machine that built it - works.
-func TestGateRefusesABuildLeaseThatLacksWhatJigBuilt(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	setup := func(t *testing.T) (fx *fixture.Fixture, d Deps, elsewhere, otherLease string) {
-		t.Helper()
-		fx = fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		d = newDeps(t, fx)
-		newAdoptTicket(t, d, ticket)
-		authorBranch(t, fx, branch)
-		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-			t.Fatalf("Gate round 1: %v", err)
-		}
-		other := t.TempDir()
-		elsewhere = jigBuildsOnAt(t, d, fx, other, ticket, branch)
-		otherLease, err := pool.Dir(other, "fixture-repo", ticket, pool.Build)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return fx, d, elsewhere, otherLease
-	}
-	wantMissing := func(t *testing.T, err error, elsewhere string) {
-		t.Helper()
-		var ae *axi.Error
-		if !errors.As(err, &ae) || ae.Code != "BUILD_LEASE_MISSING" {
-			t.Fatalf("Gate: err = %v, want an *axi.Error BUILD_LEASE_MISSING", err)
-		}
-		if len(ae.Help) == 0 || !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, elsewhere[:7]) {
-			t.Fatalf("BUILD_LEASE_MISSING = %+v, want it to name the branch and the missing commit %s, and carry help", ae, elsewhere[:7])
-		}
-	}
-
-	t.Run("a build lease cut afterwards", func(t *testing.T) {
-		t.Parallel()
-		fx, d, elsewhere, otherLease := setup(t)
-		// What `jig run` does before it dispatches: acquire the build lease,
-		// cut from origin's copy, which lacks the other machine's commit.
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
-			t.Fatalf("acquire the build lease: %v", err)
-		}
-		wantMissing(t, gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket}), elsewhere)
-
-		// The help: push it from the machine that built it. This machine's
-		// lease then follows origin, which holds the commit.
-		builder(t).Push(otherLease, "origin", branch)
-		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		if err != nil || r.Verdict != "clean" {
-			t.Fatalf("Gate after the commit was pushed = %q (err %v), want a clean round", r.Verdict, err)
-		}
-		if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != elsewhere {
-			t.Fatalf("the round reviewed %s, want origin's head with the other machine's commit, %s", head, elsewhere)
-		}
-	})
-
-	t.Run("and built its own commit on it", func(t *testing.T) {
-		t.Parallel()
-		fx, d, elsewhere, _ := setup(t)
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
-		if err != nil {
-			t.Fatalf("acquire the build lease: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(lease.Dir, "fix2.txt"), []byte("this machine's fix\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		builder(t).Commit(lease.Dir, ticket+" fix-2")
-		own := run(t, lease.Dir, "rev-parse", "HEAD")
-		journalBuilt(t, d.Store, ticket, "fix-2", own, 1)
-
-		err = gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		wantMissing(t, err, elsewhere)
-		var ae *axi.Error
-		if errors.As(err, &ae) && strings.Contains(ae.Msg, own[:7]) {
-			t.Errorf("BUILD_LEASE_MISSING %q names this machine's own commit %s as missing", ae.Msg, own[:7])
-		}
-	})
-}
-
-// commitLeftover leaves what a build attempt that never verified leaves in a
-// lease: one commit no journal line records. It returns the commit.
-func commitLeftover(t *testing.T, dir, ticket string) string {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "leftover.txt"), []byte("an attempt's leftover\n"), 0o644); err != nil {
-		t.Fatalf("write leftover.txt: %v", err)
-	}
-	builder(t).Commit(dir, ticket+" attempt: never verified")
-	return run(t, dir, "rev-parse", "HEAD")
-}
-
-// TestGateJudgesADivergedLease: whether a diverged build lease is jig's to keep
-// is the gate's choice of copy: it is when it holds a commit jig built that
-// origin lacks (pool.HoldsUnpushedBuilt), and not when it holds only an
-// attempt's unverified leftover, whatever else it holds. The gate counts such a
-// lease as one that does not hold the branch: the round reviews origin's copy,
-// instead of refusing BRANCH_DIVERGED and sending the
-// human to merge the leftover into the branch. Two states give it: jig's
-// verified commit was built on another machine and pushed, and the lease holds
-// only the leftover; or jig's commit was built here and pushed, and the
-// leftover sits on top of it. The requirement that origin holds what jig built
-// then applies as it does to any copy: without the push, the round is refused
-// for the missing commit, not for the divergence.
-func TestGateJudgesADivergedLease(t *testing.T) {
-	t.Parallel()
-
-	const ticket, branch = "JIG-2", "add-retry"
-	// setup adopts the branch, leaves an attempt's unverified commit in this
-	// machine's build lease, and has another machine build and verify jig's
-	// commit. It returns the fixture, the leftover, jig's commit and the other
-	// machine's build lease.
-	setup := func(t *testing.T) (fx *fixture.Fixture, d Deps, leftover, built, otherLease string) {
-		t.Helper()
-		fx = fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		d = newDeps(t, fx)
-		newAdoptTicket(t, d, ticket)
-		authorBranch(t, fx, branch)
-		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-			t.Fatalf("Gate round 1: %v", err)
-		}
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
-		if err != nil {
-			t.Fatalf("acquire the build lease: %v", err)
-		}
-		leftover = commitLeftover(t, lease.Dir, ticket)
-		other := t.TempDir()
-		built = jigBuildsOnAt(t, d, fx, other, ticket, branch)
-		otherLease, err = pool.Dir(other, "fixture-repo", ticket, pool.Build)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return fx, d, leftover, built, otherLease
-	}
-
-	t.Run("jig's commit was pushed", func(t *testing.T) {
-		t.Parallel()
-		fx, d, leftover, built, otherLease := setup(t)
-		builder(t).Push(otherLease, "origin", branch)
-
-		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		if err != nil || r.Verdict != "clean" {
-			t.Fatalf("Gate = %q (err %v), want a clean round over origin's copy: the lease holds none of jig's commits", r.Verdict, err)
-		}
-		if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != built {
-			t.Fatalf("the round reviewed %s, want origin's head with jig's commit, %s", head, built)
-		}
-		buildLease := buildLeaseOf(t, fx, ticket)
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != leftover {
-			t.Fatalf("the build lease is at %s after the round, want the leftover %s untouched: gating changes no lease of the build", got, leftover)
-		}
-	})
-
-	t.Run("jig's commit was not pushed", func(t *testing.T) {
-		t.Parallel()
-		fx, d, _, built, _ := setup(t)
-		authorPush(t, fx, branch, "more.txt") // the lease and origin diverge
-
-		err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		var ae *axi.Error
-		if !errors.As(err, &ae) || ae.Code != "BUILD_LEASE_MISSING" {
-			t.Fatalf("Gate: err = %v, want an *axi.Error BUILD_LEASE_MISSING: origin lacks the commit jig built", err)
-		}
-		if !strings.Contains(ae.Msg, built[:7]) {
-			t.Errorf("BUILD_LEASE_MISSING %q does not name the missing commit %s", ae.Msg, built[:7])
-		}
-	})
-
-	// jig's commit was built here and pushed, an attempt then left an
-	// unverified commit on top of it in the lease, and the author pushed on.
-	// The lease has diverged, but the only commit jig built is on origin too,
-	// so nothing the lease holds needs keeping, and refusing would name work
-	// that is safe on origin.
-	t.Run("jig's commit was pushed and a leftover sits on top of it", func(t *testing.T) {
-		t.Parallel()
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		d := newDeps(t, fx)
-		newAdoptTicket(t, d, ticket)
-		authorBranch(t, fx, branch)
-		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
-			t.Fatalf("Gate round 1: %v", err)
-		}
-		built := jigBuildsOn(t, d, fx, ticket, branch)
-		buildLease := buildLeaseOf(t, fx, ticket)
-		builder(t).Push(buildLease, "origin", branch)
-		leftover := commitLeftover(t, buildLease, ticket)
-		pushed := authorPush(t, fx, branch, "more.txt") // on top of jig's commit
-
-		r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: ticket})
-		if err != nil || r.Verdict != "clean" {
-			t.Fatalf("Gate = %q (err %v), want a clean round over origin's copy: every commit jig built is there", r.Verdict, err)
-		}
-		if head := run(t, gateLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); head != pushed {
-			t.Fatalf("the round reviewed %s, want origin's head %s, which holds jig's commit %s and the author's", head, pushed, built)
-		}
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != leftover {
-			t.Fatalf("the build lease is at %s after the round, want the leftover %s untouched: gating changes no lease of the build", got, leftover)
-		}
-	})
 }
 
 // TestGateIgnoresACommitJigReportedButNeverVerified: a builder's claim that did
@@ -936,8 +479,8 @@ func TestGateJudgesADivergedLease(t *testing.T) {
 // Adoption is stricter, and says so (TestGateRefusesAnAdoptionThatCannotStand):
 // a ticket with such a claim and no verified line cannot be told from one built
 // by a jig that never journaled them, so it is not adopted. The two arms are
-// steps of one ticket: the claim is journaled once, and the round without a
-// build lease comes first.
+// steps of one ticket: the claim is journaled once, and the round with the branch
+// in no clone comes first.
 func TestGateIgnoresACommitJigReportedButNeverVerified(t *testing.T) {
 	t.Parallel()
 
@@ -961,11 +504,10 @@ func TestGateIgnoresACommitJigReportedButNeverVerified(t *testing.T) {
 		}
 	}
 
-	step(t, "with no build lease here", wantClean)
-	step(t, "with a build lease here", func(t *testing.T) {
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
-			t.Fatalf("acquire the build lease: %v", err)
-		}
+	step(t, "with the branch in no clone", wantClean)
+	step(t, "with the branch in the clone", func(t *testing.T) {
+		run(t, fx.RepoDir, "fetch", "origin")
+		run(t, fx.RepoDir, "checkout", "-b", branch, "origin/"+branch)
 		wantClean(t)
 	})
 }
@@ -1004,11 +546,11 @@ func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 
 	err := gateRefused(t, d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
 	wantAxiCode(t, err, "BRANCH_DIVERGED")
-	if !strings.Contains(err.Error(), "the build lease at "+buildLeaseOf(t, fx, fx.Ticket)) {
-		t.Fatalf("the refusal %q does not name the build lease to integrate in", err)
+	if !strings.Contains(strings.ReplaceAll(err.Error(), `\\`, `\`), "the clone at "+fx.RepoDir) {
+		t.Fatalf("the refusal %q does not name the clone to integrate in", err)
 	}
 
-	buildDir := buildLeaseOf(t, fx, fx.Ticket)
+	buildDir := fx.RepoDir
 	run(t, buildDir, "fetch", "origin")
 	run(t, buildDir, "merge", "--no-edit", "origin/"+ticketBranch(fx.Ticket))
 	r, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
@@ -1018,8 +560,8 @@ func TestGatePostPublishRoundOnAnOrdinaryTicket(t *testing.T) {
 	if r.Round != 2 || r.Verdict != "clean" || r.Branch != "" {
 		t.Fatalf("report = round %d %q on %q, want a clean round 2 on the ticket's own branch", r.Round, r.Verdict, r.Branch)
 	}
-	if head, want := run(t, gateLeaseOf(t, fx, fx.Ticket), "rev-parse", "HEAD"), run(t, buildLeaseOf(t, fx, fx.Ticket), "rev-parse", "HEAD"); head != want {
-		t.Fatalf("the round reviewed %s, want the build lease's integrated copy %s", head, want)
+	if head, want := reviewedHead(t, d, fx.Ticket), run(t, fx.RepoDir, "rev-parse", "HEAD"); head != want {
+		t.Fatalf("the round reviewed %s, want the clone's integrated copy %s", head, want)
 	}
 }
 

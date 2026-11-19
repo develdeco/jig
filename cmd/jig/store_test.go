@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -263,11 +263,8 @@ func TestStoreMigrateRefusesALeaseStillHeld(t *testing.T) {
 	mapPath := writeMigrateMap(t, migrateMapYAML)
 	jigHome := t.TempDir()
 
-	leaseDir, err := pool.Dir(jigHome, "product-repo", "T-1", pool.Build)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(leaseDir, 0o755); err != nil {
+	cloneDir := filepath.Join(home.PoolDir(jigHome), "product-repo", "T-1")
+	if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
