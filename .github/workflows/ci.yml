@@ -140,11 +140,12 @@ jobs:
       # A function only tests reach is test support, and lives where only tests
       # import it: deadcode lists every function of the jig binary that no path
       # from main reaches, and any line it prints, or a failure of deadcode
-      # itself, fails the step. There is no exception list. v0.39.0, which the
-      # list was first measured with, panics building the standard library for
-      # linux with this Go (go.mod's, 1.27.4); v0.50.0 is the oldest release
-      # measured to run clean on it, and prints the same list on linux, darwin
-      # and windows. lint.TestDeadcodeStepFailsOnAnyLine runs this script.
+      # itself, fails the step. There is no exception list. The list was first
+      # measured with deadcode@v0.39.0 ./cmd/jig, which panics building the
+      # standard library for linux with this Go (go.mod's, 1.27.4); v0.50.0 is
+      # the oldest release measured to run clean on it, and prints the same list
+      # on linux, darwin and windows. lint.TestDeadcodeStepFailsOnAnyLine pins
+      # the run line below and runs this script.
       - name: deadcode
         if: runner.os == 'Linux'
         run: |
