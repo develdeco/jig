@@ -938,17 +938,3 @@ func TestPublishRecordPRJournalsAFailedTitleReadAsUnknown(t *testing.T) {
 		t.Errorf("warnings = %q, want one for the failed title read", warnings)
 	}
 }
-
-// publishedBody renders the pull request body of the fixture's ticket and
-// returns it.
-func publishedBody(t *testing.T, d Deps, fx *fixture.Fixture) string {
-	t.Helper()
-	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	body, err := os.ReadFile(filepath.Join(d.Store.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
-	if err != nil {
-		t.Fatalf("read the body: %v", err)
-	}
-	return string(body)
-}
