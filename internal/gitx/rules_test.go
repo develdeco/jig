@@ -275,7 +275,7 @@ func TestRuleAtDeclinedEnv(t *testing.T) {
 	if _, ok := discover(work, envOf(nil)); !ok {
 		t.Fatal("the plain repository is declined")
 	}
-	for _, name := range readDeclinedEnv {
+	for _, name := range []string{"GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_REPLACE_REF_BASE", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE"} {
 		for _, value := range []string{"", "x"} {
 			if _, ok := discover(work, envOf(map[string]string{name: value})); ok {
 				t.Errorf("discover answered with %s=%q set", name, value)

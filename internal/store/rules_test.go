@@ -194,6 +194,10 @@ func TestRuleAtLandingTakesEveryKindOfWrite(t *testing.T) {
 	cases := []struct {
 		name    string
 		symlink bool
+		// link, when set, is a link the landing makes: its path in the tree,
+		// and the entry and owner it points to.
+		link      string
+		linkEntry TrackerEntry
 		// setup leaves the committed starting tree.
 		setup func(t *testing.T, st *Store)
 		// hook is the sync's writes, run inside the checkpoint hook.
@@ -222,8 +226,10 @@ func TestRuleAtLandingTakesEveryKindOfWrite(t *testing.T) {
 			},
 		},
 		{
-			name:    "make a link and remove another",
-			symlink: true,
+			name:      "make a link and remove another",
+			symlink:   true,
+			link:      "trackers/github/acme/tracking/8/JIG-1",
+			linkEntry: e8,
 			setup: func(t *testing.T, st *Store) {
 				e := putRecord(t, st, owner, "acme/tracking", 7)
 				if _, err := st.LinkTrackerEntry(e, owner); err != nil {
@@ -357,6 +363,20 @@ func TestRuleAtLandingTakesEveryKindOfWrite(t *testing.T) {
 				t.Fatalf("working tree still dirty after the landing:\n%s", got)
 			}
 			c.check(t, headTree(t, work, "trackers"), runGit(t, work, "ls-tree", "-r", "--name-only", "HEAD"))
+			if c.link != "" {
+				// The link points where the store says, in the commit and on disk.
+				want, err := st.linkTarget(c.linkEntry, owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = filepath.ToSlash(want)
+				if got := strings.TrimSpace(runGit(t, work, "show", "HEAD:"+c.link)); got != want {
+					t.Errorf("the committed link points to %q, want %q", got, want)
+				}
+				if got, err := os.Readlink(filepath.Join(work, filepath.FromSlash(c.link))); err != nil || filepath.ToSlash(got) != want {
+					t.Errorf("the link on disk points to %q (%v), want %q", got, err, want)
+				}
+			}
 		})
 	}
 }

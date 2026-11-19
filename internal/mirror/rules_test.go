@@ -1162,3 +1162,45 @@ func TestRuleAtACloneWithoutSymlinksSyncsWithOneWarningAndKeepsEveryRecord(t *te
 		t.Errorf("warnings = %q, want exactly one saying this clone makes no links", warnings)
 	}
 }
+
+// TestRuleAtAPrivateIssueRepoIsNotScanned: Sync scans the creates and the
+// updates for publish-safety hits only when the issue repo is public, so a
+// private store's item that trips a term is still created and still updated.
+func TestRuleAtAPrivateIssueRepoIsNotScanned(t *testing.T) {
+	hit := "Contact " + publishSafetyTestEmail + " for this"
+	w := newRuleWorld(t, false)
+	w.client.private = true
+	// A create lands its record in a commit: a repository with no remote is enough.
+	runGit(t, w.st.Root, "init", "-b", "main")
+	runGit(t, w.st.Root, "config", "user.name", "tester")
+	runGit(t, w.st.Root, "config", "user.email", "tester@example.invalid")
+	enableSymlinks(t, w.st.Root)
+	w.ticket("DEMO-1", store.Ticket{Title: "A clean title"})
+	w.ticket("DEMO-2", store.Ticket{Title: hit})
+	runGit(t, w.st.Root, "add", "-A")
+	runGit(t, w.st.Root, "commit", "-m", "init")
+	w.adopt("DEMO-1", 50)
+	ticketYAML := "schema_version: 1\ntitle: A clean title\nbody: |\n  " + hit + "\n"
+	if err := os.WriteFile(filepath.Join(w.st.TicketDir("DEMO-1"), "ticket.yaml"), []byte(ticketYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updates := len(w.client.updates)
+
+	report, err := Sync(Deps{Store: w.st, Cfg: w.cfg, Client: w.client}, SyncOpts{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(report.Skipped) != 0 {
+		t.Fatalf("Skipped = %+v, want none: a private issue repo is not scanned", report.Skipped)
+	}
+	if len(w.client.updates) == updates {
+		t.Errorf("no UpdateIssue call, want the edit carrying the hit written")
+	}
+	created := false
+	for _, c := range report.Created {
+		created = created || c.What == "DEMO-2"
+	}
+	if !created || len(w.client.calls) == 0 {
+		t.Errorf("Created = %+v, calls = %d, want DEMO-2 created despite the hit", report.Created, len(w.client.calls))
+	}
+}

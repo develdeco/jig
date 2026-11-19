@@ -108,7 +108,7 @@ func TestRuleAtUnclaimedEditNote(t *testing.T) {
 	}{
 		{"claim note names the ready slices only", ready, []string{inside}, "ready: a)"},
 		{"no ready slice", blocked, []string{inside}, "--slice <slice>`)."},
-		{"brief without approval", briefPhase(), []string{inside}, "before changing code"},
+		{"brief without approval", briefPhase(), []string{inside}, "has no approved brief yet"},
 		{"a slice claimed", claimed, []string{inside}, ""},
 		{"a slice parked on its environment", envParked, []string{inside}, ""},
 		{"a done ticket", done, []string{inside}, ""},
