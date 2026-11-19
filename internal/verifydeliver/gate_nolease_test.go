@@ -282,33 +282,52 @@ func TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts(t *testing.T) {
 
 // wantNotesListTheHeadsFile requires the review notes under pr/ to list
 // .claude/jig.yaml, the file the head changes and the checkout's commit does
-// not, among the files the change touched.
+// not, in the "Touched files:" block of the coverage: from that line up to
+// "Reviewed paths:" or the next heading. The reviewed paths are no evidence of
+// what the change touched, so they are left out of the search.
 func wantNotesListTheHeadsFile(t *testing.T, d Deps, ticket string) {
 	t.Helper()
 	notes, err := os.ReadFile(filepath.Join(d.Store.TicketDir(ticket), "pr", "review-notes.md"))
 	if err != nil {
 		t.Fatalf("read the review notes: %v", err)
 	}
-	if !strings.Contains(string(notes), ".claude/jig.yaml") {
-		t.Errorf("the review notes do not list the head's touched file .claude/jig.yaml:\n%s", notes)
+	text := string(notes)
+	start := strings.Index(text, "Touched files:")
+	if start < 0 {
+		t.Fatalf("the review notes have no Touched files block:\n%s", notes)
+	}
+	block := text[start:]
+	for _, end := range []string{"Reviewed paths:", "\n## "} {
+		if i := strings.Index(block, end); i >= 0 {
+			block = block[:i]
+		}
+	}
+	if !strings.Contains(block, "- .claude/jig.yaml\n") {
+		t.Errorf("the touched files of the review notes do not list the head's .claude/jig.yaml:\n%s", block)
 	}
 }
 
 // TestPublishBodyNamesTheHeadsOraclesNotTheCheckoutsRecorded: for a round that
 // recorded the head it reviewed, the body's notes list the files that head
-// touched, though the clone is checked out on the target.
+// touched, though the clone is checked out on the target and its own branch is
+// a commit behind the head: the round reviewed origin's copy.
 func TestPublishBodyNamesTheHeadsOraclesNotTheCheckoutsRecorded(t *testing.T) {
 	t.Parallel()
 	fx, d, _ := cloneBuilt(t)
-	declareHeadOnlyOracle(t, fx.RepoDir)
+	head := declareHeadOnlyOracle(t, fx.RepoDir)
+	builder(t).Push(fx.RepoDir, "origin", ticketBranch(fx.Ticket))
+	run(t, fx.RepoDir, "reset", "--hard", "HEAD~1")
+	run(t, fx.RepoDir, "checkout", "main")
 	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if p.Head != head || p.Copy != string(originsCopy) {
+		t.Fatalf("test setup: the round reviews %s from %s, want origin's copy at %s", p.Head, p.Copy, head)
+	}
 	if _, err := GateFinish(d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
 		t.Fatal(err)
 	}
-	run(t, fx.RepoDir, "checkout", "main")
 	useGithubHost(t, &d, "", "")
 	if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
 		t.Fatalf("PublishBody: %v", err)
