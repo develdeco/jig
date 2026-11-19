@@ -54,7 +54,30 @@ func TestKeepsNextSaysWhatEachBlockedTicketWaitsFor(t *testing.T) {
 	r.ticket(t, "SHOP-2", "blocked_by:\n  - ticket: SHOP-1\n    kind: merged\n", true)
 
 	out, code := r.run(t, "next")
-	if code != 0 || !strings.Contains(out, "waiting[1]{ticket,blocker,fact}:\n  SHOP-2,SHOP-1,") {
+	if code != 0 || !strings.Contains(out, "waiting[1]{ticket,blocker,fact}:\n  SHOP-2,SHOP-1,it has not published\n") {
 		t.Errorf("jig next = exit %d, want SHOP-2 waiting for SHOP-1 with a fact:\n%s", code, out)
+	}
+
+	js, code := r.run(t, "next", "--json")
+	var l struct {
+		Tickets []struct {
+			ID        string `json:"id"`
+			BlockedBy []struct {
+				Ticket string `json:"ticket"`
+				Fact   string `json:"fact"`
+			} `json:"blocked_by"`
+		} `json:"tickets"`
+	}
+	if err := json.Unmarshal([]byte(js), &l); code != 0 || err != nil {
+		t.Fatalf("jig next --json: exit %d, %v\n%s", code, err, js)
+	}
+	var got string
+	for _, tk := range l.Tickets {
+		if tk.ID == "SHOP-2" && len(tk.BlockedBy) == 1 && tk.BlockedBy[0].Ticket == "SHOP-1" {
+			got = tk.BlockedBy[0].Fact
+		}
+	}
+	if got != "it has not published" {
+		t.Errorf("SHOP-2's blocked_by fact = %q, want %q:\n%s", got, "it has not published", js)
 	}
 }
