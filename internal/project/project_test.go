@@ -817,12 +817,6 @@ platform: platform/
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if got := cfg.ReviewEffortFor("full"); got != "high" {
-			t.Errorf("full review effort = %q, want high", got)
-		}
-		if got := cfg.ReviewEffortFor("delta"); got != "medium" {
-			t.Errorf("delta review effort = %q, want medium", got)
-		}
 		if got := cfg.BuilderEffortFor(0); got != "medium" {
 			t.Errorf("first attempt effort = %q, want medium", got)
 		}
@@ -845,8 +839,6 @@ builder_effort:
 			t.Fatalf("Load: %v", err)
 		}
 		for _, c := range []struct{ name, got, want string }{
-			{"full", cfg.ReviewEffortFor("full"), "max"},
-			{"delta", cfg.ReviewEffortFor("delta"), ""},
 			{"first", cfg.BuilderEffortFor(0), "low"},
 			{"retry", cfg.BuilderEffortFor(1), "xhigh"},
 		} {

@@ -28,7 +28,7 @@ import (
 // a store up one version at a time. A store at any version from
 // MinSchemaVersion to CurrentSchemaVersion opens as it is: a v2 store keeps its
 // project.yaml, a v3 store has store.yaml and a jig.yaml marker in the
-// project's repo instead (LoadStoreConfig, LoadConfig).
+// project's repo instead (LoadStoreConfig, LoadConfigWith).
 const (
 	MinSchemaVersion     = 2
 	CurrentSchemaVersion = 3
@@ -102,13 +102,11 @@ type BuilderEffort struct {
 // effortLevels are the levels Claude Code's --effort accepts.
 var effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
-// Effort defaults (ADR 0023): a full review and a builder's retry think
-// hard; a delta review and a builder's first attempt think less.
+// Effort defaults (ADR 0023): a builder's retry thinks hard and its first
+// attempt thinks less.
 const (
-	defaultReviewEffortFull  = "high"
-	defaultReviewEffortDelta = "medium"
-	defaultBuilderFirst      = "medium"
-	defaultBuilderRetry      = "high"
+	defaultBuilderFirst = "medium"
+	defaultBuilderRetry = "high"
 )
 
 // effortOr is v's level, or def when v is absent.
@@ -117,19 +115,6 @@ func effortOr(v *string, def string) string {
 		return def
 	}
 	return *v
-}
-
-// ReviewEffortFor returns the gate reviewer's effort for a round of scope
-// ("full" or "delta").
-func (c Config) ReviewEffortFor(scope string) string {
-	var e ReviewEffort
-	if c.Gate != nil {
-		e = c.Gate.ReviewEffort
-	}
-	if scope == "delta" {
-		return effortOr(e.Delta, defaultReviewEffortDelta)
-	}
-	return effortOr(e.Full, defaultReviewEffortFull)
 }
 
 // BuilderEffortFor returns a builder's effort for an attempt that follows
@@ -246,7 +231,7 @@ type configRaw struct {
 // a project.yaml claims schema_version 2 - an older schema_version leaves both
 // unread rather than refused, since `jig store migrate`
 // (resolveStoreForProjectAllowingOldSchema) must still Load a v1 project.yaml
-// whole, for project.Config. CheckSchemaVersion (cmd/jig's resolveStore, the
+// whole, for project.Config. CheckSchemaVersion (cmd/jig's resolveStoreChecked, the
 // one place every command checks it) to be the thing that refuses it for every
 // other command - and routes: (which only ever fed publish's now-gone route
 // step) is refused outright regardless of schema_version.
@@ -588,7 +573,7 @@ func renameFileInError(err error, from, to string) error {
 // allowOlder. A schema_version from MinSchemaVersion to CurrentSchemaVersion
 // passes: a v2 store opens as it is, and `jig store migrate` takes it to v3
 // when the person chooses. Every command resolving a store (cmd/jig's
-// resolveStore, the one place every command loads the store's config) calls
+// resolveStoreChecked, the one place every command loads the store's config) calls
 // this with allowOlder false; `jig store migrate` is the one command that
 // passes true, since migrating a store up is the whole point of opening it.
 // `jig help` and `jig version` never resolve a store at all, so neither check

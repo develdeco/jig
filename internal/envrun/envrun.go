@@ -185,7 +185,7 @@ func (e *TimedOutError) Reason() string { return "did not finish within " + e.Li
 // Is reports a TimedOutError as ErrTimedOut.
 func (e *TimedOutError) Is(target error) bool { return target == ErrTimedOut }
 
-// ShellStream is ShellOutputUsage that hands the command's combined stdout and
+// ShellStream runs cmd like Shell with extra environment variables and hands the command's combined stdout and
 // stderr to w as it is produced, instead of returning it. A limit of 0 or less
 // bounds nothing. The process tree is guarded as ever: ended with the jig
 // process that runs it, and killed at its limit.

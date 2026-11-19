@@ -195,7 +195,7 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	return s, "", false
 }
 
-// resolveStoreChecked is resolveStore's and
+// resolveStoreChecked is the shared implementation of
 // resolveStoreForProjectAllowingOldSchema's shared implementation:
 // allowOlderSchema says whether a schema_version older than
 // project.CurrentSchemaVersion passes the one schema check every command
@@ -254,10 +254,10 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 }
 
 // resolveStoreForProject resolves the store, project config and machine
-// mapping the same way resolveStore does, except an explicit --project name
+// mapping the same way resolveStoreChecked does, except an explicit --project name
 // is tried first: it resolves the store path via the per-machine project
 // mapping (project.LoadMachine(jigHome)[name].Store), ahead of the
-// --store/cwd fallback chain resolveStore falls through to when projectFlag
+// --store/cwd fallback chain resolveStoreChecked falls through to when projectFlag
 // is empty.
 func resolveStoreForProject(e env, projectFlag, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
 	return resolveStoreForProjectChecked(e, projectFlag, storeFlag, stdout, false)

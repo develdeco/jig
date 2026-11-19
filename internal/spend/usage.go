@@ -109,7 +109,8 @@ type transcriptLine struct {
 	} `json:"message"`
 }
 
-// FromSession is FromTranscript less the subagent transcripts of the agents
+// FromSession sums the usage of the Claude Code transcript at path, for
+// session (see below), less the subagent transcripts of the agents
 // in own: those agents have a spend line of their own, so the session's line
 // does not count them twice. An agent in own with no transcript on disk is
 // nothing to leave out.

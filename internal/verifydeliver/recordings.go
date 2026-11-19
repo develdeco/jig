@@ -145,12 +145,11 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 	} else {
 		list.HeadSHA = files.repos[0].Head
 	}
-	readable := all
-	if len(readable) > maxReviewRecordings {
-		list.Omitted += len(readable) - maxReviewRecordings
-		readable = readable[:maxReviewRecordings]
+	if len(all) > maxReviewRecordings {
+		list.Omitted += len(all) - maxReviewRecordings
+		all = all[:maxReviewRecordings]
 	}
-	cands, _, err := verifiedCandidates(d, in.Ticket, readable)
+	cands, _, err := verifiedCandidates(d, in.Ticket, all)
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: review: check the build's recordings: %w", err)
 	}

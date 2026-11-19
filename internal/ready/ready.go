@@ -38,7 +38,10 @@ type Batch struct {
 	Slices []string
 }
 
-// Batches is Schedule with each batch named by its repo.
+// Batches groups slices into batches: each batch is one repo's slices, which
+// run serially in the order slices appears; the batches may run concurrently,
+// one per repo, and come in the order their repos first appear. wsRepo maps a
+// slice's workspace id to its repo name (Place builds it).
 func Batches(slices []store.Slice, wsRepo map[string]string) []Batch {
 	var order []string
 	groups := map[string][]string{}

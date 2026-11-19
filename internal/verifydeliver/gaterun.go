@@ -367,7 +367,6 @@ func (r *gateRun) roundInput() RoundInput {
 		Ticket:     r.ticket,
 		Round:      r.n,
 		Branch:     r.branch,
-		Effort:     r.d.Cfg.ReviewEffortFor,
 		Intent:     r.intent,
 		IntentText: r.intentText,
 		Home:       r.d.Home,

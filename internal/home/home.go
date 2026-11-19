@@ -1,4 +1,4 @@
-// Package home resolves jig's per-machine root. Root reads it once, from the
+// Package home resolves jig's per-machine root. RootFrom reads it once, from the
 // JIG_HOME environment variable or the real home directory; every
 // home-anchored path (the machine mapping, the worktree pool, the
 // evidence tree) is derived from a root its caller passes in, so the binary
@@ -14,8 +14,8 @@ import (
 	"strings"
 )
 
-// RootFrom is Root against the environment getenv reads, in place of the
-// process's: $JIG_HOME if getenv gives one, else <user home>/.config/jig with
+// RootFrom is the jig home root as the environment getenv reads gives it:
+// $JIG_HOME if getenv gives one, else <user home>/.config/jig with
 // the user home UserDirFrom finds. The binary passes os.Getenv; a command that
 // runs in a process beside others (a test) passes the environment it was
 // given, so what it resolves never depends on a variable another sets.

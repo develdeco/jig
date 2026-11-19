@@ -90,7 +90,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// renderStatusWith is renderStatus with the word on where the ticket stands
+// renderStatusWith renders the status of a ticket and each section's blocks, with the word on where the ticket stands
 // given: the advice it ends with is the advice of that phase.
 func renderStatusWith(st *store.Store, ticket string, sections []statusSection, standing standingOf) (string, error) {
 	slices, err := st.ReadSlices(ticket)
@@ -632,7 +632,7 @@ func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (stri
 
 	// A stalled slice outranks every hint below except an open question
 	// (checked above), and env-blocked in turn outranks everything but
-	// stalled (matching the state: line's own precedence in RenderStatus):
+	// stalled (matching the state: line's own precedence in renderStatusWith):
 	// both are stuck, not merely unfinished, so the worse of the two is
 	// reported the moment it is found rather than waited out - checked in
 	// two full passes, not one combined pass, so a stalled slice later in

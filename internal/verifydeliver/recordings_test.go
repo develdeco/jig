@@ -62,7 +62,7 @@ func journalLines(t *testing.T, st *store.Store, ticket string, lines ...journal
 func (l recordingsLease) roundInput(st *store.Store, jigHome string) RoundInput {
 	return RoundInput{
 		Store: st, Ticket: "JIG-1", Round: 1, LeaseDir: l.dir,
-		RepoName: "fixture-repo", Target: "main", Model: "rung-a",
+		RepoName: "fixture-repo", Target: "main",
 		Manifest: oneOracleManifest(), Home: jigHome,
 	}
 }

@@ -1284,8 +1284,8 @@ type RoundRepo struct {
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
 // source reads only its own Round field (fakeGateSource.Round, gate.go) and
-// ignores the rest, while the reviewer source below uses the rest to build
-// review.json and dispatch.
+// ignores the rest, while PrepareReviewRequest uses the rest to build
+// review.json.
 type RoundInput struct {
 	Store    *store.Store
 	Ticket   string
@@ -1304,10 +1304,6 @@ type RoundInput struct {
 	// lookup reads it to find the ledger's lines for the ticket that name the
 	// branch and not the ticket; "" means none.
 	Branch string
-	Model  string
-	// Effort gives the reviewer's reasoning effort for a round of a scope
-	// ("full" or "delta"): project.Config.ReviewEffortFor. nil passes none.
-	Effort func(scope string) string
 	// Intent is this round's resolved intent binding (intent.go's
 	// resolveIntent, which Gate calls), already absolute or "" for source
 	// "none", and IntentText the exact bytes at its Path ("" for "none").

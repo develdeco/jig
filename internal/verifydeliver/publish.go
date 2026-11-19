@@ -1036,7 +1036,7 @@ type publication struct {
 // map's clone may sit on an older main than the branch), so the trailer is the
 // publish.trailer of the jig.yaml at rev in dir when the store takes that
 // marker as its project's (Config.TakesMarker: a v3 store, not a member
-// marker, a project the store serves, as LoadConfig decides for the marker on
+// marker, a project the store serves, as LoadConfigWith decides for the marker on
 // disk). Otherwise (a v2 store, no jig.yaml at the head, a member marker,
 // another project's marker) it is cfg.PublishTrailer, the project's marker on
 // this machine. A head jig.yaml that cannot be read or does not parse takes

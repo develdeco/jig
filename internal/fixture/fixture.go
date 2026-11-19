@@ -180,7 +180,7 @@ var identityEnv = []string{
 // path) is made directly, which is the template's own build.
 //
 // Everything checkable is validated before writing the fixture, and the
-// per-machine mapping under the jig home (project.InitProject) is written
+// per-machine mapping under the jig home (projecttest.InitProject) is written
 // last, after everything else under dir already exists, on every Build, for
 // the copy. On any error once the non-empty check has passed, Build removes
 // what it wrote: dir's new contents, and dir itself when Build created it, so
