@@ -70,6 +70,7 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 		"`--oracle` proves the rule across them",
 		"An `--action ask` about a rule lays out every case it must decide, with one recommended answer.",
 		"a search that must come back empty",
+		"`probed` also lists the probes the builder recorded, with their `slice`: a current, caught one covers its term, a survivor you probe again.",
 	)
 	wantAll(t, "skills/review rounds", skillFile(t, "review", "rounds"),
 		"--still-present",
@@ -83,14 +84,16 @@ func TestSkillSentencesBuildReadAndFix(t *testing.T) {
 		"Make independent reads in one step; an edit's result shows it applied.",
 		"Fix the rule each finding names wherever its oracle reaches.",
 		"mutate each term the fix adds (operand, condition, constant, return)",
-		"add a test for each survivor",
+		"record each with `jig probe <T> --seam S --file F --line N --mutation M --command C --outcome caught|survived`",
+		"add a test for each survivor, then probe it again.",
 	)
 	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
 		"Read the function, not the file",
 		"make independent reads in one step",
 		"fixes the rule each finding names wherever its oracle reaches",
 		"mutate each term the fix adds",
-		"add a test for each survivor",
+		"record each probe with `jig probe`",
+		"add a test for each survivor, then probe it again.",
 	)
 }
 

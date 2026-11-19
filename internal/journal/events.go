@@ -63,6 +63,9 @@ const (
 	EventKeepQueued      = "keep-queued"
 	EventPrBody          = "pr-body"
 	EventPublishApproved = "publish-approved"
+	// EventBuilderProbe is a probe or a skip a builder recorded with no gate
+	// round open, for the slice its session holds.
+	EventBuilderProbe = "builder-probe"
 )
 
 // Events the machine ledger records and a ticket's journal does not.
