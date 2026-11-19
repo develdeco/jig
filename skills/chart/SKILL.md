@@ -13,7 +13,7 @@ You are the main session. Every question to the person is yours; a subagent cann
 
 ## Briefs
 
-`briefs` lists the tickets to brief; brief them all before any build: a subagent per ticket (sonnet, background) drafts its brief with intake (its ticket exists: never mint or approve), marks each recommended answer it takes, checks it with `jig validate <T> --check`, hands back its questions. Meanwhile ask a numbered round with recommendations, record answers, send a changed one to its drafter, confirm once, then `jig validate <T>` each. Ask and wait, unless told to go with your recommendations (ADR 0035).
+`briefs` lists the tickets to brief; brief them all before any build: a subagent per ticket (sonnet, background) drafts its brief with intake (its ticket exists: never mint or approve), marks each recommended answer it takes, sizes it against the `jig recall` receipts as intake says, checks it with `jig validate <T> --check`, hands back its questions. Meanwhile ask a numbered round with recommendations, record answers, send a changed one to its drafter, confirm once, then `jig validate <T>` each. Ask and wait, unless told to go with your recommendations (ADR 0035).
 
 ## Builds
 
