@@ -13,7 +13,7 @@ func TestWorktrees(t *testing.T) {
 	t.Parallel()
 	repo := initRepo(t, filepath.Join(t.TempDir(), "origin.git"))
 	outside := t.TempDir()
-	linked := filepath.Join(outside, "repo with space.worktrees", "T-1")
+	linked := filepath.Join(outside, "repo with space.worktrees", "linked")
 	detached := filepath.Join(outside, "detached")
 	gone := filepath.Join(outside, "gone")
 	mustRun(t, repo, "worktree", "add", "-q", linked, "-b", "feat/t-1")
