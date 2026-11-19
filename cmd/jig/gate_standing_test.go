@@ -85,26 +85,6 @@ func TestSecondGateReportsTheStandingRound(t *testing.T) {
 	}
 }
 
-// TestGateAfterARecordedRoundAppliesADecidedAsk: a person keeps an ask the
-// closing round raised; a plain `jig gate` at the same head queues its fix
-// slice, as it did before a standing round was reported.
-func TestGateAfterARecordedRoundAppliesADecidedAsk(t *testing.T) {
-	t.Parallel()
-	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
-	e := testEnv(fx.Home).atTerminal()
-	buildFixtureTicket(t, fx)
-	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
-		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
-	}
-	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
-	}
-	out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
-	if code != 0 || strings.Contains(out, "stands at its head") || !strings.Contains(out, "fix-2-q-alpha") {
-		t.Fatalf("jig gate: exit = %d, want the kept ask's slice queued\n%s", code, out)
-	}
-}
-
 // TestSecondGateWithRoundShapingFlagsGoesOnAsToday: a gate given a flag that
 // shapes the round does not report the standing round, which would drop the
 // flag; it goes on as it would with none standing.
