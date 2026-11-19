@@ -12,6 +12,9 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// ledgerTicket names the ticket of the journals these tests write.
+const ledgerTicket = "ticket-one"
+
 // ledgerRepo is a one-file git repo and the blob of that file at HEAD.
 func ledgerRepo(t *testing.T) (roundFiles, string) {
 	t.Helper()
@@ -115,11 +118,11 @@ func TestLedgerReadsBuilderProbesFromTheJournal(t *testing.T) {
 		{TS: at(4), Event: journal.EventBuilderProbe, Slice: "fix-1", Skip: &journal.SkipNote{File: "a_test.go", Why: "tests", Blob: "b2"}},
 		{TS: at(5), Event: journal.EventOracle, Slice: "fix-1"},
 	} {
-		if err := journal.Append(st, "T-1", l); err != nil {
+		if err := journal.Append(st, ledgerTicket, l); err != nil {
 			t.Fatal(err)
 		}
 	}
-	probes, skips, err := ledgerBefore(st, "T-1", 2)
+	probes, skips, err := ledgerBefore(st, ledgerTicket, 2)
 	if err != nil {
 		t.Fatalf("ledgerBefore: %v", err)
 	}
@@ -141,10 +144,10 @@ func TestPublishCoverageNamesTheSliceOfABuilderProbe(t *testing.T) {
 		{Round: 1, ResultProbe: ResultProbe{Seam: "the clamp", File: "a.go", Line: 3, Mutation: "raise it", Outcome: ProbeCaught}, State: ProbeCurrent},
 		{Slice: "fix-1", ResultProbe: ResultProbe{Seam: "the clamp", File: "a.go", Line: 9, Mutation: "negate it", Outcome: ProbeCaught}, State: ProbeCurrent},
 	}}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, cov, "", nil); err != nil {
+	if err := writeReviewNotes(st, ledgerTicket, "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, cov, "", nil); err != nil {
 		t.Fatal(err)
 	}
-	notes := readNotes(t, st, "T-1", "review-notes.md")
+	notes := readNotes(t, st, ledgerTicket, "review-notes.md")
 	for _, want := range []string{"(the clamp; round 1)", "(the clamp; builder, slice fix-1)"} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("review notes lack %q:\n%s", want, notes)
