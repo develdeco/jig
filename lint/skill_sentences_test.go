@@ -82,15 +82,15 @@ func TestSkillSentencesBuildReadAndFix(t *testing.T) {
 		"Read the function, not the file: find code with `grep -n` or the LSP",
 		"Make independent reads in one step; an edit's result shows it applied.",
 		"Fix the rule each finding names wherever its oracle reaches.",
-		"mutate each term the fix adds (operand, condition, constant, return)",
-		"add a test for each survivor",
+		"mutate each term the fix adds (operand, condition, constant, return) after your last edit",
+		"a survivor blocks the commit until a test catches it",
 	)
 	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
 		"Read the function, not the file",
 		"make independent reads in one step",
 		"fixes the rule each finding names wherever its oracle reaches",
-		"mutate each term the fix adds",
-		"add a test for each survivor",
+		"mutate each term the fix adds after your last edit",
+		"a survivor blocks the commit until a test catches it",
 	)
 }
 

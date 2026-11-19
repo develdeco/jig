@@ -88,6 +88,12 @@ oracle runs when its builder runs `jig verify`, and a ticket's last run is
 be at most 100 lines and 6000 bytes, and its frontmatter needs a `name:`
 matching the directory name and a `description:` of at most 50 words.
 
+## Changing jig's own workflow
+
+A change to jig's own workflow (a step, command, record or check every run
+pays for) needs a miss seen on two or more tickets and the cost it saves.
+Prefer removing what caused the miss.
+
 ## Testing rules
 
 - Tests never touch the network. Every git remote used in a test is a bare,
