@@ -102,6 +102,50 @@ func TestLedgerRanksProbesByWhenTheyWereMade(t *testing.T) {
 	}
 }
 
+// TestLedgerRanksProbesByWhenTheyWereMadeAndTheirMutation: between two rounds,
+// a builder's probes of different terms of one line each stay current, a probe
+// that repeats an earlier one's mutation supersedes it, and a round before or
+// after decides the line whatever its mutation. A round's own probes of a
+// line all stay current.
+func TestLedgerRanksProbesByWhenTheyWereMadeAndTheirMutation(t *testing.T) {
+	t.Parallel()
+	rf, blob := ledgerRepo(t)
+	b := func(line int, at int64, mutation, outcome string) ProbeRecord {
+		return ProbeRecord{Slice: "s", After: 1, At: at, File: "a.go", Line: line, Mutation: mutation, Outcome: outcome, Blob: blob}
+	}
+	r := func(round, line int, mutation string) ProbeRecord {
+		return ProbeRecord{Round: round, File: "a.go", Line: line, Mutation: mutation, Outcome: ProbeCaught, Blob: blob}
+	}
+	probed, current, _, err := currentLedger(rf, []ProbeRecord{
+		// line 1: two terms between the rounds.
+		b(1, 10, "negate it", ProbeCaught), b(1, 11, "drop the factor", ProbeCaught),
+		// line 2: the same term again after a test for its survivor.
+		b(2, 10, "negate it", ProbeSurvived), b(2, 11, "negate it", ProbeCaught),
+		// line 3: two terms, then round 2 probes one of them: it decides the line.
+		b(3, 10, "negate it", ProbeCaught), b(3, 11, "drop the factor", ProbeCaught), r(2, 3, "raise it"),
+		// line 4: round 1's probe, then the builder's of another term: the builder decides.
+		r(1, 4, "raise it"), b(4, 10, "negate it", ProbeCaught),
+		// line 5: a round's two probes of one line both stay current.
+		r(1, 5, "negate it"), r(1, 5, "drop the factor"),
+		// line 6: a later round listed before the earlier builder probe still decides.
+		r(2, 6, "raise it"), b(6, 10, "negate it", ProbeCaught),
+	}, nil)
+	if err != nil {
+		t.Fatalf("currentLedger: %v", err)
+	}
+	var got []string
+	for _, p := range probed {
+		got = append(got, p.State)
+	}
+	want := "current,current,stale,current,stale,stale,current,stale,current,current,current,current,stale"
+	if strings.Join(got, ",") != want {
+		t.Errorf("states = %v, want %s", got, want)
+	}
+	if len(current) != 8 {
+		t.Errorf("%d covering probes, want the 8 current caught ones", len(current))
+	}
+}
+
 // TestLedgerReadsBuilderProbesFromTheJournal: the ledger before a round holds
 // the probes and skips builders journaled, with their slice, and places each
 // by the rounds that had closed when it was made.

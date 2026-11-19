@@ -119,15 +119,19 @@ func builderLedger(st *store.Store, ticket string) ([]ProbeRecord, []SkipRecord,
 	return probes, skips, nil
 }
 
-// rankBefore reports whether probe a was made before probe b: by round for a
-// round's probes, and a builder's probe sits between the round that had closed
-// when it was made and the next, ordered by its own time among its peers.
-func rankBefore(a, b ProbeRecord) bool {
-	ka, kb := a.rankKey(), b.rankKey()
-	if ka != kb {
-		return ka < kb
+// supersedes reports whether probe q takes the place of probe p of the same
+// line. Probes rank in groups: a round's own, and a builder's made between two
+// rounds. The latest group decides a line. Within a group a later builder's
+// probe supersedes an earlier one only when it repeats its mutation, since
+// several terms of one line probed between two rounds each stay current, while
+// a probe of the same term again, after a test for its survivor, replaces it.
+// A round's probes of a line all stay current.
+func (q ProbeRecord) supersedes(p ProbeRecord) bool {
+	kq, kp := q.rankKey(), p.rankKey()
+	if kq != kp {
+		return kq > kp
 	}
-	return a.At < b.At
+	return q.At > p.At && q.Mutation == p.Mutation
 }
 
 // rankKey is where a probe falls among the rounds: 2n for round n's own, and

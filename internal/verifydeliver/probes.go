@@ -229,13 +229,11 @@ func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []S
 // does not still read as current.
 func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (probed []ProbedEntry, current []ResultProbe, currentSkips []ResultSkip, err error) {
 	var files []string
-	latest := map[string]ProbeRecord{}
+	byLine := map[string][]ProbeRecord{}
 	for _, p := range probes {
 		files = append(files, p.File)
 		at := fmt.Sprintf("%s:%d", p.File, p.Line)
-		if last, seen := latest[at]; !seen || rankBefore(last, p) {
-			latest[at] = p
-		}
+		byLine[at] = append(byLine[at], p)
 	}
 	for _, s := range skips {
 		files = append(files, s.File)
@@ -246,8 +244,11 @@ func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (pro
 	}
 	for _, p := range probes {
 		state := ProbeStale
-		last := latest[fmt.Sprintf("%s:%d", p.File, p.Line)]
-		if b, ok := blobs[p.File]; ok && b == p.Blob && !rankBefore(p, last) {
+		replaced := false
+		for _, q := range byLine[fmt.Sprintf("%s:%d", p.File, p.Line)] {
+			replaced = replaced || q.supersedes(p)
+		}
+		if b, ok := blobs[p.File]; ok && b == p.Blob && !replaced {
 			state = ProbeCurrent
 			if p.Outcome == ProbeCaught {
 				// A survivor is probed again: only a caught probe covers its term.
