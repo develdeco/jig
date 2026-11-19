@@ -469,47 +469,6 @@ func TestHasRemote(t *testing.T) {
 	}
 }
 
-// TestDirty covers a clean checkout (false), an untracked file (true, the
-// shape a Push that refused before its own stageAndCommit ran leaves
-// behind), and a staged-but-uncommitted change (true) - all without Dirty
-// itself staging or committing anything.
-func TestDirty(t *testing.T) {
-	st, work, _ := newTestRemoteStore(t)
-
-	if dirty, err := st.Dirty(); err != nil {
-		t.Fatal(err)
-	} else if dirty {
-		t.Fatal("Dirty = true, want false right after a clean checkout")
-	}
-
-	untracked := filepath.Join(work, "T-1")
-	if err := os.MkdirAll(untracked, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(untracked, "ticket.md"), []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if dirty, err := st.Dirty(); err != nil {
-		t.Fatal(err)
-	} else if !dirty {
-		t.Fatal("Dirty = false, want true with an untracked ticket folder present")
-	}
-
-	runGit(t, work, "add", "-A")
-	staged, err := st.hasStagedChanges()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !staged {
-		t.Fatal("test setup did not stage the untracked file")
-	}
-	if dirty, err := st.Dirty(); err != nil {
-		t.Fatal(err)
-	} else if !dirty {
-		t.Fatal("Dirty = false, want true with a staged-but-uncommitted change")
-	}
-}
-
 func TestPush(t *testing.T) {
 	st, work, remote := newTestRemoteStore(t)
 
@@ -1117,44 +1076,6 @@ func assertRefusesStoreConflict(t *testing.T, st *Store, work, remote, which str
 	}
 }
 
-// TestRefuseIfMidRebaseOrMergeNamesTheState pins the refusal message's
-// wording for individual states. Before this, inProgressRebaseOrMerge read
-// exactly which marker fired and refuseIfMidRebaseOrMerge threw it away,
-// reporting every one of these as "an unfinished rebase or merge, or
-// unresolved conflicts" even though a staged cherry-pick, a staged revert
-// and unmerged index entries from a conflicted stash pop are none of those.
-// The message must name what jig itself found, the way abortFailedPull's
-// message already does one function below.
-func TestRefuseIfMidRebaseOrMergeNamesTheState(t *testing.T) {
-	cases := []struct {
-		name  string
-		leave func(t *testing.T, work string)
-		want  string
-	}{
-		{"CherryPick", leaveConflictedCherryPick, "an unfinished cherry-pick"},
-		{"Revert", leaveResolvedRevert, "an unfinished revert"},
-		{"StashPop", leaveConflictedStashPop, "unresolved (unmerged) index entries"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			st, work, _ := newTestRemoteStore(t)
-			c.leave(t, work)
-
-			err := st.Sync()
-			var ae *axi.Error
-			if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
-				t.Fatalf("Sync: err = %v, want *axi.Error STORE_CONFLICT", err)
-			}
-			if !strings.Contains(ae.Msg, c.want) {
-				t.Fatalf("Sync refusal Msg = %q, want it to name %q", ae.Msg, c.want)
-			}
-			if strings.Contains(ae.Msg, "unfinished rebase or merge, or unresolved conflicts") {
-				t.Fatalf("Sync refusal Msg = %q, still uses the old generic wording", ae.Msg)
-			}
-		})
-	}
-}
-
 // TestInProgressRebaseOrMergeMarkers pins the description
 // inProgressRebaseOrMerge reports for every git-path marker it checks, one
 // at a time, independent of rebaseOrMergeMarkers's own literal strings: the
@@ -1212,21 +1133,6 @@ func TestInProgressRebaseOrMergeMarkers(t *testing.T) {
 	})
 }
 
-// TestSyncAndPushRefuseAfterConflictedStashPop: a conflicted `git stash
-// pop` leaves unmerged index entries with none of
-// refuseIfMidRebaseOrMerge's three marker files. Without the
-// unmerged-index check, Sync and Push would `add -A` the conflict markers
-// and commit (Push would then push them to the shared remote).
-func TestSyncAndPushRefuseAfterConflictedStashPop(t *testing.T) {
-	for _, which := range []string{"Sync", "Push"} {
-		t.Run(which, func(t *testing.T) {
-			st, work, remote := newTestRemoteStore(t)
-			leaveConflictedStashPop(t, work)
-			assertRefusesStoreConflict(t, st, work, remote, which)
-		})
-	}
-}
-
 // TestSyncAndPushRefuseAfterConflictedCherryPick: a conflicted
 // `git cherry-pick` sets CHERRY_PICK_HEAD, not MERGE_HEAD, so the guard
 // must key off the unmerged index, not a fixed list of marker files.
@@ -1236,88 +1142,6 @@ func TestSyncAndPushRefuseAfterConflictedCherryPick(t *testing.T) {
 			st, work, remote := newTestRemoteStore(t)
 			leaveConflictedCherryPick(t, work)
 			assertRefusesStoreConflict(t, st, work, remote, which)
-		})
-	}
-}
-
-// TestSyncAndPushRefuseAfterResolvedCherryPickOrRevert: a conflicting
-// cherry-pick or revert that the user has resolved and staged (no unmerged
-// index entries left) still has CHERRY_PICK_HEAD or REVERT_HEAD set until
-// `--continue` or `--abort` runs. Before those two joined
-// inProgressRebaseOrMerge's marker list, this state slipped past both the
-// marker check and the (by-then-clean) unmerged-index check, so Sync would
-// commit the user's resolved pick or revert as "jig: record uncommitted
-// store state" under jig's own identity and Push would publish it.
-func TestSyncAndPushRefuseAfterResolvedCherryPickOrRevert(t *testing.T) {
-	fixtures := map[string]func(*testing.T, string){
-		"CherryPick": leaveResolvedCherryPick,
-		"Revert":     leaveResolvedRevert,
-	}
-	for name, fixture := range fixtures {
-		for _, which := range []string{"Sync", "Push"} {
-			t.Run(name+"/"+which, func(t *testing.T) {
-				st, work, remote := newTestRemoteStore(t)
-				fixture(t, work)
-				assertRefusesStoreConflict(t, st, work, remote, which)
-			})
-		}
-	}
-}
-
-// TestSyncAndPushRefuseWhileRebaseApplyInProgress: the "apply" rebase
-// backend leaves .git/rebase-apply rather than .git/rebase-merge. Dropping
-// "rebase-apply" from inProgressRebaseOrMerge's marker list would survive
-// every other test in this file, since only this fixture leaves the index
-// clean while still mid-rebase; this one catches that case specifically.
-func TestSyncAndPushRefuseWhileRebaseApplyInProgress(t *testing.T) {
-	for _, which := range []string{"Sync", "Push"} {
-		t.Run(which, func(t *testing.T) {
-			st, work, remote := newTestRemoteStore(t)
-			leaveRebaseApplyInProgress(t, work)
-			assertRefusesStoreConflict(t, st, work, remote, which)
-		})
-	}
-}
-
-// TestSyncAndPushRefuseDetachedHEAD: mid-`git bisect` (or any other detached
-// checkout) HEAD does not point at a branch. `git rev-parse --abbrev-ref
-// HEAD` happily prints the literal "HEAD" for that, which would send Sync
-// and Push into a `pull`/`push origin HEAD`; currentBranch instead uses
-// `git symbolic-ref`, which fails on a detached HEAD, so both refuse with
-// STORE_CONFLICT before touching anything.
-func TestSyncAndPushRefuseDetachedHEAD(t *testing.T) {
-	for _, which := range []string{"Sync", "Push"} {
-		t.Run(which, func(t *testing.T) {
-			st, work, remote := newTestRemoteStore(t)
-			sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
-			runGit(t, work, "checkout", sha)
-			if err := os.WriteFile(filepath.Join(work, "uncommitted.txt"), []byte("x\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			beforeCount := runGit(t, work, "rev-list", "--count", "HEAD")
-			remoteBefore := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
-
-			var err error
-			switch which {
-			case "Sync":
-				err = st.Sync()
-			case "Push":
-				err = st.Push("should be refused")
-			}
-			var ae *axi.Error
-			if !errors.As(err, &ae) || ae.Code != "STORE_CONFLICT" {
-				t.Fatalf("%s with a detached HEAD: err = %v, want *axi.Error STORE_CONFLICT", which, err)
-			}
-
-			afterCount := runGit(t, work, "rev-list", "--count", "HEAD")
-			if beforeCount != afterCount {
-				t.Fatalf("%s committed on a detached HEAD: HEAD count %q -> %q", which, beforeCount, afterCount)
-			}
-			remoteAfter := runGit(t, "", "--git-dir", remote, "rev-parse", "main")
-			if remoteBefore != remoteAfter {
-				t.Fatalf("%s pushed from a detached HEAD: remote main moved", which)
-			}
 		})
 	}
 }

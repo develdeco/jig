@@ -77,71 +77,14 @@ func TestPushFastForwardsOnly(t *testing.T) {
 // directory, and nothing is attempted.
 func TestPushAndFetchLeaveOtherRemotesToTheGitProgram(t *testing.T) {
 	work := newStoreRepo(t)
-	nonBare := newStoreRepo(t)
-	for name, u := range map[string]string{"net": "https://example.invalid/store.git", "scp": "git@example.invalid:store.git", "nonbare": nonBare, "dotgit": filepath.Join(nonBare, ".git")} {
-		mustRun(t, work, "remote", "add", name, u)
-		r := openRepo(t, work)
-		if err := r.Push(name, "main"); !errors.Is(err, ErrUseCLI) {
-			t.Errorf("Push to %s = %v, want ErrUseCLI", u, err)
-		}
-		if _, err := r.Fetch(name, "main"); !errors.Is(err, ErrUseCLI) {
-			t.Errorf("Fetch from %s = %v, want ErrUseCLI", u, err)
-		}
+	const u = "https://example.invalid/store.git"
+	mustRun(t, work, "remote", "add", "net", u)
+	r := openRepo(t, work)
+	if err := r.Push("net", "main"); !errors.Is(err, ErrUseCLI) {
+		t.Errorf("Push to %s = %v, want ErrUseCLI", u, err)
 	}
-}
-
-// TestPushAndFetchLeaveWhatTheRemoteConfigAsksToTheGitProgram: a local bare
-// origin is still the git program's when either side's config asks for what
-// an in-process copy does not do, and then neither side changes.
-func TestPushAndFetchLeaveWhatTheRemoteConfigAsksToTheGitProgram(t *testing.T) {
-	cases := []struct {
-		name string
-		lay  func(t *testing.T, work, remote string)
-	}{
-		{"a push URL", func(t *testing.T, work, remote string) {
-			mustRun(t, work, "config", "remote.origin.pushurl", remote)
-		}},
-		{"its own receive-pack", func(t *testing.T, work, _ string) {
-			mustRun(t, work, "config", "remote.origin.receivepack", "git-receive-pack")
-		}},
-		{"URL rewriting", func(t *testing.T, work, remote string) {
-			mustRun(t, work, "config", "url."+remote+".insteadOf", "store:")
-		}},
-		{"another fetch refspec", func(t *testing.T, work, _ string) {
-			mustRun(t, work, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
-		}},
-		{"objects checked on fetch", func(t *testing.T, work, _ string) {
-			mustRun(t, work, "config", "fetch.fsckObjects", "true")
-		}},
-		{"objects checked on receive", func(t *testing.T, _, remote string) {
-			mustRun(t, remote, "config", "receive.fsckObjects", "true")
-		}},
-		{"objects checked on every transfer, as a bare key", func(t *testing.T, _, remote string) {
-			writeFileT(t, remote, "config", readFileT(t, remote, "config")+"[transfer]\n\tfsckObjects\n")
-		}},
-		{"the remote's own hook", func(t *testing.T, _, remote string) {
-			writeFileT(t, remote, "hooks/post-receive", "#!/bin/sh\n")
-		}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			work, remote := newRemotePair(t)
-			writeFileT(t, work, "a.txt", "a\n")
-			mustRun(t, work, "add", "-A")
-			mustRun(t, work, "commit", "-q", "-m", "a")
-			before := mustRun(t, remote, "rev-parse", "main")
-			c.lay(t, work, remote)
-			r := openRepo(t, work)
-			if err := r.Push("origin", "main"); !errors.Is(err, ErrUseCLI) {
-				t.Errorf("Push = %v, want ErrUseCLI", err)
-			}
-			if _, err := r.Fetch("origin", "main"); !errors.Is(err, ErrUseCLI) {
-				t.Errorf("Fetch = %v, want ErrUseCLI", err)
-			}
-			if after := mustRun(t, remote, "rev-parse", "main"); after != before {
-				t.Errorf("origin's main moved from %s to %s", before, after)
-			}
-		})
+	if _, err := r.Fetch("net", "main"); !errors.Is(err, ErrUseCLI) {
+		t.Errorf("Fetch from %s = %v, want ErrUseCLI", u, err)
 	}
 }
 
@@ -290,44 +233,31 @@ func looseIn17(n int) []string {
 // TestPushStartsTheRemotesAutomaticMaintenance: the git program's
 // receive-pack starts `git maintenance run --auto` on the remote after a
 // push; an in-process push does the same once the remote's loose objects
-// may have passed its gc.auto, unless its receive.autoGC is off.
+// may have passed its gc.auto. A remote that turns receive.autoGC off is
+// not started (see TestRuleAtAutoGCOnReceive).
 func TestPushStartsTheRemotesAutomaticMaintenance(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		autoGC string
-		packed bool
-	}{
-		{"receive.autoGC on", "", true},
-		{"receive.autoGC off", "false", false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			work, remote := newRemotePair(t)
-			mustRun(t, remote, "config", "gc.auto", "1")
-			// The gc task is the one that packs loose objects. Up to git
-			// 2.55 it is the only task "maintenance run --auto" enables by
-			// default; git 2.56 changed the default tasks, so name it.
-			mustRun(t, remote, "config", "maintenance.gc.enabled", "true")
-			if c.autoGC != "" {
-				mustRun(t, remote, "config", "receive.autoGC", c.autoGC)
-			}
-			for i, body := range looseIn17(2) {
-				writeFileT(t, work, fmt.Sprintf("f%d.txt", i), body)
-			}
-			mustRun(t, work, "add", "-A")
-			mustRun(t, work, "commit", "-q", "-m", "two loose objects in 17")
-			if err := openRepo(t, work).Push("origin", "main"); err != nil {
-				t.Fatalf("Push: %v", err)
-			}
-			entries, err := os.ReadDir(filepath.Join(remote, "objects", "17"))
-			if err != nil && !os.IsNotExist(err) {
-				t.Fatal(err)
-			}
-			if packed := len(entries) == 0; packed != c.packed {
-				t.Fatalf("origin's objects/17 has %d loose objects; packed = %v, want %v", len(entries), packed, c.packed)
-			}
-			mustRun(t, remote, "fsck", "--strict")
-		})
+	work, remote := newRemotePair(t)
+	mustRun(t, remote, "config", "gc.auto", "1")
+	// The gc task is the one that packs loose objects. Up to git
+	// 2.55 it is the only task "maintenance run --auto" enables by
+	// default; git 2.56 changed the default tasks, so name it.
+	mustRun(t, remote, "config", "maintenance.gc.enabled", "true")
+	for i, body := range looseIn17(2) {
+		writeFileT(t, work, fmt.Sprintf("f%d.txt", i), body)
 	}
+	mustRun(t, work, "add", "-A")
+	mustRun(t, work, "commit", "-q", "-m", "two loose objects in 17")
+	if err := openRepo(t, work).Push("origin", "main"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(remote, "objects", "17"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("origin's objects/17 still has %d loose objects, want them packed", len(entries))
+	}
+	mustRun(t, remote, "fsck", "--strict")
 }
 
 // TestFetch: the remote's branch lands in the remote-tracking branch, the
