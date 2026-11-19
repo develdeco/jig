@@ -95,6 +95,8 @@ matching the directory name and a `description:` of at most 50 words.
 - Every package whose tests run git wires `internal/gittest` into
   `TestMain` (`gittest.Run`), which points git at a generated, hermetic
   config and stops background maintenance from outliving the test process.
+  Git refuses every write to that shared config, so a test that sets global
+  git config gives itself a config of its own (in e2e, `withGitGlobal`).
 - A function only tests reach is test support, and lives where only tests
   import it (a `_test.go` file of the package, or a package such as
   `internal/gitx/gitxtest` that only tests import): CI's Linux leg runs

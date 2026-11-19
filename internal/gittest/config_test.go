@@ -3,6 +3,7 @@ package gittest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gittest"
@@ -68,8 +69,8 @@ func TestRunConfigRefusesWrites(t *testing.T) {
 		{"config", "--global", "core.hooksPath", "/some/hooks"},
 		{"config", "--global", "--unset", "maintenance.auto"},
 	} {
-		if out, err := gitx.Run(dir, args...); err == nil {
-			t.Errorf("git %v wrote the shared config, want a refusal: %s", args, out)
+		if out, err := gitx.Run(dir, args...); err == nil || !strings.Contains(err.Error(), "could not lock config file") {
+			t.Errorf("git %v = %q, %v, want the refusal to lock the shared config", args, out, err)
 		}
 	}
 	if after, err := os.ReadFile(cfg); err != nil || string(after) != string(before) {
