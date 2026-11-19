@@ -242,22 +242,20 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		Round int    `yaml:"round"`
 		Head  string `yaml:"head"`
 		Copy  string `yaml:"copy"`
-		Lease string `yaml:"lease"`
 	}
 	if err := yaml.Unmarshal(openData, &open); err != nil {
 		t.Fatalf("parse the open record: %v", err)
 	}
-	if open.Round != 1 || open.Head != b.sha || open.Copy != "the clone's" || open.Lease == "" {
-		t.Errorf("open record = %+v, want round 1 at %s, the clone's copy and a lease", open, b.sha)
+	if open.Round != 1 || open.Head != b.sha || open.Copy != "the clone's" {
+		t.Errorf("open record = %+v, want round 1 at %s and the clone's copy", open, b.sha)
 	}
 	// The store is shared: neither the open record nor the request names a
-	// directory of this machine's jig home. The lease is written relative to it.
+	// directory of this machine's jig home.
 	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {
 		if strings.Contains(strings.ReplaceAll(string(readFileOrFatal(t, b.workFile(name))), `\\`, `\`), b.env.home) {
 			t.Errorf("%s names the jig home %s", name, b.env.home)
 		}
 	}
-	lease := filepath.Join(b.env.home, filepath.FromSlash(open.Lease))
 	// The round ran no command: oracles_passed is the pass `jig verify`
 	// witnessed for slice a, at the head; the other workspace has no row.
 	var req struct {
@@ -275,17 +273,12 @@ func TestGateReviewsClonesCopy(t *testing.T) {
 		req.OraclesPassed[0].Commit != b.sha || req.OraclesPassed[0].AtHead != "yes" {
 		t.Errorf("oracles_passed = %+v, want slice a's pass in alpha at %s, at the head", req.OraclesPassed, b.sha)
 	}
-	// The reviewer reads the code at the head in the worktree the open round
-	// names, which is jig's, not the clone.
-	if head := gitLog(t, lease, "rev-parse", "HEAD"); head != b.sha {
-		t.Errorf("the open round's worktree is at %s, want %s", head, b.sha)
-	}
 
 	// jig review context again prints the open round and opens no other.
 	r2 := newHarness(t, b.fx, b.env, "s-reviewer")
 	ctx := r2.Jig("review", "context", b.fx.Ticket, "--model", "test-model")
-	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, lease) {
-		t.Fatalf("jig review context exit = %d, want 0, the open round and its worktree %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, lease, ctx.Stdout, ctx.Stderr)
+	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, b.sha) {
+		t.Fatalf("jig review context exit = %d, want 0, the open round and its head %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, b.sha, ctx.Stdout, ctx.Stderr)
 	}
 	r2.Bash("git log --oneline -3")
 

@@ -12,7 +12,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/repohost"
 )
 
@@ -502,7 +501,7 @@ func TestPublishApproveAndTheConfirmation(t *testing.T) {
 }
 
 // TestPublishShipsTheClonesCopyUnchanged: the branch only the operator's clone
-// has is pushed from the publish lease as it stands - the same sha, no commit
+// has is pushed as it stands - the same sha, no commit
 // on top - and a clone that moved on since the round is refused.
 func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 	t.Parallel()
@@ -535,10 +534,9 @@ func TestPublishShipsTheClonesCopyUnchanged(t *testing.T) {
 	if n := publishPrCalls(t, logFile); n != 1 {
 		t.Fatalf("pull requests opened = %d, want 1", n)
 	}
-	if lease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish); err != nil {
-		t.Fatal(err)
-	} else if got := run(t, lease, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("the publish lease is at %s, want the reviewed head %s", got, head)
+	// The clone's own branch and checkout are where the person left them.
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("the clone is at %s after the publish, want %s untouched", got, head)
 	}
 }
 

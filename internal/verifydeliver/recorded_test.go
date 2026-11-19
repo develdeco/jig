@@ -127,6 +127,44 @@ func TestGatePrepareRefusesWhatHasNoCopy(t *testing.T) {
 	if lines, _ := journal.Read(d.Store, fx.Ticket); len(lines) != 0 {
 		t.Fatalf("the refused gate journaled %+v", lines)
 	}
+
+	// A branch only another machine has built on: the journal records the
+	// commit jig built, neither the clone nor origin holds it, and the round is
+	// refused instead of reviewing less than the ticket built. Pushing it from
+	// the machine that built it is the way on.
+	t.Run("the chosen copy lacks a commit jig built", func(t *testing.T) {
+		t.Parallel()
+		const ticket, branch = "JIG-2", "add-retry"
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d := newDeps(t, fx)
+		d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
+		newAdoptTicket(t, d, ticket)
+		authorBranch(t, fx, branch)
+		if _, err := GatePrepare(d, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
+			t.Fatalf("GatePrepare adopting %s: %v", branch, err)
+		}
+		other := cloneFrom(t, fx.RepoRemote)
+		run(t, other, "checkout", branch)
+		elsewhere := writeAndCommit(t, other, "fix.txt", "jig's fix", ticket+" fix-1: built on another machine")
+		journalBuilt(t, d.Store, ticket, "fix-1", elsewhere, 1)
+
+		_, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		// The code is BUILD_LEASE_MISSING until the gate stops using leases,
+		// BUILT_COMMITS_MISSING after: the refusal is what this pins.
+		var ae *axi.Error
+		if !errors.As(err, &ae) || (ae.Code != "BUILD_LEASE_MISSING" && ae.Code != "BUILT_COMMITS_MISSING") {
+			t.Fatalf("GatePrepare: err = %v, want a refusal for the missing built commit", err)
+		}
+		if len(ae.Help) == 0 || !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, elsewhere[:7]) {
+			t.Fatalf("refusal = %+v, want it to name the branch and the missing commit %s, and carry help", ae, elsewhere[:7])
+		}
+
+		builder(t).Push(other, "origin", branch)
+		p, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		if err != nil || p.Head != elsewhere || p.Copy != string(originsCopy) {
+			t.Fatalf("GatePrepare after the push = %+v (%v), want origin's copy at %s", p, err, elsewhere)
+		}
+	})
 }
 
 // TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins: the copy the round
@@ -190,6 +228,34 @@ func TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins(t *testing.T) {
 			}
 		})
 	}
+
+	// An adopted branch jig built nothing on is the author's: origin's copy,
+	// as it is now, and whatever the author pushes next.
+	t.Run("an adopted branch jig built nothing on", func(t *testing.T) {
+		t.Parallel()
+		const ticket, adopted = "JIG-2", "add-retry"
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d := newDeps(t, fx)
+		d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
+		newAdoptTicket(t, d, ticket)
+		tip := authorBranch(t, fx, adopted)
+
+		p, err := GatePrepare(d, GateOpts{Ticket: ticket, Branch: adopted})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		if p.Copy != string(originsCopy) || p.Head != tip || p.Branch != adopted {
+			t.Fatalf("round reviews %s at %s on %s, want origin's copy at %s on %s", p.Copy, p.Head, p.Branch, tip, adopted)
+		}
+		pushed := authorPush(t, fx, adopted, "more.txt")
+		again, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		if err != nil || again.Head != pushed || again.Copy != string(originsCopy) {
+			t.Fatalf("GatePrepare after the author pushed = %+v (%v), want origin's copy at %s", again, err, pushed)
+		}
+		if got := originRef(t, fx.RepoRemote, "refs/heads/"+adopted); got != pushed {
+			t.Fatalf("origin's %s = %s, want %s untouched: gating pushes nothing", adopted, got, pushed)
+		}
+	})
 }
 
 // TestReopeningARoundKeepsItsDraftsOnlyWhileTheHeadStands: `jig gate` over a
