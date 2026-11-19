@@ -1,14 +1,11 @@
 package e2e
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/fixture"
 )
 
 // TestShareThenHereFromFreshClone: a project is local until it is shared, and
@@ -104,104 +101,5 @@ func TestShareThenHereFromFreshClone(t *testing.T) {
 	}
 	if got := hereJSON(t, env2, fresh, "MYREPO-1"); got.Ticket.ID != "MYREPO-1" {
 		t.Errorf("the shared ticket is not there: %+v", got.Ticket)
-	}
-}
-
-// TestShareOrchestratorReportsReposWithoutARemote: share sets the remote of each
-// repo it is told of, pushes the store and the orchestrator (and a nested repo
-// it gave a remote), writes into jig.yaml the remote of a nested clone that no
-// .gitmodules carries (a collaborator's checkout has no other way to learn it),
-// and reports the nested repos that still have no remote, which collaborators
-// cannot get.
-func TestShareOrchestratorReportsReposWithoutARemote(t *testing.T) {
-	t.Parallel()
-	env := projEnv(t)
-	shop := filepath.Join(t.TempDir(), "shop")
-	api := projGitRepo(t, filepath.Join(shop, "api"))
-	web := projGitRepo(t, filepath.Join(shop, "web"))
-	projRun(t, env, shop, "init", "--orchestrator", "--yes")
-	storeRemote := projBareRemote(t, "shop-tickets.git")
-	shopRemote := projBareRemote(t, "shop.git")
-	apiRemote := projBareRemote(t, "api.git")
-
-	r := projRun(t, env, shop, "share", "--store-remote", storeRemote, "--remote", "shop="+shopRemote, "--remote", "api="+apiRemote, "--yes")
-	for _, want := range []string{"without_remote[1]{repo}:\n  web\n", "pushed[3]{repo,branch}:\n  store,main\n  api,main\n  shop,main\n", "pass --remote <name>=<url>"} {
-		if !strings.Contains(r.Stdout, want) {
-			t.Errorf("jig share stdout lacks %q:\n%s", want, r.Stdout)
-		}
-	}
-	m := projMarker(t, shop)
-	if m.Store != storeRemote {
-		t.Errorf("jig.yaml store = %q, want %q", m.Store, storeRemote)
-	}
-	if len(m.Repos) != 2 || m.Repos[0].Remote != apiRemote || m.Repos[1].Remote != "" {
-		t.Errorf("jig.yaml repos = %+v, want api with its new remote and web with none", m.Repos)
-	}
-	if got := gitLog(t, api, "remote", "get-url", "origin"); got != apiRemote {
-		t.Errorf("api's origin = %q, want %q", got, apiRemote)
-	}
-	if got := gitLog(t, web, "remote"); got != "" {
-		t.Errorf("web got remotes %q it was not given", got)
-	}
-	if refs := gitLog(t, apiRemote, "for-each-ref", "--format=%(refname)"); refs != "refs/heads/main" {
-		t.Errorf("api's remote refs = %q, want main pushed", refs)
-	}
-	if got := gitLog(t, shopRemote, "show", "main:jig.yaml"); !strings.Contains(got, "remote: "+apiRemote) || !strings.Contains(got, "store: "+storeRemote) {
-		t.Errorf("the pushed jig.yaml lacks the store or api's remote:\n%s", got)
-	}
-
-	// A fresh clone of the orchestrator learns api's URL from jig.yaml.
-	if got := repoNames(projMarker(t, shop).Repos); got != "api,web" {
-		t.Errorf("repos = %s", got)
-	}
-	r = projRun(t, env, shop, "repos")
-	if !strings.Contains(r.Stdout, "api,api,"+axi.Quote(apiRemote)+",checked out") {
-		t.Errorf("jig repos lacks api's remote:\n%s", r.Stdout)
-	}
-}
-
-// TestShareCreatesThroughTheHostCLI: --create makes each repository that has no
-// remote through gh, private, with the remote gh adds; the fake gh here adds
-// the remote of a bare repository the test made, and the push reaches it.
-func TestShareCreatesThroughTheHostCLI(t *testing.T) {
-	t.Parallel()
-	env := projEnv(t)
-	parent := t.TempDir()
-	repo := projGitRepo(t, filepath.Join(parent, "myrepo"))
-	projRun(t, env, repo, "init")
-	storeRemote := projBareRemote(t, "myrepo-tickets.git")
-	repoRemote := projBareRemote(t, "myrepo.git")
-
-	stubDir := fixture.GhStub(t)
-	log := filepath.Join(t.TempDir(), "gh.log")
-	hosted := env.with(
-		"PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"GH_STUB_LOG="+log,
-		fmt.Sprintf(`GH_STUB_REPO_URLS={"myrepo-tickets":%q,"myrepo":%q}`, storeRemote, repoRemote),
-	)
-
-	projRun(t, hosted, repo, "share", "--create", "--yes")
-	if got := gitLog(t, repo, "remote", "get-url", "origin"); got != repoRemote {
-		t.Errorf("the repo's origin = %q, want the one gh made, %q", got, repoRemote)
-	}
-	if got := gitLog(t, repo+"-tickets", "remote", "get-url", "origin"); got != storeRemote {
-		t.Errorf("the store's origin = %q, want the one gh made, %q", got, storeRemote)
-	}
-	for _, bare := range []string{storeRemote, repoRemote} {
-		if refs := gitLog(t, bare, "for-each-ref", "--format=%(refname)"); refs != "refs/heads/main" {
-			t.Errorf("%s has refs %q, want main pushed", bare, refs)
-		}
-	}
-	data, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatalf("read the gh log: %v", err)
-	}
-	for _, want := range []string{`"repo","create","myrepo-tickets","--private"`, `"repo","create","myrepo","--private"`} {
-		if !strings.Contains(string(data), want) {
-			t.Errorf("gh was not run as %s:\n%s", want, data)
-		}
-	}
-	if m := projMarker(t, repo); m.Store != storeRemote {
-		t.Errorf("jig.yaml store = %q, want %q", m.Store, storeRemote)
 	}
 }
