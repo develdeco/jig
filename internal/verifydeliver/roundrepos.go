@@ -3,7 +3,7 @@ package verifydeliver
 // A gate round covers the repos a ticket's slices build in. In a project of
 // one repo that is the repo, and a round works as it always has: a finding's
 // file is a path in the repo. In a project of several repos a round has a
-// lease, a base, a head and a scope diff for each repo the ticket touches, and
+// clone, a base, a head and a scope diff for each repo the ticket touches, and
 // names a file as "<repo>/<path>" everywhere a round names one - a finding's
 // file, reviewed_paths, must_review - so one list of files covers all the repos
 // and a file says which repo's code it is. A workspace is named the same way
@@ -13,6 +13,7 @@ package verifydeliver
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -157,10 +158,11 @@ type roundRepo struct {
 	// commit under review there.
 	Dir  string
 	Head string
-	// Worktrees are the directories the reviewer may read the head in
-	// (reviewerWorktrees). A reviewed path that is absolute and inside one is
-	// that repo's file. None when they are not known.
-	Worktrees []string
+	// Worktrees asks for the directories the reviewer may read the head in
+	// (reviewerWorktrees), when a reviewed path needs them: one that is
+	// absolute and inside one is that repo's file. nil when they are not
+	// known.
+	Worktrees func() []string
 	Man       manifest.Manifest
 }
 
@@ -294,7 +296,10 @@ func (rf roundFiles) relativize(p string) (string, bool) {
 		return norm, true
 	}
 	for _, r := range rf.repos {
-		for _, w := range r.Worktrees {
+		if r.Worktrees == nil || !filepath.IsAbs(p) {
+			continue
+		}
+		for _, w := range r.Worktrees() {
 			if rel, ok := relativizeAbsolute(w, p); ok {
 				if rf.qualified {
 					return rf.qualify(r.Name, rel), true
@@ -309,7 +314,7 @@ func (rf roundFiles) relativize(p string) (string, bool) {
 // normalizeReviewed relativizes and normalizes every reviewed_paths entry
 // exactly once, right after validateReviewResult has accepted the result.
 // Coverage, clearing and persistence all read this one normalized list
-// afterward, so an absolute in-lease path that counted as coverage also counts
+// afterward, so an absolute in-worktree path that counted as coverage also counts
 // as clearing evidence and is never written to findings.yaml as a host path. An
 // entry that cannot be normalized was already ignored by the coverage check, so
 // it is dropped here too.

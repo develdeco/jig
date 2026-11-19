@@ -52,7 +52,7 @@ func TestParseReviewResultStillPresentRules(t *testing.T) {
 }
 
 // TestValidateReviewResultStillPresentRules covers the still_present rules
-// that need the request and the lease's head.
+// that need the request and the round's head.
 func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Parallel()
 

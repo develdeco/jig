@@ -176,6 +176,121 @@ func TestReviewerWorktreesAreTheAdvisedDirAndTheLinkedOnesOfTheClone(t *testing.
 	}
 }
 
+func declareTestOracle(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".claude", "jig.yaml"), []byte("oracles:\n  test: echo test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder(t).Commit(dir, "declare the test oracle")
+}
+
+// TestWorktreesAreAskedOfGitOnlyForAnAbsolutePathAndOnce: the worktrees of the
+// clone cost a git process, so a reviewed path that is relative never asks for
+// them, and the ones that are absolute ask once between them.
+func TestWorktreesAreAskedOfGitOnlyForAnAbsolutePathAndOnce(t *testing.T) {
+	t.Parallel()
+	asked := 0
+	rf := roundFiles{repos: []roundRepo{{Worktrees: func() []string { asked++; return []string{"/wt"} }}}}
+	if rel, ok := rf.relativize("alpha/a.go"); !ok || rel != "alpha/a.go" || asked != 0 {
+		t.Errorf("a relative path = %q, %v after %d ask(s), want it as it is and no ask", rel, ok, asked)
+	}
+	if _, ok := rf.relativize("../escape.go"); ok || asked != 0 {
+		t.Errorf("a path climbing out is read (%v) after %d ask(s), want it left out with no ask", ok, asked)
+	}
+
+	clone, _ := tinyRepo(t)
+	lazy := lazyWorktrees(clone, "T-1")
+	first := lazy()
+	run(t, clone, "worktree", "add", "--detach", filepath.Join(t.TempDir(), "later"))
+	if again := lazy(); !slices.Equal(first, again) {
+		t.Errorf("the worktrees were asked of git again: %v then %v", first, again)
+	}
+}
+
+// TestARoundOverSeveralReposReadsEachReposHeadNotItsCheckout: with every clone
+// checked out on the target, the round covers each repo's branch at its head
+// and the files it changed to review, and closes clean.
+func TestARoundOverSeveralReposReadsEachReposHeadNotItsCheckout(t *testing.T) {
+	t.Parallel()
+	o := orchestratorTicket(t, "api", "web")
+	heads := map[string]string{"api": o.build(t, "api"), "web": o.build(t, "web")}
+	for _, repo := range []string{"api", "web"} {
+		run(t, o.d.Machine.Clones[repo], "checkout", "main")
+	}
+
+	p, err := GatePrepare(o.d, GateOpts{Ticket: o.ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	for _, r := range p.Repos {
+		if r.Head != heads[r.Repo] {
+			t.Errorf("repo %s is reviewed at %s, want its branch's head %s", r.Repo, r.Head, heads[r.Repo])
+		}
+	}
+	for _, want := range []string{"api/server/handler.go", "web/ui/page.go"} {
+		if !slices.Contains(p.Request.MustReview, want) {
+			t.Errorf("must_review = %v, want %s: the files the heads changed", p.Request.MustReview, want)
+		}
+	}
+	if _, err := GateFinish(o.d, p, cleanReport(p), Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+		t.Fatalf("GateFinish: %v", err)
+	}
+
+}
+
+// TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts: a round that recorded no oracle
+// names (a scripted one) has publish name the manifest's, in the contract index
+// entry, as the manifest stands at the head it ships, whatever the clone is
+// checked out on: the head's manifest declares an oracle the checkout's does
+// not. Recording a pull request the harness opened (`jig publish --pr`) writes
+// the same entry, from the same manifest.
+func TestPublishBodyNamesTheHeadsOraclesNotTheCheckouts(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"publish", "record the pull request"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+			d := newDeps(t, fx)
+			_, addEnv := useGithubHost(t, &d, "", "")
+			driveBuild(t, fx, "rung-a")
+			src := NewFakeGateSource(fx.ScenarioDir)
+			if _, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil {
+				t.Fatalf("Gate round 1: %v", err)
+			}
+			driveFix1(t, fx, "rung-a")
+			head := declareHeadOnlyOracle(t, buildLeaseDir(t, fx))
+			if report, err := Gate(d, src, GateOpts{Ticket: fx.Ticket}); err != nil || report.Verdict != "clean" {
+				t.Fatalf("Gate round 2 = %q (%v), want clean", report.Verdict, err)
+			}
+			run(t, fx.RepoDir, "checkout", "main")
+
+			if mode == "publish" {
+				if _, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true}); err != nil {
+					t.Fatalf("Publish: %v", err)
+				}
+			} else {
+				addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
+				if _, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket}); err != nil {
+					t.Fatalf("PublishBody: %v", err)
+				}
+				if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket}, "https://github.com/owner/fixture-repo/pull/7", nil); err != nil {
+					t.Fatalf("PublishRecordPR: %v", err)
+				}
+			}
+			index, err := os.ReadFile(filepath.Join(d.Store.Root, "platform", "contract-index.md"))
+			if err != nil {
+				t.Fatalf("read contract-index.md: %v", err)
+			}
+			if !strings.Contains(string(index), "oracles "+headOnlyOracle+",") {
+				t.Errorf("contract-index.md does not name the oracle the head declares (%s):\n%s", headOnlyOracle, index)
+			}
+		})
+	}
+}
+
 // headOnlyOracle is an oracle only the ticket's head declares.
 const headOnlyOracle = "headonly"
 
@@ -251,6 +366,11 @@ func TestAGateRoundTakesNoLease(t *testing.T) {
 	}
 	if !slices.Contains(p.Request.Oracles, headOnlyOracle) {
 		t.Fatalf("the request's oracles are %v, want the head's manifest (%s) and not the checkout's", p.Request.Oracles, headOnlyOracle)
+	}
+	for _, want := range []string{"alpha/alpha.go", ".claude/jig.yaml"} {
+		if !slices.Contains(p.Request.MustReview, want) {
+			t.Fatalf("must_review = %v, want %s: the files the head changed from its base, not the checkout's", p.Request.MustReview, want)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
 		t.Fatal("the round made a pool directory under the jig home")

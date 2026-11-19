@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -142,6 +143,20 @@ func reviewerWorktrees(clone, ticket string) []string {
 		}
 	}
 	return dirs
+}
+
+// lazyWorktrees is reviewerWorktrees of the clone for the ticket, asked of git
+// only when a reviewed path needs it (a path that is absolute and not in the
+// advised directory) and then once.
+func lazyWorktrees(clone, ticket string) func() []string {
+	var (
+		once sync.Once
+		dirs []string
+	)
+	return func() []string {
+		once.Do(func() { dirs = reviewerWorktrees(clone, ticket) })
+		return dirs
+	}
 }
 
 // fetchOriginRefs brings origin's branches into the clone's remote-tracking

@@ -368,7 +368,7 @@ type reviewResultWire struct {
 // known action and risk on every finding, non-empty title and
 // risk_rationale, a non-negative line, and repo-relative file syntax on
 // every finding, and a non-empty prior and non-negative line on every
-// still_present entry. The rules that need the request or the lease's
+// still_present entry. The rules that need the request or the round's
 // head - oracle membership, prior identity (a finding's or a still_present
 // entry's), reviewed_paths coverage, file existence - are checked
 // separately by validateReviewResult, once the caller has that context.
@@ -806,7 +806,7 @@ func oraclesManifest(names []string) manifest.Manifest {
 	return manifest.Manifest{Oracles: oracles}
 }
 
-// validateReviewResult checks result against req and the lease's head, the
+// validateReviewResult checks result against req and the round's head, the
 // rules ParseReviewResult cannot check on its own: a finding's file exists at
 // head or was deleted in the scope diff; a prior names an id under open or
 // dismissed, and no two findings share one; a still_present entry's prior names
@@ -814,7 +814,7 @@ func oraclesManifest(names []string) manifest.Manifest {
 // still_present entry and a finding's own prior) share one, and that id's own
 // file exists at head or was deleted in the scope diff; reviewed_paths covers
 // every must_review path. rf is the files of the round: which repo a finding's
-// file is in, and the leases an absolute
+// file is in, and the reviewer's worktrees an absolute
 // reviewed_paths entry is relativized against. atHead reports whether a
 // (normalized) file, as the round names it, exists at the commit under review,
 // and deleted holds the files, as the round names them, that the scope diff
@@ -1261,7 +1261,7 @@ type RoundInput struct {
 	// SlicePasses, which describe the one repo of a round over one, and the
 	// round names its files "<repo>/<path>" (roundrepos.go).
 	Repos []RoundRepo
-	// Branch is the ticket's branch the lease is checked out to. The intent
+	// Branch is the ticket's branch the round reviews. The intent
 	// lookup reads it to find the ledger's lines for the ticket that name the
 	// branch and not the ticket; "" means none.
 	Branch string
@@ -1340,13 +1340,13 @@ func (req ReviewRequest) files() roundFiles {
 }
 
 // requestFiles is the files of the round as req, the request it was handed,
-// describes them, with each repo's lease and the commit under review there.
+// describes them, with each repo's clone and the commit under review there.
 func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 	rf := req.files()
 	if !in.qualified() {
 		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.CloneDir, req.HeadSHA
 		if in.CloneDir != "" {
-			rf.repos[0].Worktrees = reviewerWorktrees(in.CloneDir, in.Ticket)
+			rf.repos[0].Worktrees = lazyWorktrees(in.CloneDir, in.Ticket)
 		}
 		return rf
 	}
@@ -1355,7 +1355,7 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 			if r.Name == rf.repos[i].Name {
 				rf.repos[i].Dir = r.CloneDir
 				if r.CloneDir != "" {
-					rf.repos[i].Worktrees = reviewerWorktrees(r.CloneDir, in.Ticket)
+					rf.repos[i].Worktrees = lazyWorktrees(r.CloneDir, in.Ticket)
 				}
 			}
 		}
@@ -1368,7 +1368,7 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 // handed, worked out and written, before anyone reviews. A recorded round
 // (GatePrepare) keeps it for the agent that reads `jig review context`.
 type ReviewPrep struct {
-	// Head is the lease's HEAD the round reviews, Scope and Base what the diff
+	// Head is the commit the round reviews, Scope and Base what the diff
 	// is taken from (resolveScope). They are those of the one repo of a
 	// round over one; a round over several has them in Repos instead.
 	Head, Scope, Base string
@@ -1427,7 +1427,7 @@ type RepoPrep struct {
 }
 
 // forRepo is the input of a round over one repo, r, made from the input of a
-// round over several: what the helpers that read one repo's lease take.
+// round over several: what the helpers that read one repo's clone take.
 func (in RoundInput) forRepo(r RoundRepo) RoundInput {
 	one := in
 	one.Repos = nil
@@ -1481,7 +1481,7 @@ func orHEAD(rev string) string {
 // session and never touches the store's findings: the caller decides what
 // reads the request.
 //
-// A round over several repos (RoundInput.Repos) does that for the lease of
+// A round over several repos (RoundInput.Repos) does that for the clone of
 // each, and writes one request that lists them (ReviewRequest.Repos) and names
 // every file "<repo>/<path>".
 //

@@ -140,7 +140,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 			}
 		}
 	}
-	// Resolved once: every lease and every copy of the branch name this one
+	// Resolved once: every clone and every copy of the branch name this one
 	// branch. The ticket's own record names it, or --branch adopts one
 	// (resolveGateBranch); an adoption is recorded further down, once every
 	// precondition of the round has passed.
@@ -183,7 +183,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	// so a refusal on either still leaves no trace: not a written intent.md,
 	// not a journal line, for a plain rerun to be the whole recovery. It is a
 	// ticket-level record, not specific to this round's branch or frontier
-	// state, so nothing here reads lease or branch state; the write only needs
+	// state, so nothing here reads clone or branch state; the write only needs
 	// to happen after every precondition that can still refuse the round. No
 	// separate push: the write is a tracked change like any other this round
 	// makes, carried by the round's own end-of-round push on success, or by
@@ -370,7 +370,7 @@ func (r *gateRun) roundInput() RoundInput {
 func (r *gateRun) reviewFiles(rv *Review) roundFiles {
 	rf := roundFiles{qualified: r.qualified}
 	for _, gr := range r.repos {
-		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: rv.headOf(gr.name), Worktrees: reviewerWorktrees(gr.dir, r.ticket), Man: gr.man})
+		rf.repos = append(rf.repos, roundRepo{Name: gr.name, Dir: gr.dir, Head: rv.headOf(gr.name), Man: gr.man})
 	}
 	return rf
 }

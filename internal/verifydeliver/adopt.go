@@ -23,9 +23,9 @@ type gateBranch struct {
 	Adopting bool
 	// Built is the commits the journal records jig built on the ticket's
 	// branch and verified (journal.BuiltCommits), in journal order; none while
-	// an adopted branch is only the author's. They stay in the build lease until
+	// an adopted branch is only the author's. They stay in the clone until
 	// someone pushes them, so once there are any, origin's copy of the branch
-	// may lack them, and the round chooses its copy by that (chooseBuiltCopy).
+	// may lack them, and the round refuses a copy that does (chooseCopy).
 	Built []string
 }
 

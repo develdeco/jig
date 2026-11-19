@@ -25,9 +25,12 @@ func TestRecordedRoundKeepsTheMachinesPathsOutOfTheStore(t *testing.T) {
 	d := newDeps(t, fx)
 	rec := filepath.Join(d.Home, "evidence", "abc", "recording.svg")
 
-	var worktree string
+	var worktree, linked string
 	report := recordedRound(t, d, GateOpts{Ticket: fx.Ticket, Yes: true}, func(p Prepared) ReviewResult {
 		worktree = ReviewWorktreeDir(operatorClone(d, p.Repo), p.Ticket)
+		// The worktree a harness made for the reviewer, outside the clone.
+		linked = filepath.Join(t.TempDir(), "harness-worktree")
+		run(t, operatorClone(d, p.Repo), "worktree", "add", "--detach", linked, p.Head)
 		var abs []string
 		for _, f := range p.Request.MustReview {
 			abs = append(abs, filepath.Join(worktree, filepath.FromSlash(f)))
@@ -36,7 +39,7 @@ func TestRecordedRoundKeepsTheMachinesPathsOutOfTheStore(t *testing.T) {
 			Findings: []ResultFinding{{
 				File: "alpha/alpha.go", Line: 1, Action: ActionNote, Risk: RiskLow, Oracle: "test",
 				Title:         "the screen in " + rec + " is wrong",
-				Detail:        "see " + filepath.ToSlash(rec) + " and " + fmt.Sprintf("%q", rec) + ", checked in " + worktree,
+				Detail:        "see " + filepath.ToSlash(rec) + " and " + fmt.Sprintf("%q", rec) + ", checked in " + worktree + " and in " + filepath.ToSlash(linked),
 				RiskRationale: "from " + wslMountPath(rec),
 			}},
 			ReviewedPaths: abs,
@@ -54,7 +57,7 @@ func TestRecordedRoundKeepsTheMachinesPathsOutOfTheStore(t *testing.T) {
 	if !strings.Contains(f.Title, "<jig home>") || !strings.Contains(f.Detail, "<worktree>") || !strings.Contains(f.RiskRationale, "<jig home>") {
 		t.Errorf("the paths were not replaced by their names: title %q, detail %q, rationale %q", f.Title, f.Detail, f.RiskRationale)
 	}
-	dirs := []string{d.Home, worktree, d.Store.Root}
+	dirs := []string{d.Home, worktree, linked, d.Store.Root}
 	err = filepath.WalkDir(d.Store.Root, func(path string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return err

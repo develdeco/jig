@@ -38,6 +38,6 @@ func TestRelativizeReviewedPathAcrossSpellings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, ok := relativizeAbsolute(link, outside); ok {
-		t.Errorf("relativizeAbsolute(%s, %s) = %q, want a path outside the lease left out", link, outside, got)
+		t.Errorf("relativizeAbsolute(%s, %s) = %q, want a path outside the directory left out", link, outside, got)
 	}
 }

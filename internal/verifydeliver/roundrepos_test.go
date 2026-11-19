@@ -19,16 +19,19 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// worktreesOf is the Worktrees of a roundRepo that has exactly these.
+func worktreesOf(dirs ...string) func() []string { return func() []string { return dirs } }
+
 // twoRepoFiles is the files of a round over the repos api (workspaces server
 // and lib, oracles test and lint) and web (workspaces ui and lib, oracle test),
 // read in apiDir and webDir.
 func twoRepoFiles(apiDir, webDir string) roundFiles {
 	return roundFiles{qualified: true, repos: []roundRepo{
-		{Name: "api", Dir: apiDir, Worktrees: []string{apiDir}, Head: "api-head", Man: manifest.Manifest{
+		{Name: "api", Dir: apiDir, Worktrees: worktreesOf(apiDir), Head: "api-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "server", Path: "server"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/...", "lint": "go vet ./{path}/..."},
 		}},
-		{Name: "web", Dir: webDir, Worktrees: []string{webDir}, Head: "web-head", Man: manifest.Manifest{
+		{Name: "web", Dir: webDir, Worktrees: worktreesOf(webDir), Head: "web-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "ui", Path: "ui"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/..."},
 		}},
@@ -554,7 +557,7 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 // oneRepoIn is the files of a round over one repo read in cloneDir, whose
 // manifest declares the oracles named.
 func oneRepoIn(cloneDir string, oracleNames []string) roundFiles {
-	return roundFiles{repos: []roundRepo{{Dir: cloneDir, Worktrees: []string{cloneDir}, Man: oraclesManifest(oracleNames)}}}
+	return roundFiles{repos: []roundRepo{{Dir: cloneDir, Worktrees: worktreesOf(cloneDir), Man: oraclesManifest(oracleNames)}}}
 }
 
 // TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a

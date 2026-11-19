@@ -167,6 +167,17 @@ func (t *publishTarget) base() string {
 // "" for a scripted round, which recorded none.
 func (t *publishTarget) reviewedHead() string { return t.gateRep.ReviewedSHA[t.repoName] }
 
+// readRev is the revision to read the repo's head at, in the operator's clone:
+// the reviewed head, else for a scripted round, which recorded none, the
+// ticket's branch. Never the clone's HEAD, which is whatever the person has
+// checked out.
+func (t *publishTarget) readRev() string {
+	if head := t.reviewedHead(); head != "" {
+		return head
+	}
+	return t.branch
+}
+
 // several is whether the ticket publishes in more than one repo.
 func (t *publishTarget) several() bool { return len(t.covered) > 1 }
 
@@ -669,7 +680,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		sh.linked = linksFor(sh.pt, known)
 		sh.pub, err = renderPublication(d, sh.pt, renderInput{
-			dir: sh.dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
+			dir: sh.dir, head: sh.head, touched: sh.touched,
 			picks: picks, what: what, warn: fn.warn, links: sh.linked,
 		})
 		if err != nil {
@@ -976,13 +987,12 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 
 // renderInput is what rendering a publication reads: the repository to read
 // commits from and the head the gate reviewed, the files the change touched,
-// the oracle names, and the picks file.
+// and the picks file.
 type renderInput struct {
-	dir         string
-	head        string
-	touched     []string
-	oracleNames []string
-	picks       *PicksResult
+	dir     string
+	head    string
+	touched []string
+	picks   *PicksResult
 	// what is the What given now, nil for none.
 	what *string
 	warn func(format string, args ...any)
@@ -1470,7 +1480,6 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 		head    string
 		rev     string
 		touched []string
-		names   []string
 	}
 	reads := make([]reading, 0, len(targets))
 	for _, pt := range targets {
@@ -1483,19 +1492,12 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			if err := checkBodyHead(d, pt, dir); err != nil {
 				return reading{}, err
 			}
-			rev := head
-			if rev == "" {
-				rev = "HEAD"
-			}
+			rev := pt.readRev()
 			touched, err := diffFiles(dir, pt.target, rev)
 			if err != nil {
 				return reading{}, err
 			}
-			man, err := manifest.Resolve(dir)
-			if err != nil {
-				return reading{}, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
-			}
-			return reading{pt: pt, dir: dir, head: head, rev: rev, touched: touched, names: pt.oracleNames(man)}, nil
+			return reading{pt: pt, dir: dir, head: head, rev: rev, touched: touched}, nil
 		}()
 		if err != nil {
 			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
@@ -1511,7 +1513,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	for _, rd := range reads {
 		pt := rd.pt
 		r, err := renderPublication(d, pt, renderInput{
-			dir: rd.dir, head: rd.rev, touched: rd.touched, oracleNames: rd.names, picks: picks, what: what, warn: fn.warn,
+			dir: rd.dir, head: rd.rev, touched: rd.touched, picks: picks, what: what, warn: fn.warn,
 			links: linksFor(pt, known),
 		})
 		if err != nil {
@@ -1724,7 +1726,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		oracleNames := pt.gateRep.OracleNames
 		if len(oracleNames) == 0 {
 			if dir, err := readerDir(d, pt); err == nil {
-				if man, err := manifest.Resolve(dir); err == nil {
+				if man, err := manifest.ResolveAt(dir, pt.readRev()); err == nil {
 					oracleNames = SortedOracleNames(man)
 				}
 			}
