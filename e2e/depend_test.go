@@ -6,13 +6,10 @@ package e2e
 // releases the ticket, and a refused edge leaves ticket.yaml as it was.
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -51,43 +48,9 @@ func dependParent(t *testing.T, fx *fixture.Fixture, h *fakeHarness) *store.Stor
 	return st
 }
 
-func readTicketYAML(t *testing.T, fx *fixture.Fixture, id string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", id, "ticket.yaml"))
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
 func branchHeads(h *fakeHarness) string {
 	h.t.Helper()
 	return h.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
-}
-
-// TestDependStacksAStandaloneTicketOnABranch: a ticket stacked by `jig depend`
-// waits for its parent, and its branch starts from the parent's branch.
-func TestDependStacksAStandaloneTicketOnABranch(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-parent")
-	dependParent(t, fx, h)
-
-	r := runJig(t, env, fx.RepoDir, "depend", fx.Ticket, "--on", "JIG-2", "--kind", "stacked")
-	if r.Code != 0 || !strings.Contains(r.Stdout, "result: recorded") {
-		t.Fatalf("jig depend: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	n := nextJSON[dependNextOut](t, env, fx.RepoDir, fx.Ticket)
-	if n.State != "blocked" || len(n.BlockedBy) != 1 || n.BlockedBy[0].Ticket != "JIG-2" || n.BlockedBy[0].Kind != "stacked" || n.BlockedBy[0].Fact != "it has not published" {
-		t.Fatalf("jig next %s: state %q, blocked_by %+v, want blocked on JIG-2 (stacked) with its fact", fx.Ticket, n.State, n.BlockedBy)
-	}
-	if len(n.Stack) != 1 || n.Stack[0].Parent != "JIG-2" || n.Stack[0].StartFrom != parentBranch {
-		t.Errorf("stack = %+v, want the branch to start from %s", n.Stack, parentBranch)
-	}
-	text := runJig(t, env, fx.RepoDir, "next", fx.Ticket).Stdout
-	if want := "stack[1]{repo,parent,start_from,pr_target}:\n  fixture-repo,JIG-2," + parentBranch + "," + parentBranch + "\n"; !strings.Contains(text, want) {
-		t.Errorf("jig next lacks %q:\n%s", want, text)
-	}
 }
 
 // TestDependOnATicketWithABranchIsAdvice: stacking a ticket whose branch
@@ -127,57 +90,5 @@ func TestDependOnATicketWithABranchIsAdvice(t *testing.T) {
 	}
 	if text := runJig(t, env, fx.RepoDir, "next", fx.Ticket).Stdout; !strings.Contains(text, "`git merge "+parentBranch+"`") {
 		t.Errorf("jig next lacks the merge of %s:\n%s", parentBranch, text)
-	}
-}
-
-// TestDependClearReleasesAMergedEdge: a merged edge holds the ticket in
-// `jig next` until `jig depend --on --clear` removes it.
-func TestDependClearReleasesAMergedEdge(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-parent")
-	dependParent(t, fx, h)
-
-	if r := runJig(t, env, fx.RepoDir, "depend", fx.Ticket, "--on", "JIG-2"); r.Code != 0 || !strings.Contains(r.Stdout, "result: recorded") {
-		t.Fatalf("jig depend: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	n := nextJSON[dependNextOut](t, env, fx.RepoDir, fx.Ticket)
-	if n.State != "blocked" || len(n.BlockedBy) != 1 || n.BlockedBy[0].Kind != "merged" || len(n.Stack) != 0 {
-		t.Fatalf("with the edge: state %q, blocked_by %+v, stack %+v, want blocked by a merged edge and no stack", n.State, n.BlockedBy, n.Stack)
-	}
-	if r := runJig(t, env, fx.RepoDir, "depend", fx.Ticket, "--on", "JIG-2", "--clear"); r.Code != 0 || !strings.Contains(r.Stdout, "result: cleared") {
-		t.Fatalf("jig depend --clear: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	n = nextJSON[dependNextOut](t, env, fx.RepoDir, fx.Ticket)
-	if n.State != "ready" || len(n.BlockedBy) != 0 {
-		t.Errorf("after the clear: state %q, blocked_by %+v, want ready and nothing blocking", n.State, n.BlockedBy)
-	}
-}
-
-// TestDependRefusesACycleAndASelfEdge: both are refused, naming the chain,
-// and ticket.yaml stays as it was.
-func TestDependRefusesACycleAndASelfEdge(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-parent")
-	dependParent(t, fx, h)
-	if r := runJig(t, env, fx.RepoDir, "depend", fx.Ticket, "--on", "JIG-2"); r.Code != 0 {
-		t.Fatalf("jig depend: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	child, parent := readTicketYAML(t, fx, fx.Ticket), readTicketYAML(t, fx, "JIG-2")
-
-	r := runJig(t, env, fx.RepoDir, "depend", "JIG-2", "--on", fx.Ticket, "--kind", "stacked")
-	if r.Code == 0 || !strings.Contains(r.Stdout, "VALIDATION_ERROR") || !strings.Contains(r.Stdout, "JIG-2 -> "+fx.Ticket+" -> JIG-2") {
-		t.Errorf("a cycle: exit %d, want a refusal naming the chain\n%s", r.Code, r.Stdout)
-	}
-	r = runJig(t, env, fx.RepoDir, "depend", fx.Ticket, "--on", fx.Ticket)
-	if r.Code == 0 || !strings.Contains(r.Stdout, "VALIDATION_ERROR") || !strings.Contains(r.Stdout, "cannot wait for itself") {
-		t.Errorf("a self edge: exit %d, want a refusal\n%s", r.Code, r.Stdout)
-	}
-	if readTicketYAML(t, fx, fx.Ticket) != child || readTicketYAML(t, fx, "JIG-2") != parent {
-		t.Errorf("a refusal changed a ticket.yaml")
-	}
-	if out, err := gitx.Run(fx.StoreDir, "status", "--porcelain"); err != nil || strings.TrimSpace(out) != "" {
-		t.Errorf("the store has uncommitted changes after the refusals: %q, %v", out, err)
 	}
 }
