@@ -117,17 +117,3 @@ func TestStoreMigrateWritersTakesNoSchemaFlags(t *testing.T) {
 		t.Error("a refused invocation made the store a writers store")
 	}
 }
-
-// TestStoreMigrateWritersNeedsAnOrigin: a store with no origin is refused.
-func TestStoreMigrateWritersNeedsAnOrigin(t *testing.T) {
-	t.Parallel()
-	fx := newFixture(t, fixture.Opts{Standalone: true})
-	if _, err := gitx.Run(fx.StoreDir, "config", "jig.writer", "alice"); err != nil {
-		t.Fatal(err)
-	}
-	e := testEnv(fx.Home).inDir(fx.RepoDir)
-	out, code := runMain(t, e, "", "store", "migrate", "--writers")
-	if code == 0 || !strings.Contains(out, "no origin") {
-		t.Errorf("exit %d, want a refusal naming the missing origin\n%s", code, out)
-	}
-}

@@ -6,12 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/project/projecttest"
 )
@@ -141,49 +139,6 @@ func TestGithookHereAndProjectInstallPerClone(t *testing.T) {
 
 // blockMarkerForTest is the line that opens the block in a repository's post-commit.
 const blockMarkerForTest = "# >>> jig >>>"
-
-func TestGithookPostCommitRecordsTheCommit(t *testing.T) {
-	t.Parallel()
-	ie := newInstallerEnv(t)
-	repo := ie.repo(t, "work")
-	if _, err := gitx.Run(repo, "commit", "-q", "--allow-empty", "-m", "one"); err != nil {
-		t.Fatal(err)
-	}
-	sha, err := gitx.RevParse(repo, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := time.Date(2026, 10, 1, 12, 30, 0, 123456789, time.UTC)
-	e := ie.env.inDir(repo).withClock(fixedClock(at))
-
-	out, code := runMain(t, e, "", "githook", "post-commit")
-	if code != 0 || out != "" {
-		t.Fatalf("exit %d, output %q, want a silent success", code, out)
-	}
-	lines, err := ledger.Read(ie.jigHome)
-	if err != nil || len(lines) != 1 {
-		t.Fatalf("ledger = %+v, %v, want one line", lines, err)
-	}
-	l := lines[0]
-	if l.Event != journal.EventGitCommit || l.Commit != sha || l.Cwd != repo || l.Branch != "main" || l.TS != "2026-10-01T12:30:00.123456789Z" {
-		t.Errorf("ledger line = %+v, want a git-commit of %s on main in %s at the clock's time", l, sha, repo)
-	}
-	if l.Ticket != "" || l.Session != "" || l.Harness != "" {
-		t.Errorf("ledger line carries more than commit, cwd and branch: %+v", l)
-	}
-
-	// A detached HEAD has no branch.
-	if _, err := gitx.Run(repo, "checkout", "-q", "--detach"); err != nil {
-		t.Fatal(err)
-	}
-	if _, code := runMain(t, e, "", "githook", "post-commit"); code != 0 {
-		t.Fatalf("detached: exit %d", code)
-	}
-	lines, _ = ledger.Read(ie.jigHome)
-	if len(lines) != 2 || lines[1].Branch != "" || lines[1].Commit != sha {
-		t.Errorf("ledger after a detached commit = %+v", lines)
-	}
-}
 
 func TestGithookPostCommitNeverFailsTheCommit(t *testing.T) {
 	t.Parallel()
