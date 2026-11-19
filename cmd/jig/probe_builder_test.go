@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,5 +156,46 @@ func TestBuilderProbeJoinsTheNextRoundsLedger(t *testing.T) {
 	out, code := runMain(t, e, "", "review", "context", fx.Ticket, "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "builder_probes: 2 (slice a)") || !strings.Contains(out, "probed[2]{round,file:line,outcome,state,seam,mutation,slice}:") {
 		t.Errorf("review context: exit %d, want the builder's probes named by slice\n%s", code, out)
+	}
+}
+
+// TestBuilderProbeRecordedBeforeTheCommitIsCurrentAfterIt: the build skill has
+// a builder probe before committing, so the probe is recorded over uncommitted
+// edits. It records the blob of the file as it is in the worktree, which the
+// commit then makes the blob at HEAD: the probe is current after the commit,
+// and stale once the file is edited again.
+func TestBuilderProbeRecordedBeforeTheCommitIsCurrentAfterIt(t *testing.T) {
+	t.Parallel()
+	r := newVerifyRig(t)
+	if out, code := r.run("claim", r.fx.Ticket, "--slice", "a", "--session", "s-1", "--store", r.fx.StoreDir); code != 0 {
+		t.Fatalf("claim: exit %d\n%s", code, out)
+	}
+	path := filepath.Join(r.fx.RepoDir, "alpha", "alpha.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := string(data) + "\n// the fix\n"
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runMain(t, claimantEnv(r.fx, "s-1"), "", builderProbeArgs(r.fx, "alpha/alpha.go", 5, verifydeliver.ProbeCaught)...)
+	if code != 0 {
+		t.Fatalf("jig probe over an uncommitted edit: exit %d\n%s", code, out)
+	}
+	r.commit("a", "the fix", map[string]string{"alpha/alpha.go": edited})
+	state := func() verifydeliver.SliceProbes {
+		got, err := verifydeliver.BuilderProbesAt(r.st, r.fx.Ticket, "a", "fixture-repo", r.fx.RepoDir, "HEAD", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := state(); got.Current != 1 || got.Stale != 0 {
+		t.Errorf("after the commit: %+v, want the probe current", got)
+	}
+	r.commit("a", "edit again", map[string]string{"alpha/alpha.go": edited + "// more\n"})
+	if got := state(); got.Current != 0 || got.Stale != 1 {
+		t.Errorf("after another edit: %+v, want the probe stale", got)
 	}
 }

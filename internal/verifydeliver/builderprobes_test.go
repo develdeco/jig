@@ -1,6 +1,7 @@
 package verifydeliver
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,5 +176,61 @@ func TestLedgerCheckBuilderDraftHoldsTheRoundsShapeRules(t *testing.T) {
 		if _, err := CheckBuilderDraft(dr); err == nil {
 			t.Errorf("%s: want a refusal", name)
 		}
+	}
+}
+
+// TestLedgerPlacesBuilderProbesAmongClosedAndCleanRounds: the journal says how
+// many rounds had closed, a gate-clean line counting as one, when each builder
+// probe was made, so a probe made after round 2 ranks after round 2's and two
+// probes of one line, read back, leave the later current and the earlier stale.
+func TestLedgerPlacesBuilderProbesAmongClosedAndCleanRounds(t *testing.T) {
+	t.Parallel()
+	rf, blob := ledgerRepo(t)
+	st := &store.Store{Root: t.TempDir()}
+	at := func(sec int) string {
+		return time.Date(2026, 1, 1, 0, 0, sec, 0, time.UTC).Format(time.RFC3339Nano)
+	}
+	probe := func(line int, outcome string) *journal.ProbeNote {
+		return &journal.ProbeNote{Seam: "s", File: "a.go", Line: line, Mutation: "m", Command: "go test", Outcome: outcome, Blob: blob}
+	}
+	for _, l := range []journal.Line{
+		{TS: at(1), Event: journal.EventBuilderProbe, Slice: "s1", Probe: probe(1, ProbeCaught)},
+		{TS: at(2), Event: journal.EventGateRound, Attempt: 1},
+		{TS: at(3), Event: journal.EventBuilderProbe, Slice: "s1", Probe: probe(2, ProbeCaught)},
+		{TS: at(4), Event: journal.EventGateClean, Attempt: 2},
+		{TS: at(5), Event: journal.EventBuilderProbe, Slice: "s1", Probe: probe(3, ProbeSurvived)},
+		{TS: at(6), Event: journal.EventBuilderProbe, Slice: "s1", Probe: probe(3, ProbeCaught)},
+	} {
+		if err := journal.Append(st, ledgerTicket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probes, _, err := ledgerBefore(st, ledgerTicket, 3)
+	if err != nil {
+		t.Fatalf("ledgerBefore: %v", err)
+	}
+	var after []int
+	for _, p := range probes {
+		after = append(after, p.After)
+	}
+	if got := fmt.Sprint(after); got != "[0 1 2 2]" {
+		t.Errorf("rounds closed before each probe = %s, want [0 1 2 2]", got)
+	}
+	if probes[2].At == 0 || probes[3].At <= probes[2].At {
+		t.Errorf("probe times %d then %d, want the later one later", probes[2].At, probes[3].At)
+	}
+	// A round-2 probe of line 2 (made at the close of round 2) outranks the
+	// builder's earlier one, and the builder's re-probe of line 3 the survivor.
+	probes = append(probes, ProbeRecord{Round: 2, File: "a.go", Line: 2, Outcome: ProbeCaught, Blob: blob})
+	probed, _, _, err := currentLedger(rf, probes, nil)
+	if err != nil {
+		t.Fatalf("currentLedger: %v", err)
+	}
+	var got []string
+	for _, p := range probed {
+		got = append(got, p.State)
+	}
+	if want := "current,stale,stale,current,current"; strings.Join(got, ",") != want {
+		t.Errorf("states = %v, want %s", got, want)
 	}
 }
