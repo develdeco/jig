@@ -45,7 +45,7 @@ func PinnedText(d Deps, ticket, head string) Pinned {
 	if base == "" {
 		return Pinned{Note: "no base for the change is known"}
 	}
-	removed, err := gitx.RemovedSentences(d.Clone, base, head, pinnedMinWords)
+	removed, added, err := gitx.RemovedSentences(d.Clone, base, head, pinnedMinWords)
 	if err != nil {
 		return Pinned{Note: fmt.Sprintf("the removed text could not be read: %v", err)}
 	}
@@ -66,10 +66,6 @@ func PinnedText(d Deps, ticket, head string) Pinned {
 	}
 	if len(found) == 0 {
 		return Pinned{}
-	}
-	added, err := gitx.DiffAdded(d.Clone, base, head)
-	if err != nil {
-		return Pinned{Note: fmt.Sprintf("the added lines could not be read: %v", err)}
 	}
 	addedAt := map[string]bool{}
 	for _, a := range added {

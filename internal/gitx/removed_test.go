@@ -57,6 +57,14 @@ func TestRemovedSentences(t *testing.T) {
 		"a.txt": "The quick brown fox jumps over the lazy dog today. Short one here. Is this a long enough question to be taken?\n" +
 			"This line has many words but no final mark at all\n" +
 			"No stop inside.word mid and then eight words are here yes ok. tail words without a mark here\n" +
+			"- A list bullet whose sentence is long enough to be taken as one.\n" +
+			"# A heading whose sentence is long enough to be taken as one.\n" +
+			"    // A comment whose sentence is long enough to be taken as one.\n" +
+			"5. **Shown, never refused.** The rows never change the exit code of any run.\n" +
+			"- one two three four five six seven.\n" +
+			"- Exactly eight words are in this one here.\n" +
+			"> 2026 plus more words follow here to make up eight words.\n" +
+			"_Emphasis closes here and the sentence has eight words._ Then comes another sentence of eight words in all.\n" +
 			"kept line stays put\n",
 		"gone.txt": "A whole file that is deleted keeps its sentences as removed ones!\n",
 		"blob.bin": "a\x00b. one two three four five six seven eight nine.\n",
@@ -69,7 +77,7 @@ func TestRemovedSentences(t *testing.T) {
 	}
 	head := commit("c2")
 
-	got, err := RemovedSentences(dir, base, head, 8)
+	got, added, err := RemovedSentences(dir, base, head, 8)
 	if err != nil {
 		t.Fatalf("RemovedSentences: %v", err)
 	}
@@ -77,14 +85,27 @@ func TestRemovedSentences(t *testing.T) {
 		{Path: "a.txt", Text: "The quick brown fox jumps over the lazy dog today."},
 		{Path: "a.txt", Text: "Is this a long enough question to be taken?"},
 		{Path: "a.txt", Text: "No stop inside.word mid and then eight words are here yes ok."},
+		{Path: "a.txt", Text: "A list bullet whose sentence is long enough to be taken as one."},
+		{Path: "a.txt", Text: "A heading whose sentence is long enough to be taken as one."},
+		{Path: "a.txt", Text: "A comment whose sentence is long enough to be taken as one."},
+		{Path: "a.txt", Text: "The rows never change the exit code of any run."},
+		{Path: "a.txt", Text: "Exactly eight words are in this one here."},
+		{Path: "a.txt", Text: "2026 plus more words follow here to make up eight words."},
+		{Path: "a.txt", Text: "_Emphasis closes here and the sentence has eight words."},
+		{Path: "a.txt", Text: "Then comes another sentence of eight words in all."},
 		{Path: "gone.txt", Text: "A whole file that is deleted keeps its sentences as removed ones!"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("RemovedSentences = %+v, want %+v", got, want)
 	}
+	// The lines the same diff adds, as DiffAdded reads them.
+	wantAdded := []AddedLine{{Path: "a.txt", Line: 2, Text: "A brand new line with plenty of words in it to count as added."}}
+	if !reflect.DeepEqual(added, wantAdded) {
+		t.Fatalf("added = %+v, want %+v", added, wantAdded)
+	}
 
-	none, err := RemovedSentences(dir, head, head, 8)
-	if err != nil || len(none) != 0 {
+	none, noneAdded, err := RemovedSentences(dir, head, head, 8)
+	if err != nil || len(none) != 0 || len(noneAdded) != 0 {
 		t.Fatalf("an empty change removes %+v (err %v), want nothing", none, err)
 	}
 }

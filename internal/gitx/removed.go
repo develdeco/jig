@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // RemovedSentence is one sentence a diff removes: Path is the file it left, as
@@ -16,22 +17,36 @@ type RemovedSentence struct {
 }
 
 // RemovedSentences returns the sentences base..head removes in dir, in diff
-// order, with renames off as in DiffAdded (a renamed file is a deletion and an
-// addition). A removed line holds one sentence or several: each is cut after a
-// ".", "!" or "?" that ends the line or is followed by a space, and is kept when
-// it ends in one of them and has minWords or more words. A binary file and a
+// order, and the lines it adds (as DiffAdded reads them), both from the one
+// diff, with renames off as in DiffAdded (a renamed file is a deletion and an
+// addition). A removed line holds one sentence or several: each starts at its
+// first word that holds a letter or digit (the list, quote, heading and comment
+// marks before it are no part of it), is cut after a ".", "!" or "?" that ends
+// the line or is followed by a space (emphasis marks "*" and "_" may close it
+// first), and is kept when it has minWords or more words. A binary file and a
 // submodule remove none. Whether a file's new version still holds a sentence is
 // for the caller to ask.
-func RemovedSentences(dir, base, head string, minWords int) ([]RemovedSentence, error) {
+func RemovedSentences(dir, base, head string, minWords int) ([]RemovedSentence, []AddedLine, error) {
 	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
 		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
-		return nil, callError(args, stderr.String(), err)
+		return nil, nil, callError(args, stderr.String(), err)
 	}
+	added, err := parseAdded(stdout.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	removed, err := parseRemoved(stdout.String(), minWords)
+	return removed, added, err
+}
+
+// parseRemoved reads the removed lines of RemovedSentences' patch, which has
+// no context lines.
+func parseRemoved(patch string, minWords int) ([]RemovedSentence, error) {
 	var out []RemovedSentence
 	path, inHeader := "", false
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	for _, line := range strings.Split(patch, "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
@@ -70,25 +85,59 @@ func oldSidePath(line string) (string, error) {
 	return strings.TrimPrefix(name, "a/"), nil
 }
 
-// splitSentences cuts a line into the sentences that end in ".", "!" or "?"
-// and have minWords or more words. A cut falls after one of those marks that
-// ends the line or is followed by a space; text after the last mark is not a
-// sentence.
+// splitSentences cuts a line into its sentences and keeps those of minWords or
+// more words. A sentence ends at a ".", "!" or "?" that ends the line or is
+// followed by a space, with any "*" or "_" that closes emphasis right after it
+// (the emphasis is no part of the sentence); text after the last mark is not a
+// sentence. It starts at its first word that holds a letter or digit: the words
+// before it (a list dash, a quote or heading mark, a comment marker) are
+// neither part of it nor counted, so a file that quotes the sentence without
+// the mark still holds it.
 func splitSentences(line string, minWords int) []string {
 	var out []string
 	start := 0
 	for i := 0; i < len(line); i++ {
 		c := line[i]
-		if (c != '.' && c != '!' && c != '?') || (i+1 < len(line) && line[i+1] != ' ' && line[i+1] != '\t') {
+		if c != '.' && c != '!' && c != '?' {
 			continue
 		}
-		s := strings.TrimSpace(line[start : i+1])
-		start = i + 1
-		if len(strings.Fields(s)) >= minWords {
+		j := i + 1
+		for j < len(line) && (line[j] == '*' || line[j] == '_') {
+			j++
+		}
+		if j < len(line) && line[j] != ' ' && line[j] != '\t' {
+			continue
+		}
+		seg := line[start : i+1]
+		start = j
+		if s, words := sentenceFrom(seg); words >= minWords {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// sentenceFrom is seg from its first word that holds a letter or digit, and
+// the count of the words from there; "" and 0 when no word holds one.
+func sentenceFrom(seg string) (string, int) {
+	off := 0
+	for {
+		rest := seg[off:]
+		trimmed := strings.TrimLeft(rest, " \t")
+		off += len(rest) - len(trimmed)
+		word := trimmed
+		if k := strings.IndexAny(trimmed, " \t"); k >= 0 {
+			word = trimmed[:k]
+		}
+		if word == "" {
+			return "", 0
+		}
+		if strings.IndexFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) >= 0 {
+			s := seg[off:]
+			return s, len(strings.Fields(s))
+		}
+		off += len(word)
+	}
 }
 
 // GrepHit is one line of a tracked file that holds a searched string: Path is
@@ -102,8 +151,8 @@ type GrepHit struct {
 
 // GrepFixed returns every line of the text files tracked at rev in dir that
 // holds any of patterns verbatim, as fixed strings, in path order. A binary
-// file is skipped, and no match is an empty result, not an error. rev is
-// resolved to a commit first. An empty pattern is dropped: it would match every
+// file is skipped, and no match is an empty result, not an error. A rev git
+// cannot resolve is git's own error. An empty pattern is dropped: it would match every
 // line.
 func GrepFixed(dir, rev string, patterns []string) ([]GrepHit, error) {
 	var kept []string
@@ -115,11 +164,6 @@ func GrepFixed(dir, rev string, patterns []string) ([]GrepHit, error) {
 	if len(kept) == 0 {
 		return nil, nil
 	}
-	full, err := Run(dir, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
-	if err != nil {
-		return nil, fmt.Errorf("gitx: grep fixed: rev %q does not resolve to a commit: %w", rev, err)
-	}
-	full = strings.TrimSpace(full)
 	f, err := os.CreateTemp("", "jig-grep-*")
 	if err != nil {
 		return nil, fmt.Errorf("gitx: grep fixed: %w", err)
@@ -133,7 +177,7 @@ func GrepFixed(dir, rev string, patterns []string) ([]GrepHit, error) {
 		return nil, fmt.Errorf("gitx: grep fixed: %w", err)
 	}
 	args := []string{"-c", "core.quotepath=false", "grep", "-z", "-n", "-I", "-F", "--no-color", "--no-textconv",
-		"-f", f.Name(), full, "--"}
+		"-f", f.Name(), rev, "--"}
 	var stdout, stderr bytes.Buffer
 	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
 		if stderr.Len() == 0 && stdout.Len() == 0 {
@@ -156,7 +200,7 @@ func GrepFixed(dir, rev string, patterns []string) ([]GrepHit, error) {
 		if err != nil {
 			return nil, fmt.Errorf("gitx: grep fixed: unexpected line number in %q", rec)
 		}
-		hits = append(hits, GrepHit{Path: strings.TrimPrefix(parts[0], full+":"), Line: n, Text: parts[2]})
+		hits = append(hits, GrepHit{Path: strings.TrimPrefix(parts[0], rev+":"), Line: n, Text: parts[2]})
 	}
 	return hits, nil
 }
