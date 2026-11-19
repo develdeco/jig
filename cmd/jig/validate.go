@@ -605,13 +605,16 @@ func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBl
 // or a closing parenthesis, in a decision wherever the brief puts it (a bullet,
 // a numbered item or a paragraph, under any heading, bold or not, the tag on
 // the first line or a wrapped one). A block counts once however many tags it
-// holds. Prose that explains the tag (it is quoted or backticked) is not one.
+// holds. A tag inside an inline code span or a double-quoted span is a
+// mention, prose that explains the tag or quotes a line naming it, not a
+// decision's tag: those spans are dropped from a block before it is matched.
 func defaultedDecisions(brief []byte) int {
 	n := 0
 	var block []string
 	inFence := false
 	flush := func() {
-		if defaultedTag.MatchString(strings.Join(block, " ")) {
+		text := quotation.ReplaceAllString(dropCodeSpans(strings.Join(block, " ")), "")
+		if defaultedTag.MatchString(text) {
 			n++
 		}
 		block = block[:0]
@@ -640,9 +643,58 @@ func defaultedDecisions(brief []byte) int {
 var listItem = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s`)
 
 // defaultedTag matches the tag: defaulted, then a date or a closing
-// parenthesis (or "(defaulted;" and "(defaulted,"), not preceded by a quote or
-// backtick (prose about the tag).
-var defaultedTag = regexp.MustCompile(`\(defaulted[;,]|(?:^|[^"` + "`" + `A-Za-z0-9])defaulted(?:\s+\d{4}-\d{2}-\d{2}|\s*\))`)
+// parenthesis (or "(defaulted;" and "(defaulted,"), not inside a longer word.
+// It is matched only on text whose code spans and quotations, the mentions of
+// the tag, are already dropped.
+var defaultedTag = regexp.MustCompile(`\(defaulted[;,]|(?:^|[^A-Za-z0-9])defaulted(?:\s+\d{4}-\d{2}-\d{2}|\s*\))`)
+
+// quotation matches a double-quoted span, straight or curly. Single quotes
+// are left alone: an apostrophe would pair with the next one.
+var quotation = regexp.MustCompile(`"[^"]*"|“[^”]*”`)
+
+// dropCodeSpans removes s's inline code spans as CommonMark reads them: a run
+// of backticks opens a span and the next run of the same length closes it. A
+// run that nothing closes stays as text.
+func dropCodeSpans(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		open := backtickRun(s, i)
+		end := -1
+		for j := i + open; j < len(s); {
+			if s[j] != '`' {
+				j++
+				continue
+			}
+			run := backtickRun(s, j)
+			if run == open {
+				end = j + run
+				break
+			}
+			j += run
+		}
+		if end < 0 {
+			b.WriteString(s[i : i+open])
+			i += open
+			continue
+		}
+		i = end
+	}
+	return b.String()
+}
+
+// backtickRun is the length of the run of backticks that starts at s[i].
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
+}
 
 // checkNext is the help --check prints: show the person the brief and ask
 // about its decisions, then validate. defaulted is the number of decisions
