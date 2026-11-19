@@ -73,7 +73,7 @@ func TestPureRuleJigBuiltIsWhatTheJournalRecordsOfTheBranch(t *testing.T) {
 	} {
 		// No slices: the slice states are read only when the journal says
 		// nothing, and with none there is nothing to read.
-		got, err := jigBuilt(nil, "T-1", nil, c.lines)
+		got, err := jigBuilt(nil, "a-ticket", nil, c.lines)
 		if err != nil || got != c.want {
 			t.Errorf("%s: jigBuilt = %v (%v), want %v", c.name, got, err, c.want)
 		}
