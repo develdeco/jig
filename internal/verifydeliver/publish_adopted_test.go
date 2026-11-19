@@ -9,7 +9,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // TestPublishShipsAnAdoptedBranch is the hand-written-branch loop's last step:
@@ -107,13 +106,9 @@ func TestPublishShipsAnAdoptedBranch(t *testing.T) {
 		}
 	})
 
-	step(t, "the build lease follows origin's copy, which holds everything jig built", func(t *testing.T) {
-		buildLease := buildLeaseOf(t, fx, ticket)
-		if _, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build); err != nil {
-			t.Fatalf("build Acquire after the publish: %v", err)
-		}
-		if got := run(t, buildLease, "rev-parse", "HEAD"); got != head {
-			t.Errorf("the build lease is at %s after the publish, want origin's copy %s", got, head)
+	step(t, "the clone's branch is origin's copy, which holds everything jig built", func(t *testing.T) {
+		if got := run(t, fx.RepoDir, "rev-parse", "refs/heads/"+branch); got != head {
+			t.Errorf("the clone's %s is at %s after the publish, want origin's copy %s", branch, got, head)
 		}
 	})
 
@@ -271,12 +266,8 @@ func TestPublishUpdatesThePRTheAuthorOpened(t *testing.T) {
 		if report.Head["fixture-repo"] != head || head != tip {
 			t.Fatalf("origin's %s = %s (report head %q), want the author's %s, unchanged", branch, head, report.Head["fixture-repo"], tip)
 		}
-		buildLease, perr := pool.Dir(fx.Home, "fixture-repo", ticket, pool.Build)
-		if perr != nil {
-			t.Fatal(perr)
-		}
-		if _, err := os.Stat(buildLease); !os.IsNotExist(err) {
-			t.Errorf("a build lease exists at %s (stat err %v): publishing a branch jig built nothing on needs none", buildLease, err)
+		if _, err := os.Stat(filepath.Join(fx.Home, "pool")); !os.IsNotExist(err) {
+			t.Errorf("a pool directory exists (stat err %v): publishing a branch jig built nothing on needs none", err)
 		}
 	})
 }

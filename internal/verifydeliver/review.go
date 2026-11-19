@@ -754,29 +754,29 @@ func normalizeRepoRelPath(p string) (string, error) {
 // through a symlink resolved. An absolute path that is not inside the
 // worktree as spelled is therefore compared once more with both sides
 // resolved, which compares the files rather than their spellings.
-func relativizeReviewedPath(leaseDir, p string) (string, bool) {
+func relativizeReviewedPath(cloneDir, p string) (string, bool) {
 	if norm, err := normalizeRepoRelPath(p); err == nil {
 		return norm, true
 	}
-	return relativizeAbsolute(leaseDir, p)
+	return relativizeAbsolute(cloneDir, p)
 }
 
 // relativizeAbsolute is relativizeReviewedPath's reading of an absolute path:
-// p relative to leaseDir, normalized, when it is inside the lease as spelled or
+// p relative to cloneDir, normalized, when it is inside the lease as spelled or
 // once both are resolved. A path that is not absolute, or is not inside the
 // lease, or a lease that is not given, is false.
-func relativizeAbsolute(leaseDir, p string) (string, bool) {
-	if leaseDir == "" || !filepath.IsAbs(p) {
+func relativizeAbsolute(cloneDir, p string) (string, bool) {
+	if cloneDir == "" || !filepath.IsAbs(p) {
 		return "", false
 	}
-	absLease, err := filepath.Abs(leaseDir)
+	absClone, err := filepath.Abs(cloneDir)
 	if err != nil {
 		return "", false
 	}
-	if norm, ok := relativeInside(absLease, p); ok {
+	if norm, ok := relativeInside(absClone, p); ok {
 		return norm, true
 	}
-	resolvedLease, err := filepath.EvalSymlinks(absLease)
+	resolvedClone, err := filepath.EvalSymlinks(absClone)
 	if err != nil {
 		return "", false
 	}
@@ -784,7 +784,7 @@ func relativizeAbsolute(leaseDir, p string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return relativeInside(resolvedLease, resolved)
+	return relativeInside(resolvedClone, resolved)
 }
 
 // relativeInside returns p relative to dir, normalized, when p is inside
@@ -1045,15 +1045,15 @@ func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, err
 //
 // Beside the scope and base it says how the head relates to the head the delta
 // starts from (kind) and that head (prior): lineOther and "" for a full scope.
-func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
+func resolveScope(st *store.Store, ticket, cloneDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
 			return "", "", lineOther, "", "", fmt.Errorf("verifydeliver: review: read round %d report.yaml: %w", round-1, perr)
 		}
 		if prior != "" {
-			if isAnc, ancErr := gitx.IsAncestor(leaseDir, prior, head); ancErr == nil && isAnc {
-				kind, ownTree, merge, lerr := classifyLineCarried(leaseDir, prior, head, targetRef)
+			if isAnc, ancErr := gitx.IsAncestor(cloneDir, prior, head); ancErr == nil && isAnc {
+				kind, ownTree, merge, lerr := classifyLineCarried(cloneDir, prior, head, targetRef)
 				if lerr != nil {
 					return "", "", lineOther, "", "", lerr
 				}
@@ -1068,7 +1068,7 @@ func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target
 		}
 	}
 
-	base, err = scopebase.Resolve(st, ticket, leaseDir, repoName, target, head)
+	base, err = scopebase.Resolve(st, ticket, cloneDir, repoName, target, head)
 	if err != nil {
 		return "", "", lineOther, "", "", err
 	}
@@ -1091,8 +1091,8 @@ type scopeDiff struct {
 // a round with no open findings yet (round 1, or every round
 // before the first one that reports any) passes nil. Only the reviewer
 // source (below) ever calls this; the scripted source never does.
-func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDiff, error) {
-	changed, deleted, err := gitx.DiffNameStatus(leaseDir, base, head)
+func computeScopeDiff(cloneDir, base, head string, openFiles []string) (scopeDiff, error) {
+	changed, deleted, err := gitx.DiffNameStatus(cloneDir, base, head)
 	if err != nil {
 		return scopeDiff{}, fmt.Errorf("verifydeliver: review: diff changed and deleted files: %w", err)
 	}
@@ -1113,7 +1113,7 @@ func computeScopeDiff(leaseDir, base, head string, openFiles []string) (scopeDif
 	}
 	// One question for every open file: a repository gitx reads itself answers
 	// them in process, and one it leaves to git costs one process, not two a file.
-	exist, err := gitx.FilesAtRev(leaseDir, head, norms)
+	exist, err := gitx.FilesAtRev(cloneDir, head, norms)
 	if err != nil {
 		return scopeDiff{}, fmt.Errorf("verifydeliver: review: check the open finding files at head: %w", err)
 	}
@@ -1247,11 +1247,11 @@ type RoundRepo struct {
 	// stacked ticket's parent branch while the parent has not merged, "" for
 	// origin/<Target>.
 	MergeRef string
-	// LeaseDir is the repository the round reads the repo in: its clone, which
+	// CloneDir is the repository the round reads the repo in: its clone, which
 	// the round never changes. Head is the commit of the branch the round
 	// reviews there ("" reads the repository's HEAD, which a test of the
 	// request alone leaves at the head).
-	LeaseDir string
+	CloneDir string
 	Head     string
 	// OperatorClone is the operator's mapped clone of the repo, or "".
 	OperatorClone string
@@ -1269,7 +1269,7 @@ type RoundInput struct {
 	Store    *store.Store
 	Ticket   string
 	Round    int
-	LeaseDir string
+	CloneDir string
 	// Head is RoundRepo.Head of the one repo.
 	Head     string
 	RepoName string
@@ -1277,7 +1277,7 @@ type RoundInput struct {
 	// MergeRef is RoundRepo.MergeRef of the one repo.
 	MergeRef string
 	// Repos are the repos of a round in a project of several repos. When set
-	// they replace LeaseDir, RepoName, Target, OperatorClone, Manifest and
+	// they replace CloneDir, RepoName, Target, OperatorClone, Manifest and
 	// SlicePasses, which describe the one repo of a round over one, and the
 	// round names its files "<repo>/<path>" (roundrepos.go).
 	Repos []RoundRepo
@@ -1341,7 +1341,7 @@ func (in RoundInput) repoList() []RoundRepo {
 		return in.Repos
 	}
 	return []RoundRepo{{
-		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir, Head: in.Head,
+		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, CloneDir: in.CloneDir, Head: in.Head,
 		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses,
 	}}
 }
@@ -1364,18 +1364,18 @@ func (req ReviewRequest) files() roundFiles {
 func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 	rf := req.files()
 	if !in.qualified() {
-		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.LeaseDir, req.HeadSHA
-		if in.LeaseDir != "" {
-			rf.repos[0].Worktree = ReviewWorktreeDir(in.LeaseDir, in.Ticket)
+		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.CloneDir, req.HeadSHA
+		if in.CloneDir != "" {
+			rf.repos[0].Worktree = ReviewWorktreeDir(in.CloneDir, in.Ticket)
 		}
 		return rf
 	}
 	for i := range rf.repos {
 		for _, r := range in.Repos {
 			if r.Name == rf.repos[i].Name {
-				rf.repos[i].Dir = r.LeaseDir
-				if r.LeaseDir != "" {
-					rf.repos[i].Worktree = ReviewWorktreeDir(r.LeaseDir, in.Ticket)
+				rf.repos[i].Dir = r.CloneDir
+				if r.CloneDir != "" {
+					rf.repos[i].Worktree = ReviewWorktreeDir(r.CloneDir, in.Ticket)
 				}
 			}
 		}
@@ -1451,7 +1451,7 @@ type RepoPrep struct {
 func (in RoundInput) forRepo(r RoundRepo) RoundInput {
 	one := in
 	one.Repos = nil
-	one.LeaseDir, one.RepoName, one.Target, one.MergeRef = r.LeaseDir, r.Name, r.Target, r.MergeRef
+	one.CloneDir, one.RepoName, one.Target, one.MergeRef = r.CloneDir, r.Name, r.Target, r.MergeRef
 	one.OperatorClone, one.Manifest, one.SlicePasses = r.OperatorClone, r.Manifest, r.SlicePasses
 	return one
 }
@@ -1515,15 +1515,15 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	files := roundFiles{qualified: qualified}
 	var prep ReviewPrep
 	for _, r := range repos {
-		head, err := gitx.RevParse(r.LeaseDir, orHEAD(r.Head))
+		head, err := gitx.RevParse(r.CloneDir, orHEAD(r.Head))
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve the head: %w", err))
 		}
-		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
+		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.CloneDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
-		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.LeaseDir, Head: head, Man: r.Manifest})
+		files.repos = append(files.repos, roundRepo{Name: r.Name, Dir: r.CloneDir, Head: head, Man: r.Manifest})
 		carriedRef := ""
 		if carried != "" {
 			carriedRef = mergeRefOf(r.MergeRef, r.Target)
@@ -1569,7 +1569,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	changedAny := false
 	for i, r := range repos {
 		rp := &prep.Repos[i]
-		diff, err := computeScopeDiff(r.LeaseDir, rp.Base, rp.Head, openByRepo[r.Name])
+		diff, err := computeScopeDiff(r.CloneDir, rp.Base, rp.Head, openByRepo[r.Name])
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
@@ -1614,7 +1614,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		rp := prep.Repos[i]
 		fullBases[r.Name] = rp.Base
 		if rp.Scope != "full" {
-			if fullBases[r.Name], err = scopebase.Resolve(in.Store, in.Ticket, r.LeaseDir, r.Name, r.Target, rp.Head); err != nil {
+			if fullBases[r.Name], err = scopebase.Resolve(in.Store, in.Ticket, r.CloneDir, r.Name, r.Target, rp.Head); err != nil {
 				return ReviewPrep{}, inRepo(qualified, r.Name, err)
 			}
 		}
@@ -1626,7 +1626,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	// The store references of the whole change, from the same bases.
 	var refRepos []storeRefRepo
 	for i, r := range repos {
-		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.LeaseDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
+		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.CloneDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
 	}
 	prep.StoreRefs, err = storeRefsOf(in.Store, in.Ticket, in.Round, refRepos)
 	if err != nil {

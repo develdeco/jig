@@ -200,9 +200,9 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 func reviewerHostDirs(in RoundInput) []hostDir {
 	var dirs []hostDir
 	for _, r := range in.repoList() {
-		dirs = append(dirs, hostDir{r.LeaseDir, "<clone>"})
-		if r.LeaseDir != "" {
-			dirs = append(dirs, hostDir{ReviewWorktreeDir(r.LeaseDir, in.Ticket), "<worktree>"})
+		dirs = append(dirs, hostDir{r.CloneDir, "<clone>"})
+		if r.CloneDir != "" {
+			dirs = append(dirs, hostDir{ReviewWorktreeDir(r.CloneDir, in.Ticket), "<worktree>"})
 		}
 	}
 	dirs = append(dirs, hostDir{in.Home, "<jig home>"})

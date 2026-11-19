@@ -417,7 +417,7 @@ func (s *Store) SetMigratedTicket(ticket, oldID, title, body string, blockedBy [
 //
 // A ticket.yaml ReadTicket refuses (an unknown key, a newer schema_version)
 // is returned as is: its *axi.Error already carries its own code and the
-// next step, which matters on this path, where every build lease, gate
+// next step, which matters on this path, where every build, gate
 // round and publish would otherwise fail with no more than a bare message.
 //
 // A recorded branch equal to target, one git itself would refuse as a ref

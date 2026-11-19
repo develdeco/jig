@@ -289,11 +289,11 @@ func (p Prepared) Covered() []PreparedRepo {
 func (p Prepared) roundInput(d Deps) RoundInput {
 	in := RoundInput{Store: d.Store, Ticket: p.Ticket, Round: p.Round, Home: d.Home, Branch: p.Branch}
 	if !p.qualified() {
-		in.LeaseDir, in.Head, in.RepoName, in.Target = operatorClone(d, p.Repo), p.Head, p.Repo, p.Target
+		in.CloneDir, in.Head, in.RepoName, in.Target = operatorClone(d, p.Repo), p.Head, p.Repo, p.Target
 		return in
 	}
 	for _, r := range p.Repos {
-		in.Repos = append(in.Repos, RoundRepo{Name: r.Repo, Target: r.Target, LeaseDir: operatorClone(d, r.Repo), Head: r.Head})
+		in.Repos = append(in.Repos, RoundRepo{Name: r.Repo, Target: r.Target, CloneDir: operatorClone(d, r.Repo), Head: r.Head})
 	}
 	return in
 }

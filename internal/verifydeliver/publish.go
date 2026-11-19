@@ -1129,7 +1129,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 	// What the reviewed head has for a final run, from the journal's
 	// final-oracle lines at exactly that commit, never from a working tree,
-	// which may be another branch or a later head when the gate lease is gone.
+	// which may be another branch or a later head.
 	// Publish runs nothing: it says what a builder's `jig verify --final` left.
 	reviewed := t.reviewedHead()
 	if reviewed == "" {
@@ -1443,7 +1443,7 @@ type BodyReport struct {
 // pr-body line: the first step of publishing when an agent does the pushing.
 // A ticket that publishes in several repos gets a body for each (or the one
 // o.Repo names), each naming the pull requests of the others the journal
-// records and "pending" for those it does not. It changes no lease and no
+// records and "pending" for those it does not. It changes no clone and no
 // branch, runs nothing, and needs the reviewed head to be the tip of the
 // clone's branch or of origin's: a body for a head that is neither describes a
 // pull request nobody will open.
@@ -1642,7 +1642,7 @@ type RecordReport struct {
 // posts the notes on it (postReviewNotes), matching earlier posts by the parsed
 // pull request without case and journaling its canonical url. A failed post is
 // a warning, and the pull request stays recorded; notes that could not be
-// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no lease and no branch and pushes
+// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no clone and no branch and pushes
 // nothing of the repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket

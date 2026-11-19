@@ -78,7 +78,7 @@ func TestExcerptFailedNamesTheCause(t *testing.T) {
 func TestIntentExcerptNoOperatorClone(t *testing.T) {
 	t.Parallel()
 	dir, head := newIntentInferLease(t)
-	in := RoundInput{Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir, RepoName: "fixture-repo", Target: "main"}
+	in := RoundInput{Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir, RepoName: "fixture-repo", Target: "main"}
 
 	path, note := intentExcerpt(in, head, []string{"a.go"})
 	assertNoExcerpt(t, path, note, "no mapped clone recorded for this repo")
@@ -88,7 +88,7 @@ func TestIntentExcerptBadOperatorClone(t *testing.T) {
 	t.Parallel()
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: t.TempDir(), // not a git repo
 	}
 
@@ -100,7 +100,7 @@ func TestIntentExcerptBadTargetNoMergeBase(t *testing.T) {
 	t.Parallel()
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "does-not-exist", OperatorClone: dir,
 	}
 
@@ -113,7 +113,7 @@ func TestIntentExcerptNoLocalSessions(t *testing.T) {
 	userHome, jigHome := newIntentInferHomes(t) // empty: no .claude/projects at all
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: jigHome, UserHome: userHome,
 	}
@@ -130,7 +130,7 @@ func TestIntentExcerptNoUserHome(t *testing.T) {
 	_, jigHome := newIntentInferHomes(t)
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: jigHome,
 	}
@@ -149,7 +149,7 @@ func TestIntentExcerptNoJigHome(t *testing.T) {
 	diffFiles := []string{"alpha/alpha.go", "alpha/percent.go"}
 	writeSyntheticClaudeSession(t, userHome, "session-match", dir, diffFiles, intentInferSessionMTime)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		UserHome: userHome,
 	}
@@ -183,7 +183,7 @@ func TestIntentExcerptDiscoverErrorNamesCause(t *testing.T) {
 	}
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: jigHome, UserHome: homeDir,
 	}
@@ -198,7 +198,7 @@ func TestIntentExcerptBelowMatchThreshold(t *testing.T) {
 	dir, head := newIntentInferLease(t)
 	writeSyntheticClaudeSession(t, homeDir, "session-unrelated", dir, []string{"unrelated/file.go"}, intentInferSessionMTime)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: jigHome, UserHome: homeDir,
 	}
@@ -224,7 +224,7 @@ func TestIntentExcerptCannotWriteExcerpt(t *testing.T) {
 	diffFiles := []string{"alpha/alpha.go", "alpha/percent.go"}
 	writeSyntheticClaudeSession(t, homeDir, "session-match", dir, diffFiles, intentInferSessionMTime)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: notADir, UserHome: homeDir,
 	}
@@ -244,7 +244,7 @@ func TestIntentExcerptWritesTheMatchingSessionUnderTheJigHome(t *testing.T) {
 	diffFiles := []string{"alpha/alpha.go", "alpha/percent.go"}
 	writeSyntheticClaudeSession(t, homeDir, "session-match", dir, diffFiles, intentInferSessionMTime)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 		Home: jigHome, UserHome: homeDir,
 	}
@@ -296,7 +296,7 @@ func TestPrepareReviewRequestPointsAtTheExcerptOnlyWhenNoIntentIsStated(t *testi
 			commitReviewLease(t, dir, "change")
 			writeSyntheticClaudeSession(t, homeDir, "session-match", dir, []string{"alpha/alpha.go", "alpha/percent.go"}, intentInferSessionMTime)
 			in := RoundInput{
-				Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+				Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 				RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
 				Home: jigHome, UserHome: homeDir, Intent: tc.intent, Recorded: true,
 			}
@@ -342,7 +342,7 @@ func TestPrepareReviewRequestSaysWhyThereIsNoExcerpt(t *testing.T) {
 	writeReviewFile(t, dir, "alpha/alpha.go", "package alpha\n")
 	commitReviewLease(t, dir, "change")
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 		RepoName: "fixture-repo", Target: "main", Intent: Intent{Source: IntentSourceNone},
 	}
 
@@ -364,7 +364,7 @@ func TestPrepareReviewRequestWritesNothingForARoundWithNothingToReview(t *testin
 	for _, recorded := range []bool{false, true} {
 		dir := newReviewLease(t, "main")
 		in := RoundInput{
-			Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
+			Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir,
 			RepoName: "fixture-repo", Target: "main", Intent: Intent{Source: IntentSourceBrief, Path: "/x/brief.md"},
 			Recorded: recorded,
 		}

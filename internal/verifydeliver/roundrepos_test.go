@@ -551,10 +551,10 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	}
 }
 
-// oneRepoIn is the files of a round over one repo read in leaseDir, whose
+// oneRepoIn is the files of a round over one repo read in cloneDir, whose
 // manifest declares the oracles named.
-func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
-	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Worktree: leaseDir, Man: oraclesManifest(oracleNames)}}}
+func oneRepoIn(cloneDir string, oracleNames []string) roundFiles {
+	return roundFiles{repos: []roundRepo{{Dir: cloneDir, Worktree: cloneDir, Man: oraclesManifest(oracleNames)}}}
 }
 
 // TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a

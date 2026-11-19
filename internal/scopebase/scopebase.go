@@ -15,8 +15,8 @@ import (
 // Resolve is the base of the whole change: merge-base(origin/target, head),
 // falling back to the ticket's recorded start sha only when the merge-base
 // call itself fails (e.g. no such ref). A full-scope review starts here.
-func Resolve(st *store.Store, ticket, leaseDir, repoName, target, head string) (string, error) {
-	mergeBase, mbErr := gitx.MergeBase(leaseDir, "origin/"+target, head)
+func Resolve(st *store.Store, ticket, cloneDir, repoName, target, head string) (string, error) {
+	mergeBase, mbErr := gitx.MergeBase(cloneDir, "origin/"+target, head)
 	if mbErr == nil {
 		return mergeBase, nil
 	}

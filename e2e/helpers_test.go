@@ -244,12 +244,6 @@ func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, env jigEn
 	return fx, env
 }
 
-// poolBuildLeaseDir returns the build lease directory for ticket under home,
-// matching pool.Acquire's layout: <home>/pool/<repoName>/<ticket>.
-func poolBuildLeaseDir(home, repoName, ticket string) string {
-	return filepath.Join(home, "pool", repoName, ticket)
-}
-
 // pinnedIdentityEnv pins author/committer identity and dates for scripted
 // test commits (divergent store pushes, target-branch moves), so any commit
 // this suite makes outside the fake backend is still deterministic.

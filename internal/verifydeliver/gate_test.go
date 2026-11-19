@@ -17,7 +17,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -719,12 +718,8 @@ func TestGateFailsWithTheRefusalOfTicketBranch(t *testing.T) {
 			_, err = Gate(d, NewFakeGateSource(fx.ScenarioDir), GateOpts{Ticket: fx.Ticket})
 			wantAxiCode(t, err, tc.wantCode)
 
-			gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-			if err != nil {
-				t.Fatalf("resolve gate lease: %v", err)
-			}
-			if _, err := os.Stat(gateLease); !os.IsNotExist(err) {
-				t.Fatalf("the refused Gate left a gate lease at %s (stat err %v), want none", gateLease, err)
+			if _, err := os.Stat(filepath.Join(fx.Home, "pool")); !os.IsNotExist(err) {
+				t.Fatalf("the refused Gate left a pool directory (stat err %v), want none", err)
 			}
 			restore(t)
 		})

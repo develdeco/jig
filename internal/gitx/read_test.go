@@ -44,7 +44,6 @@ func TestInProcessReadsMatchGit(t *testing.T) {
 	t.Run("subject", func(t *testing.T) { checkSubject(t, fx) })
 	t.Run("unmerged", func(t *testing.T) { checkUnmerged(t, fx) })
 	t.Run("git paths", func(t *testing.T) { checkGitPaths(t, fx) })
-	t.Run("work tree probe", func(t *testing.T) { checkProbe(t, fx) })
 	t.Run("tree entries", func(t *testing.T) { checkTreeEntries(t, fx) })
 	t.Run("paths in a commit", func(t *testing.T) { checkHasPathAt(t, fx) })
 	t.Run("blob content", func(t *testing.T) { checkBlobAt(t, fx) })
@@ -512,33 +511,6 @@ func checkGitPaths(t *testing.T, fx *readFixture) {
 	got, err := GitPaths(fx.sub, odd[1], odd[2])
 	if err != nil || len(got) != 2 || canonPath(got[0]) != canonPath(want[0]) || canonPath(got[1]) != canonPath(want[1]) {
 		t.Errorf("GitPaths(odd names) = %v, %v; git %v", got, err, want)
-	}
-}
-
-func checkProbe(t *testing.T, fx *readFixture) {
-	for name, dir := range map[string]string{"top": fx.main, "subdirectory": fx.sub, "linked worktree": fx.wt, "gitfile": fx.holder, "separate git dir": fx.sep} {
-		t.Run(name, func(t *testing.T) {
-			want := mustGit(t, dir, "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree", "--show-prefix")
-			got, ok := workTreeProbeInProcess(dir, os.LookupEnv)
-			if !ok || got != want {
-				t.Errorf("in process %q, %v; git %q", got, ok, want)
-			}
-			if got, err := WorkTreeProbe(dir); err != nil || got != want {
-				t.Errorf("WorkTreeProbe = %q, %v; git %q", got, err, want)
-			}
-		})
-	}
-	// Inside a git directory and in no repository, git answers.
-	gitDir := filepath.Join(fx.main, ".git")
-	want := mustGit(t, gitDir, "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree", "--show-prefix")
-	if got, err := WorkTreeProbe(gitDir); err != nil || got != want {
-		t.Errorf("WorkTreeProbe(.git) = %q, %v; git %q", got, err, want)
-	}
-	if _, ok := workTreeProbeInProcess(gitDir, os.LookupEnv); ok {
-		t.Errorf("answered in process inside a git directory")
-	}
-	if _, err := WorkTreeProbe(t.TempDir()); err == nil {
-		t.Errorf("WorkTreeProbe outside a repository succeeded")
 	}
 }
 

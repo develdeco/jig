@@ -352,13 +352,13 @@ func (r *gateRun) roundInput() RoundInput {
 	}
 	if !r.qualified {
 		gr := r.repos[0]
-		in.LeaseDir, in.Head, in.RepoName, in.Target, in.MergeRef = gr.dir, gr.head, gr.name, gr.target, gr.mergeRef
+		in.CloneDir, in.Head, in.RepoName, in.Target, in.MergeRef = gr.dir, gr.head, gr.name, gr.target, gr.mergeRef
 		in.OperatorClone, in.Manifest, in.SlicePasses = gr.dir, gr.man, gr.slicePasses
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
-			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.dir, Head: gr.head,
+			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, CloneDir: gr.dir, Head: gr.head,
 			OperatorClone: gr.dir, Manifest: gr.man, SlicePasses: gr.slicePasses,
 		})
 	}

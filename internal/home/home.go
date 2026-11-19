@@ -1,7 +1,6 @@
 // Package home resolves jig's per-machine root. RootFrom reads it once, from the
 // JIG_HOME environment variable or the real home directory; every
-// home-anchored path (the machine mapping, the worktree pool, the
-// evidence tree) is derived from a root its caller passes in, so the binary
+// home-anchored path (the machine mapping, the evidence tree) is derived from a root its caller passes in, so the binary
 // resolves the root once and a test hands each package its own root instead of
 // touching the environment or the real home directory.
 package home
@@ -54,7 +53,9 @@ func UserDirFrom(getenv func(string) string) (string, error) {
 	return "", errors.New(enverr + " is not defined")
 }
 
-// PoolDir returns the worktree pool root under the jig home root.
+// PoolDir returns the root of the pool of leases an earlier jig kept under the
+// jig home root. This jig makes none; the directory is read only by the
+// migration's refusal to leave work in one (migrate.CheckNoLeases).
 func PoolDir(root string) string {
 	return filepath.Join(root, "pool")
 }
@@ -75,9 +76,8 @@ func IntentExcerptDir(root string) string {
 
 // The evidence tree is <root>/evidence/<storeID>/<ticket>/...: a fifth home
 // beside the four ARCHITECTURE.md names, kept out of the store's git on purpose
-// (media are large and the store is a long-lived repo) and out of any lease (a
-// lease is rewound between rounds), so it lives with the machine, like the
-// pool. RecordDir, PicksDir and ReviewDir name the three kinds of directory in
+// (media are large and the store is a long-lived repo), so it lives with the
+// machine, like the mapping. RecordDir, PicksDir and ReviewDir name the three kinds of directory in
 // it. Each part a caller supplies (the store id, the ticket, a sha, a run) must
 // name a single directory, so no spelling can climb out of the tree.
 

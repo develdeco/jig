@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -298,10 +297,6 @@ func TestRecordedRoundKeepsTheStoreCommittedWhenItFailsToOpen(t *testing.T) {
 	builder(t).Commit(buildDir, "break manifest")
 	branch := ticketBranch(fx.Ticket)
 	builder(t).Push(buildDir, "origin", branch)
-	gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("reacquire gate lease: %v", err)
-	}
 
 	if _, err := GatePrepare(d, o); err == nil {
 		t.Fatal("GatePrepare of round 2: want an error (broken manifest)")
@@ -313,8 +308,8 @@ func TestRecordedRoundKeepsTheStoreCommittedWhenItFailsToOpen(t *testing.T) {
 	if strings.Contains(subject, "round 0") || !strings.Contains(subject, "round 2") {
 		t.Fatalf("push subject = %q, want it to name the real round 2", subject)
 	}
-	if strings.Contains(subject, gateLease.Dir) || strings.Contains(subject, "yaml") {
-		t.Fatalf("push subject = %q, leaked the gate lease's path or the raw manifest error", subject)
+	if strings.Contains(subject, fx.RepoDir) || strings.Contains(subject, "yaml") {
+		t.Fatalf("push subject = %q, leaked the clone's path or the raw manifest error", subject)
 	}
 }
 

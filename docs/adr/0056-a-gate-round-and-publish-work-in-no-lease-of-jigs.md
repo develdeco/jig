@@ -1,0 +1,31 @@
+# A gate round and publish work in no lease of jig's
+
+A gate round took a lease for the ticket and the repo: a full clone under `<jig home>/pool/<repo>/<ticket>-gate`, kept in step with origin, reset to the copy of the branch the round reviewed, and handed to the reviewer as its pristine worktree. Publish took a second, `<ticket>-publish`, and pushed from it. A lease is the machinery a builder's worktree once had (a clone jig kept for a phase, synced, recovered when a session died in it, reset between uses), and [ADR 0039](0039-jig-advises-a-tickets-worktree-and-makes-none.md) took it away from the builder: the harness makes the builder's worktree and jig advises it. The gate and publish kept the old way, and the cost was the larger part of what jig spends on git: the pool's setup, sync and recovery were most of the git processes of a whole suite, and an adopted branch with a build lease an earlier jig kept could be compared with a clone nothing creates any more.
+
+Everything a round reads from its lease is a read of a commit: the manifest at the head, the diffs and hunks between the base and the head, ancestry, and `origin/<target>` are all in the clone's own object store once origin's refs are fetched into it. And everything publish needs is a push of one commit. Neither needs a second clone.
+
+## Decision
+
+**A gate round works in the repo's mapped clone and changes nothing in it.** `chooseCopy`, one function the gate and publish share, fetches origin into the clone (`--prune`, and only `refs/remotes/origin/*`: no local branch, no checkout, no tag, no file) and chooses the copy of the ticket's branch:
+
+- the clone has the branch and origin has none, or the clone's is ahead of or level with origin's: the clone's;
+- origin's is ahead of the clone's, or the clone has none: origin's;
+- each has commits the other lacks: refused, `BRANCH_DIVERGED`, naming the clone and the merge that joins the two. jig merges nothing that is not its own;
+- no copy anywhere: refused, `BRANCH_NOT_FOUND`;
+- no clone mapped for the repo on this machine: refused, `CLONE_NOT_MAPPED`, with `jig map <repo>=<path>` as the way on. The lease let a gate review origin's copy of a repo nobody had cloned; the work is built in a clone now, and a repo with none has nothing to read or to push from.
+
+Whichever copy it is must hold every commit the journal records jig built, or the command is refused, `BUILT_COMMITS_MISSING` (what was `BUILD_LEASE_MISSING`, with the build lease gone from it). The commits are found by id, so the refusal says to join with a merge, not a rebase. The build lease an earlier jig kept is no copy any more; nothing creates one.
+
+The round reads the head's manifest from git (`manifest.ResolveAt`, beside `Resolve`, which reads a working directory), its diffs, hunks and ancestry with the head named by its sha, and `origin/<target>` from the fetched refs. No directory is made under `<jig home>/pool`.
+
+**Publish pushes the reviewed head by its sha from the clone.** It uses the same copy rule and the same checks over the clone's refs (the head is the one the last clean round reviewed, the push is a fast-forward of origin's branch, the range is not empty), then `git push origin <head>:refs/heads/<branch>` with `gitx.GuardedPush`. The clone's checkout and branches are never moved, so a person's dirty clone is untouched, and nothing is pushed when origin holds the head already.
+
+**The reviewer makes its own worktree at the head, which jig advises and makes none of.** `jig review context` names, for each repo with a clone on this machine, a `worktree` row (repo, clone, dir, command): the command is `git -C <clone> worktree add --detach <clone>.worktrees/<TICKET>-review <head>`, or `git -C <dir> checkout --detach <head>` when the directory is there from an earlier round. A harness with a worktree method (Claude Code's Agent `isolation: worktree`) starts the reviewer in a worktree of its own, which begins at the harness's commit and is moved to the head with `git checkout --detach <head>`. The reviewer reads, probes and puts files back there, never in the clone, and removes what it made with `git worktree remove` once `jig review done` has recorded the round, never forced. The directory sits beside the builder's worktree and is separate from it: the builder's holds the ticket's branch, and git lets one worktree hold a branch; the reviewer needs the head, not the branch. The `repos` table and `review.json` lose their `worktree` column and field. This reverses the spawn advice that the reviewer's subagent runs with no worktree isolation because the round had one.
+
+**`internal/pool` goes.** With it go lease restore and recovery, the sync rule of `Acquire`, `Compare` (the rule uses `gitx.Standing`), the lease fields of the open record and the recorded round (a record an earlier jig wrote is still read; its `lease` is read as nothing), the reserved `-gate` and `-publish` suffixes of a ticket id (a ticket id keeps the one rule it needs, that it is a single directory name that does not start with a dot, now `store.CheckTicketID`), and the functions that only the pool reached (`gitx.WorkTreeProbe`, `gitx.ResolveCommitTrusted`). `migrate.CheckNoLeases` stays: a build lease of v0.1.2 can hold work nobody pushed, and a migration that renames a ticket would orphan it, so the migration still refuses while one is there. It reads the pool directory by the names the old roles gave (`<repo>/<ticket>`, `-gate`, `-publish`) and imports nothing of the pool; `home.PoolDir` stays for it.
+
+**What happens to a pool directory an earlier jig made.** Nothing. jig deletes nothing of the person's. A gate or publish lease is a copy of a branch that is on origin or in the clone, so it is safe to delete once nothing unpushed is in it; a build lease may hold unpushed commits and is the person's to look at first. `<jig home>/pool` can be removed whole when none is left of either kind.
+
+## Amended
+
+[ADR 0039](0039-jig-advises-a-tickets-worktree-and-makes-none.md) put a ticket's worktree "never in jig's pool, whose leases are for jig's phases". jig has no pool and no lease for any phase now, so the clause has nothing left to say, and the reviewer's worktree is the second worktree jig advises: beside the builder's, one for each clone, named for the ticket with `-review`.

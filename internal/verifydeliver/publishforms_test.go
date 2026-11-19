@@ -90,8 +90,8 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(d.Store.Root, filepath.FromSlash(repo.ReviewNotes))); err != nil {
 		t.Errorf("no review notes: %v", err)
 	}
-	if _, err := os.Stat(publishLeaseDir(t, fx)); err == nil {
-		t.Error("--body made a publish lease")
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Error("--body made a pool directory")
 	}
 	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != cloneHead {
 		t.Errorf("the clone moved from %s to %s", cloneHead, got)

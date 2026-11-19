@@ -8,7 +8,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/phase"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -36,8 +35,8 @@ func init() {
 // printing one line naming it when it differs from what was typed: every
 // command that takes a ticket id (gate, publish, requeue, status and
 // validate) calls this before anything else touches the ticket, so a
-// command reached through an alias always works on the ticket's folder,
-// leases and branch under its current id.
+// command reached through an alias always works on the ticket's folder
+// and branch under its current id.
 func resolveTicketArg(st *store.Store, ticket string, stdout io.Writer) (string, error) {
 	resolved, err := st.ResolveTicket(ticket)
 	if err != nil {
@@ -166,11 +165,11 @@ func intakeHint(ticket string) string {
 	return fmt.Sprintf("Write its brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate %s --check`; run `jig validate %s` once the person has confirmed the brief%s", ticket, ticket, promptHint(phase.Prompt(phase.Brief, ticket)))
 }
 
-// checkTicketID fails when ticket cannot name a ticket's pool leases (see
-// pool.CheckTicket): every command that works a ticket refuses such an id
-// before it reaches the store or the pool.
+// checkTicketID fails when ticket cannot name a ticket's folder (see
+// store.CheckTicketID): every command that works a ticket refuses such an id
+// before it reaches the store.
 func checkTicketID(ticket string) error {
-	if err := pool.CheckTicket(ticket); err != nil {
+	if err := store.CheckTicketID(ticket); err != nil {
 		return &axi.Error{Msg: err.Error(), Code: "VALIDATION_ERROR"}
 	}
 	return nil

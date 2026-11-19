@@ -30,7 +30,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	}
 	repos := make([]RoundRepo, len(r.repos))
 	for i, gr := range r.repos {
-		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.dir, Head: gr.head}
+		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, CloneDir: gr.dir, Head: gr.head}
 	}
 	origin, rep, ok, err := carriedFrom(r.d.Store, r.ticket, r.n, prep, r.intent.Source, r.intentSHA256)
 	if err != nil || !ok {
@@ -39,7 +39,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	heads, targetSHA, mergeTips, mergeRefs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	for i, rp := range prep.Repos {
 		heads[rp.Repo] = rp.Head
-		tip, err := gitx.RevParse(repos[i].LeaseDir, "origin/"+repos[i].Target)
+		tip, err := gitx.RevParse(repos[i].CloneDir, "origin/"+repos[i].Target)
 		if err != nil {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", repos[i].Target, err))
 		}
@@ -51,7 +51,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 		}
 		ref := mergeRefOf(repos[i].MergeRef, repos[i].Target)
 		mergeRefs[rp.Repo] = ref
-		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].LeaseDir, ref); err != nil {
+		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].CloneDir, ref); err != nil {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve %s: %w", ref, err))
 		}
 	}

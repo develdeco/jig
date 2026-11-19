@@ -8,7 +8,6 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt: a branch that is
@@ -49,14 +48,7 @@ func TestPublishPushesABranchAlreadyOnOriginWithoutChangingIt(t *testing.T) {
 	if len(built) < 2 {
 		t.Fatalf("test setup: the build lease holds %d commit(s) beyond main, want several", len(built))
 	}
-	// An earlier publish's leftover: the publish lease holds the branch with a
-	// commit of its own, and origin has no such branch, so nothing compares.
-	stale, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Publish)
-	if err != nil {
-		t.Fatalf("pool.Acquire publish lease: %v", err)
-	}
-	writeAndCommit(t, stale.Dir, "leftover.txt", "an earlier attempt", "an earlier publish's leftover")
-	// The branch reaches origin from the build lease.
+	// The branch reaches origin from the clone.
 	builder(t).Push(buildDir, "origin", branch)
 	pushed := originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 	logFile, _ := useGithubHost(t, &d, openPullOf(t, branch), "")

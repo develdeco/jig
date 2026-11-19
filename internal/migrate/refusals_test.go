@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -104,15 +104,21 @@ func TestCheckNoLeases(t *testing.T) {
 		t.Errorf("no leases: got %v, want nil", err)
 	}
 
-	dir, err := pool.Dir(jigHome, "demo-repo", "T-1", pool.Gate)
-	if err != nil {
-		t.Fatal(err)
+	for _, suffix := range []string{"", "-gate", "-publish"} {
+		dir := filepath.Join(home.PoolDir(jigHome), "demo-repo", "T-1"+suffix)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := CheckNoLeases(jigHome, []string{"demo-repo"}, []string{"T-1", "T-2"})
+		if err == nil || !strings.Contains(err.Error(), dir) {
+			t.Errorf("a lease at %s exists: got %v, want a refusal naming it", dir, err)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckNoLeases(jigHome, []string{"demo-repo"}, []string{"T-1", "T-2"}); err == nil {
-		t.Errorf("a gate lease for T-1 exists: got nil, want a refusal")
+	if err := CheckNoLeases(jigHome, []string{"demo-repo"}, []string{"T-1"}); err != nil {
+		t.Errorf("the leases are gone: got %v, want nil", err)
 	}
 }
 

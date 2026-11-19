@@ -13,7 +13,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -180,16 +179,6 @@ func journalLen(t *testing.T, d Deps, ticket string) int {
 		t.Fatalf("journal.Read: %v", err)
 	}
 	return len(lines)
-}
-
-// publishLeaseDir returns the fixture ticket's publish lease directory.
-func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
-	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish)
-	if err != nil {
-		t.Fatalf("resolve publish lease: %v", err)
-	}
-	return dir
 }
 
 // TestPublishFullChain is the one chain of the publish: a ticket gated clean by
