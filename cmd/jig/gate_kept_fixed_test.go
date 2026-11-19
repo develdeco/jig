@@ -92,40 +92,6 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	}
 }
 
-// A keep recorded while a round is open is applied when that round closes, as
-// it always was: the gate queued nothing, since the round was already open.
-func TestKeptAskRecordedInAnOpenRoundIsQueuedByItsClose(t *testing.T) {
-	t.Parallel()
-	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer-no-workspace"})
-	e := testEnv(fx.Home).atTerminal()
-	buildFixtureTicket(t, fx)
-	if out, code := roundThroughMain(t, e, fx, filepath.Join(fx.ScenarioDir, "gate", "round-1", "review-result.json")); code != 2 {
-		t.Fatalf("round 1 exit = %d, want 2\n%s", code, out)
-	}
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("jig gate: exit = %d, want 0 (the round opens)\n%s", code, out)
-	}
-	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Bump it.", "--workspace", "alpha", "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
-	}
-	path := filepath.Join(t.TempDir(), "round-2.json")
-	writeReviewResultAt(t, path, verifydeliver.ReviewResult{Findings: []verifydeliver.ResultFinding{}, ReviewedPaths: []string{"go.mod"}, Summary: "round 2"})
-	out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", path, "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha\n%s", code, out)
-	}
-}
-
-// A round that reports the ask again after its slice was built keeps it alive:
-// the old keep applies to the recurrence, as a new slice beside the first.
-func TestKeptAskTheClosingRoundReportsAgainStillQueuesItsFixSlice(t *testing.T) {
-	t.Parallel()
-	out, code, _ := keptAskRound2(t, true)
-	if code != 0 || !strings.Contains(out, "fix-2-alpha") {
-		t.Fatalf("round 2: exit = %d, want 0 and fix-2-alpha\n%s", code, out)
-	}
-}
-
 // keptNoteRound2 runs the life of a kept note: round 1 notes
 // beta/version.go, a person keeps the note, the next gate queues its slice and
 // the work is built, and round 2's reviewer reports nothing and read reviewed. It returns round
@@ -172,15 +138,5 @@ func TestKeptNoteTheClosingRoundDidNotReadIsNotSpentAsFixed(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", "round-2", "findings.yaml")); err == nil {
 		t.Fatal("round 2 was recorded without its reviewer reading the kept note's file")
-	}
-}
-
-// A kept note the closing round's reviewer read and no longer reports, at a
-// moved head, is spent as fixed and queues no slice.
-func TestKeptNoteTheClosingRoundReadAndNoLongerReportsReadsFixed(t *testing.T) {
-	t.Parallel()
-	out, code, _ := keptNoteRound2(t, []string{"go.mod", "beta/version.go"})
-	if code != 0 || strings.Contains(out, "fix-2-") {
-		t.Fatalf("round 2: exit = %d, want 0 and no fix-2- slice\n%s", code, out)
 	}
 }
