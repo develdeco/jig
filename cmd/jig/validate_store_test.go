@@ -521,6 +521,7 @@ func TestDefaultedDecisions(t *testing.T) {
 		{"decisions after a closed code fence", "# T-1: x\n\n## Decision\n\n```\n- fenced (defaulted)\n```\n\n- After the fence. (defaulted 2026-11-06)\n- And another. (defaulted 2026-11-06)\n", 2},
 		{"indented list item under a tagged parent", "# T-1: x\n\n## Decision\n\n- The parent. (defaulted 2026-11-03)\n  - The child. (defaulted 2026-11-03)\n", 2},
 		{"backticked prose with a dated tag", "# T-1: x\n\nThe tag reads `defaulted 2026-11-02 (owner: proceed with the plan)` in a brief.\n", 0},
+		{"a convention line and a quoted ask are mentions", "# T-1: x\n\nShape: bug. Each decision below is tagged `(user-confirmed)` or `(defaulted)`.\n\nThe ask read \"Show the person the brief and ask about its decisions (N are tagged defaulted)\".\n\n## Decisions\n\n1. **A** (defaulted). a.\n2. **B** (user-confirmed). b.\n3. **C** (defaulted). c.\n4. **D** (defaulted). d.\n", 3},
 		{"no decisions", "# T-1: x\n\n## Goal\n\nx\n", 0},
 	}
 	for _, c := range cases {
