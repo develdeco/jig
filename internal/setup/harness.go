@@ -167,12 +167,6 @@ func (h Harness) Merge(data []byte, jig string) (out []byte, changed bool, err e
 	return h.merge(data, jig)
 }
 
-// Unmerge removes jig's entries from the document in data. A result of nil with
-// a change means the file was jig's alone and goes.
-func (h Harness) Unmerge(data []byte) (out []byte, changed bool, err error) {
-	return h.unmerge(data)
-}
-
 // Installed lists the events of the document in data that carry an entry of
 // jig's.
 func (h Harness) Installed(data []byte) ([]string, error) { return h.installed(data) }

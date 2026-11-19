@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 // Builder makes a test's builder moves under one environment.
@@ -54,7 +55,7 @@ func (b *Builder) Commit(dir, msg string) {
 		return
 	}
 	if repo, err := gitx.OpenRepo(dir); err == nil {
-		committed, err := repo.CommitAllEnv(msg, b.env)
+		committed, err := gitxtest.CommitAllEnv(repo, msg, b.env)
 		if err == nil {
 			if !committed {
 				b.t.Fatalf("gitbuild: nothing to commit in %s", dir)
@@ -134,7 +135,7 @@ func (b *Builder) hooked(dir string) bool {
 	} else {
 		env = append(os.Environ(), b.env...)
 	}
-	return gitx.HooksConfigured(dir, env)
+	return gitxtest.HooksConfigured(dir, env)
 }
 
 func (b *Builder) run(dir string, args ...string) {

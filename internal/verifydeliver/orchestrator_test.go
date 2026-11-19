@@ -15,6 +15,7 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -45,7 +46,7 @@ func orchestratorTicket(t *testing.T, repos ...string) orchestrated {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	cfg, err := project.LoadConfig(fx.Home, fx.StoreDir, "", fx.OrchestratorDir)
+	cfg, err := projecttest.LoadConfig(fx.Home, fx.StoreDir, "", fx.OrchestratorDir)
 	if err != nil {
 		t.Fatalf("project.LoadConfig: %v", err)
 	}

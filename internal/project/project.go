@@ -28,7 +28,7 @@ import (
 // a store up one version at a time. A store at any version from
 // MinSchemaVersion to CurrentSchemaVersion opens as it is: a v2 store keeps its
 // project.yaml, a v3 store has store.yaml and a jig.yaml marker in the
-// project's repo instead (LoadStoreConfig, LoadConfig).
+// project's repo instead (LoadStoreConfig, LoadConfigWith).
 const (
 	MinSchemaVersion     = 2
 	CurrentSchemaVersion = 3
@@ -102,13 +102,11 @@ type BuilderEffort struct {
 // effortLevels are the levels Claude Code's --effort accepts.
 var effortLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
-// Effort defaults (ADR 0023): a full review and a builder's retry think
-// hard; a delta review and a builder's first attempt think less.
+// Effort defaults (ADR 0023): a builder's retry thinks hard and its first
+// attempt thinks less.
 const (
-	defaultReviewEffortFull  = "high"
-	defaultReviewEffortDelta = "medium"
-	defaultBuilderFirst      = "medium"
-	defaultBuilderRetry      = "high"
+	defaultBuilderFirst = "medium"
+	defaultBuilderRetry = "high"
 )
 
 // effortOr is v's level, or def when v is absent.
@@ -119,22 +117,8 @@ func effortOr(v *string, def string) string {
 	return *v
 }
 
-// ReviewEffortFor returns the gate reviewer's effort for a round of scope
-// ("full" or "delta").
-func (c Config) ReviewEffortFor(scope string) string {
-	var e ReviewEffort
-	if c.Gate != nil {
-		e = c.Gate.ReviewEffort
-	}
-	if scope == "delta" {
-		return effortOr(e.Delta, defaultReviewEffortDelta)
-	}
-	return effortOr(e.Full, defaultReviewEffortFull)
-}
-
 // BuilderEffortFor returns a builder's effort for an attempt that follows
-// failedAttempts failed attempts of its slice (journal.FailedAttempts, the
-// same count that climbs the staircase).
+// failedAttempts failed attempts of its slice.
 func (c Config) BuilderEffortFor(failedAttempts int) string {
 	if failedAttempts > 0 {
 		return effortOr(c.BuilderEffort.Retry, defaultBuilderRetry)
@@ -247,7 +231,7 @@ type configRaw struct {
 // a project.yaml claims schema_version 2 - an older schema_version leaves both
 // unread rather than refused, since `jig store migrate`
 // (resolveStoreForProjectAllowingOldSchema) must still Load a v1 project.yaml
-// whole, for project.Config. CheckSchemaVersion (cmd/jig's resolveStore, the
+// whole, for project.Config. CheckSchemaVersion (cmd/jig's resolveStoreChecked, the
 // one place every command checks it) to be the thing that refuses it for every
 // other command - and routes: (which only ever fed publish's now-gone route
 // step) is refused outright regardless of schema_version.
@@ -589,7 +573,7 @@ func renameFileInError(err error, from, to string) error {
 // allowOlder. A schema_version from MinSchemaVersion to CurrentSchemaVersion
 // passes: a v2 store opens as it is, and `jig store migrate` takes it to v3
 // when the person chooses. Every command resolving a store (cmd/jig's
-// resolveStore, the one place every command loads the store's config) calls
+// resolveStoreChecked, the one place every command loads the store's config) calls
 // this with allowOlder false; `jig store migrate` is the one command that
 // passes true, since migrating a store up is the whole point of opening it.
 // `jig help` and `jig version` never resolve a store at all, so neither check
@@ -667,28 +651,6 @@ func lockFile(path, what string, wait time.Duration) (release func(), err error)
 	return release, nil
 }
 
-// SaveMachine writes the per-machine project mapping under the jig home root
-// jigHome, creating its parent directory if needed. It replaces the whole
-// file, atomically and under the mapping's lock, so a reader never sees half
-// of it; a caller that reads the mapping, changes it and writes it back
-// uses UpdateMachine, which holds the lock across all three.
-func SaveMachine(jigHome string, m map[string]MachineProject) error {
-	return saveMachine(jigHome, m, machineLockTimeout)
-}
-
-// saveMachine is SaveMachine waiting up to wait for the lock.
-func saveMachine(jigHome string, m map[string]MachineProject, wait time.Duration) error {
-	if jigHome == "" {
-		return fmt.Errorf("project: no jig home given")
-	}
-	release, err := lockFile(home.MachinePath(jigHome), "machine mapping", wait)
-	if err != nil {
-		return err
-	}
-	defer release()
-	return writeMachine(jigHome, m)
-}
-
 // UpdateMachine changes the per-machine project mapping under the jig home
 // root jigHome: it reads the mapping (empty when there is none yet), calls fn
 // to change it, and writes the result back, all under the mapping's lock, so
@@ -764,52 +726,4 @@ func StandaloneStoreDir(repoDir string) (string, error) {
 
 func siblingStoreDir(absRepo string) string {
 	return filepath.Join(filepath.Dir(absRepo), filepath.Base(absRepo)+"-tickets")
-}
-
-// InitProject loads storePath's config (a v2 store's project.yaml), validates
-// that every clone name matches a repo declared there (by Repo.Name), and
-// records the mapping in the per-machine store under the jig home root
-// jigHome, keyed by the project's name. `jig init` makes v3 projects and maps
-// them itself (Init); this is how an existing v2 store, and the test fixture's,
-// gets its clones mapped.
-func InitProject(jigHome, storePath string, clones map[string]string) (Config, error) {
-	cfg, err := LoadStoreConfig(storePath)
-	if err != nil {
-		return Config{}, err
-	}
-
-	repoNames := map[string]bool{}
-	for _, r := range cfg.Repos {
-		repoNames[r.Name()] = true
-	}
-	for name := range clones {
-		if !repoNames[name] {
-			return Config{}, &axi.Error{
-				Msg:  fmt.Sprintf("clone %q does not match any repo declared in project.yaml", name),
-				Code: "VALIDATION_ERROR",
-			}
-		}
-	}
-
-	absStore, err := filepath.Abs(storePath)
-	if err != nil {
-		return Config{}, fmt.Errorf("project: resolve store path: %w", err)
-	}
-	absClones := make(map[string]string, len(clones))
-	for name, p := range clones {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			return Config{}, fmt.Errorf("project: resolve clone %s: %w", name, err)
-		}
-		absClones[name] = abs
-	}
-
-	if err := UpdateMachine(jigHome, func(machine map[string]MachineProject) error {
-		machine[cfg.Name] = MachineProject{Store: absStore, Clones: absClones}
-		return nil
-	}); err != nil {
-		return Config{}, err
-	}
-
-	return cfg, nil
 }

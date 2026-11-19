@@ -9,6 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/setup"
 )
 
@@ -294,7 +295,7 @@ func TestSetupProjectUntrackedForm(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	repo := ie.markedProject(t, "app", "project: demo\nkind: project\n")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"demo": {Store: filepath.Join(ie.root, "store"), Clones: map[string]string{"app": repo}, Root: repo},
 	}); err != nil {
 		t.Fatal(err)

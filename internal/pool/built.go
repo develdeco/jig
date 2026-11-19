@@ -12,10 +12,9 @@ import (
 // (refs/heads/<branch>) holds a commit jig built on it (built, as for
 // RequireBuilt) that origin's copy (refs/remotes/origin/<branch>) lacks:
 // whether the copy holds jig's work that exists nowhere else. The one rule for
-// it, wherever a diverged copy of an adopted branch is judged: the build
-// re-cuts a lease that does not (RecutUnlessBuilt), and the gate takes such a
-// lease for one that does not hold the branch (verifydeliver's choice of
-// copy). A diverged copy with no such commit has, of its own, only what origin
+// it, wherever a diverged copy of an adopted branch is judged: the gate takes
+// a lease that holds none for one that does not hold the branch
+// (verifydeliver's choice of copy). A diverged copy with no such commit has, of its own, only what origin
 // can replace: the history an author's rewrite replaced, an attempt's
 // leftovers, or leftovers on top of jig's commits that origin already has, and
 // the branch is still origin's to follow. A copy with one holds work that

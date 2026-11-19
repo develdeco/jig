@@ -444,27 +444,6 @@ func TestReusablePickIsTheLatestForTheSameHeadAndRecordings(t *testing.T) {
 	}
 }
 
-// TestRenderPicksPromptNamesTheFilesAndTheContract.
-func TestRenderPicksPromptNamesTheFilesAndTheContract(t *testing.T) {
-	t.Parallel()
-	got := RenderPicksPrompt("/h/picks.json", "/h/result.json")
-	for _, want := range []string{
-		"picks.json at /h/picks.json",
-		"write /h/result.json with exactly one JSON object: " + picksResultSchema,
-		intentSourcesPrompt,
-		fmt.Sprintf("at most %d recordings", media.MaxFiles),
-		"step order",
-		"refused whole",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("prompt lacks %q:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "\u2014") {
-		t.Error("prompt holds an em dash")
-	}
-}
-
 // TestRenderPicksSectionComposesFlowsInOrderAndMakesTheWordsSafe: flows come
 // under their own ### headings, each recording in the one reference form gh
 // rewrites for its kind, and the session's words are made safe for a
@@ -750,20 +729,6 @@ func TestVerifyStagedHoldsEveryStagedFileToWhatWasStaged(t *testing.T) {
 				t.Errorf("verifyStaged = %v, want a refusal naming %q", err, c.want)
 			}
 		})
-	}
-}
-
-// TestSessionPromptsDescribeTheIntentSourcesInOnePlace: the reviewer's prompt
-// and the pick's both hand the session an intent and a source, so both carry
-// the one sentence that says what each source means.
-func TestSessionPromptsDescribeTheIntentSourcesInOnePlace(t *testing.T) {
-	t.Parallel()
-	review := RenderReviewPrompt(ReviewRequest{Ticket: "JIG-1", Round: 1, Scope: "full"}, "/abs/review.json", "/abs/result.json")
-	pick := RenderPicksPrompt("/abs/picks.json", "/abs/picks.result.json")
-	for name, prompt := range map[string]string{"reviewer": review, "pick": pick} {
-		if !strings.Contains(prompt, intentSourcesPrompt) {
-			t.Errorf("the %s prompt does not carry intentSourcesPrompt:\n%s", name, prompt)
-		}
 	}
 }
 

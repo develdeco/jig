@@ -164,23 +164,6 @@ func carriedNote(origin, prior int, prep ReviewPrep, qualified bool, tips, refs 
 	return fmt.Sprintf("Carried over from round %d: %s; the oracle ran and passed.", origin, strings.Join(parts, "; "))
 }
 
-// carriedOver is carriedFrom and carriedNote for a launched round with nothing
-// to read: the round it carries, or 0 and no note.
-func carriedOver(in RoundInput, prep ReviewPrep) (origin int, note string, err error) {
-	origin, _, ok, err := carriedFrom(in.Store, in.Ticket, in.Round, prep, in.Intent.Source, intentSHA256(in.Intent.Source, in.IntentText))
-	if err != nil || !ok {
-		return 0, "", err
-	}
-	tips, refs := map[string]string{}, map[string]string{}
-	for _, r := range in.repoList() {
-		refs[r.Name] = mergeRefOf(r.MergeRef, r.Target)
-		if tip, terr := gitx.RevParse(r.LeaseDir, refs[r.Name]); terr == nil {
-			tips[r.Name] = tip
-		}
-	}
-	return origin, carriedNote(origin, in.Round-1, prep, in.qualified(), tips, refs), nil
-}
-
 // mergeRefOf is the ref a merge must bring in to count as the target's
 // (classifyLine): ref when the round names one (a stacked ticket's parent
 // branch), else origin/<target>.

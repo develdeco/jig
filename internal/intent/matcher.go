@@ -146,10 +146,10 @@ func sessionMentions(s *Session) []string {
 // often a subdirectory a session happened to start in, and relativizing an
 // absolute path against it instead would turn a path outside cwd but still
 // inside the repo (or, worse, a path directly in cwd itself) into a bare
-// basename or a "../"-relative one, neither of which mentionMatches can
+// basename or a "../"-relative one, neither of which normalizedMentionMatches can
 // still recognize - the underlying file just goes unmentioned instead.
 // Anything else - already relative, or absolute outside the repo entirely -
-// passes through unchanged so mentionMatches still gets a chance at it via
+// passes through unchanged so normalizedMentionMatches still gets a chance at it via
 // its own suffix rule.
 func relativizeToCWD(p, cwd, topLevel string) string {
 	p = strings.TrimSpace(p)
@@ -170,16 +170,7 @@ func relativizeToCWD(p, cwd, topLevel string) string {
 	return rel
 }
 
-// mentionMatches reports whether mention names diffFile: equal, or a
-// "/"-bounded suffix of it - except a bare-basename diffFile (no directory
-// component, e.g. a repo-root file), which only a bare mention (no
-// directory component of its own) can name, so a nested file sharing that
-// basename never falsely stands in for the repo-root one.
-func mentionMatches(mention, diffFile string) bool {
-	return normalizedMentionMatches(normalizeMention(mention), normalizeMention(diffFile))
-}
-
-// normalizedMentionMatches is mentionMatches's own rule, given m and d
+// normalizedMentionMatches reports whether mention names diffFile by the rule, given m and d
 // already normalized (normalizeMention) by the caller - scoreSession's own
 // hot loop, which normalizes once per distinct string rather than once per
 // (mention, diffFile) pair.
@@ -210,7 +201,7 @@ func normalizeMention(p string) string {
 
 // filePathTokens is a permissive, structural scan for path-like tokens in
 // prose: it widens the candidate mention set, never judges the prose
-// itself - a false positive costs nothing, since mentionMatches still has
+// itself - a false positive costs nothing, since normalizedMentionMatches still has
 // to agree it names a real diff file.
 var filePathTokens = regexp.MustCompile(`[A-Za-z0-9_.\-/\\]+\.[A-Za-z0-9]+`)
 

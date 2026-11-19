@@ -392,8 +392,7 @@ func TestIntentMissingFrontMatterErrors(t *testing.T) {
 
 // TestIntentUnknownFrontMatterKeyRefused asserts ParseIntent refuses an
 // intent.md whose front matter carries a key jig never writes there,
-// rather than silently dropping it - the same standard revieweval holds
-// its own files to (yamlKnownFields).
+// rather than silently dropping it.
 func TestIntentUnknownFrontMatterKeyRefused(t *testing.T) {
 	_, err := ParseIntent([]byte("---\nsource: explicit\nbogus: field\n---\nhello\n"))
 	if err == nil {

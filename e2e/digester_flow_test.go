@@ -20,6 +20,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -180,7 +181,7 @@ func TestDigesterFlow(t *testing.T) {
 	if setup.Code != 0 {
 		t.Fatalf("jig setup exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", setup.Code, setup.Stdout, setup.Stderr)
 	}
-	hooksPath, err := gitx.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "core.hooksPath")
+	hooksPath, err := gitxtest.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "core.hooksPath")
 	if err != nil || hooksPath == "" {
 		t.Fatalf("git config --global core.hooksPath = %q, %v, want jig's hook directory", hooksPath, err)
 	}

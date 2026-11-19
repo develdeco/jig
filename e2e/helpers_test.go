@@ -333,7 +333,7 @@ func findJournalLine(lines []journal.Line, event, slice, outcome string) (journa
 	return journal.Line{}, false
 }
 
-// firstLine mirrors internal/session/fake.go's firstLine: the text up to its first
+// firstLine is the text up to its first
 // line break, or all of it if there is none. Used to derive expected commit
 // messages from scenario result.json summaries without hardcoding them.
 func firstLine(s string) string {

@@ -11,8 +11,7 @@
 // (PublishRecordPR) or pushes the reviewed head and opens it (Publish). Publish
 // reconciles nothing, squashes nothing and commits nothing on the ticket
 // branch, so the person's branch never diverges from origin's because of it.
-// The one launched reviewer left is the source internal/revieweval measures
-// reviewers with (a Launcher starts its sessions; this package starts none).
+// This package starts no session.
 package verifydeliver
 
 import (
@@ -88,7 +87,7 @@ func (d Deps) publishHost(remote string) (repohost.Host, error) {
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
 // to "main" when unset). A v3 project whose jig.yaml was not found on this
-// machine has no repos (project.LoadConfig): it comes back as the zero repo,
+// machine has no repos (project.LoadConfigWith): it comes back as the zero repo,
 // which the first thing that needs a clone of it refuses, rather than an
 // index out of range.
 func primaryRepo(cfg project.Config) (project.Repo, string, string) {

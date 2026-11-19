@@ -14,7 +14,7 @@ import (
 // issues, links added and removed, fields set, and every drift line - plus
 // whatever a publish-safety hit skipped or a missing issue
 // left unlinked. Both `jig trackers sync` and the checkpoint hook wired
-// into every other command (resolveStore) render the same report through
+// into every other command (resolveStoreChecked) render the same report through
 // this one function, so the two places drift lines print (the output of the
 // command whose checkpoint found them, and jig trackers sync's) print the
 // same shape. A table with no

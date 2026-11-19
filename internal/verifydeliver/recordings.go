@@ -145,19 +145,11 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 	} else {
 		list.HeadSHA = files.repos[0].Head
 	}
-	var readable []pickCandidate
-	for _, c := range all {
-		if file, err := c.path(d, storeID, in.Ticket); err == nil && in.Readable != nil && !in.Readable(file) {
-			list.Omitted++
-			continue
-		}
-		readable = append(readable, c)
+	if len(all) > maxReviewRecordings {
+		list.Omitted += len(all) - maxReviewRecordings
+		all = all[:maxReviewRecordings]
 	}
-	if len(readable) > maxReviewRecordings {
-		list.Omitted += len(readable) - maxReviewRecordings
-		readable = readable[:maxReviewRecordings]
-	}
-	cands, _, err := verifiedCandidates(d, in.Ticket, readable)
+	cands, _, err := verifiedCandidates(d, in.Ticket, all)
 	if err != nil {
 		return "", fmt.Errorf("verifydeliver: review: check the build's recordings: %w", err)
 	}
@@ -261,19 +253,4 @@ func scrubReviewResult(r ReviewResult, dirs []hostDir) ReviewResult {
 	}
 	out.Summary = scrub(r.Summary)
 	return out
-}
-
-// scrubReviewResultFile rewrites the reviewer's result.json at path, whose
-// bytes are data, with the directories of this machine left out, when it names
-// any: the file sits in the store's work directory, which is committed. Nothing
-// reads it back after the round parsed it.
-func scrubReviewResultFile(path string, data []byte, dirs []hostDir) error {
-	scrubbed := leaveOutSessionHostPaths(string(data), dirs...)
-	if scrubbed == string(data) {
-		return nil
-	}
-	if err := os.WriteFile(path, []byte(scrubbed), 0o644); err != nil {
-		return fmt.Errorf("verifydeliver: review: rewrite result.json without host paths: %w", err)
-	}
-	return nil
 }

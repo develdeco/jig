@@ -137,6 +137,24 @@ jobs:
       - name: govulncheck
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      # A function only tests reach is test support, and lives where only tests
+      # import it: deadcode lists every function of the jig binary that no path
+      # from main reaches, and any line it prints, or a failure of deadcode
+      # itself, fails the step. There is no exception list. The list was first
+      # measured with deadcode@v0.39.0 ./cmd/jig, which panics building the
+      # standard library for linux with this Go (go.mod's, 1.27.4); v0.50.0 is
+      # the oldest release measured to run clean on it, and prints the same list
+      # on linux, darwin and windows. lint.TestDeadcodeStepFailsOnAnyLine pins
+      # the run line below and runs this script.
+      - name: deadcode
+        if: runner.os == 'Linux'
+        run: |
+          out="$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 ./cmd/jig)"
+          if [ -n "$out" ]; then
+            echo "$out"
+            echo "deadcode: the functions above are reached by tests alone. Delete them, or move them where only tests import them." >&2
+            exit 1
+          fi
       - name: actionlint
         if: runner.os == 'Linux'
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -261,7 +279,7 @@ jobs:
   # The package the test job's Windows leg skips, on a Windows runner of its
   # own. It is one of the leg's two longest (843 s, beside cmd/jig's 852 s,
   # in a step of 1,050-1,110 s) and the floor once the in-flight diets of
-  # cmd/jig, e2e and revieweval land; until then cmd/jig bounds the
+  # cmd/jig and e2e land; until then cmd/jig bounds the
   # step and the saving does not show. A package alone on the runner runs
   # faster than inside a shared step (gitx: 61 s alone, 149 s in the full
   # step). It runs when the test job's Windows leg does. Main's ruleset does

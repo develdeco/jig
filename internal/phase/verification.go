@@ -151,13 +151,6 @@ func (in VerifyInput) judge(p CommitRef) CommitVerification {
 	return row
 }
 
-func shortSHA(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
-	}
-	return sha
-}
-
 // failLineMax bounds a told failure line.
 const failLineMax = 160
 

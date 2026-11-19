@@ -90,29 +90,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// RenderStatus renders the exact `jig status` golden format for ticket:
-// ticket/state lines, a slices table (a slice's id, state, attempts,
-// blocked_by, question and goal, then the workspace and oracle it names as
-// slices.yaml has them and, for a fix slice, the round it came from), a
-// questions table (or "questions:
-// none"), a parked table (present only while a slice is needs-input) and a
-// stalled table (present only while a slice is stalled), the blocks of every
-// registered status section (registerStatusSection), and a contextual help
-// hint. A ticket that adopted a branch names it on a branch line under the
-// ticket's. The parked and stalled tables are the custody surface: they make
-// "awaiting a human" (parked) and "stuck" (stalled) unmistakable and distinct
-// from each other and from ordinary in-progress work.
-func RenderStatus(st *store.Store, ticket string) (string, error) {
-	return renderStatus(st, ticket, statusSections())
-}
-
-// renderStatus is RenderStatus over the given sections: each one's blocks
-// follow the status blocks and come before the help line.
-func renderStatus(st *store.Store, ticket string, sections []statusSection) (string, error) {
-	return renderStatusWith(st, ticket, sections, derivePhase)
-}
-
-// renderStatusWith is renderStatus with the word on where the ticket stands
+// renderStatusWith renders the status of a ticket and each section's blocks, with the word on where the ticket stands
 // given: the advice it ends with is the advice of that phase.
 func renderStatusWith(st *store.Store, ticket string, sections []statusSection, standing standingOf) (string, error) {
 	slices, err := st.ReadSlices(ticket)
@@ -654,7 +632,7 @@ func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (stri
 
 	// A stalled slice outranks every hint below except an open question
 	// (checked above), and env-blocked in turn outranks everything but
-	// stalled (matching the state: line's own precedence in RenderStatus):
+	// stalled (matching the state: line's own precedence in renderStatusWith):
 	// both are stuck, not merely unfinished, so the worse of the two is
 	// reported the moment it is found rather than waited out - checked in
 	// two full passes, not one combined pass, so a stalled slice later in

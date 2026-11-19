@@ -92,22 +92,6 @@ func Handle(d Deps, ev Event) (res Result, err error) {
 	return res, errors.Join(h.errs...)
 }
 
-// Run parses payload with the adapter, handles the event and returns what
-// the harness reads, in the adapter shape (nil for nothing). An event the
-// adapter does not map is ignored. Like Handle it never panics.
-func Run(d Deps, a Adapter, data []byte) (out []byte, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			out, err = nil, fmt.Errorf("observe: %s: panic: %v", a.Name(), r)
-		}
-	}()
-	ev, err := a.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return RunEvent(d, a, ev)
-}
-
 // RunEvent is Run for an event already parsed.
 func RunEvent(d Deps, a Adapter, ev Event) (out []byte, err error) {
 	defer func() {

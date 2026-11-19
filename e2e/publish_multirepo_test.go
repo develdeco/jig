@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 )
@@ -33,7 +33,7 @@ func githubOrchestrator(t *testing.T, b *builtOrchestrator) (jigEnv, string) {
 	for i, r := range marker.Repos {
 		url := "https://github.com/acme/" + r.Name + ".git"
 		remote := filepath.ToSlash(b.fx.NestedRemotes[r.Name])
-		if _, err := gitx.RunReplaceEnv(b.fx.Dir, env.environ(), "config", "--global", "url."+remote+".insteadOf", url); err != nil {
+		if _, err := gitxtest.RunReplaceEnv(b.fx.Dir, env.environ(), "config", "--global", "url."+remote+".insteadOf", url); err != nil {
 			t.Fatalf("git config --global url.insteadOf for %s: %v", r.Name, err)
 		}
 		marker.Repos[i].Remote = url

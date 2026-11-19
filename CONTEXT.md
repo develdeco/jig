@@ -136,7 +136,7 @@ _Avoid_: research agent, explorer
 
 **Harness**:
 The program a person builds in - Claude Code today; Codex, Gemini CLI, Cursor, GitHub Copilot and OpenCode by the same floor. jig attaches to it through hooks, skills, MCP and the CLI, and never starts it, picks its model or grants its tools.
-_Avoid_: agent runtime, backend (a backend is what the reviewer evaluation launches)
+_Avoid_: agent runtime, backend
 
 **Session**:
 One run of a harness, known to jig by the id the harness gives it (or one jig mints, `s-` and 12 hex digits), as the fold of its lines in the **Ledger**. Live until it has a `session-end` line. Its claims, verifications and tool calls are how jig knows who built what.
@@ -297,18 +297,6 @@ _Avoid_: review comment triage, auto-dismiss
 **Finding outcome**:
 How a finding ended, as the review notes give it: *fixed* (a round cleared it, by a fix slice or an open finding's coverage), *addressed* (a note the risk floor routed whose file a later round changed and read without reporting it again: no slice fixed it), *dismissed* (a human's decision), *noted* (a record nothing changed: a reviewer's own `note`, or a routed one nobody addressed) or *asked*. A finding a later round continued with another title or risk keeps its first version in the notes.
 _Avoid_: resolved, closed
-
-**Gold**:
-A review-eval case's seeded truth: the findings a correct review must report and the traps it must not flag, both written into the case when it is built, not read off a review after the fact. A finding beyond it is labeled from a recorded human decision instead: kept, dismissed, or, when nobody decided, pending.
-_Avoid_: ground truth, expected output
-
-**Round verdict**:
-A review-eval round's result: FAIL when it was refused or failed or any failure list is non-empty (a miss, a lost finding, a dropped question, a misattributed or wrong prior, a false alarm, a re-litigation); PROVISIONAL when nothing failed but some finding is still pending a label; PASS otherwise. A case takes its worst round's verdict.
-_Avoid_: pass/fail, score
-
-**Staircase** (retired):
-The per-dispatch model ladder jig used while it chose models: the first rung first, one rung up for each earlier attempt of the slice that failed at the work, floored to the dearest model when the diff touched a path a repo declares as invariant-sensitive (ADR 0019). jig chooses no model now (ADR 0032); the code survives only as the reviewer evaluation's default model, its `staircase:` and `builder_effort:` keys still load, and nothing in the binary reads them.
-_Avoid_: model tiering, escalation policy
 
 **Stall**:
 The same failure signature recurring twice: two `oracle` failures of one slice with one signature since its last `verified` or `requeue` line. The signature is built from the end of the failed run's output, so the same failure matches and two different ones do not; a run that covers no commit never counts. It marks a misconception, not a capability shortfall, and calls for a different approach rather than another attempt; an unattended stall also marks the slice `stalled` until `jig requeue`.

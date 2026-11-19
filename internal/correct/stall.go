@@ -10,7 +10,7 @@ import (
 
 // StallAfter is how many oracle failures with one signature make a stall: the
 // repeat of a failure is the sign that the next attempt is more of the same
-// (outcome.StallCounter's threshold, the frontier's own).
+// (two is where a repeated signature is a stall, not a retry).
 const StallAfter = 2
 
 // A Stall is a slice whose oracle failed the same way again: StallAfter or

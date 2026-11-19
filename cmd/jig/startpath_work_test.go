@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 )
 
 // startPathRig is the fixture clone on its ticket's branch, plus five more
@@ -67,9 +68,9 @@ func measureWork(t *testing.T, call func()) (processes int, reads int64) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("GIT_TRACE2_EVENT", dir)
-	before := gitx.InProcessReads()
+	before := gitxtest.InProcessReads()
 	call()
-	reads = gitx.InProcessReads() - before
+	reads = gitxtest.InProcessReads() - before
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +92,7 @@ func checkWork(t *testing.T, name string, processes int, reads int64, maxProcess
 
 // hereMaxProcesses and hereMaxReads bound what `jig here` costs on the
 // startPathRig fixture: git programs started (trace files) and in-process
-// reads (gitx.InProcessReads). Each is the count measured on main plus 2; a
+// reads (gitxtest.InProcessReads). Each is the count measured on main plus 2; a
 // change that adds work on purpose raises it.
 const (
 	hereMaxProcesses       = 10
@@ -113,7 +114,7 @@ func TestHereWorkStaysUnderItsCeiling(t *testing.T) {
 // sessionStartMaxProcesses and sessionStartMaxReads bound what the
 // SessionStart hook (jig observe --harness claude) costs on the startPathRig
 // fixture: git programs started (trace files) and in-process reads
-// (gitx.InProcessReads). Each is the count measured on main plus 2; a change
+// (gitxtest.InProcessReads). Each is the count measured on main plus 2; a change
 // that adds work on purpose raises it.
 const (
 	sessionStartMaxProcesses       = 10
@@ -135,7 +136,7 @@ func TestSessionStartHookWorkStaysUnderItsCeiling(t *testing.T) {
 // observeMaxProcesses and observeMaxReads bound what the call that runs after
 // every tool (jig observe --harness claude, PostToolUse Bash) costs on the
 // startPathRig fixture: git programs started (trace files) and in-process
-// reads (gitx.InProcessReads). Each is the count measured on main plus 2; a
+// reads (gitxtest.InProcessReads). Each is the count measured on main plus 2; a
 // change that adds work on purpose raises it.
 const (
 	observeMaxProcesses       = 0

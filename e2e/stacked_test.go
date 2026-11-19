@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -74,11 +74,11 @@ func commitOnParent(t *testing.T, h *fakeHarness, file string) string {
 	h.git("worktree", "add", "-q", dir, parentBranch)
 	writeFileOrFatal(t, filepath.Join(dir, filepath.FromSlash(file)), []byte(file+"\n"))
 	for _, args := range [][]string{{"add", "--", file}, {"commit", "-q", "-m", "JIG-2 p: more ground", "-m", "Jig-Slice: p"}} {
-		if _, err := gitx.RunReplaceEnv(dir, h.gitEnv(), args...); err != nil {
+		if _, err := gitxtest.RunReplaceEnv(dir, h.gitEnv(), args...); err != nil {
 			t.Fatalf("git %v in the parent's worktree: %v", args, err)
 		}
 	}
-	head, err := gitx.RunReplaceEnv(dir, h.gitEnv(), "rev-parse", "HEAD")
+	head, err := gitxtest.RunReplaceEnv(dir, h.gitEnv(), "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}

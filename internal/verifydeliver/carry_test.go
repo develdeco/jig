@@ -540,14 +540,14 @@ func TestRoundsRecordTheMergeADeltaCarriedInEachShape(t *testing.T) {
 		}
 	})
 
-	t.Run("a launched round", func(t *testing.T) {
+	t.Run("a recorded round of several repos", func(t *testing.T) {
 		t.Parallel()
-		got := carriedOf([]RepoPrep{{Repo: "a"}, {Repo: "b", Carried: "abc", CarriedRef: "origin/main"}})
+		got := carriedOfCovered([]PreparedRepo{{Repo: "a"}, {Repo: "b", Carried: "abc", CarriedRef: "origin/main"}})
 		if want := map[string]CarriedMerge{"b": {SHA: "abc", Ref: "origin/main"}}; !reflect.DeepEqual(got, want) {
-			t.Errorf("carriedOf = %+v, want %+v", got, want)
+			t.Errorf("carriedOfCovered = %+v, want %+v", got, want)
 		}
-		if got := carriedOf([]RepoPrep{{Repo: "a"}}); got != nil {
-			t.Errorf("carriedOf with none = %+v, want nil", got)
+		if got := carriedOfCovered([]PreparedRepo{{Repo: "a"}}); got != nil {
+			t.Errorf("carriedOfCovered with none = %+v, want nil", got)
 		}
 	})
 }

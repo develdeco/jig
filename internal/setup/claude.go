@@ -40,12 +40,6 @@ func ClaudeHooks() []ClaudeHook {
 // claudeShellTools matches Claude Code's shell tools by name.
 const claudeShellTools = "Bash|PowerShell"
 
-// ClaudeCommand is the command of every Claude Code entry: jig is the program
-// part JigCommand gives, and the event arrives on stdin.
-func ClaudeCommand(jig string) string {
-	return ObserveCommand(jig, "claude")
-}
-
 // claudeFormat is Claude Code's settings file: grouped entries of type
 // command.
 var claudeFormat = groupedFormat{
@@ -448,13 +442,6 @@ func (p FilePlan) Apply() error {
 		return nil
 	}
 	return writeFile(p.Path, p.After, 0o644, true)
-}
-
-// PlanClaude works out installing jig's Claude Code entries into the settings
-// file at path, or taking them out when uninstall is set. A file that is not
-// there is an empty document to install into and nothing to uninstall from.
-func PlanClaude(path, jig string, uninstall bool) (FilePlan, error) {
-	return planFile(path, jig, uninstall, MergeClaude, UnmergeClaude)
 }
 
 // planFile works out a change to the file at path with a harness's merge and

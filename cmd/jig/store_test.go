@@ -10,7 +10,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -222,7 +222,7 @@ func TestStoreMigrateApplyEndToEnd(t *testing.T) {
 	// a machine-mapped clone of the product repo, unrelated to the
 	// migration itself.
 	productClone := t.TempDir()
-	if _, err := project.InitProject(jigHome, fx.work, map[string]string{"product-repo": productClone}); err != nil {
+	if _, err := projecttest.InitProject(jigHome, fx.work, map[string]string{"product-repo": productClone}); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 	for _, id := range []string{"GRAPH-1", "T-1"} {

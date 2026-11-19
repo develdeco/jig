@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -643,7 +645,7 @@ func TestGenerateOrchestrator(t *testing.T) {
 	if mp.Store != fx.StoreDir || mp.Root != fx.OrchestratorDir || mp.Clones["api"] != fx.NestedDirs["api"] || mp.Clones["web"] != fx.NestedDirs["web"] {
 		t.Fatalf("machine map = %+v, want the store, the orchestrator and both clones", mp)
 	}
-	cfg, err := project.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
+	cfg, err := projecttest.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -710,7 +712,7 @@ func TestCodeRepoIsServedInProcess(t *testing.T) {
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
 	}
-	if committed, err := repo.CommitAllEnv("lease step", env); err != nil || !committed {
+	if committed, err := gitxtest.CommitAllEnv(repo, "lease step", env); err != nil || !committed {
 		t.Fatalf("CommitAllEnv in the lease = %v, %v; want a commit", committed, err)
 	}
 	if err := repo.Push("origin", "main"); err != nil {

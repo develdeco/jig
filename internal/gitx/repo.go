@@ -55,7 +55,7 @@ func OpenRepo(dir string) (*Repo, error) {
 	if fi, err := os.Stat(gitDir); err != nil || !fi.IsDir() {
 		return nil, ErrUseCLI // a linked worktree or submodule (.git is a file), or no repository
 	}
-	repo, done, err := openStorage(gitDir)
+	repo, done, err := OpenStorage(gitDir)
 	if err != nil {
 		return nil, ErrUseCLI
 	}
@@ -70,10 +70,10 @@ func OpenRepo(dir string) (*Repo, error) {
 	return r, nil
 }
 
-// openStorage opens the repository whose git directory is gitDir, for
+// OpenStorage opens the repository whose git directory is gitDir, for
 // objects, refs, config and index only, and returns what closes it. Pack
 // files stay open until then rather than being reopened for every object.
-func openStorage(gitDir string) (*git.Repository, func(), error) {
+func OpenStorage(gitDir string) (*git.Repository, func(), error) {
 	abs, err := filepath.Abs(gitDir)
 	if err != nil {
 		return nil, nil, err
@@ -89,7 +89,7 @@ func openStorage(gitDir string) (*git.Repository, func(), error) {
 
 // open opens the repository for one method call.
 func (r *Repo) open() (*git.Repository, func(), error) {
-	repo, done, err := openStorage(r.gitDir())
+	repo, done, err := OpenStorage(r.gitDir())
 	if err != nil {
 		return nil, nil, fmt.Errorf("gitx: open %s: %w", r.dir, err)
 	}
@@ -260,10 +260,10 @@ func (r *Repo) HasRemote(name string) bool {
 	return err == nil
 }
 
-// lockFile is a file held under the git program's lock (<path>.lock,
+// LockFile is a file held under the git program's lock (<path>.lock,
 // created only if absent). commit writes the new contents into the lock
 // file and renames it over the file; release gives the lock up otherwise.
-type lockFile struct {
+type LockFile struct {
 	path string
 	f    *os.File
 }
@@ -271,7 +271,7 @@ type lockFile struct {
 // lock takes path's lock file. A lock another process holds returns
 // ErrUseCLI, so the git program runs that step and reports the lock as it
 // always does.
-func lock(path string) (*lockFile, error) {
+func Lock(path string) (*LockFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -282,11 +282,11 @@ func lock(path string) (*lockFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &lockFile{path: path, f: f}, nil
+	return &LockFile{path: path, f: f}, nil
 }
 
 // commit replaces the locked file with data and gives up the lock.
-func (l *lockFile) commit(data []byte) error {
+func (l *LockFile) Commit(data []byte) error {
 	if _, err := l.f.Write(data); err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func (l *lockFile) commit(data []byte) error {
 }
 
 // release gives up the lock without changing the file, unless commit did.
-func (l *lockFile) release() {
+func (l *LockFile) Release() {
 	if l.f != nil {
 		l.f.Close()
 		l.f = nil
@@ -335,13 +335,13 @@ var errRefMoved = errors.New("gitx: ref moved")
 // ErrUseCLI when another process holds the lock, and errRefMoved when the
 // ref no longer holds from.
 func writeRef(repo *git.Repository, gitDir string, name plumbing.ReferenceName, to plumbing.Hash, from *plumbing.Hash) error {
-	l, err := lock(refPath(gitDir, name))
+	l, err := Lock(refPath(gitDir, name))
 	if err != nil {
 		return err
 	}
-	defer l.release()
+	defer l.Release()
 	if from != nil {
-		cur, err := refValue(repo, name)
+		cur, err := RefValue(repo, name)
 		if err != nil {
 			return err
 		}
@@ -349,12 +349,12 @@ func writeRef(repo *git.Repository, gitDir string, name plumbing.ReferenceName, 
 			return errRefMoved
 		}
 	}
-	return l.commit([]byte(to.String() + "\n"))
+	return l.Commit([]byte(to.String() + "\n"))
 }
 
-// refValue is the commit ref name holds, ZeroHash when it does not exist;
+// RefValue is the commit ref name holds, ZeroHash when it does not exist;
 // a symbolic ref returns ErrUseCLI.
-func refValue(repo *git.Repository, name plumbing.ReferenceName) (plumbing.Hash, error) {
+func RefValue(repo *git.Repository, name plumbing.ReferenceName) (plumbing.Hash, error) {
 	ref, err := repo.Storer.Reference(name)
 	switch {
 	case errors.Is(err, plumbing.ErrReferenceNotFound):

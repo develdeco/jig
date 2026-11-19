@@ -156,25 +156,6 @@ func TestAppendConcurrentNoLostLines(t *testing.T) {
 	}
 }
 
-func TestFailedAttempts(t *testing.T) {
-	lines := []Line{
-		{Slice: "a", Event: "result", Outcome: "code-bug", Attempt: 1},
-		{Slice: "a", Event: "result", Outcome: "green", Attempt: 2}, // claimed green, never verified
-		{Slice: "a", Event: "result", Outcome: "needs-input", Attempt: 3},
-		{Slice: "a", Event: "result", Outcome: "flawed-brief", Attempt: 4},
-		{Slice: "a", Event: "result", Outcome: "blocked-by-env", Attempt: 5},
-		{Slice: "a", Event: "result", Outcome: "green", Attempt: 6},
-		{Slice: "a", Event: "verified", Attempt: 6},
-		{Slice: "b", Event: "result", Outcome: "failed", Attempt: 1},
-	}
-	if got := FailedAttempts(lines, "a"); got != 2 {
-		t.Fatalf("FailedAttempts(a) = %d, want 2 (the code-bug and the green that did not verify)", got)
-	}
-	if got := FailedAttempts(lines, "c"); got != 0 {
-		t.Fatalf("FailedAttempts(c) = %d, want 0 for a slice with no lines", got)
-	}
-}
-
 // TestRenderChangelogListsOnlyVerifiedCommits: a builder may claim green
 // more than once in an attempt (a red oracle run goes back to its session,
 // ADR 0020), so a journal with verified lines lists each slice by the commit

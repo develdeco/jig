@@ -32,27 +32,16 @@ func ComputeReady(slices []store.Slice, states map[string]store.SliceState) []st
 	return out
 }
 
-// Schedule groups slices into batches: each inner slice-id list belongs to
-// one repo and runs serially, in the order slices appears; the outer list of
-// batches may run concurrently, one per repo. wsRepo maps a slice's
-// workspace id to its repo name (Place builds it). Batches come in the order
-// their repos first appear.
-func Schedule(slices []store.Slice, wsRepo map[string]string) [][]string {
-	batches := Batches(slices, wsRepo)
-	out := make([][]string, 0, len(batches))
-	for _, b := range batches {
-		out = append(out, b.Slices)
-	}
-	return out
-}
-
 // Batch is one repo's serial run of slices, in build order.
 type Batch struct {
 	Repo   string
 	Slices []string
 }
 
-// Batches is Schedule with each batch named by its repo.
+// Batches groups slices into batches: each batch is one repo's slices, which
+// run serially in the order slices appears; the batches may run concurrently,
+// one per repo, and come in the order their repos first appear. wsRepo maps a
+// slice's workspace id to its repo name (Place builds it).
 func Batches(slices []store.Slice, wsRepo map[string]string) []Batch {
 	var order []string
 	groups := map[string][]string{}

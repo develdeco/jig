@@ -102,8 +102,7 @@ func ParseIntent(data []byte) (Intent, error) {
 	body := strings.TrimPrefix(rest[end+len("\n---\n"):], "\n")
 
 	// Strict: an unknown front-matter key is refused rather than silently
-	// dropped, the same standard revieweval already holds its own files to
-	// (yamlKnownFields).
+	// dropped.
 	var fm intentFrontMatter
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(fmText)))
 	dec.KnownFields(true)

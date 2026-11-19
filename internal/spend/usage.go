@@ -109,22 +109,8 @@ type transcriptLine struct {
 	} `json:"message"`
 }
 
-// FromTranscript sums the usage of the Claude Code transcript at path, for
-// session. The transcript of a session that was resumed begins with the lines
-// of the session it was resumed from, which carry that session's id; a line
-// with another session's id is that session's spend, counted by its own
-// spend line, and is left out. A session id of "" counts every line. The
-// transcripts of the session's subagents, in <path without .jsonl>/subagents,
-// are counted with it: their usage is the session's, and the main transcript
-// does not hold it.
-//
-// An empty path, or a transcript that is not there, is no spend. A line that
-// is not JSON, or has no usage, is skipped. Prices may be nil.
-func FromTranscript(path, session string, prices Prices) (Totals, error) {
-	return FromSession(path, session, nil, prices)
-}
-
-// FromSession is FromTranscript less the subagent transcripts of the agents
+// FromSession sums the usage of the Claude Code transcript at path, for
+// session (see below), less the subagent transcripts of the agents
 // in own: those agents have a spend line of their own, so the session's line
 // does not count them twice. An agent in own with no transcript on disk is
 // nothing to leave out.

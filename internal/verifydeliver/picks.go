@@ -95,25 +95,6 @@ type PicksResult struct {
 	Summary string      `json:"summary"`
 }
 
-// picksPromptTemplate is the exact prompt rendered (via fmt.Sprintf) for every
-// pick dispatch: it states the job and the output contract and says what jig
-// will check. It names no tool and no kind of change, and the session gets no
-// repository: what it judges by is the intent and what the scenarios say about
-// their recordings.
-const picksPromptTemplate = `Choose which of this build's recordings the pull request shows, and compose them into flows. Your input is in picks.json at %s: the change's intent, as a source and the path of the file that states it (` + intentSourcesPrompt + `), and the candidate recordings, each with an id, the scenario it records, an optional flow and step, a caption, and whether it is an image or a video.
-Pick the recordings that show this change to a person reviewing the pull request, and leave out the rest. Put recordings of one flow together in step order, keep scenarios that stand alone as flows of their own, and mix the two where that reads best. Pick at most %d recordings in all. Give each flow a short title, and a caption of your own only where a recording's caption would mislead. Do not edit files, commit, or push; you work in an empty scratch directory.
-When finished, write %s with exactly one JSON object: %s
-jig checks that every id is a candidate and none is used twice, that recordings of one flow keep their step order, that every title and the summary are non-empty and within bounds, and that at least one and at most %d recordings are picked. A result that fails a check is refused whole, and the pull request then has no demo section.`
-
-// picksResultSchema is the {schema} filled into picksPromptTemplate: the
-// literal shape of one pick result.
-const picksResultSchema = `{"flows": [{"title": "...", "items": [{"id": "<candidate id>", "caption": "<optional>"}]}], "summary": "..."}`
-
-// RenderPicksPrompt fills picksPromptTemplate for one pick dispatch.
-func RenderPicksPrompt(reqPath, resultPath string) string {
-	return fmt.Sprintf(picksPromptTemplate, reqPath, media.MaxFiles, resultPath, picksResultSchema, media.MaxFiles)
-}
-
 var (
 	picksResultTopKeys  = map[string]bool{"flows": true, "summary": true}
 	picksResultFlowKeys = map[string]bool{"title": true, "items": true}

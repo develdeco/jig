@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -423,7 +423,7 @@ func githubClone(t *testing.T, b builtTicket) (jigEnv, string) {
 func githubRemote(t *testing.T, fx *fixture.Fixture, env jigEnv) (jigEnv, string) {
 	t.Helper()
 	const remoteURL = "https://github.com/acme/fixture-repo.git"
-	if _, err := gitx.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
 		t.Fatalf("git config --global url.insteadOf: %v", err)
 	}
 	path := filepath.Join(fx.StoreDir, "project.yaml")

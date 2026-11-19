@@ -25,10 +25,6 @@ var live struct {
 	ended bool
 }
 
-// Stopped is the error of a wait that ended because jig was stopped: it
-// matches ErrStopped, as the error of a stopped oracle does.
-func Stopped(what string) error { return &StoppedError{Cmd: what} }
-
 // register records an end function for a running oracle and returns the call
 // that forgets it. Once EndAll has run, a new oracle is ended at once: jig is
 // going down and starts nothing it will not stop.

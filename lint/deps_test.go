@@ -19,10 +19,11 @@ const modulePath = "github.com/develdeco/jig"
 // does not start one, so no code of that kind is in the binary, whether or not
 // anything calls it.
 var cliForbiddenDeps = []string{
-	"internal/session",
-	"internal/staircase",
-	"internal/screen",
 	"internal/frontier",
+	// What only tests import: history rewriting and in-process commits with a
+	// pinned environment, and a v2 store's machine mapping.
+	"internal/gitx/gitxtest",
+	"internal/project/projecttest",
 }
 
 // TestCLIDoesNotLinkSession pins that the binary links no session code: `go

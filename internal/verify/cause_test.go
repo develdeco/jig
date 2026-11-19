@@ -23,7 +23,7 @@ func TestOracleFailLineNamesItsCause(t *testing.T) {
 		cause string
 	}{
 		{"timeout", timedOut("go test ./..."), journal.CauseTimeout},
-		{"stopped", envrun.Stopped("go test ./..."), journal.CauseStopped},
+		{"stopped", &envrun.StoppedError{Cmd: "go test ./..."}, journal.CauseStopped},
 		{"test failure", os.ErrInvalid, ""},
 	}
 	for _, c := range cases {
@@ -61,7 +61,7 @@ func TestAStoppedRunLeavesNoRecordingDirectory(t *testing.T) {
 		err      error
 		wantKept bool
 	}{
-		{"stopped", envrun.Stopped("go test ./..."), false},
+		{"stopped", &envrun.StoppedError{Cmd: "go test ./..."}, false},
 		{"failed", os.ErrInvalid, false},
 		{"passed", nil, true},
 	}

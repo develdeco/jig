@@ -99,7 +99,7 @@ func registerHereSection(s hereSection) {
 func hereSections() []hereSection { return defaultHereSections.sorted() }
 
 // statusSection is one block-producing part of `jig status`, for a ticket in
-// a store. RenderStatus renders the registered blocks after its own and
+// a store. renderStatusWith renders the registered blocks after its own and
 // before its help line.
 type statusSection struct {
 	Order  int

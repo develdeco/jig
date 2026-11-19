@@ -127,7 +127,7 @@ func (fs plainFS) Root() string { return fs.root }
 
 // plainFile is an os.File that reports the name it was opened with. Lock
 // and Unlock do nothing: go-git takes them only around its own packed-refs
-// and ref writes, which gitx does not use (writeRef and CommitAll take the
+// and ref writes, which gitx does not use (writeRef and CommitAllAs take the
 // git program's lock files instead).
 type plainFile struct {
 	*os.File

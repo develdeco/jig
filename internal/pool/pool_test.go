@@ -89,10 +89,6 @@ func TestAcquireCloneAndResume(t *testing.T) {
 	commit(t, lease1.Dir, "work")
 	resumeSHA := run(t, lease1.Dir, "rev-parse", "HEAD")
 
-	if err := lease1.Return(); err != nil {
-		t.Fatalf("Return: %v", err)
-	}
-
 	lease2, err := Acquire(jigHome, "fixture", remote, "main", "jig/T-1", "T-1", Build)
 	if err != nil {
 		t.Fatalf("second Acquire: %v", err)

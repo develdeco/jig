@@ -39,21 +39,16 @@ func Run(dir string, args ...string) (string, error) {
 // RunEnv is Run with env appended to the process environment, for pinning an
 // identity (GIT_AUTHOR_NAME and friends) without persisting it.
 func RunEnv(dir string, env []string, args ...string) (string, error) {
-	var stdout, stderr bytes.Buffer
-	if err := run(dir, env, false, &stdout, &stderr, args); err != nil {
-		return "", callError(args, stderr.String(), err)
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return RunWith(dir, env, false, args...)
 }
 
-// RunReplaceEnv is Run with env as the call's whole process environment,
-// instead of appended to this process's own inherited one: a caller
-// resolving some other directory's identity, or lack of one, uses it so an
-// identity this process has pinned for its own commits (gittest.PinIdentity,
-// say) cannot shadow it.
-func RunReplaceEnv(dir string, env []string, args ...string) (string, error) {
+// RunWith is RunEnv that says what env is: appended to this process's own
+// inherited environment, or, with exact, the call's whole environment, so a
+// caller resolving some other directory's identity, or lack of one, is not
+// shadowed by an identity this process has pinned for its own commits.
+func RunWith(dir string, env []string, exact bool, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	if err := run(dir, env, true, &stdout, &stderr, args); err != nil {
+	if err := run(dir, env, exact, &stdout, &stderr, args); err != nil {
 		return "", callError(args, stderr.String(), err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
@@ -693,7 +688,7 @@ func lsTreeEntry(entry string) (entryType, path string, err error) {
 func CommonDir(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
-		inProcessReads.Add(1)
+		InProcessReadTally.Add(1)
 		out = loc.commonDir
 	} else {
 		var err error
@@ -745,7 +740,7 @@ func SameDir(a, b string) bool {
 func TopLevel(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
-		inProcessReads.Add(1)
+		InProcessReadTally.Add(1)
 		out = loc.workTree
 	} else {
 		var err error
@@ -771,16 +766,6 @@ func CommitTime(dir, rev string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("gitx: parse commit time %q: %w", out, err)
 	}
 	return t, nil
-}
-
-// CommitOnAnyRemote reports whether sha is reachable from any remote-
-// tracking branch in dir.
-func CommitOnAnyRemote(dir, sha string) (bool, error) {
-	out, err := Run(dir, "branch", "-r", "--contains", sha)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
 }
 
 // IsLocalRemote reports whether url points at the local filesystem: an

@@ -11,13 +11,17 @@ import (
 
 func TestRootHonorsEnv(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("JIG_HOME", dir)
-	r, err := Root()
+	r, err := RootFrom(func(k string) string {
+		if k == "JIG_HOME" {
+			return dir
+		}
+		return ""
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r != dir {
-		t.Fatalf("Root() = %q, want %q", r, dir)
+		t.Fatalf("RootFrom = %q, want %q", r, dir)
 	}
 }
 
@@ -34,9 +38,6 @@ func TestPathsDeriveFromTheRootGiven(t *testing.T) {
 	}
 	if e := IntentExcerptDir(root); e != filepath.Join(root, "intent-excerpts") {
 		t.Fatalf("IntentExcerptDir(%q) = %q", root, e)
-	}
-	if s := IntentScratchDir(root); s != filepath.Join(root, "intent-scratch") {
-		t.Fatalf("IntentScratchDir(%q) = %q", root, s)
 	}
 }
 

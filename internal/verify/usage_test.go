@@ -75,7 +75,7 @@ func TestARunJigStoppedKeepsItsLineWithoutFigures(t *testing.T) {
 	r := newRig(t, fixture.Opts{})
 	r.deps.Oracle = nil
 	r.deps.OracleUsage = func(cmd, dir string, env []string, limit time.Duration) (string, envrun.Usage, error) {
-		return "", envrun.Usage{}, envrun.Stopped("the oracle")
+		return "", envrun.Usage{}, &envrun.StoppedError{Cmd: "the oracle"}
 	}
 	sha := r.fixClamp()
 	_, _ = Run(r.deps, r.request("a", sha))

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,81 +15,6 @@ func ticketOf(id string, envs ...events.Envelope) *ticket {
 	w.apply(envs)
 	t, _ := w.ticketFor(id)
 	return t
-}
-
-func TestPhaseFollowsTheJournal(t *testing.T) {
-	t.Parallel()
-	claim := jl(at(0, 1), "T", "a", journal.EventClaim)
-	pending := jl(at(0, 5), "T", "a", journal.EventVerifyPending)
-	verified := jl(at(0, 9), "T", "a", journal.EventVerified)
-	ask := jl(at(1, 0), "T", "b", journal.EventQuestion, with("s", "", "", "which?", "q-001", ""))
-	answer := jl(at(1, 5), "T", "b", journal.EventAnswer, with("p", "", "", "this", "q-001", "person"))
-	stall := jl(at(1, 9), "T", "c", journal.EventStall)
-	open := jl(at(2, 0), "T", "", journal.EventGateOpen)
-	round := jl(at(2, 5), "T", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt = 1 })
-	clean := jl(at(3, 0), "T", "", journal.EventGateClean, func(l *journal.Line) { l.Attempt = 2 })
-	body := jl(at(3, 5), "T", "", journal.EventPrBody)
-	pr := jl(at(3, 9), "T", "", journal.EventPr, func(l *journal.Line) { l.URL = "https://x/pull/1" })
-	done := jl(at(4, 0), "T", "", journal.EventPublishDone)
-	fix := jl(at(2, 30), "T", "f1", journal.EventClaim)
-
-	tests := []struct {
-		name  string
-		lines []events.Envelope
-		want  string
-		label string
-	}{
-		{"nothing yet", nil, StateQueued, "queued"},
-		{"a claim is building", []events.Envelope{claim}, StateBuilding, "building"},
-		{"an old pending line leaves it building", []events.Envelope{claim, pending}, StateBuilding, "building"},
-		{"a result after an old pending line", []events.Envelope{claim, pending, verified}, StateBuilding, "building"},
-		{"a question nobody answered parks it", []events.Envelope{claim, ask}, StateNeedsInput, "needs input"},
-		{"the answer ends the parking", []events.Envelope{claim, ask, answer}, StateBuilding, "building"},
-		{"a stalled slice stalls the ticket", []events.Envelope{claim, stall}, StateStalled, "stalled"},
-		{"an open round is in review", []events.Envelope{claim, verified, open}, StateReviewing, "in review"},
-		{"a round with findings", []events.Envelope{claim, verified, open, round}, StateFindings, "review found asks"},
-		{"fix slices built after the findings are building again", []events.Envelope{claim, open, round, fix}, StateBuilding, "building"},
-		{"a clean round is ready", []events.Envelope{claim, open, clean}, StateReady, "ready to publish"},
-		{"a body after the clean round is publishing", []events.Envelope{open, clean, body}, StatePublishing, "publishing"},
-		{"a pull request", []events.Envelope{open, clean, body, pr}, StatePublishing, "publishing"},
-		{"publish done", []events.Envelope{open, clean, body, pr, done}, StatePublished, "published"},
-	}
-	for _, tc := range tests {
-		got, label := ticketOf("T", tc.lines...).phase(time.UTC)
-		if got != tc.want || label != tc.label {
-			t.Errorf("%s: phase = %s %q, want %s %q", tc.name, got, label, tc.want, tc.label)
-		}
-	}
-
-	// A slice stalled since its claim stalls the ticket.
-	stalled := ticketOf("T", jl(at(0, 1), "T", "c", journal.EventClaim), stall)
-	if got, _ := stalled.phase(time.UTC); got != StateStalled {
-		t.Errorf("a stall after the claim: phase = %s, want stalled", got)
-	}
-}
-
-func TestPhaseTakesTheStoresWordOnTheSlices(t *testing.T) {
-	t.Parallel()
-	tk := ticketOf("T", jl(at(0, 1), "T", "a", journal.EventClaim))
-	for state, want := range map[string]string{"stalled": StateStalled, "parked": StateNeedsInput, "env-blocked": StateEnvBlocked, "green": StateGreen, "building": StateBuilding} {
-		tk.status = &statusInfo{State: state}
-		if got, _ := tk.phase(time.UTC); got != want {
-			t.Errorf("status %s: phase = %s, want %s", state, got, want)
-		}
-	}
-}
-
-// TestPhaseDoesNotCallATicketNothingStartedBuilding: a status that says new or
-// queued is taken at its word, in the words it used, however the journal reads.
-func TestPhaseDoesNotCallATicketNothingStartedBuilding(t *testing.T) {
-	t.Parallel()
-	tk := ticketOf("T", jl(at(0, 1), "T", "", journal.EventApproval))
-	for _, word := range []string{"new", "queued"} {
-		tk.status = &statusInfo{State: word}
-		if got, label := tk.phase(time.UTC); got != StateQueued || label != word {
-			t.Errorf("status %s: phase = %s %q, want %s %q", word, got, label, StateQueued, word)
-		}
-	}
 }
 
 func TestLinesStayInTheOrderTheyWereWritten(t *testing.T) {
@@ -205,34 +129,6 @@ func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
 	tk.status = parseStatus(statusJIG1())
 	if rows := tk.slices(time.UTC); len(rows) != 4 || rows[3].ID != "d" || rows[3].State != StateQueued {
 		t.Errorf("with a status the store's four slices are listed: %+v", rows)
-	}
-}
-
-// TestAnOldPendingLineIsDrawnAsHistoryInNoInFlightState: a verify-pending line
-// an old worker wrote is no verification under way. The slice keeps the
-// store's state, the ticket is building, the activity line says it as history
-// and the line is drawn in no state of work in flight.
-func TestAnOldPendingLineIsDrawnAsHistoryInNoInFlightState(t *testing.T) {
-	t.Parallel()
-	pending := jl(at(0, 5), "T", "b", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", ""))
-	tk := ticketOf("T", jl(at(0, 1), "T", "b", journal.EventClaim), pending)
-	tk.status = &statusInfo{Slices: []statusSlice{{ID: "b", State: "building"}, {ID: "c", State: "stalled"}}}
-	rows := tk.slices(time.UTC)
-	if rows[0].State != StateBuilding || rows[1].State != StateStalled {
-		t.Errorf("states = %s, %s, want building and stalled as the store has them", rows[0].State, rows[1].State)
-	}
-	if rows[0].LastState != "" || !strings.HasPrefix(rows[0].Last, "verification requested for ") {
-		t.Errorf("the pending line's row = %q in %q, want history in no state", rows[0].Last, rows[0].LastState)
-	}
-	if state, label := tk.phase(time.UTC); state != StateBuilding || label != "building" {
-		t.Errorf("phase = %s %q, want building", state, label)
-	}
-	if got := eventState(pending); got != "" {
-		t.Errorf("a pending line is drawn in %q, want no state", got)
-	}
-	g := newRig(t, "T")
-	if got := g.m.say(tk, pending); !strings.HasPrefix(got, "verification requested for ") || strings.Contains(got, "verifying") {
-		t.Errorf("the activity feed says %q, want neutral history words", got)
 	}
 }
 
