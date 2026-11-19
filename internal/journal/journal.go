@@ -175,11 +175,15 @@ type Line struct {
 // Spend is a spend line's cost: the token counts a transcript's usage
 // records sum to, and the dollars they priced at.
 type Spend struct {
-	Input      int64   `json:"input,omitempty"`
-	Output     int64   `json:"output,omitempty"`
-	CacheRead  int64   `json:"cache_read,omitempty"`
-	CacheWrite int64   `json:"cache_write,omitempty"`
-	USD        float64 `json:"usd,omitempty"`
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cache_read,omitempty"`
+	CacheWrite int64 `json:"cache_write,omitempty"`
+	// Peak is the largest single request of the session's or agent's
+	// transcript (input, cache reads and cache writes of one message). A line
+	// without it, or with 0, has no known peak.
+	Peak int64   `json:"peak,omitempty"`
+	USD  float64 `json:"usd,omitempty"`
 }
 
 // Recording is one file a scenario recorded: its name inside the recording

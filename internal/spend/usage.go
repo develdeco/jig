@@ -23,6 +23,11 @@ type Totals struct {
 	Output     int64
 	CacheRead  int64
 	CacheWrite int64
+	// Peak is the largest single request of the transcripts: the input, cache
+	// reads and cache writes of one API message (output is not context). Zero
+	// is unknown, not none: a line written before the figure existed has no
+	// peak, and a ticket's Peak is the largest of the lines it adds up.
+	Peak int64
 	// USD is the cost of the priced models' usage at list price.
 	USD float64
 	// Messages counts the distinct API messages a transcript held; Sessions
@@ -47,7 +52,7 @@ func (t Totals) Tokens() int64 {
 
 // Spend is t as a spend line records it.
 func (t Totals) Spend() journal.Spend {
-	return journal.Spend{Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, USD: t.USD}
+	return journal.Spend{Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Peak: t.Peak, USD: t.USD}
 }
 
 // syntheticModel is the model Claude Code names the messages it writes itself
@@ -205,6 +210,7 @@ func sumFiles(files []string, session string, prices Prices) (Totals, error) {
 		t.Output += m.out
 		t.CacheRead += m.cacheRead
 		t.CacheWrite += m.cacheWrite
+		t.Peak = max(t.Peak, m.in+m.cacheRead+m.cacheWrite)
 		if m.model != "" && m.model != syntheticModel {
 			models[m.model] = true
 		}
