@@ -26,7 +26,11 @@ var (
 // with no config file), points GIT_CONFIG_GLOBAL at it, sets
 // GIT_CONFIG_NOSYSTEM=1, and runs m. Every git process the binary spawns,
 // including git-receive-pack on the far side of a local push, then runs
-// without detached maintenance or host config. After m.Run() it runs the
+// without detached maintenance or host config. The config is read-only to
+// git: every write to it fails with "could not lock config file", so a test
+// that installs global settings (a core.hooksPath, say) points
+// GIT_CONFIG_GLOBAL at a file of its own that includes this one, and no
+// setting of one test reaches another. After m.Run() it runs the
 // AtExit funcs in LIFO order and returns the exit code. Before m runs it also
 // removes from the binary's environment every variable in gitenv.HookOnly,
 // plus EMAIL, which git reads as an identity: a person's shell exports them,
@@ -54,6 +58,16 @@ func Run(m *testing.M) int {
 			filepath.ToSlash(filepath.Join(dir, "ignore")), filepath.ToSlash(filepath.Join(dir, "attributes")))
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "gittest: write %s: %v\n", cfg, err)
+		return 1
+	}
+	// Every parallel test of the binary reads this one file, so a setting one
+	// test writes to it runs in every other test's git. Git changes a config
+	// file only through <file>.lock, created exclusively; a directory under
+	// that name is a lock no git process can take, on every platform and as
+	// root, so every write fails and every read still works. A read-only
+	// file would not do: git replaces the file by renaming over it.
+	if err := os.Mkdir(cfg+".lock", 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "gittest: hold the lock of %s: %v\n", cfg, err)
 		return 1
 	}
 	if err := os.Setenv("GIT_CONFIG_GLOBAL", cfg); err != nil {
