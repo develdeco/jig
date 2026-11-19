@@ -1,0 +1,211 @@
+package verifydeliver
+
+// A builder's probes (ADR 0036, amended): with no gate round open, the session
+// that holds a slice records its mutation probes and skips as journal lines for
+// that slice, each with the blob of its file in the builder's worktree. The
+// next round reads them with the earlier rounds' probes, so a current, caught
+// one covers its term and a survivor is probed again. Probes of one line rank
+// by when they were made: a builder's probe after round N closed is later than
+// round N's, and one made before it closed is earlier.
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
+)
+
+// CheckBuilderDraft holds a builder's probe or skip to the shape rules a
+// round's draft is held to and returns it with its file normalized. A builder's
+// draft is one probe or one skip, never a finding.
+func CheckBuilderDraft(dr Draft) (Draft, error) {
+	switch {
+	case dr.kinds() != 1 || (dr.Probe == nil && dr.Skip == nil):
+		return dr, reviewInvalid("a builder records one probe or one skip")
+	case dr.Probe != nil:
+		p := *dr.Probe
+		if err := checkResultProbe(0, p); err != nil {
+			return dr, err
+		}
+		p.File, _ = normalizeRepoRelPath(p.File)
+		dr.Probe = &p
+	default:
+		s := *dr.Skip
+		if err := checkResultSkip(0, s); err != nil {
+			return dr, err
+		}
+		s.File, _ = normalizeRepoRelPath(s.File)
+		dr.Skip = &s
+	}
+	return dr, nil
+}
+
+// BuilderLine is the journal line a builder's draft is recorded as, for slice,
+// with blob the git blob of its file in the worktree and now the time it is
+// made at.
+func BuilderLine(slice, session, blob, now string, dr Draft) journal.Line {
+	l := journal.Line{TS: now, Slice: slice, Event: journal.EventBuilderProbe, Session: session}
+	if p := dr.Probe; p != nil {
+		l.Probe = &journal.ProbeNote{
+			Seam: p.Seam, File: p.File, Line: p.Line, Mutation: p.Mutation, Command: p.Command, Outcome: p.Outcome, Blob: blob,
+		}
+	}
+	if s := dr.Skip; s != nil {
+		l.Skip = &journal.SkipNote{File: s.File, From: s.From, To: s.To, Why: s.Why, Blob: blob}
+	}
+	return l
+}
+
+// BuilderFile is the file of a builder's draft as the round names it.
+func BuilderFile(dr Draft) string {
+	if dr.Probe != nil {
+		return dr.Probe.File
+	}
+	return dr.Skip.File
+}
+
+// parseStamp reads a journal line's time; ok is false when it has none.
+func parseStamp(ts string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	return t, err == nil
+}
+
+// builderLedger reads the builder-probe lines of ticket as ledger records.
+// A probe's After is how many gate rounds had closed by the time it was made,
+// from the closing lines' times, and At its own time.
+func builderLedger(st *store.Store, ticket string) ([]ProbeRecord, []SkipRecord, error) {
+	lines, err := journal.Read(st, ticket)
+	if err != nil {
+		return nil, nil, fmt.Errorf("verifydeliver: probes: read the journal: %w", err)
+	}
+	var closed []time.Time
+	for _, l := range lines {
+		if l.Event != journal.EventGateRound && l.Event != journal.EventGateClean {
+			continue
+		}
+		if t, ok := parseStamp(l.TS); ok {
+			closed = append(closed, t)
+		}
+	}
+	var probes []ProbeRecord
+	var skips []SkipRecord
+	for _, l := range lines {
+		if l.Event != journal.EventBuilderProbe {
+			continue
+		}
+		at, ok := parseStamp(l.TS)
+		if !ok {
+			continue
+		}
+		after := 0
+		for _, c := range closed {
+			if !c.After(at) {
+				after++
+			}
+		}
+		switch {
+		case l.Probe != nil:
+			p := l.Probe
+			probes = append(probes, ProbeRecord{
+				Seam: p.Seam, File: p.File, Line: p.Line, Mutation: p.Mutation, Command: p.Command, Outcome: p.Outcome, Blob: p.Blob,
+				Slice: l.Slice, After: after, At: at.UnixNano(),
+			})
+		case l.Skip != nil:
+			s := l.Skip
+			skips = append(skips, SkipRecord{File: s.File, From: s.From, To: s.To, Why: s.Why, Blob: s.Blob, Slice: l.Slice})
+		}
+	}
+	return probes, skips, nil
+}
+
+// supersedes reports whether probe q takes the place of probe p of the same
+// line. Probes rank in groups: a round's own, and a builder's made between two
+// rounds. The latest group decides a line. Within a group a later builder's
+// probe supersedes an earlier one only when it repeats its mutation, since
+// several terms of one line probed between two rounds each stay current, while
+// a probe of the same term again, after a test for its survivor, replaces it.
+// A round's probes of a line all stay current.
+func (q ProbeRecord) supersedes(p ProbeRecord) bool {
+	kq, kp := q.rankKey(), p.rankKey()
+	if kq != kp {
+		return kq > kp
+	}
+	return q.At > p.At && q.Mutation == p.Mutation
+}
+
+// rankKey is where a probe falls among the rounds: 2n for round n's own, and
+// 2n+1 for a builder's made after n rounds had closed.
+func (p ProbeRecord) rankKey() int {
+	if p.Slice == "" {
+		return 2 * p.Round
+	}
+	return 2*p.After + 1
+}
+
+// SliceProbeRow is one probe of a slice that `jig verify` shows: one that is
+// stale at the head, or a current survivor.
+type SliceProbeRow struct {
+	File     string
+	Line     int
+	Outcome  string
+	State    string
+	Mutation string
+}
+
+// SliceProbes is what a slice's recorded probes come to at a head: how many are
+// current, stale and survived (the current survivors), and a row for each stale
+// or surviving one. Total is how many the slice has recorded.
+type SliceProbes struct {
+	Total, Current, Stale, Survived int
+	Rows                            []SliceProbeRow
+}
+
+// BuilderProbesAt reads the probes recorded for slice of ticket and judges
+// them against head, a commit of the clone dir of repo: a probe is stale once
+// its file's blob at head differs from the one it recorded, or a later probe
+// of the same line exists, a reviewer's round or another of the builder's.
+// qualified says files are named <repo>/<path>, as in a project of several
+// repos. It is a fact to show: nothing here refuses.
+func BuilderProbesAt(st *store.Store, ticket, slice, repo, dir, head string, qualified bool) (SliceProbes, error) {
+	rounds, err := existingGateRounds(st, ticket)
+	if err != nil {
+		return SliceProbes{}, fmt.Errorf("verifydeliver: probes: count rounds: %w", err)
+	}
+	probes, _, err := ledgerBefore(st, ticket, rounds+1)
+	if err != nil {
+		return SliceProbes{}, err
+	}
+	rf := roundFiles{qualified: qualified, repos: []roundRepo{{Name: repo, Dir: dir, Head: head}}}
+	var mine []ProbeRecord
+	for _, p := range probes {
+		if _, _, ok := rf.of(p.File); ok {
+			mine = append(mine, p)
+		}
+	}
+	probed, _, _, err := currentLedger(rf, mine, nil)
+	if err != nil {
+		return SliceProbes{}, err
+	}
+	var out SliceProbes
+	for _, p := range probed {
+		if p.Slice != slice {
+			continue
+		}
+		out.Total++
+		survivor := p.State == ProbeCurrent && p.Outcome == ProbeSurvived
+		switch {
+		case p.State == ProbeStale:
+			out.Stale++
+		default:
+			out.Current++
+		}
+		if survivor {
+			out.Survived++
+		}
+		if p.State == ProbeStale || survivor {
+			out.Rows = append(out.Rows, SliceProbeRow{File: p.File, Line: p.Line, Outcome: p.Outcome, State: p.State, Mutation: p.Mutation})
+		}
+	}
+	return out, nil
+}

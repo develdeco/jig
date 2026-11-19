@@ -82,7 +82,7 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 		"hunks: 3",
 		"unprobed: 1",
 		"oracles_passed[1]{slice,workspace,command,commit,at_head,seconds}:\n  s1,a,go test ./a/...,cccccccccccc,no,4",
-		"probed[2]{round,file:line,outcome,state,seam,mutation}:\n  1,\"a/a.go:3\",caught,current,a total,drop the factor\n  1,\"a/b.go:7\",survived,stale,a total,negate it",
+		"probed[2]{round,file:line,outcome,state,seam,mutation,slice}:\n  1,\"a/a.go:3\",caught,current,a total,drop the factor,\n  1,\"a/b.go:7\",survived,stale,a total,negate it,",
 		"unprobed[1]{hunk}:\n  \"a/b.go:6-8\"",
 	} {
 		if !strings.Contains(out, want) {
