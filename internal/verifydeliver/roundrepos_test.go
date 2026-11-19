@@ -24,11 +24,11 @@ import (
 // read in apiDir and webDir.
 func twoRepoFiles(apiDir, webDir string) roundFiles {
 	return roundFiles{qualified: true, repos: []roundRepo{
-		{Name: "api", Dir: apiDir, Head: "api-head", Man: manifest.Manifest{
+		{Name: "api", Dir: apiDir, Worktree: apiDir, Head: "api-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "server", Path: "server"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/...", "lint": "go vet ./{path}/..."},
 		}},
-		{Name: "web", Dir: webDir, Head: "web-head", Man: manifest.Manifest{
+		{Name: "web", Dir: webDir, Worktree: webDir, Head: "web-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "ui", Path: "ui"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/..."},
 		}},
@@ -507,14 +507,14 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	intent := reportIntentYAML{Source: "brief", SHA256: "x"}
 	one := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Repo: "app", Branch: "jig/JIG-1", Copy: "origin's", Head: "h1", Base: "b1", Scope: "full",
-		Target: "main", TargetSHA: "t1", Lease: "pool/app/JIG-1-gate", Intent: intent, Opened: "2026-01-01T00:00:00Z",
+		Target: "main", TargetSHA: "t1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 	}
 	data, err := yaml.Marshal(one)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const golden = "round: 1\nticket: JIG-1\nrepo: app\nbranch: jig/JIG-1\ncopy: origin's\nhead: h1\nbase: b1\nscope: full\n" +
-		"target: main\ntarget_sha: t1\nlease: pool/app/JIG-1-gate\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
+		"target: main\ntarget_sha: t1\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
 	if string(data) != golden {
 		t.Errorf("the open record of a round over one repo changed:\n%s\nwant:\n%s", data, golden)
 	}
@@ -525,8 +525,8 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	several := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Branch: "jig/JIG-1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 		Repos: []openRepoFile{
-			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta", Lease: "pool/api/JIG-1-gate"},
-			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw", Lease: "pool/web/JIG-1-gate"},
+			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta"},
+			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw"},
 		},
 	}
 	data, err = yaml.Marshal(several)
@@ -537,7 +537,7 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha", "lease"} {
+	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the open record of a round over several repos has %q at the top:\n%s", key, data)
 		}
@@ -554,7 +554,7 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 // oneRepoIn is the files of a round over one repo read in leaseDir, whose
 // manifest declares the oracles named.
 func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
-	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
+	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Worktree: leaseDir, Man: oraclesManifest(oracleNames)}}}
 }
 
 // TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a

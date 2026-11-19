@@ -194,12 +194,16 @@ func writeReviewRecordings(in RoundInput, files roundFiles) (string, error) {
 }
 
 // reviewerHostDirs are the directories of this machine that a reviewer's
-// words, which reach the store, must not name: the lease it works in, the jig
-// home (the recordings and everything else jig keeps there) and the store.
+// words, which reach the store, must not name: the clones it reads and the
+// worktrees jig advises for it, the jig home (the recordings and everything
+// else jig keeps there) and the store.
 func reviewerHostDirs(in RoundInput) []hostDir {
 	var dirs []hostDir
 	for _, r := range in.repoList() {
-		dirs = append(dirs, hostDir{r.LeaseDir, "<lease>"})
+		dirs = append(dirs, hostDir{r.LeaseDir, "<clone>"})
+		if r.LeaseDir != "" {
+			dirs = append(dirs, hostDir{ReviewWorktreeDir(r.LeaseDir, in.Ticket), "<worktree>"})
+		}
 	}
 	dirs = append(dirs, hostDir{in.Home, "<jig home>"})
 	if in.Store != nil {

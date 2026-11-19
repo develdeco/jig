@@ -242,7 +242,7 @@ func readRepo(t *testing.T, dir string) repoFacts {
 // TestBuiltTicketCopyIsTheDirectBuild: a copy of the built ticket and a
 // fixture built directly (fixture.Generate, then driveBuild) are the same
 // state in different directories: the same files in the fixture's directory
-// and in the jig home (the store, the remotes, the build lease's clone and its
+// and in the jig home (the store, the remotes, the clone and its
 // config, the machine mapping, the journal), once the directories are read as
 // each other's and the times blanked; the same repositories with the same refs,
 // the same shape of history (subjects and parents) under each, the same files in
@@ -320,7 +320,7 @@ func compareBuilt(t *testing.T, copied, direct *fixture.Fixture, sameIDs bool) {
 		}
 
 		gotRepos, wantRepos := gitDirsUnder(t, from[i]), gitDirsUnder(t, to[i])
-		if len(gotRepos) != len(wantRepos) || len(wantRepos) == 0 {
+		if len(gotRepos) != len(wantRepos) || (i == 0 && len(wantRepos) == 0) {
 			t.Fatalf("root %d: %d repositories, direct build has %d", i, len(gotRepos), len(wantRepos))
 		}
 		for j := range wantRepos {

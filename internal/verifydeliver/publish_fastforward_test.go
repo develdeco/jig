@@ -10,7 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // whenPublishFetchesOrigin runs move just before publish's fetch of origin, the
@@ -126,16 +125,12 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 		if !errors.As(err, &ae) {
 			t.Fatalf("err = %v, want an *axi.Error", err)
 		}
-		buildDir, perr := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Build)
-		if perr != nil {
-			t.Fatal(perr)
-		}
 		if !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, "1 commit(s) the branch lacks") {
 			t.Errorf("the refusal %q does not name the branch and origin's one commit the copy lacks", ae.Msg)
 		}
 		help := strings.Join(ae.Help, "\n")
-		if !strings.Contains(help, "git -C "+buildDir+" fetch origin && git -C "+buildDir+" merge origin/"+branch) || !strings.Contains(help, "never forces") {
-			t.Errorf("the refusal's help = %q, want the merge in the build lease at %s and that publish never forces", help, buildDir)
+		if !strings.Contains(help, "jig gate "+fx.Ticket) || !strings.Contains(help, "never forces") {
+			t.Errorf("the refusal's help = %q, want a new round and that publish never forces", help)
 		}
 		if got := originRef(t, fx.RepoRemote, "refs/heads/main"); got != mainBefore {
 			t.Fatalf("origin's main = %s, want %s unchanged", got, mainBefore)
@@ -149,8 +144,8 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 
 		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 		wantAxiCode(t, err, "BRANCH_DIVERGED")
-		if !strings.Contains(err.Error(), "the build lease at "+buildLeaseOf(t, fx, fx.Ticket)) {
-			t.Errorf("the refusal %q does not name the build lease to integrate in", err)
+		if !strings.Contains(strings.ReplaceAll(err.Error(), `\\`, `\`), "the clone at "+fx.RepoDir) {
+			t.Errorf("the refusal %q does not name the clone to integrate in", err)
 		}
 		wantNothingWritten(t, theirs, journalBefore, storeHead)
 	})

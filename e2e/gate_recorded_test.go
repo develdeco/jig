@@ -476,11 +476,7 @@ func TestPublishBodyThenPR(t *testing.T) {
 	b.openRound(t)
 	b.reviewedClean(t, 1)
 
-	gateLease := filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-gate")
-	if _, err := os.Stat(gateLease); err != nil {
-		t.Fatalf("test setup: the gate lease is not at %s: %v", gateLease, err)
-	}
-	leaseHead := gitLog(t, gateLease, "rev-parse", "HEAD")
+	cloneHead := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch)
 	originBefore := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch)
 	callsBefore := len(ghCalls(t, log))
 
@@ -502,8 +498,8 @@ func TestPublishBodyThenPR(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-publish")); err == nil {
 		t.Errorf("--body made a publish lease")
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != leaseHead {
-		t.Errorf("the gate lease moved from %s to %s", leaseHead, got)
+	if got := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch); got != cloneHead {
+		t.Errorf("the clone's %s moved from %s to %s", b.branch, cloneHead, got)
 	}
 	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != originBefore {
 		t.Errorf("origin's %s went from %q to %q", b.branch, originBefore, got)

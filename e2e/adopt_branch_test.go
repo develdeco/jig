@@ -219,12 +219,11 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if g2.Code != 0 || !strings.Contains(g2.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate round 2 exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g2.Code, g2.Stdout, g2.Stderr)
 	}
-	gateLease := filepath.Join(env.home, "pool", "fixture-repo", ticket+"-gate")
-	if got := gitLog(t, gateLease, "symbolic-ref", "--short", "HEAD"); got != branch {
-		t.Fatalf("the gate lease is on %q, want the reviewed branch %q", got, branch)
+	if !strings.Contains(g2.Stdout, "copy: the clone's") {
+		t.Fatalf("round 2 did not review the clone's copy\nstdout:\n%s", g2.Stdout)
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != jigFix {
-		t.Fatalf("round 2 reviewed %s, want the branch with the fix commit, %s", got, jigFix)
+	if got := h.git("rev-parse", "refs/heads/"+branch); got != jigFix {
+		t.Fatalf("the clone's %s is at %s, want the fix commit %s the round reviewed", branch, got, jigFix)
 	}
 
 	// The clean round makes the ticket publishable like any other, adopted or
@@ -297,7 +296,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if g3.Code != 0 || !strings.Contains(g3.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate after the publish exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g3.Code, g3.Stdout, g3.Stderr)
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("the round after the publish reviewed %s, want origin's copy, %s", got, head)
+	if got := h.git("rev-parse", "refs/heads/"+branch); got != head {
+		t.Fatalf("the clone's %s is at %s after the publish, want what origin holds, %s", branch, got, head)
 	}
 }

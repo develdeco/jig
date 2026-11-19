@@ -65,8 +65,7 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	t.Parallel()
 	fx, d, head := reviewedInTheClone(t)
 	logFile, _ := useGithubHost(t, &d, "", "")
-	gateLease := gateLeaseOf(t, fx, fx.Ticket)
-	gateHead := run(t, gateLease, "rev-parse", "HEAD")
+	cloneHead := run(t, fx.RepoDir, "rev-parse", "HEAD")
 
 	report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
 	if err != nil {
@@ -94,8 +93,8 @@ func TestPublishBodyRendersAndChangesNothingElse(t *testing.T) {
 	if _, err := os.Stat(publishLeaseDir(t, fx)); err == nil {
 		t.Error("--body made a publish lease")
 	}
-	if got := run(t, gateLease, "rev-parse", "HEAD"); got != gateHead {
-		t.Errorf("the gate lease moved from %s to %s", gateHead, got)
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != cloneHead {
+		t.Errorf("the clone moved from %s to %s", cloneHead, got)
 	}
 	if got := originRef(t, fx.RepoRemote, "refs/heads/"+report.Branch); got != "" {
 		t.Errorf("origin has %s at %s after --body", report.Branch, got)

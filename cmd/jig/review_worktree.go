@@ -8,12 +8,6 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// reviewWorktreeSuffix follows the ticket's id in the directory of the
-// reviewer's worktree, beside the builder's (`<clone>.worktrees/<TICKET>`): the
-// builder's worktree holds the ticket's branch, which git lets one worktree
-// hold, and the reviewer needs the head, not the branch (ADR 0039).
-const reviewWorktreeSuffix = "-review"
-
 // dirExists says dir is a directory.
 func dirExists(dir string) bool {
 	info, err := os.Stat(dir)
@@ -44,7 +38,7 @@ func reviewerWorktreeBlocks(p verifydeliver.Prepared, clones map[string]string, 
 			continue
 		}
 		clone = filepath.ToSlash(filepath.Clean(clone))
-		dir := clone + worktreesDirSuffix + p.Ticket + reviewWorktreeSuffix
+		dir := verifydeliver.ReviewWorktreeDir(clone, p.Ticket)
 		command := "git -C " + gitPath(clone) + " worktree add --detach " + gitPath(dir) + " " + h.head
 		if exists(dir) {
 			command = "git -C " + gitPath(dir) + " checkout --detach " + h.head

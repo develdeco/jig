@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/pool"
 )
@@ -168,82 +167,4 @@ func TestFetchTicketBranchFromBuildLeaseTakesOneProcessWhenTheLeaseIsOnTheBranch
 		}
 		f.wantAtTheSourcesTip(t)
 	})
-}
-
-// TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt: the
-// restore a round starts with is for what may have been left in the lease. A
-// round whose lease was restored and had nothing run in it since (the gate
-// says so, RoundInput.Pristine) starts no reset; one that was not does. Not
-// parallel.
-func TestPrepareReviewRequestResetsALeaseOnlyWhenSomethingMayHaveChangedIt(t *testing.T) {
-	for _, c := range []struct {
-		name     string
-		pristine bool
-		resets   int
-	}{{"the lease was restored just before", true, 0}, {"the lease was not restored", false, 1}} {
-		t.Run(c.name, func(t *testing.T) {
-			dir := newReviewLease(t, "main")
-			writeReviewFile(t, dir, "alpha.go", "package alpha\n")
-			commitReviewLease(t, dir, "change")
-			in := RoundInput{
-				Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir,
-				RepoName: "fixture-repo", Target: "main", OperatorClone: dir,
-				Home: t.TempDir(), UserHome: t.TempDir(), Intent: Intent{Source: IntentSourceBrief, Path: "/x/brief.md"},
-				Recorded: true, Pristine: c.pristine,
-			}
-			var err error
-			calls := gittest.GitCalls(t, func() { _, err = PrepareReviewRequest(in) })
-			if err != nil {
-				t.Fatal(err)
-			}
-			resets := 0
-			for _, s := range subcommands(calls, dir) {
-				if strings.HasPrefix(s, "reset --hard") {
-					resets++
-				}
-			}
-			if resets != c.resets {
-				t.Errorf("PrepareReviewRequest started %d resets of the lease, want %d (%q)", resets, c.resets, subcommands(calls, dir))
-			}
-		})
-	}
-}
-
-// TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt counts the hard resets
-// one recorded gate call starts in its lease: the one before an existing lease
-// is re-acquired (dirt would block the checkout) and the one that restores it
-// at the copy it points at. The round runs nothing in the lease, so it starts
-// none for the review. Not parallel: it counts through the process's trace.
-func TestAGateCallResetsItsLeaseOnlyWhereSomethingChangedIt(t *testing.T) {
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	driveBuild(t, fx, "rung-a")
-	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resets := func() int {
-		var gerr error
-		calls := gittest.GitCalls(t, func() { _, gerr = GatePrepare(d, GateOpts{Ticket: fx.Ticket}) })
-		if gerr != nil {
-			t.Fatalf("GatePrepare: %v", gerr)
-		}
-		n := 0
-		for _, s := range subcommands(calls, gateLease) {
-			if strings.HasPrefix(s, "reset --hard") {
-				n++
-			}
-		}
-		return n
-	}
-	// The lease is new: the restore at the copy is all there is, since the round
-	// runs nothing in the lease for a review reset to undo.
-	if got := resets(); got != 1 {
-		t.Errorf("a first call started %d resets of the gate lease, want 1", got)
-	}
-	// The lease exists now: the restore before the acquire and the one at the
-	// copy are all there is.
-	if got := resets(); got != 2 {
-		t.Errorf("a second call started %d resets of the gate lease, want 2", got)
-	}
 }

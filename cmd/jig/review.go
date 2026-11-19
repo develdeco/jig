@@ -340,7 +340,7 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	p.Request.Hunks = verifydeliver.HunksWithDrafts(p, drafts)
-	deltas, err := computeDeltaDiffs(p)
+	deltas, err := computeDeltaDiffs(p, mp.Clones)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

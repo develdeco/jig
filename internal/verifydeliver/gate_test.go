@@ -628,152 +628,6 @@ func TestGateIntentNotRecordedWhenNotGreen(t *testing.T) {
 	})
 }
 
-// TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances is the chain of what a
-// killed reviewer leaves in the gate lease, on one build: what the second round
-// must not trip over.
-//
-// NM2 scenario A: a reviewer that outlived a killed jig (no signal handler
-// reaches a future reviewer source's own defer restore) can leave an untracked
-// failing test file and a tracked edit sitting in the gate lease. The next `jig
-// gate` must not have its review skewed by that leftover dirt -
-// Gate itself restores the lease to a pristine head before the round reads it. The
-// untracked file here is a failing test of alpha: it is only absent from the
-// lease the reviewer reads if the restore came first.
-//
-// NM5, a residual of NM2: leftover tracked dirt (a reviewer that outlived a
-// killed jig, or a rewrite from an earlier attempt) does not get in the
-// way of a round by itself, but once the ticket branch later advances past
-// the same file, the checkout that runs before Gate's post-acquire restore
-// (fetchTicketBranchFromBuildLease's own final `git checkout <branch>`) refuses
-// with "local changes ... would be overwritten", and Gate would return before
-// that restore ever runs - leaving the lease detached and still dirty, so
-// pool.Acquire's own checkout would fail the exact same way on every later
-// attempt. Gate restores an existing lease pristine before Acquire ever touches
-// it, so the very next gate succeeds (the second round here, whose lease holds
-// the dirt of both scenarios and whose branch advanced), and a lease already
-// left wedged by an earlier failed attempt (detached, still dirty, its local
-// branch ref already fast-forwarded past the dirty file) recovers too (the
-// third).
-func TestGateRecoversLeftoverTrackedDirtOnceBranchAdvances(t *testing.T) {
-	t.Parallel()
-
-	fx := generateBuilt(t, "rung-a")
-
-	d := newDeps(t, fx)
-	var gateDir string
-	trackedPath := func() string { return filepath.Join(gateDir, "alpha", "alpha.go") }
-	var orig []byte
-	dirty := func(t *testing.T, note string) {
-		t.Helper()
-		edited := append(append([]byte{}, orig...), []byte("\n// "+note+"\n")...)
-		if err := os.WriteFile(trackedPath(), edited, 0o644); err != nil {
-			t.Fatalf("dirty tracked file: %v", err)
-		}
-	}
-	advance := func(t *testing.T, note string) {
-		t.Helper()
-		buildDir := buildLeaseDir(t, fx)
-		bp := filepath.Join(buildDir, "alpha", "alpha.go")
-		bdata, err := os.ReadFile(bp)
-		if err != nil {
-			t.Fatalf("read build alpha.go: %v", err)
-		}
-		if err := os.WriteFile(bp, append(bdata, []byte("\n// "+note+"\n")...), 0o644); err != nil {
-			t.Fatalf("write build alpha.go: %v", err)
-		}
-		builder(t).Commit(buildDir, note)
-	}
-	wantPristine := func(t *testing.T, what string) {
-		t.Helper()
-		status, err := gitx.Run(gateDir, "status", "--porcelain")
-		if err != nil {
-			t.Fatalf("git status: %v", err)
-		}
-		if status != "" {
-			t.Fatalf("gate lease left dirty after %s: %q", what, status)
-		}
-	}
-
-	step(t, "round 1 leaves the gate lease its own", func(t *testing.T) {
-		if _, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket}); err != nil {
-			t.Fatalf("Gate round 1: %v", err)
-		}
-		gateLease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", ticketBranch(fx.Ticket), fx.Ticket, pool.Gate)
-		if err != nil {
-			t.Fatalf("reacquire gate lease: %v", err)
-		}
-		gateDir = gateLease.Dir
-		if orig, err = os.ReadFile(trackedPath()); err != nil {
-			t.Fatalf("read tracked file: %v", err)
-		}
-	})
-
-	step(t, "round 2 wipes a failing repro and a tracked edit before it reads the lease, though the branch advanced", func(t *testing.T) {
-		// An untracked failing test file, as a reviewer's own repro would leave
-		// behind.
-		reproPath := filepath.Join(gateDir, "alpha", "zz_repro_test.go")
-		repro := "package alpha\n\nimport \"testing\"\n\nfunc TestZZRepro(t *testing.T) { t.Fatal(\"boom\") }\n"
-		if err := os.WriteFile(reproPath, []byte(repro), 0o644); err != nil {
-			t.Fatalf("write leftover repro test: %v", err)
-		}
-		// A tracked edit left uncommitted, as a killed
-		// reviewer's own edit would leave behind.
-		dirty(t, "leftover reviewer edit")
-		// Advance the ticket's branch in the build lease with a commit touching the
-		// same file, as a later slice build (e.g. after an --early gate) would.
-		advance(t, "next slice")
-
-		report2, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatalf("Gate round 2 should succeed on the first attempt despite the leftover dirt and the advanced branch: %v", err)
-		}
-		if report2.Round != 2 || report2.Verdict != "clean" {
-			t.Fatalf("report2 = %+v, want round 2 clean", report2)
-		}
-		if _, err := os.Stat(reproPath); !os.IsNotExist(err) {
-			t.Fatalf("leftover untracked repro file still present after Gate: err = %v", err)
-		}
-		wantPristine(t, "round 2")
-	})
-
-	step(t, "round 3 recovers a lease an earlier failed attempt left detached and dirty", func(t *testing.T) {
-		// Forge exactly the state a pre-fix failed attempt would have left
-		// behind: advance the branch again, dirty the lease again, then call
-		// the real fetchTicketBranchFromBuildLease directly - its fetch force-
-		// updates the local branch ref to the new tip and succeeds, but its own
-		// final checkout back onto that branch fails on the dirty file, so it
-		// returns with the lease detached at the old commit and still dirty.
-		advance(t, "third slice")
-		// A lease on the branch is fetched with no checkout to fail, so the lease
-		// is left off the branch, as the attempt that failed had it.
-		run(t, gateDir, "checkout", "--detach", "HEAD")
-		dirty(t, "leftover from a killed attempt")
-		if err := fetchTicketBranchFromBuildLease(fx.Home, gateDir, "fixture-repo", fx.Ticket, ticketBranch(fx.Ticket)); err == nil {
-			t.Fatal("test setup: fetchTicketBranchFromBuildLease should still fail on the dirty file before the pre-Acquire restore runs")
-		}
-
-		report3, err := Gate(d, alwaysCleanSource{}, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatalf("Gate round 3 should recover a lease left detached and dirty by an earlier failed attempt: %v", err)
-		}
-		if report3.Round != 3 || report3.Verdict != "clean" {
-			t.Fatalf("report3 = %+v, want round 3 clean", report3)
-		}
-		head, err := gitx.RevParse(gateDir, "HEAD")
-		if err != nil {
-			t.Fatalf("resolve HEAD: %v", err)
-		}
-		branchHead, err := gitx.RevParse(gateDir, ticketBranch(fx.Ticket))
-		if err != nil {
-			t.Fatalf("resolve branch HEAD: %v", err)
-		}
-		if head != branchHead {
-			t.Fatalf("gate lease HEAD %s is not the ticket branch's HEAD %s: still detached", head, branchHead)
-		}
-		wantPristine(t, "round 3")
-	})
-}
-
 // TestGateUsesRecordedBranch runs a gate round on a ticket whose ticket.yaml
 // records a branch, with the build lease on that branch instead of the
 // default name. Gate resolves the branch once, through
@@ -801,15 +655,11 @@ func TestGateUsesRecordedBranch(t *testing.T) {
 		t.Fatalf("Verdict = %q, want fix-slices", report.Verdict)
 	}
 
-	gateLease, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Gate)
-	if err != nil {
-		t.Fatalf("resolve gate lease: %v", err)
+	if want := run(t, fx.RepoDir, "rev-parse", "refs/heads/feature/custom"); report.Round != 1 || run(t, fx.RepoDir, "rev-parse", "HEAD") != want {
+		t.Fatalf("the round reviewed another branch than the recorded one: the clone is at %s, feature/custom at %s", run(t, fx.RepoDir, "rev-parse", "HEAD"), want)
 	}
-	if head := run(t, gateLease, "symbolic-ref", "--short", "HEAD"); head != "feature/custom" {
-		t.Fatalf("gate lease HEAD branch = %q, want the recorded %q", head, "feature/custom")
-	}
-	if _, err := gitx.Run(gateLease, "rev-parse", "--verify", "--quiet", "refs/heads/"+ticketBranch(fx.Ticket)); err == nil {
-		t.Fatalf("the gate lease has a %s branch, want only the recorded one", ticketBranch(fx.Ticket))
+	if _, err := gitx.Run(fx.RepoDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+ticketBranch(fx.Ticket)); err == nil {
+		t.Fatalf("the clone has a %s branch, want only the recorded one", ticketBranch(fx.Ticket))
 	}
 }
 

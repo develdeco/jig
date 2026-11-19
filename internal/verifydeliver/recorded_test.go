@@ -17,7 +17,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -53,10 +52,9 @@ func cleanReport(p Prepared) ReviewResult {
 
 // TestGatePrepareOpensARoundWithoutMakingOne: the gate over a branch only the
 // operator's clone has opens round 1: the request and the open record are in
-// the store's work directory, the lease is a pristine checkout of the clone's
-// head, and there is no gate/round-1 yet. Neither file names a directory of
-// this machine's jig home (the store is shared); the Prepared a caller gets
-// spells the lease out.
+// the store's work directory, the round is at the clone's head and made no
+// directory under the jig home, and there is no gate/round-1 yet. Neither file
+// names a directory of this machine's jig home (the store is shared).
 func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	t.Parallel()
 	fx, d, head := cloneBuilt(t)
@@ -68,8 +66,11 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if p.Round != 1 || p.Head != head || p.Branch != ticketBranch(fx.Ticket) || p.Copy != string(clonesCopy) || p.Scope != "full" {
 		t.Fatalf("Prepared = round %d at %s on %s from %s (%s), want round 1 at %s on the ticket's branch from the clone's copy, full", p.Round, p.Head, p.Branch, p.Copy, p.Scope, head)
 	}
-	if got := run(t, p.Lease, "rev-parse", "HEAD"); got != head || p.Lease != gateLeaseOf(t, fx, fx.Ticket) {
-		t.Fatalf("lease %q at %s, want the gate lease checked out at the clone's head %s", p.Lease, got, head)
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Fatal("the round made a pool directory under the jig home")
+	}
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("the clone is at %s after the round, want %s untouched", got, head)
 	}
 	if originRef(t, fx.RepoRemote, "refs/heads/"+p.Branch) != "" {
 		t.Fatal("the gate pushed the branch to origin")
@@ -94,15 +95,15 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if err := yaml.Unmarshal(data, &open); err != nil {
 		t.Fatal(err)
 	}
-	if open.Lease != "pool/fixture-repo/JIG-1-gate" || open.Head != head || open.Opened == "" {
-		t.Errorf("open record = %+v, want the lease relative to the jig home, the head and the time it opened", open)
+	if open.Head != head || open.Opened == "" {
+		t.Errorf("open record = %+v, want the head and the time it opened", open)
 	}
 
 	again, ok, err := CurrentRound(d, fx.Ticket)
 	if err != nil || !ok {
 		t.Fatalf("CurrentRound = ok %v, %v, want the round just opened", ok, err)
 	}
-	if !reflect.DeepEqual(again.Request, p.Request) || again.Lease != p.Lease || again.Head != head {
+	if !reflect.DeepEqual(again.Request, p.Request) || again.Head != head {
 		t.Errorf("CurrentRound = %+v, want what GatePrepare returned: %+v", again, p)
 	}
 }
@@ -681,22 +682,6 @@ func TestGateFinishRefusesWhatItCannotStandBehind(t *testing.T) {
 		_, err = GateFinish(d, p, cleanReport(p), Provenance{})
 		wantAxiCode(t, err, "REVIEW_NOT_OPEN")
 	})
-	t.Run("the lease changed", func(t *testing.T) {
-		t.Parallel()
-		fx, d, _ := cloneBuilt(t)
-		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(p.Lease, p.Request.MustReview[0]), []byte("edited by the reviewer\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		_, err = GateFinish(d, p, cleanReport(p), Provenance{})
-		wantAxiCode(t, err, "REVIEW_INVALID")
-		if _, statErr := os.Stat(gateRoundDir(d.Store, fx.Ticket, 1)); statErr == nil {
-			t.Fatal("a refused report made gate/round-1")
-		}
-	})
 	t.Run("the branch moved", func(t *testing.T) {
 		t.Parallel()
 		fx, d, _ := cloneBuilt(t)
@@ -880,57 +865,6 @@ func TestReadStatusSaysWhereTheGateAndThePublishStand(t *testing.T) {
 		s.ReviewedSHA["fixture-repo"] != head || s.ApprovedFor != head || s.Published {
 		t.Fatalf("ReadStatus after a clean round and an approval = %+v (%v)", s, err)
 	}
-}
-
-// TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone: with no clone
-// holding the branch, the choice is the one the build lease and origin always
-// had (pointAtTicketBranch); a branch no copy has is BRANCH_NOT_FOUND; and an
-// adopted branch gone from origin is, too, whatever the build lease holds,
-// since a branch nobody can open a pull request from is not one to review.
-func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
-	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	// What the choice reads is the journal's built commits, the build lease and
-	// origin: no gate round is needed.
-	driveBuild(t, fx, "rung-a")
-	branch := ticketBranch(fx.Ticket)
-	acquire := func(t *testing.T, branch string) string {
-		t.Helper()
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Publish)
-		if err != nil {
-			t.Fatalf("acquire the publish lease: %v", err)
-		}
-		return lease.Dir
-	}
-	point := func(t *testing.T, adopted bool) (branchCopy, error) {
-		t.Helper()
-		lines, err := journal.Read(d.Store, fx.Ticket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pointAtBranchCopy(d, acquire(t, branch), "fixture-repo", fx.Ticket, branch, adopted, journal.BuiltCommits(lines), "publish")
-	}
-
-	// A clone that is mapped but lacks the branch changes nothing.
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	if got, err := point(t, false); err != nil || got != buildLeasesCopy {
-		t.Fatalf("copy = %v (%v), want the build lease's: the branch is built there and not pushed", got, err)
-	}
-
-	// Gone from the build lease and absent from origin: no copy.
-	if err := os.RemoveAll(buildLeaseDir(t, fx)); err != nil {
-		t.Fatal(err)
-	}
-	_, err := point(t, false)
-	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
-
-	// An adopted branch whose only copy is the build lease's is refused too.
-	buildLeaseDir(t, fx) // a fresh build lease, on the branch cut from main
-	run(t, buildLeaseOf(t, fx, fx.Ticket), "checkout", "-B", branch, "origin/main")
-	writeAndCommit(t, buildLeaseOf(t, fx, fx.Ticket), "built.txt", "built", "built")
-	_, err = point(t, true)
-	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
 }
 
 // TestRecordReviewerJournalsWhoReadsTheRound: the first time review context

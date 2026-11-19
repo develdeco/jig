@@ -55,25 +55,27 @@ func roundIsDelta(p verifydeliver.Prepared) bool {
 
 // computeDeltaDiffs reads the diff of each repo of a delta round and, over
 // deltaMaxLines, writes it beside the request. It is nil for a full round.
-func computeDeltaDiffs(p verifydeliver.Prepared) ([]deltaDiff, error) {
+// clones maps each repo to the clone the diff is read in: the commits are in its
+// object store.
+func computeDeltaDiffs(p verifydeliver.Prepared, clones map[string]string) ([]deltaDiff, error) {
 	if !roundIsDelta(p) {
 		return nil, nil
 	}
-	type src struct{ repo, lease, base, head string }
+	type src struct{ repo, dir, base, head string }
 	var srcs []src
 	if len(p.Repos) == 0 {
-		srcs = []src{{"", p.Lease, p.Base, p.Head}}
+		srcs = []src{{"", clones[p.Repo], p.Base, p.Head}}
 	}
 	for _, r := range p.Repos {
-		srcs = append(srcs, src{r.Repo, r.Lease, r.Base, r.Head})
+		srcs = append(srcs, src{r.Repo, clones[r.Repo], r.Base, r.Head})
 	}
 	var out []deltaDiff
 	for _, s := range srcs {
-		text, err := gitx.DiffPatch(s.lease, s.base, s.head)
+		text, err := gitx.DiffPatch(s.dir, s.base, s.head)
 		if err != nil {
 			return nil, err
 		}
-		changed, err := gitx.DiffNameOnly(s.lease, s.base, s.head, "AMTD")
+		changed, err := gitx.DiffNameOnly(s.dir, s.base, s.head, "AMTD")
 		if err != nil {
 			return nil, err
 		}

@@ -1075,24 +1075,6 @@ func resolveScope(st *store.Store, ticket, leaseDir, repoName, targetRef, target
 	return "full", base, lineOther, "", "", nil
 }
 
-// leaseChanged is the read-only guard a session that must never edit is held
-// to: it reports whether leaseDir's HEAD is no longer head, or any tracked
-// file differs from it. Untracked files are left out on purpose - a session
-// is expected to leave scratch behind, and the caller restores the lease
-// pristine afterwards. The reviewer round uses it and prefixes the errors with
-// its own name.
-func leaseChanged(leaseDir, head string) (bool, error) {
-	headAfter, err := gitx.RevParse(leaseDir, "HEAD")
-	if err != nil {
-		return false, fmt.Errorf("resolve HEAD after dispatch: %w", err)
-	}
-	statusOut, err := gitx.Run(leaseDir, "status", "--porcelain", "--untracked-files=no")
-	if err != nil {
-		return false, fmt.Errorf("git status after dispatch: %w", err)
-	}
-	return headAfter != head || statusOut != "", nil
-}
-
 // scopeDiff is the scope diff's coverage lists: Changed is every file
 // base..head adds, modifies or type-changes (a rename counts as its new
 // path); Deleted is every file it removes; MustReview is their sorted,
@@ -1265,15 +1247,18 @@ type RoundRepo struct {
 	// stacked ticket's parent branch while the parent has not merged, "" for
 	// origin/<Target>.
 	MergeRef string
+	// LeaseDir is the repository the round reads the repo in: its clone, which
+	// the round never changes. Head is the commit of the branch the round
+	// reviews there ("" reads the repository's HEAD, which a test of the
+	// request alone leaves at the head).
 	LeaseDir string
+	Head     string
 	// OperatorClone is the operator's mapped clone of the repo, or "".
 	OperatorClone string
 	Manifest      manifest.Manifest
 	// SlicePasses are the witnessed passes of the slices that build in this
 	// repo (witnessedPasses): review.json's oracles_passed.
 	SlicePasses []SlicePass
-	// Pristine is RoundInput.Pristine for this repo's lease.
-	Pristine bool
 }
 
 // RoundInput is what Gate hands a GateSource for one round: the scripted
@@ -1285,6 +1270,8 @@ type RoundInput struct {
 	Ticket   string
 	Round    int
 	LeaseDir string
+	// Head is RoundRepo.Head of the one repo.
+	Head     string
 	RepoName string
 	Target   string
 	// MergeRef is RoundRepo.MergeRef of the one repo.
@@ -1325,11 +1312,6 @@ type RoundInput struct {
 	// written even when there is nothing to review, since someone still has
 	// to say so.
 	Recorded bool
-	// Pristine says the caller restored the lease (LeaseDir; a round over several
-	// repos says it in each RoundRepo) to its head just before, and nothing has
-	// run in it since (a gate round runs nothing), so the restore a round starts
-	// with has nothing to undo and is left out.
-	Pristine bool
 	Manifest manifest.Manifest
 	// SlicePasses are the witnessed passes of the slices that build in the repo
 	// (witnessedPasses); review.json hands them to the reviewer as
@@ -1359,8 +1341,8 @@ func (in RoundInput) repoList() []RoundRepo {
 		return in.Repos
 	}
 	return []RoundRepo{{
-		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir,
-		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses, Pristine: in.Pristine,
+		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, LeaseDir: in.LeaseDir, Head: in.Head,
+		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses,
 	}}
 }
 
@@ -1383,12 +1365,18 @@ func (in RoundInput) requestFiles(req ReviewRequest) roundFiles {
 	rf := req.files()
 	if !in.qualified() {
 		rf.repos[0].Name, rf.repos[0].Dir, rf.repos[0].Head = in.RepoName, in.LeaseDir, req.HeadSHA
+		if in.LeaseDir != "" {
+			rf.repos[0].Worktree = ReviewWorktreeDir(in.LeaseDir, in.Ticket)
+		}
 		return rf
 	}
 	for i := range rf.repos {
 		for _, r := range in.Repos {
 			if r.Name == rf.repos[i].Name {
 				rf.repos[i].Dir = r.LeaseDir
+				if r.LeaseDir != "" {
+					rf.repos[i].Worktree = ReviewWorktreeDir(r.LeaseDir, in.Ticket)
+				}
 			}
 		}
 		rf.repos[i].Head = req.repo(rf.repos[i].Name).HeadSHA
@@ -1496,8 +1484,17 @@ func roundIntentExcerpt(in RoundInput, repos []RepoPrep, changed map[string][]st
 	return "", note
 }
 
+// orHEAD is rev, or HEAD when rev is empty.
+func orHEAD(rev string) string {
+	if rev == "" {
+		return "HEAD"
+	}
+	return rev
+}
+
 // PrepareReviewRequest works out and writes one round's review.json, the pre-
-// dispatch half of a review round. The lease is restored pristine first; the head, the scope and
+// dispatch half of a review round. It reads each repo at its head and changes
+// nothing in it; the head, the scope and
 // base (resolveScope), the scope diff and must_review follow, then the
 // intent excerpt when nothing states an intent, the build's recordings, and
 // the request itself under the store's work directory. It never starts a
@@ -1518,14 +1515,9 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 	files := roundFiles{qualified: qualified}
 	var prep ReviewPrep
 	for _, r := range repos {
-		if r.Pristine {
-			// Restored and untouched since: the reset would only repeat itself.
-		} else if err := resetLeasePristine(r.LeaseDir, "HEAD"); err != nil {
-			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: restore lease before round: %w", err))
-		}
-		head, err := gitx.RevParse(r.LeaseDir, "HEAD")
+		head, err := gitx.RevParse(r.LeaseDir, orHEAD(r.Head))
 		if err != nil {
-			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve HEAD: %w", err))
+			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve the head: %w", err))
 		}
 		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.LeaseDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
 		if err != nil {

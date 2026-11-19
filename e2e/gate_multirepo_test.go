@@ -268,29 +268,26 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 	var open struct {
 		Head  string `yaml:"head"`
-		Lease string `yaml:"lease"`
 		Repos []struct {
-			Repo  string `yaml:"repo"`
-			Copy  string `yaml:"copy"`
-			Head  string `yaml:"head"`
-			Lease string `yaml:"lease"`
+			Repo string `yaml:"repo"`
+			Copy string `yaml:"copy"`
+			Head string `yaml:"head"`
 		} `yaml:"repos"`
 	}
 	openData := readFileOrFatal(t, b.workFile("gate.round-1.open.yaml"))
 	if err := yaml.Unmarshal(openData, &open); err != nil {
 		t.Fatalf("parse the open record: %v", err)
 	}
-	if open.Head != "" || open.Lease != "" || len(open.Repos) != 2 {
+	if open.Head != "" || len(open.Repos) != 2 {
 		t.Fatalf("open record = %+v, want the settings of each repo in its repos and none at the top", open)
 	}
 	for i, repo := range []string{"api", "web"} {
 		r := open.Repos[i]
-		lease := filepath.Join(home, filepath.FromSlash(r.Lease))
-		if r.Repo != repo || r.Copy != "the clone's" || r.Lease != "pool/"+repo+"/"+ticket+"-gate" {
-			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy in its own lease", i, r, repo)
+		if r.Repo != repo || r.Copy != "the clone's" {
+			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy", i, r, repo)
 		}
-		if head := gitLog(t, lease, "rev-parse", "HEAD"); head != r.Head {
-			t.Errorf("the lease of %s is at %s, want the head the round opened on, %s", repo, head, r.Head)
+		if head := gitLog(t, b.fx.NestedDirs[repo], "rev-parse", "refs/heads/"+b.branch); head != r.Head {
+			t.Errorf("the clone of %s has the branch at %s, want the head the round opened on, %s", repo, head, r.Head)
 		}
 	}
 	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/pool"
@@ -263,133 +262,6 @@ func wantCopy(t *testing.T, d Deps, fx *fixture.Fixture, ticket, branch string, 
 	}
 }
 
-// TestPointAtTicketBranchSaysWhoseCopyItChose: the function the gate and
-// publish share reports which copy of the branch the lease was left at, the
-// build lease's or origin's, because what publish's refusals tell the operator
-// to do depends on it. The rule is the branch's, not the kind of ticket's: an
-// adopted branch jig built nothing on is origin's, the author's; any other
-// branch is the build lease's while origin has no copy of it (the ticket's own
-// jig/<ticket> until a publish pushes it) or while its commits are unpushed,
-// and origin's once it holds them, whether the human or a publish pushed them.
-// (The cases a publish pushed are steps of TestPublishFullChain, which has one.)
-//
-// What it reads is the build lease, origin and the journal's built commits, so
-// no round is needed: a ticket's own branch is one build and its states are
-// steps of the one ticket, in an order in which each leaves the pool as the next
-// expects it; an adopted branch is the author's push and the states jig's own
-// commit and the author's put it in.
-func TestPointAtTicketBranchSaysWhoseCopyItChose(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a ticket's own branch", func(t *testing.T) {
-		t.Parallel()
-		fx := generateBuilt(t, "rung-a")
-		d := newDeps(t, fx)
-		br, buildDir := ticketBranch(fx.Ticket), buildLeaseDir(t, fx)
-		// pushedOn adds a commit to origin's copy of br from another clone.
-		pushedOn := func(t *testing.T) {
-			t.Helper()
-			other := cloneFrom(t, fx.RepoRemote)
-			run(t, other, "checkout", br)
-			writeAndCommit(t, other, "more.txt", "added on origin", "a commit only origin has")
-			builder(t).Push(other, "origin", br)
-		}
-
-		step(t, "built and not pushed", func(t *testing.T) {
-			wantCopy(t, d, fx, fx.Ticket, br, false, buildLeasesCopy, "the ticket's own branch lives in the build lease until a publish pushes it")
-		})
-		step(t, "pushed as it is", func(t *testing.T) {
-			builder(t).Push(buildDir, "origin", br)
-			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "origin holds every commit the build lease does")
-		})
-		step(t, "pushed and built on", func(t *testing.T) {
-			writeAndCommit(t, buildDir, "built.txt", "built after the push", "a commit only the build lease has")
-			wantCopy(t, d, fx, fx.Ticket, br, false, buildLeasesCopy, "the build lease is ahead of origin's")
-		})
-		step(t, "pushed and pushed on", func(t *testing.T) {
-			builder(t).Push(buildDir, "origin", br)
-			pushedOn(t)
-			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "the build lease's is behind it, so it is not the branch's head")
-		})
-		step(t, "pushed on, beside a leftover of an attempt", func(t *testing.T) {
-			commitLeftover(t, buildDir, fx.Ticket)
-			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "the lease's own commit is an attempt's leftover, not jig's work")
-		})
-		step(t, "pushed, with no build lease here", func(t *testing.T) {
-			if err := os.RemoveAll(buildDir); err != nil {
-				t.Fatalf("remove the build lease: %v", err)
-			}
-			wantCopy(t, d, fx, fx.Ticket, br, false, originsCopy, "it holds every commit jig built")
-		})
-	})
-
-	t.Run("an adopted branch", func(t *testing.T) {
-		t.Parallel()
-		const ticket, branch = "JIG-2", "add-retry"
-		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-		d := newDeps(t, fx)
-		newAdoptTicket(t, d, ticket)
-		authorBranch(t, fx, branch)
-		var built, pushed string
-
-		step(t, "jig built nothing on it", func(t *testing.T) {
-			wantCopy(t, d, fx, ticket, branch, true, originsCopy, "the branch is the author's")
-		})
-		step(t, "jig built on it and has not pushed", func(t *testing.T) {
-			built = jigBuildsOn(t, d, fx, ticket, branch)
-			wantCopy(t, d, fx, ticket, branch, true, buildLeasesCopy, "jig's commit is only there")
-		})
-		// jig's commit is in the build lease and unpushed when the author pushes
-		// again, so neither copy holds both. Publish judges the two the way the
-		// gate does (chooseBuiltCopy) and refuses with BRANCH_DIVERGED and the
-		// merge to do in the build lease, before it writes anything or pushes:
-		// origin's branch keeps the author's commit, and jig's is not lost.
-		step(t, "the author pushed on while jig's commit is unpushed", func(t *testing.T) {
-			pushed = authorPush(t, fx, branch, "more.txt")
-			_, err := pointAt(t, d, fx, ticket, branch, true)
-			wantAxiCode(t, err, "BRANCH_DIVERGED")
-			if !strings.Contains(err.Error(), "the build lease at "+buildLeaseOf(t, fx, ticket)) {
-				t.Errorf("the refusal %q does not name the build lease to integrate in", err)
-			}
-			if got := run(t, buildLeaseOf(t, fx, ticket), "rev-parse", "HEAD"); got != built {
-				t.Errorf("the build lease is at %s after the refusal, want jig's %s untouched", got, built)
-			}
-			if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != pushed {
-				t.Fatalf("origin's %s = %s after the refusal, want the author's %s untouched", branch, got, pushed)
-			}
-		})
-		step(t, "jig built on it and pushed", func(t *testing.T) {
-			buildLease := buildLeaseOf(t, fx, ticket)
-			run(t, buildLease, "fetch", "origin")
-			run(t, buildLease, "merge", "--no-edit", "origin/"+branch)
-			builder(t).Push(buildLease, "origin", branch)
-			wantCopy(t, d, fx, ticket, branch, true, originsCopy, "it holds jig's commit now")
-		})
-		// The journal records a commit jig built that is still in another
-		// machine's build lease. Publishing from this one would ship a branch that
-		// leaves it out, so it is refused (BUILD_LEASE_MISSING), as the gate does
-		// for the same copy, and the help names publish as the command to run on
-		// the machine that built it.
-		step(t, "jig built on it on another machine and has not pushed", func(t *testing.T) {
-			lease, err := pool.Acquire(t.TempDir(), "fixture-repo", fx.RepoRemote, "main", branch, ticket, pool.Build)
-			if err != nil {
-				t.Fatalf("acquire the other machine's build lease: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(lease.Dir, "fix2.txt"), []byte("the other machine's fix\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			builder(t).Commit(lease.Dir, ticket+" fix-2: the other machine's fix")
-			journalBuilt(t, d.Store, ticket, "fix-2", run(t, lease.Dir, "rev-parse", "HEAD"), 1)
-
-			_, err = pointAt(t, d, fx, ticket, branch, true)
-			wantAxiCode(t, err, "BUILD_LEASE_MISSING")
-			if !strings.Contains(strings.Join(err.(*axi.Error).Help, "\n"), "Run `jig publish "+ticket+"` on the machine that built them") {
-				t.Errorf("the refusal's help = %q, want it to name `jig publish %s`", err.(*axi.Error).Help, ticket)
-			}
-		})
-	})
-}
-
 // TestPublishUpdatesThePRTheAuthorOpened: the author opened a pull request for
 // their branch before handing it to jig. Publish updates that one - its body,
 // through `gh pr edit` - and opens no second, and the branch it pushes to is
@@ -433,8 +305,12 @@ func TestPublishUpdatesThePRTheAuthorOpened(t *testing.T) {
 		if report.Head["fixture-repo"] != head || head != tip {
 			t.Fatalf("origin's %s = %s (report head %q), want the author's %s, unchanged", branch, head, report.Head["fixture-repo"], tip)
 		}
-		if _, err := os.Stat(buildLeaseOf(t, fx, ticket)); !os.IsNotExist(err) {
-			t.Errorf("a build lease exists at %s (stat err %v): publishing a branch jig built nothing on needs none", buildLeaseOf(t, fx, ticket), err)
+		buildLease, perr := pool.Dir(fx.Home, "fixture-repo", ticket, pool.Build)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		if _, err := os.Stat(buildLease); !os.IsNotExist(err) {
+			t.Errorf("a build lease exists at %s (stat err %v): publishing a branch jig built nothing on needs none", buildLease, err)
 		}
 	})
 }

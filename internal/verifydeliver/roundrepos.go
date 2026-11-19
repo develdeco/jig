@@ -20,14 +20,14 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // gateRepo is one repo a gate round covers: the slices that build in it, the
-// lease the round reads it in and what the round learned of it there.
+// copy of the branch the round reads in the repo's clone and what the round
+// learned of it there.
 type gateRepo struct {
 	repo   project.Repo
 	name   string
@@ -39,18 +39,17 @@ type gateRepo struct {
 	// included.
 	slices []store.Slice
 	// built is the commits the journal records jig built in the repo: the ones
-	// its copy of the branch must hold (chooseBuiltCopy).
+	// its copy of the branch must hold (chooseCopy).
 	built []string
 
-	lease pool.Lease
-	// copy says whose copy of the branch the lease was left at.
+	// dir is the repo's clone, which the round reads and never changes, and
+	// head the commit of the branch's copy under review there.
+	dir  string
+	head string
+	// copy says whose copy of the branch the round reviews.
 	copy        branchCopy
 	man         manifest.Manifest
 	slicePasses []SlicePass
-	// pristine says the lease was restored to its head when it was pointed at
-	// its copy and nothing has run in it since, so the restore a review round
-	// starts with would have nothing to undo (RoundRepo.Pristine).
-	pristine bool
 }
 
 // gateRepos are the repos a gate round covers, in the project's order. A
@@ -154,11 +153,15 @@ func inRepo(qualified bool, name string, err error) error {
 // manifest.
 type roundRepo struct {
 	Name string
-	// Dir is the gate lease the round reads the repo in, Head the commit
-	// under review there.
+	// Dir is the repository the round reads the repo in (its clone), Head the
+	// commit under review there.
 	Dir  string
 	Head string
-	Man  manifest.Manifest
+	// Worktree is where the reviewer reads the head, when jig knows: the
+	// directory it advised (reviewWorktreeDir). A reviewed path that is
+	// absolute and inside it is that repo's file. "" when it is not known.
+	Worktree string
+	Man      manifest.Manifest
 }
 
 // roundFiles reads the file names of a gate round (see the top of this file):
@@ -276,17 +279,17 @@ func (rf roundFiles) byRepo(files []string) map[string][]string {
 }
 
 // relativize reads one reviewed_paths entry (relativizeReviewedPath) against
-// the leases of the round: a relative path is taken as the round names it, an
-// absolute one inside a repo's lease becomes that repo's file.
+// the reviewer's worktrees of the round: a relative path is taken as the round
+// names it, an absolute one inside a repo's worktree becomes that repo's file.
 func (rf roundFiles) relativize(p string) (string, bool) {
 	if !rf.qualified {
-		return relativizeReviewedPath(rf.repos[0].Dir, p)
+		return relativizeReviewedPath(rf.repos[0].Worktree, p)
 	}
 	if norm, err := normalizeRepoRelPath(p); err == nil {
 		return norm, true
 	}
 	for _, r := range rf.repos {
-		if rel, ok := relativizeAbsolute(r.Dir, p); ok {
+		if rel, ok := relativizeAbsolute(r.Worktree, p); ok {
 			return rf.qualify(r.Name, rel), true
 		}
 	}
