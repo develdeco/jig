@@ -51,6 +51,7 @@ func runFinal(d verify.Deps, req verify.Request, o verifyOpts, stream, stdout io
 	if res.State == "" {
 		code = 1
 	}
+	res.Pinned = verify.PinnedText(d, res.Ticket, pinnedHead(res.Result))
 	if o.json {
 		out, err := json.Marshal(verifyFinalJSONOf(res, req, code))
 		if err != nil {
@@ -158,6 +159,7 @@ func verifyFinalFooter(res verify.FinalResult, req verify.Request, code int) []s
 	if res.PushErr != "" {
 		blocks = append(blocks, axi.KV("warning", [][2]string{{"message", "the run is recorded here but could not be pushed to the store (the next checkpoint will): " + res.PushErr}}))
 	}
+	blocks = append(blocks, pinnedBlocks(res.Pinned)...)
 	help := "Publish names this run when it is at the reviewed head"
 	switch {
 	case !res.Covered:
@@ -190,6 +192,7 @@ type verifyFinalJSON struct {
 	PushError  string   `json:"push_error,omitempty"`
 	Summary    string   `json:"summary,omitempty"`
 	Signature  string   `json:"signature,omitempty"`
+	pinnedJSON
 }
 
 func verifyFinalJSONOf(res verify.FinalResult, req verify.Request, code int) verifyFinalJSON {
@@ -210,5 +213,6 @@ func verifyFinalJSONOf(res verify.FinalResult, req verify.Request, code int) ver
 		Outcome: outcome, Exit: code, Seconds: res.Seconds, Covered: res.Covered, Uncovered: res.Uncovered,
 		TreeBefore: res.TreeBefore, TreeAfter: res.TreeAfter, Recorded: recorded, NoRecord: req.NoRecord,
 		Pushed: res.Pushed && res.PushErr == "", PushError: res.PushErr, Summary: res.Summary, Signature: res.Signature,
+		pinnedJSON: pinnedJSONOf(res.Pinned),
 	}
 }
