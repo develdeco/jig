@@ -362,3 +362,24 @@ func TestRuleAtAnswerNotes(t *testing.T) {
 		t.Errorf("a long answer is cut to 600 bytes: %+v", n)
 	}
 }
+
+// TestRuleAtTheCheckoutIsTheTopLevelOfTheCwd: an edit from a subdirectory of a
+// checkout is inside it, whichever directory of it the file sits in. The
+// repository is the bare minimum discovery accepts.
+func TestRuleAtTheCheckoutIsTheTopLevelOfTheCwd(t *testing.T) {
+	t.Parallel()
+	top := t.TempDir()
+	for _, d := range []string{".git/objects", ".git/refs", "pkg"} {
+		if err := os.MkdirAll(filepath.Join(top, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(top, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ready := buildPhase(map[string]string{"a": phase.SubPending}, "a")
+	h := stubPhaseHandler(filepath.Join(top, "pkg"), "T-1", ready, filepath.Join(top, "main.go"))
+	if n := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}}); len(n) != 1 {
+		t.Errorf("an edit of the top folder from a subdirectory: notes = %+v, want the claim note", n)
+	}
+}
