@@ -170,6 +170,18 @@ type Line struct {
 	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
+	// Change is the size of the change a publish-done line shipped. A line
+	// without it is of a publish that recorded none.
+	Change *ChangeSize `json:"change,omitempty"`
+}
+
+// ChangeSize is how much code a published change touched: the files it
+// changed, and their bytes at the merge base with the publish base (a file the
+// change adds has none there and counts with 0). A ticket in several repos
+// records the sum over its repos.
+type ChangeSize struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
 }
 
 // Spend is a spend line's cost: the token counts a transcript's usage

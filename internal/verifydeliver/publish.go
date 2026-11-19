@@ -641,6 +641,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
+	allTargets, allErr := ticketTargets(d, ticket, o.Repo, targets)
 	picks, err := loadPicksFile(o.Picks)
 	if err != nil {
 		return PublishReport{}, err
@@ -849,7 +850,20 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if err := writeStoreDocs(d, targets[0], unionNames(names...)); err != nil {
 			return PublishReport{}, err
 		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+		var spans []repoSpan
+		var spanErr error
+		if len(ships) == len(targets[0].covered) {
+			for _, sh := range ships {
+				spans = append(spans, repoSpan{dir: sh.dir, base: sh.pt.base(), head: sh.head})
+			}
+		} else {
+			// A publish of some of the repos finishes a ticket whose other
+			// repos an earlier one shipped.
+			if spanErr = allErr; spanErr == nil {
+				spans, spanErr = readSpans(d, allTargets)
+			}
+		}
+		if err := journal.Append(d.Store, ticket, publishDoneLine(spans, spanErr, fn.warn)); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
@@ -1667,6 +1681,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		}
 	}
 	pt := targets[0]
+	allTargets, allErr := ticketTargets(d, ticket, o.Repo, targets)
 	host, err := d.publishHost(pt.repo.Remote)
 	if err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
@@ -1775,7 +1790,12 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		notes = postReviewNotes(d, host, ticket, prURL, pt.lineRepo(), pt.notesName(), warn)
 	}
 	if len(pending) == 0 {
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+		var spans []repoSpan
+		spanErr := allErr
+		if spanErr == nil {
+			spans, spanErr = readSpans(d, allTargets)
+		}
+		if err := journal.Append(d.Store, ticket, publishDoneLine(spans, spanErr, warn)); err != nil {
 			return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
