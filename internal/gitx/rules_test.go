@@ -555,7 +555,7 @@ func TestRuleAtScanWalk(t *testing.T) {
 			mkdir(t, filepath.Join(dir, "inner", ".git"))
 		}}, ErrUseCLI, nil},
 		{"the root .gitattributes", setup{fileMode: true, lay: file(".gitattributes")}, nil, []string{".gitattributes"}},
-		{"a .gitattributes below the root", setup{fileMode: true, lay: file("T-1/.gitattributes")}, ErrUseCLI, nil},
+		{"a .gitattributes below the root", setup{fileMode: true, lay: file("ticket-a/.gitattributes")}, ErrUseCLI, nil},
 		{"a name core.precomposeUnicode would recompose", setup{fileMode: true, precompose: true, lay: file("caf\u00e9.txt")}, ErrUseCLI, nil},
 		{"an ASCII name under core.precomposeUnicode", setup{fileMode: true, precompose: true, lay: file("cafe.txt")}, nil, []string{"cafe.txt"}},
 		{"a name beyond ASCII with no ignore rules", setup{fileMode: true, lay: file("caf\u00e9.txt")}, nil, []string{"caf\u00e9.txt"}},

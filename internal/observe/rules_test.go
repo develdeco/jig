@@ -121,7 +121,7 @@ func TestRuleAtUnclaimedEditNote(t *testing.T) {
 		{"no files", ready, nil, ""},
 		{"an empty file name", ready, []string{""}, ""},
 	} {
-		h := stubPhaseHandler(cwd, "T-1", c.tk, c.files...)
+		h := stubPhaseHandler(cwd, "ticket-a", c.tk, c.files...)
 		notes := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}})
 		if c.want == "" {
 			if len(notes) != 0 {
@@ -135,17 +135,17 @@ func TestRuleAtUnclaimedEditNote(t *testing.T) {
 	}
 
 	// The refs name the ticket and which of the two notes, and a note heard is not repeated.
-	h := stubPhaseHandler(cwd, "T-1", ready, inside)
+	h := stubPhaseHandler(cwd, "ticket-a", ready, inside)
 	n := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}})
-	if len(n) != 1 || n[0].Ref != "unclaimed-edit:T-1:claim" || n[0].Source != "unclaimed-edit" {
+	if len(n) != 1 || n[0].Ref != "unclaimed-edit:ticket-a:claim" || n[0].Source != "unclaimed-edit" {
 		t.Errorf("claim note = %+v", n)
 	}
-	h = stubPhaseHandler(cwd, "T-1", briefPhase(), inside)
+	h = stubPhaseHandler(cwd, "ticket-a", briefPhase(), inside)
 	n = h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}})
-	if len(n) != 1 || n[0].Ref != "unclaimed-edit:T-1:brief" {
+	if len(n) != 1 || n[0].Ref != "unclaimed-edit:ticket-a:brief" {
 		t.Errorf("brief note = %+v", n)
 	}
-	both := sessionMemory{delivered: map[string]bool{"unclaimed-edit:T-1:brief": true, "unclaimed-edit:T-1:claim": true}}
+	both := sessionMemory{delivered: map[string]bool{"unclaimed-edit:ticket-a:brief": true, "unclaimed-edit:ticket-a:claim": true}}
 	if n := h.unclaimedEditNotes(both); n != nil {
 		t.Errorf("notes after both were heard = %+v", n)
 	}
@@ -158,7 +158,7 @@ func TestRuleAtUnclaimedEditNote(t *testing.T) {
 		"no derivation": func(h *handler) { h.d.Derive = nil },
 		"no cwd":        func(h *handler) { h.w.Cwd = "" },
 	} {
-		h := stubPhaseHandler(cwd, "T-1", ready, inside)
+		h := stubPhaseHandler(cwd, "ticket-a", ready, inside)
 		mod(h)
 		if n := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}}); n != nil {
 			t.Errorf("%s: notes = %+v, want none", name, n)
@@ -166,7 +166,7 @@ func TestRuleAtUnclaimedEditNote(t *testing.T) {
 	}
 
 	// A phase that cannot be derived costs the note and is reported.
-	h = stubPhaseHandler(cwd, "T-1", ready, inside)
+	h = stubPhaseHandler(cwd, "ticket-a", ready, inside)
 	h.d.Derive = func(*store.Store, string) (phase.Ticket, error) { return phase.Ticket{}, errors.New("boom") }
 	if n := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}}); n != nil || len(h.errs) != 1 {
 		t.Errorf("a failed derivation: notes = %+v, errs = %v", n, h.errs)
@@ -246,7 +246,7 @@ func ruleCtx(t *testing.T, session string, lines []journal.Line, since time.Time
 	}
 	return NoteCtx{
 		Event:   Event{Kind: KindTool, Session: session},
-		Where:   locate.Where{Ticket: "T-1"},
+		Where:   locate.Where{Ticket: "ticket-a"},
 		Store:   st,
 		JigHome: t.TempDir(),
 		Since:   since,
@@ -333,7 +333,7 @@ func TestRuleAtAnswerNotes(t *testing.T) {
 		return n
 	}
 	n := run("s1", start, q, a)
-	if len(n) != 1 || n[0].Ref != "answer:T-1:Q-1" || n[0].Text != "Q-1 was answered by the owner: use the first" || n[0].Enforce {
+	if len(n) != 1 || n[0].Ref != "answer:ticket-a:Q-1" || n[0].Text != "Q-1 was answered by the owner: use the first" || n[0].Enforce {
 		t.Errorf("an answer = %+v", n)
 	}
 	noWho := a
@@ -378,7 +378,7 @@ func TestRuleAtTheCheckoutIsTheTopLevelOfTheCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := buildPhase(map[string]string{"a": phase.SubPending}, "a")
-	h := stubPhaseHandler(filepath.Join(top, "pkg"), "T-1", ready, filepath.Join(top, "main.go"))
+	h := stubPhaseHandler(filepath.Join(top, "pkg"), "ticket-a", ready, filepath.Join(top, "main.go"))
 	if n := h.unclaimedEditNotes(sessionMemory{delivered: map[string]bool{}}); len(n) != 1 {
 		t.Errorf("an edit of the top folder from a subdirectory: notes = %+v, want the claim note", n)
 	}

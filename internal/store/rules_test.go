@@ -527,10 +527,10 @@ func TestRuleAtDirtyIsAnyUncommittedChange(t *testing.T) {
 	if dirty, err := st.Dirty(); err != nil || dirty {
 		t.Fatalf("Dirty = %v, %v, want false right after a clean checkout", dirty, err)
 	}
-	if err := os.MkdirAll(filepath.Join(work, "T-1"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(work, "ticket-a"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(work, "T-1", "ticket.md"), []byte("x\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "ticket-a", "ticket.md"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if dirty, err := st.Dirty(); err != nil || !dirty {
