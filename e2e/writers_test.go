@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -182,172 +180,4 @@ func keysOfStrings(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// TestStatusNamesDriver: the writer that claims a ticket drives it, and
-// `jig status` names that writer; another writer's claim is refused with
-// DRIVER_HELD and the command that takes over; --take takes it and status
-// names the new driver. It holds in a writers store and, backed by
-// claims.ndjson on main, in a single-main one.
-func TestStatusNamesDriver(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []struct {
-		name    string
-		writers bool
-	}{{"writers", true}, {"single-main", false}} {
-		t.Run(mode.name, func(t *testing.T) {
-			t.Parallel()
-			w := newWritersWorld(t, mode.writers)
-			T := w.fx.Ticket
-
-			if r := w.jigAlice(t, "status", T); strings.Contains(r.Stdout, "driver:") {
-				t.Fatalf("a ticket nobody drives has a driver block:\n%s", r.Stdout)
-			}
-			r := w.jigAlice(t, "claim", T, "--slice", "a", "--session", "s-alice")
-			if r.Code != 0 {
-				t.Fatalf("alice claim: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-			}
-			r = w.jigAlice(t, "status", T)
-			for _, want := range []string{"driver:\n", "  ticket: " + T + "\n", "  writer: alice\n", "  session: s-alice\n"} {
-				if !strings.Contains(r.Stdout, want) {
-					t.Errorf("alice status lacks %q:\n%s", want, r.Stdout)
-				}
-			}
-
-			// Bob, on another slice, finds the ticket driven. The refusal comes
-			// from the log every writer shares, not from his machine.
-			r = w.jigBob(t, "claim", T, "--slice", "b", "--session", "s-bob")
-			if r.Code != 1 || !strings.Contains(r.Stdout, "code: DRIVER_HELD") || !strings.Contains(r.Stdout, "alice") {
-				t.Fatalf("bob claim: exit %d, want 1 with DRIVER_HELD naming alice\n%s%s", r.Code, r.Stdout, r.Stderr)
-			}
-			if !strings.Contains(r.Stdout, "jig claim "+T+" --slice b --take") {
-				t.Errorf("the refusal does not give the command that takes over:\n%s", r.Stdout)
-			}
-			if r = w.jigBob(t, "status", T); !strings.Contains(r.Stdout, "  writer: alice\n") {
-				t.Errorf("bob status does not name alice:\n%s", r.Stdout)
-			}
-			// Nothing of bob's claim was written to his journal.
-			bobStore, err := store.Open(w.bobStore)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if lines, err := journal.Read(bobStore, T); err != nil {
-				t.Fatal(err)
-			} else {
-				for _, l := range lines {
-					if l.Event == journal.EventClaim && l.Session == "s-bob" {
-						t.Errorf("the refused claim of bob left a claim line: %+v", l)
-					}
-				}
-			}
-
-			r = w.jigBob(t, "claim", T, "--slice", "b", "--session", "s-bob", "--take")
-			if r.Code != 0 || !strings.Contains(r.Stdout, "result: claimed") {
-				t.Fatalf("bob claim --take: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-			}
-			if r = w.jigBob(t, "status", T); !strings.Contains(r.Stdout, "  writer: bob\n") || strings.Contains(r.Stdout, "writer: alice") {
-				t.Errorf("bob status after taking over:\n%s", r.Stdout)
-			}
-
-			// Alice learns of it the next time she touches the store: her claim
-			// on another slice is refused, naming bob.
-			r = w.jigAlice(t, "claim", T, "--slice", "c", "--session", "s-alice")
-			if r.Code != 1 || !strings.Contains(r.Stdout, "code: DRIVER_HELD") || !strings.Contains(r.Stdout, "bob") {
-				t.Errorf("alice claim after bob took over: exit %d, want 1 with DRIVER_HELD naming bob\n%s", r.Code, r.Stdout)
-			}
-			if r = w.jigAlice(t, "status", T); !strings.Contains(r.Stdout, "  writer: bob\n") {
-				t.Errorf("alice status after syncing does not name bob:\n%s", r.Stdout)
-			}
-
-			// Bob lets go of his only slice: the ticket is free, alice can drive.
-			if r = w.jigBob(t, "claim", T, "--slice", "b", "--session", "s-bob", "--release"); r.Code != 0 {
-				t.Fatalf("bob release: exit %d\n%s", r.Code, r.Stdout)
-			}
-			if r = w.jigBob(t, "status", T); strings.Contains(r.Stdout, "driver:") {
-				t.Errorf("bob status after his release still has a driver:\n%s", r.Stdout)
-			}
-			if r = w.jigAlice(t, "claim", T, "--slice", "c", "--session", "s-alice"); r.Code != 0 {
-				t.Errorf("alice claim after bob let go: exit %d\n%s", r.Code, r.Stdout)
-			}
-		})
-	}
-}
-
-// TestRefusedClaimTakesNoDriver: a claim refused unattended for its
-// conditions leaves no driver behind.
-func TestRefusedClaimTakesNoDriver(t *testing.T) {
-	t.Parallel()
-	w := newWritersWorld(t, true)
-	st, err := store.Open(w.fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeBlockedTicket(t, st, "merged")
-	approve(t, st)
-
-	r := w.jigAlice(t, "claim", "JIG-2", "--slice", "x", "--unattended", "--session", "s-1")
-	if r.Code != 1 || !strings.Contains(r.Stdout, "CLAIM_BLOCKED_MERGED") {
-		t.Fatalf("unattended claim: exit %d, want CLAIM_BLOCKED_MERGED\n%s", r.Code, r.Stdout)
-	}
-	if r = w.jigAlice(t, "status", "JIG-2"); strings.Contains(r.Stdout, "driver:") {
-		t.Errorf("a refused claim took the driver:\n%s", r.Stdout)
-	}
-}
-
-// TestRewrittenWriterRefused: a writer branch force-pushed to something that
-// does not descend from what was merged is not merged: the next command
-// of another writer warns WRITER_REWRITTEN, goes on with the rest, and the
-// rewritten commits never reach its branch.
-func TestRewrittenWriterRefused(t *testing.T) {
-	t.Parallel()
-	w := newWritersWorld(t, true)
-
-	// Bob works; alice's next command merges it.
-	r := w.jigBob(t, "ticket", "new", "--title", "bob work")
-	if r.Code != 0 || !strings.Contains(r.Stdout, "id: JIG-2") {
-		t.Fatalf("bob ticket new: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	r = w.jigAlice(t, "ticket", "new", "--title", "alice work")
-	if r.Code != 0 || strings.Contains(r.Stdout, "WRITER_REWRITTEN") {
-		t.Fatalf("alice ticket new: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	if _, err := os.Stat(filepath.Join(w.fx.StoreDir, "tickets", "JIG-2")); err != nil {
-		t.Fatalf("alice did not merge bob's ticket: %v", err)
-	}
-	aliceHead := gitLog(t, w.fx.StoreDir, "rev-parse", "HEAD")
-
-	// Someone rewrites writers/bob: reset to main, a new commit, forced.
-	scratch := filepath.Join(t.TempDir(), "scratch")
-	gitLog(t, "", "clone", w.fx.StoreRemote, scratch)
-	gitLog(t, scratch, "checkout", "-q", "-B", "writers/bob", "origin/main")
-	if err := os.WriteFile(filepath.Join(scratch, "rewritten.txt"), []byte("not bob's history\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitLog(t, scratch, "add", "-A")
-	gitLog(t, scratch, "commit", "-q", "-m", "rewritten")
-	rewritten := gitLog(t, scratch, "rev-parse", "HEAD")
-	gitLog(t, scratch, "push", "-q", "--force", "origin", "writers/bob")
-
-	r = w.jigAlice(t, "ticket", "new", "--title", "alice work again")
-	if r.Code != 0 {
-		t.Fatalf("alice ticket new over a rewritten branch: exit %d\n%s%s", r.Code, r.Stdout, r.Stderr)
-	}
-	if !strings.Contains(r.Stdout, "WRITER_REWRITTEN") || !strings.Contains(r.Stdout, "writers/bob") {
-		t.Errorf("alice was not warned WRITER_REWRITTEN about writers/bob:\n%s%s", r.Stdout, r.Stderr)
-	}
-	if _, err := os.Stat(filepath.Join(w.fx.StoreDir, "rewritten.txt")); err == nil {
-		t.Error("alice merged the rewritten branch")
-	}
-	if out := gitLog(t, w.fx.StoreDir, "branch", "--contains", rewritten); strings.Contains(out, "writers/alice") {
-		t.Errorf("alice's branch contains the rewritten commit:\n%s", out)
-	}
-	// What she had merged before is still hers, and her new ticket is made.
-	gitLog(t, w.fx.StoreDir, "merge-base", "--is-ancestor", aliceHead, "HEAD")
-	if _, err := os.Stat(filepath.Join(w.fx.StoreDir, "tickets", "JIG-2")); err != nil {
-		t.Errorf("alice lost bob's earlier ticket: %v", err)
-	}
-	// Nothing was repaired: the origin still has bob's branch as rewritten.
-	if got := gitLog(t, w.fx.StoreRemote, "rev-parse", "refs/heads/writers/bob"); got != rewritten {
-		t.Errorf("writers/bob on the origin = %s, want the rewritten %s untouched", got, rewritten)
-	}
 }

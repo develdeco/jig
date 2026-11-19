@@ -355,53 +355,6 @@ func scenarioResultSummary(t *testing.T, scenarioDir, slice, attempt string) str
 	return res.Summary
 }
 
-// committedPatchSteps is every (slice, attempt) pair in the base fixture
-// scenario whose patch.diff is non-empty and therefore produces a commit in
-// the fake backend, in the order internal/fixture/fixture_test.go's own
-// TestPatchSequence applies them (that test is the generator package's own
-// authority on which attempts commit). TestEndToEndTwice uses it to derive
-// the expected pre-squash commit message SET without hardcoding scenario
-// content twice.
-var committedPatchSteps = []struct{ slice, attempt string }{
-	{"a", "1"},
-	{"b", "1"},
-	{"b", "2"},
-	{"c", "2"},
-	{"d", "1"},
-	{"fix-1", "1"},
-}
-
-// expectedSliceCommitMessages derives the exact commit message set the fake
-// backend produces for committedPatchSteps, reading each step's scenario
-// result.json rather than hardcoding the summaries.
-func expectedSliceCommitMessages(t *testing.T, fx *fixture.Fixture, ticket string) []string {
-	t.Helper()
-	var msgs []string
-	for _, step := range committedPatchSteps {
-		summary := scenarioResultSummary(t, fx.ScenarioDir, step.slice, step.attempt)
-		msgs = append(msgs, fmt.Sprintf("%s %s: %s", ticket, step.slice, firstLine(summary)))
-	}
-	return msgs
-}
-
-// assertSameMessageSet compares got and want as multisets (order-independent
-// but count-sensitive), fataling with a readable diff on mismatch.
-func assertSameMessageSet(t *testing.T, got, want []string) {
-	t.Helper()
-	gotSorted := append([]string(nil), got...)
-	wantSorted := append([]string(nil), want...)
-	sort.Strings(gotSorted)
-	sort.Strings(wantSorted)
-	if len(gotSorted) != len(wantSorted) {
-		t.Fatalf("commit message count = %d, want %d\ngot:  %v\nwant: %v", len(gotSorted), len(wantSorted), gotSorted, wantSorted)
-	}
-	for i := range gotSorted {
-		if gotSorted[i] != wantSorted[i] {
-			t.Fatalf("commit message set mismatch at sorted index %d:\ngot:  %v\nwant: %v", i, gotSorted, wantSorted)
-		}
-	}
-}
-
 // normalizeCRLF normalizes "\r\n" to "\n" for golden comparisons, matching
 // every other package's convention in this repo.
 func normalizeCRLF(s string) string {

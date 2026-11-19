@@ -33,15 +33,6 @@ func projBareRemote(t *testing.T, name string) string {
 	return filepath.ToSlash(dir)
 }
 
-// projFileURL is the file:// URL of the directory p.
-func projFileURL(p string) string {
-	slash := filepath.ToSlash(p)
-	if strings.HasPrefix(slash, "/") {
-		return "file://" + slash
-	}
-	return "file:///" + slash
-}
-
 // projMarker reads the jig.yaml in dir.
 func projMarker(t *testing.T, dir string) project.Marker {
 	t.Helper()

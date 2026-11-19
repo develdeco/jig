@@ -36,15 +36,6 @@ func productTreeStatus(t *testing.T) string {
 	return strings.TrimSpace(out)
 }
 
-func hasSlice(slices []store.Slice, id string) bool {
-	for _, s := range slices {
-		if s.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
 // flow narrates a test as a transcript: step names a stage, run runs a jig
 // command and logs it with the lines of its output that matter.
 type flow struct {
