@@ -518,12 +518,13 @@ func identityNames() []string {
 func (e jigEnv) withoutIdentity() jigEnv { return e.without(identityEnvNames...) }
 
 // withGitGlobal returns e with a git global config of the test's own. The
-// test binary hermetic global config (gittest.Run) is shared by every test
-// and must stay as it is; a test that installs global git settings (a
-// core.hooksPath, say) would otherwise hand them to every parallel test's
-// commits. The returned env points GIT_CONFIG_GLOBAL at a file in the test
-// temp dir that includes the hermetic one, so `git config --global` from the
-// subprocess, or from a harness using the same env, writes only there.
+// test binary hermetic global config (gittest.Run) is shared by every test,
+// so git refuses every write to it; a test that installs global git settings
+// (a core.hooksPath, say) fails with "could not lock config file" until it
+// runs with this env. The returned env points GIT_CONFIG_GLOBAL at a file in
+// the test temp dir that includes the hermetic one, so `git config --global`
+// from the subprocess, or from a harness using the same env, writes only
+// there.
 func (e jigEnv) withGitGlobal(t *testing.T) jigEnv {
 	t.Helper()
 	hermetic := os.Getenv("GIT_CONFIG_GLOBAL")

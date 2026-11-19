@@ -102,8 +102,10 @@ func TestGitProcessCeilings(t *testing.T) {
 		must(th.Jig("gate", ticket, "--early"), "jig gate")
 		checkCeiling(t, "gate", path)
 
+		// setup --global writes core.hooksPath, so into a git global config
+		// of the test's own.
 		path = filepath.Join(traces, "setup")
-		must(runJig(t, env.with(gitTraceEnv+"="+path), fx.RepoDir, "setup", "--global", "--hooks", "--githook", "--harness", "claude", "--yes"), "jig setup")
+		must(runJig(t, env.withGitGlobal(t).with(gitTraceEnv+"="+path), fx.RepoDir, "setup", "--global", "--hooks", "--githook", "--harness", "claude", "--yes"), "jig setup")
 		checkCeiling(t, "setup", path)
 	})
 
