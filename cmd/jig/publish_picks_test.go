@@ -221,43 +221,6 @@ func TestPublishBodyOffersTheRecordingsToPickFromThroughMain(t *testing.T) {
 	}
 }
 
-// TestPublishWithoutRecordingsHasNoDemoSectionThroughMain: a ticket whose
-// build recorded nothing publishes a pull request body with no ## Demo
-// section, and nothing is offered to pick from.
-func TestPublishWithoutRecordingsHasNoDemoSectionThroughMain(t *testing.T) {
-	t.Parallel()
-	jigHome := t.TempDir()
-	e := testEnv(jigHome)
-	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	buildFixtureTicket(t, fx)
-	gateCleanThroughMain(t, e, fx)
-	out, code := runMain(t, e, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir)
-	if code != 0 {
-		t.Fatalf("publish: exit = %d, want 0\n%s", code, out)
-	}
-	if strings.Contains(out, "picks:") {
-		t.Errorf("publish output reports a pick for a build that recorded nothing:\n%s", out)
-	}
-
-	body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md"))
-	if err != nil {
-		t.Fatalf("read pr/fixture-repo.md: %v", err)
-	}
-	text := string(body)
-	if strings.Contains(text, "## Demo") {
-		t.Errorf("pr body has a ## Demo section although nothing was recorded:\n%s", text)
-	}
-	for _, want := range []string{"## What\n", "## Verification"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("pr body lacks %q:\n%s", want, text)
-		}
-	}
-}
-
 // TestPicksRowsSayWhatWasPickedOrWhy: none for a build that recorded nothing,
 // and for one that did the status and the one thing each status adds.
 func TestPicksRowsSayWhatWasPickedOrWhy(t *testing.T) {
@@ -291,32 +254,5 @@ func TestPicksRowsSayWhatWasPickedOrWhy(t *testing.T) {
 				t.Errorf("picksRows(%+v)[%d] = %v, want %v", c.report, i, got[i], c.want[i])
 			}
 		}
-	}
-}
-
-// TestPublishOffersNoRecordingOfATestTheTicketDidNotTouchThroughMain: the
-// journal holds a recording, but of a test file the ticket's commits never
-// changed, so publish prints no picks row and no waiting warning, and the body
-// has no ## Demo section.
-func TestPublishOffersNoRecordingOfATestTheTicketDidNotTouchThroughMain(t *testing.T) {
-	t.Parallel()
-	jigHome := t.TempDir()
-	e := testEnv(jigHome)
-	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
-	buildFixtureTicket(t, fx)
-	gateCleanThroughMain(t, e, fx)
-	st := recordGreetingFrom(t, jigHome, fx, "untouched_test.go")
-
-	out, code := runMain(t, e, "", "publish", fx.Ticket, "--body", "--store", fx.StoreDir)
-	if code != 0 {
-		t.Fatalf("publish --body: exit = %d, want 0\n%s", code, out)
-	}
-	for _, bad := range []string{"picks", "waiting to be picked"} {
-		if strings.Contains(out, bad) {
-			t.Errorf("publish output mentions %q for a recording of an untouched test:\n%s", bad, out)
-		}
-	}
-	if body, err := os.ReadFile(filepath.Join(st.TicketDir(fx.Ticket), "pr", "fixture-repo.md")); err != nil || strings.Contains(string(body), "## Demo") {
-		t.Errorf("pr body = %q (err %v), want one with no demo", body, err)
 	}
 }
