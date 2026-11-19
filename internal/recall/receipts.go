@@ -23,15 +23,32 @@ type Facts struct {
 }
 
 // FactsOf reads the Facts out of a ticket's journal. A builder is a session or
-// an agent whose spend line was written on a slice; its peak is the largest of
-// its lines, so a later line never lowers it.
+// an agent with a spend line stamped at or after the ticket's first claim,
+// less the subagents a gate-round or gate-clean line names as a round's
+// reviewer (a session named as reviewer that also claimed is still a builder,
+// as it is no subagent). A builder's peak is the largest of its lines, so a
+// later line never lowers it.
 func FactsOf(lines []journal.Line) Facts {
 	var f Facts
+	var firstClaim time.Time
+	reviewers := map[string]bool{}
 	for _, l := range lines {
-		if l.Event == journal.EventPublishDone {
+		switch l.Event {
+		case journal.EventPublishDone:
 			f.At = l.TS
 			f.Change = l.Change
+		case journal.EventClaim:
+			if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil && (firstClaim.IsZero() || at.Before(firstClaim)) {
+				firstClaim = at
+			}
+		case journal.EventGateRound, journal.EventGateClean:
+			if l.Session != "" && l.Agent != "" {
+				reviewers[spend.Key(l.Session, l.Agent)] = true
+			}
 		}
+	}
+	if firstClaim.IsZero() {
+		return f // nothing was built through jig: nobody to name
 	}
 	built := map[string]bool{}
 	peak := map[string]int64{}
@@ -40,13 +57,16 @@ func FactsOf(lines []journal.Line) Facts {
 			continue
 		}
 		k := spend.Key(l.Session, l.Agent)
-		if l.Slice != "" {
+		peak[k] = max(peak[k], l.Spend.Peak)
+		// A stamp that does not parse is no proof the line is from before.
+		if at, err := time.Parse(time.RFC3339Nano, l.TS); err != nil || !at.Before(firstClaim) {
 			built[k] = true
 		}
-		peak[k] = max(peak[k], l.Spend.Peak)
 	}
 	for k := range built {
-		f.Peak = max(f.Peak, peak[k])
+		if !reviewers[k] {
+			f.Peak = max(f.Peak, peak[k])
+		}
 	}
 	return f
 }

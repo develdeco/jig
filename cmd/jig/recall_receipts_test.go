@@ -24,10 +24,11 @@ func TestRecallReceiptsReachTheBlockAndTheJSON(t *testing.T) {
 	}
 	shipped := func(id, at string, size *journal.ChangeSize) {
 		putTicket(t, st, id, "Ticket "+id, false)
+		add(id, journal.Line{TS: "2026-01-01T00:00:00Z", Event: journal.EventClaim, Session: "s", Slice: "a"})
 		add(id, journal.Line{TS: at, Event: journal.EventPublishDone, Change: size})
 	}
 	built := func(id, agent string, peak int64) {
-		add(id, journal.Line{TS: "2026-01-01T00:00:00Z", Event: journal.EventSpend, Session: "s", Agent: agent, Slice: "a", Spend: &journal.Spend{Input: 1, Peak: peak}})
+		add(id, journal.Line{TS: "2026-01-01T00:00:01Z", Event: journal.EventSpend, Session: "s", Agent: agent, Slice: "a", Spend: &journal.Spend{Input: 1, Peak: peak}})
 	}
 	shipped("T-1", "2026-01-01T10:00:00Z", &journal.ChangeSize{Files: 4, Bytes: 4096})
 	built("T-1", "small", 90000)
