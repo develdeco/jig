@@ -170,6 +170,36 @@ type Line struct {
 	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
+	// Probe and Skip are a builder-probe line's probe or skip: what the
+	// builder reported, with the git blob of its file in the builder's
+	// worktree when it was recorded. Exactly one is set on such a line.
+	Probe *ProbeNote `json:"probe,omitempty"`
+	Skip  *SkipNote  `json:"skip,omitempty"`
+}
+
+// ProbeNote is a builder's mutation probe of one term: the critical path it is
+// on, the file and line, the edit, the command run against it, whether the
+// command caught it or it survived, and the blob of the file when it was
+// recorded.
+type ProbeNote struct {
+	Seam     string `json:"seam"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Mutation string `json:"mutation"`
+	Command  string `json:"command"`
+	Outcome  string `json:"outcome"`
+	Blob     string `json:"blob"`
+}
+
+// SkipNote is a builder's set-aside of a file, or of lines From to To of it
+// (both 0 for the whole file), with why no term there is on a critical path
+// and the blob of the file when it was recorded.
+type SkipNote struct {
+	File string `json:"file"`
+	From int    `json:"from,omitempty"`
+	To   int    `json:"to,omitempty"`
+	Why  string `json:"why"`
+	Blob string `json:"blob"`
 }
 
 // Spend is a spend line's cost: the token counts a transcript's usage
