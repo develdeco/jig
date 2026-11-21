@@ -36,6 +36,10 @@ type gateRepo struct {
 	// mergeRef is the ref a merge must bring in to count as the target's
 	// (classifyLine), "" for origin/<target>: a stacked ticket's parent branch.
 	mergeRef string
+	// scopeBase is the branch the whole change is measured from when it is not
+	// the target: the container's, for a ticket with one that is not stacked
+	// on an unmerged parent. "" is the target.
+	scopeBase string
 	// slices are the ticket's slices that build in the repo, fix slices
 	// included.
 	slices []store.Slice
