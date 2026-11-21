@@ -129,9 +129,9 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 		// The session that mints a task works on it from then on, as for
 		// `jig ticket new`: its brief is drafted before any journal line
 		// names the session. A multi-task has no brief to draft.
-		if k := entries[pos].Kind; k == "" || k == store.KindTask {
+		if rec, rerr := st.ReadTicket(id); rerr == nil && rec.KindOrDefault() == store.KindTask {
 			if terr := touchMinter(e, id); terr != nil {
-				fmt.Fprintf(os.Stderr, "warning: the ledger could not record that this session works on %s: %v\n", id, terr)
+				fmt.Fprintf(e.stderr, "warning: the ledger could not record that this session works on %s: %v\n", id, terr)
 			}
 		}
 	}

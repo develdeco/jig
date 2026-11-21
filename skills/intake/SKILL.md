@@ -31,7 +31,7 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 ## Brief output (single ticket)
 
-- The task is minted by `jig graduate` from one `tickets.yaml` entry (title, body scoped to the work), never by `jig ticket new`; use the id and folder it prints, never your own. The chart name is the title's lowercase slug unless named. Steps: `jig skill intake chart-verdict`.
+- The task is minted by `jig graduate` from one `tickets.yaml` entry (title, body scoped to the work), never by `jig ticket new`; use the id and folder it prints, never your own. The chart name is the title's lowercase slug unless named. On a ticket that exists, its entry carries its `id`: no second task. Steps: `jig skill intake chart-verdict`.
 - `brief.md`: `## `-sectioned behavioral spec.
 - `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; GUARDRAIL and prefactoring slices (first) stay separate. A slice's oracle is a literal command naming what it adds or keeps, or a manifest oracle's name when that is the proof; nothing names a whole suite so a gate can reuse it. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
 - `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (it prints the section hashes, even when it fails; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`. A stamp a brief edit left stale: do what its line says.

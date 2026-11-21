@@ -91,3 +91,38 @@ func TestIntakeIssueFlow(t *testing.T) {
 		t.Errorf("jig next %s = %+v, want an issue of chart checkout with 3 tasks", issue2, root2)
 	}
 }
+
+// TestIntakeIssueExistingTicket: intake on a backlog ticket makes the issue
+// and its chart, and the chart's one entry carries the ticket's id, so
+// graduate keeps it and mints no second task.
+func TestIntakeIssueExistingTicket(t *testing.T) {
+	t.Parallel()
+	fx, env := newFixture(t, fixture.Opts{})
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := runJig(t, env, fx.StoreDir, "ticket", "new", "--title", "Backlog item"); r.Code != 0 {
+		t.Fatalf("jig ticket new: exit %d\n%s", r.Code, r.Stdout)
+	}
+	all, _ := st.Tickets()
+	backlog := all[len(all)-1]
+	if r := runJig(t, env, fx.StoreDir, "chart", "new", "backlog", "--title", "Backlog item", "--need", "Do the backlog item."); r.Code != 0 {
+		t.Fatalf("jig chart new: exit %d\n%s", r.Code, r.Stdout)
+	}
+	issue, _ := st.ChartIssue("backlog")
+	before, _ := st.Tickets()
+	if err := os.WriteFile(st.ChartFile("backlog"), []byte("issue: "+issue+"\ntickets:\n  - id: "+backlog+"\n    title: Backlog item\n    body: Its part.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := runJig(t, env, fx.StoreDir, "graduate", "backlog"); r.Code != 0 {
+		t.Fatalf("jig graduate: exit %d\n%s", r.Code, r.Stdout)
+	}
+	if after, _ := st.Tickets(); len(after) != len(before) {
+		t.Errorf("graduate minted a second task: %v, were %v", after, before)
+	}
+	entries, err := st.ReadChart("backlog")
+	if err != nil || len(entries) != 1 || entries[0].ID != backlog {
+		t.Errorf("entries = %+v, %v, want the one entry keeping %s", entries, err, backlog)
+	}
+}

@@ -69,3 +69,37 @@ func TestGraduateTiesTheMintingSessionToTheTask(t *testing.T) {
 		}
 	}
 }
+
+// TestGraduateTiesTheMintingSessionWarningGoesToTheEnvStderr: a ledger that
+// cannot record the tie warns on the env's stderr, not the process's, and not
+// on stdout; the graduation still succeeds.
+func TestGraduateTiesTheMintingSessionWarningGoesToTheEnvStderr(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "home-is-a-file")
+	if err := os.WriteFile(home, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := envFrom(map[string]string{"JIG_HOME": home, "HOME": home, "USERPROFILE": home, locate.SessionEnv: "s-x"})
+	var warn bytes.Buffer
+	e.stderr = &warn
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginClone(t, clone)
+	var buf bytes.Buffer
+	if code := run(e, []string{"chart", "new", "plan", "--title", "Plan", "--need", "A need", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("jig chart new: exit %d\n%s", code, buf.String())
+	}
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.ChartFile("plan"), []byte("issue: DEMO-1\ntickets:\n  - title: Work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if code := run(e, []string{"graduate", "plan", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("jig graduate: exit %d\n%s", code, buf.String())
+	}
+	if !strings.Contains(warn.String(), "could not record that this session works on DEMO-2") || strings.Contains(buf.String(), "could not record") {
+		t.Errorf("stderr = %q, stdout = %q, want the warning on the env's stderr only", warn.String(), buf.String())
+	}
+}
