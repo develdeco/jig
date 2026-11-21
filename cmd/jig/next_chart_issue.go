@@ -172,7 +172,7 @@ func landHelp(c phase.Chart) []string {
 			break
 		}
 	}
-	return []string{"Land " + first.ID + " (or merge it on the host), then ask: " + c.Prompt}
+	return []string{first.Prompt + " (or merge it on the host), then ask: " + c.Prompt}
 }
 
 // issueHelp are the lines a model chart's issue block adds to the help: the

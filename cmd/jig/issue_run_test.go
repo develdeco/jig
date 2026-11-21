@@ -179,13 +179,114 @@ func TestIssueRunStopsAtEachLandingEndToEnd(t *testing.T) {
 	}
 
 	// Landed: the chart is done.
+	if n.Lands[0].State != "waits for a merge" {
+		t.Errorf("issue not merged: state %q", n.Lands[0].State)
+	}
 	r.issueHost(t, true, true, true)
+	if n = r.issueRun(t); len(n.Lands) != 1 || n.Lands[0].State != "merged on the host, not recorded" {
+		t.Errorf("issue merged on the host: lands %+v, want a record to make", n.Lands)
+	}
 	if out, code := r.run(t, "land", "TK-1"); code != 0 {
 		t.Fatalf("jig land TK-1: exit %d\n%s", code, out)
 	}
 	n = r.issueRun(t)
 	if n.Code != phase.CodeChartDone || n.Issue.Stage != phase.IssueLanded {
 		t.Fatalf("landed: %s %+v", n.Code, n.Issue)
+	}
+}
+
+// TestIssueRunMultiTaskIsPublishedThenLanded: a multi-task of two tasks and a
+// task that waits for it to merge, read through `jig next <issue>`. With both
+// tasks landed into the multi-task it is in `publish` and the run is ready;
+// once its own pull request is recorded it is a landing instead, the
+// dependent an end behind it, and a merge the host made reads as a record to
+// make.
+func TestIssueRunMultiTaskIsPublishedThenLanded(t *testing.T) {
+	r := newChartRig(t)
+	r.put(t, "project.yaml", "schema_version: 2\nname: demo\nkeys:\n  TK: everything in demo\ntrackers: []\nrepos:\n  - remote: /srv/app.git\n    label: app\n")
+	r.ticket(t, "TK-1", "kind: issue\n", false)
+	r.ticket(t, "TK-4", "kind: multi-task\n", false)
+	r.ticket(t, "TK-5", "parent: TK-4\n", true)
+	r.ticket(t, "TK-6", "parent: TK-4\n", true)
+	r.ticket(t, "TK-7", "blocked_by:\n  - ticket: TK-4\n    kind: merged\n", true)
+	r.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-4\n    title: Four\n    kind: multi-task\n  - id: TK-5\n    title: Five\n  - id: TK-6\n    title: Six\n  - id: TK-7\n    title: Seven\n", "")
+	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.email", "fixture@example.invalid"}, {"config", "user.name", "fixture"}, {"add", "-A"}, {"commit", "-m", "store"}} {
+		if _, err := gitx.Run(r.root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", fixture.GhStub(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	branchOf := func(id string) string {
+		t.Helper()
+		rec, err := r.st.ReadTicket(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := r.st.ResolveTicketBranch(id, rec, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	multi, issue := branchOf("TK-4"), branchOf("TK-1")
+	pull := func(n int, base string, merged bool) fixture.GhPull {
+		p := fixture.GhPull{Number: n, Base: base}
+		if merged {
+			p.State, p.Merged, p.MergeCommit = "closed", true, "c0ffee"+string(rune('0'+n%10))
+		}
+		return p
+	}
+	r.publishInto(t, "TK-5", "TK-4", "5")
+	r.publishInto(t, "TK-6", "TK-4", "6")
+
+	// One task landed, one not: the multi-task is not ready.
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, pull(5, multi, true), pull(6, multi, false)))
+	if n := r.issueRun(t); len(n.Publish) != 0 {
+		t.Fatalf("one task open: publish = %+v, want none", n.Publish)
+	}
+
+	// Both landed: the multi-task is the main session's to publish.
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, pull(5, multi, true), pull(6, multi, true)))
+	n := r.issueRun(t)
+	if !n.Ready || len(n.Publish) != 1 || n.Publish[0] != (nextChartPublish{Ticket: "TK-4", Prompt: "Publish TK-4"}) {
+		t.Fatalf("both landed: ready %v publish %+v, want TK-4 to publish", n.Ready, n.Publish)
+	}
+	if text, _ := r.run(t, "next", "TK-1"); !strings.Contains(text, "publish[1]{ticket,prompt}:\n  TK-4,Publish TK-4") {
+		t.Errorf("jig next TK-1 lacks the publish table:\n%s", text)
+	}
+
+	// Published: a landing, not a publish, and the dependent waits for it.
+	r.publishInto(t, "TK-4", "TK-1", "9")
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, pull(5, multi, true), pull(6, multi, true), pull(9, issue, false)))
+	n = r.issueRun(t)
+	if len(n.Publish) != 0 || n.Code != phase.CodeChartWaitsLand || n.Prompt != "Continue TK-1" {
+		t.Fatalf("published: publish %+v code %s prompt %q", n.Publish, n.Code, n.Prompt)
+	}
+	var row *nextChartLand
+	for i, l := range n.Lands {
+		if l.Ticket == "TK-4" {
+			row = &n.Lands[i]
+		}
+	}
+	if row == nil || row.Prompt != "Land TK-4" || row.State != "waits for a merge" {
+		t.Fatalf("lands = %+v, want TK-4 waiting for a merge", n.Lands)
+	}
+	found := false
+	for _, e := range n.Ends {
+		if e.Ticket == "TK-7" && e.Blocker == "TK-4" && strings.Contains(e.Fact, "waits for TK-4 to land into "+issue) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ends = %+v, want TK-7 waiting for TK-4 to land into %s", n.Ends, issue)
+	}
+
+	// Merged on the host: a record to make.
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, pull(5, multi, true), pull(6, multi, true), pull(9, issue, true)))
+	for _, l := range r.issueRun(t).Lands {
+		if l.Ticket == "TK-4" && l.State != "merged on the host, not recorded" {
+			t.Errorf("TK-4 merged on the host: state %q", l.State)
+		}
 	}
 }
 

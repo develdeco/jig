@@ -52,14 +52,17 @@ func layModel(st *store.Store, cfg project.Config, mp project.MachineProject, me
 				}
 			}
 		}
+		if shared != "" {
+			e.SharedIssue = shared
+		}
 		if e.Kind == store.KindMultiTask {
 			if r, err := land.ReadinessOf(d, e.ID); err == nil {
-				e.Container = &phase.ChartContainer{State: r.State, Prompt: r.Prompt}
+				e.Container = &phase.ChartContainer{State: r.State, Prompt: r.Prompt, OnHost: containerMergedOnHost(d, e.ID, r.State)}
 			}
 		}
 	}
 	if r, err := land.ReadinessOf(d, issue); err == nil {
-		tail := &phase.ChartTail{State: r.State, Prompt: r.Prompt}
+		tail := &phase.ChartTail{State: r.State, Prompt: r.Prompt, OnHost: containerMergedOnHost(d, issue, r.State)}
 		for _, w := range r.Waits {
 			tail.Waits = append(tail.Waits, w.Ticket)
 		}
@@ -68,6 +71,17 @@ func layModel(st *store.Store, cfg project.Config, mp project.MachineProject, me
 		}
 		facts.Tail = tail
 	}
+}
+
+// containerMergedOnHost says the container, published with no landed line (state
+// published), has its pull requests merged on the host: a merge `jig land`
+// records, as for a task's landing.
+func containerMergedOnHost(d land.Deps, container, state string) bool {
+	if state != land.StatePublished {
+		return false
+	}
+	m, err := d.Merges.Of(container)
+	return err == nil && m.Met()
 }
 
 // chartOfIssueWord is the chart that plans the issue a word names (an id or an

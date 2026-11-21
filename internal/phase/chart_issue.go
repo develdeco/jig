@@ -25,6 +25,31 @@ func (i *ChartIssue) acts() bool {
 	return false
 }
 
+// The Land states of a container's row, in the words a ticket's Land phase says
+// them.
+const (
+	landWaits  = "waits for a merge"
+	landOnHost = "merged on the host, not recorded"
+)
+
+// landState is the Land state of a published container: merged on the host and
+// not recorded when the host says so, else waiting for a merge.
+func landState(onHost bool) string {
+	if onHost {
+		return landOnHost
+	}
+	return landWaits
+}
+
+// landPrompt is what asks for ticket's landing: `Land T`, and for a task two
+// issues share, into the issue the chart plans (`Land T --issue I`).
+func landPrompt(ticket, sharedIssue string) string {
+	if sharedIssue != "" {
+		return Prompt(Land, ticket) + " --issue " + sharedIssue
+	}
+	return Prompt(Land, ticket)
+}
+
 // modelRows lays Lands, Publish and Issue on c from the rows, in row order, the
 // issue's own landing last.
 func (d *chartDeriver) modelRows(c *Chart) {
@@ -45,11 +70,11 @@ func (d *chartDeriver) modelRows(c *Chart) {
 			case TailReady:
 				c.Publish = append(c.Publish, ChartPublish{ID: r.ID, Prompt: e.Container.Prompt})
 			case TailPublished:
-				c.Lands = append(c.Lands, ChartLand{Pos: r.Pos, ID: r.ID, Prompt: Prompt(Land, r.ID), After: e.After, State: "waits for a merge"})
+				c.Lands = append(c.Lands, ChartLand{Pos: r.Pos, ID: r.ID, Prompt: landPrompt(r.ID, e.SharedIssue), After: e.After, State: landState(e.Container.OnHost)})
 			}
 		case r.Kind == "" && r.Ticket != nil && r.Ticket.Current == Land && r.Ticket.Code == CodeDone:
 			c.Lands = append(c.Lands, ChartLand{
-				Pos: r.Pos, ID: r.ID, Prompt: Prompt(Land, r.ID), After: e.After,
+				Pos: r.Pos, ID: r.ID, Prompt: landPrompt(r.ID, e.SharedIssue), After: e.After,
 				State: r.Ticket.Phases[len(r.Ticket.Phases)-1].Text,
 			})
 		}
@@ -57,7 +82,7 @@ func (d *chartDeriver) modelRows(c *Chart) {
 	if t := d.f.Tail; t != nil {
 		c.Issue = d.issueStage(*t, len(c.Lands) > 0)
 		if c.Issue.Stage == IssuePublished {
-			c.Lands = append(c.Lands, ChartLand{ID: d.f.Issue, Prompt: Prompt(Land, d.f.Issue), State: "waits for a merge"})
+			c.Lands = append(c.Lands, ChartLand{ID: d.f.Issue, Prompt: Prompt(Land, d.f.Issue), State: landState(t.OnHost)})
 		}
 	}
 }

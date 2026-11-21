@@ -118,6 +118,9 @@ type ChartEntry struct {
 	// and Into the branch it lands into: read for a model chart only.
 	After []string
 	Into  string
+	// SharedIssue is the chart's issue when the task is a task of two issues:
+	// its landing is asked for per issue.
+	SharedIssue string
 	// Container is where a multi-task stands before its own pull request
 	// (land.ReadinessOf), nil for any other entry or a legacy chart.
 	Container *ChartContainer
@@ -143,6 +146,9 @@ const (
 type ChartContainer struct {
 	State  string
 	Prompt string
+	// OnHost says the container is published and the host reports its pull
+	// requests merged, with no landed line: a merge to record, not to ask for.
+	OnHost bool
 }
 
 // ChartUnmet is one precondition of the issue's publish that is not met.
@@ -157,6 +163,8 @@ type ChartTail struct {
 	Waits  []string
 	Unmet  []ChartUnmet
 	Prompt string
+	// OnHost is ChartContainer's, for the issue's own pull request.
+	OnHost bool
 }
 
 // ChartFacts are what the reader gathered of a chart.

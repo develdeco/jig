@@ -177,6 +177,40 @@ func TestIssueRunMultiTaskIsPublishedAndLanded(t *testing.T) {
 	}
 }
 
+// TestIssueRunContainerMergedOnTheHostIsARecordToMake: a published multi-task
+// and a published issue whose pull request the host merged are lands rows that
+// say so, and one the host has not merged waits for a merge; a task two issues
+// share is asked for with its issue.
+func TestIssueRunContainerMergedOnTheHostIsARecordToMake(t *testing.T) {
+	t.Parallel()
+	m := entry(1, "M-1", ticketBriefing("M-1"))
+	m.Kind = "multi-task"
+	for onHost, want := range map[bool]string{true: "merged on the host, not recorded", false: "waits for a merge"} {
+		m.Container = &ChartContainer{State: TailPublished, OnHost: onHost}
+		c := DeriveChart(model(m))
+		if len(c.Lands) != 1 || c.Lands[0].ID != "M-1" || c.Lands[0].State != want {
+			t.Errorf("multi-task on the host %v: lands = %+v, want state %q", onHost, c.Lands, want)
+		}
+		f := model(entry(1, "A-1", ticketLanded("A-1")))
+		f.Tail = &ChartTail{State: TailPublished, OnHost: onHost}
+		c = DeriveChart(f)
+		if len(c.Lands) != 1 || c.Lands[0].ID != "ISS-1" || c.Lands[0].State != want {
+			t.Errorf("issue on the host %v: lands = %+v, want state %q", onHost, c.Lands, want)
+		}
+	}
+
+	shared := entry(1, "A-1", ticketUnlanded("A-1", false))
+	shared.SharedIssue = "ISS-1"
+	c := DeriveChart(model(shared))
+	if len(c.Lands) != 1 || c.Lands[0].Prompt != "Land A-1 --issue ISS-1" || !strings.Contains(c.Reason, "Land A-1 --issue ISS-1") {
+		t.Errorf("shared task: lands = %+v reason %q, want its issue named", c.Lands, c.Reason)
+	}
+	plain := DeriveChart(model(entry(1, "A-1", ticketUnlanded("A-1", false))))
+	if plain.Lands[0].Prompt != "Land A-1" {
+		t.Errorf("task of one issue: prompt = %q", plain.Lands[0].Prompt)
+	}
+}
+
 // TestIssueRunEndReasonNamesTheBranch: a dependent of an unlanded ticket waits
 // for it to land into the branch it lands into.
 func TestIssueRunEndReasonNamesTheBranch(t *testing.T) {
