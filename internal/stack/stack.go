@@ -63,6 +63,9 @@ type Repo struct {
 	// Container is the ticket whose branch the pull request goes into, and
 	// ContainerBranch that branch; both "" for a ticket with no container.
 	Container, ContainerBranch string
+	// ContainerHead is the tip of the container's branch in the clone, "" when
+	// it holds no copy; ContainerFrom is the ref to create that branch from.
+	ContainerHead, ContainerFrom string
 	// Parent is the ticket the branch is stacked on in this repo, "" when the
 	// repo is the ticket's alone. ParentBranch is its branch, ParentRef the ref
 	// its head was read from, and ParentHead that head, "" when the clone has
@@ -101,6 +104,9 @@ func (r Repo) Shared() bool { return r.Parent != "" && !r.Merged }
 // each repo it builds in.
 type Plan struct {
 	Ticket string
+	// Kind is "issue" or "multi-task" for a plan of such a ticket's own branch
+	// (the union of its tasks' repos), "" for a task.
+	Kind string
 	// Branch is the ticket's branch, which has one name in every repo.
 	Branch string
 	// Repos are the repos the ticket builds in, in the project's order. A
@@ -162,6 +168,10 @@ type Facts struct {
 	// Container and ContainerBranch are the ticket whose branch the pull
 	// request goes into and that branch; "" for a ticket with no container.
 	Container, ContainerBranch string
+	// ContainerHead is the tip of the container's branch in the clone, "" when
+	// it holds no copy; ContainerFrom is the ref that branch is cut from when
+	// it is to be created (its own container's branch, else the target).
+	ContainerHead, ContainerFrom string
 	// MergedDep says a ticket this one waits for, with the kind merged, builds
 	// in the repo: with a container, the ticket starts from its branch, where
 	// that work merged.
@@ -188,7 +198,7 @@ type Facts struct {
 // landed in the repo is told to restack or retarget nothing.
 func Judge(f Facts) Repo {
 	r := Repo{Repo: f.Repo, Target: f.Target, StartFrom: "origin/" + f.Target, PRTarget: f.Target, Head: f.Head,
-		Container: f.Container, ContainerBranch: f.ContainerBranch}
+		Container: f.Container, ContainerBranch: f.ContainerBranch, ContainerHead: f.ContainerHead, ContainerFrom: f.ContainerFrom}
 	base := r.Base()
 	r.PRTarget = base
 	if f.FromContainer {
@@ -283,6 +293,9 @@ func Read(in Input, ticket string) (Plan, error) {
 	if len(parents) == 0 && !hasContainer && !notTask {
 		return plan, nil
 	}
+	if notTask {
+		plan.Kind = kind
+	}
 
 	repos := ready.ProjectRepos(in.Cfg, in.Clones)
 	builtIn := func(id string) ([]string, error) {
@@ -368,6 +381,19 @@ func Read(in Input, ticket string) (Plan, error) {
 			}
 			f.Container, f.ContainerBranch, base = container, cb, cb
 			f.FromContainer = kind == store.KindMultiTask
+			// The branch the container's own is cut from, were it to be
+			// created: its container's (a multi-task's issue), else the target.
+			f.ContainerFrom = "origin/" + target
+			if crec.KindOrDefault() == store.KindMultiTask {
+				if up, ok, err := in.Store.ContainerOf(container, crec); err == nil && ok {
+					if urec, err := in.Store.ReadTicket(up); err == nil {
+						if ub, err := in.Store.ResolveTicketBranch(up, urec, target); err == nil {
+							f.ContainerFrom = "origin/" + ub
+						}
+					}
+				}
+			}
+			_, f.ContainerHead = tip(dir, cb)
 		}
 		_, f.Head = tip(dir, branch)
 		if f.Head != "" {

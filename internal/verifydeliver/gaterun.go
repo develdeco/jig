@@ -135,7 +135,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 			return r, fmt.Errorf("verifydeliver: gate: read what %s is stacked on: %w", ticket, err)
 		}
 		for _, gr := range repos {
-			if sr, ok := plan.In(gr.name); ok && sr.Shared() && sr.PRTarget != "" {
+			if sr, ok := plan.In(gr.name); ok && (sr.Shared() || sr.Container != "") && sr.PRTarget != "" {
 				gr.mergeRef = "origin/" + sr.PRTarget
 			}
 		}

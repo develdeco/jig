@@ -106,10 +106,10 @@ func TestContainerRead(t *testing.T) {
 		ticket string
 		want   Repo
 	}{
-		{"T-1", Repo{Repo: "api", Target: "main", StartFrom: "origin/main", PRTarget: issue, Container: "I-1", ContainerBranch: issue}},
-		{"T-2", Repo{Repo: "api", Target: "main", StartFrom: "origin/" + issue, PRTarget: issue, Container: "I-1", ContainerBranch: issue}},
-		{"T-3", Repo{Repo: "api", Target: "main", StartFrom: "origin/main", PRTarget: multi, Container: "M-1", ContainerBranch: multi}},
-		{"M-1", Repo{Repo: "api", Target: "main", StartFrom: "origin/" + issue, PRTarget: issue, Container: "I-1", ContainerBranch: issue}},
+		{"T-1", Repo{Repo: "api", Target: "main", StartFrom: "origin/main", PRTarget: issue, Container: "I-1", ContainerBranch: issue, ContainerFrom: "origin/main"}},
+		{"T-2", Repo{Repo: "api", Target: "main", StartFrom: "origin/" + issue, PRTarget: issue, Container: "I-1", ContainerBranch: issue, ContainerFrom: "origin/main"}},
+		{"T-3", Repo{Repo: "api", Target: "main", StartFrom: "origin/main", PRTarget: multi, Container: "M-1", ContainerBranch: multi, ContainerFrom: "origin/" + issue}},
+		{"M-1", Repo{Repo: "api", Target: "main", StartFrom: "origin/" + issue, PRTarget: issue, Container: "I-1", ContainerBranch: issue, ContainerFrom: "origin/main"}},
 		{"I-1", Repo{Repo: "api", Target: "main", StartFrom: "origin/main", PRTarget: "main"}},
 	} {
 		plan, err := Read(in, c.ticket)
