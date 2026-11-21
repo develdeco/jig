@@ -41,6 +41,9 @@ type claimDeps struct {
 	// merges says whether the work of a blocker has merged. nil
 	// judges a blocker by its journal alone: it is met once it published.
 	merges mergeSource
+	// issue is the issue of the chart the dependent is read in: a blocker that
+	// is a shared task is judged for it. "" reads the dependent's own issue.
+	issue string
 }
 
 // mergeSource says whether the work of a ticket has merged:
@@ -125,11 +128,11 @@ func blockerProblem(st *store.Store, ticket, blocker, kind string, d claimDeps) 
 	var m ready.Merge
 	if d.merges != nil {
 		var err error
-		if m, err = d.merges.Of(blocker); err != nil {
+		if m, err = mergeFor(st, d.merges, ticket, blocker, d.issue); err != nil {
 			return nil, err
 		}
 	} else {
-		published, err := isPublished(st, blocker)
+		published, err := publishedFor(st, ticket, blocker, d.issue)
 		if err != nil {
 			return nil, err
 		}

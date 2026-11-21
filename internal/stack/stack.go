@@ -19,6 +19,7 @@ package stack
 
 import (
 	"os"
+	"slices"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
@@ -364,7 +365,8 @@ func ReadFor(in Input, ticket, issue string) (Plan, error) {
 			if err != nil {
 				continue
 			}
-			if dc, ok, err := in.Store.ContainerOf(id, drec); err != nil || !ok || !chain[dc] {
+			dcs, err := in.Store.ContainersOf(id, drec)
+			if err != nil || !slices.ContainsFunc(dcs, func(c string) bool { return chain[c] }) {
 				continue
 			}
 			if names, err := builtIn(id); err == nil {

@@ -47,7 +47,7 @@ func newMergeReader(e env, st *store.Store, cfg project.Config, mp project.Machi
 // that input. A fact that cannot be read is one that is not met, saying why, so
 // a ticket never reads as free because its blocker could not be looked at. nil
 // merges reads none.
-func readMerges(merges mergeSource, inputs []ready.Ticket) {
+func readMerges(st *store.Store, merges mergeSource, inputs []ready.Ticket) {
 	if merges == nil {
 		return
 	}
@@ -64,7 +64,9 @@ func readMerges(merges mergeSource, inputs []ready.Ticket) {
 			if !ok || b.Kind == "stacked" || !inputs[i].Published || inputs[i].Closed != nil || inputs[i].Merge != nil {
 				continue
 			}
-			m, err := merges.Of(b.Ticket)
+			// A blocker that is a shared task is read for the issue of the
+			// dependent that waits for it.
+			m, err := mergeFor(st, merges, in.ID, b.Ticket, "")
 			if err != nil {
 				m = ready.Merge{Published: true, Repos: []ready.RepoMerge{{Why: "its merge could not be read: " + err.Error()}}}
 			}

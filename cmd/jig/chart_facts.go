@@ -81,6 +81,9 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 		problemOf[p.Entry] = append(problemOf[p.Entry], p.Text())
 	}
 
+	// A shared entry is read for this chart's own issue: published, waiting on
+	// a merge or done by that issue's pull request alone.
+	issue, _ := st.ChartIssue(name)
 	facts := phase.ChartFacts{Name: name}
 	for i, e := range entries {
 		pos := i + 1
@@ -92,7 +95,7 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 			// The needs are the refs that did resolve.
 			for _, r := range refs[i] {
 				if r.knownID != "" {
-					ce.Needs = append(ce.Needs, chartNeed(st, fmt.Sprintf("%s#%d", name, pos), r.knownID, r.kind, merges))
+					ce.Needs = append(ce.Needs, chartNeed(st, fmt.Sprintf("%s#%d", name, pos), r.knownID, r.kind, merges, issue))
 					continue
 				}
 				ce.Needs = append(ce.Needs, phase.ChartNeed{
@@ -121,9 +124,9 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 			if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
 				blocker = resolved
 			}
-			ce.Needs = append(ce.Needs, chartNeed(st, e.ID, blocker, b.Kind, merges))
+			ce.Needs = append(ce.Needs, chartNeed(st, e.ID, blocker, b.Kind, merges, issue))
 		}
-		if t, err := derivePhasePlanned(st, cfg, mp, e.ID, rec, merges); err != nil {
+		if t, err := derivePhasePlanned(st, cfg, mp, e.ID, rec, merges, issue); err != nil {
 			ce.Problem = err.Error()
 		} else {
 			ce.Ticket = &t
@@ -170,19 +173,19 @@ func layOpenParents(st *store.Store, needs []phase.ChartNeed, ticket string, mer
 // chartNeed is the edge from dependent (a ticket, or a chart entry that has no
 // ticket yet) to blocker, judged as a claim judges it. A blocker the store
 // cannot read is a need that is never met.
-func chartNeed(st *store.Store, dependent, blocker, kind string, merges mergeSource) phase.ChartNeed {
+func chartNeed(st *store.Store, dependent, blocker, kind string, merges mergeSource, issue string) phase.ChartNeed {
 	if kind == "" {
 		kind = "merged"
 	}
 	n := phase.ChartNeed{Ticket: blocker, Kind: kind}
-	p, err := blockerProblem(st, dependent, blocker, kind, claimDeps{merges: merges})
+	p, err := blockerProblem(st, dependent, blocker, kind, claimDeps{merges: merges, issue: issue})
 	switch {
 	case err != nil:
 		n.Code, n.Why = phase.CodeNeedUnknown, fmt.Sprintf("%s waits for %s, which cannot be read: %v", dependent, blocker, err)
 	case p == nil:
 		n.Met = true
 	default:
-		n.Code, n.Why, n.PRs = p.Code, p.Message, mergePRs(merges, blocker, kind)
+		n.Code, n.Why, n.PRs = p.Code, p.Message, mergePRs(st, merges, dependent, blocker, kind, issue)
 	}
 	return n
 }

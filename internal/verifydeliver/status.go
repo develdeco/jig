@@ -37,6 +37,11 @@ type Status struct {
 	// PRs is repo -> the pull request recorded or opened there, for a ticket
 	// whose publish names its repos (a project of several): PR is the latest.
 	PRs map[string]string `json:"prs,omitempty"`
+	// PRHead and PRHeads are the head each pull request line recorded: the
+	// latest, and repo -> the latest in that repo. They are what a pull request
+	// was opened or updated for, which the branch may have moved past.
+	PRHead  string            `json:"pr_head,omitempty"`
+	PRHeads map[string]string `json:"pr_heads,omitempty"`
 	// Issues is, for a shared task, the publish state of each issue it is
 	// published into, in chart order; the fields above are then empty.
 	Issues []IssueStatus `json:"issues,omitempty"`
@@ -128,6 +133,7 @@ func ReadStatusFor(st *store.Store, ticket, issue string) (Status, error) {
 	}
 	is := publishStatus(lines)
 	s.BodyFor, s.ApprovedFor, s.PR, s.PRs, s.Published = is.BodyFor, is.ApprovedFor, is.PR, is.PRs, is.Published
+	s.PRHead, s.PRHeads = is.PRHead, is.PRHeads
 	return s, nil
 }
 
@@ -142,8 +148,9 @@ type IssueStatus struct {
 	PRs         map[string]string `json:"prs,omitempty"`
 	// PRHead is the head the latest pull request line recorded: the head that
 	// issue's pull request was opened or updated for.
-	PRHead    string `json:"pr_head,omitempty"`
-	Published bool   `json:"published,omitempty"`
+	PRHead    string            `json:"pr_head,omitempty"`
+	PRHeads   map[string]string `json:"pr_heads,omitempty"`
+	Published bool              `json:"published,omitempty"`
 }
 
 // publishStatus reads the publish fields from journal lines already read for
@@ -162,6 +169,12 @@ func publishStatus(lines []journal.Line) IssueStatus {
 			if l.URL != "" {
 				s.PR = l.URL
 				s.PRHead = l.Commit
+				if l.Repo != "" {
+					if s.PRHeads == nil {
+						s.PRHeads = map[string]string{}
+					}
+					s.PRHeads[l.Repo] = l.Commit
+				}
 				if l.Repo != "" {
 					if s.PRs == nil {
 						s.PRs = map[string]string{}

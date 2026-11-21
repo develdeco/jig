@@ -28,8 +28,9 @@ func TestSharedStack(t *testing.T) {
 	add("I-2", store.Ticket{Title: "Two", Kind: store.KindIssue})
 	add("T-S", store.Ticket{Title: "Shared"})
 	add("T-1", store.Ticket{Title: "Alone"})
+	add("T-D", store.Ticket{Title: "Dependent", BlockedBy: []store.TicketBlockedBy{{Ticket: "T-S"}}})
 	for name, content := range map[string]string{
-		"a": "issue: I-1\ntickets:\n  - id: T-S\n    title: Shared\n  - id: T-1\n    title: Alone\n",
+		"a": "issue: I-1\ntickets:\n  - id: T-S\n    title: Shared\n  - id: T-1\n    title: Alone\n  - id: T-D\n    title: Dependent\n",
 		"b": "issue: I-2\ntickets:\n  - id: T-S\n    title: Shared\n",
 	} {
 		if err := store.AtomicWrite(st.ChartFile(name), []byte(content)); err != nil {
@@ -67,6 +68,12 @@ func TestSharedStack(t *testing.T) {
 		if err != nil || len(plan.Repos) != 1 || !reflect.DeepEqual(plan.Repos[0], want) {
 			t.Errorf("ReadFor(T-S, %s) = %+v, %v\nwant %+v", issue, plan.Repos, err, want)
 		}
+	}
+	// A dependent of the shared task in the first issue's chart starts from that
+	// issue's branch, where the task merged.
+	dep, err := Read(in, "T-D")
+	if err != nil || len(dep.Repos) != 1 || dep.Repos[0].StartFrom != "origin/"+b1 || dep.Repos[0].PRTarget != b1 {
+		t.Errorf("Read(T-D) = %+v, %v, want it to start from and go into %s", dep.Repos, err, b1)
 	}
 	alone, err := Read(in, "T-1")
 	if err != nil || len(alone.Repos) != 1 || alone.Repos[0].PRTarget != b1 || alone.Repos[0].Containers != nil {
