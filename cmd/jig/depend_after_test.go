@@ -90,6 +90,22 @@ func TestAfterRecordRefusesWhatCannotBeTrueAndWritesNothing(t *testing.T) {
 	}
 }
 
+// TestAfterShownNoWaitBetweenIssues: --on is refused between two issues, and
+// still works between an issue and a task.
+func TestAfterShownNoWaitBetweenIssues(t *testing.T) {
+	r, _ := issueRig(t)
+	head := r.head(t)
+	if out, code := r.jig(t, "depend", "DEMO-2", "--on", "DEMO-1"); code == 0 || !strings.Contains(out, "never waits") {
+		t.Errorf("issue on issue: exit %d\n%s", code, out)
+	}
+	if r.head(t) != head {
+		t.Error("a refusal wrote to the store")
+	}
+	if out, code := r.jig(t, "depend", "DEMO-4", "--on", "DEMO-1"); code != 0 {
+		t.Errorf("task on issue: exit %d\n%s", code, out)
+	}
+}
+
 // TestAfterRecordTakesNoOnOrKind: it is a suggestion, not a wait.
 func TestAfterRecordTakesNoOnOrKind(t *testing.T) {
 	r, _ := issueRig(t)

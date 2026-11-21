@@ -101,6 +101,13 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, dependUsage("a ticket cannot wait for itself"))
 		}
 	}
+	if parent != "" && !*clearFlag {
+		_, childIssue := issueKind(st, child)
+		_, parentIssue := issueKind(st, parent)
+		if childIssue && parentIssue {
+			return renderErr(stdout, dependUsage(fmt.Sprintf("%s and %s are issues: an issue lands after another by suggestion (`jig depend %s --after %s`), never waits; code both need is a task in both charts", child, parent, child, parent)))
+		}
+	}
 	if err := st.Sync(); err != nil {
 		return renderErr(stdout, err)
 	}
