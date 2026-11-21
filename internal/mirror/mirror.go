@@ -143,6 +143,10 @@ type SyncReport struct {
 	// repo and the number, so the operator can remove it by hand if it
 	// really is gone.
 	GoneRecordedPRs []GoneRecordedPR
+	// TasksNotCarried is how many tasks and multi-tasks already mirrored
+	// this sync no longer carries because trackers: github: tasks: is off:
+	// their issues are left open and untouched.
+	TasksNotCarried int
 	// MovedRecords is every record this sync moved from a ticket's or chart's
 	// own folder into the tracker tree, and every record it moved from beside
 	// its link into its entry's folder. Empty in a dry run, which moves
@@ -231,7 +235,7 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	if err := refuseUnreadableRecords(d.Store); err != nil {
 		return SyncReport{}, nil, err
 	}
-	items, err := collectItems(d.Store, d.Cfg.GitHub.Repo)
+	items, notCarried, err := collectItems(d.Store, d.Cfg.GitHub.Repo, d.Cfg.GitHub.Tasks)
 	if err != nil {
 		return SyncReport{}, nil, err
 	}
@@ -240,6 +244,7 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 		return SyncReport{}, items, fmt.Errorf("mirror: read publish-terms.txt: %w", err)
 	}
 	var report SyncReport
+	report.TasksNotCarried = notCarried
 	if !opts.DryRun {
 		report.MovedRecords, err = moveLegacyRecords(d.Store, items, d.Cfg.GitHub.Repo)
 		if err != nil {
@@ -627,30 +632,74 @@ func previewCreateRender(st *store.Store, cfg project.Config, it item, prs []PRR
 // collectItems lists every ticket (key, then number order) then every chart
 // (name order), the order a sync takes them in, each
 // with where its record is (findRecord, for the repository repo).
-func collectItems(st *store.Store, repo string) ([]item, error) {
+//
+// A chart with an issue: has no item, since its issue ticket is its issue; its
+// record, if it holds one, is left alone. A task or multi-task such a chart
+// lists, and no legacy chart lists, has an item only when tasks is true;
+// notCarried counts those left out that already hold a record, the mirrored
+// tasks the setting stopped carrying. Every legacy ticket and chart is kept.
+func collectItems(st *store.Store, repo string, tasks bool) (items []item, notCarried int, err error) {
 	tickets, err := st.Tickets()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	charts, err := st.ChartNames()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	items := make([]item, 0, len(tickets)+len(charts))
-	for _, o := range append(ticketOwners(tickets), chartOwners(charts)...) {
+	var legacyCharts []string
+	taskOnly := map[string]bool{} // listed by a chart with an issue, by no legacy chart
+	inLegacy := map[string]bool{}
+	for _, name := range charts {
+		issue, err := st.ChartIssue(name)
+		if err != nil {
+			return nil, 0, err
+		}
+		entries, err := st.ReadChart(name)
+		if err != nil {
+			return nil, 0, err
+		}
+		if issue == "" {
+			legacyCharts = append(legacyCharts, name)
+			for _, e := range entries {
+				inLegacy[e.ID] = true
+			}
+			continue
+		}
+		for _, e := range entries {
+			if e.ID != "" {
+				taskOnly[e.ID] = true
+			}
+		}
+	}
+
+	items = make([]item, 0, len(tickets)+len(legacyCharts))
+	for _, o := range append(ticketOwners(tickets), chartOwners(legacyCharts)...) {
 		it := item{kind: "ticket", id: o.Ticket}
 		if o.Chart != "" {
 			it = item{kind: "chart", id: o.Chart}
 		}
 		ref, err := findRecord(st, o, repo)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		it.ref = ref
+		if !tasks && it.kind == "ticket" && taskOnly[it.id] && !inLegacy[it.id] {
+			t, err := st.ReadTicket(it.id)
+			if err != nil {
+				return nil, 0, err
+			}
+			if t.KindOrDefault() != store.KindIssue {
+				if it.ref.has() {
+					notCarried++
+				}
+				continue
+			}
+		}
 		items = append(items, it)
 	}
-	return items, nil
+	return items, notCarried, nil
 }
 
 // ticketOwners lists ids as the owners of ticket records.

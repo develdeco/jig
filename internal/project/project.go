@@ -198,9 +198,14 @@ type Config struct {
 // explicitly rather than having jig derive it, since a derived home would
 // move every issue the day a second repo joined the project, and GitHub
 // cannot transfer an issue from a private repo to a public one.
+//
+// Tasks is the project's one setting for whether the mirror also carries the
+// tasks and multi-tasks a chart with an issue lists; the issue tickets are
+// always mirrored. Absent means false.
 type GitHubTracker struct {
 	Repo    string `yaml:"repo"`
 	Project string `yaml:"project"`
+	Tasks   bool   `yaml:"tasks,omitempty"`
 }
 
 // configRaw mirrors Config's YAML shape, with Tracker, Trackers and Routes
@@ -340,10 +345,14 @@ func decodeGitHubTrackerEntry(node yaml.Node) (*GitHubTracker, error) {
 	if valueNode.Kind != yaml.MappingNode {
 		return nil, malformedTrackerEntryError("trackers: github: entry must be a mapping")
 	}
-	known := map[string]bool{"repo": true, "project": true}
-	for i := 0; i < len(valueNode.Content); i += 2 {
-		if k := valueNode.Content[i].Value; !known[k] {
+	known := map[string]bool{"repo": true, "project": true, "tasks": true}
+	for i := 0; i+1 < len(valueNode.Content); i += 2 {
+		k, v := valueNode.Content[i].Value, valueNode.Content[i+1]
+		if !known[k] {
 			return nil, malformedTrackerEntryError(fmt.Sprintf("trackers: github: entry has unknown key %q", k))
+		}
+		if k == "tasks" && (v.Kind != yaml.ScalarNode || v.Tag != "!!bool") {
+			return nil, malformedTrackerEntryError("trackers: github: tasks: must be true or false")
 		}
 	}
 	var gh GitHubTracker

@@ -323,6 +323,12 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 	if err != nil {
 		return "", err
 	}
+	if rec.KindOrDefault() == store.KindIssue {
+		// An issue ticket is the need: its text and the footer, no slices,
+		// brief or pull requests. Its plan is a comment (see the plan comment).
+		parts = append(parts, ticketFooterAt(ticket, footerBranch(st, cfg, ticket, rec)))
+		return strings.Join(parts, "\n\n"), nil
+	}
 	if rec.Closed != nil {
 		closed, err := closedBlock(st, *rec.Closed, needQualify, ownerRepo)
 		if err != nil {

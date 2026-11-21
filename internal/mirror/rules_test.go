@@ -108,7 +108,7 @@ type planOpts struct {
 func (w *ruleWorld) plan(o planOpts) SyncReport {
 	w.t.Helper()
 	w.st.ReloadTrackerTree()
-	items, err := collectItems(w.st, w.cfg.GitHub.Repo)
+	items, _, err := collectItems(w.st, w.cfg.GitHub.Repo, false)
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -782,7 +782,7 @@ func TestRuleAtTheCreateScanSeesTheFullRender(t *testing.T) {
 	w := newRuleWorld(t, true)
 	w.ticket("DEMO-1", store.Ticket{Title: "A clean title", Body: "Contact " + publishSafetyTestEmail + " for this"})
 	w.ticket("DEMO-2", store.Ticket{Title: "Another clean title", Body: "A clean description"})
-	items, err := collectItems(w.st, "example/tracking")
+	items, _, err := collectItems(w.st, "example/tracking", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -934,7 +934,7 @@ func legacyWorld(t *testing.T) *ruleWorld {
 func TestRuleAtRecordsInTheirOwnFoldersMoveIntoTheTree(t *testing.T) {
 	t.Run("a sync moves them", func(t *testing.T) {
 		w := legacyWorld(t)
-		items, err := collectItems(w.st, "example/tracking")
+		items, _, err := collectItems(w.st, "example/tracking", false)
 		if err != nil {
 			t.Fatal(err)
 		}

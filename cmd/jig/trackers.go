@@ -97,6 +97,12 @@ func cmdTrackers(e env, args []string, stdout io.Writer) int {
 	}
 
 	skipped := renderSyncReport(stdout, report, *dryRun)
+	if report.TasksNotCarried > 0 {
+		axi.Render(stdout, axi.KV("tasks_not_carried", [][2]string{
+			{"count", fmt.Sprintf("%d", report.TasksNotCarried)},
+			{"why", "trackers: github: tasks: is off; their issues are left open and untouched"},
+		}))
+	}
 	if landErr != nil {
 		return renderErr(stdout, landErr)
 	}
