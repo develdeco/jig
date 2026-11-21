@@ -168,7 +168,7 @@ func TestCIWorkflowTriggers(t *testing.T) {
 
 // TestCIWorkflowTestJob asserts the "test" job's legs are the ones the plan
 // job names (TestCIWorkflowPlan: all three platforms on every push to main,
-// Linux and macOS on every pull request; a macOS-only regression has
+// Linux and macOS on every pull request into main; a macOS-only regression has
 // shipped before, commit d920a72), that its legs report the check names
 // main's ruleset requires, and that it actually enforces formatting, vet,
 // and tests rather than just building.
@@ -196,7 +196,7 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	}
 
 	// Main's ruleset requires test (ubuntu-latest) and test (macos-latest) by
-	// name, and every pull request reports both (TestCIWorkflowPlan), so the
+	// name, and every pull request into main reports both (TestCIWorkflowPlan), so the
 	// name is pinned, not just the platforms: another name would never
 	// report a required check.
 	if name, _ := yamlString(job["name"]); name != "test (${{ matrix.os }})" {
@@ -298,7 +298,7 @@ func runPlan(t *testing.T, jobs map[string]interface{}, event string, changed []
 }
 
 // allLegs and pullRequestLegs are the test job's legs on every run of
-// ci.yml but a pull request's, and on a pull request that changes nothing
+// ci.yml but a pull request into main's, and on one that changes nothing
 // Windows builds or runs differently: test (ubuntu-latest) and
 // test (macos-latest) are the checks main's ruleset requires.
 var (

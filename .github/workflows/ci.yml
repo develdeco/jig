@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -17,8 +18,8 @@ on:
     - cron: "37 9 * * *"
 
 concurrency:
-  # A pull request's newer push cancels the run of its older one, whose
-  # result nobody needs. Every other run - a push to main, the daily run, a
+  # A newer push to a pull request into main cancels the run of its older
+  # one, whose result nobody needs. Every other run - a push to main, the daily run, a
   # dispatch, a release's call - is a group of its own, by its run id, and
   # always finishes: main is where Windows tests each merge, so a merge's run
   # is its only Windows verdict. A group shared by main's pushes cancels it at
@@ -28,8 +29,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which jobs and test legs this run needs. A pull request runs the test
-  # job on Linux and macOS, and on Windows too only when it changes what
+  # Which jobs and test legs this run needs. A pull request into main runs
+  # the test job on Linux and macOS, and on Windows too only when it changes what
   # Windows builds or runs differently: a _windows Go file or one with a
   # build constraint, go.mod or go.sum, .gitattributes, or a workflow. A
   # pull request that changes only docs (markdown at the root or in .github,
@@ -112,7 +113,7 @@ jobs:
 
   # Named in full so no matrix key beyond os can reach the check names main's
   # ruleset requires: test (ubuntu-latest) and test (macos-latest), which
-  # every pull request reports. lint/workflow_test.go checks them.
+  # every pull request into main reports. lint/workflow_test.go checks them.
   test:
     name: test (${{ matrix.os }})
     needs: plan

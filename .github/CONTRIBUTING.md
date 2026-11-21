@@ -21,11 +21,14 @@ what your change can break: the packages you touched (`go test
 ./internal/store`, say), the packages that import them when behavior changes,
 and `./lint`, whose checks cover files across the repo (skills, workflows,
 tests). The full suite takes minutes. CI runs it on Linux and macOS on every
-pull request, and on Windows too when the pull request changes what Windows
+pull request into main, and on Windows too when the pull request changes what Windows
 builds differently (a `_windows` file or one with a build constraint,
 `go.mod`, `go.sum`, `.gitattributes`, a workflow); every push to main, the
 daily run and every release run it on all three, so a Windows-only failure
-shows on main and is fixed forward. A pull request that changes only docs
+shows on main and is fixed forward. A task's pull request into an issue's
+branch runs no CI, and the issue's pull request into main runs the whole suite
+once; the builder's own runs before the gate cover the task. A pull request
+that changes only docs
 runs `./lint`, whose tests are the only ones that read them. The full suite
 is CI's alone: a jig gate round and publish run no test. A jig build slice's own
 oracle runs when its builder runs `jig verify`, and a ticket's last run is
@@ -189,7 +192,7 @@ what Claude Code reads: the session start context reaches the model, a
 commit the session makes is verified, and an unattended session is held back
 from stopping with the reason jig gives. Set `JIG_E2E_BINARY` to an installed
 jig to run the e2e suite against it instead of a binary built from the tree.
-CI's `claude-cli` job runs it on all three platforms, on every pull request
+CI's `claude-cli` job runs it on all three platforms, on every pull request into main
 but a docs-only one, every push to main and once a day, with the latest CLI release installed,
 and every release runs it with its own binaries, as they are installed,
 before and after it is published.
