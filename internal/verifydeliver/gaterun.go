@@ -137,6 +137,9 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 		for _, gr := range repos {
 			if sr, ok := plan.In(gr.name); ok && (sr.Shared() || sr.Container != "") && sr.PRTarget != "" {
 				gr.mergeRef = "origin/" + sr.PRTarget
+				if !sr.Shared() {
+					gr.scopeBase = sr.PRTarget
+				}
 			}
 		}
 	}
@@ -352,13 +355,13 @@ func (r *gateRun) roundInput() RoundInput {
 	}
 	if !r.qualified {
 		gr := r.repos[0]
-		in.CloneDir, in.Head, in.RepoName, in.Target, in.MergeRef = gr.dir, gr.head, gr.name, gr.target, gr.mergeRef
+		in.CloneDir, in.Head, in.RepoName, in.Target, in.MergeRef, in.ScopeBase = gr.dir, gr.head, gr.name, gr.target, gr.mergeRef, gr.scopeBase
 		in.OperatorClone, in.Manifest, in.SlicePasses = gr.dir, gr.man, gr.slicePasses
 		return in
 	}
 	for _, gr := range r.repos {
 		in.Repos = append(in.Repos, RoundRepo{
-			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, CloneDir: gr.dir, Head: gr.head,
+			Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, ScopeBase: gr.scopeBase, CloneDir: gr.dir, Head: gr.head,
 			OperatorClone: gr.dir, Manifest: gr.man, SlicePasses: gr.slicePasses,
 		})
 	}

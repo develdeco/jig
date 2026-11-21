@@ -30,7 +30,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	}
 	repos := make([]RoundRepo, len(r.repos))
 	for i, gr := range r.repos {
-		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, CloneDir: gr.dir, Head: gr.head}
+		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, ScopeBase: gr.scopeBase, CloneDir: gr.dir, Head: gr.head}
 	}
 	origin, rep, ok, err := carriedFrom(r.d.Store, r.ticket, r.n, prep, r.intent.Source, r.intentSHA256)
 	if err != nil || !ok {

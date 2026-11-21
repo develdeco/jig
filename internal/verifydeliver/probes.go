@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -329,9 +330,15 @@ func publishCoverage(st *store.Store, t *publishTarget, dir, head string) (behav
 	if err != nil {
 		return behaviorCoverage{}, err
 	}
-	base, err := gitx.MergeBase(dir, "origin/"+t.target, head)
+	// The whole change is measured from the container's branch for a ticket
+	// with one that is not stacked on an unmerged parent, as the gate does.
+	scopeBranch := t.target
+	if t.stack.Container != "" && !t.stack.Shared() {
+		scopeBranch = scopebase.BranchFor(dir, t.target, t.stack.PRTarget)
+	}
+	base, err := gitx.MergeBase(dir, "origin/"+scopeBranch, head)
 	if err != nil {
-		return behaviorCoverage{}, fmt.Errorf("verifydeliver: publish: merge-base origin/%s %s: %w", t.target, head, err)
+		return behaviorCoverage{}, fmt.Errorf("verifydeliver: publish: merge-base origin/%s %s: %w", scopeBranch, head, err)
 	}
 	hunks, err := changeHunks(rf, map[string]string{t.repoName: base})
 	if err != nil {

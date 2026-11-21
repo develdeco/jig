@@ -104,3 +104,78 @@ func TestContainerGateHoldsATicketToItsContainersBranch(t *testing.T) {
 		t.Fatalf("Prepared = %+v, want an open round 3: a merge of main is read for a ticket with a container", p)
 	}
 }
+
+// TestContainerPublishCoverageIsOfTheTicketsOwnChange: the behavior coverage a
+// publish writes counts the hunks of the ticket's own change, measured from the
+// container's branch, not another task's work the container holds; a stacked
+// ticket keeps the target as its base.
+func TestContainerPublishCoverageIsOfTheTicketsOwnChange(t *testing.T) {
+	t.Parallel()
+	fx, d, _ := cloneBuilt(t)
+	branch := ticketBranch(fx.Ticket)
+	run(t, fx.RepoDir, "checkout", "-b", "I-1-issue", "main")
+	writeAndCommit(t, fx.RepoDir, "other-task.txt", "another task's work", "another task merged into the container")
+	run(t, fx.RepoDir, "push", "origin", "I-1-issue")
+	run(t, fx.RepoDir, "checkout", branch)
+	run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "I-1-issue")
+	head := run(t, fx.RepoDir, "rev-parse", "HEAD")
+	run(t, fx.RepoDir, "fetch", "origin")
+
+	files := func(r stack.Repo) []string {
+		pt := &publishTarget{ticket: fx.Ticket, repoName: "fixture-repo", target: "main", stack: r}
+		cov, err := publishCoverage(d.Store, pt, fx.RepoDir, head)
+		if err != nil {
+			t.Fatalf("publishCoverage: %v", err)
+		}
+		var out []string
+		for _, h := range cov.Unprobed {
+			out = append(out, h.File)
+		}
+		return out
+	}
+	container := stack.Repo{Repo: "fixture-repo", Target: "main", PRTarget: "I-1-issue", Container: "I-1", ContainerBranch: "I-1-issue"}
+	if got := files(container); len(got) == 0 || slices.Contains(got, "other-task.txt") {
+		t.Errorf("unprobed files with a container = %v, want the ticket's own and not other-task.txt", got)
+	}
+	stacked := container
+	stacked.Parent, stacked.ParentBranch, stacked.PRTarget = "JIG-0", "jig/JIG-0", "jig/JIG-0"
+	if got := files(stacked); !slices.Contains(got, "other-task.txt") {
+		t.Errorf("unprobed files of a stacked ticket = %v, want the target as its base: other-task.txt in them", got)
+	}
+}
+
+// TestContainerGateScopeIsTheTicketsOwnChange: a task branched from its
+// container's branch, which holds another task's merged work, is reviewed over
+// its own change alone (the pull request's diff), not over the other task's
+// file too; the control, with no container, reads both.
+func TestContainerGateScopeIsTheTicketsOwnChange(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name      string
+		stack     func(string) (stack.Plan, error)
+		wantOther bool
+	}{
+		{"with a container", inContainer, false},
+		{"without one", nil, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, _ := cloneBuilt(t)
+			d.Stack = c.stack
+			branch := ticketBranch(fx.Ticket)
+			run(t, fx.RepoDir, "checkout", "-b", "I-1-issue", "main")
+			writeAndCommit(t, fx.RepoDir, "other-task.txt", "another task's work", "another task merged into the container")
+			run(t, fx.RepoDir, "push", "origin", "I-1-issue")
+			run(t, fx.RepoDir, "checkout", branch)
+			run(t, fx.RepoDir, "merge", "--no-ff", "--no-edit", "I-1-issue")
+
+			p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+			if err != nil {
+				t.Fatalf("GatePrepare: %v", err)
+			}
+			if got := slices.Contains(p.Request.MustReview, "other-task.txt"); got != c.wantOther || len(p.Request.MustReview) == 0 {
+				t.Errorf("must_review = %v, want other-task.txt in it: %v, and the ticket's own files", p.Request.MustReview, c.wantOther)
+			}
+		})
+	}
+}

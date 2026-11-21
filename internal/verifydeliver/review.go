@@ -1025,7 +1025,7 @@ func priorRound(st *store.Store, ticket string, round int) (int, reportYAML, err
 //
 // Beside the scope and base it says how the head relates to the head the delta
 // starts from (kind) and that head (prior): lineOther and "" for a full scope.
-func resolveScope(st *store.Store, ticket, cloneDir, repoName, targetRef, target string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
+func resolveScope(st *store.Store, ticket, cloneDir, repoName, targetRef, target, scopeBase string, round int, head string) (scope, base string, kind lineKind, prior, carried string, err error) {
 	if round > 1 {
 		prior, perr := priorReviewedSHA(st, ticket, round-1, repoName)
 		if perr != nil {
@@ -1048,7 +1048,7 @@ func resolveScope(st *store.Store, ticket, cloneDir, repoName, targetRef, target
 		}
 	}
 
-	base, err = scopebase.Resolve(st, ticket, cloneDir, repoName, target, head)
+	base, err = scopebase.ResolveOn(st, ticket, cloneDir, repoName, target, scopeBase, head)
 	if err != nil {
 		return "", "", lineOther, "", "", err
 	}
@@ -1227,6 +1227,9 @@ type RoundRepo struct {
 	// stacked ticket's parent branch while the parent has not merged, "" for
 	// origin/<Target>.
 	MergeRef string
+	// ScopeBase is the branch the whole change is measured from when it is a
+	// container's, "" for the target.
+	ScopeBase string
 	// CloneDir is the repository the round reads the repo in: its clone, which
 	// the round never changes. Head is the commit of the branch the round
 	// reviews there ("" reads the repository's HEAD, which a test of the
@@ -1256,6 +1259,8 @@ type RoundInput struct {
 	Target   string
 	// MergeRef is RoundRepo.MergeRef of the one repo.
 	MergeRef string
+	// ScopeBase is RoundRepo.ScopeBase of the one repo.
+	ScopeBase string
 	// Repos are the repos of a round in a project of several repos. When set
 	// they replace CloneDir, RepoName, Target, OperatorClone, Manifest and
 	// SlicePasses, which describe the one repo of a round over one, and the
@@ -1321,7 +1326,7 @@ func (in RoundInput) repoList() []RoundRepo {
 		return in.Repos
 	}
 	return []RoundRepo{{
-		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, CloneDir: in.CloneDir, Head: in.Head,
+		Name: in.RepoName, Target: in.Target, MergeRef: in.MergeRef, ScopeBase: in.ScopeBase, CloneDir: in.CloneDir, Head: in.Head,
 		OperatorClone: in.OperatorClone, Manifest: in.Manifest, SlicePasses: in.SlicePasses,
 	}}
 }
@@ -1431,7 +1436,7 @@ type RepoPrep struct {
 func (in RoundInput) forRepo(r RoundRepo) RoundInput {
 	one := in
 	one.Repos = nil
-	one.CloneDir, one.RepoName, one.Target, one.MergeRef = r.CloneDir, r.Name, r.Target, r.MergeRef
+	one.CloneDir, one.RepoName, one.Target, one.MergeRef, one.ScopeBase = r.CloneDir, r.Name, r.Target, r.MergeRef, r.ScopeBase
 	one.OperatorClone, one.Manifest, one.SlicePasses = r.OperatorClone, r.Manifest, r.SlicePasses
 	return one
 }
@@ -1499,7 +1504,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, fmt.Errorf("verifydeliver: review: resolve the head: %w", err))
 		}
-		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.CloneDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, in.Round, head)
+		scope, base, kind, prior, carried, err := resolveScope(in.Store, in.Ticket, r.CloneDir, r.Name, mergeRefOf(r.MergeRef, r.Target), r.Target, r.ScopeBase, in.Round, head)
 		if err != nil {
 			return ReviewPrep{}, inRepo(qualified, r.Name, err)
 		}
@@ -1594,7 +1599,7 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		rp := prep.Repos[i]
 		fullBases[r.Name] = rp.Base
 		if rp.Scope != "full" {
-			if fullBases[r.Name], err = scopebase.Resolve(in.Store, in.Ticket, r.CloneDir, r.Name, r.Target, rp.Head); err != nil {
+			if fullBases[r.Name], err = scopebase.ResolveOn(in.Store, in.Ticket, r.CloneDir, r.Name, r.Target, r.ScopeBase, rp.Head); err != nil {
 				return ReviewPrep{}, inRepo(qualified, r.Name, err)
 			}
 		}

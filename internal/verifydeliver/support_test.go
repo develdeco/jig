@@ -28,6 +28,6 @@ func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable
 
 // resolveScopeBase is resolveScope's scope and base over origin/<target>.
 func resolveScopeBase(st *store.Store, ticket, cloneDir, repoName, target string, round int, head string) (scope, base string, err error) {
-	scope, base, _, _, _, err = resolveScope(st, ticket, cloneDir, repoName, "origin/"+target, target, round, head)
+	scope, base, _, _, _, err = resolveScope(st, ticket, cloneDir, repoName, "origin/"+target, target, "", round, head)
 	return scope, base, err
 }

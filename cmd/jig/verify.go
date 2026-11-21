@@ -14,6 +14,7 @@ import (
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verify"
 )
@@ -269,6 +270,7 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		Store: st, JigHome: jigHome, Clone: dir, Repo: repoName, Target: target,
 		Now: e.now,
 	}
+	d.Base = containerBase(st, cfg, mp, jigHome, ticket, repoName)
 	if o.final {
 		// A union is of every slice that builds in this repo: no slice is
 		// picked, and a project of several repos says which are this one's.
@@ -291,6 +293,25 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 		Dir: o.dir, NoRecord: o.noRecord,
 	}
 	return d, req, source, nil
+}
+
+// containerBase is the branch the whole change of ticket is measured from in
+// repo when its pull request goes into a container's branch and no unmerged
+// stacked parent: the container's. "" is the target (and any ticket that has
+// no container, or whose plan cannot be read: the base only ranks recordings).
+func containerBase(st *store.Store, cfg project.Config, mp project.MachineProject, jigHome, ticket, repo string) string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || !hasStackFacts(st, ticket, rec) {
+		return ""
+	}
+	plan, err := stack.Read(stackInput(st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome)), ticket)
+	if err != nil {
+		return ""
+	}
+	if r, ok := plan.In(repo); ok && r.Container != "" && !r.Shared() {
+		return r.PRTarget
+	}
+	return ""
 }
 
 // verifyRepo is the repo the commit is in, by its name in the project, and its
