@@ -275,8 +275,9 @@ type ofForOf struct{ mergeSource }
 func (m ofForOf) OfFor(ticket, _ string) (ready.Merge, error) { return m.Of(ticket) }
 
 // nextNotATask is `jig next <ticket>` for an issue or a multi-task: its kind,
-// where it stands in the model and its children, and no phase and no prompt,
-// since it has no brief, slices or pull request of its own.
+// where it stands in the model and its children, and no phase, since it has no
+// brief or slices: nextForTicket adds the readiness of its own pull request,
+// with the prompt that moves it (land.ReadinessOf).
 func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
 	id := data.in.ID
 	n := nextTicket{Ticket: id, Title: data.title, State: kind, Kind: kind, Ready: []nextBatch{}}
@@ -320,7 +321,8 @@ func ownBranchFacts(st *store.Store, cfg project.Config, mp project.MachineProje
 }
 
 // notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
-// multi-task: no phase, no ready table and no prompt. `jig status <ticket>`
+// multi-task: no phase and no ready table, and for `next` the prompt of its own
+// pull request, with the children not landed. `jig status <ticket>`
 // prints the same under its own shape: top-level ticket: and state: lines, which
 // the screens of the TUI read.
 func (n nextTicket) notATaskBlocks(verb string) []string {
@@ -389,6 +391,11 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 	}
 	help := fmt.Sprintf("A %s is not briefed or built: run `jig next <ticket>` on one of its tasks", n.Kind)
 	switch {
+	case verb == "next" && n.State == land.StateWaiting && len(n.Waits) == 0 && len(n.Unmet) > 0:
+		help = fmt.Sprintf("%s waits for %s", n.Ticket, n.Unmet[0].Why)
+		if n.Prompt != "" {
+			help += fmt.Sprintf(": ask `%s`", n.Prompt)
+		}
 	case verb == "next" && n.State == land.StateReady:
 		help = fmt.Sprintf("Every child of %s has landed: ask `%s`, which opens its pull request", n.Ticket, n.Prompt)
 	case verb == "next" && n.State == land.StatePublished:

@@ -540,6 +540,17 @@ func validateTicketOwnContainer(st *store.Store, ticket string) []string {
 	if err != nil {
 		return nil
 	}
+	// A task under a multi-task is part of the multi-task's issue too: the
+	// issue publishes after the multi-task, and the multi-task after the task.
+	for _, c := range slices.Clone(containers) {
+		if crec, err := st.ReadTicket(c); err == nil && crec.KindOrDefault() == store.KindMultiTask {
+			issues, err := st.IssuesOf(c)
+			if err != nil {
+				return nil
+			}
+			containers = append(containers, issues...)
+		}
+	}
 	var problems []string
 	for _, b := range rec.BlockedBy {
 		id, err := st.ResolveTicket(b.Ticket)

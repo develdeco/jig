@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
@@ -243,6 +244,9 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	head := [][2]string{{"ticket", ticket}, {"tier", report.Tier}}
 	help := "Run `jig status " + ticket + "` to confirm the ticket is fully green"
+	if container {
+		help = fmt.Sprintf("%s has its pull request: ask `%s` to merge it", ticket, phase.Prompt(phase.Land, ticket))
+	}
 	if len(report.Pending) > 0 {
 		head = append(head, [2]string{"pending", strings.Join(report.Pending, ", ")})
 		help = fmt.Sprintf("%s still needs its pull request: `jig publish %s --repo %s`", joinWords(report.Pending), ticket, report.Pending[0])

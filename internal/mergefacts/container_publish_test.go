@@ -73,6 +73,34 @@ func TestContainerPublishMergeFactReadsItsOwnPullRequests(t *testing.T) {
 	}
 }
 
+// TestContainerPublishMergeFactOfAnIssueReadsEveryTasksRepos: an issue is in the
+// union of the repos its tasks build in, through a multi-task too (api and web,
+// not docs), and is met when its pull request in each is merged.
+func TestContainerPublishMergeFactOfAnIssueReadsEveryTasksRepos(t *testing.T) {
+	t.Parallel()
+	const (
+		apiPR = "https://github.com/o/api/pull/1"
+		webPR = "https://github.com/o/web/pull/2"
+	)
+	st, cfg := containerStore(t, apiPR, webPR)
+	for _, l := range []journal.Line{
+		{Event: journal.EventPr, URL: apiPR}, {Event: journal.EventPr, URL: webPR}, {Event: journal.EventPublishDone},
+	} {
+		if err := journal.Append(st, "I-1", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prs := &fakePRs{reads: map[string]PRRead{apiPR: {State: ready.PRMerged}, webPR: {State: ready.PROpen}}}
+	m, err := (&Reader{Store: st, Cfg: cfg, PRs: prs}).Of("I-1")
+	if err != nil || m.Met() || len(m.Repos) != 2 || m.Repos[0].Repo != "api" || m.Repos[1].Repo != "web" {
+		t.Fatalf("Of(I-1) = %+v, %v, want api and web, web open", m, err)
+	}
+	prs.reads[webPR] = PRRead{State: ready.PRMerged}
+	if m, err := (&Reader{Store: st, Cfg: cfg, PRs: prs}).Of("I-1"); err != nil || !m.Met() {
+		t.Errorf("Of(I-1) with both merged = %+v, %v, want met", m, err)
+	}
+}
+
 // TestContainerPublishMergeFactOfATaskIsUnchanged: a task under the multi-task
 // is read as before, through its own journal and slices, and a container with
 // no task builds in every repo of the project.

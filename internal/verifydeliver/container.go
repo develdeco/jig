@@ -55,7 +55,7 @@ type childRow struct {
 // child not landed is PUBLISH_NOT_READY naming each with its standing, an unmet
 // precondition its own code, and a container already landed has nothing to
 // open.
-func containerNotReady(ticket string, s ContainerStanding, hasChildren bool) error {
+func containerNotReady(ticket string, s ContainerStanding) error {
 	switch {
 	case s.State == ContainerLanded:
 		return &axi.Error{
@@ -80,7 +80,7 @@ func containerNotReady(ticket string, s ContainerStanding, hasChildren bool) err
 			help = []string{fmt.Sprintf("Ask `%s`, then publish %s again", u.Prompt, ticket)}
 		}
 		return &axi.Error{Msg: fmt.Sprintf("%s is not ready to publish: %s", ticket, u.Why), Code: u.Code, Help: help}
-	case !hasChildren || s.State == ContainerWaiting:
+	case s.State == ContainerWaiting:
 		return &axi.Error{
 			Msg:  fmt.Sprintf("%s is not ready to publish: it has no children yet", ticket),
 			Code: PublishNotReady,
@@ -278,14 +278,26 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	if err := containerNotReady(ticket, standing, len(plan.Repos) > 0); err != nil {
+	if err := containerNotReady(ticket, standing); err != nil {
 		return PublishReport{}, err
+	}
+	if len(plan.Repos) == 0 {
+		return PublishReport{}, &axi.Error{
+			Msg:  fmt.Sprintf("%s builds in no repo the project knows: there is no pull request to open", ticket),
+			Code: PublishNotReady,
+			Help: []string{"Check the repos of the project and of its tasks' slices"},
+		}
 	}
 	into, _, err := d.Store.ContainerOf(ticket, rec)
 	if err != nil {
 		return PublishReport{}, err
 	}
 	title := publishTitle(d.Store.TicketName(ticket, rec), ticket)
+	// Only an issue's body is a need; a multi-task's is its chart's notes.
+	need := ""
+	if rec.KindOrDefault() == store.KindIssue {
+		need = rec.Body
+	}
 	var covered []string
 	for _, r := range plan.Repos {
 		covered = append(covered, r.Repo)
@@ -358,7 +370,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		pt := sh.pt
 		sh.linked = linksFor(pt, known)
-		sh.pub, err = writeContainerBody(d, pt, ticket, title, rec.Body, sh.children, sh.linked)
+		sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, sh.linked)
 		if err != nil {
 			return PublishReport{}, inRepo(qualified, pt.repoName, err)
 		}
@@ -379,7 +391,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		pt := sh.pt
 		if links := linksFor(pt, known); !sameLinks(links, sh.linked) {
-			if sh.pub, err = writeContainerBody(d, pt, ticket, title, rec.Body, sh.children, links); err != nil {
+			if sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, links); err != nil {
 				return PublishReport{}, inRepo(qualified, pt.repoName, err)
 			}
 			sh.linked = links
@@ -409,7 +421,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if url == "" || sameLinks(links, sh.linked) {
 			continue
 		}
-		if sh.pub, err = writeContainerBody(d, sh.pt, ticket, title, rec.Body, sh.children, links); err != nil {
+		if sh.pub, err = writeContainerBody(d, sh.pt, ticket, title, need, sh.children, links); err != nil {
 			return PublishReport{}, inRepo(qualified, sh.pt.repoName, err)
 		}
 		sh.linked = links

@@ -29,7 +29,7 @@ func containerDeps(t *testing.T) (*Deps, *ContainerStanding, string) {
 	d := newDeps(t, fx)
 	for id, rec := range map[string]store.Ticket{
 		"I-1": {Title: "The issue", Body: "People need the thing.", Kind: store.KindIssue, Slug: "the-issue"},
-		"M-1": {Title: "The multi-task", Kind: store.KindMultiTask, Slug: "the-multi-task"},
+		"M-1": {Title: "The multi-task", Body: "chart notes of the multi-task", Kind: store.KindMultiTask, Slug: "the-multi-task"},
 		"T-1": {Title: "First task", Parent: "M-1"}, "T-2": {Title: "Second task", Parent: "M-1"},
 		"T-3": {Title: "Third task"},
 	} {
@@ -125,7 +125,7 @@ func TestContainerPublishOpensAMultiTasksPullRequest(t *testing.T) {
 			t.Errorf("the body lacks %q:\n%s", want, body)
 		}
 	}
-	for _, not := range []string{"## Demo", "## Verification", "## What", "T-3"} {
+	for _, not := range []string{"## Demo", "## Verification", "## What", "T-3", "chart notes"} {
 		if strings.Contains(string(body), not) {
 			t.Errorf("the body has %q:\n%s", not, body)
 		}
@@ -203,6 +203,7 @@ func TestContainerPublishRefusesBeforeAnyWrite(t *testing.T) {
 	}{
 		{"a child waits", ContainerStanding{State: ContainerWaiting, Waits: []ContainerWait{{"T-1", "published"}, {"T-3", "building"}}}, PublishNotReady, "T-1 (published), T-3 (building)"},
 		{"a precondition", ContainerStanding{State: ContainerWaiting, Unmet: []ContainerUnmet{{"LAND_SUITE_NOT_RUN", "the suite has not run", "Run the suite"}}}, "LAND_SUITE_NOT_RUN", "the suite has not run"},
+		{"a precondition with no prompt", ContainerStanding{State: ContainerWaiting, Unmet: []ContainerUnmet{{"LAND_SUITE_NOT_RUN", "the suite has not run", ""}}}, "LAND_SUITE_NOT_RUN", "the suite has not run"},
 		{"no children", ContainerStanding{State: ContainerWaiting}, PublishNotReady, "no children"},
 		{"landed already", ContainerStanding{State: ContainerLanded}, PublishNotReady, "has landed"},
 	} {
@@ -211,6 +212,13 @@ func TestContainerPublishRefusesBeforeAnyWrite(t *testing.T) {
 		ae, ok := err.(*axi.Error)
 		if !ok || ae.Code != c.code || !strings.Contains(ae.Msg, c.msg) {
 			t.Errorf("%s: err = %v, want %s containing %q", c.name, err, c.code, c.msg)
+			continue
+		}
+		if c.name == "a precondition" && !strings.Contains(strings.Join(ae.Help, " "), "`Run the suite`") {
+			t.Errorf("%s: help = %v, want the precondition's prompt", c.name, ae.Help)
+		}
+		if c.name == "a precondition with no prompt" && strings.Contains(strings.Join(ae.Help, " "), "Ask ``") {
+			t.Errorf("%s: help = %v names an empty prompt", c.name, ae.Help)
 		}
 	}
 	if got := len(journalEvents(t, d, "I-1")); got != before {

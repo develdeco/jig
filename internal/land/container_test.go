@@ -2,10 +2,14 @@ package land_test
 
 import (
 	"errors"
+	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/mergefacts"
+	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
@@ -151,7 +155,7 @@ func TestContainerReadyCheckRunsTheRegistry(t *testing.T) {
 			return []land.Unmet{{Code: "FAKE_NOT_MET", Why: "the fake suite has not run", Prompt: "Run the fake suite"}}, nil
 		},
 		func(land.Container) ([]land.Unmet, error) {
-			return []land.Unmet{{Code: "FAKE_TWO", Why: "second"}}, nil
+			return []land.Unmet{{Code: "FAKE_TWO", Why: "second", Prompt: "Do the other"}}, nil
 		},
 	}
 	r := w.readiness("M-1")
@@ -165,5 +169,77 @@ func TestContainerReadyCheckRunsTheRegistry(t *testing.T) {
 	land.Preconditions = []land.Precondition{func(land.Container) ([]land.Unmet, error) { return nil, errors.New("boom") }}
 	if _, err := land.ReadinessOf(w.d, "M-1"); err == nil {
 		t.Error("a precondition's error was swallowed")
+	}
+}
+
+// TestContainerReadyHandsAPreconditionTheReposOfItsTasks: a precondition is
+// asked for the repos the container's tasks build in (api and web, not docs) in
+// the project order; a container with no task is in every repo.
+func TestContainerReadyHandsAPreconditionTheReposOfItsTasks(t *testing.T) {
+	t.Parallel()
+	w := multiTaskWorld(t)
+	w.d.Cfg = project.Config{Repos: []project.Repo{
+		{Remote: "https://github.com/acme/api.git"}, {Remote: "https://github.com/acme/web.git"}, {Remote: "https://github.com/acme/docs.git"},
+	}}
+	for id, ws := range map[string]string{"T-1": "api/server", "T-2": "web/ui"} {
+		path := filepath.Join(w.st.TicketDir(id), "slices.yaml")
+		if err := store.AtomicWrite(path, []byte("slices:\n  - id: s\n    workspace: "+ws+"\n    goal: g\n    oracle: test\n    blocked_by: []\n    from_brief: []\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"api", "web"}
+	for _, id := range []string{"M-1", "I-1"} {
+		c, err := land.ContainerOf(w.d, id)
+		if err != nil {
+			t.Fatalf("ContainerOf(%s): %v", id, err)
+		}
+		if !slices.Equal(c.Repos, want) {
+			t.Errorf("%s's repos = %v, want %v: the tasks build in api and web", id, c.Repos, want)
+		}
+	}
+	w.ticket("M-2", store.Ticket{Kind: store.KindMultiTask})
+	if c, err := land.ContainerOf(w.d, "M-2"); err != nil || len(c.Repos) != 3 {
+		t.Errorf("a container with no task = %+v, %v, want every repo of the project", c, err)
+	}
+}
+
+// TestContainerReadyReadsASharedChildForItsIssue: a task two issues list counts
+// for I-1 by its landed pull request into I-1 and waits I-2 on its open one.
+func TestContainerReadyReadsASharedChildForItsIssue(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.ticket("I-1", store.Ticket{Kind: store.KindIssue})
+	w.ticket("I-2", store.Ticket{Kind: store.KindIssue})
+	w.ticket("S-1", store.Ticket{})
+	w.chart("a", "I-1", "S-1")
+	w.chart("b", "I-2", "S-1")
+	w.publish("S-1", "I-1", prURL("1"), ready.PROpen, w.branch("I-1"))
+	w.publish("S-1", "I-2", prURL("2"), ready.PROpen, w.branch("I-2"))
+	w.merged(prURL("1"), w.branch("I-1"))
+	if r := w.readiness("I-1"); r.State != land.StateReady || r.Prompt != "Publish I-1" {
+		t.Errorf("I-1 = %+v, want ready: the shared task landed into it", r)
+	}
+	if r := w.readiness("I-2"); r.State != land.StateWaiting || len(r.Waits) != 1 || r.Waits[0] != (land.Wait{Ticket: "S-1", Standing: "published"}) {
+		t.Errorf("I-2 = %+v, want waiting on the shared task's open pull request into it", r)
+	}
+}
+
+// TestContainerReadyLandedContainerHasNothingToAsk: a multi-task whose own pull
+// request merged on the host with no landed line is still published; with the
+// line it is landed, with no prompt.
+func TestContainerReadyLandedContainerHasNothingToAsk(t *testing.T) {
+	t.Parallel()
+	w := multiTaskWorld(t)
+	ib := w.branch("I-1")
+	w.publish("M-1", "I-1", prURL("4"), ready.PROpen, ib)
+	w.merged(prURL("4"), ib)
+	if r := w.readiness("M-1"); r.State != land.StatePublished || r.Prompt != "Land M-1" {
+		t.Fatalf("merged, not recorded: %+v, want published, Land M-1", r)
+	}
+	if err := journal.Append(w.st, "M-1", journal.Line{Event: journal.EventLanded, Into: "I-1", URL: prURL("4")}); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.readiness("M-1"); r.State != land.StateLanded || r.Prompt != "" {
+		t.Errorf("landed: %+v, want landed with no prompt", r)
 	}
 }
