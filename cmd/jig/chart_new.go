@@ -17,6 +17,7 @@ func init() {
 	registerVerb(verb{
 		Spec: cmdSpec{"chart", "make a chart: jig chart new <name> --title <t>", []flagSpec{
 			{"title", "chart title (required)", false},
+			{"issue", "id of the issue ticket the chart plans", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
@@ -60,6 +61,7 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 
 	fs := newFlagSet(e, "chart new")
 	title := fs.String("title", "", "chart title (required)")
+	issueFlag := fs.String("issue", "", "id of the issue ticket the chart plans")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	positionals, handled, err := parseWithPositionals(stdout, fs, rest)
@@ -94,6 +96,12 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 	if err := chartNameTaken(st, name); err != nil {
 		return renderErr(stdout, err)
 	}
+	issue := ""
+	if *issueFlag != "" {
+		if issue, err = checkNewChartIssue(st, *issueFlag); err != nil {
+			return renderErr(stdout, err)
+		}
+	}
 
 	// Claim commits the chart's folder alone and, on a store with an origin,
 	// pushes it alone. Its write checks the name again, so a chart or ticket
@@ -104,7 +112,12 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 			if err := chartNameTaken(st, name); err != nil {
 				return "", nil, err
 			}
-			if err := st.CreateChart(name, heading); err != nil {
+			if issue != "" {
+				if _, err := checkNewChartIssue(st, issue); err != nil {
+					return "", nil, err
+				}
+			}
+			if err := st.CreateChartWithIssue(name, heading, issue); err != nil {
 				return "", nil, err
 			}
 			return name, []string{st.ChartRelDir(name)}, nil

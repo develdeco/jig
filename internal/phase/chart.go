@@ -97,6 +97,10 @@ type ChartEntry struct {
 	// ID is the ticket the entry minted, "" until `jig graduate`.
 	ID    string
 	Title string
+	// Kind is the ticket's kind when it is not a task ("issue" or
+	// "multi-task"): such a ticket is not briefed or built, so the standing keeps
+	// its row but never offers it in the briefs or the run.
+	Kind string
 	// Rank is the ticket's rank, nil when unranked or not graduated.
 	Rank *int
 	// Needs are every edge of the entry, met or not.
@@ -125,7 +129,10 @@ type ChartRow struct {
 	// Wave is the longest chain of in-chart blockers over every edge, 0 for
 	// none, -1 for an entry on a cycle or waiting on one (the rule of
 	// internal/ready's Waves, over tickets instead of slices).
-	Wave   int
+	Wave int
+	// Kind is the ticket's kind when it is not a task: such a row offers no
+	// prompt, is not ready, and is not counted in the verdict.
+	Kind   string
 	Ticket *Ticket
 	Done   bool
 	Reach  string
@@ -264,7 +271,7 @@ func scopeNamed(f ChartFacts) ChartFacts {
 func (r ChartRow) Prompt() string {
 	t := r.Ticket
 	switch {
-	case t == nil || r.Done:
+	case t == nil || r.Done || r.Kind != "":
 		return ""
 	case t.Code == CodeBlocked && r.Reach != ReachHere:
 		return ""
@@ -303,7 +310,7 @@ func DeriveChart(f ChartFacts) Chart {
 		d.reachOf(i)
 		e := f.Entries[i]
 		row := ChartRow{
-			Pos: e.Pos, ID: e.ID, Title: e.Title, Rank: e.Rank, Wave: d.waveOf(i),
+			Pos: e.Pos, ID: e.ID, Title: e.Title, Rank: e.Rank, Wave: d.waveOf(i), Kind: e.Kind,
 			Ticket: e.Ticket, Done: d.done(i), Reach: d.reach[i], Problem: e.Problem,
 		}
 		if !row.Done {
@@ -329,7 +336,7 @@ func DeriveChart(f ChartFacts) Chart {
 			c.Ends = append(c.Ends, d.retargetEnds(r)...)
 			continue
 		}
-		if r.Ticket != nil && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
+		if r.Ticket != nil && d.f.Entries[d.byPos[r.Pos]].Kind == "" && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
 			c.Briefs = append(c.Briefs, r.ID)
 		}
 		if r.Reach != ReachAfterMerge {
@@ -546,7 +553,7 @@ func (d *chartDeriver) waveOf(i int) int {
 func (d *chartDeriver) runWaves(c *Chart) {
 	here := map[int]bool{}
 	for i, e := range d.f.Entries {
-		if e.ID != "" && d.reach[i] == ReachHere {
+		if e.ID != "" && e.Kind == "" && d.reach[i] == ReachHere {
 			here[i] = true
 		}
 	}
@@ -588,7 +595,7 @@ func (d *chartDeriver) runWaves(c *Chart) {
 func (d *chartDeriver) verdict(c *Chart) {
 	graduated, done := 0, 0
 	for _, r := range c.Rows {
-		if r.ID == "" {
+		if r.ID == "" || r.Kind != "" {
 			continue
 		}
 		graduated++

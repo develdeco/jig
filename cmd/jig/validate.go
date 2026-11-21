@@ -84,6 +84,12 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
+	if rec, err := st.ReadTicket(ticket); err == nil {
+		if k := rec.KindOrDefault(); k != store.KindTask {
+			return validateNotATask(st, cfg, ticket, k, stdout)
+		}
+	}
+
 	var blocks []string
 	if *restamp {
 		res, err := restampTicket(st, ticket)
@@ -260,16 +266,11 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		problems = append(problems, `brief.md has no "## " sections`)
 	}
 
-	aliasProblems, err := st.CheckAliases()
+	recordProblems, err := validateTicketRecord(st, cfg, ticket)
 	if err != nil {
 		return nil, err
 	}
-	problems = append(problems, aliasProblems...)
-
-	problems = append(problems, validateTicketDeps(st, ticket)...)
-	problems = append(problems, validateTicketClosed(st, ticket)...)
-	problems = append(problems, validateUpstreamEdges(st, ticket)...)
-	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
+	problems = append(problems, recordProblems...)
 
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -467,6 +468,66 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 
 	if cyc := ticketDepsCycle(st, ticket, nil); cyc != "" {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
+	}
+	return problems
+}
+
+// validateTicketRecord is the problems of a ticket's record and its edges:
+// aliases, blockers, parent, closure, upstream edges and branch. An issue or a
+// multi-task has no brief or slices, so this is all `jig validate` checks of it.
+func validateTicketRecord(st *store.Store, cfg project.Config, ticket string) ([]string, error) {
+	problems, err := st.CheckAliases()
+	if err != nil {
+		return nil, err
+	}
+	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketParent(st, ticket)...)
+	problems = append(problems, validateTicketClosed(st, ticket)...)
+	problems = append(problems, validateUpstreamEdges(st, ticket)...)
+	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
+	return problems, nil
+}
+
+// validateNotATask implements `jig validate <ticket>` for an issue or a
+// multi-task: the record checks only, no brief to approve.
+func validateNotATask(st *store.Store, cfg project.Config, ticket, kind string, stdout io.Writer) int {
+	problems, err := validateTicketRecord(st, cfg, ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	if len(problems) > 0 {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("ticket %s failed validation", ticket),
+			Code: "VALIDATION_ERROR",
+			Help: problems,
+		})
+	}
+	axi.Render(stdout,
+		"valid: yes",
+		axi.KV("ticket", [][2]string{{"id", ticket}, {"kind", kind}}),
+		axi.Help(fmt.Sprintf("A %s has no brief or slices: `jig next %s` shows its tasks", kind, ticket)),
+	)
+	return 0
+}
+
+// validateTicketParent checks a ticket's parent: it must be a ticket of kind
+// multi-task, and only a task has one. A ticket.yaml that cannot be read is
+// validateTicketDeps to report.
+func validateTicketParent(st *store.Store, ticket string) []string {
+	t, err := st.ReadTicket(ticket)
+	if err != nil || t.Parent == "" {
+		return nil
+	}
+	var problems []string
+	if k := t.KindOrDefault(); k != store.KindTask {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q on a ticket of kind %s; only a task has a parent", t.Parent, k))
+	}
+	if err := requireTicketID(st, t.Parent); err != nil {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is not a ticket of the store", t.Parent))
+	} else if pt, perr := st.ReadTicket(t.Parent); perr == nil {
+		if k := pt.KindOrDefault(); k != store.KindMultiTask {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is a %s, not a multi-task", t.Parent, k))
+		}
 	}
 	return problems
 }

@@ -17,6 +17,7 @@ func init() {
 		Spec: cmdSpec{"ticket", "mint a new ticket: jig ticket new --title <t>", []flagSpec{
 			{"title", "ticket title (required)", false},
 			{"body", "ticket body/description", false},
+			{"kind", "ticket kind: issue, task or multi-task (default task)", false},
 			{"key", "key to mint under (required when the store declares more than one)", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
@@ -68,6 +69,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "ticket new")
 	title := fs.String("title", "", "ticket title (required)")
 	body := fs.String("body", "", "ticket body/description")
+	kind := fs.String("kind", store.KindTask, "ticket kind: issue, task or multi-task (default task)")
 	keyFlag := fs.String("key", "", "key to mint under (required when the store declares more than one)")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
@@ -78,6 +80,13 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 	}
 	if *title == "" {
 		return renderErr(stdout, &axi.Error{Msg: "jig ticket new requires --title", Code: "VALIDATION_ERROR"})
+	}
+
+	if !store.ValidKind(*kind) {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("jig ticket new --kind %q: must be issue, task or multi-task", *kind),
+			Code: "VALIDATION_ERROR",
+		})
 	}
 
 	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
@@ -106,7 +115,7 @@ func cmdTicket(e env, args []string, stdout io.Writer) int {
 		func() (string, []string, error) {
 			// The slug is fixed here, with the title it comes from: the
 			// ticket's branch keeps its name when the title is edited.
-			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body, Slug: store.Slug(*title)})
+			mintedID, err := st.Mint(key, store.Ticket{Title: *title, Body: *body, Slug: store.Slug(*title), Kind: *kind})
 			if err != nil {
 				return "", nil, err
 			}

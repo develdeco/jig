@@ -60,6 +60,7 @@ type nextChartTicket struct {
 	Title    string          `json:"title"`
 	Rank     *int            `json:"rank,omitempty"`
 	Wave     int             `json:"wave"`
+	Kind     string          `json:"kind,omitempty"`
 	Phase    string          `json:"phase"`
 	Steps    []string        `json:"steps,omitempty"`
 	Ready    bool            `json:"ready"`
@@ -155,9 +156,9 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	for _, r := range c.Rows {
 		row := nextChartTicket{
 			Pos: r.Pos, ID: r.ID, Title: r.Title, Rank: r.Rank, Wave: r.Wave,
-			Reach: r.Reach, Prompt: r.Prompt(), Problem: r.Problem,
+			Reach: r.Reach, Prompt: r.Prompt(), Problem: r.Problem, Kind: r.Kind, Phase: r.Kind,
 		}
-		if t := r.Ticket; t != nil {
+		if t := r.Ticket; t != nil && r.Kind == "" {
 			row.Phase, row.Ready, row.Code = string(t.Current), t.Ready, t.Code
 			for _, p := range t.Phases {
 				row.Steps = append(row.Steps, p.State)
