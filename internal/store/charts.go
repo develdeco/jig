@@ -191,6 +191,46 @@ func (s *Store) ContainerOf(ticket string, rec Ticket) (id string, found bool, e
 	return ids[0], true, nil
 }
 
+// TasksUnder are the tasks that build a container's work, in chart order: for a
+// multi-task those whose parent it is, for an issue every task of its chart,
+// under a multi-task or not. Any other ticket has none.
+func (s *Store) TasksUnder(container string, rec Ticket) ([]string, error) {
+	switch rec.KindOrDefault() {
+	case KindMultiTask:
+		all, err := s.Tickets()
+		if err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, id := range all {
+			if r, err := s.ReadTicket(id); err == nil && r.Parent == container && r.KindOrDefault() == KindTask {
+				out = append(out, id)
+			}
+		}
+		return out, nil
+	case KindIssue:
+		chart, err := s.ChartOfIssue(container)
+		if err != nil || chart == "" {
+			return nil, err
+		}
+		entries, err := s.ReadChart(chart)
+		if err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, e := range entries {
+			if e.ID == "" {
+				continue
+			}
+			if r, err := s.ReadTicket(e.ID); err == nil && r.KindOrDefault() == KindTask {
+				out = append(out, e.ID)
+			}
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
 func (s *Store) ReadChart(name string) ([]ChartEntry, error) {
 	path := s.ChartFile(name)

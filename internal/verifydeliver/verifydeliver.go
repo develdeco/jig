@@ -76,6 +76,10 @@ type Deps struct {
 	// StackFor is Stack for one issue of a shared task (stack.ReadFor): the
 	// plan a publish into that issue's branch uses. nil reads Stack's.
 	StackFor func(ticket, issue string) (stack.Plan, error)
+	// Container says where a multi-task or an issue stands before its own
+	// pull request (land.ReadinessOf): PublishContainer opens it only when its
+	// children have landed. nil refuses a container's publish.
+	Container func(ticket string) (ContainerStanding, error)
 }
 
 // publishHost is the host d hands Publish for the repo it ships: d.Host when

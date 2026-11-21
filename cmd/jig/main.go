@@ -332,6 +332,22 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 		d.StackFor = func(ticket, issue string) (stack.Plan, error) {
 			return stack.ReadFor(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket, issue)
 		}
+		// A multi-task or an issue publishes once its children have landed,
+		// which the host is asked about now.
+		d.Container = func(ticket string) (verifydeliver.ContainerStanding, error) {
+			r, err := containerReadiness(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0), ticket)
+			if err != nil {
+				return verifydeliver.ContainerStanding{}, err
+			}
+			s := verifydeliver.ContainerStanding{State: r.State}
+			for _, w := range r.Waits {
+				s.Waits = append(s.Waits, verifydeliver.ContainerWait{Ticket: w.Ticket, Standing: w.Standing})
+			}
+			for _, u := range r.Unmet {
+				s.Unmet = append(s.Unmet, verifydeliver.ContainerUnmet{Code: u.Code, Why: u.Why, Prompt: u.Prompt})
+			}
+			return s, nil
+		}
 	}
 	return d
 }

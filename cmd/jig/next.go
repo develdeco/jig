@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -191,6 +192,13 @@ type nextTicket struct {
 	Issues    []string      `json:"issues,omitempty"`
 	Children  []nextChild   `json:"children,omitempty"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
+	// Prompt, Waits and Unmet are, for an issue or a multi-task, what its own
+	// pull request waits for: State is then waiting, ready, published or landed
+	// (land.ReadinessOf), Waits the children not landed and Unmet the
+	// preconditions not met; Prompt is what to ask next.
+	Prompt string      `json:"prompt,omitempty"`
+	Waits  []nextWait  `json:"waits,omitempty"`
+	Unmet  []nextUnmet `json:"unmet,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -240,9 +248,39 @@ type nextChild struct {
 	Kind  string `json:"kind,omitempty"`
 }
 
+// nextWait is one child of a container that has not landed, with its standing.
+type nextWait struct {
+	Ticket   string `json:"ticket"`
+	Standing string `json:"standing"`
+}
+
+// nextUnmet is one precondition of a container's publish that is not met.
+type nextUnmet struct {
+	Code   string `json:"code"`
+	Why    string `json:"why"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// containerReadiness is where the issue or multi-task id stands before its own
+// pull request: land.ReadinessOf over the project's merge facts.
+func containerReadiness(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, id string) (land.Readiness, error) {
+	lm, ok := merges.(land.Merges)
+	if !ok {
+		lm = ofForOf{merges}
+	}
+	return land.ReadinessOf(land.Deps{Store: st, Cfg: cfg, Clones: mp.Clones, Merges: lm}, id)
+}
+
+// ofForOf reads a merge source that knows no shared task as one whose fact for
+// any issue is its fact.
+type ofForOf struct{ mergeSource }
+
+func (m ofForOf) OfFor(ticket, _ string) (ready.Merge, error) { return m.Of(ticket) }
+
 // nextNotATask is `jig next <ticket>` for an issue or a multi-task: its kind,
-// where it stands in the model and its children, and no phase and no prompt,
-// since it has no brief, slices or pull request of its own.
+// where it stands in the model and its children, and no phase, since it has no
+// brief or slices: nextForTicket adds the readiness of its own pull request,
+// with the prompt that moves it (land.ReadinessOf).
 func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
 	id := data.in.ID
 	n := nextTicket{Ticket: id, Title: data.title, State: kind, Kind: kind, Ready: []nextBatch{}}
@@ -286,7 +324,8 @@ func ownBranchFacts(st *store.Store, cfg project.Config, mp project.MachineProje
 }
 
 // notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
-// multi-task: no phase, no ready table and no prompt. `jig status <ticket>`
+// multi-task: no phase and no ready table, and for `next` the prompt of its own
+// pull request, with the children not landed. `jig status <ticket>`
 // prints the same under its own shape: top-level ticket: and state: lines, which
 // the screens of the TUI read.
 func (n nextTicket) notATaskBlocks(verb string) []string {
@@ -317,6 +356,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		if len(n.Issues) > 0 {
 			pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
 		}
+		if n.Prompt != "" {
+			pairs = append(pairs, [2]string{"prompt", n.Prompt})
+		}
 		blocks = []string{axi.KV("next", pairs)}
 		blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
 	}
@@ -336,9 +378,38 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 	} else {
 		blocks = append(blocks, "children: none")
 	}
+	if len(n.Waits) > 0 {
+		rows := make([][]string, len(n.Waits))
+		for i, w := range n.Waits {
+			rows[i] = []string{w.Ticket, w.Standing}
+		}
+		blocks = append(blocks, axi.Table("waits", []string{"ticket", "standing"}, rows))
+	}
+	if len(n.Unmet) > 0 {
+		rows := make([][]string, len(n.Unmet))
+		for i, u := range n.Unmet {
+			rows[i] = []string{u.Code, u.Why, u.Prompt}
+		}
+		blocks = append(blocks, axi.Table("unmet", []string{"code", "why", "prompt"}, rows))
+	}
+	help := fmt.Sprintf("A %s is not briefed or built: run `jig next <ticket>` on one of its tasks", n.Kind)
+	switch {
+	case verb == "next" && n.State == land.StateWaiting && len(n.Waits) == 0 && len(n.Unmet) > 0:
+		help = fmt.Sprintf("%s waits for %s", n.Ticket, n.Unmet[0].Why)
+		if n.Prompt != "" {
+			help += fmt.Sprintf(": ask `%s`", n.Prompt)
+		}
+	case verb == "next" && n.State == land.StateReady:
+		help = fmt.Sprintf("Every child of %s has landed: ask `%s`, which opens its pull request", n.Ticket, n.Prompt)
+	case verb == "next" && n.State == land.StatePublished:
+		help = fmt.Sprintf("%s has its pull request: ask `%s` to merge it", n.Ticket, n.Prompt)
+	case verb == "next" && n.State == land.StateWaiting && len(n.Children) == 0:
+		help = fmt.Sprintf("%s has no children yet: graduate its chart", n.Ticket)
+	case verb == "next" && n.State == land.StateWaiting:
+		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
+	}
 	blocks = append(blocks, afterBlock(n.LandsAfter)...)
-	help := []string{fmt.Sprintf("A %s is not briefed or built: run `jig next <ticket>` on one of its tasks", n.Kind)}
-	return append(blocks, axi.Help(append(help, afterHelp(n.Ticket, n.LandsAfter)...)...))
+	return append(blocks, axi.Help(append([]string{help}, afterHelp(n.Ticket, n.LandsAfter)...)...))
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
@@ -572,10 +643,26 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	if k := data.rec.KindOrDefault(); k != store.KindTask {
 		n, err := ownBranchFacts(st, cfg, mp, merges, data.rec, nextNotATask(st, data, k))
-		if err == nil && k == store.KindIssue {
-			n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id)
+		if err != nil {
+			return nextTicket{}, err
 		}
-		return n, err
+		if k == store.KindIssue {
+			if n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id); err != nil {
+				return nextTicket{}, err
+			}
+		}
+		r, err := containerReadiness(st, cfg, mp, merges, id)
+		if err != nil {
+			return nextTicket{}, err
+		}
+		n.State, n.Prompt = r.State, r.Prompt
+		for _, w := range r.Waits {
+			n.Waits = append(n.Waits, nextWait{Ticket: w.Ticket, Standing: w.Standing})
+		}
+		for _, u := range r.Unmet {
+			n.Unmet = append(n.Unmet, nextUnmet{Code: u.Code, Why: u.Why, Prompt: u.Prompt})
+		}
+		return n, nil
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
 	branch, err := ticketBranch(st, cfg, id, data.rec)

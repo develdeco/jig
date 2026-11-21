@@ -1,5 +1,7 @@
 # A ticket has a kind, and a chart is one issue's plan
 
+**Superseded in part by [ADR 0062](0062-a-container-publishes-once-its-children-have-landed.md):** `jig next <T>` of an issue or a multi-task now says where its own pull request stands (`waiting`, `ready` with the prompt `Publish <T>`, `published`) and `jig publish <T> --yes` opens it once its children have landed, so "no prompt" and "no pull request of their own" no longer hold. The kinds, the parent link and the chart as one issue's plan stand.
+
 A ticket was one thing, a unit of work with a brief, slices and a pull request, and a chart was the map over many of them. Work that starts as a need (a person's issue) has no home in that shape: the need is not buildable, and several tickets meet it. The store needs the need, the tickets that meet it, and the groups among them, without a second record type and without rewriting the 205 tickets already in it.
 
 ## Decision
