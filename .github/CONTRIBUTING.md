@@ -25,11 +25,12 @@ pull request into main, and on Windows too when the pull request changes what
 Windows builds differently (a `_windows` file or one with a build constraint,
 `go.mod`, `go.sum`, `.gitattributes`, a workflow); every push to main, the
 daily run and every release run it on all three, so a Windows-only failure
-shows on main and is fixed forward. A task's pull request into an issue's
-branch runs no CI, and the issue's pull request into main runs the whole suite
-once; the builder's own runs before the gate cover the task. A pull request
-that changes only docs
-runs `./lint`, whose tests are the only ones that read them. The full suite
+shows on main and is fixed forward. A pull request into any branch other than
+main runs no CI: a task's into its issue's branch, a multi-task child's, a
+stacked ticket's into its parent's; the builder's own runs before the gate
+cover them. The issue's pull request into main runs the whole suite, and again
+after an update when main moves while it is open. A pull request that changes
+only docs runs `./lint`, whose tests are the only ones that read them. The full suite
 is CI's alone: a jig gate round and publish run no test. A jig build slice's own
 oracle runs when its builder runs `jig verify`, and a ticket's last run is
 `jig verify --final`, the union of its slices' commands at the reviewed head.

@@ -154,8 +154,8 @@ func TestCIWorkflowTriggers(t *testing.T) {
 		} else if s, ok := yamlString(prBranches[0]); !ok || s != "main" {
 			t.Errorf("ci.yml: pull_request branches is %v, want exactly [main]: a pull request into another branch must not run ci", prBranches)
 		}
-		for _, k := range []string{"branches-ignore", "paths", "paths-ignore"} {
-			if _, has := pr[k]; has {
+		for k := range pr {
+			if k != "branches" {
 				t.Errorf("ci.yml: pull_request has %s, want only branches: [main], so main is the one branch ci protects", k)
 			}
 		}
