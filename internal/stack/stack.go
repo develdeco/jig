@@ -317,6 +317,13 @@ func Read(in Input, ticket string) (Plan, error) {
 	// their work merges into its branch, which is then where this one starts.
 	mergedDeps := map[string]bool{}
 	if hasContainer {
+		// The containers a dependency's work can have merged into and still be
+		// in this one's branch: this container and the ones above it (a
+		// multi-task's branch is cut from its issue's).
+		chain := map[string]bool{container: true}
+		if up, ok, err := in.Store.ContainerOf(container, crec); err == nil && ok {
+			chain[up] = true
+		}
 		for _, b := range rec.BlockedBy {
 			if b.Kind == KindStacked {
 				continue
@@ -331,7 +338,7 @@ func Read(in Input, ticket string) (Plan, error) {
 			if err != nil {
 				continue
 			}
-			if dc, ok, err := in.Store.ContainerOf(id, drec); err != nil || !ok || dc != container {
+			if dc, ok, err := in.Store.ContainerOf(id, drec); err != nil || !ok || !chain[dc] {
 				continue
 			}
 			if names, err := builtIn(id); err == nil {

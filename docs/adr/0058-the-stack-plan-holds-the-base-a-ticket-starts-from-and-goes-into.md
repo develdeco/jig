@@ -7,7 +7,7 @@ A ticket's pull request went into the target, or into an unmerged stacked parent
 **The plan holds the base.** `stack.Repo` gains `Container` and `ContainerBranch` (and the copy of that branch the clone holds, and the ref it is cut from), and `PRTarget` and `StartFrom` name the base. Every reader takes the base from the plan; none computes it.
 
 - `PRTarget` is the container's branch whenever the ticket has a container, the repo's target otherwise. An unmerged stacked parent still wins while it has not merged; once it merged, the ticket goes into the container's branch, not the target.
-- `StartFrom` is `origin/<target>` for a ticket with no dependency, the container's branch behind a `merged` dependency or a settled stacked parent, and the unmerged parent's branch as before.
+- `StartFrom` is `origin/<target>` for a ticket with no dependency, the container's branch behind a `merged` dependency of that container or of the container above it (a multi-task's issue), and the target behind one outside them or a settled stacked parent, and the unmerged parent's branch as before.
 - `Retarget` compares the ticket's branch with the head of the base the plan names.
 
 **A task started from the target still goes into its container.** A task with no dependency starts from the target, since nothing of its container's is yet needed, and its pull request goes into the container's branch all the same. It is not told it is behind its container: a container that moved past a task is for Land to name, not for each read of the plan.

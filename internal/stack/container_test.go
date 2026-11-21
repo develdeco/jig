@@ -152,7 +152,10 @@ func TestContainerReadStartsFromTheContainerOnlyBehindADependencyOfIt(t *testing
 	add("D-1", store.Ticket{Title: "Waits for another chart's", BlockedBy: dep("X-1")})
 	add("D-2", store.Ticket{Title: "Waits for no chart's", BlockedBy: dep("U-1")})
 	add("D-3", store.Ticket{Title: "Waits for one under a multi-task", Parent: "M-1", BlockedBy: dep("T-3")})
-	add("D-4", store.Ticket{Title: "Waits for one of another multi-task", Parent: "M-1", BlockedBy: dep("T-1")})
+	add("D-4", store.Ticket{Title: "Waits for a task of the issue", Parent: "M-1", BlockedBy: dep("T-1")})
+	add("M-2", store.Ticket{Title: "Sibling multi", Kind: store.KindMultiTask})
+	add("T-4", store.Ticket{Title: "Under the sibling", Parent: "M-2"})
+	add("D-5", store.Ticket{Title: "Waits for the sibling's task", Parent: "M-1", BlockedBy: dep("T-4")})
 	chart := "issue: I-1\ntickets:\n  - id: T-1\n    title: One\n  - id: T-2\n    title: Two\n  - id: M-1\n    title: Multi\n    kind: multi-task\n  - id: T-3\n    title: Three\n  - id: D-1\n    title: d1\n  - id: D-2\n    title: d2\n  - id: D-3\n    title: d3\n  - id: D-4\n    title: d4\n"
 	if err := store.AtomicWrite(st.ChartFile("c"), []byte(chart)); err != nil {
 		t.Fatal(err)
@@ -170,7 +173,7 @@ func TestContainerReadStartsFromTheContainerOnlyBehindADependencyOfIt(t *testing
 		ticket    string
 		container bool
 	}{
-		{"D-1", false}, {"D-2", false}, {"D-3", true}, {"D-4", false}, {"T-2", true},
+		{"D-1", false}, {"D-2", false}, {"D-3", true}, {"D-4", true}, {"D-5", false}, {"T-2", true},
 	} {
 		plan, err := Read(in, c.ticket)
 		if err != nil || len(plan.Repos) != 1 {
