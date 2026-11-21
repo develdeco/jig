@@ -101,6 +101,28 @@ func TestChartNewNeedRefusalsMintNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(clone, "charts")); err == nil {
 		t.Errorf("a refusal made a chart")
 	}
+
+	// A name a chart holds, and a name a ticket holds, are refused before the
+	// issue is minted: the store gains no ticket.
+	if code, out := needRun(t, e, clone, "taken", "--title", "T"); code != 0 {
+		t.Fatalf("jig chart new taken: exit %d\n%s", code, out)
+	}
+	if code, out := needRun(t, e, clone, "first", "--title", "T", "--need", "n"); code != 0 {
+		t.Fatalf("jig chart new first --need: exit %d\n%s", code, out)
+	}
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := st.Tickets()
+	for _, name := range []string{"taken", "DEMO-1"} {
+		if code, out := needRun(t, e, clone, name, "--title", "T", "--need", "n"); code == 0 {
+			t.Errorf("name %q: exit 0, want a refusal\n%s", name, out)
+		}
+	}
+	if after, _ := st.Tickets(); len(after) != len(before) {
+		t.Errorf("a taken name minted an issue: tickets %v, were %v", after, before)
+	}
 }
 
 // TestChartNewNeedChartFailureNamesTheRepair: when the chart's own commit

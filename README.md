@@ -37,8 +37,8 @@ the step under way, its part under way opened with how far it has come, what it
 is and its latest move; then one activity log, newest first, each line tagged
 with its step and sub-step:
 
-1. **Brief.** The prompt names no ticket, so the session mints SHOP-1 with
-   `jig ticket new`, and the TUI opens it. It drafts `brief.md` and
+1. **Brief.** The prompt names no ticket, so intake makes the issue and its chart with
+   `jig chart new --need`, `jig graduate` mints SHOP-1, and the TUI opens it. It drafts `brief.md` and
    `slices.yaml` with the intake skill, asks the person to confirm the brief,
    and records the approval.
 2. **Build.** The session claims the slice and commits with a `Jig-Slice:`
