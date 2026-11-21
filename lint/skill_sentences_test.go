@@ -94,6 +94,21 @@ func TestSkillSentencesBuildReadAndFix(t *testing.T) {
 	)
 }
 
+func TestSkillSentencesBuildBroadChecks(t *testing.T) {
+	wantAll(t, "skills/build", skillFile(t, "build"),
+		"Before the first `jig gate`, and after each merge of the target into the branch before the gate that follows it",
+		"run each package the change touches in full, plus the checks the project's CI runs that no package covers",
+		"each through `jig verify <T> --` so the run is witnessed",
+		"Fix a failure in a recorded fix commit and run again until it passes.",
+	)
+	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
+		"Before the first `jig gate` for <ticket>, and after each merge of the target into the branch before the gate that follows it",
+		"run each package your change touches in full, plus the checks the project's CI runs that no package covers",
+		"each through `jig verify <ticket> --`",
+		"fix a failure in a recorded fix commit until it passes",
+	)
+}
+
 func TestSkillSentencesBuildClaimAndAsk(t *testing.T) {
 	wantAll(t, "skills/build", skillFile(t, "build"),
 		"**Stop on any claim warning.**",
