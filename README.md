@@ -205,7 +205,8 @@ moments, and a directory in no project gets nothing:
   names, its slices and their states, open questions, commits not yet verified,
   and the prompt that asks for the ticket's next phase; on a branch with no ticket,
   that work asked for without one is planned first with the intake skill, which
-  decides brief or chart and makes the issue and its chart.
+  writes the need first, makes an issue and its chart for each need, and
+  decides brief or chart for each (a need raised later is another issue).
   The harness's session id is set as `JIG_SESSION` for the session's shell
   commands where the harness allows it (Claude Code does), and asked of the
   agent where it does not.
