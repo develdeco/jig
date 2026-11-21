@@ -822,7 +822,7 @@ func (n nextTicket) help() []string {
 		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
 		if t != nil && t.Current == phase.Land {
-			return []string{landAdvice(*t, n.Ticket)}
+			return []string{landAdvice(*t, n.Ticket, issuesOfRows(n.Shared))}
 		}
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
 	case stateBehind:

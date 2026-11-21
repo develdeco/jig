@@ -55,8 +55,13 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 		v.Done = true
 		return v, nil
 	}
-	in := stack.Input{Store: d.Store, Cfg: d.Cfg, Clones: d.Clones, Merges: d.Merges}
-	plan, err := stack.ReadFor(in, ticket, opts.Issue)
+	readPlan := d.Plan
+	if readPlan == nil {
+		readPlan = func(ticket, issue string) (stack.Plan, error) {
+			return stack.ReadFor(stack.Input{Store: d.Store, Cfg: d.Cfg, Clones: d.Clones, Merges: d.Merges}, ticket, issue)
+		}
+	}
+	plan, err := readPlan(ticket, opts.Issue)
 	if err != nil {
 		return v, err
 	}
@@ -69,6 +74,7 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 	// What must land first: each rule, in order.
 	scene := Scene{Deps: d, Ticket: ticket, Rec: rec, Into: into}
 	var first []string
+	var firstInto string
 	var why []string
 	for _, rule := range Rules {
 		got, err := rule.Before(scene)
@@ -77,6 +83,9 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 		}
 		for _, b := range got {
 			if !containsString(first, b.Ticket) {
+				if len(first) == 0 {
+					firstInto = b.Into
+				}
 				first = append(first, b.Ticket)
 				why = append(why, b.Ticket+": "+b.Why)
 			}
@@ -84,7 +93,7 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 	}
 	if len(first) > 0 {
 		return refuse(v, CodeWaits, fmt.Sprintf("%s waits for %s to land first (%s)", ticket, strings.Join(first, ", "), strings.Join(why, "; ")), first,
-			fmt.Sprintf("Land %s first: run `jig land %s`.", first[0], first[0])), nil
+			fmt.Sprintf("Land %s first: run `%s`.", first[0], Command(d.Store, first[0], firstInto))), nil
 	}
 	// Each repo not landed: what the host says of its pull request.
 	for _, rm := range own.Repos {

@@ -57,6 +57,9 @@ type Deps struct {
 	// Methods reads the merge methods the pull request's repo allows
 	// (repohost.AllowedMergeMethods); nil or known false is not known.
 	Methods func(url string) (repohost.MergeMethods, bool)
+	// Plan reads a ticket's stack plan for an issue (stack.ReadFor over the
+	// store, the project and the clones); nil reads it so.
+	Plan func(ticket, issue string) (stack.Plan, error)
 }
 
 // Refusal is a landing that is out of order. Nothing is written for one.
@@ -150,6 +153,9 @@ type Scene struct {
 // Before is a ticket that must land before another, with why.
 type Before struct {
 	Ticket, Why string
+	// Into is the container the ticket is to land into, for the command that
+	// lands it: a task two issues share lands per issue.
+	Into string
 }
 
 // Rule answers "what must land before this".
@@ -295,13 +301,13 @@ func mergedInto(d Deps, ticket, into string) (ready.Merge, error) {
 func waitsOn(d Deps, id, into string) ([]Before, error) {
 	rec, err := d.Store.ReadTicket(id)
 	if err != nil {
-		return []Before{{Ticket: id, Why: "it is not a ticket of the store"}}, nil
+		return []Before{{Ticket: id, Why: "it is not a ticket of the store", Into: into}}, nil
 	}
 	if rec.Closed != nil {
 		if store.Releases(rec.Closed.Reason) {
 			return nil, nil
 		}
-		return []Before{{Ticket: id, Why: ready.NotPlanned}}, nil
+		return []Before{{Ticket: id, Why: ready.NotPlanned, Into: into}}, nil
 	}
 	m, err := mergedInto(d, id, into)
 	if err != nil {
@@ -310,7 +316,7 @@ func waitsOn(d Deps, id, into string) ([]Before, error) {
 	if m.Met() {
 		return nil, nil
 	}
-	return []Before{{Ticket: id, Why: m.Why()}}, nil
+	return []Before{{Ticket: id, Why: m.Why(), Into: into}}, nil
 }
 
 // blockersOfKind are the tickets rec names as blockers whose kind is stacked
@@ -326,17 +332,20 @@ func blockersOfKind(st *store.Store, rec store.Ticket, stacked bool) []string {
 }
 
 func mergedDependencies(s Scene) ([]Before, error) {
-	return waitsOnAll(s, blockersOfKind(s.Store, s.Rec, false))
+	return waitsOnAll(s, blockersOfKind(s.Store, s.Rec, false), s.Into)
 }
 
 func stackedParents(s Scene) ([]Before, error) {
-	return waitsOnAll(s, blockersOfKind(s.Store, s.Rec, true))
+	return waitsOnAll(s, blockersOfKind(s.Store, s.Rec, true), s.Into)
 }
 
-func waitsOnAll(s Scene, ids []string) ([]Before, error) {
+// waitsOnAll is the Before of each of ids, read for the container into: a
+// dependency lands into the ticket's own container, and a container's child
+// lands into the container itself (the ticket), as Complete reads it.
+func waitsOnAll(s Scene, ids []string, into string) ([]Before, error) {
 	var out []Before
 	for _, id := range ids {
-		b, err := waitsOn(s.Deps, id, s.Into)
+		b, err := waitsOn(s.Deps, id, into)
 		if err != nil {
 			return nil, err
 		}
@@ -349,14 +358,14 @@ func tasksOfMultiTask(s Scene) ([]Before, error) {
 	if s.Rec.KindOrDefault() != store.KindMultiTask {
 		return nil, nil
 	}
-	return waitsOnAll(s, Children(s.Store, s.Ticket, s.Rec))
+	return waitsOnAll(s, Children(s.Store, s.Ticket, s.Rec), s.Ticket)
 }
 
 func ticketsOfIssue(s Scene) ([]Before, error) {
 	if s.Rec.KindOrDefault() != store.KindIssue {
 		return nil, nil
 	}
-	return waitsOnAll(s, Children(s.Store, s.Ticket, s.Rec))
+	return waitsOnAll(s, Children(s.Store, s.Ticket, s.Rec), s.Ticket)
 }
 
 // Children are the tickets a container lands: every task under a multi-task,

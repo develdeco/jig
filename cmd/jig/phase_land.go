@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/phase"
@@ -33,10 +35,14 @@ func mergedOnHost(merges mergeSource, f phase.Facts, lines []journal.Line, issue
 
 // landAdvice is the advice for a published ticket that has not landed: the
 // person's word is what lands it, and `jig land` names the merge and records it.
-// "" for a ticket that is not at Land.
-func landAdvice(t phase.Ticket, ticket string) string {
+// issues are the issues of a task two issues share, which lands per issue; nil
+// for any other ticket. "" for a ticket that is not at Land.
+func landAdvice(t phase.Ticket, ticket string, issues []string) string {
 	if t.Current != phase.Land {
 		return ""
+	}
+	if len(issues) > 1 {
+		return ticket + " is published into " + strings.Join(issues, " and ") + " and lands per issue: at the person's word run `jig land " + ticket + " --issue <ID>` for each, make the merge it names, then run it again to record it" + promptHint(t.Prompt)
 	}
 	if t.MergedOnHost() {
 		return ticket + " is published and its pull request merged on the host, not recorded: run `jig land " + ticket + "` to record it" + promptHint(t.Prompt)

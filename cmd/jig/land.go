@@ -94,7 +94,7 @@ func cmdLand(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	}
 	switch {
 	case len(v.Merge) > 0:
-		return renderMerge(e, stdout, jigHome, ticket, v, notes)
+		return renderMerge(e, stdout, st, jigHome, ticket, v, notes)
 	case len(v.Record) > 0:
 		return recordLanded(e, stdin, stdout, deps, jigHome, ticket, v, notes)
 	}
@@ -103,7 +103,7 @@ func cmdLand(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	axi.Render(stdout,
 		axi.KV("already_landed", [][2]string{{"ticket", ticket}}),
 		axi.Table("landed", []string{"repo", "pr", "base", "into", "commit", "provenance"}, rows),
-		axi.Help(append(notes, nextLanding(deps, ticket))...),
+		axi.Help(append(notes, nextLanding(deps, ticket, v.Into))...),
 	)
 	return 0
 }
@@ -123,7 +123,7 @@ func landDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProj
 // renderMerge names the merges to make, one row per repo, and leaves a line in
 // the ledger saying so, so that the landing that follows is the session's own.
 // Nothing is merged and nothing is written to the store.
-func renderMerge(e env, stdout io.Writer, jigHome, ticket string, v land.Verdict, notes []string) int {
+func renderMerge(e env, stdout io.Writer, st *store.Store, jigHome, ticket string, v land.Verdict, notes []string) int {
 	if jigHome != "" {
 		_ = ledger.Append(jigHome, journal.Line{TS: stamp(e), Ticket: ticket, Event: journal.EventLandNamed, Into: v.Into})
 	}
@@ -136,7 +136,7 @@ func renderMerge(e env, stdout io.Writer, jigHome, ticket string, v land.Verdict
 		}
 	}
 	help = append(help,
-		"jig does not merge: make each merge with its command, at the person's word, then run `jig land "+ticket+"` again to record it",
+		"jig does not merge: make each merge with its command, at the person's word, then run `"+land.Command(st, ticket, v.Into)+"` again to record it",
 	)
 	axi.Render(stdout,
 		axi.KV("land", [][2]string{{"ticket", ticket}, {"into", orDash(v.Into)}, {"merges", fmt.Sprint(len(v.Merge))}}),
@@ -151,7 +151,7 @@ func renderMerge(e env, stdout io.Writer, jigHome, ticket string, v land.Verdict
 // the merge first (then it is the agent's, or a person's at a terminal).
 func recordLanded(e env, stdin io.Reader, stdout io.Writer, deps land.Deps, jigHome, ticket string, v land.Verdict, notes []string) int {
 	provenance := journal.ProvenanceHost
-	if named(jigHome, ticket) {
+	if named(jigHome, ticket, v.Into) {
 		provenance = journal.ProvenanceAgent
 		if e.stdinIsTerminal(stdin) {
 			provenance = journal.ProvenancePerson
@@ -176,20 +176,20 @@ func recordLanded(e env, stdin io.Reader, stdout io.Writer, deps land.Deps, jigH
 	axi.Render(stdout,
 		axi.KV("landed", [][2]string{{"ticket", ticket}, {"provenance", provenance}}),
 		axi.Table("landed", []string{"repo", "pr", "base", "into", "commit", "provenance"}, landedRows(rows)),
-		axi.Help(append(notes, nextLanding(deps, ticket))...),
+		axi.Help(append(notes, nextLanding(deps, ticket, v.Into))...),
 	)
 	return 0
 }
 
 // named says this machine named a merge for ticket: a land-named line in the
 // ledger.
-func named(jigHome, ticket string) bool {
+func named(jigHome, ticket, into string) bool {
 	if jigHome == "" {
 		return false
 	}
 	found := false
 	err := ledger.ReadBackward(jigHome, landNamedWindow, func(l journal.Line) bool {
-		if l.Event == journal.EventLandNamed && l.Ticket == ticket {
+		if l.Event == journal.EventLandNamed && l.Ticket == ticket && l.Into == into {
 			found = true
 			return false
 		}
