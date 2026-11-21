@@ -39,7 +39,7 @@ func derivePhaseWith(st *store.Store, ticket string, merges mergeSource) (phase.
 // for that issue's publish lines alone (journal.ReadFor), and a blocker that is
 // a shared task is judged for it.
 func derivePhaseFor(st *store.Store, ticket string, merges mergeSource, issue string) (phase.Ticket, error) {
-	f, lines, err := phaseFactsOf(st, ticket, map[string]bool{}, merges, issue)
+	f, lines, err := phaseFactsWith(st, ticket, merges, issue)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
@@ -57,7 +57,7 @@ func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan
 
 // derivePhaseStackedFor is derivePhaseStacked read for a chart's issue.
 func derivePhaseStackedFor(st *store.Store, ticket string, merges mergeSource, plan stack.Plan, issue string) (phase.Ticket, error) {
-	f, lines, err := phaseFactsOf(st, ticket, map[string]bool{}, merges, issue)
+	f, lines, err := phaseFactsWith(st, ticket, merges, issue)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
@@ -131,9 +131,10 @@ func restackAsks(plan stack.Plan) []phase.Restack {
 // the journal lines it reads beside them, with the blockers judged by merges, as
 // a claim judges them: a blocker is held until its work has merged. nil judges
 // by the journal alone, where a blocker is met once it published. It reads the
-// store and writes nothing.
-func phaseFactsWith(st *store.Store, ticket string, merges mergeSource) (phase.Facts, []journal.Line, error) {
-	return phaseFactsOf(st, ticket, map[string]bool{}, merges, "")
+// store and writes nothing. issue is the issue of the chart the ticket is read in
+// ("" for none): a shared task is then read for it.
+func phaseFactsWith(st *store.Store, ticket string, merges mergeSource, issue string) (phase.Facts, []journal.Line, error) {
+	return phaseFactsOf(st, ticket, map[string]bool{}, merges, issue)
 }
 
 // phaseFactsOf is phaseFactsWith for a ticket reached through blockers: seen holds
