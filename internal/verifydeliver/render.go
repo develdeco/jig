@@ -702,6 +702,9 @@ func renderTrailer(trailer string) string {
 type prLink struct {
 	Repo string
 	URL  string
+	// Issue, when set, makes the link another issue's pull request of the same
+	// shared task (Repo is then empty): the body says it is shared with it.
+	Issue string
 }
 
 // pendingPR is what a link says of a repo whose pull request is not opened yet.
@@ -718,6 +721,10 @@ func renderPartOfSection(ticket string, links []prLink) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Part of %s\n\n", ticket)
 	for _, l := range links {
+		if l.Issue != "" {
+			fmt.Fprintf(&b, "Shared with %s (pull request %s)\n", l.Issue, l.URL)
+			continue
+		}
 		url := l.URL
 		if url == "" {
 			url = pendingPR

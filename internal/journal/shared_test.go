@@ -69,7 +69,8 @@ func TestSharedJournal(t *testing.T) {
 
 	one := sharedStore(t, map[string]string{"a": "issue: I-1\ntickets:\n  - id: T-1\n    title: t\n"})
 	write(one)
-	if got, want := events(ReadFor(one, "T-1", "I-1")), []string{"gate-clean>", "pr-body>I-1", "publish-approved>I-1", "publish-done>"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("one container: %v, want %v", got, want)
+	oneAll, _ := Read(one, "T-1")
+	if got, _ := ReadFor(one, "T-1", "I-1"); !reflect.DeepEqual(got, oneAll) {
+		t.Errorf("one container: %d lines, want Read's %d", len(got), len(oneAll))
 	}
 }

@@ -29,6 +29,11 @@ type Host interface {
 	// its parent merged is found all the same, and publish points it at its base.
 	FindOpenPR(head string) (OpenPR, error)
 
+	// FindOpenPRInto is FindOpenPR for the open pull request from head into
+	// base alone: a task two issues share has one from its branch into each
+	// issue's, and a publish for one issue must not take the other's.
+	FindOpenPRInto(head, base string) (OpenPR, error)
+
 	// UpdatePR replaces the body of the pull request at url, and points it at
 	// base in the same call when base is not "".
 	UpdatePR(url, bodyFile, base string) error
@@ -319,6 +324,17 @@ type pullRequest struct {
 // that GitHub did not retarget when its parent merged is still the ticket's.
 // More than one open pull request from a head is an error, not a choice.
 func (h *githubHost) FindOpenPR(head string) (OpenPR, error) {
+	return h.findOpenPR(head, "")
+}
+
+// FindOpenPRInto is FindOpenPR for the pull request from head into base: the
+// one of a task that two issues share, which has a pull request into each
+// issue's branch from the one head.
+func (h *githubHost) FindOpenPRInto(head, base string) (OpenPR, error) {
+	return h.findOpenPR(head, base)
+}
+
+func (h *githubHost) findOpenPR(head, base string) (OpenPR, error) {
 	out, err := h.run("api", "repos/"+h.repoSpec()+"/pulls", "--method", "GET",
 		"-f", "head="+h.owner+":"+head, "-f", "state=open")
 	if err != nil {
@@ -327,6 +343,15 @@ func (h *githubHost) FindOpenPR(head string) (OpenPR, error) {
 	var rows []pullRequest
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		return OpenPR{}, fmt.Errorf("repohost: parse gh api pulls output %q: %w", out, err)
+	}
+	if base != "" {
+		into := rows[:0:0]
+		for _, r := range rows {
+			if r.Base.Ref == base {
+				into = append(into, r)
+			}
+		}
+		rows = into
 	}
 	switch len(rows) {
 	case 0:

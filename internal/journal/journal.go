@@ -384,37 +384,34 @@ func IsPublishEvent(event string) bool {
 	return false
 }
 
-// ReadFor is Read as the issue's container sees it: every line, except that a
-// publish line of another issue is dropped. A publish line that names no Into
-// is the ticket's one container's, so a journal written before a ticket could
-// be shared reads as it did; a ticket that two issues list has no such one, and
-// its line with none is of neither. With no issue it is Read. A ticket with at
-// most one container reads through it as Read does, for the lines of its own.
+// ReadFor is Read as the issue's container sees it: every line, except that,
+// for a ticket that two issues list (a shared task), a publish line of another
+// issue is dropped. A publish line that names no Into is the one container's of
+// a ticket that has one, so a journal written before a ticket could be shared
+// reads as it did; a shared task has no such one, and its line with none is of
+// neither issue. With no issue, and for a ticket with at most one container, it
+// is Read.
 func ReadFor(st *store.Store, ticket, issue string) ([]Line, error) {
 	lines, err := Read(st, ticket)
 	if err != nil || issue == "" {
 		return lines, err
 	}
+	// Whether the ticket is shared is asked once, and only when a publish line
+	// could be dropped: a ticket with at most one container drops none.
 	shared, known := false, false
 	kept := lines[:0:0]
 	for _, l := range lines {
-		if IsPublishEvent(l.Event) {
-			if l.Into != "" {
-				if l.Into != issue {
-					continue
-				}
-			} else {
-				if !known {
-					known = true
-					if rec, err := st.ReadTicket(ticket); err == nil {
-						if cs, err := st.ContainersOf(ticket, rec); err == nil {
-							shared = len(cs) > 1
-						}
+		if IsPublishEvent(l.Event) && l.Into != issue {
+			if !known {
+				known = true
+				if rec, err := st.ReadTicket(ticket); err == nil {
+					if cs, err := st.ContainersOf(ticket, rec); err == nil {
+						shared = len(cs) > 1
 					}
 				}
-				if shared {
-					continue
-				}
+			}
+			if shared {
+				continue
 			}
 		}
 		kept = append(kept, l)

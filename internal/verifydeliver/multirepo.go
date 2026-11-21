@@ -81,7 +81,33 @@ func linksFor(t *publishTarget, known map[string]string) []prLink {
 			links = append(links, prLink{Repo: name, URL: known[name]})
 		}
 	}
-	return links
+	return append(links, t.sharedWith...)
+}
+
+// sharedWithFor are the pull requests of the other issues of a shared task in
+// t's repo, as the journal holds them: one link for each other issue that has
+// one, in chart order. A ticket that is not shared has none.
+func sharedWithFor(d Deps, t *publishTarget) ([]prLink, error) {
+	var out []prLink
+	for _, issue := range t.issues {
+		if issue == t.into {
+			continue
+		}
+		lines, err := journal.ReadFor(d.Store, t.ticket, issue)
+		if err != nil {
+			return nil, err
+		}
+		url := ""
+		for _, l := range lines {
+			if l.Event == journal.EventPr && l.URL != "" && l.Repo == t.lineRepo() {
+				url = l.URL
+			}
+		}
+		if url != "" {
+			out = append(out, prLink{Issue: issue, URL: url})
+		}
+	}
+	return out, nil
 }
 
 // sameLinks reports whether a and b name the same pull requests.

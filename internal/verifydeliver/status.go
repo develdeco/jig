@@ -37,6 +37,9 @@ type Status struct {
 	// PRs is repo -> the pull request recorded or opened there, for a ticket
 	// whose publish names its repos (a project of several): PR is the latest.
 	PRs map[string]string `json:"prs,omitempty"`
+	// Issues is, for a shared task, the publish state of each issue it is
+	// published into, in chart order; the fields above are then empty.
+	Issues []IssueStatus `json:"issues,omitempty"`
 }
 
 // OpenStatus is a round that is open: opened by `jig gate` or `jig review
@@ -61,7 +64,16 @@ type OpenRepoStatus struct {
 }
 
 // ReadStatus reads ticket's gate and publish state from the store.
+//
+// A shared task (two issues list it) has its publish state in Issues, one for
+// each issue, and the flat fields empty; ReadStatusFor reads one issue's into
+// the flat fields.
 func ReadStatus(st *store.Store, ticket string) (Status, error) {
+	return ReadStatusFor(st, ticket, "")
+}
+
+// ReadStatusFor is ReadStatus with the publish fields read for one issue.
+func ReadStatusFor(st *store.Store, ticket, issue string) (Status, error) {
 	s := Status{Ticket: ticket}
 	n, err := existingGateRounds(st, ticket)
 	if err != nil {
@@ -88,10 +100,56 @@ func ReadStatus(st *store.Store, ticket string) (Status, error) {
 			s.Open.Repos = append(s.Open.Repos, OpenRepoStatus{Repo: r.Repo, Head: r.Head, Copy: r.Copy})
 		}
 	}
-	lines, err := journal.Read(st, ticket)
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return Status{}, fmt.Errorf("verifydeliver: status: read ticket: %w", err)
+	}
+	containers, err := st.ContainersOf(ticket, rec)
+	if err != nil {
+		return Status{}, fmt.Errorf("verifydeliver: status: containers: %w", err)
+	}
+	if issue == "" && len(containers) > 1 {
+		// A shared task has one publish state for each issue and none of its
+		// own.
+		for _, c := range containers {
+			lines, err := journal.ReadFor(st, ticket, c)
+			if err != nil {
+				return Status{}, fmt.Errorf("verifydeliver: status: read journal: %w", err)
+			}
+			is := publishStatus(lines)
+			is.Issue = c
+			s.Issues = append(s.Issues, is)
+		}
+		return s, nil
+	}
+	lines, err := journal.ReadFor(st, ticket, issue)
 	if err != nil {
 		return Status{}, fmt.Errorf("verifydeliver: status: read journal: %w", err)
 	}
+	is := publishStatus(lines)
+	s.BodyFor, s.ApprovedFor, s.PR, s.PRs, s.Published = is.BodyFor, is.ApprovedFor, is.PR, is.PRs, is.Published
+	return s, nil
+}
+
+// IssueStatus is what the journal says of the publish of a shared task into
+// one issue: the fields of Status that a publish records, for that issue's
+// pull requests alone.
+type IssueStatus struct {
+	Issue       string            `json:"issue"`
+	BodyFor     string            `json:"body_for,omitempty"`
+	ApprovedFor string            `json:"approved_for,omitempty"`
+	PR          string            `json:"pr,omitempty"`
+	PRs         map[string]string `json:"prs,omitempty"`
+	// PRHead is the head the latest pull request line recorded: the head that
+	// issue's pull request was opened or updated for.
+	PRHead    string `json:"pr_head,omitempty"`
+	Published bool   `json:"published,omitempty"`
+}
+
+// publishStatus reads the publish fields from journal lines already read for
+// one issue (or the whole ticket's).
+func publishStatus(lines []journal.Line) IssueStatus {
+	var s IssueStatus
 	for _, l := range lines {
 		switch l.Event {
 		case journal.EventPrBody:
@@ -103,6 +161,7 @@ func ReadStatus(st *store.Store, ticket string) (Status, error) {
 		case journal.EventPr:
 			if l.URL != "" {
 				s.PR = l.URL
+				s.PRHead = l.Commit
 				if l.Repo != "" {
 					if s.PRs == nil {
 						s.PRs = map[string]string{}
@@ -114,5 +173,5 @@ func ReadStatus(st *store.Store, ticket string) (Status, error) {
 			s.Published = true
 		}
 	}
-	return s, nil
+	return s
 }

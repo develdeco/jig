@@ -73,6 +73,9 @@ type Deps struct {
 	// says so. nil reads none, so every pull request goes into its repo's
 	// target.
 	Stack func(ticket string) (stack.Plan, error)
+	// StackFor is Stack for one issue of a shared task (stack.ReadFor): the
+	// plan a publish into that issue's branch uses. nil reads Stack's.
+	StackFor func(ticket, issue string) (stack.Plan, error)
 }
 
 // publishHost is the host d hands Publish for the repo it ships: d.Host when
