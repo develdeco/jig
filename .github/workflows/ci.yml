@@ -44,8 +44,8 @@ jobs:
   # schedule, a dispatch, a release's call - runs everything on all three.
   # The Windows legs take 15 to 18 minutes, Linux and macOS 2 to 4, so a
   # Windows-only failure is found on main within the half hour after its
-  # merge and fixed forward. lint/workflow_test.go runs this job's step with synthetic
-  # changes.
+  # merge and fixed forward. lint/workflow_test.go runs this job's step with
+  # synthetic changes.
   plan:
     runs-on: ubuntu-latest
     permissions:
