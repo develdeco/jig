@@ -209,6 +209,37 @@ func TestIssueRunLandsNameWhatMustLandFirst(t *testing.T) {
 	}
 }
 
+// TestIssueRunSkill: the chart skill's core stays under its cap with the
+// pointer to the reference, `jig skill chart issue` serves the model chart's
+// run, and the land skill says a running session goes on after a landing.
+func TestIssueRunSkill(t *testing.T) {
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	core, code := runMain(t, e, "", "skill", "chart")
+	if code != 0 || len(core) >= 6000 || !strings.Contains(core, "jig skill chart issue") || !strings.Contains(core, "Do not wait for a merge") {
+		t.Errorf("jig skill chart: exit %d, %d bytes, want under 6000 with the pointer to the issue reference and the legacy rule", code, len(core))
+	}
+	ref, code := runMain(t, e, "", "skill", "chart", "issue")
+	if code != 0 {
+		t.Fatalf("jig skill chart issue: exit %d\n%s", code, ref)
+	}
+	for _, want := range []string{"CHART_WAITS_LAND", "Land <T>", "jig land <T>", "merged on the host, not recorded", "`publish`", "jig verify <issue> --final", "LAND_SUITE_FAILED", "Never answer a \"Land X\"", "jig publish <issue> --yes"} {
+		if !strings.Contains(ref, want) {
+			t.Errorf("jig skill chart issue lacks %q", want)
+		}
+	}
+	if !strings.Contains(ref, "never both at once") {
+		t.Error("jig skill chart issue does not say several issues run one after another")
+	}
+	if strings.Contains(ref+core, "—") {
+		t.Error("the chart skill or its issue reference holds an em dash")
+	}
+	landSkill, _ := runMain(t, e, "", "skill", "land")
+	if !strings.Contains(landSkill, "jig skill chart issue") {
+		t.Errorf("jig skill land does not point a running session to the issue run:\n%s", landSkill)
+	}
+}
+
 // TestIssueRunNamesTheSameWordsAsLand: the suite codes and the container
 // states the phase package spells are the words internal/land says.
 func TestIssueRunNamesTheSameWordsAsLand(t *testing.T) {

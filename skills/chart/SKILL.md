@@ -5,7 +5,7 @@ description: Runs a chart's tickets from the main session - every brief first, t
 
 # chart
 
-Run `jig next <chart>` (several tickets: `--tickets A,B`; their chart is in `jig next`'s `charts`). If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket: `jig graduate <chart>` first. The standing is derived: re-read it.
+Run `jig next <chart>` (or `jig next <issue>` for an issue's chart; several tickets: `--tickets A,B`; their chart is in `jig next`'s `charts`). If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket: `jig graduate <chart>` first. The standing is derived: re-read it.
 
 Three prompts make a chart run: one aimed at a chart or some of its tickets ("Take A and B to PR", "Continue A and B"), a yes to intake's confirm question, intake's explicit launch. One ticket alone: run it alone.
 
@@ -46,6 +46,8 @@ Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the 
 ## Ends
 
 After each wave re-read `jig next <chart>` (same `--tickets`) and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request or unnamed ticket (`ends`), and that `prompt` resumes the same tickets. Do not wait for a merge. Say the `spend` line.
+
+When `jig next` shows `lands`, `publish` or an `issue`, the chart plans an issue: read `jig skill chart issue`. Its run stops at each landing and goes on after `Land X`.
 
 ## Never
 
