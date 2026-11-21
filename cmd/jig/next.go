@@ -261,23 +261,36 @@ func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
 }
 
 // notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
-// multi-task: no phase, no ready table and no prompt.
-func (n nextTicket) notATaskBlocks() []string {
-	pairs := [][2]string{{"ticket", n.Ticket}}
-	if n.Title != "" {
-		pairs = append(pairs, [2]string{"title", n.Title})
+// multi-task: no phase, no ready table and no prompt. `jig status <ticket>`
+// prints the same under its own shape: top-level ticket: and state: lines, which
+// the screens of the TUI read.
+func (n nextTicket) notATaskBlocks(verb string) []string {
+	var blocks []string
+	if verb == "status" {
+		blocks = []string{"ticket: " + n.Ticket, "state: " + n.State, "kind: " + n.Kind}
+		if n.Chart != "" {
+			blocks = append(blocks, "chart: "+n.Chart)
+		}
+		if len(n.Issues) > 0 {
+			blocks = append(blocks, "issue: "+strings.Join(n.Issues, ", "))
+		}
+	} else {
+		pairs := [][2]string{{"ticket", n.Ticket}}
+		if n.Title != "" {
+			pairs = append(pairs, [2]string{"title", n.Title})
+		}
+		pairs = append(pairs, [2]string{"state", n.State}, [2]string{"kind", n.Kind})
+		if n.Parent != "" {
+			pairs = append(pairs, [2]string{"parent", n.Parent})
+		}
+		if n.Chart != "" {
+			pairs = append(pairs, [2]string{"chart", n.Chart})
+		}
+		if len(n.Issues) > 0 {
+			pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
+		}
+		blocks = []string{axi.KV("next", pairs)}
 	}
-	pairs = append(pairs, [2]string{"state", n.State}, [2]string{"kind", n.Kind})
-	if n.Parent != "" {
-		pairs = append(pairs, [2]string{"parent", n.Parent})
-	}
-	if n.Chart != "" {
-		pairs = append(pairs, [2]string{"chart", n.Chart})
-	}
-	if len(n.Issues) > 0 {
-		pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
-	}
-	blocks := []string{axi.KV("next", pairs)}
 	if len(n.Children) > 0 {
 		var rows [][]string
 		for _, c := range n.Children {
@@ -650,7 +663,7 @@ func distributionAdvice(all []nextBatch) []string {
 
 func (n nextTicket) blocks(topology bool) []string {
 	if n.Kind != "" {
-		return n.notATaskBlocks()
+		return n.notATaskBlocks("next")
 	}
 	pairs := [][2]string{{"ticket", n.Ticket}}
 	if n.Title != "" {

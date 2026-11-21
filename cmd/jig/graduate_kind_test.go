@@ -115,6 +115,12 @@ func TestKindNextListsNoIssueOrMultiTaskAsReady(t *testing.T) {
 			t.Errorf("jig %s DEMO-2: exit %d\n%s", verb, code, out)
 		}
 	}
+	// jig status keeps its shape for the screens that read it: top-level ticket:
+	// and state: lines, and no next: block.
+	_, out = jig("status", "DEMO-2")
+	if !strings.HasPrefix(strings.ReplaceAll(out, "\r\n", "\n"), "ticket: DEMO-2\nstate: multi-task\n") || strings.Contains(out, "next:") {
+		t.Errorf("jig status DEMO-2 is not in status shape:\n%s", out)
+	}
 	code, out = jig("next", "DEMO-1")
 	if code != 0 || !strings.Contains(out, "chart: plan") || !strings.Contains(out, "DEMO-2") {
 		t.Errorf("jig next DEMO-1: exit %d\n%s", code, out)

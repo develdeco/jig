@@ -83,7 +83,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 			if err != nil {
 				return renderErr(stdout, err)
 			}
-			axi.Render(stdout, nextNotATask(st, data, k).notATaskBlocks()...)
+			axi.Render(stdout, nextNotATask(st, data, k).notATaskBlocks("status")...)
 			return 0
 		}
 	}
