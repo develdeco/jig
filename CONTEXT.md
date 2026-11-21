@@ -63,7 +63,7 @@ committed and pushed with it) and never read back. Today's one mirror projects e
 issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,
-reported and overwritten with the store's value at the next sync.
+reported and overwritten with the store's value at the next sync. A chart with an `issue:` has no issue of its own: its issue ticket is mirrored always, the tasks it lists only when the project's `trackers: github: tasks:` is true (each a full issue opening with a `Part of #n` line), and the plan is a comment posted on the issue whenever what it shows changes, never an edit.
 _Avoid_: tracker as the source of tickets
 
 **Tracker tree**:

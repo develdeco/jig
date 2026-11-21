@@ -177,6 +177,11 @@ func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 	}
 }
 
+func (w *tasksWorld) record(what string) githubRecord {
+	w.t.Helper()
+	return readTestRecord(w.t, treeRecordPath(w.t, w.st, what))
+}
+
 func countClosed(c *fakeClient) int {
 	n := 0
 	for _, is := range c.issues {

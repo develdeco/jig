@@ -147,6 +147,9 @@ type SyncReport struct {
 	// this sync no longer carries because trackers: github: tasks: is off:
 	// their issues are left open and untouched.
 	TasksNotCarried int
+	// PlanComments is every plan comment Sync posted on an issue ticket's
+	// issue, previewed the same way in a dry run.
+	PlanComments []PlanComment
 	// MovedRecords is every record this sync moved from a ticket's or chart's
 	// own folder into the tracker tree, and every record it moved from beside
 	// its link into its entry's folder. Empty in a dry run, which moves
@@ -464,6 +467,9 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 	}
 	if err := placeBoardItems(ctx, d.Store, d.Cfg, client, items, statusByTicket, prsByTicket, skip, &report, opts.DryRun); err != nil {
 		return report, items, fmt.Errorf("mirror: place board items: %w", err)
+	}
+	if err := postPlanComments(ctx, d.Store, d.Cfg, client, items, skip, terms, public, opts.DryRun, &report); err != nil {
+		return report, items, fmt.Errorf("mirror: post plan comments: %w", err)
 	}
 	if !opts.DryRun {
 		if _, err := d.Store.RebuildTrackerLinks(); err != nil {
