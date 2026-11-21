@@ -154,6 +154,9 @@ type nextIssueRow struct {
 	PR     string `json:"pr"`
 	State  string `json:"state"`
 	Stale  string `json:"stale,omitempty"`
+	// Land says where the issue's landing stands: landed, merged on the host and
+	// not recorded, or waits for a merge; "" before the task publishes into it.
+	Land string `json:"land,omitempty"`
 }
 
 // The states of an issue's pull request of a shared task.
@@ -213,6 +216,7 @@ func sharedRows(st *store.Store, input stack.Input, merges mergeSource, id strin
 			if url != "" {
 				any = true
 				row.PR, row.State = url, prState(merge, r.Repo, len(repos) > 1)
+				row.Land = landWords(st, id, issue, row.State)
 				if row.State == issueMerged && head != "" && r.Head != "" && head != r.Head {
 					row.Stale = fmt.Sprintf("stale: merged at %s, the task is at %s", shortSHA(head), shortSHA(r.Head))
 				}
@@ -289,6 +293,16 @@ func sharedHelp(ticket string, rows []nextIssueRow, unpublished []string) []stri
 	var help []string
 	for _, issue := range unpublished {
 		help = append(help, fmt.Sprintf("run `jig publish %s --issue %s` to open its pull request into %s", ticket, issue, issue))
+	}
+	// One landing for each issue that has published and not landed: the
+	// person's word lands it, one issue at a time.
+	landIssues := map[string]bool{}
+	for _, r := range rows {
+		if r.Land == "" || r.Land == landedWords || landIssues[r.Issue] {
+			continue
+		}
+		landIssues[r.Issue] = true
+		help = append(help, fmt.Sprintf("%s into %s %s: at the person's word run `jig land %s --issue %s`", ticket, r.Issue, r.Land, ticket, r.Issue))
 	}
 	staleIssues := map[string]bool{}
 	for _, r := range rows {

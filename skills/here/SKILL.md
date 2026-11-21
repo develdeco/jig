@@ -47,7 +47,7 @@ Read `jig skill here runs` when `jig next` ends with an overlap table.
 
 ## Phases and prompts
 
-A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`). `jig next <T>` names the one it is at (`phase:`), whether it can start (`ready:`) and the prompt that asks for it (`prompt:`, such as "Build SHOP-1"). Each phase's skill starts with `jig next <T>` and stops if the phase is not its own; it ends by relaying the `prompt:` to the person, who decides when the next phase runs. When you only oriented, relay that `prompt:` and stop.
+A ticket moves through four phases, each with a skill: brief (`intake`), build (`build`), review (`review`) and publish (`publish`); a fifth, land (`land`), runs only at the person's word. `jig next <T>` names the one it is at (`phase:`), whether it can start (`ready:`) and the prompt that asks for it (`prompt:`, such as "Build SHOP-1"). Each phase's skill starts with `jig next <T>` and stops if the phase is not its own; it ends by relaying the `prompt:` to the person, who decides when the next phase runs. When you only oriented, relay that `prompt:` and stop.
 
 A chart verdict ends a start-to-finish run (a chart is not a ticket); what follows depends on the prompt's intent to launch: `jig skill intake chart-verdict`.
 

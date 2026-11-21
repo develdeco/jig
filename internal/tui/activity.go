@@ -219,7 +219,7 @@ type subLabels map[string]string
 func (m *Model) subLabelsOf(t *ticket) subLabels {
 	out := subLabels{}
 	d := m.phaseOf(t)
-	for _, p := range d.Phases {
+	for _, p := range d.Work() {
 		for _, s := range p.Subs {
 			out[s.Key] = s.Label
 		}

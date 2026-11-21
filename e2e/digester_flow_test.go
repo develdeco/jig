@@ -180,7 +180,7 @@ func TestDigesterFlow(t *testing.T) {
 	f.step("2. the brief is validated, and approved with it")
 	// Nobody approved the brief: planning is where the ticket stands, and the
 	// build waits for the approval.
-	expectPhase(t, env, fx.RepoDir, ticket, "a drafted brief", "brief", true, "", "Plan "+ticket, "cppp")
+	expectPhase(t, env, fx.RepoDir, ticket, "a drafted brief", "brief", true, "", "Plan "+ticket, "cpppp")
 	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "build").Phase.For; ask == nil || ask.Ready || ask.Code != "PHASE_BRIEF_NOT_APPROVED" || !strings.Contains(ask.Reason, "is not approved") {
 		t.Errorf("--for build on a drafted brief: %+v, want PHASE_BRIEF_NOT_APPROVED", ask)
 	}
@@ -192,7 +192,7 @@ func TestDigesterFlow(t *testing.T) {
 	if err != nil || !ok || approval.BriefSHA256 == "" {
 		t.Fatalf("approval = %+v, %v, %v, want the brief's hash recorded", approval, ok, err)
 	}
-	expectPhase(t, env, fx.RepoDir, ticket, "an approved brief", "build", true, "", "Build "+ticket, "dcpp")
+	expectPhase(t, env, fx.RepoDir, ticket, "an approved brief", "build", true, "", "Build "+ticket, "dcppp")
 	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "brief").Phase.For; ask == nil || !ask.Ready || !strings.HasPrefix(ask.Warning, "brief is done (approved by ") || !strings.HasSuffix(ask.Warning, "; prompt: Build "+ticket) {
 		t.Errorf("--for brief once approved: %+v, want a warning with the prompt that moves on", ask)
 	}
@@ -224,7 +224,7 @@ func TestDigesterFlow(t *testing.T) {
 		t.Fatalf("jig claim output lacks the claim:\n%s", claim.Stdout)
 	}
 	// A slice is claimed: still the build, and review waits for the slices.
-	expectPhase(t, env, fx.RepoDir, ticket, "a build under way", "build", true, "", "Build "+ticket, "dcpp")
+	expectPhase(t, env, fx.RepoDir, ticket, "a build under way", "build", true, "", "Build "+ticket, "dcppp")
 	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "review").Phase.For; ask == nil || ask.Ready || ask.Code != "PHASE_NOT_BUILT" {
 		t.Errorf("--for review while slices are short of green: %+v, want PHASE_NOT_BUILT", ask)
 	}
@@ -359,7 +359,7 @@ func TestDigesterFlow(t *testing.T) {
 			t.Errorf("the builder's jig next lacks %q:\n%s", want, nextText.Stdout)
 		}
 	}
-	expectPhase(t, env, fx.RepoDir, ticket, "a build done", "review", true, "", "Review "+ticket, "ddcp")
+	expectPhase(t, env, fx.RepoDir, ticket, "a build done", "review", true, "", "Review "+ticket, "ddcpp")
 	if ask := phaseAsked(t, env, fx.RepoDir, ticket, "build").Phase.For; ask == nil || !ask.Ready || ask.Code != "" || !strings.HasPrefix(ask.Warning, "build is done (") || !strings.HasSuffix(ask.Warning, "; prompt: Review "+ticket) {
 		t.Errorf("--for build once built: %+v, want a warning, not a refusal", ask)
 	}
@@ -382,7 +382,7 @@ func TestDigesterFlow(t *testing.T) {
 	}
 	// The round is open: the phase waits for its reviewer, whose work `jig next`
 	// has no advice for, and an unattended session has no review left to open.
-	open := expectPhase(t, env, fx.RepoDir, ticket, "a round open", "review", false, "PHASE_ROUND_OPEN", "Review "+ticket, "ddcp")
+	open := expectPhase(t, env, fx.RepoDir, ticket, "a round open", "review", false, "PHASE_ROUND_OPEN", "Review "+ticket, "ddcpp")
 	if !strings.Contains(open.Phase.Reason, "round 1") {
 		t.Errorf("the open round's reason = %q, want it to name round 1", open.Phase.Reason)
 	}
@@ -406,7 +406,7 @@ func TestDigesterFlow(t *testing.T) {
 	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
 		t.Errorf("Stop with a clean round no person approved = exit %d, %q, want silence: publishing waits for the person", res.Code, res.Stdout)
 	}
-	expectPhase(t, env, fx.RepoDir, ticket, "a clean round", "publish", true, "", "Publish "+ticket, "dddc")
+	expectPhase(t, env, fx.RepoDir, ticket, "a clean round", "publish", true, "", "Publish "+ticket, "dddcp")
 
 	f.step("13. the pull request: its body is rendered, a person approves, the harness pushes and opens it, jig records it")
 	env, ghLog := githubRemote(t, fx, env)
@@ -444,7 +444,7 @@ func TestDigesterFlow(t *testing.T) {
 	if res := h.Hook("Stop", map[string]any{"stop_hook_active": false}); res.Code != 0 || res.Stdout != "" {
 		t.Errorf("Stop once the ticket is published = exit %d, %q, want silence", res.Code, res.Stdout)
 	}
-	expectPhase(t, env, fx.RepoDir, ticket, "a published ticket", "publish", false, "PHASE_DONE", "", "dddd")
+	expectPhase(t, env, fx.RepoDir, ticket, "a published ticket", "land", false, "PHASE_DONE", "Land "+ticket, "ddddc")
 	if got := originRefOrEmpty(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
 		t.Errorf("origin's %s = %s, want the reviewed head %s", branch, got, head)
 	}

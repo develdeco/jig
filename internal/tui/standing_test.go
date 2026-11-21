@@ -150,7 +150,7 @@ func TestTheScreensStandWhereInternalPhaseSaysTheTicketStands(t *testing.T) {
 			t.Errorf("%s: the screens stand at %s (ready %v), phase.Derive at %s (ready %v)", tc.name, got.Current, got.Ready, d.Current, d.Ready)
 		}
 		steps := m.steps(tk)
-		for i, p := range d.Phases {
+		for i, p := range d.Work() {
 			if got.States[i] != p.State {
 				t.Errorf("%s: the screens have %s %s, phase.Derive %s", tc.name, p.Name, got.States[i], p.State)
 			}

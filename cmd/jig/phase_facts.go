@@ -43,6 +43,7 @@ func derivePhaseFor(st *store.Store, ticket string, merges mergeSource, issue st
 	if err != nil {
 		return phase.Ticket{}, err
 	}
+	f.MergedOnHost = mergedOnHost(merges, f, lines, issue)
 	return phase.Derive(f, lines), nil
 }
 
@@ -62,6 +63,7 @@ func derivePhaseStackedFor(st *store.Store, ticket string, merges mergeSource, p
 		return phase.Ticket{}, err
 	}
 	f.Restacks = restackAsks(plan)
+	f.MergedOnHost = mergedOnHost(merges, f, lines, issue)
 	return phase.Derive(f, lines), nil
 }
 
@@ -358,6 +360,8 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 		}
 		return fmt.Sprintf("%s is published but behind: run %s, then `jig publish %s`, which pushes the merge and points the open PR at its base%s",
 			ticket, strings.Join(asks, " and "), ticket, prompt)
+	case t.Code == phase.CodeDone && t.Current == phase.Land:
+		return landAdvice(t, ticket, nil)
 	case t.Code == phase.CodeDone:
 		return ticket + " is published: run `jig next` to see the tickets that are left"
 	case t.Current == phase.Brief && awaitsApproval(t):

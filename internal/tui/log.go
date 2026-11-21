@@ -59,7 +59,7 @@ const callAfter = 2 * time.Second
 func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 	now := m.now()
 	var ws []moveWindow
-	for step, p := range d.Phases {
+	for step, p := range d.Work() {
 		for _, s := range p.Subs {
 			var tr subTrack
 			end := now
@@ -206,12 +206,12 @@ func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
 // currentOf is the step under way in d: the first not done, the last when all
 // are.
 func currentOf(d phase.Ticket) int {
-	for i, p := range d.Phases {
+	for i, p := range d.Work() {
 		if p.State != phase.StateDone {
 			return i
 		}
 	}
-	return len(d.Phases) - 1
+	return len(d.Work()) - 1
 }
 
 // wroteLine is the place of the line call l wrote, when it wrote one: the

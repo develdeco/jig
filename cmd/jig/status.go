@@ -687,6 +687,11 @@ func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (stri
 	if err != nil {
 		return "", err
 	}
+	if t.Current == phase.Land && t.Code == phase.CodeDone {
+		if issues := sharedIssues(st, ticket); issues != nil {
+			return landAdvice(t, ticket, issues), nil
+		}
+	}
 	return phaseAdvice(t, ticket), nil
 }
 

@@ -84,7 +84,7 @@ func TestHelperSkillsAreCarriedAndInTheSets(t *testing.T) {
 			t.Errorf("helper %s is in the project set", name)
 		}
 	}
-	if got, want := projectSkillNames(), []string{"here", "intake", "chart", "build", "review", "publish"}; !slices.Equal(got, want) {
+	if got, want := projectSkillNames(), []string{"here", "intake", "chart", "build", "review", "publish", "land"}; !slices.Equal(got, want) {
 		t.Errorf("project set = %v, want %v", got, want)
 	}
 	if got, want := helperSkillNames(), []string{"jig-init", "jig-attach"}; !slices.Equal(got, want) {

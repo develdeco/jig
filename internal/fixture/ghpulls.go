@@ -24,6 +24,11 @@ type GhPull struct {
 	Owner  string
 	Head   string
 	Base   string
+	// Mergeable is what the host says of mergeability: "MERGEABLE" (the
+	// default), "CONFLICTING" or "UNKNOWN". MergeCommit is the commit of a
+	// merged pull request's merge, "" for none.
+	Mergeable   string
+	MergeCommit string
 }
 
 // GhPulls is the JSON the fake gh lists for GH_STUB_PULLS: pulls, in the
@@ -46,6 +51,12 @@ func GhPulls(t testing.TB, pulls ...GhPull) string {
 			"state":    state,
 			"head":     map[string]any{"ref": p.Head, "user": map[string]any{"login": p.Owner}},
 			"base":     map[string]any{"ref": p.Base},
+		}
+		if p.Mergeable != "" {
+			row["mergeable"] = p.Mergeable
+		}
+		if p.MergeCommit != "" {
+			row["merge_commit_sha"] = p.MergeCommit
 		}
 		if p.Merged {
 			row["merged_at"] = "2026-01-01T00:00:00Z"

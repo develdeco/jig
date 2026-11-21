@@ -56,7 +56,7 @@ Read `jig skill publish stacked` when `jig next` says `state: behind`.
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person (none once the pull request is recorded) and stop. Publish is the last phase: no skill follows it, even in a start-to-finish run.
+Once the pull request is recorded, `jig next <T>` names `Land <T>`: tell the person it is theirs to say (`jig skill land`), never run it yourself, and stop. No skill follows publish in a start-to-finish run.
 
 ## Never
 

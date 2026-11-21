@@ -1,5 +1,5 @@
-// Package phase derives where a ticket stands: which of its four phases
-// (brief, build, review and publish) is current, whether that phase can start
+// Package phase derives where a ticket stands: which of its phases
+// (brief, build, review, publish and land) is current, whether that phase can start
 // now, why not, the prompt that starts it, and the sub-steps of each phase.
 // Every command that advises the next step reads this one derivation, so a
 // session, a person and the TUI get the same answer.
@@ -25,7 +25,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// Name is one of the four phases of a ticket.
+// Name is one of the phases of a ticket.
 type Name string
 
 // The phases, in the order a ticket goes through them.
@@ -34,10 +34,18 @@ const (
 	Build   Name = "build"
 	Review  Name = "review"
 	Publish Name = "publish"
+	// Land is the fifth phase: the merge of the published pull requests, made by
+	// the session at the person's word and recorded by `jig land` (ADR 0061).
+	Land Name = "land"
 )
 
 // Names are the phases in order.
-var Names = [4]Name{Brief, Build, Review, Publish}
+var Names = [5]Name{Brief, Build, Review, Publish, Land}
+
+// Work is how many of the phases are the work of a ticket, brief to publish:
+// the TUI draws these, and a ticket's Current is among them until it is
+// published and not landed.
+const Work = 4
 
 // Parse is the phase a word names, and false for a word that names none.
 func Parse(s string) (Name, bool) {
@@ -71,6 +79,8 @@ func Prompt(p Name, ticket string) string {
 		return "Review " + ticket
 	case Publish:
 		return "Publish " + ticket
+	case Land:
+		return "Land " + ticket
 	}
 	return ""
 }
@@ -307,6 +317,14 @@ type Facts struct {
 	// done, and the ticket's own standing says so. The brief, build and review
 	// phases stay done, since the merge is part of the work that follows them.
 	Restacks []Restack
+	// Landed says every pull request the ticket published has a landed line,
+	// as the caller read them; Derive also reads the journal lines (LandedIn),
+	// so a caller that passes the lines need not set it.
+	Landed bool
+	// MergedOnHost says the host reports the ticket's pull requests merged: the
+	// caller that asked the host sets it. A published ticket with that and no
+	// landed line is merged on the host, not recorded.
+	MergedOnHost bool
 
 	// SessionName words a session id wherever the answer names a session (who
 	// took a round, who holds a slice). role is the part the session plays in
@@ -328,8 +346,11 @@ type Facts struct {
 
 // Ticket is where a ticket stands.
 type Ticket struct {
-	Phases [4]Phase
-	// Current is the first phase not done, the last when all are.
+	Phases [5]Phase
+	// Current is the first phase not done. When every phase is done it is
+	// Publish, the last of the work (Work): a landed ticket reads as a published
+	// one always did. A published ticket that has not landed is at Land, with
+	// the code PHASE_DONE as before and the prompt `Land T`.
 	Current Name
 	// Ready is whether Current can start now.
 	Ready bool
@@ -403,7 +424,7 @@ func (t Ticket) For(p Name) Asked {
 	i := p.index()
 	switch {
 	case i < 0:
-		a.Reason = fmt.Sprintf("%q is none of the phases (brief, build, review, publish)", string(p))
+		a.Reason = fmt.Sprintf("%q is none of the phases (brief, build, review, publish, land)", string(p))
 	case t.d != nil && t.d.f.Closed != "":
 		a.Code, a.Reason = CodeClosed, t.d.closedReason()
 	case t.Phases[i].State == StateDone:
@@ -412,6 +433,8 @@ func (t Ticket) For(p Name) Asked {
 		if t.Prompt != "" {
 			a.Warning += "; prompt: " + t.Prompt
 		}
+	case p == Land && t.Current == Land:
+		a.Ready = true
 	case p == t.Current:
 		a.Ready, a.Code, a.Reason = t.Ready, t.Code, t.Reason
 	default:
@@ -514,6 +537,9 @@ type digest struct {
 	notes      []Ask
 	slices     []sliceView
 	pub        publishView
+	// landed and hasPR are what land read of the lines: every pull request has
+	// a landed line, and some repo has a pull request.
+	landed, hasPR bool
 }
 
 // OpenRoundIn is the round the journal says is open: the latest gate-open line
@@ -590,9 +616,11 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	publishP, own := d.publish(reviewDone)
 	publishDone := pub && !d.owed() || own && reviewDone
 
-	t := Ticket{Phases: [4]Phase{briefP, buildP, reviewP, publishP}, d: d}
-	done := [4]bool{briefDone, buildDone, reviewDone, publishDone}
-	cur := len(done) - 1
+	landP, landDone := d.land(publishDone)
+
+	t := Ticket{Phases: [5]Phase{briefP, buildP, reviewP, publishP, landP}, d: d}
+	done := [5]bool{briefDone, buildDone, reviewDone, publishDone, landDone}
+	cur := Work - 1
 	for i, dn := range done {
 		if !dn {
 			cur = i
@@ -1391,6 +1419,9 @@ func (d *digest) ready(t *Ticket) {
 		// Published, and owed a merge: the publish is ready again.
 	case f.Published:
 		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeDone, f.Ticket+" is published", ""
+		if t.Current == Land {
+			t.Prompt = Prompt(Land, f.Ticket)
+		}
 	case t.Current == Build && len(f.Blockers) > 0:
 		reasons := make([]string, len(f.Blockers))
 		for i, b := range f.Blockers {

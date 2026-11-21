@@ -162,7 +162,10 @@ func TestDerive(t *testing.T) {
 // current at it, pending after, and all done for a published ticket.
 func stateWord(cur Name, got Ticket) string {
 	if got.Code == CodeDone {
-		return "dddd"
+		if got.Current == Land {
+			return "ddddc"
+		}
+		return "ddddd"
 	}
 	out := ""
 	for _, n := range Names {
@@ -962,7 +965,7 @@ func TestDerivePublishedWithRestacksIsBehind(t *testing.T) {
 
 	published := allGreen()
 	published.Published = true
-	if got := Derive(published, lines); got.Behind() || got.Code != CodeDone || got.Ready || got.Prompt != "" || got.Current != Publish || got.Restacks() != nil {
+	if got := Derive(published, append(lines, ln(journal.EventLanded))); got.Behind() || got.Code != CodeDone || got.Ready || got.Prompt != "" || got.Current != Publish || got.Restacks() != nil {
 		t.Errorf("published with nothing owed: behind %v code %q ready %v prompt %q restacks %v, want done", got.Behind(), got.Code, got.Ready, got.Prompt, got.Restacks())
 	}
 

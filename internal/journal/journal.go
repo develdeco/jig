@@ -150,10 +150,13 @@ type Line struct {
 	// repo leaves it out.
 	Repo string `json:"repo,omitempty"`
 	// Into is the container (the issue or multi-task) a pr-body,
-	// publish-approved, pr or publish-done line is for: the one whose branch
+	// publish-approved, pr, publish-done or landed line is for: the one whose branch
 	// the pull request goes into. A ticket that has a container writes it; a
 	// line with none is read as the ticket's one container (ReadFor).
 	Into string `json:"into,omitempty"`
+	// Base is the branch a landed line's pull request merged into, as the host
+	// says.
+	Base string `json:"base,omitempty"`
 	// Ref is the id of the subject the line is about: a question (q-001),
 	// a review finding (r1-f2) or a note's fingerprint.
 	Ref string `json:"ref,omitempty"`
@@ -385,7 +388,7 @@ func IsPublishEvent(event string) bool {
 }
 
 // ReadFor is Read as the issue's container sees it: every line, except that,
-// for a ticket that two issues list (a shared task), a publish line of another
+// for a ticket that two issues list (a shared task), a publish or landed line of another
 // issue is dropped. A publish line that names no Into is the one container's of
 // a ticket that has one, so a journal written before a ticket could be shared
 // reads as it did; a shared task has no such one, and its line with none is of
@@ -401,7 +404,7 @@ func ReadFor(st *store.Store, ticket, issue string) ([]Line, error) {
 	shared, known := false, false
 	kept := lines[:0:0]
 	for _, l := range lines {
-		if IsPublishEvent(l.Event) && l.Into != issue {
+		if (IsPublishEvent(l.Event) || l.Event == EventLanded) && l.Into != issue {
 			if !known {
 				known = true
 				if rec, err := st.ReadTicket(ticket); err == nil {

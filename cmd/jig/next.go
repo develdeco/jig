@@ -31,7 +31,7 @@ func init() {
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
-			{"for", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already", false},
+			{"for", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already", false},
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
 		}, false},
@@ -66,7 +66,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	topology := fs.Bool("topology", false, "also print every slice of the ticket with its repo, wave and blockers")
-	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already")
+	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already")
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
@@ -375,7 +375,7 @@ func parseAskedPhase(word, ticket string) (phase.Name, error) {
 	p, ok := phase.Parse(word)
 	switch {
 	case !ok:
-		return "", &axi.Error{Msg: fmt.Sprintf("--for %q is none of the phases", word), Code: "VALIDATION_ERROR", Help: []string{"The phases are brief, build, review and publish"}}
+		return "", &axi.Error{Msg: fmt.Sprintf("--for %q is none of the phases", word), Code: "VALIDATION_ERROR", Help: []string{"The phases are brief, build, review, publish and land"}}
 	case ticket == "":
 		return "", &axi.Error{Msg: "--for asks about a ticket: name one", Code: "VALIDATION_ERROR"}
 	}
@@ -821,6 +821,9 @@ func (n nextTicket) help() []string {
 	case ready.StateClosed:
 		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
+		if t != nil && t.Current == phase.Land {
+			return []string{landAdvice(*t, n.Ticket, issuesOfRows(n.Shared))}
+		}
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
 	case stateBehind:
 		if help := n.behindHelp(); len(help) > 0 {
