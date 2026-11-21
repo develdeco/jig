@@ -136,6 +136,9 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 		}
 		facts.Entries = append(facts.Entries, ce)
 	}
+	if issue != "" {
+		layModel(st, cfg, mp, merges, issue, &facts)
+	}
 	return facts, nil
 }
 

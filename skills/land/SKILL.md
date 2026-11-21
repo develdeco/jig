@@ -39,7 +39,7 @@ An issue can be suggested to land after another (`jig depend <issue> --after <is
 
 ## Then
 
-Say what landed and what `jig land` names next, and stop. Do not land the next ticket unless the person said to.
+Say what landed and what `jig land` names next, and stop. Do not land the next ticket unless the person said to. A session that was running the issue (`jig skill chart issue`) re-reads `jig next <issue>` and goes on with what the landing freed; one that was not says the prompt and stops.
 
 ## Never
 

@@ -73,23 +73,9 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 	}
 	// What must land first: each rule, in order.
 	scene := Scene{Deps: d, Ticket: ticket, Rec: rec, Into: into}
-	var first []string
-	var firstInto string
-	var why []string
-	for _, rule := range Rules {
-		got, err := rule.Before(scene)
-		if err != nil {
-			return v, err
-		}
-		for _, b := range got {
-			if !containsString(first, b.Ticket) {
-				if len(first) == 0 {
-					firstInto = b.Into
-				}
-				first = append(first, b.Ticket)
-				why = append(why, b.Ticket+": "+b.Why)
-			}
-		}
+	first, firstInto, why, err := mustLandFirst(scene)
+	if err != nil {
+		return v, err
 	}
 	if len(first) > 0 {
 		return refuse(v, CodeWaits, fmt.Sprintf("%s waits for %s to land first (%s)", ticket, strings.Join(first, ", "), strings.Join(why, "; ")), first,
@@ -225,4 +211,42 @@ func mergeRow(d Deps, rm ready.RepoMerge, st repohost.Status, known bool, base, 
 		row.Resolve = fmt.Sprintf("the host reports it CONFLICTING: in the ticket's worktree run `git merge origin/%s`, resolve it, then `jig publish %s` (a merge resolved by hand is a delta for review)", row.Base, ticket)
 	}
 	return row
+}
+
+// mustLandFirst runs every rule of Rules over the scene: the tickets that must
+// land before it, in the order the rules found them, the container the first is
+// landed into, and each one's why.
+func mustLandFirst(scene Scene) (first []string, firstInto string, why []string, err error) {
+	for _, rule := range Rules {
+		got, err := rule.Before(scene)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		for _, b := range got {
+			if !containsString(first, b.Ticket) {
+				if len(first) == 0 {
+					firstInto = b.Into
+				}
+				first = append(first, b.Ticket)
+				why = append(why, b.Ticket+": "+b.Why)
+			}
+		}
+	}
+	return first, firstInto, why, nil
+}
+
+// LandFirst are the tickets that must land before ticket may, by Rules alone:
+// no host is asked and nothing about ticket's own pull request is judged. issue
+// is the issue a shared task lands into, "" for any other ticket.
+func LandFirst(d Deps, ticket, issue string) ([]string, error) {
+	rec, err := d.Store.ReadTicket(ticket)
+	if err != nil {
+		return nil, err
+	}
+	into, err := intoOf(d.Store, ticket, rec, issue)
+	if err != nil {
+		return nil, err
+	}
+	first, _, _, err := mustLandFirst(Scene{Deps: d, Ticket: ticket, Rec: rec, Into: into})
+	return first, err
 }

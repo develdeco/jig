@@ -87,8 +87,15 @@ func TestSharedChartStanding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.Ready || b.Code != phase.CodeChartWaitsMerge || len(b.Ends) != 1 || b.Ends[0].ID != "SHOP-5" || b.Ends[0].Because.Ticket != "SHOP-3" || len(b.Ends[0].Because.PRs) != 1 || b.Ends[0].Because.PRs[0].URL != sharedPR2 {
+	if b.Ready || b.Code != phase.CodeChartWaitsLand || len(b.Ends) != 1 || b.Ends[0].ID != "SHOP-5" || b.Ends[0].Because.Ticket != "SHOP-3" || len(b.Ends[0].Because.PRs) != 1 || b.Ends[0].Because.PRs[0].URL != sharedPR2 {
 		t.Errorf("chart b: ready %v code %q ends %+v, want SHOP-5 waiting on the task's pull request into SHOP-2", b.Ready, b.Code, b.Ends)
+	}
+	// The task two issues share is asked for per issue.
+	if len(b.Lands) != 1 || b.Lands[0].ID != "SHOP-3" || b.Lands[0].Prompt != "Land SHOP-3 --issue SHOP-2" {
+		t.Errorf("chart b: lands = %+v, want SHOP-3 landed with --issue SHOP-2", b.Lands)
+	}
+	if help := chartHelp(b); len(help) != 1 || !strings.HasPrefix(help[0], "Land SHOP-3 --issue SHOP-2 (or merge it on the host), then ask: ") {
+		t.Errorf("chart b: help = %v, want the landing with its issue", help)
 	}
 
 	for dependent, wantProblem := range map[string]bool{"SHOP-4": false, "SHOP-5": true} {

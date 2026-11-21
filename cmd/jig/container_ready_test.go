@@ -21,11 +21,19 @@ type containerReadyOut struct {
 func (r chartRig) containerReady(t *testing.T, id string) containerReadyOut {
 	t.Helper()
 	out, code := r.run(t, "next", id, "--json")
-	var n containerReadyOut
+	var n struct {
+		containerReadyOut
+		// An issue that has a chart answers its run: its own standing is the
+		// issue block.
+		Issue *containerReadyOut `json:"issue"`
+	}
 	if err := json.Unmarshal([]byte(out), &n); code != 0 || err != nil {
 		t.Fatalf("jig next %s --json: exit %d, %v\n%s", id, code, err, out)
 	}
-	return n
+	if n.Issue != nil {
+		return *n.Issue
+	}
+	return n.containerReadyOut
 }
 
 // TestContainerReadyNextSaysWaitingThenReady: `jig next` of a multi-task says

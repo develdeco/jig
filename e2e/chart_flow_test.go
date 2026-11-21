@@ -247,7 +247,7 @@ func TestChartFlow(t *testing.T) {
 		t.Errorf("ends = %+v, want %s waiting on %s's open pull request", c.Ends, id[3], id[1])
 	}
 	text = runJig(t, env, fx.RepoDir, "next", "c").Stdout
-	for _, want := range []string{"code: CHART_WAITS_MERGE", "waits[1]{ticket,blocker,kind,pr,state,fact}:", id[3] + "," + id[1] + `,merged,"` + pr + `",OPEN,`, "Merge " + pr + ", then ask: Continue c"} {
+	for _, want := range []string{"code: CHART_WAITS_MERGE", "waits[1]{ticket,blocker,kind,pr,state,fact}:", id[3] + "," + id[1] + `,merged,"` + pr + `",OPEN,`, "Land " + id[1] + " (or merge it on the host), then ask: Continue c"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("jig next c lacks %q:\n%s", want, text)
 		}
