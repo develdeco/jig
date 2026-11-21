@@ -1,5 +1,7 @@
 # A gate round and publish run no test, and a ticket's last run is the union of its slices' commands
 
+**Amended by [ADR 0063](0063-an-issue-runs-the-repos-suite-once-by-witnessing.md):** "CI is the only full suite" no longer holds for an issue: `jig verify <issue> --final` runs the repo's declared `suite` oracle once, at the tip of the issue's branch. A task's final run is unchanged.
+
 [ADR 0021](0021-the-gate-reuses-an-oracle-pass-on-the-same-tree.md) had a gate round run every manifest oracle in its own lease, cold, before a reviewer read a line, reusing a pass `jig verify` recorded on the same tree, or one a light delta away. [ADR 0052](0052-jig-witnesses-a-run-and-starts-none.md) moved the builder's run into the builder's own worktree and left jig starting none. The gate's pre-round suite then repeated, in a lease with cold caches, what each slice's builder had run and jig had witnessed, and the rules that existed only to make it cheaper (the reuse of a pass on the same tree, the light delta, the gate's own `gate-oracle` lines chained from round to round, the suite slot calls inside the gate) had no reason left.
 
 ## Decision

@@ -1,5 +1,7 @@
 # A repo with no declaration has no named oracle
 
+**Amended by [ADR 0063](0063-an-issue-runs-the-repos-suite-once-by-witnessing.md):** one oracle name, `suite`, now has a meaning for an issue: its one full run. It is read for an issue only and a repo with none declared still has none.
+
 [ADR 0027](0027-jigs-testing-method-and-what-a-project-owns.md) said a repo with no `.claude/jig.yaml` still works because jig fills in what it can: a `go.mod` gave it a `test` oracle (`go test ./...`) and a `package.json` gave it one oracle per script (`npm run <script>`). That was a guess per language. It covers two languages, each new one needs code in jig, and both guesses are whole suites. The agent that builds in a repo reads the repo and its instructions and finds the real test commands; jig adds nothing to gather them.
 
 ## Decision
