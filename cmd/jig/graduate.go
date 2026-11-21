@@ -585,6 +585,7 @@ func chartEntryProblems(st *store.Store, cfg project.Config, entries []store.Cha
 		}
 	}
 	out = append(out, chartKindProblems(st, chart, entries)...)
+	out = append(out, chartOwnContainerProblems(st, chart, entries)...)
 	return append(out, chartSharedProblems(st, chart, entries)...)
 }
 

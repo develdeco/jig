@@ -222,3 +222,45 @@ func checkNewChartIssue(st *store.Store, issue string) (string, error) {
 	}
 	return id, nil
 }
+
+// chartOwnContainerProblems is the blocked_by refs of a task entry that name
+// its own container: the multi-task it sits under or the chart's issue. A
+// container publishes only after its tasks have landed, so a task that waits for
+// it waits forever.
+func chartOwnContainerProblems(st *store.Store, chart string, entries []store.ChartEntry) []chartProblem {
+	issue, _ := st.ChartIssue(chart)
+	var out []chartProblem
+	for i, e := range entries {
+		if e.Kind == store.KindMultiTask {
+			continue
+		}
+		type container struct {
+			id    string
+			index int
+			what  string
+		}
+		var own []container
+		if issue != "" {
+			own = append(own, container{id: issue, what: "issue " + issue})
+		}
+		if e.Under != "" {
+			if j := underIndex(entries, e.Under); j >= 0 {
+				own = append(own, container{id: entries[j].ID, index: j + 1, what: fmt.Sprintf("multi-task (entry %d)", j+1)})
+			}
+		}
+		for _, r := range e.BlockedBy {
+			for _, c := range own {
+				named := false
+				if name, k, ok := parseRef(r.Ref); ok {
+					named = (name == "" || name == chart) && c.index != 0 && k == c.index
+				} else if id, err := st.ResolveTicket(r.Ref); err == nil && c.id != "" && id == c.id {
+					named = true
+				}
+				if named {
+					out = append(out, refProblem(chart, entries, i, r.Ref, "names the "+c.what+" this task is part of: it publishes only after its tasks have landed, so the wait never ends"))
+				}
+			}
+		}
+	}
+	return out
+}

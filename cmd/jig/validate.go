@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -482,6 +483,7 @@ func validateTicketRecord(st *store.Store, cfg project.Config, ticket string) ([
 	}
 	problems = append(problems, validateTicketDeps(st, ticket)...)
 	problems = append(problems, validateTicketParent(st, ticket)...)
+	problems = append(problems, validateTicketOwnContainer(st, ticket)...)
 	problems = append(problems, validateTicketClosed(st, ticket)...)
 	problems = append(problems, validateUpstreamEdges(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
@@ -523,6 +525,32 @@ func validateNotATask(st *store.Store, cfg project.Config, ticket, kind string, 
 		axi.Help(fmt.Sprintf("A %s has no brief or slices: `jig next %s` shows its tasks", kind, ticket)),
 	)
 	return 0
+}
+
+// validateTicketOwnContainer is the problem of a task whose blocked_by names a
+// container it is part of (its multi-task, or an issue that lists it): the
+// container publishes only after its tasks have landed, so the task would wait
+// for it forever.
+func validateTicketOwnContainer(st *store.Store, ticket string) []string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || len(rec.BlockedBy) == 0 {
+		return nil
+	}
+	containers, err := st.ContainersOf(ticket, rec)
+	if err != nil {
+		return nil
+	}
+	var problems []string
+	for _, b := range rec.BlockedBy {
+		id, err := st.ResolveTicket(b.Ticket)
+		if err != nil {
+			continue
+		}
+		if slices.Contains(containers, id) {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q is a container %s is part of: it publishes only after its tasks have landed, so the wait never ends", b.Ticket, ticket))
+		}
+	}
+	return problems
 }
 
 // validateTicketParent checks a ticket's parent: it must be a ticket of kind
