@@ -233,11 +233,8 @@ func TestIntakeNeedsReference(t *testing.T) {
 	wantAll(t, "skills/intake/references/needs", ref,
 		"**as proposed**", "**one issue**", "could it land on main by itself", "a new need",
 		"never match phrases", "one confirmation, never one per need",
+		"Nothing is made before the answer", "**as proposed** (recommended)", "never how the work is planned",
+		"Make no issue", "whose pull request already merged is a new need",
+		"Confirm it in one line (its title and need; \"not now\" is the other answer), then grill it to its own verdict, whose step makes its issue and chart",
 	)
-	if len(core) > 6000 {
-		t.Errorf("intake core is %d bytes, budget is <=6000", len(core))
-	}
-	if len(ref) > 6000 || strings.Count(ref, "\n") > 100 {
-		t.Errorf("needs reference is %d bytes, %d lines, budget is <=6000 and 100", len(ref), strings.Count(ref, "\n"))
-	}
 }

@@ -7,8 +7,8 @@ import (
 
 // TestAPromptOnNoTicketHearsHowWorkGetsOne: a session in a project whose branch
 // binds no ticket hears, with its first prompt, that a change asked for
-// without a ticket is planned first with the intake skill, which decides brief
-// or chart and makes the issue and its chart; it hears it once. A session on a ticket's branch does not.
+// without a ticket is planned first with the intake skill, which writes the need
+// first, makes an issue and its chart for each need, and decides brief or chart for each; it hears it once. A session on a ticket's branch does not.
 func TestAPromptOnNoTicketHearsHowWorkGetsOne(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)

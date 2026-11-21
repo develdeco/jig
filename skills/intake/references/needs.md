@@ -21,7 +21,7 @@ Grill in the order the person confirmed. Each need reaches its own verdict and i
 
 After an issue's chart was made, tell a new request from a change to that issue by one test: could it land on main by itself, so that the person sees it merge without the other?
 
-- **Yes: a new need.** Make a new issue with its own chart, confirmed in one line (its title and need; "not now" is the other answer), then grill it.
+- **Yes: a new need.** Confirm it in one line (its title and need; "not now" is the other answer), then grill it to its own verdict, whose step makes its issue and chart.
 - **No: a change to the issue.** Write it where it belongs: the need's change to the issue's `body`, a planning change to its chart, a briefing change to its task's `brief.md`. Make no issue.
 - A change to an issue whose pull request already merged is a new need.
 
