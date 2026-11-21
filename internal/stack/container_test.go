@@ -129,6 +129,60 @@ func TestContainerRead(t *testing.T) {
 	}
 }
 
+// TestContainerReadStartsFromTheContainerOnlyBehindADependencyOfIt: a merged
+// dependency outside the task's container (no chart's, another issue's) leaves
+// the task starting from the target; one of the same container, or of the same
+// multi-task, starts it from the container's branch.
+func TestContainerReadStartsFromTheContainerOnlyBehindADependencyOfIt(t *testing.T) {
+	t.Parallel()
+	api := newRepo(t, "workspaces:\n  - id: server\n    path: server\noracles:\n  test: go test ./{path}/...\n")
+	st := containerStore(t)
+	add := func(id string, rec store.Ticket) {
+		if err := st.CreateTicketRecord(id, rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.AppendSlices(id, []store.Slice{{ID: "a", Workspace: "server", Goal: "Do it.", Oracle: "test", BlockedBy: []string{}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dep := func(on string) []store.TicketBlockedBy { return []store.TicketBlockedBy{{Ticket: on}} }
+	add("I-2", store.Ticket{Title: "Other issue", Kind: store.KindIssue})
+	add("X-1", store.Ticket{Title: "Other chart's"})
+	add("U-1", store.Ticket{Title: "No chart's"})
+	add("D-1", store.Ticket{Title: "Waits for another chart's", BlockedBy: dep("X-1")})
+	add("D-2", store.Ticket{Title: "Waits for no chart's", BlockedBy: dep("U-1")})
+	add("D-3", store.Ticket{Title: "Waits for one under a multi-task", Parent: "M-1", BlockedBy: dep("T-3")})
+	add("D-4", store.Ticket{Title: "Waits for one of another multi-task", Parent: "M-1", BlockedBy: dep("T-1")})
+	chart := "issue: I-1\ntickets:\n  - id: T-1\n    title: One\n  - id: T-2\n    title: Two\n  - id: M-1\n    title: Multi\n    kind: multi-task\n  - id: T-3\n    title: Three\n  - id: D-1\n    title: d1\n  - id: D-2\n    title: d2\n  - id: D-3\n    title: d3\n  - id: D-4\n    title: d4\n"
+	if err := store.AtomicWrite(st.ChartFile("c"), []byte(chart)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AtomicWrite(st.ChartFile("other"), []byte("issue: I-2\ntickets:\n  - id: X-1\n    title: x\n")); err != nil {
+		t.Fatal(err)
+	}
+	in := Input{
+		Store:  st,
+		Cfg:    project.Config{Repos: []project.Repo{{Remote: api.origin, Label: "api"}}},
+		Clones: map[string]string{"api": api.clone},
+		Merges: fakeMerges{},
+	}
+	for _, c := range []struct {
+		ticket    string
+		container bool
+	}{
+		{"D-1", false}, {"D-2", false}, {"D-3", true}, {"D-4", false}, {"T-2", true},
+	} {
+		plan, err := Read(in, c.ticket)
+		if err != nil || len(plan.Repos) != 1 {
+			t.Fatalf("%s: plan = %+v, %v", c.ticket, plan, err)
+		}
+		r := plan.Repos[0]
+		if got := r.StartFrom == "origin/"+r.ContainerBranch; got != c.container {
+			t.Errorf("%s: StartFrom = %q, want the container's branch (%q): %v", c.ticket, r.StartFrom, r.ContainerBranch, c.container)
+		}
+	}
+}
+
 // TestContainerReadRetargetsAgainstTheContainer: a task stacked on a parent that
 // merged goes into the container's branch, and is to merge it while its branch
 // does not hold the container's head.

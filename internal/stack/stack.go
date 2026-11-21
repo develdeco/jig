@@ -325,6 +325,15 @@ func Read(in Input, ticket string) (Plan, error) {
 			if resolved, err := in.Store.ResolveTicket(id); err == nil {
 				id = resolved
 			}
+			// Only a dependency of this container merged into its branch: one
+			// outside it (another chart's, or no chart's) merged elsewhere.
+			drec, err := in.Store.ReadTicket(id)
+			if err != nil {
+				continue
+			}
+			if dc, ok, err := in.Store.ContainerOf(id, drec); err != nil || !ok || dc != container {
+				continue
+			}
 			if names, err := builtIn(id); err == nil {
 				for _, n := range names {
 					mergedDeps[n] = true

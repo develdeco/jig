@@ -331,7 +331,7 @@ The owner's place for a ticket in the order to start ready tickets: `rank:` in `
 _Avoid_: priority field, weight
 
 **Merge fact**:
-Whether a ticket's work has merged, for each repo it builds in. A `merged` blocker holds its dependents until it is met: the ticket published, and the host says its recorded pull request merged or, with none recorded or the host unable to say, its branch tip is an ancestor of `origin/<target>` in the mapped clone. Patch equivalence is never taken for a merge, so a squash stays unmet until its pull request is recorded, and what is missing is named (`no merge on record`, `its PR is open`).
+Whether a ticket's work has merged, for each repo it builds in. A `merged` blocker holds its dependents until it is met: the ticket published, and the host says its recorded pull request merged or, with none recorded or the host unable to say, its branch tip is an ancestor of `origin/<PR base>` (the container's branch for a ticket with one, else the target) in the mapped clone. Patch equivalence is never taken for a merge, so a squash stays unmet until its pull request is recorded, and what is missing is named (`no merge on record`, `its PR is open`).
 _Avoid_: merge status
 
 **Container**:
