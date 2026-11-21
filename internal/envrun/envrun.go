@@ -306,7 +306,12 @@ func (e *SyntaxError) Error() string { return "sh cannot parse the command: " + 
 // *SyntaxError carrying sh's message when sh rejects cmd, and another error
 // when sh could not be asked (no sh found, or it would not start).
 func CheckSyntax(cmd string) error {
-	sh, err := Sh()
+	return checkSyntax(Sh, cmd)
+}
+
+// checkSyntax is CheckSyntax with find giving the sh to ask.
+func checkSyntax(find func() (string, error), cmd string) error {
+	sh, err := find()
 	if err != nil {
 		return err
 	}

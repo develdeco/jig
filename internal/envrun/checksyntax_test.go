@@ -55,8 +55,11 @@ func TestCheckSyntax(t *testing.T) {
 // TestCheckSyntaxWithNoShIsNotASyntaxError: with no sh to ask, the answer is
 // an error that is not a *SyntaxError, so a caller stores what it was given.
 func TestCheckSyntaxWithNoShIsNotASyntaxError(t *testing.T) {
-	t.Setenv("PATH", "")
-	err := CheckSyntax("echo (")
+	noSh := errors.New("no sh")
+	err := checkSyntax(func() (string, error) { return "", noSh }, "echo (")
+	if !errors.Is(err, noSh) {
+		t.Fatalf("checkSyntax with no sh = %v, want the finder's error", err)
+	}
 	if err == nil {
 		t.Fatal("CheckSyntax with no sh on PATH = nil, want an error")
 	}
