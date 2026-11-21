@@ -67,4 +67,9 @@ func TestCheckSyntaxWithNoShIsNotASyntaxError(t *testing.T) {
 	if errors.As(err, &se) {
 		t.Fatalf("CheckSyntax with no sh = %v, want an error that is not a *SyntaxError", err)
 	}
+	// A found sh that will not start is not a rejection of the command either.
+	err = checkSyntax(func() (string, error) { return filepath.Join(t.TempDir(), "sh"), nil }, "echo (")
+	if err == nil || errors.As(err, &se) {
+		t.Fatalf("checkSyntax with an sh that will not start = %v, want an error that is not a *SyntaxError", err)
+	}
 }

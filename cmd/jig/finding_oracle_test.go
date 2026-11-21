@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/fixture"
 )
 
@@ -42,7 +44,12 @@ func TestFindingRefusesAnOracleShCannotParse(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "ORACLE_NOT_RUNNABLE") {
 		t.Fatalf("jig finding with a prose oracle: exit = %d, want 1 and ORACLE_NOT_RUNNABLE\n%s", code, out)
 	}
-	for _, want := range []string{"--oracle", "syntax error", "--detail", "command alone"} {
+	// sh's own words differ by sh (bash and dash), so the test asks the same sh.
+	var se *envrun.SyntaxError
+	if err := envrun.CheckSyntax(proseOracle); !errors.As(err, &se) {
+		t.Fatalf("CheckSyntax(proseOracle) = %v, want a *SyntaxError", err)
+	}
+	for _, want := range []string{"--oracle is not a command sh can run: " + se.Msg, "--detail", "command alone"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the refusal does not say %q:\n%s", want, out)
 		}
