@@ -79,7 +79,7 @@ func verifyFinalHeader(plan verify.FinalResult, req verify.Request, o verifyOpts
 		timeout, timeoutDefault = req.Timeout.String(), false
 	}
 	kv := [][2]string{
-		{"command", plan.Command + " (the union of the ticket's slice commands)"}, {"dir", plan.Dir}, {"commit", plan.SHA},
+		{"command", plan.Command + finalCommandNote(plan)}, {"dir", plan.Dir}, {"commit", plan.SHA},
 		{"ticket", plan.Ticket}, {"tree", plan.TreeBefore},
 	}
 	if len(plan.Classes) > 0 {
@@ -100,8 +100,24 @@ func verifyFinalHeader(plan verify.FinalResult, req verify.Request, o verifyOpts
 		flagLine("no-record", on(o.noRecord), !o.noRecord),
 		flagLine("json", on(o.json), !o.json),
 	}
+	if plan.Suite {
+		return []string{axi.KV("verify", kv), axi.KV("flags", flags)}
+	}
 	return []string{axi.KV("verify", kv), axi.Table("slices", []string{"slice", "command"}, rows), axi.KV("flags", flags)}
 }
+
+// finalCommandNote says what the command of a final run is: the union of the
+// ticket's slice commands, or an issue's declared suite.
+func finalCommandNote(plan verify.FinalResult) string {
+	if plan.Suite {
+		return " (the repo's suite oracle: an issue's one full run)"
+	}
+	return " (the union of the ticket's slice commands)"
+}
+
+// suiteCINote is the line an issue's final run ends with: jig tells and
+// enforces nothing about the project's CI.
+const suiteCINote = "A task's pull request into this branch need not run the whole suite in CI: the issue's run is this one"
 
 // verifyFinalWouldRecord is what --dry-run prints after the header: the line a
 // run would write, and what it would change.
@@ -162,8 +178,15 @@ func verifyFinalFooter(res verify.FinalResult, req verify.Request, code int) []s
 	switch {
 	case !res.Covered:
 		help = "This run covers no commit: commit or discard the changes, then run `jig verify --final` again"
+	case outcome == "fail" && res.Suite:
+		help = fmt.Sprintf("The suite failed: add a fix task to the chart of %s (`jig next %s` says how); it lands into the issue's branch, which moves the tip, and the suite is run again there", res.Ticket, res.Ticket)
+	case res.Suite:
+		help = fmt.Sprintf("`jig next %s` reads this run at the tip of the issue's branch", res.Ticket)
 	case outcome == "fail":
 		help = "The union failed: fix what it reports, commit, and run `jig verify --final` again at the new head"
+	}
+	if res.Suite {
+		return append(blocks, axi.Help(help), axi.Help(suiteCINote))
 	}
 	return append(blocks, axi.Help(help))
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -27,6 +28,7 @@ const (
 	publishIssueUsage   = "the issue a task two issues share is published into: its pull request goes into that issue's branch (a ticket with at most one issue takes none)"
 	publishPicksUsage   = "a picks file: the recordings to show in the pull request's demo, in the pick result's JSON shape"
 	publishWhatUsage    = "a what file: the bullets for the pull request's What, the first saying why the change exists; the ticket stores them and the next render reuses them (with --repo, for a ticket that builds in several repos)"
+	publishSuiteUsage   = "for an issue: publish without its suite at the branch tip, for this reason; jig records the waiver, who said it and the tip it stands for, and shows it in the pull request"
 	publishStoreUsage   = "explicit store path"
 	publishProjectUsage = "project name, resolved via the machine mapping"
 )
@@ -43,6 +45,7 @@ func init() {
 			{"issue", publishIssueUsage, false},
 			{"picks", publishPicksUsage, false},
 			{"what", publishWhatUsage, false},
+			{"without-suite", publishSuiteUsage, false},
 			{"store", publishStoreUsage, false},
 			{"project", publishProjectUsage, false},
 		}, false},
@@ -79,6 +82,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	issue := fs.String("issue", "", publishIssueUsage)
 	picks := fs.String("picks", "", publishPicksUsage)
 	what := fs.String("what", "", publishWhatUsage)
+	withoutSuite := fs.String("without-suite", "", publishSuiteUsage)
 	storeFlag := fs.String("store", "", publishStoreUsage)
 	projectFlag := fs.String("project", "", publishProjectUsage)
 	if handled, err := parseFlags(stdout, fs, rest); handled {
@@ -153,6 +157,13 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		}
 	} else if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
+	}
+	waiveGiven := false
+	fs.Visit(func(f *flag.Flag) { waiveGiven = waiveGiven || f.Name == "without-suite" })
+	if waiveGiven {
+		if err := suiteWaiverAllowed(st, ticket, *withoutSuite, forms > 0, *yes); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 
 	deps := verifydeliverDeps(e, st, cfg, mp, jigHome)
@@ -230,6 +241,15 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 
 	var report verifydeliver.PublishReport
 	if container {
+		if waiveGiven {
+			provenance := journal.ProvenanceAgent
+			if e.stdinIsTerminal(stdin) {
+				provenance = journal.ProvenancePerson
+			}
+			if err := waiveSuites(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0), ticket, *withoutSuite, provenance); err != nil {
+				return renderErr(stdout, err)
+			}
+		}
 		report, err = verifydeliver.PublishContainer(deps, opts)
 	} else {
 		printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)

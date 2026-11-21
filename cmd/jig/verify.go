@@ -249,8 +249,12 @@ func resolveVerify(e env, o verifyOpts, st *store.Store, cfg project.Config, mp 
 			})
 		}
 	}
-	if err := requireSlices(st, ticket); err != nil {
-		return none(err)
+	// An issue has no slices: its final run is the repo's suite, so only that
+	// form reaches it without any.
+	if rec, rerr := st.ReadTicket(ticket); !(o.final && rerr == nil && rec.KindOrDefault() == store.KindIssue) {
+		if err := requireSlices(st, ticket); err != nil {
+			return none(err)
+		}
 	}
 	o.session = where.Session
 

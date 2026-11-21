@@ -178,6 +178,34 @@ func NextAttempt(lines []Line, slice string) int {
 	return highest + 1
 }
 
+// SuiteWaivedAt is the latest suite-waived line of repo whose commit is exactly
+// tip: a person's or an agent's word, recorded and never judged, that the
+// issue publishes without its suite at that tip. A waiver at another tip
+// stands for nothing. repo is "" in a project of one repo.
+func SuiteWaivedAt(lines []Line, repo, tip string) (line Line, ok bool) {
+	if tip == "" {
+		return Line{}, false
+	}
+	for _, l := range lines {
+		if l.Event == EventSuiteWaived && l.Commit == tip && l.Repo == repo {
+			line, ok = l, true
+		}
+	}
+	return line, ok
+}
+
+// SuiteWaivedUnread is the latest suite-waived line of repo with no commit: a
+// waiver given while the repo's tip could not be read. It stands only while the
+// tip stays unreadable; the caller asks it nowhere else.
+func SuiteWaivedUnread(lines []Line, repo string) (line Line, ok bool) {
+	for _, l := range lines {
+		if l.Event == EventSuiteWaived && l.Commit == "" && l.Repo == repo {
+			line, ok = l, true
+		}
+	}
+	return line, ok
+}
+
 // FinalRunAt is the final run `jig verify --final` recorded at exactly head
 // for repo: the latest final-oracle line of that repo whose commit is head,
 // that covers it (no Uncovered reason) and judged the code (a pass or a fail,

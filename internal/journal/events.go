@@ -68,6 +68,11 @@ const (
 	// into (Base), the container it went into (Into), the merge commit (Commit)
 	// and who made it known (Provenance).
 	EventLanded = "landed"
+	// EventSuiteWaived is the line `jig publish --without-suite` writes into an
+	// issue's journal, one per repo whose suite is unmet: the repo, the tip it
+	// waives (Commit), the reason (Summary) and who said it (Provenance). It
+	// stands for that tip only (SuiteWaivedAt).
+	EventSuiteWaived = "suite-waived"
 )
 
 // Events the machine ledger records and a ticket's journal does not.

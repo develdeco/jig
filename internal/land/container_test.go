@@ -18,6 +18,18 @@ import (
 func (w *world) readiness(container string) land.Readiness {
 	w.t.Helper()
 	w.d.Merges = &mergefacts.Reader{Store: w.st, Cfg: w.d.Cfg, PRs: w.h}
+	if w.d.Clones == nil || w.noSuite != nil {
+		// A repo with no clone is a suite jig cannot read: these tests are
+		// about the children, so the repo is cloned with no suite declared, at
+		// the container's branch.
+		if w.noSuite == nil {
+			w.noSuite = &suiteWorld{world: w, dir: w.t.TempDir()}
+			w.noSuite.initClone()
+			w.d.Clones = map[string]string{"app": w.noSuite.dir}
+		}
+		w.noSuite.branch = w.branch(container)
+		w.noSuite.commit("oracles:\n  test: \"go test\"\n")
+	}
 	r, err := land.ReadinessOf(w.d, container)
 	if err != nil {
 		w.t.Fatalf("ReadinessOf(%s): %v", container, err)

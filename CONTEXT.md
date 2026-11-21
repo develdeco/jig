@@ -266,6 +266,10 @@ _Avoid_: ticket checkout
 A branch recorded in a ticket's `ticket.yaml` as its own: by the first `jig gate <ticket> --branch <name>` for a branch built outside jig, or by a `jig claim` on a branch that names no ticket. Every later gate round reviews the copy of it in the operator's clone (or origin's), and `jig publish` ships the reviewed head as it is: nothing is reconciled, squashed or committed on it, and origin's branch is fast-forwarded. A ticket has at most one, for good: it needs no brief and no slices to be gated.
 _Avoid_: imported branch, external branch, hand-written branch
 
+**Suite**:
+The repo's declared oracle named `suite` (`oracles: suite:` in `.claude/jig.yaml`), run once for an issue, never for a slice, task or multi-task: `jig verify <issue> --final` is that run, witnessed in the repo's worktree at the tip of the issue's branch, and it is the issue's final run (a task's stays the union of its slices' commands). A repo with no `suite` has none. An issue's publish waits for a covering pass at the tip, a waiver (`jig publish --without-suite`) or no declaration; a fail is fixed by a fix task.
+_Avoid_: full test run, CI
+
 **Gate**:
 Out-of-band verification of a ticket's branch, read in the repo's mapped clone: `jig gate` opens a round and runs no command (it lists the passes the slices' builders had witnessed), and a fresh-context reviewer that jig did not start closes it (see **Recorded round**).
 _Avoid_: code review, QA pass

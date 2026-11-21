@@ -199,6 +199,8 @@ type nextTicket struct {
 	Prompt string      `json:"prompt,omitempty"`
 	Waits  []nextWait  `json:"waits,omitempty"`
 	Unmet  []nextUnmet `json:"unmet,omitempty"`
+	// Waived are an issue's suite waivers standing at its tips.
+	Waived []string `json:"waived,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -408,8 +410,11 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 	case verb == "next" && n.State == land.StateWaiting:
 		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
 	}
+	if len(n.Waived) > 0 {
+		blocks = append(blocks, axi.KV("waived", waivedRows(n.Waived)))
+	}
 	blocks = append(blocks, afterBlock(n.LandsAfter)...)
-	return append(blocks, axi.Help(append([]string{help}, afterHelp(n.Ticket, n.LandsAfter)...)...))
+	return append(blocks, axi.Help(append(append([]string{help}, suiteHelp(n)...), afterHelp(n.Ticket, n.LandsAfter)...)...))
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
@@ -662,6 +667,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		for _, u := range r.Unmet {
 			n.Unmet = append(n.Unmet, nextUnmet{Code: u.Code, Why: u.Why, Prompt: u.Prompt})
 		}
+		n.Waived = r.Waived
 		return n, nil
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
@@ -1577,4 +1583,32 @@ func mapKeys[V any](m map[string]V) []string {
 func sortedStrings(s []string) []string {
 	sort.Strings(s)
 	return s
+}
+
+// suiteHelp are the lines `jig next <issue>` adds for its suite: a failed run
+// is a fix task the session adds to the chart, and a task's pull request into
+// the issue's branch need not run the whole suite in CI. jig names both and
+// enforces neither.
+func suiteHelp(n nextTicket) []string {
+	var out []string
+	for _, u := range n.Unmet {
+		switch u.Code {
+		case land.SuiteFailed:
+			out = append(out, fmt.Sprintf("The suite failed, so add a fix task: an entry in the chart of %s (intake, then `jig graduate`) whose blocked_by is merged on the chart's last entries, the ones no entry depends on, so it starts from the issue's branch and its pull request goes into it; it reopens the suite at the new tip", n.Ticket))
+			return append(out, suiteCINote)
+		case land.SuiteNotRun:
+			return append(out, suiteCINote)
+		}
+	}
+	return out
+}
+
+// waivedRows is a list of sentences as the key-value rows of a block: one row each,
+// keyed by its position.
+func waivedRows(rows []string) [][2]string {
+	out := make([][2]string, len(rows))
+	for i, r := range rows {
+		out[i] = [2]string{fmt.Sprint(i + 1), r}
+	}
+	return out
 }
