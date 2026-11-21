@@ -218,6 +218,8 @@ type Readiness struct {
 	Unmet []Unmet
 	// Waived are the suite waivers standing at the issue's tips, in words.
 	Waived []string
+	// Verification are an issue's pull request body lines about its suite.
+	Verification []string
 	// Prompt is what to ask next: Publish T when ready, Land T when published,
 	// and "" when waiting.
 	Prompt string
@@ -255,9 +257,11 @@ func ReadinessOf(d Deps, container string) (Readiness, error) {
 	if r.Unmet, err = Check(c); err != nil {
 		return Readiness{}, err
 	}
-	if r.Waived, err = SuiteWaivers(d, c); err != nil {
+	suites, err := SuiteOf(d, c)
+	if err != nil {
 		return Readiness{}, err
 	}
+	r.Waived, r.Verification = suiteWaived(suites), VerificationLines(suites)
 	if len(r.Unmet) > 0 {
 		for _, u := range r.Unmet {
 			if u.Prompt != "" {

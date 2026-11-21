@@ -339,7 +339,7 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 			if err != nil {
 				return verifydeliver.ContainerStanding{}, err
 			}
-			s := verifydeliver.ContainerStanding{State: r.State}
+			s := verifydeliver.ContainerStanding{State: r.State, Verification: r.Verification}
 			for _, w := range r.Waits {
 				s.Waits = append(s.Waits, verifydeliver.ContainerWait{Ticket: w.Ticket, Standing: w.Standing})
 			}

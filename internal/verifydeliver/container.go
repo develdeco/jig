@@ -40,6 +40,10 @@ type ContainerStanding struct {
 	State string
 	Waits []ContainerWait
 	Unmet []ContainerUnmet
+	// Verification are the lines of an issue's pull request body about its
+	// suite, one per repo: what ran at the issue's head, was waived, or was
+	// never declared. Empty for a multi-task and for an issue with no clone.
+	Verification []string
 }
 
 // childRow is one child of a container as its pull request body names it: the
@@ -214,7 +218,7 @@ func childOf(d Deps, id, container, repo string, qualified bool) (childRow, erro
 // title, for an issue its need, the other repos' pull requests, one line per
 // child with its landed pull request, and the project's trailer. No round, no
 // demo and no verification: every line was reviewed in its task.
-func renderContainerBody(ticket, title, need string, children []childRow, links []prLink, trailer string) string {
+func renderContainerBody(ticket, title, need string, children []childRow, verification []string, links []prLink, trailer string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n", title)
 	if need = strings.TrimSpace(need); need != "" {
@@ -235,6 +239,12 @@ func renderContainerBody(ticket, title, need string, children []childRow, links 
 	}
 	for _, c := range children {
 		line(c, 0)
+	}
+	if len(verification) > 0 {
+		b.WriteString("\n## Verification\n\n")
+		for _, v := range verification {
+			b.WriteString("- " + v + "\n")
+		}
 	}
 	b.WriteString(renderTrailer(trailer))
 	return b.String()
@@ -378,7 +388,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		pt := sh.pt
 		sh.linked = linksFor(pt, known)
-		sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, sh.linked)
+		sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, standing.Verification, sh.linked)
 		if err != nil {
 			return PublishReport{}, inRepo(qualified, pt.repoName, err)
 		}
@@ -399,7 +409,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		pt := sh.pt
 		if links := linksFor(pt, known); !sameLinks(links, sh.linked) {
-			if sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, links); err != nil {
+			if sh.pub, err = writeContainerBody(d, pt, ticket, title, need, sh.children, standing.Verification, links); err != nil {
 				return PublishReport{}, inRepo(qualified, pt.repoName, err)
 			}
 			sh.linked = links
@@ -429,7 +439,7 @@ func PublishContainer(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if url == "" || sameLinks(links, sh.linked) {
 			continue
 		}
-		if sh.pub, err = writeContainerBody(d, sh.pt, ticket, title, need, sh.children, links); err != nil {
+		if sh.pub, err = writeContainerBody(d, sh.pt, ticket, title, need, sh.children, standing.Verification, links); err != nil {
 			return PublishReport{}, inRepo(qualified, sh.pt.repoName, err)
 		}
 		sh.linked = links
@@ -467,10 +477,10 @@ func repoNamed(cfg project.Config, name string) project.Repo {
 
 // writeContainerBody writes the body of the container's pull request in the
 // repo of pt to <ticket>/pr/<repo>.md.
-func writeContainerBody(d Deps, pt *publishTarget, ticket, title, need string, children []childRow, links []prLink) (publication, error) {
+func writeContainerBody(d Deps, pt *publishTarget, ticket, title, need string, children []childRow, verification []string, links []prLink) (publication, error) {
 	rel := filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", pt.repoName+".md"))
 	full := filepath.Join(d.Store.Root, filepath.FromSlash(rel))
-	body := renderContainerBody(ticket, title, need, children, links, d.Cfg.PublishTrailer)
+	body := renderContainerBody(ticket, title, need, children, verification, links, d.Cfg.PublishTrailer)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: pr body: create dir: %w", err)
 	}

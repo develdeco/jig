@@ -43,9 +43,9 @@ type RepoSuite struct {
 	Unmet    *Unmet       // the precondition's answer, nil when met
 }
 
-// journalRepo is the repo name a journal line of the project carries: none in
+// JournalRepo is the repo name a journal line of the project carries: none in
 // a project of one repo.
-func journalRepo(d Deps, repo string) string {
+func JournalRepo(d Deps, repo string) string {
 	if len(d.Cfg.Repos) < 2 {
 		return ""
 	}
@@ -90,7 +90,7 @@ func SuiteOf(d Deps, c Container) ([]RepoSuite, error) {
 			out = append(out, rs)
 			continue
 		}
-		jr := journalRepo(d, repo)
+		jr := JournalRepo(d, repo)
 		run, hasRun := journal.FinalRunAt(lines, jr, tip)
 		waiver, waived := journal.SuiteWaivedAt(lines, jr, tip)
 		switch {
@@ -155,18 +155,43 @@ func suitePrecondition(c Container) ([]Unmet, error) {
 	return out, nil
 }
 
-// SuiteWaivers are the repos of c whose suite is waived at the tip, each
-// as the `jig next` shows it: the repo, the reason and who said it.
-func SuiteWaivers(d Deps, c Container) ([]string, error) {
-	suites, err := SuiteOf(d, c)
-	if err != nil {
-		return nil, err
-	}
+// suiteWaived are the waivers among suites in words, one per waived repo, as
+// `jig next` shows them: the repo, the tip, who said it and why.
+func suiteWaived(suites []RepoSuite) []string {
 	var out []string
 	for _, s := range suites {
 		if s.Standing == SuiteWaived {
 			out = append(out, fmt.Sprintf("suite of %s waived at %s by %s: %s", s.Repo, short(s.Tip), s.Waiver.Provenance, s.Waiver.Summary))
 		}
 	}
-	return out, nil
+	return out
+}
+
+// VerificationLines are the lines of an issue's pull request body about its
+// suite, one per repo, in the words ADR 0053's final run uses: what ran at the
+// issue's head and how it ended, that it was waived and why, that the repo
+// declares none, or that only an earlier tip has a run. A project of several
+// repos names each line's repo.
+func VerificationLines(suites []RepoSuite) []string {
+	var out []string
+	for _, s := range suites {
+		var line string
+		switch s.Standing {
+		case SuitePass:
+			line = fmt.Sprintf("Suite at the issue's head %s: pass in %d s: `%s`", short(s.Tip), s.Run.Seconds, s.Command)
+		case SuiteFail:
+			line = fmt.Sprintf("Suite at the issue's head %s failed", short(s.Tip))
+		case SuiteWaived:
+			line = fmt.Sprintf("Suite waived at %s: %s", short(s.Tip), s.Waiver.Summary)
+		case SuiteUndeclared:
+			line = "No suite declared in " + s.Repo
+		default:
+			line = fmt.Sprintf("No suite run at the issue's head %s", short(s.Tip))
+		}
+		if len(suites) > 1 {
+			line = s.Repo + ": " + line
+		}
+		out = append(out, line)
+	}
+	return out
 }
