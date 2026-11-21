@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,12 @@ type ChartEntry struct {
 	Title     string     `yaml:"title"`
 	Body      string     `yaml:"body,omitempty"`
 	BlockedBy []ChartRef `yaml:"blocked_by,omitempty"`
+	// Kind is the ticket kind the entry mints: "task" (the default, empty
+	// here) or "multi-task". Only a chart that names an issue may set it.
+	Kind string `yaml:"kind,omitempty"`
+	// Under is the multi-task a task entry sits under: "#k", the 1-based
+	// position of a multi-task entry of this chart, or that entry's ticket id.
+	Under string `yaml:"under,omitempty"`
 
 	// asRead is the id, title and body exactly as ReadChart returned them,
 	// carried along on the entry itself so a later WriteChart can tell a
@@ -52,7 +59,84 @@ type chartEntrySnapshot struct {
 
 // ChartFile is the wire shape of charts/<name>/tickets.yaml.
 type ChartFile struct {
+	// Issue is the id of the issue ticket this chart plans: the need the
+	// chart's tickets meet. Empty is a legacy chart, read as it always was.
+	Issue   string       `yaml:"issue,omitempty"`
 	Tickets []ChartEntry `yaml:"tickets"`
+}
+
+// readChartFile reads and decodes charts/<name>/tickets.yaml whole.
+func (s *Store) readChartFile(name string) (ChartFile, error) {
+	data, err := ReadFile(s.ChartFile(name))
+	if err != nil {
+		return ChartFile{}, err
+	}
+	var cf ChartFile
+	if err := yaml.Unmarshal(data, &cf); err != nil {
+		return ChartFile{}, err
+	}
+	return cf, nil
+}
+
+// ChartIssue is the id of the issue chart name plans, empty for a chart with
+// none (a legacy chart).
+func (s *Store) ChartIssue(name string) (string, error) {
+	cf, err := s.readChartFile(name)
+	if err != nil {
+		return "", err
+	}
+	return cf.Issue, nil
+}
+
+// ChartOfIssue is the name of the chart whose issue is issue, empty when no
+// chart plans it. A chart that cannot be read is skipped.
+func (s *Store) ChartOfIssue(issue string) (string, error) {
+	if issue == "" {
+		return "", nil
+	}
+	names, err := s.ChartNames()
+	if err != nil {
+		return "", err
+	}
+	for _, name := range names {
+		if got, err := s.ChartIssue(name); err == nil && got == issue {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+// IssuesOf is the issue of every chart that lists ticket as an entry's id, in
+// chart-name order: two charts that list it give two issues. A chart with no
+// issue gives none. It runs on the hook path, so a chart's tickets.yaml is
+// decoded only when it names the ticket's id at all; one that cannot be read
+// is skipped.
+func (s *Store) IssuesOf(ticket string) ([]string, error) {
+	if ticket == "" {
+		return nil, nil
+	}
+	names, err := s.ChartNames()
+	if err != nil {
+		return nil, err
+	}
+	var issues []string
+	for _, name := range names {
+		data, err := ReadFile(s.ChartFile(name))
+		if err != nil || !bytes.Contains(data, []byte(ticket)) {
+			continue
+		}
+		var cf ChartFile
+		if err := yaml.Unmarshal(data, &cf); err != nil || cf.Issue == "" {
+			continue
+		}
+		for _, e := range cf.Tickets {
+			if e.ID == ticket {
+				issues = append(issues, cf.Issue)
+				break
+			}
+		}
+	}
+	return issues, nil
 }
 
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
@@ -228,6 +312,19 @@ func setChartEntryFields(node *yaml.Node, entry ChartEntry) {
 		node.Content = append(node.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "blocked_by"},
 			blockedByNode(entry.BlockedBy),
+		)
+	}
+
+	if entry.Kind != "" {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "kind"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: entry.Kind},
+		)
+	}
+	if entry.Under != "" {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "under"},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: entry.Under, Style: yaml.DoubleQuotedStyle},
 		)
 	}
 }
@@ -545,8 +642,12 @@ func chartMapSkeleton(title string) string {
 // chartTicketsSkeleton is the tickets.yaml of a chart just made: a header
 // that says how an entry is written and an empty list. ReadChart reads it as
 // no entries and WriteChart accepts it once entries are added.
-func chartTicketsSkeleton(name string) string {
-	return "# Handover to `jig graduate " + name + "`: one entry per ticket, in order. An entry has\n" +
+func chartTicketsSkeleton(name, issue string) string {
+	head := ""
+	if issue != "" {
+		head = "issue: " + issue + "\n"
+	}
+	return head + "# Handover to `jig graduate " + name + "`: one entry per ticket, in order. An entry has\n" +
 		"# a title (required), a body, a key (when the store declares more than one) and\n" +
 		"# blocked_by refs: \"#k\" names an earlier entry of this file, \"<chart>#k\" an entry\n" +
 		"# of another chart, anything else is a ticket id; kind is merged (the default) or\n" +
@@ -562,6 +663,13 @@ func chartTicketsSkeleton(name string) string {
 // so no half-made chart is left. The caller checks the name's rules and the
 // title.
 func (s *Store) CreateChart(name, title string) error {
+	return s.CreateChartWithIssue(name, title, "")
+}
+
+// CreateChartWithIssue is CreateChart for a chart that plans an issue: its
+// tickets.yaml starts with `issue: <id>`. The caller checks that the issue is
+// an issue ticket no other chart plans.
+func (s *Store) CreateChartWithIssue(name, title, issue string) error {
 	taken, err := s.ChartFolderTaken(name)
 	if err != nil {
 		return err
@@ -575,7 +683,7 @@ func (s *Store) CreateChart(name, title string) error {
 		_ = os.RemoveAll(dir)
 		return err
 	}
-	if err := AtomicWrite(s.ChartFile(name), []byte(chartTicketsSkeleton(name))); err != nil {
+	if err := AtomicWrite(s.ChartFile(name), []byte(chartTicketsSkeleton(name, issue))); err != nil {
 		_ = os.RemoveAll(dir)
 		return err
 	}
