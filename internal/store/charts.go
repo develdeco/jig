@@ -112,6 +112,31 @@ func (s *Store) ChartOfIssue(issue string) (string, error) {
 // decoded only when it names the ticket's id at all; one that cannot be read
 // is skipped.
 func (s *Store) IssuesOf(ticket string) ([]string, error) {
+	listings, err := s.ChartsListing(ticket)
+	if err != nil {
+		return nil, err
+	}
+	var issues []string
+	for _, l := range listings {
+		issues = append(issues, l.Issue)
+	}
+	return issues, nil
+}
+
+// Listing is one model chart's entry for a ticket: the chart, the issue it
+// plans, the entry's 1-based position and the entry itself.
+type Listing struct {
+	Chart, Issue string
+	Position     int
+	Entry        ChartEntry
+}
+
+// ChartsListing is every model chart (one that names an issue) that lists
+// ticket as an entry's id, in chart-name order; a chart with no issue is a
+// legacy chart and does not count. Like IssuesOf it decodes a chart's
+// tickets.yaml only when it names the ticket's id at all, and skips one that
+// cannot be read.
+func (s *Store) ChartsListing(ticket string) ([]Listing, error) {
 	if ticket == "" {
 		return nil, nil
 	}
@@ -119,7 +144,7 @@ func (s *Store) IssuesOf(ticket string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var issues []string
+	var out []Listing
 	for _, name := range names {
 		data, err := ReadFile(s.ChartFile(name))
 		if err != nil || !bytes.Contains(data, []byte(ticket)) {
@@ -129,38 +154,41 @@ func (s *Store) IssuesOf(ticket string) ([]string, error) {
 		if err := yaml.Unmarshal(data, &cf); err != nil || cf.Issue == "" {
 			continue
 		}
-		for _, e := range cf.Tickets {
+		for i, e := range cf.Tickets {
 			if e.ID == ticket {
-				issues = append(issues, cf.Issue)
+				out = append(out, Listing{Chart: name, Issue: cf.Issue, Position: i + 1, Entry: e})
 				break
 			}
 		}
 	}
-	return issues, nil
+	return out, nil
 }
 
-// ContainerOf is the ticket whose branch ticket's pull request goes into: a
+// ContainersOf is every ticket whose branch ticket's pull request goes into: a
 // task's parent (a multi-task) when its record names one, else the issue of
-// the one chart that lists it; a multi-task's is its chart's issue. An issue
-// has none, and neither has a ticket no chart lists, one only a legacy chart
-// (no issue) lists, or one two charts list: those read as they always did.
-// rec is ticket's record; the chart files are read only when it names no
-// parent and is not an issue.
-func (s *Store) ContainerOf(ticket string, rec Ticket) (id string, found bool, err error) {
+// every chart that lists it, so a shared task has one for each issue. An issue
+// has none, and neither has a ticket no model chart lists. rec is ticket's
+// record; the chart files are read only when it names no parent and is not an
+// issue.
+func (s *Store) ContainersOf(ticket string, rec Ticket) ([]string, error) {
 	if rec.KindOrDefault() == KindIssue {
-		return "", false, nil
+		return nil, nil
 	}
 	if rec.Parent != "" {
-		return rec.Parent, true, nil
+		return []string{rec.Parent}, nil
 	}
-	issues, err := s.IssuesOf(ticket)
-	if err != nil {
+	return s.IssuesOf(ticket)
+}
+
+// ContainerOf is the one container of ticket: the single element of
+// ContainersOf. A ticket with none, and a shared task with several, have no
+// single container and read as they always did.
+func (s *Store) ContainerOf(ticket string, rec Ticket) (id string, found bool, err error) {
+	ids, err := s.ContainersOf(ticket, rec)
+	if err != nil || len(ids) != 1 {
 		return "", false, err
 	}
-	if len(issues) != 1 {
-		return "", false, nil
-	}
-	return issues[0], true, nil
+	return ids[0], true, nil
 }
 
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.

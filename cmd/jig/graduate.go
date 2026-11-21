@@ -584,7 +584,8 @@ func chartEntryProblems(st *store.Store, cfg project.Config, entries []store.Cha
 			})
 		}
 	}
-	return append(out, chartKindProblems(st, chart, entries)...)
+	out = append(out, chartKindProblems(st, chart, entries)...)
+	return append(out, chartSharedProblems(st, chart, entries)...)
 }
 
 // entryRef is one already-validated blocked_by ref for a chart entry,
