@@ -28,15 +28,11 @@ func nextLanding(d land.Deps, ticket, into string) string {
 			if resolved, err := st.ResolveTicket(b.Ticket); err != nil || resolved != ticket {
 				continue
 			}
-			issue := ""
-			if cs, err := st.ContainersOf(id, rec); err == nil && len(cs) > 1 {
-				if !slices.Contains(cs, into) {
-					continue
-				}
-				issue = into
-			}
-			if got, _ := land.Landed(st, id, issue); len(got) == 0 && published(st, id) {
-				return fmt.Sprintf("The next landing is `%s`, which waited for it", land.Command(st, id, into))
+			// A dependent is named when the land rules let it land now, this
+			// landing counted: one that waits for another issue's merge of a
+			// shared task, or for anything else, is not the next landing.
+			if v, err := land.Judge(d, id, land.Options{}); err == nil && v.Refusal == nil && !v.Done {
+				return fmt.Sprintf("The next landing is `%s`, which waited for it", land.Command(st, id, ""))
 			}
 		}
 	}
