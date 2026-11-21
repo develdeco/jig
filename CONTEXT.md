@@ -23,8 +23,24 @@ _Avoid_: database, state dir
 **Ticket**:
 jig's record of one unit of work, in the store, under an id jig mints: a
 key plus a number. May carry aliases, its earlier ids, kept forever; an id or
-alias resolves to the ticket's current id wherever jig takes one.
-_Avoid_: issue, which names a tracker's copy of a ticket
+alias resolves to the ticket's current id wherever jig takes one. Has a kind, recorded in its `ticket.yaml` as `kind:`: an **Issue**, a **Task** or a **Multi-task**; no `kind` reads as a task, so every ticket recorded before the field is one.
+_Avoid_: issue as a synonym, which is a kind of ticket and the word for a tracker's copy (see **Tracker item**)
+
+**Issue**:
+The kind of ticket that holds a need: its `body` is the need's text. It has no brief, slices or pull request of its own; its **Chart** is the plan for it, and its tasks are the tickets that chart lists. `jig ticket new --kind issue` mints one, and `jig next <T>` shows its chart and the tasks under it with no prompt. A task's issue is never recorded on the task: it is the issue of the chart that lists it, so a task two charts list has two issues ([ADR 0057](docs/adr/0057-a-ticket-has-a-kind-and-a-chart-is-one-issues-plan.md)).
+_Avoid_: epic, story
+
+**Task**:
+The kind of ticket that is built: it has a brief, slices and a pull request, as every ticket had before kinds. The default kind: a ticket with no `kind:` is a task. A task may sit under a **Multi-task**, recorded as `parent:` on its `ticket.yaml`.
+_Avoid_: story, sub-task
+
+**Multi-task**:
+The kind of ticket that groups tasks of one chart under one name: `kind: multi-task`, with `parent:` on each task under it. It holds tasks only (a multi-task under a multi-task is refused by `jig validate` and `jig graduate`) and is minted before them. Like an issue it has no brief, slices or pull request of its own at this stage; `jig next <T>` shows its issues and children with no prompt, and `jig next` never lists it as ready.
+_Avoid_: epic, parent ticket
+
+**Tracker item**:
+A tracker's copy of a ticket or chart: what GitHub calls an issue, held in the tracker tree and kept in step by the mirror. It is not a ticket of the **Issue** kind; the words stay apart so the store's issue and the tracker's never mean each other.
+_Avoid_: issue, remote ticket
 
 **Closed ticket**:
 A ticket closed without a pull request for one of three reasons: covered (another change did the work), superseded (another ticket replaces it) or not planned (it will not be done). Its record carries a `closed:` entry, written by `jig close` and removed by `jig reopen`. It cannot be claimed, gated, published, requeued or reviewed, and the tickets that wait for it go on when it was covered or superseded and stay held when it was not planned.
@@ -303,7 +319,7 @@ The same failure signature recurring twice: two `oracle` failures of one slice w
 _Avoid_: retry loop, flaky failure
 
 **Chart**:
-The wayfinder layer for work spanning tickets: `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`) and `tickets.yaml` (the handover jig reads and writes). `jig chart new <name> --title <t>` makes it and commits it, and `jig validate <name>` checks its entries and lists every problem, minting nothing. jig writes only the skeleton, once, when the chart is made (the title and five empty sections, and an empty `tickets:` list), and reads the map after. The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict makes the chart and mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**; [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md)).
+One **Issue**'s plan, and the wayfinder layer for work spanning tickets: a chart names its issue with `issue: <ID>` at the top of `tickets.yaml` (an issue has one chart and a chart one issue), and an entry may set `kind:` (`task`, the default, or `multi-task`) and `under:` (`#k` or a multi-task entry's ticket id). A chart with no `issue:` is a legacy chart: it validates and graduates as it always did and its tickets read as tasks with no parent. `charts/<name>/` holds `map.md` (for people and sessions; jig reads its sections, the fog for `jig recall` and all of them for `jig next <chart>`) and `tickets.yaml` (the handover jig reads and writes). `jig chart new <name> --title <t>` makes it and commits it, and `jig validate <name>` checks its entries and lists every problem, minting nothing. jig writes only the skeleton, once, when the chart is made (the title and five empty sections, and an empty `tickets:` list), and reads the map after. The map decides what to build; it never builds anything itself. `jig graduate <name>` creates the chart's tickets and writes their ids back into `tickets.yaml`; an intake that reaches a chart verdict makes the chart and mints none of them. A chart's standing is derived and a chart run takes its tickets to a pull request (see **Chart standing**, **Chart run**; [ADR 0040](docs/adr/0040-a-chart-is-made-and-checked-by-verbs.md)).
 _Avoid_: roadmap, epic
 
 **Dependency**:

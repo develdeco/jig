@@ -272,7 +272,7 @@ ledger.md
 charts/
   <name>/
     map.md          # for people and sessions; jig writes its skeleton once (jig chart new) and reads its sections after
-    tickets.yaml    # the handover jig reads and writes
+    tickets.yaml    # the handover jig reads and writes; top-level issue:, per-entry kind: and under:
 trackers/
   <provider>/<scope>/
     <remote id>/                  # one folder per remote item: its record and its link
@@ -286,7 +286,7 @@ tickets/
     budget.yaml       # jig budget: tokens and usd limits
     intent.md         # jig gate --intent/--doc; ignored when brief.md exists
     slices.yaml
-    ticket.yaml       # optional: this ticket's own record - title, body, blockers, adopted branch, rank, closed, aliases
+    ticket.yaml       # optional: this ticket's own record - title, body, kind (issue, task, multi-task; absent is task), parent (a task's multi-task), blockers, adopted branch, rank, closed, aliases
     start.<repo>.sha  # the sha the ticket's branch started from
     slices/
       <id>.state
