@@ -45,6 +45,10 @@ type Deps struct {
 	// be empty, and a commit with no known fork point is not held to one.
 	Repo   string
 	Target string
+	// Base is the branch the whole change is measured from when it is not the
+	// target: a container's, for a ticket whose pull request goes into it.
+	// "" is the target.
+	Base string
 	// Oracle runs an oracle command in dir with env (each "NAME=value") added
 	// to its environment, bounded by limit (0 for none), and returns its
 	// combined output. nil means the real run: envrun.ShellStream, through sh.
@@ -627,7 +631,7 @@ func (x *run) startSHA() string {
 
 // changedFiles lists the files the commit changed against the base the gate's
 // full scope uses (merge-base of origin/<target> and the commit, the start sha
-// only when that fails: scopebase.Resolve), as the scope diff reads
+// only when that fails: scopebase.ResolveOn), as the scope diff reads
 // them (added, modified or type-changed). The start sha alone would list, after
 // an integration merge, every file the target changed since it too. nil when the
 // base is unknown or the diff fails, which ranks every recording alike.
@@ -650,7 +654,7 @@ func (x *run) changedBase() string {
 	if d.Repo == "" || d.Target == "" {
 		return x.startSHA()
 	}
-	base, err := scopebase.Resolve(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, x.sha)
+	base, err := scopebase.ResolveOn(d.Store, x.r.Ticket, x.dir, d.Repo, d.Target, d.Base, x.sha)
 	if err != nil {
 		return x.startSHA()
 	}

@@ -96,6 +96,20 @@ func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) 
 	if err != nil {
 		return nil, err
 	}
+	// The base the ticket's pull request goes into: its container's branch
+	// when it has one. The record is read only if a branch is looked at.
+	container, hasContainer, err := r.Store.ContainerOf(ticket, rec)
+	if err != nil {
+		return nil, err
+	}
+	var crec store.Ticket
+	if hasContainer {
+		if crec, err = r.Store.ReadTicket(container); err != nil {
+			container = ""
+		}
+	} else {
+		container = ""
+	}
 	out := make([]ready.RepoMerge, 0, len(refs))
 	for _, repo := range refs {
 		ev := ready.Evidence{Ticket: ticket, PR: pullRequestOf(repo, len(refs), urls)}
@@ -109,7 +123,7 @@ func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) 
 		}
 		// The branch is the way left when the pull request did not decide.
 		if ev.State == "" {
-			ev.Ancestor = r.inTarget(ticket, rec, repo)
+			ev.Ancestor = r.inTarget(ticket, rec, repo, container, crec)
 		}
 		out = append(out, ready.JudgeRepo(ev))
 	}
@@ -189,19 +203,29 @@ func remoteBase(remote string) string {
 }
 
 // inTarget reports whether the ticket's branch tip in the repo's clone is an
-// ancestor of the repo's target branch on its origin: the clone's own
-// origin/<target>, as of its last fetch (nothing is fetched here). The branch
+// ancestor of the branch its pull request goes into on its origin: the
+// container's branch for a ticket with one (container, whose record is
+// crec), else the repo's target. That is the clone's own origin/<base>, as of
+// its last fetch (nothing is fetched here). The branch
 // is looked for as the clone has it, on the origin and local; either one
 // being in the target is enough. False when there is no clone, no origin
 // target, or no such branch: the lack of a branch is not evidence.
-func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef) bool {
+func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef, container string, crec store.Ticket) bool {
 	if repo.dir == "" {
 		return false
 	}
 	if fi, err := os.Stat(repo.dir); err != nil || !fi.IsDir() {
 		return false
 	}
-	target := "refs/remotes/origin/" + repo.target
+	base := repo.target
+	if container != "" {
+		cb, err := r.Store.ResolveTicketBranch(container, crec, repo.target)
+		if err != nil {
+			return false
+		}
+		base = cb
+	}
+	target := "refs/remotes/origin/" + base
 	if !hasCommit(repo.dir, target) {
 		return false
 	}

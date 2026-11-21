@@ -139,6 +139,30 @@ func (s *Store) IssuesOf(ticket string) ([]string, error) {
 	return issues, nil
 }
 
+// ContainerOf is the ticket whose branch ticket's pull request goes into: a
+// task's parent (a multi-task) when its record names one, else the issue of
+// the one chart that lists it; a multi-task's is its chart's issue. An issue
+// has none, and neither has a ticket no chart lists, one only a legacy chart
+// (no issue) lists, or one two charts list: those read as they always did.
+// rec is ticket's record; the chart files are read only when it names no
+// parent and is not an issue.
+func (s *Store) ContainerOf(ticket string, rec Ticket) (id string, found bool, err error) {
+	if rec.KindOrDefault() == KindIssue {
+		return "", false, nil
+	}
+	if rec.Parent != "" {
+		return rec.Parent, true, nil
+	}
+	issues, err := s.IssuesOf(ticket)
+	if err != nil {
+		return "", false, err
+	}
+	if len(issues) != 1 {
+		return "", false, nil
+	}
+	return issues[0], true, nil
+}
+
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
 func (s *Store) ReadChart(name string) ([]ChartEntry, error) {
 	path := s.ChartFile(name)
@@ -630,9 +654,13 @@ func (s *Store) ChartFolderTaken(name string) (bool, error) {
 // heading and the five sections of the chart template, each empty. It holds
 // no placeholder prose, because a paragraph under a heading is an item to
 // recall and to the GitHub mirror.
-func chartMapSkeleton(title string) string {
+func chartMapSkeleton(title, issue string) string {
+	dest := "## Destination\n\n"
+	if issue != "" {
+		dest += "Plans issue " + issue + ".\n\n"
+	}
 	return "# " + title + "\n\n" +
-		"## Destination\n\n" +
+		dest +
 		"## Notes\n\n" +
 		"## Decisions so far\n\n" +
 		"## Not yet specified (fog)\n\n" +
@@ -679,7 +707,7 @@ func (s *Store) CreateChartWithIssue(name, title, issue string) error {
 	}
 	dir := filepath.Join(s.Root, chartsDirName, name)
 	// tickets.yaml goes last: a folder is a chart once it has one.
-	if err := AtomicWrite(s.ChartMapFile(name), []byte(chartMapSkeleton(title))); err != nil {
+	if err := AtomicWrite(s.ChartMapFile(name), []byte(chartMapSkeleton(title, issue))); err != nil {
 		_ = os.RemoveAll(dir)
 		return err
 	}
