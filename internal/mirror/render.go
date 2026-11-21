@@ -315,13 +315,27 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 	ownerRepo, needQualify := qualifyRepo(cfg)
 
 	var parts []string
-	if desc != "" {
-		parts = append(parts, qualify(unwrap(trimText(desc)), needQualify, ownerRepo))
-	}
-
 	rec, err := st.ReadTicket(ticket)
 	if err != nil {
 		return "", err
+	}
+	if rec.KindOrDefault() != store.KindIssue {
+		partOf, err := partOfLine(st, cfg, ticket, rec)
+		if err != nil {
+			return "", err
+		}
+		if partOf != "" {
+			parts = append(parts, partOf)
+		}
+	}
+	if desc != "" {
+		parts = append(parts, qualify(unwrap(trimText(desc)), needQualify, ownerRepo))
+	}
+	if rec.KindOrDefault() == store.KindIssue {
+		// An issue ticket is the need: its text and the footer, no slices,
+		// brief or pull requests. Its plan is a comment (see the plan comment).
+		parts = append(parts, ticketFooterAt(ticket, footerBranch(st, cfg, ticket, rec)))
+		return strings.Join(parts, "\n\n"), nil
 	}
 	if rec.Closed != nil {
 		closed, err := closedBlock(st, *rec.Closed, needQualify, ownerRepo)
@@ -360,6 +374,41 @@ func RenderTicketBody(st *store.Store, cfg project.Config, ticket string, prs []
 
 	parts = append(parts, ticketFooterAt(ticket, footerBranch(st, cfg, ticket, rec)))
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// partOfLine is the first lines of a mirrored task's or multi-task's issue:
+// "Part of #n" for each issue of IssuesOf that has an issue yet, then the
+// multi-task's own when the ticket sits under one whose issue exists, each
+// number once. A need or multi-task with no issue yet leaves its part out
+// until a later sync adds it. Empty when the ticket serves nothing.
+func partOfLine(st *store.Store, cfg project.Config, ticket string, rec store.Ticket) (string, error) {
+	if cfg.GitHub == nil {
+		return "", nil
+	}
+	needs, err := st.IssuesOf(ticket)
+	if err != nil {
+		return "", err
+	}
+	if rec.Parent != "" {
+		needs = append(needs, rec.Parent)
+	}
+	var refs []string
+	seen := map[string]bool{}
+	for _, id := range needs {
+		ref, err := findRecord(st, store.TrackerOwner{Ticket: id}, cfg.GitHub.Repo)
+		if err != nil {
+			return "", err
+		}
+		if !ref.inTree || ref.entry.ID == "" || seen[ref.entry.ID] {
+			continue
+		}
+		seen[ref.entry.ID] = true
+		refs = append(refs, "Part of #"+ref.entry.ID)
+	}
+	if len(refs) == 0 {
+		return "", nil
+	}
+	return strings.Join(refs, "\n"), nil
 }
 
 // RenderChartBody renders chart's full issue body: its map.md without the

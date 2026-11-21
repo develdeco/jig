@@ -225,3 +225,18 @@ func TestSkillSentencesChartNesting(t *testing.T) {
 		"nested builder", "in the background", "only its repo's slices, never gate or nest", "a hold saying to gate is yours", "wait for them before the gate", "the question, its id and default", "No Agent tool", "if you have the Agent tool", "A hand-back at green with no reviewer", "its tie replaced by running the `command` of its repo's `worktrees` row", "working in that row's `dir`",
 	)
 }
+
+func TestIntakeNeedsReference(t *testing.T) {
+	core := skillFile(t, "intake")
+	ref := skillFile(t, "intake", "needs")
+	wantAll(t, "skills/intake", core, "Before the verdict write the need: what the person needs, never how it is planned, from the prompt or the conversation; it is the step's `--need`")
+	wantAll(t, "skills/jig-init", skillFile(t, "jig-init"), "writes the need first, makes an issue and its chart for each need with `jig chart new", "decides brief or chart for each (a need raised later is another issue)")
+	wantAll(t, "skills/intake", core, "Read `jig skill intake needs` when the prompt states several needs or a need comes after an issue was made")
+	wantAll(t, "skills/intake/references/needs", ref,
+		"**as proposed**", "**one issue**", "could it land on main by itself", "a new need",
+		"never match phrases", "one confirmation, never one per need",
+		"Nothing is made before the answer", "**as proposed** (recommended)", "never how the work is planned",
+		"Make no issue", "whose pull request already merged is a new need",
+		"Confirm it in one line (its title and need; \"not now\" is the other answer), then grill it to its own verdict, whose step makes its issue and chart",
+	)
+}
