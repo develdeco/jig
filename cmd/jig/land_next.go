@@ -31,8 +31,17 @@ func nextLanding(d land.Deps, ticket, into string) string {
 			// A dependent is named when the land rules let it land now, this
 			// landing counted: one that waits for another issue's merge of a
 			// shared task, or for anything else, is not the next landing.
-			if v, err := land.Judge(d, id, land.Options{}); err == nil && v.Refusal == nil && !v.Done {
-				return fmt.Sprintf("The next landing is `%s`, which waited for it", land.Command(st, id, ""))
+			// A task two issues share lands per issue, so it is judged for each
+			// of its issues, in chart order, and named with the first that
+			// can land.
+			issues := []string{""}
+			if cs, err := st.ContainersOf(id, rec); err == nil && len(cs) > 1 {
+				issues = cs
+			}
+			for _, issue := range issues {
+				if v, err := land.Judge(d, id, land.Options{Issue: issue}); err == nil && v.Refusal == nil && !v.Done {
+					return fmt.Sprintf("The next landing is `%s`, which waited for it", land.Command(st, id, issue))
+				}
 			}
 		}
 	}
