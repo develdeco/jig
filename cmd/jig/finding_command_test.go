@@ -17,7 +17,7 @@ func TestFindingHelpSaysTheOracleIsACommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("jig finding --help: exit = %d\n%s", code, out)
 	}
-	for _, want := range []string{"narrowest command that proves the fix", "literal", "required for a fix", "everywhere its rule applies", "a search that must come back empty"} {
+	for _, want := range []string{"narrowest command that proves the fix", "literal", "required for a fix", "everywhere its rule applies", "a search that must come back empty", "one command sh can run, its explanation in --detail"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("jig finding --help does not say %q:\n%s", want, out)
 		}

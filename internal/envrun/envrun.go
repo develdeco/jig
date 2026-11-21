@@ -292,6 +292,44 @@ func shCommand(ctx context.Context, cmd, dir string, env []string) (*exec.Cmd, e
 	return c, nil
 }
 
+// SyntaxError is a command the sh of this package cannot parse; Msg is sh's
+// own message.
+type SyntaxError struct {
+	Msg string
+}
+
+func (e *SyntaxError) Error() string { return "sh cannot parse the command: " + e.Msg }
+
+// CheckSyntax asks Sh whether it can parse cmd, without running it: `sh -n`
+// with cmd on standard input, which hands sh the bytes as written on every OS
+// (the command line is what Git's sh on Windows rewrites). It returns a
+// *SyntaxError carrying sh's message when sh rejects cmd, and another error
+// when sh could not be asked (no sh found, or it would not start).
+func CheckSyntax(cmd string) error {
+	return checkSyntax(Sh, cmd)
+}
+
+// checkSyntax is CheckSyntax with find giving the sh to ask.
+func checkSyntax(find func() (string, error), cmd string) error {
+	sh, err := find()
+	if err != nil {
+		return err
+	}
+	c := exec.Command(sh, "-n")
+	c.Stdin = strings.NewReader(cmd)
+	var out bytes.Buffer
+	c.Stdout, c.Stderr = &out, &out
+	err = c.Run()
+	if err == nil {
+		return nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return &SyntaxError{Msg: strings.TrimSpace(out.String())}
+	}
+	return fmt.Errorf("ask %s to parse the command: %w", sh, err)
+}
+
 // substitute replaces {ticket} and {port} placeholders in cmd.
 func substitute(cmd, ticket string, port int) string {
 	cmd = strings.ReplaceAll(cmd, "{ticket}", ticket)
