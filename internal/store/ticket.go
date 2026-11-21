@@ -68,6 +68,34 @@ type Ticket struct {
 	// Closed is the ticket's closure: set when it was closed without a pull
 	// request (`jig close`), nil while it is open. See Closed.
 	Closed *Closed
+	// Kind is the ticket's kind: KindIssue, KindTask or KindMultiTask. Empty
+	// reads as a task (KindOrDefault), so a ticket recorded before the field
+	// existed is a task and no store is rewritten.
+	Kind string
+	// Parent is the id of the multi-task this task sits under; empty for any
+	// other ticket. A ticket's issue is not recorded here: it is the issue of
+	// the chart that lists the ticket.
+	Parent string
+}
+
+// The three kinds a ticket can have.
+const (
+	KindIssue     = "issue"
+	KindTask      = "task"
+	KindMultiTask = "multi-task"
+)
+
+// KindOrDefault is the ticket's kind, a task when none is recorded.
+func (t Ticket) KindOrDefault() string {
+	if t.Kind == "" {
+		return KindTask
+	}
+	return t.Kind
+}
+
+// ValidKind reports whether k is one of the three kinds.
+func ValidKind(k string) bool {
+	return k == KindIssue || k == KindTask || k == KindMultiTask
 }
 
 // Adopted reports whether the ticket adopted a branch: a recorded branch is
@@ -89,6 +117,8 @@ type ticketFile struct {
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
 	Closed        *closedFile       `yaml:"closed,omitempty"`
+	Kind          string            `yaml:"kind,omitempty"`
+	Parent        string            `yaml:"parent,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -175,6 +205,13 @@ func ReadTicketFile(path string) (Ticket, error) {
 			},
 		}
 	}
+	if f.Kind != "" && !ValidKind(f.Kind) {
+		return Ticket{}, &axi.Error{
+			Msg:  fmt.Sprintf("%s has kind %q; must be %q, %q or %q", path, f.Kind, KindIssue, KindTask, KindMultiTask),
+			Code: "TICKET_RECORD_INVALID",
+			Help: []string{fmt.Sprintf("Fix or remove the kind in %s", path)},
+		}
+	}
 	if f.SchemaVersion > ticketSchemaVersion {
 		return Ticket{}, &axi.Error{
 			Msg:  fmt.Sprintf("%s has schema_version %d, newer than this jig version understands (%d)", path, f.SchemaVersion, ticketSchemaVersion),
@@ -182,7 +219,7 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases}
+	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases, Kind: f.Kind, Parent: f.Parent}
 	if f.Closed != nil {
 		c := Closed(*f.Closed)
 		t.Closed = &c
@@ -281,6 +318,10 @@ func writeTicketFile(path string, t Ticket) error {
 		Rank:          t.Rank,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
+		Parent:        t.Parent,
+	}
+	if t.Kind != KindTask {
+		f.Kind = t.Kind
 	}
 	if t.Closed != nil {
 		c := closedFile(*t.Closed)

@@ -267,6 +267,7 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	problems = append(problems, aliasProblems...)
 
 	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketParent(st, ticket)...)
 	problems = append(problems, validateTicketClosed(st, ticket)...)
 	problems = append(problems, validateUpstreamEdges(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
@@ -467,6 +468,28 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 
 	if cyc := ticketDepsCycle(st, ticket, nil); cyc != "" {
 		problems = append(problems, "ticket.yaml blocked_by cycle: "+cyc)
+	}
+	return problems
+}
+
+// validateTicketParent checks a ticket's parent: it must be a ticket of kind
+// multi-task, and only a task has one. A ticket.yaml that cannot be read is
+// validateTicketDeps to report.
+func validateTicketParent(st *store.Store, ticket string) []string {
+	t, err := st.ReadTicket(ticket)
+	if err != nil || t.Parent == "" {
+		return nil
+	}
+	var problems []string
+	if k := t.KindOrDefault(); k != store.KindTask {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q on a ticket of kind %s; only a task has a parent", t.Parent, k))
+	}
+	if err := requireTicketID(st, t.Parent); err != nil {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is not a ticket of the store", t.Parent))
+	} else if pt, perr := st.ReadTicket(t.Parent); perr == nil {
+		if k := pt.KindOrDefault(); k != store.KindMultiTask {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is a %s, not a multi-task", t.Parent, k))
+		}
 	}
 	return problems
 }
