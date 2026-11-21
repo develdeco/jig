@@ -1,9 +1,6 @@
 package land
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -164,22 +161,6 @@ type Readiness struct {
 	// Prompt is what to ask next: Publish T when ready, Land T when published,
 	// and "" when waiting.
 	Prompt string
-}
-
-// Why is what a waiting container waits for, in a sentence; "" when it waits
-// for nothing.
-func (r Readiness) Why() string {
-	switch {
-	case len(r.Waits) > 0:
-		ids := make([]string, len(r.Waits))
-		for i, w := range r.Waits {
-			ids[i] = w.Ticket
-		}
-		return fmt.Sprintf("%d of its children have not landed: %s", len(ids), strings.Join(ids, ", "))
-	case len(r.Unmet) > 0:
-		return r.Unmet[0].Why
-	}
-	return ""
 }
 
 // ReadinessOf says where container stands. A container with no children (a

@@ -155,7 +155,7 @@ func TestContainerReadyCheckRunsTheRegistry(t *testing.T) {
 		},
 	}
 	r := w.readiness("M-1")
-	if r.State != land.StateWaiting || len(r.Unmet) != 2 || r.Unmet[0].Code != "FAKE_NOT_MET" || r.Prompt != "Run the fake suite" || r.Why() != "the fake suite has not run" {
+	if r.State != land.StateWaiting || len(r.Unmet) != 2 || r.Unmet[0].Code != "FAKE_NOT_MET" || r.Prompt != "Run the fake suite" || r.Unmet[0].Why != "the fake suite has not run" {
 		t.Fatalf("readiness = %+v, want waiting on the fake precondition with its prompt", r)
 	}
 	if seen.ID != "M-1" || seen.Kind != store.KindMultiTask || seen.Branch != base || len(seen.Children) != 2 || len(seen.Repos) != 1 {
