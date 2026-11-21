@@ -255,3 +255,32 @@ func TestIntakeNeedsReference(t *testing.T) {
 		"Confirm it in one line (its title and need; \"not now\" is the other answer), then grill it to its own verdict, whose step makes its issue and chart",
 	)
 }
+
+func TestIntakeChartFold(t *testing.T) {
+	ref := skillFile(t, "intake", "chart-verdict")
+	wantAll(t, "skills/intake/references/chart-verdict", ref,
+		"When `jig recall` names an open ticket of another chart near the work, or a fog item is about another chart's tickets, and this chart's model makes that ticket's goal native, fold it in",
+		"Judge that by meaning, never by matching words",
+		"`jig close <T> --reason superseded --by <task> --note \"<why>\"`",
+		"out of the other chart's `tickets.yaml`",
+		"A ticket two charts list is a shared task, not a fold",
+		"a note atop its `brief.md` saying what changed",
+		"Editing it withdraws the approval, so `jig next` puts it back at its brief",
+		"Fold it in two steps. The moved tickets enter this chart's entries with their ids as the entries are written. The closes and edge moves follow `jig graduate`, naming the task ids it prints, because `jig close --by` takes only a ticket that exists",
+		"Once graduated, close each ticket this chart supersedes",
+		"into this chart's entries (before `jig graduate`)",
+		"Once graduated, move an edge to a closed ticket onto its replacement with `jig depend <T> --on <P>` (keep `--kind stacked` when the old edge was stacked), and clear the old edge with `jig depend <T> --on <closed> --clear`",
+		"without `--on`, `--clear` removes every edge of the ticket",
+		"naming the task that replaces it",
+		"Move the rest, with their ids,",
+		"A superseded blocker releases the tickets that wait for it",
+		"A multi-task moves with its tasks, never a task alone",
+		"rewrite each ref the move shifts, in both charts and in the moved entry's own refs (a ref to a ticket that has an id can be written as its id)",
+		"only when none of its tickets published or landed; otherwise that issue keeps what it holds and lands it",
+		"Never leave such a ticket as an edge out of the chart",
+		"A ticket that serves another need stays where it is, and an edge to it is fine",
+		"this chart's as a decision, the other's as a note at its top",
+		"closed as superseded by this chart's issue",
+	)
+	wantNone(t, "skills/intake/references/chart-verdict", ref, "—", "Fold it before the entries are written")
+}
