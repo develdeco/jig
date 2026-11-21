@@ -251,11 +251,15 @@ func TestIntakeChartFold(t *testing.T) {
 		"A ticket two charts list is a shared task, not a fold",
 		"a note atop its `brief.md` saying what changed",
 		"Editing it withdraws the approval, so `jig next` puts it back at its brief",
-		"Move an edge to a closed ticket onto its replacement with `jig depend <T> --on <P>` and clear the old edge with `--clear`",
+		"Fold it in two steps. The moved tickets enter this chart's entries with their ids as the entries are written. The closes and edge moves follow `jig graduate`, naming the task ids it prints, because `jig close --by` takes only a ticket that exists",
+		"Once graduated, close each ticket this chart supersedes",
+		"into this chart's entries (before `jig graduate`)",
+		"Once graduated, move an edge to a closed ticket onto its replacement with `jig depend <T> --on <P>`, and clear the old edge with `jig depend <T> --on <closed> --clear`",
+		"without `--on`, `--clear` removes every edge of the ticket",
 		"Never leave such a ticket as an edge out of the chart",
 		"A ticket that serves another need stays where it is, and an edge to it is fine",
 		"this chart's as a decision, the other's as a note at its top",
 		"closed as superseded by this chart's issue",
 	)
-	wantNone(t, "skills/intake/references/chart-verdict", ref, "—")
+	wantNone(t, "skills/intake/references/chart-verdict", ref, "—", "Fold it before the entries are written")
 }
