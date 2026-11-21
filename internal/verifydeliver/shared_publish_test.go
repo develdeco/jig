@@ -267,8 +267,13 @@ func TestSharedPublishRecordsAHandedOffPullRequestIntoItsIssue(t *testing.T) {
 	shareTicket(t, &d, fx.Ticket)
 	_, addEnv := useGithubHost(t, &d, "", "")
 	addEnv("GH_STUB_HEAD_REF="+ticketBranch(fx.Ticket), "GH_STUB_HEAD_OID="+head)
-	if _, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket, Issue: "I-2"}, "https://github.com/owner/fixture-repo/pull/7", nil); err != nil {
+	rec, err := PublishRecordPR(d, PublishOpts{Ticket: fx.Ticket, Issue: "I-2"}, "https://github.com/owner/fixture-repo/pull/7", nil)
+	if err != nil {
 		t.Fatalf("PublishRecordPR into I-2: %v", err)
+	}
+	// The notes are rendered for the issue before the pull request is read back.
+	if rec.ReviewNotes.Status != ReviewNotesPosted || rec.Readback.Match == journal.BodyUnknown {
+		t.Errorf("the hand-off's notes %+v and read-back %q, want the notes posted and the body read back", rec.ReviewNotes, rec.Readback.Match)
 	}
 	if got := linesInto(t, d, fx.Ticket, "I-2"); !slices.Contains(got, journal.EventPr) || !slices.Contains(got, journal.EventPublishDone) {
 		t.Errorf("lines into I-2 = %v, want pr and publish-done", got)
