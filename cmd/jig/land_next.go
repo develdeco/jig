@@ -36,7 +36,12 @@ func nextLanding(d land.Deps, ticket, into string) string {
 			// can land.
 			issues := []string{""}
 			if cs, err := st.ContainersOf(id, rec); err == nil && len(cs) > 1 {
-				issues = cs
+				issues = append([]string{}, cs...)
+				// The issue this landing went into is judged first: it is the
+				// one the landing released.
+				if i := slices.Index(issues, into); i > 0 {
+					issues[0], issues[i] = issues[i], issues[0]
+				}
 			}
 			for _, issue := range issues {
 				if v, err := land.Judge(d, id, land.Options{Issue: issue}); err == nil && v.Refusal == nil && !v.Done {
