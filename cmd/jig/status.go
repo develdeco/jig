@@ -94,7 +94,9 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	// the plan's open pull requests are read through the listing's max age rather
 	// than asked of the host each time: a parent that merged shows in the hint
 	// within that age, as it does in the listing.
-	out, err := renderStatusWith(st, ticket, statusSectionsWithBranch(cfg, mp), plannedStanding(cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)))
+	merges := newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)
+	sections := append(statusSectionsWithBranch(cfg, mp), sharedStatusSection(cfg, mp, merges))
+	out, err := renderStatusWith(st, ticket, sections, plannedStanding(cfg, mp, merges))
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -588,8 +590,8 @@ func plannedStanding(cfg project.Config, mp project.MachineProject, merges merge
 		if err != nil {
 			return phase.Ticket{}, err
 		}
-		if mayBeBehind(st, ticket, rec) {
-			if t, err := derivePhasePlanned(st, cfg, mp, ticket, rec, merges); err == nil {
+		if mayBeBehind(st, ticket, rec, "") {
+			if t, err := derivePhasePlanned(st, cfg, mp, ticket, rec, merges, ""); err == nil {
 				return t, nil
 			}
 		}

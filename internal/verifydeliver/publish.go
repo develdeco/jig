@@ -55,6 +55,9 @@ type PublishOpts struct {
 	// ones an earlier publish stored, if any. It needs one repo, by o.Repo when
 	// the ticket builds in several.
 	What string
+	// Issue is the issue a shared task (one two issues list) is published into:
+	// `jig publish --issue`. A ticket with at most one container takes none.
+	Issue string
 }
 
 // PublishReport is Publish's result.
@@ -151,6 +154,31 @@ type publishTarget struct {
 	// stacked on (Deps.Stack): the zero value when it is stacked on nothing
 	// here.
 	stack stack.Repo
+	// into is the container (issue or multi-task) the pull request goes into
+	// and the four publish lines name: the ticket's one container, or for a
+	// shared task the issue --issue named. "" for a ticket with none.
+	into string
+	// sharedWith are the other issues' pull requests of a shared task in this
+	// repo, which the body names.
+	sharedWith []prLink
+	// issues are the issues of a shared task, in chart order: nil for any
+	// other ticket. Each other issue's pull request is named in the body.
+	issues []string
+}
+
+// readJournal is the ticket's journal as the pull request of this target sees
+// it (journal.ReadFor).
+func (t *publishTarget) readJournal(d Deps) ([]journal.Line, error) {
+	return journal.ReadFor(d.Store, t.ticket, t.into)
+}
+
+// appendLine appends a publish line to the ticket's journal, naming the
+// container it is for.
+func (t *publishTarget) appendLine(d Deps, l journal.Line) error {
+	if journal.IsPublishEvent(l.Event) {
+		l.Into = t.into
+	}
+	return journal.Append(d.Store, t.ticket, l)
 }
 
 // base is the branch the repo's pull request goes into: the plan's PRTarget
@@ -327,7 +355,7 @@ func (t *publishTarget) oracleNames(man manifest.Manifest) []string {
 // disk. It returns a target for each repo the publish works in, the ticket's
 // repos in the project's order or the one --repo names. A refusal here leaves
 // nothing written.
-func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
+func readyToPublish(d Deps, ticket, repoFlag, issue string) ([]*publishTarget, error) {
 	if err := d.Store.Sync(); err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
 	}
@@ -339,6 +367,12 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	rec, err := d.Store.ReadTicket(ticket)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
+	}
+	// A shared task goes into the issue --issue names; any other ticket into
+	// its one container, if it has one.
+	into, issues, err := publishInto(d, ticket, rec, issue)
+	if err != nil {
+		return nil, err
 	}
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
@@ -393,7 +427,12 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	// read refuses the publish rather than opening a pull request into the
 	// wrong branch.
 	var plan stack.Plan
-	if d.Stack != nil {
+	switch {
+	case issues != nil && d.StackFor != nil:
+		if plan, err = d.StackFor(ticket, into); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read where %s goes into %s: %w", ticket, into, err)
+		}
+	case d.Stack != nil:
 		if plan, err = d.Stack(ticket); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: read what %s is stacked on: %w", ticket, err)
 		}
@@ -406,13 +445,72 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 		targets[i] = &publishTarget{
 			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch, title: title,
 			slices: slices, repoSlices: gr.slices, gateRep: gateRep, lastRound: lastRound,
-			covered: names, qualified: len(d.Cfg.Repos) > 1,
+			covered: names, qualified: len(d.Cfg.Repos) > 1, into: into, issues: issues,
 		}
 		if r, ok := plan.In(gr.name); ok {
 			targets[i].stack = r
 		}
+		if targets[i].sharedWith, err = sharedWithFor(d, targets[i]); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read the pull requests of the other issues of %s: %w", ticket, err)
+		}
 	}
 	return targets, nil
+}
+
+// SharedTaskIssueNeeded is the code of the refusal of a publish of a shared
+// task that names no issue of its own.
+const SharedTaskIssueNeeded = "SHARED_TASK_ISSUE_NEEDED"
+
+// publishInto is the container a publish of ticket goes into and, for a shared
+// task, its issues. A ticket with at most one container takes no issue: it
+// goes into that one, and a ticket with none into the target (""). A shared
+// task needs --issue to be one of its issues; otherwise nothing is written
+// and the refusal lists each issue, with the pull request it has or none.
+func publishInto(d Deps, ticket string, rec store.Ticket, issue string) (into string, issues []string, err error) {
+	containers, err := d.Store.ContainersOf(ticket, rec)
+	if err != nil {
+		return "", nil, fmt.Errorf("verifydeliver: publish: read the containers of %s: %w", ticket, err)
+	}
+	if len(containers) <= 1 {
+		if issue != "" && (len(containers) == 0 || containers[0] != issue) {
+			return "", nil, &axi.Error{
+				Msg:  fmt.Sprintf("%s is not published into %s: it is not a task of that issue", ticket, issue),
+				Code: SharedTaskIssueNeeded,
+				Help: []string{fmt.Sprintf("Publish %s without --issue: only a task two issues share takes it.", ticket)},
+			}
+		}
+		if len(containers) == 1 {
+			into = containers[0]
+		}
+		return into, nil, nil
+	}
+	state := make([]string, len(containers))
+	for i, c := range containers {
+		lines, err := journal.ReadFor(d.Store, ticket, c)
+		if err != nil {
+			return "", nil, err
+		}
+		state[i] = c + ": no pull request"
+		for _, l := range lines {
+			if l.Event == journal.EventPr && l.URL != "" {
+				state[i] = c + ": " + l.URL
+			}
+		}
+	}
+	for _, c := range containers {
+		if c == issue {
+			return issue, containers, nil
+		}
+	}
+	msg := fmt.Sprintf("%s is a shared task: say which issue to publish it into with --issue", ticket)
+	if issue != "" {
+		msg = fmt.Sprintf("%s is a shared task, and %s is not one of its issues", ticket, issue)
+	}
+	return "", nil, &axi.Error{
+		Msg:  msg + " (" + strings.Join(state, "; ") + ")",
+		Code: SharedTaskIssueNeeded,
+		Help: []string{fmt.Sprintf("Run `jig publish %s --issue <ID>`, one of %s.", ticket, strings.Join(containers, ", "))},
+	}
 }
 
 // publishBranch is the ticket's branch, which has one name in every repo: it
@@ -581,7 +679,13 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// is on origin.
 	var openPR repohost.OpenPR
 	if host != nil {
-		if openPR, err = host.FindOpenPR(branch); err != nil {
+		find := func() (repohost.OpenPR, error) { return host.FindOpenPR(branch) }
+		if pt.issues != nil {
+			// A shared task has a pull request into each issue's branch from
+			// this one: the one into this issue's is the one to update.
+			find = func() (repohost.OpenPR, error) { return host.FindOpenPRInto(branch, pt.base()) }
+		}
+		if openPR, err = find(); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
 		}
 	}
@@ -651,7 +755,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		_ = d.Store.Push(fmt.Sprintf("%s: publish failed: %s", ticket, failureCode(err)))
 	}()
 
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return PublishReport{}, err
 	}
@@ -664,7 +768,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	jlines, err := journal.Read(d.Store, ticket)
+	jlines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -740,12 +844,12 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 				continue
 			}
 			line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: sh.pt.branch, Provenance: provenance, Repo: sh.pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
-			if err := journal.Append(d.Store, ticket, line); err != nil {
+			if err := sh.pt.appendLine(d, line); err != nil {
 				return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 			}
 		}
 	}
-	jlines, err = journal.Read(d.Store, ticket)
+	jlines, err = journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -805,7 +909,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 		approval, _ := approvalOf(jlines, pt.lineRepo(), pt.reviewedHead())
 		line := journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: sh.head, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}
-		if err := journal.Append(d.Store, ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 		}
 		report.ReviewNotes[pt.repoName] = postPublishChecks(d, sh.host, ticket, prURL, pt.lineRepo(), sh.pub, fn.warn)
@@ -851,7 +955,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// the branch is out: a publish that is declined or that fails before the
 	// push leaves no changelog or ledger entry behind to be written again by
 	// the one that follows.
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -877,7 +981,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 				spans, spanErr = readSpans(d, allTargets)
 			}
 		}
-		if err := journal.Append(d.Store, ticket, publishDoneLine(spans, spanErr, fn.warn)); err != nil {
+		if err := targets[0].appendLine(d, publishDoneLine(spans, spanErr, fn.warn)); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
@@ -994,7 +1098,7 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: read questions: %w", err)
 	}
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := t.readJournal(d)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1098,7 +1202,7 @@ func reviewedTrailer(dir, rev string, cfg project.Config, warn func(format strin
 // picks file's, or an earlier pick of the same head and recordings.
 func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, error) {
 	ticket := t.ticket
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := t.readJournal(d)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1227,7 +1331,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	journaled, err := journal.Read(d.Store, ticket)
+	journaled, err := t.readJournal(d)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1488,7 +1592,7 @@ type BodyReport struct {
 func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	ticket := o.Ticket
 	fn := d.publishFuncs()
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return BodyReport{}, err
 	}
@@ -1532,7 +1636,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 		}
 		reads = append(reads, rd)
 	}
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return BodyReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1548,7 +1652,7 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
 		line := journal.Line{Event: journal.EventPrBody, Commit: rd.head, Branch: pt.branch, Ref: r.prPath, Repo: pt.lineRepo()}
-		if err := journal.Append(d.Store, ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoBody{
@@ -1683,7 +1787,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err != nil {
 		return RecordReport{}, err
 	}
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return RecordReport{}, err
 	}
@@ -1738,7 +1842,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 
 	// The other repos still waiting for a pull request: the publish is done
 	// with this one when there are none.
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, pt.into)
 	if err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1777,7 +1881,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	var notes ReviewNotesReport
 	renderFailed := false
 	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
-		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
+		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo, Issue: o.Issue}); err != nil {
 			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
 			renderFailed = true
 			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
@@ -1797,7 +1901,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		warn("jig: the %s of %s differs from the render of %s: update the pull request with the title and body `jig publish %s --body` reports\n", readback.Differs, prURL, ticket, ticket)
 	}
 	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
+	if err := pt.appendLine(d, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 	if notes.Status == "" {
@@ -1809,7 +1913,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		if spanErr == nil {
 			spans, spanErr = readSpans(d, allTargets)
 		}
-		if err := journal.Append(d.Store, ticket, publishDoneLine(spans, spanErr, warn)); err != nil {
+		if err := pt.appendLine(d, publishDoneLine(spans, spanErr, warn)); err != nil {
 			return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
@@ -1843,7 +1947,7 @@ type ApproveReport struct {
 // stands in for the confirmation a bare publish asks for, and a ticket that
 // publishes in several repos needs it for every one.
 func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, error) {
-	targets, err := readyToPublish(d, o.Ticket, o.Repo)
+	targets, err := readyToPublish(d, o.Ticket, o.Repo, o.Issue)
 	if err != nil {
 		return ApproveReport{}, err
 	}
@@ -1857,14 +1961,14 @@ func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, er
 		}
 	}
 	report := ApproveReport{Branch: targets[0].branch, Provenance: provenance}
-	prior, err := journal.Read(d.Store, o.Ticket)
+	prior, err := journal.ReadFor(d.Store, o.Ticket, targets[0].into)
 	if err != nil {
 		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
 	for _, pt := range targets {
 		head := pt.reviewedHead()
 		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
-		if err := journal.Append(d.Store, o.Ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head, FinalRun: finalRunAt(prior, pt.repoName, pt.lineRepo(), head)})

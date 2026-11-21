@@ -19,6 +19,7 @@ package stack
 
 import (
 	"os"
+	"slices"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/project"
@@ -47,6 +48,11 @@ type Input struct {
 	Merges Merges
 }
 
+// ContainerBranch is one container (an issue) of a shared task and its branch.
+type ContainerBranch struct {
+	Container, Branch string
+}
+
 // Repo is where the ticket's branch starts in one repo and where its pull
 // request goes.
 type Repo struct {
@@ -60,6 +66,10 @@ type Repo struct {
 	// branch while it has not merged, else the container's branch, else
 	// Target.
 	PRTarget string
+	// Containers are the issues a shared task's pull requests go into, each
+	// with its branch, when the plan was read for no one issue; PRTarget is
+	// then empty. Nil for any other ticket.
+	Containers []ContainerBranch
 	// Container is the ticket whose branch the pull request goes into, and
 	// ContainerBranch that branch; both "" for a ticket with no container.
 	Container, ContainerBranch string
@@ -248,7 +258,14 @@ func StackedOnAny(rec store.Ticket) bool {
 // plan, read from its record alone. A parent that is closed is not built on:
 // its closure says whether the ticket still waits for it. In a repo of the
 // ticket's, a parent counts when its own slices build there too.
-func Read(in Input, ticket string) (Plan, error) {
+func Read(in Input, ticket string) (Plan, error) { return ReadFor(in, ticket, "") }
+
+// ReadFor is Read with issue as the container: the plan of a ticket that goes
+// into that issue's branch (PRTarget is its branch, StartFrom unchanged), the
+// one a publish into that issue uses. With no issue it is Read, and a shared
+// task (two issues list it) is then planned from the target with no PRTarget
+// and each issue in Repo.Containers.
+func ReadFor(in Input, ticket, issue string) (Plan, error) {
 	rec, err := in.Store.ReadTicket(ticket)
 	if err != nil {
 		return Plan{}, err
@@ -278,9 +295,19 @@ func Read(in Input, ticket string) (Plan, error) {
 		}
 		parents = append(parents, parent{id: id, rec: prec})
 	}
-	container, hasContainer, err := in.Store.ContainerOf(ticket, rec)
+	containers, err := in.Store.ContainersOf(ticket, rec)
 	if err != nil {
 		return Plan{}, err
+	}
+	container, hasContainer := issue, issue != ""
+	if !hasContainer && len(containers) == 1 {
+		container, hasContainer = containers[0], true
+	}
+	// A shared task read for no one issue goes into each issue's branch: its
+	// start is the target's, and the plan names every container.
+	var shared []string
+	if issue == "" && len(containers) > 1 {
+		shared = containers
 	}
 	var crec store.Ticket
 	if hasContainer {
@@ -290,7 +317,7 @@ func Read(in Input, ticket string) (Plan, error) {
 	}
 	kind := rec.KindOrDefault()
 	notTask := kind != store.KindTask
-	if len(parents) == 0 && !hasContainer && !notTask {
+	if len(parents) == 0 && !hasContainer && !notTask && shared == nil {
 		return plan, nil
 	}
 	if notTask {
@@ -338,7 +365,8 @@ func Read(in Input, ticket string) (Plan, error) {
 			if err != nil {
 				continue
 			}
-			if dc, ok, err := in.Store.ContainerOf(id, drec); err != nil || !ok || !chain[dc] {
+			dcs, err := in.Store.ContainersOf(id, drec)
+			if err != nil || !slices.ContainsFunc(dcs, func(c string) bool { return chain[c] }) {
 				continue
 			}
 			if names, err := builtIn(id); err == nil {
@@ -432,7 +460,22 @@ func Read(in Input, ticket string) (Plan, error) {
 			}
 			f.Parents = append(f.Parents, fp)
 		}
-		plan.Repos = append(plan.Repos, Judge(f))
+		r := Judge(f)
+		for _, c := range shared {
+			crec, err := in.Store.ReadTicket(c)
+			if err != nil {
+				return Plan{}, err
+			}
+			cb, err := in.Store.ResolveTicketBranch(c, crec, target)
+			if err != nil {
+				return Plan{}, err
+			}
+			r.Containers = append(r.Containers, ContainerBranch{Container: c, Branch: cb})
+		}
+		if shared != nil {
+			r.PRTarget = ""
+		}
+		plan.Repos = append(plan.Repos, r)
 	}
 	return plan, nil
 }

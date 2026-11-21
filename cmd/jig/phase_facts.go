@@ -13,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -31,7 +32,14 @@ func derivePhase(st *store.Store, ticket string) (phase.Ticket, error) {
 // the phase it names and the state it prints agree on a blocker whose pull
 // request is not merged.
 func derivePhaseWith(st *store.Store, ticket string, merges mergeSource) (phase.Ticket, error) {
-	f, lines, err := phaseFactsWith(st, ticket, merges)
+	return derivePhaseFor(st, ticket, merges, "")
+}
+
+// derivePhaseFor is derivePhaseWith for a chart's issue: a shared task is read
+// for that issue's publish lines alone (journal.ReadFor), and a blocker that is
+// a shared task is judged for it.
+func derivePhaseFor(st *store.Store, ticket string, merges mergeSource, issue string) (phase.Ticket, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges, issue)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
@@ -44,7 +52,12 @@ func derivePhaseWith(st *store.Store, ticket string, merges mergeSource) (phase.
 // (restackAsks) is at its publish again, not done. `jig here` and the hooks run
 // on every tool call and keep the stack-blind derivePhaseWith (ADR 0038).
 func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan stack.Plan) (phase.Ticket, error) {
-	f, lines, err := phaseFactsWith(st, ticket, merges)
+	return derivePhaseStackedFor(st, ticket, merges, plan, "")
+}
+
+// derivePhaseStackedFor is derivePhaseStacked read for a chart's issue.
+func derivePhaseStackedFor(st *store.Store, ticket string, merges mergeSource, plan stack.Plan, issue string) (phase.Ticket, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges, issue)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
@@ -56,37 +69,45 @@ func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan
 // plan: a ticket that names a stacked blocker and has published (rec is its
 // record) is read with its stack plan, since only a published ticket can be owed
 // a merge; any other is read without one, and no plan is read for it. A plan
-// that cannot be read is an error.
-func derivePhasePlanned(st *store.Store, cfg project.Config, mp project.MachineProject, id string, rec store.Ticket, merges mergeSource) (phase.Ticket, error) {
-	if !mayBeBehind(st, id, rec) {
-		return derivePhaseWith(st, id, merges)
+// that cannot be read is an error. issue is the issue of the chart the ticket
+// is read in ("" for none): a shared task is then read for that issue.
+func derivePhasePlanned(st *store.Store, cfg project.Config, mp project.MachineProject, id string, rec store.Ticket, merges mergeSource, issue string) (phase.Ticket, error) {
+	if !mayBeBehind(st, id, rec, issue) {
+		return derivePhaseFor(st, id, merges, issue)
 	}
-	plan, err := stack.Read(stackInput(st, cfg, mp, merges), id)
+	plan, err := stack.ReadFor(stackInput(st, cfg, mp, merges), id, issue)
 	if err != nil {
 		return phase.Ticket{}, err
 	}
-	return derivePhaseStacked(st, id, merges, plan)
+	return derivePhaseStackedFor(st, id, merges, plan, issue)
 }
 
 // mayBeBehind says the ticket's stack plan can matter to where it stands: it
-// names a stacked blocker or has a container, published and is not closed. Any
-// other ticket is never owed a merge, so no plan is read for it.
-func mayBeBehind(st *store.Store, id string, rec store.Ticket) bool {
+// names a stacked blocker or has a container, published (into issue, for a
+// shared task read for one) and is not closed. Any other ticket is never owed a
+// merge, so no plan is read for it.
+func mayBeBehind(st *store.Store, id string, rec store.Ticket, issue string) bool {
 	if rec.Closed != nil || rec.KindOrDefault() != store.KindTask {
 		return false
+	}
+	published := func() bool {
+		if issue != "" {
+			lines, err := journal.ReadFor(st, id, issue)
+			return err == nil && hasPublishDone(lines)
+		}
+		ok, err := isPublished(st, id)
+		return err == nil && ok
 	}
 	// A record naming a stacked blocker or a parent is checked first; a ticket
 	// of neither is looked up in the charts only once it has published.
 	if !stack.StackedOnAny(rec) && rec.Parent == "" {
-		published, err := isPublished(st, id)
-		if err != nil || !published {
+		if !published() {
 			return false
 		}
-		_, ok, err := st.ContainerOf(id, rec)
-		return err == nil && ok
+		cs, err := st.ContainersOf(id, rec)
+		return err == nil && (len(cs) == 1 || (issue != "" && len(cs) > 1))
 	}
-	published, err := isPublished(st, id)
-	return err == nil && published
+	return published()
 }
 
 // restackAsks are the merges the plan owes the ticket's branch, one for each
@@ -110,15 +131,16 @@ func restackAsks(plan stack.Plan) []phase.Restack {
 // the journal lines it reads beside them, with the blockers judged by merges, as
 // a claim judges them: a blocker is held until its work has merged. nil judges
 // by the journal alone, where a blocker is met once it published. It reads the
-// store and writes nothing.
-func phaseFactsWith(st *store.Store, ticket string, merges mergeSource) (phase.Facts, []journal.Line, error) {
-	return phaseFactsOf(st, ticket, map[string]bool{}, merges)
+// store and writes nothing. issue is the issue of the chart the ticket is read in
+// ("" for none): a shared task is then read for it.
+func phaseFactsWith(st *store.Store, ticket string, merges mergeSource, issue string) (phase.Facts, []journal.Line, error) {
+	return phaseFactsOf(st, ticket, map[string]bool{}, merges, issue)
 }
 
 // phaseFactsOf is phaseFactsWith for a ticket reached through blockers: seen holds
 // the tickets already being gathered, so blockers that wait for one another
 // stop at the first repeat instead of recursing for good.
-func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges mergeSource) (phase.Facts, []journal.Line, error) {
+func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges mergeSource, issue string) (phase.Facts, []journal.Line, error) {
 	seen[ticket] = true
 	f := phase.Facts{Ticket: ticket}
 	rec, err := st.ReadTicket(ticket)
@@ -176,27 +198,28 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
 			blocker = resolved
 		}
-		p, err := blockerProblem(st, ticket, blocker, b.Kind, claimDeps{merges: merges})
+		p, err := blockerProblem(st, ticket, blocker, b.Kind, claimDeps{merges: merges, issue: issue})
 		if err != nil {
 			return f, nil, err
 		}
 		if p != nil {
 			f.Blockers = append(f.Blockers, phase.Blocker{Ticket: blocker, Kind: b.Kind, Reason: p.Message, Prompt: blockerPrompt(st, blocker, seen, merges),
-				Code: p.Code, PRs: mergePRs(merges, blocker, b.Kind)})
+				Code: p.Code, PRs: mergePRs(st, merges, ticket, blocker, b.Kind, issue)})
 		}
 	}
 
 	if f.Rounds, err = gateRoundsOf(st, ticket); err != nil {
 		return f, nil, err
 	}
-	lines, err := journal.Read(st, ticket)
+	// A shared task read for one issue (a chart's) has the publish lines of
+	// that issue alone; read for none it is published once every issue is.
+	lines, err := journal.ReadFor(st, ticket, issue)
 	if err != nil {
 		return f, nil, err
 	}
-	for _, l := range lines {
-		if l.Event == journal.EventPublishDone {
-			f.Published = true
-		}
+	f.Published = hasPublishDone(lines)
+	if issue == "" {
+		f.Published = publishedAll(st, ticket, lines)
 	}
 	// The open record in the store is the word on an open round: a gate that
 	// failed before its round opened journaled its opening and opened nothing.
@@ -258,7 +281,7 @@ func blockerPrompt(st *store.Store, blocker string, seen map[string]bool, merges
 	if seen[blocker] {
 		return ""
 	}
-	f, lines, err := phaseFactsOf(st, blocker, seen, merges)
+	f, lines, err := phaseFactsOf(st, blocker, seen, merges, "")
 	if err != nil {
 		return ""
 	}
@@ -272,11 +295,18 @@ func blockerPrompt(st *store.Store, blocker string, seen map[string]bool, merges
 // nothing when merges cannot be read, and nothing before the blocker published
 // (no pull request exists). Of is memoized, so this asks the host no more than
 // judging the blocker did.
-func mergePRs(merges mergeSource, blocker, kind string) []phase.MergePR {
+func mergePRs(st *store.Store, merges mergeSource, dependent, blocker, kind, issue string) []phase.MergePR {
 	if kind == "stacked" {
 		return nil
 	}
-	return unmergedPRs(merges, blocker)
+	if merges == nil {
+		return nil
+	}
+	m, err := mergeFor(st, merges, dependent, blocker, issue)
+	if err != nil {
+		return nil
+	}
+	return unmerged(m)
 }
 
 // unmergedPRs are the pull requests recorded for blocker, in each repo it
@@ -289,6 +319,11 @@ func unmergedPRs(merges mergeSource, blocker string) []phase.MergePR {
 	if err != nil {
 		return nil
 	}
+	return unmerged(m)
+}
+
+// unmerged are the pull requests of m's repos whose work has not merged.
+func unmerged(m ready.Merge) []phase.MergePR {
 	var out []phase.MergePR
 	for _, r := range m.Repos {
 		if !r.Met && r.PR != "" {

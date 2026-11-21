@@ -22,6 +22,7 @@ const (
 	publishPRUsage      = "record the pull request at this URL, which you opened from the ticket's branch, as the ticket's (with --repo, for a ticket that builds in several repos) and finish the publish once every repo has one"
 	publishApproveUsage = "record that you approve publishing the reviewed head of each repo, so `jig publish` pushes it without asking"
 	publishRepoUsage    = "publish only this repo, by its name in the project (default: every repo the ticket builds in; --pr needs it when there are several)"
+	publishIssueUsage   = "the issue a task two issues share is published into: its pull request goes into that issue's branch (a ticket with at most one issue takes none)"
 	publishPicksUsage   = "a picks file: the recordings to show in the pull request's demo, in the pick result's JSON shape"
 	publishWhatUsage    = "a what file: the bullets for the pull request's What, the first saying why the change exists; the ticket stores them and the next render reuses them (with --repo, for a ticket that builds in several repos)"
 	publishStoreUsage   = "explicit store path"
@@ -37,6 +38,7 @@ func init() {
 			{"pr", publishPRUsage, false},
 			{"approve", publishApproveUsage, false},
 			{"repo", publishRepoUsage, false},
+			{"issue", publishIssueUsage, false},
 			{"picks", publishPicksUsage, false},
 			{"what", publishWhatUsage, false},
 			{"store", publishStoreUsage, false},
@@ -72,6 +74,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	prURL := fs.String("pr", "", publishPRUsage)
 	approve := fs.Bool("approve", false, publishApproveUsage)
 	repo := fs.String("repo", "", publishRepoUsage)
+	issue := fs.String("issue", "", publishIssueUsage)
 	picks := fs.String("picks", "", publishPicksUsage)
 	what := fs.String("what", "", publishWhatUsage)
 	storeFlag := fs.String("store", "", publishStoreUsage)
@@ -125,6 +128,11 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if *issue != "" {
+		if id, err := st.ResolveTicket(*issue); err == nil {
+			*issue = id
+		}
+	}
 	if err := requireOpen(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
@@ -143,7 +151,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		fmt.Fprint(stdout, verifydeliver.ConfirmPrompt(branch, ticket, openPR, hasHost))
 		return verifydeliver.ConfirmAnswer(answers)
 	}
-	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Yes: *yes, Picks: *picks, What: *what}
+	opts := verifydeliver.PublishOpts{Ticket: ticket, Repo: *repo, Issue: *issue, Yes: *yes, Picks: *picks, What: *what}
 
 	switch {
 	case *body:

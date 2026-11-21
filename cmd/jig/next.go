@@ -194,6 +194,9 @@ type nextTicket struct {
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
+	// Shared is, for a task two issues list, one row for each issue and repo:
+	// its branch, its pull request and where that stands.
+	Shared []nextIssueRow `json:"shared,omitempty"`
 	// Conflicts are the files this ticket's branch cannot merge with another
 	// open ticket's (conflict.go); Clean are sharing pairs that merge fine.
 	Conflicts []ticketConflict `json:"conflicts,omitempty"`
@@ -222,6 +225,8 @@ type nextTicket struct {
 
 	// derived is the same derivation, for the help.
 	derived *phase.Ticket
+	// unpublished are the issues of a shared task with no pull request yet.
+	unpublished []string
 }
 
 // nextChild is one ticket under an issue (an entry of its chart, whose ID is
@@ -524,10 +529,12 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
 }
 
-// blockerInput is blocker id as readiness sees it from a ticket that waits for
-// it: whether it published and whether it was closed.
-func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
-	published, err := isPublished(st, id)
+// blockerInputFor is blocker id as readiness sees it from the ticket dependent
+// that waits for it: whether it published and whether it was closed.
+func blockerInputFor(st *store.Store, dependent, id string) (ready.Ticket, error) {
+	// A blocker that is a shared task has published, for its dependent, when it
+	// published into the dependent's issue.
+	published, err := publishedFor(st, dependent, id, "")
 	if err != nil {
 		return ready.Ticket{}, err
 	}
@@ -538,9 +545,17 @@ func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
 	return ready.Ticket{ID: id, Published: published, Closed: rec.Closed}, nil
 }
 
-// isPublished reports whether ticket's journal has a publish-done line.
+// isPublished reports whether ticket's journal has a publish-done line, and for
+// a shared task one into each of its issues (publishedAll).
 func isPublished(st *store.Store, id string) (bool, error) {
-	return journal.HasEvent(st, id, journal.EventPublishDone)
+	if done, err := journal.HasEvent(st, id, journal.EventPublishDone); err != nil || !done {
+		return false, err
+	}
+	lines, err := journal.Read(st, id)
+	if err != nil {
+		return false, err
+	}
+	return publishedAll(st, id, lines), nil
 }
 
 // nextForTicket works out what is ready to build on ticket id, and which phase
@@ -563,13 +578,13 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	// their work has merged.
 	inputs := []ready.Ticket{data.in}
 	for _, b := range data.in.Blockers {
-		in, err := blockerInput(st, b.Ticket)
+		in, err := blockerInputFor(st, id, b.Ticket)
 		if err != nil {
 			return nextTicket{}, err
 		}
 		inputs = append(inputs, in)
 	}
-	readMerges(merges, inputs)
+	readMerges(st, merges, inputs, true)
 	status := ready.Tickets(inputs)[0]
 	// A stacked ticket starts from its parent's branch where they share a
 	// repo, and its pull request goes there, until the parent merges.
@@ -599,6 +614,11 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	n.Stack = stackRows(plan, data.in.Published)
+	// A task two issues share has a pull request into each: one row for each
+	// issue and repo, and the publish each issue still needs.
+	if n.Shared, n.unpublished, err = sharedRows(st, stackInput(st, cfg, mp, merges), merges, id); err != nil {
+		return nextTicket{}, err
+	}
 	advice := ticketConflictAdvice(st, cfg, mp, id, merges)
 	n.Conflicts, n.CleanWith = advice.Conflicts, advice.Clean
 	for _, b := range ready.Batches(readySlices, place.Repo) {
@@ -714,6 +734,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind", "fact"}, rows))
 	}
 	blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
+	blocks = append(blocks, sharedBlocks(n.Shared)...)
 	if len(n.Ready) == 0 {
 		blocks = append(blocks, "ready: none")
 	} else {
@@ -749,7 +770,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), n.help()...)...))
+	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), append(n.help(), sharedHelp(n.Ticket, n.Shared, n.unpublished)...)...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
@@ -983,7 +1004,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
-	readMerges(merges, inputs)
+	readMerges(st, merges, inputs, false)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked

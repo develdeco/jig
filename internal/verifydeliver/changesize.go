@@ -101,7 +101,7 @@ func ticketTargets(d Deps, ticket, repoFlag string, targets []*publishTarget) ([
 	if repoFlag == "" || !targets[0].several() {
 		return targets, nil
 	}
-	return readyToPublish(d, ticket, "")
+	return readyToPublish(d, ticket, "", targets[0].into)
 }
 
 // publishDoneLine is the line a finished publish journals: with the change's

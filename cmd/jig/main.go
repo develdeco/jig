@@ -329,6 +329,9 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 		d.Stack = func(ticket string) (stack.Plan, error) {
 			return stack.Read(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket)
 		}
+		d.StackFor = func(ticket, issue string) (stack.Plan, error) {
+			return stack.ReadFor(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket, issue)
+		}
 	}
 	return d
 }
