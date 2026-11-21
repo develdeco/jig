@@ -14,6 +14,7 @@ import (
 const (
 	dependOnUsage      = "the ticket T waits for"
 	dependKindUsage    = "merged (the default: wait for the parent's merge) or stacked (build on the parent's branch)"
+	dependAfterUsage   = "the issue I is suggested to land after (a suggestion, not a wait)"
 	dependClearUsage   = "remove the edge to --on, or every edge of the ticket when --on is absent"
 	dependStoreUsage   = "explicit store path"
 	dependProjectUsage = "project name, resolved via the machine mapping"
@@ -25,6 +26,7 @@ func init() {
 		Spec: cmdSpec{"depend", "make a ticket wait for another: jig depend <ticket> --on <ticket> [--kind merged|stacked], or --clear", []flagSpec{
 			{"on", dependOnUsage, false},
 			{"kind", dependKindUsage, false},
+			{"after", dependAfterUsage, false},
 			{"clear", dependClearUsage, false},
 			{"store", dependStoreUsage, false},
 			{"project", dependProjectUsage, false},
@@ -47,6 +49,7 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 	fs := newFlagSet(e, "depend")
 	onFlag := fs.String("on", "", dependOnUsage)
 	kindFlag := fs.String("kind", "", dependKindUsage)
+	afterFlag := fs.String("after", "", dependAfterUsage)
 	clearFlag := fs.Bool("clear", false, dependClearUsage)
 	storeFlag := fs.String("store", "", dependStoreUsage)
 	projectFlag := fs.String("project", "", dependProjectUsage)
@@ -55,6 +58,15 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 		return 0
 	} else if err != nil {
 		return renderErr(stdout, err)
+	}
+	if *afterFlag != "" {
+		switch {
+		case len(positionals) != 1:
+			return renderErr(stdout, afterUsage("jig depend --after takes one issue"))
+		case *onFlag != "" || *kindFlag != "":
+			return renderErr(stdout, afterUsage("--after takes no --on or --kind: it is a suggestion, not a wait"))
+		}
+		return cmdDependAfter(e, positionals, *afterFlag, *clearFlag, *storeFlag, *projectFlag, stdout)
 	}
 	if err := checkDependArgs(positionals, *onFlag, *kindFlag, *clearFlag); err != nil {
 		return renderErr(stdout, err)
@@ -87,6 +99,13 @@ func cmdDepend(e env, args []string, stdout io.Writer) int {
 		}
 		if parent == child {
 			return renderErr(stdout, dependUsage("a ticket cannot wait for itself"))
+		}
+	}
+	if parent != "" && !*clearFlag {
+		_, childIssue := issueKind(st, child)
+		_, parentIssue := issueKind(st, parent)
+		if childIssue && parentIssue {
+			return renderErr(stdout, dependUsage(fmt.Sprintf("%s and %s are issues: an issue lands after another by suggestion (`jig depend %s --after %s`), never waits; code both need is a task in both charts", child, parent, child, parent)))
 		}
 	}
 	if err := st.Sync(); err != nil {

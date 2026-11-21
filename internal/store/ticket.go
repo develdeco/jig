@@ -76,6 +76,11 @@ type Ticket struct {
 	// other ticket. A ticket's issue is not recorded here: it is the issue of
 	// the chart that lists the ticket.
 	Parent string
+	// After is the issues this issue is suggested to land after, written by
+	// `jig depend --after`. It is a suggestion shown by `jig next` and `jig
+	// land`, never a blocker: nothing that reads BlockedBy reads it, and only
+	// an issue has any.
+	After []string
 }
 
 // The three kinds a ticket can have.
@@ -119,6 +124,7 @@ type ticketFile struct {
 	Closed        *closedFile       `yaml:"closed,omitempty"`
 	Kind          string            `yaml:"kind,omitempty"`
 	Parent        string            `yaml:"parent,omitempty"`
+	After         []string          `yaml:"after,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -219,7 +225,7 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases, Kind: f.Kind, Parent: f.Parent}
+	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases, Kind: f.Kind, Parent: f.Parent, After: f.After}
 	if f.Closed != nil {
 		c := Closed(*f.Closed)
 		t.Closed = &c
@@ -319,6 +325,7 @@ func writeTicketFile(path string, t Ticket) error {
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
 		Parent:        t.Parent,
+		After:         t.After,
 	}
 	if t.Kind != KindTask {
 		f.Kind = t.Kind
@@ -678,4 +685,31 @@ func (s *Store) defaultBranchOr(ticket string, rec Ticket) string {
 		return name
 	}
 	return ticket
+}
+
+// SetTicketAfter records other in ticket's after list, once, leaving the rest
+// of the record untouched. It only writes the file: `jig depend --after`
+// checks the edge and commits it through Claim.
+func (s *Store) SetTicketAfter(ticket, other string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		for _, a := range t.After {
+			if a == other {
+				return
+			}
+		}
+		t.After = append(t.After, other)
+	})
+}
+
+// RemoveTicketAfter removes other from ticket's after list.
+func (s *Store) RemoveTicketAfter(ticket, other string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		var kept []string
+		for _, a := range t.After {
+			if a != other {
+				kept = append(kept, a)
+			}
+		}
+		t.After = kept
+	})
 }

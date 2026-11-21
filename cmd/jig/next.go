@@ -205,6 +205,9 @@ type nextTicket struct {
 	// Shared is, for a task two issues list, one row for each issue and repo:
 	// its branch, its pull request and where that stands.
 	Shared []nextIssueRow `json:"shared,omitempty"`
+	// LandsAfter is, for an issue suggested to land after others, one row for
+	// each: a suggestion, never a blocker.
+	LandsAfter []nextAfterRow `json:"lands_after,omitempty"`
 	// Conflicts are the files this ticket's branch cannot merge with another
 	// open ticket's (conflict.go); Clean are sharing pairs that merge fine.
 	Conflicts []ticketConflict `json:"conflicts,omitempty"`
@@ -405,7 +408,8 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 	case verb == "next" && n.State == land.StateWaiting:
 		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
 	}
-	return append(blocks, axi.Help(help))
+	blocks = append(blocks, afterBlock(n.LandsAfter)...)
+	return append(blocks, axi.Help(append([]string{help}, afterHelp(n.Ticket, n.LandsAfter)...)...))
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
@@ -641,6 +645,11 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		n, err := ownBranchFacts(st, cfg, mp, merges, data.rec, nextNotATask(st, data, k))
 		if err != nil {
 			return nextTicket{}, err
+		}
+		if k == store.KindIssue {
+			if n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id); err != nil {
+				return nextTicket{}, err
+			}
 		}
 		r, err := containerReadiness(st, cfg, mp, merges, id)
 		if err != nil {
@@ -1000,6 +1009,9 @@ type nextStore struct {
 	// Next are the ids of the ready tickets in the order to start them: by
 	// rank, lowest first, then by id, the unranked last.
 	Next []string `json:"next"`
+	// IssueOrder are the issues with a predecessor they are suggested to land
+	// after that has not landed; a suggestion, never a wait.
+	IssueOrder []nextIssueOrder `json:"issue_order,omitempty"`
 	// SharedRanks are the ranks that more than one ready ticket holds.
 	SharedRanks []nextSharedRank `json:"shared_ranks,omitempty"`
 	// WorkspaceOverlaps are the workspaces that two ready tickets both build
@@ -1127,6 +1139,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 	}
 	out.Next = ready.ByPriority(ranked)
+	out.IssueOrder = issueOrder(afterDeps(st, cfg, mp, merges))
 	for _, s := range ready.SharedRanks(ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
@@ -1214,6 +1227,7 @@ func (n nextStore) blocks() []string {
 		}
 		blocks = append(blocks, axi.Table("next", []string{"ticket", "rank", "title"}, order))
 	}
+	blocks = append(blocks, issueOrderBlock(n.IssueOrder)...)
 	blocks = append(blocks, chartBlocks(n.Charts)...)
 	for _, s := range n.SharedRanks {
 		blocks = append(blocks, fmt.Sprintf("warning: rank %d is shared by %s: they are ordered by id", s.Rank, andList(s.Tickets)))
