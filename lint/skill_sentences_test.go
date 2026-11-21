@@ -205,8 +205,9 @@ func TestSkillSentencesChartVerdictIntent(t *testing.T) {
 		"**No intent**", "**Intent, not fully explicit**", "**Fully explicit**",
 		"\"Take <ticket> to PR\"", "\"Take <chart> to PR\"", "ask nothing", "\"not now\" the other answer", "only if the yes says so", "unattended, stop",
 		"Why: a ticket's terms ask for a ticket run, which a chart verdict ends", "unsure, ask",
-		"run `jig skill chart`", "its own `id`, `title` and `body` scoped to its part", "graduate keeps it `existing`",
+		"run `jig skill chart`", "carries that ticket's `id` with its `title` and a `body` scoped to its part", "graduate keeps it `existing` and mints no second task. A ticket a chart already lists (a graduated task) takes no step and makes nothing", "that no chart lists (a backlog ticket)",
 	)
+	wantAll(t, "skills/intake", intakeCore, "On a ticket that exists and no chart lists, its entry carries its `id`: no second task; one a chart lists takes no step")
 	wantAll(t, "skills/chart", chart,
 		"Three prompts make a chart run", "a yes to intake's confirm question", "intake's explicit launch",
 		"A run going with the recommendations, intake's explicit launch included, asks nothing",

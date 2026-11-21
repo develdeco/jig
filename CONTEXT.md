@@ -75,7 +75,7 @@ The file `record.yaml` in a remote item's folder in the tracker tree. The tree o
 _Avoid_: tracker file
 
 **Intake**:
-The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: a brief verdict mints the ticket (`jig ticket new`), a chart verdict mints none and makes the chart with `jig chart new`, whose tickets `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
+The shared opening phase of a brief and a chart, run together because both need the same first read of the work. It delivers the granularity verdict: whether the request is one ticket or a chart of several. The verdict comes before any ticket: both verdicts start with `jig chart new --need`, which makes the issue and its chart; a brief verdict writes one entry and `jig graduate` mints the task whose brief is drafted, a chart verdict writes several entries `jig graduate` mints. It starts from `jig recall`, which shows the open tickets and their edges, near-duplicates, the charts' fog, platform documents and past answers, and for a brief it ends when `jig validate` says `valid: yes` once the person has confirmed the brief, which is the brief's approval (`jig validate --check` checks the same without approving).
 _Avoid_: onboarding
 
 **Illustration**:

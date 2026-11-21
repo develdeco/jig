@@ -485,7 +485,22 @@ func validateTicketRecord(st *store.Store, cfg project.Config, ticket string) ([
 	problems = append(problems, validateTicketClosed(st, ticket)...)
 	problems = append(problems, validateUpstreamEdges(st, ticket)...)
 	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
+	problems = append(problems, validateIssueChart(st, ticket)...)
 	return problems, nil
+}
+
+// validateIssueChart is the problem of an issue no chart plans: an issue never
+// lacks its chart, so a half-made pair (an issue minted, its chart not
+// written) is found here and not left silent.
+func validateIssueChart(st *store.Store, ticket string) []string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || rec.KindOrDefault() != store.KindIssue {
+		return nil
+	}
+	if chart, err := st.ChartOfIssue(ticket); err != nil || chart != "" {
+		return nil
+	}
+	return []string{fmt.Sprintf("issue has no chart: run `jig chart new <name> --title \"<title>\" --issue %s`", ticket)}
 }
 
 // validateNotATask implements `jig validate <ticket>` for an issue or a
