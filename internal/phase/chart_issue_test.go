@@ -164,7 +164,7 @@ func TestIssueRunMultiTaskIsPublishedAndLanded(t *testing.T) {
 	t.Parallel()
 	m := entry(1, "M-1", ticketBriefing("M-1"))
 	m.Kind, m.Container = "multi-task", &ChartContainer{State: TailReady, Prompt: "Publish M-1"}
-	task := entry(2, "T-1", ticketLanded("T-1"))
+	task := entry(2, "TASK-1", ticketLanded("TASK-1"))
 	c := DeriveChart(model(m, task))
 	if len(c.Briefs) != 0 || len(c.Run) != 0 || !c.Ready || !reflect.DeepEqual(c.Publish, []ChartPublish{{ID: "M-1", Prompt: "Publish M-1"}}) {
 		t.Fatalf("ready multi-task: briefs %v run %v publish %v", c.Briefs, c.Run, c.Publish)
