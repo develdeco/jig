@@ -558,6 +558,14 @@ func TestGatePrepareOpensARoundAtTheReviewedHeadWhenAnythingStopsTheCarry(t *tes
 				t.Fatal(err)
 			}
 		}},
+		{"a queued keep", func(t *testing.T, fx *fixture.Fixture, d Deps) {
+			if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventTriage, Ref: "r1-f1", Outcome: TriageKeep, Provenance: "person"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventKeepQueued, Ref: "r1-f1"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"an edited brief", func(t *testing.T, fx *fixture.Fixture, d Deps) {
 			briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
 			original, err := os.ReadFile(briefPath)

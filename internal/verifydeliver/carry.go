@@ -107,15 +107,16 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep, intentS
 			return 0, reportYAML{}, false, nil
 		}
 	}
-	// A decision a person made since the last round is applied by the next
-	// round that closes, and a carried round applies nothing: it waits for a
-	// round a reviewer reads.
+	// A decision a person made since the last round, or a keep the gate queued
+	// as a fix slice, is applied by the next round a reviewer reads, and a
+	// carried round applies nothing (its gate-clean line would spend it): it
+	// waits for a round a reviewer reads.
 	decisions, err := ReadTriageDecisions(st, ticket)
 	if err != nil {
 		return 0, reportYAML{}, false, err
 	}
 	for _, d := range decisions {
-		if d.Pending {
+		if d.Pending || d.Queued {
 			return 0, reportYAML{}, false, nil
 		}
 	}

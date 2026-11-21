@@ -208,7 +208,11 @@ func TestGateCarriesTheHeadACleanRoundReviewed(t *testing.T) {
 	gateCleanThroughMain(t, e, fx)
 	reviewed := gitIn(t, fx.RepoDir, "rev-parse", "HEAD")
 
-	out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, "--store", fx.StoreDir, "--", "true")
+	if code != 0 {
+		t.Fatalf("verify -- true: exit = %d, want 0\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
 	if code != 0 || !strings.Contains(out, "verdict: clean (carried over from round 1)") || !strings.Contains(out, "none ran") {
 		t.Fatalf("gate at the reviewed head: exit = %d, want a clean round carried over from round 1\n%s", code, out)
 	}
@@ -234,6 +238,13 @@ func TestGateCarriesTheHeadACleanRoundReviewed(t *testing.T) {
 	}
 	if carried != 1 {
 		t.Errorf("%d carried gate-clean line(s) for round 2, want 1", carried)
+	}
+	if out, code = runMain(t, e, "", "next", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "publish") {
+		t.Errorf("next after a carried round: exit = %d, want it to name publish\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", "review", "context", fx.Ticket, "--store", fx.StoreDir)
+	if code == 0 || !strings.Contains(out, "REVIEW_NOT_OPEN") || !strings.Contains(out, " of "+fx.Ticket+" needs no reviewer: the head adds nothing to read past the head round 1 reviewed, so the gate recorded it as carried over") {
+		t.Errorf("review context on a carried round: exit = %d, want REVIEW_NOT_OPEN with the carried text\n%s", code, out)
 	}
 	if out, code = runMain(t, e, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("publish of a carried round: exit = %d, want 0\n%s", code, out)
