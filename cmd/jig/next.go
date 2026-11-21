@@ -584,7 +584,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 		inputs = append(inputs, in)
 	}
-	readMerges(st, merges, inputs)
+	readMerges(st, merges, inputs, true)
 	status := ready.Tickets(inputs)[0]
 	// A stacked ticket starts from its parent's branch where they share a
 	// repo, and its pull request goes there, until the parent merges.
@@ -1004,7 +1004,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
-	readMerges(st, merges, inputs)
+	readMerges(st, merges, inputs, false)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked

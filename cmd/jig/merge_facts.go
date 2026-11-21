@@ -47,7 +47,12 @@ func newMergeReader(e env, st *store.Store, cfg project.Config, mp project.Machi
 // that input. A fact that cannot be read is one that is not met, saying why, so
 // a ticket never reads as free because its blocker could not be looked at. nil
 // merges reads none.
-func readMerges(st *store.Store, merges mergeSource, inputs []ready.Ticket) {
+//
+// forOne says inputs hold the one dependent that is read, so a blocker that is a
+// shared task is read for that dependent's own issue. A listing of the whole
+// store has many dependents of one blocker and one input for it, so it reads a
+// shared blocker whole: met only when every issue's pull request merged.
+func readMerges(st *store.Store, merges mergeSource, inputs []ready.Ticket, forOne bool) {
 	if merges == nil {
 		return
 	}
@@ -66,13 +71,22 @@ func readMerges(st *store.Store, merges mergeSource, inputs []ready.Ticket) {
 			}
 			// A blocker that is a shared task is read for the issue of the
 			// dependent that waits for it.
-			m, err := mergeFor(st, merges, in.ID, b.Ticket, "")
+			m, err := mergeOfBlocker(st, merges, in.ID, b.Ticket, forOne)
 			if err != nil {
 				m = ready.Merge{Published: true, Repos: []ready.RepoMerge{{Why: "its merge could not be read: " + err.Error()}}}
 			}
 			inputs[i].Merge = &m
 		}
 	}
+}
+
+// mergeOfBlocker is the merge fact laid on a blocker's input: for one dependent
+// (forOne) a shared blocker is read for its issue, for a listing it is whole.
+func mergeOfBlocker(st *store.Store, merges mergeSource, dependent, blocker string, forOne bool) (ready.Merge, error) {
+	if forOne {
+		return mergeFor(st, merges, dependent, blocker, "")
+	}
+	return merges.Of(blocker)
 }
 
 // blockerFact is the blocker b that is not met, with what it is missing (why)

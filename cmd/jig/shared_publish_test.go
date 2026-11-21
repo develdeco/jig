@@ -35,4 +35,41 @@ func TestSharedPublishNamesItsIssue(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "SHARED_TASK_ISSUE_NEEDED") {
 		t.Errorf("jig publish SHOP-4 --issue SHOP-2: exit %d, want a refusal:\n%s", code, out)
 	}
+	// A task of one issue takes no --issue: it is refused for what it lacks (a
+	// clean round), never for naming none.
+	out, _ = r.run(t, "publish", "SHOP-4")
+	if strings.Contains(out, "SHARED_TASK_ISSUE_NEEDED") {
+		t.Errorf("jig publish SHOP-4 asks for an issue:\n%s", out)
+	}
+}
+
+// TestSharedPublishPlanIsForTheIssue: the plan the production publish reads for
+// a shared task and one of its issues has that issue's branch as the pull
+// request's target, and the plan read for none has no target.
+func TestSharedPublishPlanIsForTheIssue(t *testing.T) {
+	t.Parallel()
+	r := sharedRig(t)
+	cfg, mp, _ := sharedClone(t, r)
+	d := verifydeliverDeps(r.env(), r.st, cfg, mp, r.home)
+	if d.StackFor == nil {
+		t.Fatal("the publish has no plan for an issue")
+	}
+	for _, issue := range []string{"SHOP-1", "SHOP-2"} {
+		rec, err := r.st.ReadTicket(issue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := r.st.ResolveTicketBranch(issue, rec, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := d.StackFor("SHOP-3", issue)
+		if err != nil || len(plan.Repos) != 1 || plan.Repos[0].PRTarget != want || plan.Repos[0].Container != issue {
+			t.Errorf("plan for %s = %+v, %v, want the pull request into %s", issue, plan.Repos, err, want)
+		}
+	}
+	plan, err := d.Stack("SHOP-3")
+	if err != nil || len(plan.Repos) != 1 || plan.Repos[0].PRTarget != "" || len(plan.Repos[0].Containers) != 2 {
+		t.Errorf("plan for no issue = %+v, %v, want no target and both issues", plan.Repos, err)
+	}
 }
