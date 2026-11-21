@@ -149,6 +149,11 @@ type Line struct {
 	// publish there opens one pull request for each repo; a project of one
 	// repo leaves it out.
 	Repo string `json:"repo,omitempty"`
+	// Into is the container (the issue or multi-task) a pr-body,
+	// publish-approved, pr or publish-done line is for: the one whose branch
+	// the pull request goes into. A ticket that has a container writes it; a
+	// line with none is read as the ticket's one container (ReadFor).
+	Into string `json:"into,omitempty"`
 	// Ref is the id of the subject the line is about: a question (q-001),
 	// a review finding (r1-f2) or a note's fingerprint.
 	Ref string `json:"ref,omitempty"`
@@ -367,6 +372,54 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 		lines = append(lines, l)
 	}
 	return lines, nil
+}
+
+// IsPublishEvent reports whether event is one of the four publish lines that
+// carry Into: pr-body, publish-approved, pr and publish-done.
+func IsPublishEvent(event string) bool {
+	switch event {
+	case EventPrBody, EventPublishApproved, EventPr, EventPublishDone:
+		return true
+	}
+	return false
+}
+
+// ReadFor is Read as the issue's container sees it: every line, except that a
+// publish line of another issue is dropped. A publish line that names no Into
+// is the ticket's one container's, so a journal written before a ticket could
+// be shared reads as it did; a ticket that two issues list has no such one, and
+// its line with none is of neither. With no issue it is Read. A ticket with at
+// most one container reads through it as Read does, for the lines of its own.
+func ReadFor(st *store.Store, ticket, issue string) ([]Line, error) {
+	lines, err := Read(st, ticket)
+	if err != nil || issue == "" {
+		return lines, err
+	}
+	shared, known := false, false
+	kept := lines[:0:0]
+	for _, l := range lines {
+		if IsPublishEvent(l.Event) {
+			if l.Into != "" {
+				if l.Into != issue {
+					continue
+				}
+			} else {
+				if !known {
+					known = true
+					if rec, err := st.ReadTicket(ticket); err == nil {
+						if cs, err := st.ContainersOf(ticket, rec); err == nil {
+							shared = len(cs) > 1
+						}
+					}
+				}
+				if shared {
+					continue
+				}
+			}
+		}
+		kept = append(kept, l)
+	}
+	return kept, nil
 }
 
 // BuiltCommits returns the commit of every event=verified line, without

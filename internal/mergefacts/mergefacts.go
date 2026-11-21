@@ -42,12 +42,69 @@ type Reader struct {
 }
 
 // Of is the merge fact of ticket: not met unless it published, then one fact
-// per repo its slices build in.
+// per repo its slices build in. A shared task (one that two issues list) is met
+// only when every issue's fact is: Of is then the first issue's fact that is
+// not met, else the first.
 func (r *Reader) Of(ticket string) (ready.Merge, error) {
 	if m, ok := r.memo[ticket]; ok {
 		return m, nil
 	}
-	lines, err := journal.Read(r.Store, ticket)
+	rec, err := r.Store.ReadTicket(ticket)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	containers, err := r.Store.ContainersOf(ticket, rec)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	var m ready.Merge
+	if len(containers) > 1 {
+		for i, issue := range containers {
+			got, err := r.OfFor(ticket, issue)
+			if err != nil {
+				return ready.Merge{}, err
+			}
+			if i == 0 || (m.Met() && !got.Met()) {
+				m = got
+			}
+		}
+	} else if m, err = r.of(ticket, ""); err != nil {
+		return ready.Merge{}, err
+	}
+	r.remember(ticket, m)
+	return m, nil
+}
+
+// OfFor is the merge fact of ticket into one issue: published into that issue,
+// the pull request its `into` names, and the branch-tip fallback against that
+// issue's branch. With no issue it is Of.
+func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
+	if issue == "" {
+		return r.Of(ticket)
+	}
+	key := ticket + "\x00" + issue
+	if m, ok := r.memo[key]; ok {
+		return m, nil
+	}
+	m, err := r.of(ticket, issue)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	r.remember(key, m)
+	return m, nil
+}
+
+func (r *Reader) remember(key string, m ready.Merge) {
+	if r.memo == nil {
+		r.memo = map[string]ready.Merge{}
+	}
+	r.memo[key] = m
+}
+
+// of is the merge fact of ticket read through its journal for issue ("" reads
+// the whole journal and the ticket's one container).
+func (r *Reader) of(ticket, issue string) (ready.Merge, error) {
+	lines, err := journal.ReadFor(r.Store, ticket, issue)
 	if err != nil {
 		return ready.Merge{}, err
 	}
@@ -66,14 +123,10 @@ func (r *Reader) Of(ticket string) (ready.Merge, error) {
 	// A ticket that has not published has nothing to look for: no host is
 	// asked and no clone is read.
 	if m.Published {
-		if m.Repos, err = r.repos(ticket, urls); err != nil {
+		if m.Repos, err = r.repos(ticket, issue, urls); err != nil {
 			return ready.Merge{}, err
 		}
 	}
-	if r.memo == nil {
-		r.memo = map[string]ready.Merge{}
-	}
-	r.memo[ticket] = m
 	return m, nil
 }
 
@@ -87,7 +140,7 @@ type repoRef struct {
 
 // repos judges each repo the ticket builds in. urls are the pull requests its
 // journal records, oldest first.
-func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) {
+func (r *Reader) repos(ticket, issue string, urls []string) ([]ready.RepoMerge, error) {
 	rec, err := r.Store.ReadTicket(ticket)
 	if err != nil {
 		return nil, err
@@ -98,9 +151,11 @@ func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) 
 	}
 	// The base the ticket's pull request goes into: its container's branch
 	// when it has one. The record is read only if a branch is looked at.
-	container, hasContainer, err := r.Store.ContainerOf(ticket, rec)
-	if err != nil {
-		return nil, err
+	container, hasContainer := issue, issue != ""
+	if !hasContainer {
+		if container, hasContainer, err = r.Store.ContainerOf(ticket, rec); err != nil {
+			return nil, err
+		}
 	}
 	var crec store.Ticket
 	if hasContainer {
