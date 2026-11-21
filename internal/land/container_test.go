@@ -224,6 +224,40 @@ func TestContainerReadyReadsASharedChildForItsIssue(t *testing.T) {
 	}
 }
 
+// TestContainerReadyAnEntryWithNoTicketHoldsItsContainer: an entry of the chart
+// with no ticket yet, top-level or under a multi-task, is work not landed: it
+// holds the issue or the multi-task as a row named by its position and title,
+// whatever the graduated children did.
+func TestContainerReadyAnEntryWithNoTicketHoldsItsContainer(t *testing.T) {
+	t.Parallel()
+	w := multiTaskWorld(t)
+	chart := "issue: I-1\ntickets:\n  - id: M-1\n    title: Multi\n    kind: multi-task\n  - id: T-1\n    title: One\n    under: \"#1\"\n  - id: T-2\n    title: Two\n    under: M-1\n  - title: Sub\n    under: \"#1\"\n  - title: Later\n"
+	if err := store.AtomicWrite(w.st.ChartFile("c"), []byte(chart)); err != nil {
+		t.Fatal(err)
+	}
+	mb, ib := w.branch("M-1"), w.branch("I-1")
+	for i, id := range []string{"T-1", "T-2"} {
+		url := prURL(string(rune('1' + i)))
+		w.publish(id, "M-1", url, ready.PROpen, mb)
+		w.merged(url, mb)
+	}
+	if r := w.readiness("M-1"); r.State != land.StateWaiting || len(r.Waits) != 1 || r.Waits[0] != (land.Wait{Ticket: "#4 Sub", Standing: land.NotGraduated}) {
+		t.Fatalf("M-1 = %+v, want waiting on its ungraduated entry only", r)
+	}
+	w.publish("M-1", "I-1", prURL("3"), ready.PROpen, ib)
+	w.merged(prURL("3"), ib)
+	if r := w.readiness("I-1"); r.State != land.StateWaiting || len(r.Waits) != 1 || r.Waits[0] != (land.Wait{Ticket: "#5 Later", Standing: land.NotGraduated}) {
+		t.Fatalf("I-1 = %+v, want waiting on #5 Later alone: #4 is under the multi-task", r)
+	}
+	// Graduated, the entries hold nothing.
+	if err := store.AtomicWrite(w.st.ChartFile("c"), []byte("issue: I-1\ntickets:\n  - id: M-1\n    title: Multi\n    kind: multi-task\n")); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.readiness("I-1"); r.State != land.StateReady {
+		t.Errorf("I-1 with nothing ungraduated = %+v, want ready", r)
+	}
+}
+
 // TestContainerReadyLandedContainerHasNothingToAsk: a multi-task whose own pull
 // request merged on the host with no landed line is still published; with the
 // line it is landed, with no prompt.

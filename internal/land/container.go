@@ -1,9 +1,12 @@
 package land
 
 import (
+	"fmt"
+
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // The states a multi-task or an issue is in, as `jig next` says them.
@@ -94,6 +97,57 @@ func Waiting(d Deps, container string) ([]Wait, error) {
 			}
 		}
 		out = append(out, Wait{Ticket: id, Standing: standing})
+	}
+	more, err := notGraduated(d, container, rec)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, more...), nil
+}
+
+// NotGraduated is the standing of a chart entry that has no ticket yet.
+const NotGraduated = "not graduated"
+
+// notGraduated are the chart entries of container's work that have no ticket
+// yet, each named by its chart position and title: a top-level entry of an
+// issue's chart, or an entry under the multi-task. Planned work no ticket holds
+// is not landed, so it holds the container.
+func notGraduated(d Deps, container string, rec store.Ticket) ([]Wait, error) {
+	issue := container
+	if rec.KindOrDefault() == store.KindMultiTask {
+		issues, err := d.Store.IssuesOf(container)
+		if err != nil || len(issues) == 0 {
+			return nil, err
+		}
+		issue = issues[0]
+	}
+	chart, err := d.Store.ChartOfIssue(issue)
+	if err != nil || chart == "" {
+		return nil, err
+	}
+	entries, err := d.Store.ReadChart(chart)
+	if err != nil {
+		return nil, err
+	}
+	self := 0
+	for i, e := range entries {
+		if e.ID == container {
+			self = i + 1
+		}
+	}
+	var out []Wait
+	for i, e := range entries {
+		if e.ID != "" {
+			continue
+		}
+		under := e.Under != "" && (e.Under == container || (self > 0 && e.Under == fmt.Sprintf("#%d", self)))
+		if rec.KindOrDefault() == store.KindMultiTask && !under {
+			continue
+		}
+		if rec.KindOrDefault() == store.KindIssue && e.Under != "" {
+			continue
+		}
+		out = append(out, Wait{Ticket: fmt.Sprintf("#%d %s", i+1, e.Title), Standing: NotGraduated})
 	}
 	return out, nil
 }
@@ -186,13 +240,10 @@ func ReadinessOf(d Deps, container string) (Readiness, error) {
 		return Readiness{State: StatePublished, Prompt: phase.Prompt(phase.Land, container)}, nil
 	}
 	r := Readiness{State: StateWaiting}
-	if len(c.Children) == 0 {
-		return r, nil
-	}
 	if r.Waits, err = Waiting(d, container); err != nil {
 		return Readiness{}, err
 	}
-	if len(r.Waits) > 0 {
+	if len(r.Waits) > 0 || len(c.Children) == 0 {
 		return r, nil
 	}
 	if r.Unmet, err = Check(c); err != nil {
