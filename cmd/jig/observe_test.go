@@ -28,21 +28,20 @@ func hookPayload(t *testing.T, fx *fixture.Fixture, event string, extra map[stri
 }
 
 // observeRig is a fixture clone on the ticket's branch and an env that runs in
-// it with a spawner that starts nothing.
-func observeRig(t *testing.T) (*fixture.Fixture, env, *spawnRecorder) {
+// it.
+func observeRig(t *testing.T) (*fixture.Fixture, env) {
 	t.Helper()
 	fx := newFixture(t, fixture.Opts{})
 	if _, err := gitx.Run(fx.RepoDir, "checkout", "-q", "-b", "jig/"+fx.Ticket); err != nil {
 		t.Fatal(err)
 	}
-	rec := &spawnRecorder{PID: 777}
-	e := testEnv(fx.Home).inDir(fx.RepoDir).withSpawn(rec.Spawn).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
-	return fx, e, rec
+	e := testEnv(fx.Home).inDir(fx.RepoDir).withExecutable(filepath.Join(fx.Dir, "bin", "jig"))
+	return fx, e
 }
 
 func TestObserveSessionStartAnswersWithTheHereContextAsClaudeReadsIt(t *testing.T) {
 	t.Parallel()
-	fx, e, _ := observeRig(t)
+	fx, e := observeRig(t)
 	out, code := runMain(t, e, hookPayload(t, fx, "SessionStart", map[string]any{"source": "startup", "model": "m"}), "observe", "--harness", "claude")
 	if code != 0 {
 		t.Fatalf("exit %d, output %q", code, out)
@@ -80,9 +79,9 @@ func ledgerEvents(t *testing.T, root, event string) []journal.Line {
 	return out
 }
 
-func TestObserveToolStartsTheVerificationThroughTheEnvsSpawner(t *testing.T) {
+func TestObserveToolStartsNothingForACommit(t *testing.T) {
 	t.Parallel()
-	fx, e, rec := observeRig(t)
+	fx, e := observeRig(t)
 	runHook := func(event string, extra map[string]any) (string, int) {
 		t.Helper()
 		return runMain(t, e, hookPayload(t, fx, event, extra), "observe", "--harness", "claude")
@@ -102,12 +101,8 @@ func TestObserveToolStartsTheVerificationThroughTheEnvsSpawner(t *testing.T) {
 		t.Fatalf("PostToolUse: exit %d, output %q, want a silent success", code, out)
 	}
 
-	specs := rec.Specs()
-	if len(specs) != 1 || filepath.Base(specs[0].Path) != "jig" || specs[0].Args[0] != "verify" || specs[0].Args[1] != "--worker" {
-		t.Fatalf("spawned %+v, want one jig verify --worker", specs)
-	}
-	if spawned := ledgerEvents(t, fx.Home, journal.EventVerifySpawned); len(spawned) != 1 || spawned[0].PID != 777 || spawned[0].Slice != "a" {
-		t.Errorf("verify-spawned lines = %+v, want one with pid 777 for slice a", spawned)
+	if spawned := ledgerEvents(t, fx.Home, journal.EventVerifySpawned); len(spawned) != 0 {
+		t.Errorf("verify-spawned lines = %+v, want none", spawned)
 	}
 	if tools := ledgerEvents(t, fx.Home, journal.EventTool); len(tools) != 1 || tools[0].Command != "git commit -m work" {
 		t.Errorf("tool lines = %+v", tools)

@@ -10,8 +10,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -21,26 +19,24 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
 
 const (
 	apiHandlerSource = "package server\n\n// Handler names what the api serves.\nfunc Handler() string { return \"total\" }\n"
 	webPageSource    = "package ui\n\n// Page names what the web page shows.\nfunc Page() string { return \"order total\" }\n"
-	apiHandlerFixed  = "package server\n\n// Handler names what the api serves, with the currency.\nfunc Handler() string { return \"total in USD\" }\n"
 	webPageFixed     = "package ui\n\n// Page names what the web page shows, as dollars.\nfunc Page() string { return \"$4.00\" }\n"
 )
 
 // gateRequest is the part of a round's review.json that the tests of a gate
 // over several repos read.
 type gateRequest struct {
-	Scope    string `json:"scope"`
-	BaseSHA  string `json:"base_sha"`
-	HeadSHA  string `json:"head_sha"`
-	Worktree string `json:"worktree"`
-	Repos    []struct {
+	Scope   string `json:"scope"`
+	BaseSHA string `json:"base_sha"`
+	HeadSHA string `json:"head_sha"`
+	Repos   []struct {
 		Repo       string   `json:"repo"`
-		Worktree   string   `json:"worktree"`
 		Branch     string   `json:"branch"`
 		Scope      string   `json:"scope"`
 		BaseSHA    string   `json:"base_sha"`
@@ -51,10 +47,11 @@ type gateRequest struct {
 	Oracles       []string `json:"oracles"`
 	MustReview    []string `json:"must_review"`
 	OraclesPassed []struct {
-		Oracle     string   `json:"oracle"`
-		Workspace  string   `json:"workspace"`
-		ReusedFrom string   `json:"reused_from"`
-		Slices     []string `json:"slices"`
+		Slice     string `json:"slice"`
+		Workspace string `json:"workspace"`
+		Command   string `json:"command"`
+		Commit    string `json:"commit"`
+		AtHead    string `json:"at_head"`
 	} `json:"oracles_passed"`
 	Probed []struct {
 		File  string `json:"file"`
@@ -84,11 +81,10 @@ type builtOrchestrator struct {
 // oracle, and fails the test unless slice passed at sha.
 func verifyPasses(t *testing.T, h *fakeHarness, slice, sha string) {
 	t.Helper()
-	r := h.Jig("verify", "--wait")
+	r := h.Jig("verify")
 	if r.Code != 0 || !strings.Contains(r.Stdout, "slice: "+slice+"\n") || !strings.Contains(r.Stdout, "commit: "+sha) || !strings.Contains(r.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait in %s: exit %d, want slice %s to pass at %s\nstdout:\n%s\nstderr:\n%s", h.Clone, r.Code, slice, sha, r.Stdout, r.Stderr)
+		t.Fatalf("jig verify in %s: exit %d, want slice %s to pass at %s\nstdout:\n%s\nstderr:\n%s", h.Clone, r.Code, slice, sha, r.Stdout, r.Stderr)
 	}
-	h.WaitVerifiers()
 }
 
 // buildOrchestratorTicket builds the ticket described on builtOrchestrator.
@@ -178,7 +174,12 @@ func cleanResultOf(t *testing.T, mustReview []string) string {
 // opens a round whose context lists both repos, each with its own lease, base,
 // head and files to cover; a reviewer records a finding in web, which has to be
 // named as web/ui/page.go, and closes the round; the fix slice lands in web;
-// the next round reviews what changed in web, and is clean.
+// the next round reviews what changed in web, and is clean. It is the one
+// journey of a gate over two repos; the gate over one repo of several
+// (TestGateOverOneRepoOfSeveral), the adoption of a branch in every repo
+// (TestGateAdoptsABranchInEveryRepo) and who counts as independent
+// (TestBuildersAreTheAgentsThatChangedTheBranch) are in-process tests of
+// internal/verifydeliver.
 func TestGateCoversEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
@@ -191,13 +192,32 @@ func TestGateCoversEveryRepo(t *testing.T) {
 		t.Fatalf("jig gate: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
 	for _, want := range []string{
-		"round: 1", "branch: " + b.branch, "repos[2]{repo,copy,head,base,scope,worktree,must_review}:",
+		"round: 1", "branch: " + b.branch, "repos[2]{repo,copy,head,base,scope,must_review}:",
 		"  api,the clone's," + b.shaAPI + ",", "  web,the clone's," + b.shaWeb + ",",
 	} {
 		if !strings.Contains(gate.Stdout, want) {
 			t.Errorf("jig gate output lacks %q\nstdout:\n%s", want, gate.Stdout)
 		}
 	}
+
+	// The builders' last run: in each clone, `jig verify --final` is the union of
+	// the slices that build in that repo alone, recorded with the repo's name.
+	verifySlots <- struct{}{}
+	for _, c := range []struct {
+		h          *fakeHarness
+		repo, sha  string
+		slice, not string
+	}{{b.api, "api", b.shaAPI, "server", "ui"}, {b.web, "web", b.shaWeb, "ui", "server"}} {
+		res := c.h.Jig("verify", ticket, "--final")
+		if res.Code != 0 || !strings.Contains(res.Stdout, "outcome: pass") || strings.Contains(res.Stdout, c.not+",") {
+			t.Fatalf("jig verify --final in %s: exit %d, want a pass of slice %s alone\nstdout:\n%s\nstderr:\n%s", c.repo, res.Code, c.slice, res.Stdout, res.Stderr)
+		}
+		line, ok := journal.FinalRunAt(readJournal(t, b.fx, ticket), c.repo, c.sha)
+		if !ok || line.Repo != c.repo || !reflect.DeepEqual(line.Slices, []string{c.slice}) {
+			t.Errorf("FinalRunAt(%s) = %+v, %v, want a line naming the repo and slice %s", c.repo, line, ok, c.slice)
+		}
+	}
+	<-verifySlots
 
 	// jig here, from either clone, says the same of the open round: the head and
 	// the copy of each repo.
@@ -213,15 +233,15 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	// One lease, base, head, scope and list of files for each repo. The request
 	// the store keeps names no top-level head, and no directory of this machine.
 	req := b.request(t, "1")
-	if req.Scope != "" || req.BaseSHA != "" || req.HeadSHA != "" || req.Worktree != "" {
-		t.Errorf("review.json names a scope, base, head or worktree at the top (%+v), want them only in its repos", req)
+	if req.Scope != "" || req.BaseSHA != "" || req.HeadSHA != "" {
+		t.Errorf("review.json names a scope, base or head at the top (%+v), want them only in its repos", req)
 	}
 	if len(req.Repos) != 2 || req.Repos[0].Repo != "api" || req.Repos[1].Repo != "web" {
 		t.Fatalf("review.json repos = %+v, want api and web", req.Repos)
 	}
 	for i, want := range []struct{ head, mustReview string }{{b.shaAPI, "api/server/handler.go"}, {b.shaWeb, "web/ui/page.go"}} {
 		r := req.Repos[i]
-		if r.HeadSHA != want.head || r.BaseSHA == "" || r.BaseSHA == want.head || r.Scope != "full" || r.Branch != b.branch || r.Worktree != "" {
+		if r.HeadSHA != want.head || r.BaseSHA == "" || r.BaseSHA == want.head || r.Scope != "full" || r.Branch != b.branch {
 			t.Errorf("review.json repo %s = %+v, want a full scope from its base to %s on %s", r.Repo, r, want.head, b.branch)
 		}
 		if !reflect.DeepEqual(r.MustReview, []string{want.mustReview}) || !reflect.DeepEqual(r.Oracles, []string{"test"}) {
@@ -231,45 +251,43 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if want := []string{"api/server/handler.go", "web/ui/page.go"}; !reflect.DeepEqual(req.MustReview, want) {
 		t.Errorf("review.json must_review = %v, want the files of both repos, named by their repo: %v", req.MustReview, want)
 	}
-	// The pass jig verify recorded stands for the gate's run of the workspace it
-	// verified, in each repo; the lib workspaces nobody verified the gate ran.
-	reused, slicesOf := map[string]string{}, map[string]string{}
+	// The round ran no command: oracles_passed lists the pass `jig verify`
+	// witnessed for each slice, in its repo's workspace named by the repo, at
+	// the commit the slice was verified at; the lib workspaces no slice builds
+	// in have no row.
+	type passRow struct{ workspace, commit, atHead string }
+	passes := map[string]passRow{}
 	for _, o := range req.OraclesPassed {
-		reused[o.Workspace] = o.ReusedFrom
-		slicesOf[o.Workspace] = strings.Join(o.Slices, ",")
+		if o.Command == "" {
+			t.Errorf("oracles_passed row %+v has no command", o)
+		}
+		passes[o.Slice] = passRow{o.Workspace, o.Commit, o.AtHead}
 	}
-	if want := (map[string]string{"api/server": b.shaAPI, "api/lib": "", "web/ui": b.shaWeb, "web/lib": ""}); !reflect.DeepEqual(reused, want) {
-		t.Errorf("oracles_passed reused_from = %v, want %v", reused, want)
-	}
-	// Each run names the slices whose oracle it is in its workspace.
-	if want := (map[string]string{"api/server": "server", "api/lib": "", "web/ui": "ui", "web/lib": ""}); !reflect.DeepEqual(slicesOf, want) {
-		t.Errorf("oracles_passed slices = %v, want %v", slicesOf, want)
+	if want := (map[string]passRow{"server": {"api/server", b.shaAPI, "yes"}, "ui": {"web/ui", b.shaWeb, "yes"}}); !reflect.DeepEqual(passes, want) {
+		t.Errorf("oracles_passed rows = %v, want %v", passes, want)
 	}
 	var open struct {
 		Head  string `yaml:"head"`
-		Lease string `yaml:"lease"`
 		Repos []struct {
-			Repo  string `yaml:"repo"`
-			Copy  string `yaml:"copy"`
-			Head  string `yaml:"head"`
-			Lease string `yaml:"lease"`
+			Repo string `yaml:"repo"`
+			Copy string `yaml:"copy"`
+			Head string `yaml:"head"`
 		} `yaml:"repos"`
 	}
 	openData := readFileOrFatal(t, b.workFile("gate.round-1.open.yaml"))
 	if err := yaml.Unmarshal(openData, &open); err != nil {
 		t.Fatalf("parse the open record: %v", err)
 	}
-	if open.Head != "" || open.Lease != "" || len(open.Repos) != 2 {
+	if open.Head != "" || len(open.Repos) != 2 {
 		t.Fatalf("open record = %+v, want the settings of each repo in its repos and none at the top", open)
 	}
 	for i, repo := range []string{"api", "web"} {
 		r := open.Repos[i]
-		lease := filepath.Join(home, filepath.FromSlash(r.Lease))
-		if r.Repo != repo || r.Copy != "the clone's" || r.Lease != "pool/"+repo+"/"+ticket+"-gate" {
-			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy in its own lease", i, r, repo)
+		if r.Repo != repo || r.Copy != "the clone's" {
+			t.Errorf("open record repo %d = %+v, want %s read from the clone's copy", i, r, repo)
 		}
-		if head := gitLog(t, lease, "rev-parse", "HEAD"); head != r.Head {
-			t.Errorf("the lease of %s is at %s, want the head the round opened on, %s", repo, head, r.Head)
+		if head := gitLog(t, b.fx.NestedDirs[repo], "rev-parse", "refs/heads/"+b.branch); head != r.Head {
+			t.Errorf("the clone of %s has the branch at %s, want the head the round opened on, %s", repo, head, r.Head)
 		}
 	}
 	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {
@@ -295,10 +313,16 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if j := rev.Jig("review", "context", ticket, "--json"); j.Code != 0 || json.Unmarshal([]byte(j.Stdout), &full) != nil || len(full.Repos) != 2 {
 		t.Fatalf("jig review context --json: exit %d, want the request with both repos\n%s", j.Code, j.Stdout)
 	}
+	// The request names no worktree of jig's. The context advises one worktree
+	// for each repo, at its head, beside the clone.
+	if j := rev.Jig("review", "context", ticket, "--json"); strings.Contains(j.Stdout, `"worktree"`) {
+		t.Errorf("review context --json names a worktree:\n%s", j.Stdout)
+	}
 	for i, repo := range []string{"api", "web"} {
-		sameDir(t, "worktree of "+repo, full.Repos[i].Worktree, filepath.Join(home, "pool", repo, ticket+"-gate"))
-		if head := gitLog(t, full.Repos[i].Worktree, "rev-parse", "HEAD"); head != req.Repos[i].HeadSHA {
-			t.Errorf("the worktree of %s is at %s, want %s", repo, head, req.Repos[i].HeadSHA)
+		clone := filepath.ToSlash(b.fx.NestedDirs[repo])
+		want := "git -C " + clone + " worktree add --detach " + clone + ".worktrees/" + ticket + "-review " + req.Repos[i].HeadSHA
+		if !strings.Contains(ctx.Stdout, want) {
+			t.Errorf("review context lacks the worktree advice of %s:\n%s\nstdout:\n%s", repo, want, ctx.Stdout)
 		}
 	}
 	rev.Bash("git status --short")
@@ -343,7 +367,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: fix-slices") || !strings.Contains(done.Stdout, "independent: true") {
 		t.Fatalf("jig review done: exit %d, want a round with a fix slice, by a reviewer independent of the builders\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
 	}
-	for _, want := range []string{"target_sha[2]{repo,sha}:\n  api,", "\n  web,", "fix-1-web-ui-test"} {
+	for _, want := range []string{"target_sha[2]{repo,sha}:\n  api,", "\n  web,", "fix-1-web-ui"} {
 		if !strings.Contains(done.Stdout, want) {
 			t.Errorf("jig review done output lacks %q\n%s", want, done.Stdout)
 		}
@@ -352,7 +376,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	// The round is recorded with the commits of both repos, and the fix slice
 	// builds in the repo of the finding.
 	rep := b.report(t, "1")
-	if rep.Verdict != "fix-slices" || rep.Independent != true || !reflect.DeepEqual(rep.FixSlices, []string{"fix-1-web-ui-test"}) {
+	if rep.Verdict != "fix-slices" || rep.Independent != true || !reflect.DeepEqual(rep.FixSlices, []string{"fix-1-web-ui"}) {
 		t.Errorf("report.yaml of round 1 = %+v, want fix-slices, independent, with the one fix slice", rep)
 	}
 	wantReviewed := map[string]string{"api": b.shaAPI, "web": b.shaWeb}
@@ -376,8 +400,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 			fix = &slicesNow[i]
 		}
 	}
-	if fix == nil || fix.ID != "fix-1-web-ui-test" || fix.Workspace != "web/ui" || fix.Oracle != "test" || !reflect.DeepEqual(fix.Findings, []string{"r1-f1"}) {
-		t.Fatalf("the fix slice = %+v, want fix-1-web-ui-test in the workspace web/ui with the oracle test, for r1-f1", fix)
+	if fix == nil || fix.ID != "fix-1-web-ui" || fix.Workspace != "web/ui" || fix.Oracle != "test" || !reflect.DeepEqual(fix.Findings, []string{"r1-f1"}) {
+		t.Fatalf("the fix slice = %+v, want fix-1-web-ui in the workspace web/ui with the oracle test, for r1-f1", fix)
 	}
 	var findings struct {
 		Findings []struct {
@@ -399,7 +423,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	for _, batch := range nextJSON[nextRepos](t, b.env, b.fx.OrchestratorDir, ticket).Ready {
 		ready = append(ready, batch.Repo+": "+strings.Join(batch.Slices, "+"))
 	}
-	if want := []string{"web: fix-1-web-ui-test"}; !reflect.DeepEqual(ready, want) {
+	if want := []string{"web: fix-1-web-ui"}; !reflect.DeepEqual(ready, want) {
 		t.Errorf("jig next after round 1: ready %v, want %v", ready, want)
 	}
 
@@ -410,8 +434,8 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 	verifySlots <- struct{}{}
 	defer func() { <-verifySlots }()
-	fixed := b.web.Commit("fix-1-web-ui-test", "fix: page", map[string]string{"ui/page.go": webPageFixed})
-	verifyPasses(t, b.web, "fix-1-web-ui-test", fixed)
+	fixed := b.web.Commit("fix-1-web-ui", "fix: page", map[string]string{"ui/page.go": webPageFixed})
+	verifyPasses(t, b.web, "fix-1-web-ui", fixed)
 
 	if r := b.api.Jig("gate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "round: 2") {
 		t.Fatalf("jig gate after the fix: exit %d, want round 2\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
@@ -447,7 +471,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if probedIn["api/server/handler.go"] != 1 || probedIn["web/ui/page.go"] != 0 {
 		t.Errorf("round 2 hunks = %+v, want the api's hunk probed once and the web's unprobed", req2.Hunks)
 	}
-	// The reviewer reads the delta round's view (GATE-17): the stale probe as a
+	// The reviewer reads the delta round's view: the stale probe as a
 	// row, the api's current caught probe as one count, and the web's hunks as
 	// the work list.
 	ctx2 := rev.Jig("review", "context", ticket)
@@ -466,214 +490,34 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	}
 }
 
-// TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo: a session that built
-// in one repo of the ticket is a builder of the ticket, whichever repo its work
-// is in - the builder of the api, the builder of the web, and a session that
-// only edited a file of the web with its tools - and jig tells it so before the
-// review. Its round is recorded clean (independence is a fact of the round,
-// not a condition of it): unknown where no hook reported the session's calls
-// (the two builders commit with none), false where one did (the edit). A
-// session that built none of it reviews both repos, independent.
+// TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo: a session whose
+// only act was a hook-reported edit of a file in the web clone is a builder of
+// the ticket, though the branch it edited on is a nested clone's: the ledger
+// binds the call to the ticket by that branch, and the round it reviews is
+// recorded clean with independent: false (independence is a fact of the round,
+// not a condition of it). This is the one flow that runs the hook, the ledger,
+// the branch of a nested clone and the report together; which journal lines
+// make a builder, and who is independent of them, is
+// TestBuildersAreTheAgentsThatChangedTheBranch in internal/verifydeliver.
 func TestGateJudgesIndependenceAgainstTheBuildersOfEveryRepo(t *testing.T) {
 	t.Parallel()
 	b := buildOrchestratorTicket(t)
 	ticket := b.fx.Ticket
 
-	// Each builder built in one repo only, and neither is fresh for the ticket.
-	for _, h := range []*fakeHarness{b.api, b.web} {
-		next := h.Jig("next", ticket)
-		if next.Code != 0 || !strings.Contains(next.Stdout, "fresh: no") {
-			t.Errorf("jig next as %s: exit %d, want fresh: no\n%s", h.Session, next.Code, next.Stdout)
-		}
-	}
-	if gate := b.api.Jig("gate", ticket); gate.Code != 0 {
-		t.Fatalf("jig gate: exit %d\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-
-	// closedBy has h read the open round and close it, as a reviewer would.
-	closedBy := func(h *fakeHarness, round string) jigResult {
-		t.Helper()
-		if ctx := h.Jig("review", "context", ticket); ctx.Code != 0 {
-			t.Fatalf("jig review context as %s: exit %d\nstdout:\n%s\nstderr:\n%s", h.Session, ctx.Code, ctx.Stdout, ctx.Stderr)
-		}
-		return h.Jig("review", "done", ticket, "--result", cleanResultOf(t, b.request(t, round).MustReview))
-	}
-	// opened has the api's session open round n.
-	opened := func(round string) {
-		t.Helper()
-		if r := b.api.Jig("gate", ticket); r.Code != 0 || !strings.Contains(r.Stdout, "round: "+round) {
-			t.Fatalf("jig gate for round %s: exit %d\nstdout:\n%s\nstderr:\n%s", round, r.Code, r.Stdout, r.Stderr)
-		}
-	}
-	// byABuilder has h, a builder of the ticket, review round n: the round is
-	// recorded clean with the independence jig could tell (want).
-	byABuilder := func(h *fakeHarness, round string, want any) {
-		t.Helper()
-		done := closedBy(h, round)
-		if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, fmt.Sprintf("independent: %v", want)) {
-			t.Fatalf("jig review done by %s: exit %d, want a clean round with independent: %v\nstdout:\n%s\nstderr:\n%s", h.Session, done.Code, want, done.Stdout, done.Stderr)
-		}
-		if rep := b.report(t, round); rep.Verdict != "clean" || rep.Independent != want {
-			t.Errorf("report.yaml of round %s = %+v, want a clean round with independent: %v", round, rep, want)
-		}
-	}
-
-	// The web's builder never touched the api, and the api's builder never
-	// touched the web; each built part of what the round reviews.
-	byABuilder(b.web, "1", "unknown")
-	opened("2")
-	byABuilder(b.api, "2", "unknown")
-
-	// A session that only edited a file in the web clone with its tools: the
-	// ledger names it a builder by the ticket the branch of that clone binds, in
-	// either repo.
 	edited := newHarness(t, b.fx, b.env, "s-edit")
 	edited.Clone = b.fx.NestedDirs["web"]
 	edited.Hook("PostToolUse", map[string]any{"tool_name": "Edit", "tool_input": map[string]any{"file_path": filepath.Join(edited.Clone, "ui", "page.go")}})
-	opened("3")
-	byABuilder(edited, "3", false)
-
-	// A session that built none of it reviews round 4, over both repos.
-	opened("4")
-	rev := newHarness(t, b.fx, b.env, "s-reviewer")
-	rev.Clone = b.fx.NestedDirs["web"]
-	done := closedBy(rev, "4")
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
-		t.Fatalf("jig review done by a session that built nothing: exit %d, want a clean round\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
+	if gate := b.api.Jig("gate", ticket); gate.Code != 0 {
+		t.Fatalf("jig gate: exit %d\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
 	}
-}
-
-// TestGateCoversTheOneRepoATicketBuildsIn: a ticket of the orchestrator whose
-// slices are all in one repo, and that repo is not the first. The gate covers
-// that repo and no other: one lease, one head, and nothing of the api.
-func TestGateCoversTheOneRepoATicketBuildsIn(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
+	if ctx := edited.Jig("review", "context", ticket); ctx.Code != 0 {
+		t.Fatalf("jig review context as %s: exit %d\nstdout:\n%s\nstderr:\n%s", edited.Session, ctx.Code, ctx.Stdout, ctx.Stderr)
 	}
-	const ticket = "JIG-2"
-	slices, err := st.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
+	done := edited.Jig("review", "done", ticket, "--result", cleanResultOf(t, b.request(t, "1").MustReview))
+	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: false") {
+		t.Fatalf("jig review done by %s: exit %d, want a clean round with independent: false\nstdout:\n%s\nstderr:\n%s", edited.Session, done.Code, done.Stdout, done.Stderr)
 	}
-	if err := st.CreateTicketRecord(ticket, store.Ticket{Title: "Web only"}); err != nil {
-		t.Fatal(err)
-	}
-	writeFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "brief.md"), readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "brief.md")))
-	if err := st.AppendSlices(ticket, []store.Slice{{ID: "page", Workspace: "web/ui", Goal: "Show the page.", Oracle: "test", BlockedBy: []string{}, FromBrief: slices[1].FromBrief}}); err != nil {
-		t.Fatal(err)
-	}
-	branch := nextJSON[nextRepos](t, env, fx.OrchestratorDir, ticket).Branch
-	web := newHarness(t, fx, env, "s-web")
-	web.Clone = fx.NestedDirs["web"]
-	web.Branch(branch)
-
-	verifySlots <- struct{}{}
-	sha := web.Commit("page", "page: show it", map[string]string{"ui/page.go": webPageSource})
-	r := web.Jig("verify", "--wait")
-	<-verifySlots
-	if r.Code != 0 || !strings.Contains(r.Stdout, "state: pass") {
-		t.Fatalf("jig verify --wait: exit %d, want a pass\nstdout:\n%s\nstderr:\n%s", r.Code, r.Stdout, r.Stderr)
-	}
-	web.WaitVerifiers()
-
-	gate := web.Jig("gate", ticket)
-	if gate.Code != 0 || !strings.Contains(gate.Stdout, "repos[1]{") || !strings.Contains(gate.Stdout, "  web,the clone's,"+sha+",") {
-		t.Fatalf("jig gate: exit %d, want a round over the web alone\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-	if strings.Contains(gate.Stdout, "  api,") {
-		t.Errorf("jig gate lists the api, which the ticket does not build in:\n%s", gate.Stdout)
-	}
-	if _, err := os.Stat(filepath.Join(env.home, "pool", "api", ticket+"-gate")); err == nil {
-		t.Errorf("the gate made a lease for the api, which the ticket does not build in")
-	}
-	data := readFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "work", "gate.round-1.review.json"))
-	var req gateRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		t.Fatal(err)
-	}
-	if len(req.Repos) != 1 || req.Repos[0].Repo != "web" || req.Repos[0].HeadSHA != sha || !reflect.DeepEqual(req.MustReview, []string{"web/ui/page.go"}) {
-		t.Errorf("review.json = %s, want the web alone at %s with web/ui/page.go to review", data, sha)
-	}
-
-	rev := newHarness(t, fx, env, "s-reviewer")
-	rev.Clone = fx.NestedDirs["web"]
-	if ctx := rev.Jig("review", "context", ticket); ctx.Code != 0 {
-		t.Fatalf("jig review context: exit %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
-	}
-	done := rev.Jig("review", "done", ticket, "--result", cleanResultOf(t, req.MustReview))
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "target_sha[1]{repo,sha}:\n  web,") {
-		t.Fatalf("jig review done: exit %d, want a clean round with the web's target alone\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-	var rep struct {
-		ReviewedSHA map[string]string `yaml:"reviewed_sha"`
-	}
-	if err := yaml.Unmarshal(readFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "gate", "round-1", "report.yaml")), &rep); err != nil || !reflect.DeepEqual(rep.ReviewedSHA, map[string]string{"web": sha}) {
-		t.Errorf("reviewed_sha = %v (%v), want the web's head alone", rep.ReviewedSHA, err)
-	}
-}
-
-// TestGateAdoptsABranchInEveryRepo: a ticket built outside jig, on one branch
-// that both repos of the orchestrator have. `jig gate --branch` reviews it in
-// both and adopts it: the ticket records the branch, and the start of the work
-// in each repo is the tip the branch had there. A branch one of the repos lacks
-// is refused, naming the repo, and records nothing.
-func TestGateAdoptsABranchInEveryRepo(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{Orchestrator: true})
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const ticket = "JIG-2"
-	built, err := st.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateTicketRecord(ticket, store.Ticket{Title: "Built by hand"}); err != nil {
-		t.Fatal(err)
-	}
-	writeFileOrFatal(t, filepath.Join(st.TicketDir(ticket), "brief.md"), readFileOrFatal(t, filepath.Join(st.TicketDir(fx.Ticket), "brief.md")))
-	if err := st.AppendSlices(ticket, []store.Slice{
-		{ID: "handler", Workspace: "api/server", Goal: "Add up.", Oracle: "test", BlockedBy: []string{}, FromBrief: built[0].FromBrief},
-		{ID: "page", Workspace: "web/ui", Goal: "Show it.", Oracle: "test", BlockedBy: []string{}, FromBrief: built[1].FromBrief},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	api, web := orchestratorSessions(t, fx, env)
-
-	// feature/y is in the api alone.
-	api.Branch("feature/y")
-	api.Commit("", "api: handler", map[string]string{"server/handler.go": apiHandlerSource})
-	r := api.Jig("gate", ticket, "--branch", "feature/y", "--early")
-	projRefusal(t, "jig gate --branch of a branch the web lacks", r, 1, "code: BRANCH_NOT_FOUND", "error: repo web: ")
-	if rec, err := st.ReadTicket(ticket); err != nil || rec.Branch != "" {
-		t.Errorf("the refused gate recorded the branch: %+v (%v)", rec, err)
-	}
-
-	// feature/x is in both.
-	api.git("checkout", "main")
-	api.Branch("feature/x")
-	shaAPI := api.Commit("", "api: handler", map[string]string{"server/handler.go": apiHandlerSource})
-	web.Branch("feature/x")
-	shaWeb := web.Commit("", "web: page", map[string]string{"ui/page.go": webPageSource})
-	gate := api.Jig("gate", ticket, "--branch", "feature/x", "--early")
-	for _, want := range []string{"branch: feature/x", "repos[2]{", "  api,the clone's," + shaAPI + ",", "  web,the clone's," + shaWeb + ","} {
-		if !strings.Contains(gate.Stdout, want) {
-			t.Errorf("jig gate --branch output lacks %q\nstdout:\n%s", want, gate.Stdout)
-		}
-	}
-	if gate.Code != 0 {
-		t.Fatalf("jig gate --branch feature/x: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", gate.Code, gate.Stdout, gate.Stderr)
-	}
-	if rec, err := st.ReadTicket(ticket); err != nil || rec.Branch != "feature/x" {
-		t.Errorf("the ticket records %+v (%v), want the adopted branch feature/x", rec, err)
-	}
-	for repo, want := range map[string]string{"api": shaAPI, "web": shaWeb} {
-		if got := strings.TrimSpace(string(readFileOrFatal(t, st.StartSHAPath(ticket, repo)))); got != want {
-			t.Errorf("start of the work in %s = %s, want the tip of feature/x there, %s", repo, got, want)
-		}
+	if rep := b.report(t, "1"); rep.Verdict != "clean" || rep.Independent != false {
+		t.Errorf("report.yaml of round 1 = %+v, want a clean round with independent: false", rep)
 	}
 }

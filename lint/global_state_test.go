@@ -17,17 +17,12 @@ import (
 // The list shrinks as offenders are fixed; a file not on this list that
 // offends fails the lint, and a listed file with no offender left also fails.
 var debtList = map[string]bool{
-	"internal/fixture/fixture_test.go":          true,
-	"internal/gittest/gittest_test.go":          true,
-	"internal/gitx/gitx_test.go":                true,
-	"internal/gitx/repo_commit_test.go":         true,
-	"internal/home/home_test.go":                true,
-	"internal/pool/lease_test.go":               true,
-	"internal/repohost/repohost_test.go":        true,
-	"internal/session/headless_test.go":         true,
-	"internal/session/kill_windows_test.go":     true,
-	"internal/session/longpath_windows_test.go": true,
-	"internal/store/checkpoint_test.go":         true,
+	"internal/fixture/fixture_test.go":   true,
+	"internal/gittest/gittest_test.go":   true,
+	"internal/gitx/gitx_test.go":         true,
+	"internal/home/home_test.go":         true,
+	"internal/repohost/repohost_test.go": true,
+	"internal/store/checkpoint_test.go":  true,
 }
 
 // TestNoGlobalStateEditInInternalTests enforces that no test in internal/

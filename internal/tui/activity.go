@@ -171,12 +171,16 @@ func (t *ticket) goal(id string) string {
 }
 
 // subjects maps each commit the ticket verified to its subject, which jig
-// verify writes on its verify-pending line.
+// verify writes on its oracle line (an older journal had it on a
+// verify-pending line).
 func (t *ticket) subjects() map[string]string {
 	out := map[string]string{}
 	for _, l := range t.lines {
-		if l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "" {
+		switch {
+		case l.Event == journal.EventVerifyPending && l.Commit != "" && l.Summary != "":
 			out[l.Commit] = l.Summary
+		case l.Event == journal.EventOracle && l.Commit != "" && l.Subject != "":
+			out[l.Commit] = l.Subject
 		}
 	}
 	return out
@@ -215,7 +219,7 @@ type subLabels map[string]string
 func (m *Model) subLabelsOf(t *ticket) subLabels {
 	out := subLabels{}
 	d := m.phaseOf(t)
-	for _, p := range d.Phases {
+	for _, p := range d.Work() {
 		for _, s := range p.Subs {
 			out[s.Key] = s.Label
 		}
@@ -342,7 +346,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventDispatch:
 		return "jig started a builder"
 	case journal.EventVerifyPending:
-		return "verifying " + commitWords(t, l.Commit)
+		// An old worker's line: said as history, in no state of work in flight.
+		return "verification requested for " + commitWords(t, l.Commit)
 	case journal.EventOracle:
 		cmd := "its oracle"
 		if l.Command != "" {
@@ -352,10 +357,30 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 			return cmd + " passed" + took(l.Seconds)
 		}
 		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		cmd := "the final run"
+		// A command on several lines would take several rows of the page: left out.
+		if l.Command != "" && !strings.Contains(l.Command, "\n") {
+			cmd = "the final run `" + l.Command + "`"
+		}
+		covered := ""
+		if l.Uncovered != "" {
+			covered = " (covers nothing: " + l.Uncovered + ")"
+		}
+		if l.Outcome == "pass" {
+			return cmd + " passed" + took(l.Seconds) + covered
+		}
+		return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + covered + ": " + firstOf(l.Summary, l.Signature))
 	case journal.EventGateOracle:
 		cmd := "its oracle"
 		if l.Command != "" {
 			cmd = "`" + l.Command + "`"
+		}
+		if l.Outcome == "fail" {
+			return strings.TrimSpace(cmd + " failed" + took(l.Seconds) + ": " + firstOf(l.Summary, l.Signature))
+		}
+		if l.ReusedFrom != "" {
+			return cmd + " reused the pass of " + short(l.ReusedFrom)
 		}
 		return cmd + " passed" + took(l.Seconds)
 	case journal.EventVerified:
@@ -366,6 +391,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return strings.TrimSpace(who + " asks: " + firstLine(l.Summary))
 	case journal.EventAnswer:
 		return strings.TrimSpace(firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " answered the question: " + firstLine(l.Summary))
+	case journal.EventCall:
+		return strings.TrimSpace(who + " made a call: " + firstLine(l.Summary))
 	case journal.EventStall:
 		return strings.TrimSpace("stalled: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventRequeue:
@@ -630,14 +657,4 @@ func twoDigits(n int) string {
 		return "0" + strconv.Itoa(n)
 	}
 	return strconv.Itoa(n)
-}
-
-// between is the time from one line to another, "" when either has no time.
-func between(a, b events.Envelope) string {
-	ta, okA := a.At()
-	tb, okB := b.At()
-	if !okA || !okB || tb.Before(ta) {
-		return ""
-	}
-	return span(tb.Sub(ta))
 }

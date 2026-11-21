@@ -55,7 +55,7 @@ func TestClaimProblemsNameThePromptThatMakesTheTicketReady(t *testing.T) {
 	if got, _ = claimProblems(st, "JIG-2", claimDeps{}); len(got) == 0 || strings.Contains(got[0].Help, "ask: ") {
 		t.Errorf("blockers that wait for one another: %+v, want no prompt for the repeat", got)
 	}
-	f, _, err := phaseFacts(st, "JIG-2")
+	f, _, err := phaseFactsWith(st, "JIG-2", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestPhaseFactsReadTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, lines, err := phaseFacts(st, "JIG-2")
+	f, lines, err := phaseFactsWith(st, "JIG-2", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ const (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"gate", "open a gate round: re-verify the branch and hand a reviewer what to review", []flagSpec{
+		Spec: cmdSpec{"gate", "open a gate round on the branch: it runs no command, and hands a reviewer what to review", []flagSpec{
 			{"early", gateEarlyUsage, false},
 			{"branch", gateBranchUsage, false},
 			{"intent", gateIntentUsage, false},
@@ -40,6 +40,7 @@ func init() {
 			{"project", gateProjectUsage, false},
 		}, false},
 		Order: 160,
+		Note:  "a gate round runs no command: the request lists the pass `jig verify` witnessed for each slice, and a ticket's last run is `jig verify --final`",
 		Run: func(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return cmdGate(e, args, stdout, stdin)
 		},
@@ -50,9 +51,9 @@ func init() {
 // cmdGate implements `jig gate <ticket> [--early] [--branch <name>] [--intent
 // <text> | --doc <path>] [--yes]`: open a gate round over the ticket's branch.
 // The branch is read from the operator's clone (committed work only), or
-// origin's copy when that is the newer; the oracles are re-verified on its
-// head, reusing the passes `jig verify` recorded; and the request a
-// reviewer reads is written. jig starts no reviewer: a fresh-context agent
+// origin's copy when that is the newer; no command is run: the request a
+// reviewer reads lists the passes each slice's builder had witnessed with
+// `jig verify`, and is written. jig starts no reviewer: a fresh-context agent
 // reads the round with `jig review context`, reports findings with `jig
 // finding` and ends with `jig review done`, which records the round.
 //
@@ -167,24 +168,76 @@ func cmdGate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return printGateReport(stdout, st, ticket, report)
 	}
 
+	// A round still open at the branch's head is reported, not opened again:
+	// a gate run while a reviewer's round stands, or two gates started
+	// together, converge on one round. A recorded round never stands: a gate
+	// after it applies decisions and opens the next. A flag that shapes the
+	// round (it records an intent, adopts a branch, gates early, keeps
+	// findings) is never dropped: the gate goes on with it.
+	if !*early && *branch == "" && !intentFlagSet && !docFlagSet && !*yes {
+		standing, err := verifydeliver.StandingRound(deps, ticket)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		if standing != nil {
+			return printStandingRound(e, deps, stdout, ticket, standing)
+		}
+	}
+
 	p, err := verifydeliver.GatePrepare(deps, opts)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
+	if len(p.Queued) > 0 {
+		return printQueuedKeeps(stdout, ticket, p.Queued)
+	}
 	if p.Carried != nil {
 		// Nothing to read: the round is recorded, carrying over the verdict of
-		// the round a reviewer read (GATE-16).
+		// the round a reviewer read.
 		return printGateReport(stdout, st, ticket, *p.Carried)
 	}
 	blocks := roundBlocks(p, nil, false, nil)
+	blocks = append(blocks, storeRefBlocks(p.Request.StoreRefs)...)
 	blocks = append(blocks, axi.Help(gateAdvice(e, deps, ticket)...))
 	axi.Render(stdout, blocks...)
 	return 0
 }
 
+// printStandingRound prints the round a gate found at the branch's
+// head instead of opening another: the fields of a gate report, saying the
+// round was not opened again, and the help that points at its review.
+func printStandingRound(e env, d verifydeliver.Deps, stdout io.Writer, ticket string, st *verifydeliver.Standing) int {
+	var shaRows [][]string
+	for _, repo := range slices.Sorted(maps.Keys(st.Heads)) {
+		shaRows = append(shaRows, []string{repo, st.Heads[repo]})
+	}
+	blocks := []string{
+		axi.KV("gate", [][2]string{
+			{"ticket", ticket},
+			{"round", strconv.Itoa(st.Round) + " stands at its head (not opened again)"},
+			{"verdict", "open"},
+		}),
+		axi.Table("head", []string{"repo", "sha"}, shaRows),
+	}
+	blocks = append(blocks, axi.Help(gateAdvice(e, d, ticket)...))
+	axi.Render(stdout, blocks...)
+	return 0
+}
+
+// printQueuedKeeps prints what a gate did instead of opening a round: it queued
+// the fix slices of the pending keeps, which are built before the round opens.
+func printQueuedKeeps(stdout io.Writer, ticket string, queued []string) int {
+	axi.Render(stdout,
+		axi.KV("gate", [][2]string{{"ticket", ticket}, {"round", "none opened"}}),
+		axi.Table("fix_slices", []string{"id"}, idRows(queued)),
+		axi.Help(fmt.Sprintf("A kept finding is built with the fixes: build the fix slices (`jig next %s`), then run `jig gate %s` again to open the round", ticket, ticket)),
+	)
+	return 0
+}
+
 // gateAdvice is the help of an opened round: who reviews it. A session the
 // environment names is told whether it may review the ticket itself or has a
-// subagent do it (decision 39). With no session, as when the TUI's `g` opens
+// subagent do it. With no session, as when the TUI's `g` opens
 // the round, nobody is advised: the help says only what a reviewer does and
 // who should not be one.
 func gateAdvice(e env, d verifydeliver.Deps, ticket string) []string {
@@ -222,6 +275,11 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		[2]string{"round", strconv.Itoa(report.Round)},
 		[2]string{"verdict", carriedVerdict(report)},
 	)
+	// A store reference is a fact of the diff, beside the verdict and never a
+	// reason for it: the count shows only when there are some.
+	if len(report.StoreRefs) > 0 {
+		kv = append(kv, [2]string{"store_references", strconv.Itoa(len(report.StoreRefs))})
+	}
 	// Who reviewed, as the reviewer said (model and effort are self-reported;
 	// jig chooses none) and as jig found out (the reviewer and whether it
 	// built what it reviewed). A scripted or launched round has none of it.
@@ -306,6 +364,7 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		}
 		blocks = append(blocks, axi.Table("needs_a_human", []string{"id", "risk", "file:line", "title", "risk_rationale"}, needsRows))
 	}
+	blocks = append(blocks, storeRefBlocks(report.StoreRefs)...)
 	blocks = append(blocks, axi.Help(gateReportHint(st, ticket, report)...))
 	axi.Render(stdout, blocks...)
 	if len(report.NeedsHuman) > 0 {
@@ -314,8 +373,18 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 	return 0
 }
 
+// storeRefBlocks is the store_references table of a round: the lines its whole
+// change adds that name something only the store holds, at most 20 rows and
+// then an "and N more in K files" row. A round with none has no table.
+func storeRefBlocks(refs []verifydeliver.StoreRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	return []string{axi.Table("store_references", []string{"repo", "file:line", "id"}, verifydeliver.StoreRefsRows(refs))}
+}
+
 // carriedVerdict is the verdict of a round, with "(carried over from round N)"
-// after a clean one no reviewer read (GATE-16).
+// after a clean one no reviewer read.
 func carriedVerdict(report verifydeliver.GateReport) string {
 	if report.CarriedFrom > 0 {
 		return report.Verdict + " (carried over from round " + strconv.Itoa(report.CarriedFrom) + ")"

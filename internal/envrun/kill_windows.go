@@ -12,7 +12,7 @@ import (
 )
 
 // taskkillDeadline bounds KillTree's own call to taskkill. cmd.Cancel (in
-// session's headless.go and ShellOutput) runs before Go starts the WaitDelay
+// ShellStream) runs before Go starts the WaitDelay
 // timer, so whatever KillTree itself takes is not otherwise bounded by anything: a
 // slow or wedged taskkill would extend the dispatch's timeout by that much.
 // A real `taskkill /T /F` on a live tree returns in well under a second; a

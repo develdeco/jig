@@ -141,6 +141,8 @@ type Question struct {
 	Body       string `json:"body"`
 	Answer     string `json:"answer,omitempty"`
 	Provenance string `json:"provenance,omitempty"`
+	// Kind is "call" for a judgment call the builder recorded itself.
+	Kind string `json:"kind,omitempty"`
 }
 
 // Note is a note someone left on the slice, or on the ticket when Slice is
@@ -221,8 +223,9 @@ func Build(in Input) (Context, error) {
 		return Context{}, err
 	}
 	for _, q := range questions {
-		if q.Slice == sl.ID {
-			c.Questions = append(c.Questions, Question{ID: q.ID, Status: q.Status, Body: q.Body, Answer: q.Answer, Provenance: q.Provenance})
+		// A call about the whole ticket (no slice) is shown on every slice.
+		if q.Slice == sl.ID || (q.Slice == "" && q.Kind == store.KindCall) {
+			c.Questions = append(c.Questions, Question{ID: q.ID, Status: q.Status, Body: q.Body, Answer: q.Answer, Provenance: q.Provenance, Kind: q.Kind})
 		}
 	}
 	return c, nil
@@ -269,12 +272,13 @@ func (c *Context) readBrief(st *store.Store, ticket string, sl store.Slice) erro
 	return nil
 }
 
-// failedAttempts lists the failed oracle runs of slice, oldest first, the
-// latest MaxFailedAttempts of them.
+// failedAttempts lists the failed oracle runs of slice (not a run jig's stop
+// ended, which judged nothing), oldest first, the latest MaxFailedAttempts of
+// them.
 func failedAttempts(lines []journal.Line, slice string) []FailedAttempt {
 	out := []FailedAttempt{}
 	for _, l := range lines {
-		if l.Slice == slice && l.Event == journal.EventOracle && l.Outcome == "fail" {
+		if l.Slice == slice && l.Event == journal.EventOracle && l.Outcome == "fail" && l.Cause != journal.CauseStopped && l.Uncovered == "" {
 			out = append(out, FailedAttempt{Attempt: l.Attempt, Commit: l.Commit, Summary: l.Summary, Seconds: l.Seconds})
 		}
 	}
@@ -352,9 +356,9 @@ func (c Context) Blocks() []string {
 	if len(c.Questions) > 0 {
 		rows := make([][]string, 0, len(c.Questions))
 		for _, q := range c.Questions {
-			rows = append(rows, []string{q.ID, q.Status, q.Body, dash(q.Answer), dash(q.Provenance)})
+			rows = append(rows, []string{q.ID, q.Status, q.Body, dash(q.Answer), dash(q.Provenance), dash(q.Kind)})
 		}
-		blocks = append(blocks, axi.Table("questions", []string{"id", "status", "question", "answer", "provenance"}, rows))
+		blocks = append(blocks, axi.Table("questions", []string{"id", "status", "question", "answer", "provenance", "kind"}, rows))
 	}
 	if len(c.Notes) > 0 {
 		rows := make([][]string, 0, len(c.Notes))

@@ -1,16 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
-	"gopkg.in/yaml.v3"
 )
 
 // floorNoteRound1 builds the fixture ticket and closes round 1 clean with one
@@ -32,27 +29,6 @@ func floorNoteRound1(t *testing.T) (*fixture.Fixture, env) {
 		t.Fatalf("round 1 exit = %d, want 0 and a clean verdict (the fix is below the floor)\n%s", code, out)
 	}
 	return fx, e
-}
-
-// roundFindings is the parsed findings.yaml of one round.
-type roundFindings struct {
-	Cleared  []string `yaml:"cleared"`
-	Findings []struct {
-		ID string `yaml:"id"`
-	} `yaml:"findings"`
-}
-
-func readRoundFindings(t *testing.T, fx *fixture.Fixture, round string) roundFindings {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "gate", round, "findings.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc roundFindings
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	return doc
 }
 
 // TestNextAfterKeepingANoteOnACleanRoundNamesReview: a note kept after a clean
@@ -82,84 +58,6 @@ func TestNextAfterKeepingANoteOnACleanRoundNamesReview(t *testing.T) {
 	}
 }
 
-// TestAGateRoundClearsAFloorRoutedNoteAsAddressed drives the whole path: round
-// 1 files a low fix on beta/beta.go (a note), the builder commits a change to
-// that file, and round 2's reviewer reads it and reports nothing. The gate's
-// own close records the note as cleared, and the published review notes read it
-// addressed at round 2, counted apart from fixed and noted.
-func TestAGateRoundClearsAFloorRoutedNoteAsAddressed(t *testing.T) {
-	t.Parallel()
-	fx, e := floorNoteRound1(t)
-
-	changeBeta(t, fx)
-	round2 := reviewRoundResult(t, e, fx, verifydeliver.ReviewResult{Summary: "round 2: the change fixes the note"})
-	if out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", round2, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "verdict: clean") {
-		t.Fatalf("round 2 exit = %d, want 0 and a clean verdict\n%s", code, out)
-	}
-	if got := readRoundFindings(t, fx, "round-2").Cleared; len(got) != 1 || got[0] != "r1-f1" {
-		t.Fatalf("round 2 findings.yaml cleared = %v, want [r1-f1]: the change touched the note's file and the reviewer read it", got)
-	}
-
-	out, code := runMain(t, e, "", "publish", fx.Ticket, "--body", "--store", fx.StoreDir)
-	if code != 0 {
-		t.Fatalf("publish --body: exit = %d, want 0\n%s", code, out)
-	}
-	notes, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", fx.Ticket, "pr", "review-notes.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(notes), "Status: addressed at round 2") {
-		t.Errorf("review notes do not read the note addressed at round 2:\n%s", notes)
-	}
-}
-
-// TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain: the review
-// skill tells a reviewer to report a standing note again, so the round that
-// applies a kept note usually has its reviewer reporting it too. The note must
-// become one fix slice and one entry in the round's findings.yaml, not two.
-func TestAKeptNoteIsAppliedOnceInTheRoundItsReviewerReportsItAgain(t *testing.T) {
-	t.Parallel()
-	fx, e := floorNoteRound1(t)
-	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
-	}
-
-	round2 := reviewRoundResult(t, e, fx, verifydeliver.ReviewResult{
-		Summary:      "round 2: the note still stands",
-		StillPresent: []verifydeliver.StillPresentEntry{{Prior: "r1-f1", Line: 6}},
-	})
-	if out, code := runMain(t, e, "", "review", "done", fx.Ticket, "--result", round2, "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("round 2 exit = %d, want 0\n%s", code, out)
-	}
-
-	st, err := store.Open(fx.StoreDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices, err := st.ReadSlices(fx.Ticket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixes := 0
-	for _, s := range slices {
-		if s.FromGate == 2 {
-			fixes++
-		}
-	}
-	if fixes != 1 {
-		t.Errorf("round 2 queued %d fix slices, want 1 for the kept note", fixes)
-	}
-	entries := 0
-	for _, f := range readRoundFindings(t, fx, "round-2").Findings {
-		if f.ID == "r1-f1" {
-			entries++
-		}
-	}
-	if entries != 1 {
-		t.Errorf("round 2 findings.yaml lists r1-f1 %d times, want once", entries)
-	}
-}
-
 // changeBeta is the builder's commit to beta/beta.go after round 1, verified
 // under the slice that already owns the file.
 func changeBeta(t *testing.T, fx *fixture.Fixture) {
@@ -172,33 +70,6 @@ func changeBeta(t *testing.T, fx *fixture.Fixture) {
 	if err := os.WriteFile(path, append(data, []byte("\n// Greet trims nothing yet.\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" d: touch beta", "-m", "Jig-Slice: d")
-	sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-	if out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "state: pass") {
-		t.Fatalf("jig verify of the change: exit = %d, want a pass\n%s", code, out)
-	}
-}
-
-// reviewRoundResult opens the next round and writes res to a result file whose
-// reviewed_paths are the round's must_review paths, as a reviewer's are.
-func reviewRoundResult(t *testing.T, e env, fx *fixture.Fixture, res verifydeliver.ReviewResult) string {
-	t.Helper()
-	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
-		t.Fatalf("jig gate: exit = %d, want 0 (the round opens)\n%s", code, out)
-	}
-	ctx, code := runMain(t, e, "", "review", "context", fx.Ticket, "--json", "--store", fx.StoreDir)
-	if code != 0 {
-		t.Fatalf("review context: exit = %d\n%s", code, ctx)
-	}
-	var req struct {
-		MustReview []string `json:"must_review"`
-	}
-	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
-		t.Fatalf("review context --json: %v\n%s", err, ctx)
-	}
-	res.ReviewedPaths = req.MustReview
-	path := filepath.Join(t.TempDir(), "round-2.json")
-	writeReviewResultAt(t, path, res)
-	return path
+	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: touch beta"+"\n\n"+"Jig-Slice: d")
+	verifyHere(t, fx, "d")
 }

@@ -44,7 +44,6 @@ func TestInProcessReadsMatchGit(t *testing.T) {
 	t.Run("subject", func(t *testing.T) { checkSubject(t, fx) })
 	t.Run("unmerged", func(t *testing.T) { checkUnmerged(t, fx) })
 	t.Run("git paths", func(t *testing.T) { checkGitPaths(t, fx) })
-	t.Run("work tree probe", func(t *testing.T) { checkProbe(t, fx) })
 	t.Run("tree entries", func(t *testing.T) { checkTreeEntries(t, fx) })
 	t.Run("paths in a commit", func(t *testing.T) { checkHasPathAt(t, fx) })
 	t.Run("blob content", func(t *testing.T) { checkBlobAt(t, fx) })
@@ -515,33 +514,6 @@ func checkGitPaths(t *testing.T, fx *readFixture) {
 	}
 }
 
-func checkProbe(t *testing.T, fx *readFixture) {
-	for name, dir := range map[string]string{"top": fx.main, "subdirectory": fx.sub, "linked worktree": fx.wt, "gitfile": fx.holder, "separate git dir": fx.sep} {
-		t.Run(name, func(t *testing.T) {
-			want := mustGit(t, dir, "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree", "--show-prefix")
-			got, ok := workTreeProbeInProcess(dir, os.LookupEnv)
-			if !ok || got != want {
-				t.Errorf("in process %q, %v; git %q", got, ok, want)
-			}
-			if got, err := WorkTreeProbe(dir); err != nil || got != want {
-				t.Errorf("WorkTreeProbe = %q, %v; git %q", got, err, want)
-			}
-		})
-	}
-	// Inside a git directory and in no repository, git answers.
-	gitDir := filepath.Join(fx.main, ".git")
-	want := mustGit(t, gitDir, "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree", "--show-prefix")
-	if got, err := WorkTreeProbe(gitDir); err != nil || got != want {
-		t.Errorf("WorkTreeProbe(.git) = %q, %v; git %q", got, err, want)
-	}
-	if _, ok := workTreeProbeInProcess(gitDir, os.LookupEnv); ok {
-		t.Errorf("answered in process inside a git directory")
-	}
-	if _, err := WorkTreeProbe(t.TempDir()); err == nil {
-		t.Errorf("WorkTreeProbe outside a repository succeeded")
-	}
-}
-
 func checkTreeEntries(t *testing.T, fx *readFixture) {
 	// listing is git's own answer for every path of a commit's tree: the type
 	// ls-tree gives each (trees included), by path.
@@ -781,6 +753,32 @@ func checkBlobAt(t *testing.T, fx *readFixture) {
 	for _, rev := range []string{fx.fakeSHA, "refs/heads/nope", "nope"} {
 		if _, found, err := BlobAt(fx.main, rev, "a.txt"); err == nil || found {
 			t.Errorf("BlobAt(%s) = found %v, err %v; want an error", rev, found, err)
+		}
+	}
+}
+
+// TestBlobAtErrorsWhenTheTreeCannotBeRead: a commit that resolves but whose
+// tree object is missing has no readable file at any path, so BlobAt says so as
+// an error and never as "no file".
+func TestBlobAtErrorsWhenTheTreeCannotBeRead(t *testing.T) {
+	dir := initRepo(t, "")
+	const fakeTreeID = "1234567890abcdef1234567890abcdef12345678"
+	if _, err := Run(dir, "cat-file", "-e", fakeTreeID); err == nil {
+		t.Fatal("the fixture tree id exists")
+	}
+	commit, err := RunInput(dir, []byte("tree "+fakeTreeID+"\nauthor "+fiIdent+"\ncommitter "+fiIdent+"\n\nno tree\n"), "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := ResolveCommit(dir, commit); err != nil || !ok {
+		t.Fatalf("ResolveCommit(%s) = %v, %v; the fixture needs a commit that resolves", commit, ok, err)
+	}
+	if _, werr := RunRaw(dir, "cat-file", "blob", commit+":f.txt"); werr == nil {
+		t.Fatal("git read a file from the commit whose tree is missing")
+	}
+	for _, path := range []string{"f.txt", "nope"} {
+		if got, found, err := BlobAt(dir, commit, path); err == nil || found || got != nil {
+			t.Errorf("BlobAt(%s) = %q, %v, %v; want an error: the commit's tree cannot be read", path, got, found, err)
 		}
 	}
 }

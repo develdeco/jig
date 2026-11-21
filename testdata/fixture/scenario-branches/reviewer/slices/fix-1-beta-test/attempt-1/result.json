@@ -1,5 +1,0 @@
-{
-  "outcome": "green",
-  "summary": "Trimmed surrounding whitespace from Greet's name argument per gate round 1.",
-  "commit": "@HEAD"
-}

@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // This file pins, one rule at a time, what renderPicksSection does to the
@@ -32,8 +30,8 @@ func renderPickWords(t *testing.T, id, summary, caption string, dirs ...hostDir)
 	return renderPicksSection(p, "/stage", []DemoFile{{Name: name}}, dirs), name
 }
 
-// TestRenderPicksSectionLeavesOutASummaryNamingTheJigHome: the owner's
-// decision on r1-f13 (DECISIONS.md) - a summary is the session's own words,
+// TestRenderPicksSectionLeavesOutASummaryNamingTheJigHome: a pull
+// request body never names a jig directory - a summary is the session's own words,
 // and a published pull request body is public, so one that repeats the jig
 // home back is left out of the rendered section whole, not merely edited, and
 // reported in ScrubbedSummary. The file beside it, whose own caption names no
@@ -74,20 +72,17 @@ func TestRenderPicksSectionLeavesOutACaptionNamingTheStagingDirectory(t *testing
 	}
 }
 
-// TestRenderPicksSectionLeavesOutACaptionNamingTheGateLeaseAsAWSLMount: the
-// gate lease is one of the directories a session may have been told about,
-// and a session that runs in WSL on a Windows checkout sees it spelled as a
-// WSL mount, not jig's own spelling - so that spelling, not only the raw one,
-// must be checked for too.
-func TestRenderPicksSectionLeavesOutACaptionNamingTheGateLeaseAsAWSLMount(t *testing.T) {
+// TestRenderPicksSectionLeavesOutACaptionNamingTheCloneAsAWSLMount: the
+// clone is one of the directories a session may have been told about, and a
+// session that runs in WSL on a Windows checkout sees it spelled as a WSL
+// mount, not jig's own spelling - so that spelling, not only the raw one, must
+// be checked for too.
+func TestRenderPicksSectionLeavesOutACaptionNamingTheCloneAsAWSLMount(t *testing.T) {
 	t.Parallel()
-	leaseDir, err := pool.Dir(t.TempDir(), "repo", "JIG-1", pool.Gate)
-	if err != nil {
-		t.Fatalf("pool.Dir: %v", err)
-	}
-	res, name := renderPickWords(t, "r1", "it works", "ran it from "+wslMountPath(leaseDir), hostDir{leaseDir, "<lease>"})
+	cloneDir := filepath.Join(t.TempDir(), "repo")
+	res, name := renderPickWords(t, "r1", "it works", "ran it from "+wslMountPath(cloneDir), hostDir{cloneDir, "<clone>"})
 	if fmt.Sprint(res.ScrubbedCaptions) != "["+name+"]" {
-		t.Errorf("ScrubbedCaptions = %v, want [%s] (the gate lease's WSL mount spelling)", res.ScrubbedCaptions, name)
+		t.Errorf("ScrubbedCaptions = %v, want [%s] (the clone's WSL mount spelling)", res.ScrubbedCaptions, name)
 	}
 }
 
@@ -155,7 +150,7 @@ func TestRenderPicksSectionCollapsesAMultiLineCaptionToOneLine(t *testing.T) {
 	}
 }
 
-// TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText: r2-f6, a
+// TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText: a
 // caption carrying its own "](" closes the alt text early and reads whatever
 // follows as the image's own URL, which lets the session's own words point the
 // rendered image at an address of their choosing. sanitizeDemoCaption drops
@@ -173,7 +168,7 @@ func TestRenderPicksSectionCaptionCannotBreakOutOfTheImageAltText(t *testing.T) 
 }
 
 // TestRenderPicksSectionCaptionWithAnUnbalancedBracketStillShowsTheImage:
-// r2-f6, an unbalanced "[" in the caption would otherwise pair with the "]"
+// an unbalanced "[" in the caption would otherwise pair with the "]"
 // jig itself writes to close the alt text, losing the image reference (and so
 // the recording) entirely. sanitizeDemoCaption drops the bracket instead of
 // letting it pair across the boundary jig did not intend.
@@ -185,8 +180,8 @@ func TestRenderPicksSectionCaptionWithAnUnbalancedBracketStillShowsTheImage(t *t
 	}
 }
 
-// TestRenderPicksSectionEscapesHTMLInSummaryAndCaption: gate finding r4-f3,
-// the owner's decision. Neither the summary's demoteHeadings/closeOpenFence
+// TestRenderPicksSectionEscapesHTMLInSummaryAndCaption: a gate
+// finding, the owner's decision. Neither the summary's demoteHeadings/closeOpenFence
 // nor sanitizeDemoCaption's bracket strip touches raw HTML, which GitHub
 // renders a sanitized subset of inside a pull request body - a video or
 // captionless bullet's caption, and the summary outright, could otherwise put

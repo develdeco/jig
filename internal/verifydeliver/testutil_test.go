@@ -9,14 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -32,6 +31,14 @@ var buildGitEnv = []string{
 	"GIT_COMMITTER_EMAIL=fixture@example.invalid",
 	"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
 	"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+}
+
+// builder is the Builder for a test's own commits, pushes and fetches in a
+// pool lease or a clone: in process where gitx serves the repository, the git
+// program where it declines, under buildGitEnv either way.
+func builder(t testing.TB) *gitbuild.Builder {
+	t.Helper()
+	return gitbuild.New(t, buildGitEnv)
 }
 
 // ticketBranch is the default branch name a ticket with no recorded branch
@@ -117,43 +124,19 @@ func newDeps(t *testing.T, fx *fixture.Fixture) Deps {
 	if err != nil {
 		t.Fatalf("project.Load: %v", err)
 	}
-	return Deps{Store: st, Cfg: cfg, Home: fx.Home, Oracle: passingOracle}
+	clones := map[string]string{"fixture-repo": fx.RepoDir}
+	if fx.SecondRepoDir != "" {
+		clones["second-repo"] = fx.SecondRepoDir
+	}
+	return Deps{Store: st, Cfg: cfg, Home: fx.Home, Machine: project.MachineProject{Clones: clones}}
 }
 
-// passingOracle stands in for the gate's own oracle runs in tests that are
-// not about them: every run passes at once. A test about the gate's oracle
-// run (what it runs, a red run, what it runs after) sets Deps.Oracle to nil
-// for the real one.
-func passingOracle(string, string) (string, error) { return "", nil }
-
-// oracleRecorder stands in for the gate's oracle runs like passingOracle,
-// and records each command it was asked to run, in order, so a test can say
-// which runs the gate made without paying for them.
-type oracleRecorder struct {
-	mu   sync.Mutex
-	cmds []string
-}
-
-// run is the recorder's Deps.Oracle.
-func (r *oracleRecorder) run(cmd, _ string) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cmds = append(r.cmds, cmd)
-	return "", nil
-}
-
-// ran returns the commands run so far, in order.
-func (r *oracleRecorder) ran() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.cmds...)
-}
-
-// buildLeaseDir returns the build lease directory frontier would use for the
-// fixture's ticket: <pool>/fixture-repo/<ticket>, checked out on the branch
-// frontier would resolve for it, so a test that records a branch in the
-// fixture's ticket.yaml before driving the build gets a build lease on that
-// branch, and one that records none gets the "jig/<ticket>" default.
+// buildLeaseDir returns the directory a test builds the fixture's ticket in: the
+// operator's clone (fx.RepoDir), checked out on the branch the ticket resolves
+// to (cut from origin's main when the clone has none), so a test that records
+// a branch in the fixture's ticket.yaml before driving the build builds on that
+// branch, and one that records none gets the default. The work is built in the
+// clone, as a builder's is (ADR 0039).
 func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	t.Helper()
 	st, err := store.Open(fx.StoreDir)
@@ -164,11 +147,13 @@ func buildLeaseDir(t *testing.T, fx *fixture.Fixture) string {
 	if err != nil {
 		t.Fatalf("resolve %s's branch: %v", fx.Ticket, err)
 	}
-	lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Build)
-	if err != nil {
-		t.Fatalf("pool.Acquire build lease: %v", err)
+	run(t, fx.RepoDir, "fetch", "origin")
+	if _, found, _ := gitx.Resolve(fx.RepoDir, "refs/heads/"+branch); found {
+		run(t, fx.RepoDir, "checkout", branch)
+	} else {
+		run(t, fx.RepoDir, "checkout", "-b", branch, "origin/main")
 	}
-	return lease.Dir
+	return fx.RepoDir
 }
 
 // marshalReviewResult marshals result as result.json's bytes, filling a nil
@@ -252,13 +237,7 @@ func applyScenarioPatch(t *testing.T, fx *fixture.Fixture, dir, ticket, slice st
 	if _, err := gitx.Run(dir, "apply", abs); err != nil {
 		t.Fatalf("git apply %s: %v", path, err)
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("git add after %s: %v", path, err)
-	}
-	msg := fmt.Sprintf("%s %s: attempt %d", ticket, slice, attempt)
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", msg); err != nil {
-		t.Fatalf("git commit after %s: %v", path, err)
-	}
+	builder(t).Commit(dir, fmt.Sprintf("%s %s: attempt %d", ticket, slice, attempt))
 }
 
 // journalBuilt records a green result the way frontier does when its commit
@@ -432,7 +411,7 @@ func authorBranch(t *testing.T, fx *fixture.Fixture, branch string) string {
 	run(t, dir, "clone", fx.RepoRemote, ".")
 	run(t, dir, "checkout", "-b", branch)
 	applyScenarioPatch(t, fx, dir, "author", "a", 1)
-	run(t, dir, "push", "origin", branch)
+	builder(t).Push(dir, "origin", branch)
 	return run(t, dir, "rev-parse", "HEAD")
 }
 
@@ -446,11 +425,8 @@ func authorPush(t *testing.T, fx *fixture.Fixture, branch, file string) string {
 	if err := os.WriteFile(filepath.Join(dir, file), []byte("the author again\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", file, err)
 	}
-	run(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, buildGitEnv, "commit", "-m", "author: "+file); err != nil {
-		t.Fatalf("commit %s: %v", file, err)
-	}
-	run(t, dir, "push", "origin", branch)
+	builder(t).Commit(dir, "author: "+file)
+	builder(t).Push(dir, "origin", branch)
 	return run(t, dir, "rev-parse", "HEAD")
 }
 

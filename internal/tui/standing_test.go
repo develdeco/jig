@@ -150,17 +150,13 @@ func TestTheScreensStandWhereInternalPhaseSaysTheTicketStands(t *testing.T) {
 			t.Errorf("%s: the screens stand at %s (ready %v), phase.Derive at %s (ready %v)", tc.name, got.Current, got.Ready, d.Current, d.Ready)
 		}
 		steps := m.steps(tk)
-		for i, p := range d.Phases {
+		for i, p := range d.Work() {
 			if got.States[i] != p.State {
 				t.Errorf("%s: the screens have %s %s, phase.Derive %s", tc.name, p.Name, got.States[i], p.State)
 			}
 			if steps[i].Text != p.Text {
 				t.Errorf("%s: the %s row says %q, phase.Derive %q", tc.name, p.Name, steps[i].Text, p.Text)
 			}
-		}
-		// The same answer by the entry point a caller with no model uses.
-		if s := StandingOf(T, statusOfFacts(tc.facts), envs); s != got {
-			t.Errorf("%s: StandingOf = %+v, the model's = %+v", tc.name, s, got)
 		}
 	}
 }

@@ -31,7 +31,7 @@ func TestEveryKindOfLineNamesTheSubstepItAdvances(t *testing.T) {
 		{jl(at(1, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")), "slice a", "builder took it"},
 		{jl(at(1, 1), "JIG-6", "a", journal.EventRelease, with("s-builder", "", "", "", "", "")), "slice a", "builder let go of it"},
 		{jl(at(1, 2), "JIG-6", "a", journal.EventDispatch), "slice a", "jig started a builder"},
-		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verifying aaaaaaa"},
+		{jl(at(1, 3), "JIG-6", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Add the cart", "", "")), "slice a", "verification requested for aaaaaaa"},
 		{jl(at(1, 4), "JIG-6", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./cart", 3 }), "slice a", "`go test ./cart` passed in 3s"},
 		{jl(at(1, 5), "JIG-6", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")), "slice a", "verified aaaaaaa"},
 		{jl(at(1, 6), "JIG-6", "a", journal.EventVerifyError, with("", "", "", "no worker", "", "")), "slice a", "could not be verified: no worker"},
@@ -187,5 +187,35 @@ func TestAGateOracleLineLandsUnderTheGatesStepWithItsState(t *testing.T) {
 	}
 	if got := eventState(ran); got != StateGreen {
 		t.Errorf("a gate-oracle line is drawn %q, want %q", got, StateGreen)
+	}
+}
+
+// TestAFailedOrReusedGateOracleLineSaysSo: the gate journals the run that
+// failed and the pass it reused, as it journals a run it made; the first is
+// drawn stalled with why, the second names what it stands on, never "passed".
+func TestAFailedOrReusedGateOracleLineSaysSo(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-6")
+	tk := ticketOf("JIG-6")
+	g.m.w.tickets["JIG-6"] = tk
+	failed := jl(at(3, 1), "JIG-6", "", journal.EventGateOracle, with("", sha('a'), "fail", "", "", ""), func(l *journal.Line) {
+		l.Command, l.Seconds, l.Summary = "go test ./alpha/...", 4, "red on purpose"
+	})
+	reused := jl(at(3, 2), "JIG-6", "", journal.EventGateOracle, with("", sha('b'), "pass", "", "", ""), func(l *journal.Line) {
+		l.Command, l.ReusedFrom = "go test ./alpha/...", sha('a')
+	})
+	tk.lines = append(tk.lines, failed, reused)
+
+	if got := g.m.say(tk, failed); got != "`go test ./alpha/...` failed in 4s: red on purpose" {
+		t.Errorf("a failed gate-oracle line says %q", got)
+	}
+	if got := eventState(failed); got != StateStalled {
+		t.Errorf("a failed gate-oracle line is drawn %q, want %q", got, StateStalled)
+	}
+	if got := g.m.say(tk, reused); got != "`go test ./alpha/...` reused the pass of "+short(sha('a')) {
+		t.Errorf("a reused gate-oracle line says %q", got)
+	}
+	if got := eventState(reused); got != StateGreen {
+		t.Errorf("a reused gate-oracle line is drawn %q, want %q", got, StateGreen)
 	}
 }

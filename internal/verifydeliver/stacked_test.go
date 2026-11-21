@@ -119,15 +119,22 @@ func TestPublishRetargetsTheOpenPRFoundByBranch(t *testing.T) {
 		name       string
 		base       string
 		retargeted string
+		merged     bool
 	}{
-		{"into the merged parent's branch", "jig/JIG-0", "main"},
-		{"already into the target", "main", ""},
+		{"into the merged parent's branch", "jig/JIG-0", "main", false},
+		{"already into the target", "main", "", false},
+		// The parent has merged and main moved on; the session merged main into
+		// the branch, cleanly. The merge is the head to publish: no new round.
+		{"after a clean merge of the target", "jig/JIG-0", "main", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			fx, d, head := reviewedInTheClone(t)
 			d.Stack = mergedParent
 			branch := ticketBranch(fx.Ticket)
+			if tc.merged {
+				head = targetMoves(t, fx, "main1.txt")
+			}
 			pulls := fixture.GhPulls(t, fixture.GhPull{Number: 7, Owner: "owner", Head: branch, Base: tc.base})
 			logFile, _ := useGithubHost(t, &d, pulls, "")
 
@@ -140,7 +147,10 @@ func TestPublishRetargetsTheOpenPRFoundByBranch(t *testing.T) {
 				t.Errorf("report = url %q updated %v retargeted %q, want %s updated, retargeted to %q", report.PRURL["fixture-repo"], report.PRUpdated["fixture-repo"], report.PRRetargeted["fixture-repo"], url, tc.retargeted)
 			}
 			if got := originRef(t, fx.RepoRemote, "refs/heads/"+branch); got != head {
-				t.Errorf("origin's %s = %s, want the reviewed head %s", branch, got, head)
+				t.Errorf("origin's %s = %s, want the head %s", branch, got, head)
+			}
+			if _, err := os.Stat(gateRoundDir(d.Store, fx.Ticket, 2)); tc.merged && err == nil {
+				t.Errorf("a gate round 2 exists: a clean merge of the target needs no new round")
 			}
 			var edits, creates [][]string
 			for _, argv := range loggedGh(t, logFile) {

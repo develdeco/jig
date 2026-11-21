@@ -12,7 +12,7 @@
 //     WriteBudget), with the project's jig.yaml budget as the default a ticket
 //     starts from (ProjectDefault).
 //
-// The numbers come from the Claude Code transcript (FromTranscript): the
+// The numbers come from the Claude Code transcript (FromSession): the
 // usage of each API message, counted once however many transcript lines
 // repeat it, for the lines the session itself wrote plus its subagents'. A
 // subagent that has a line of its own is left out of the session's

@@ -1,5 +1,9 @@
 # Gate fix budget and risk floor: bound the fix loop, size fix slices to one session
 
+**Amended 2026-11-18:** a fix slice groups its kept findings by workspace alone, and its oracle is the commands its findings named, in finding-id order and each once, joined as `(a) && (b)`. Its id is `fix-<round>-<workspace>[-N]`, or `fix-<round>-q-<workspace>[-N]` for a keep queued before the round opens. A lone command is carried verbatim, so a manifest oracle's name runs as the manifest defines it; among several, a name is written out as the manifest defines it, since inside parentheses it would be no name. Where this record says `-<oracle>` in an id or a group, read none.
+
+**Amended by grouping kept asks and notes:** a kept ask or note no longer gets a slice of its own; it joins the kept fixes of its workspace and oracle, and the group is split under the same bound.
+
 The gate's fix loop has no budget. Every finding the reviewer routes as a fix
 becomes fix work, whatever its risk. The gate repeats until a round comes back
 clean, and one round's fixes for a workspace and oracle go into a single slice.
@@ -178,7 +182,7 @@ file-path remotes.
 
 ## References
 
-- BG-1 incident (not in public repo) showed 8 gate rounds on low-risk findings
+- An earlier incident (not in this repo) showed 8 gate rounds on low-risk findings
   alone, rounds 5-8 costing roughly a quarter of the ticket's 29M weighted
   tokens and 3 hours.
 - no-mistakes (internal policy): fix attempts are bounded per step; only

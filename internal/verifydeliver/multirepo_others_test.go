@@ -72,7 +72,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 		{repo: "api", file: "server/handler.go", title: "The handler drops the currency"},
 	}
 	own := []findingOutcome{{finding: Finding{ID: "r1-f3", Title: "Own", Risk: "high", RiskRationale: "why"}, detail: "fixed"}}
-	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", "", 2, nil, "Round summary.", own, others, nil, []string{"a.go"}, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-docs.md", "", 2, nil, "Round summary.", own, others, nil, []string{"a.go"}, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	got := readNotes(t, st, "T-1", "review-notes-docs.md")
@@ -84,8 +84,21 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 	if !(f >= 0 && f < o && o < c) {
 		t.Errorf("sections out of order (Findings %d, other repos %d, Coverage %d):\n%s", f, o, c, got)
 	}
+	// The repo's own finding is told in full in its Findings block, and the
+	// other repos' titles are only in the section of their own.
+	if f >= 0 && o > f {
+		block := got[f:o]
+		if !strings.Contains(block, "- **Own** (high): why\n  - Status: fixed\n") {
+			t.Errorf("Findings block lacks the repo's own finding in full:\n%s", block)
+		}
+		for _, other := range others {
+			if strings.Contains(block, other.title) {
+				t.Errorf("Findings block holds the other repo's finding %q:\n%s", other.title, block)
+			}
+		}
+	}
 
-	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", "", 2, nil, "Round summary.", nil, others, nil, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes-none.md", "", 2, nil, "Round summary.", nil, others, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nRound summary.\n\n" + section + "## Coverage\n\n"
@@ -99,7 +112,7 @@ func TestWriteReviewNotesListsOtherRepos(t *testing.T) {
 func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 	t.Parallel()
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readNotes(t, st, "T-1", "review-notes.md"), "# Review Notes\n\n## Coverage\n\n"; got != want {
@@ -110,7 +123,7 @@ func TestWriteReviewNotesWithoutOthersIsUnchanged(t *testing.T) {
 		{finding: Finding{ID: "r1-f2", Title: "Low one", Risk: "low", RiskRationale: "minor"}, detail: "fixed"},
 		{finding: Finding{ID: "r1-f1", Title: "High one", Risk: "high", RiskRationale: "major", Oracle: "test"}, detail: "fixed by fix-1"},
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "All fixed.", own, nil, []string{"x.go"}, []string{"x.go", "y.go"}, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Round 2\n\nAll fixed.\n\n" +
@@ -142,7 +155,7 @@ func TestWriteReviewNotesListsWhoReviewedEachRound(t *testing.T) {
 		{Round: 5, Scope: "full", Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
 		{Round: 6, Head: sha('f'), Reviewer: Provenance{Session: "s-rev"}, Independent: IndependentYes},
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 4, rounds, "", nil, nil, nil, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 4, rounds, "", nil, nil, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := "# Review Notes\n\n## Reviewers\n\n" +
@@ -174,7 +187,7 @@ func TestWriteReviewNotesSaysWhoApprovedTheBrief(t *testing.T) {
 		if err := st.WriteApproval("T-1", store.Approval{By: "Dana", At: "2026-10-23T12:00:00Z", BriefSHA256: "abc", Provenance: c.provenance}); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, ""); err != nil {
+		if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 1, nil, "", nil, nil, nil, nil, nil, "", nil); err != nil {
 			t.Fatal(err)
 		}
 		if got := readNotes(t, st, "T-1", "review-notes.md"); !strings.Contains(got, c.want+"\n") {

@@ -8,11 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/tui"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -133,49 +131,49 @@ func (r phaseRig) walk(t *testing.T, check func(s phaseStage)) {
 	prompt := func(verb string) string { return verb + " " + T }
 	const reviewed = "round: %d\nverdict: %s\nindependent: true\nreviewer:\n  session: s-rev\n  how: env\n"
 
-	check(phaseStage{name: "a drafted brief", phase: "brief", ready: true, prompt: prompt("Plan"), states: "cppp",
+	check(phaseStage{name: "a drafted brief", phase: "brief", ready: true, prompt: prompt("Plan"), states: "cpppp",
 		asked: []phaseAsk{{phase: "build", code: "PHASE_BRIEF_NOT_APPROVED", reason: "is not approved"}}})
 
 	approveBrief(t, r.st, T)
-	check(phaseStage{name: "an approved brief", phase: "build", ready: true, prompt: prompt("Build"), states: "dcpp",
+	check(phaseStage{name: "an approved brief", phase: "build", ready: true, prompt: prompt("Build"), states: "dcppp",
 		asked: []phaseAsk{{phase: "brief", ready: true, warnFrom: "brief is done (approved by ", warnTo: "; prompt: " + prompt("Build")}}})
 
 	r.line(t, journal.Line{Event: journal.EventClaim, Slice: "a", Session: "s-claim"})
 	if err := r.st.WriteSliceState(T, "a", store.SliceState{State: "building", Attempts: 1}); err != nil {
 		t.Fatal(err)
 	}
-	check(phaseStage{name: "a build under way", phase: "build", ready: true, prompt: prompt("Build"), states: "dcpp",
+	check(phaseStage{name: "a build under way", phase: "build", ready: true, prompt: prompt("Build"), states: "dcppp",
 		asked: []phaseAsk{{phase: "review", code: "PHASE_NOT_BUILT"}}})
 
 	r.green(t, "s-claim")
-	check(phaseStage{name: "a build done", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcp",
+	check(phaseStage{name: "a build done", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcpp",
 		asked: []phaseAsk{
 			{phase: "build", ready: true, warnFrom: "build is done (", warnTo: "; prompt: " + prompt("Review")},
 			{phase: "publish", code: "PHASE_NOT_REVIEWED"},
 		}})
 
 	r.openRound(t, 1)
-	check(phaseStage{name: "a round open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcp", reason: "round 1"})
+	check(phaseStage{name: "a round open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcpp", reason: "round 1"})
 
 	writeRound(t, r.root, T, 1, roundFiles{report: fmt.Sprintf(reviewed, 1, "findings")})
 	writeAsks(t, r.root, T, askSpec{id: "r1-f1"})
 	r.line(t, journal.Line{Event: journal.EventGateRound, Attempt: 1, Session: "s-rev"})
-	check(phaseStage{name: "a round with an ask to decide", phase: "review", code: "PHASE_ASKS_UNDECIDED", prompt: prompt("Review"), states: "ddcp", reason: "1 ask of "})
+	check(phaseStage{name: "a round with an ask to decide", phase: "review", code: "PHASE_ASKS_UNDECIDED", prompt: prompt("Review"), states: "ddcpp", reason: "1 ask of "})
 
 	// The decision is the line `jig triage` journals (the status_triage tests
 	// run the verb).
 	r.line(t, journal.Line{Event: journal.EventTriage, Ref: "r1-f1", Outcome: "dismiss", Provenance: "person"})
-	check(phaseStage{name: "an ask decided", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcp"})
+	check(phaseStage{name: "an ask decided", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcpp"})
 
 	r.openRound(t, 2)
-	check(phaseStage{name: "round 2 open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcp", reason: "round 2"})
+	check(phaseStage{name: "round 2 open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcpp", reason: "round 2"})
 
 	writeRound(t, r.root, T, 2, roundFiles{report: fmt.Sprintf(reviewed, 2, "clean")})
 	r.line(t, journal.Line{Event: journal.EventGateClean, Attempt: 2, Session: "s-rev"})
-	check(phaseStage{name: "a clean round", phase: "publish", ready: true, prompt: prompt("Publish"), states: "dddc"})
+	check(phaseStage{name: "a clean round", phase: "publish", ready: true, prompt: prompt("Publish"), states: "dddcp"})
 
 	r.line(t, journal.Line{Event: journal.EventPublishDone})
-	check(phaseStage{name: "a published ticket", phase: "publish", code: "PHASE_DONE", states: "dddd"})
+	check(phaseStage{name: "a published ticket", phase: "publish", code: "PHASE_DONE", states: "ddddd"})
 }
 
 // nextPhaseOut is `jig next <ticket> --json` as these tests read it: the phase
@@ -296,47 +294,6 @@ func TestNextNamesThePhaseAndPrompt(t *testing.T) {
 	})
 }
 
-// TestTheScreensStandWhereJigNextDoes: at each point a ticket passes through,
-// the screens, which read `jig status` and the journal, put it where `jig next`,
-// which reads the store, does: the same current phase, the same answer to
-// whether it can start and the same state for each of the four phases. The
-// rule is internal/phase's, and internal/tui pins that the screens derive
-// nothing of their own; this is the check that what the real status prints
-// and the real store holds give both the same facts.
-func TestTheScreensStandWhereJigNextDoes(t *testing.T) {
-	t.Parallel()
-	r := newPhaseRig(t)
-	e := r.env("")
-	r.walk(t, func(s phaseStage) {
-		T := r.ticket
-		status, err := RenderStatus(r.st, T)
-		if err != nil {
-			t.Fatalf("%s: RenderStatus: %v", s.name, err)
-		}
-		lines, err := journal.Read(r.st, T)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var envs []events.Envelope
-		for _, l := range lines {
-			envs = append(envs, events.Envelope{Src: events.SrcJournal, Store: "demo", Line: l})
-		}
-		got := tui.StandingOf(T, status, envs)
-		p := r.nextJSON(t, e).Phase
-		if got.Current != s.phase || got.Ready != s.ready {
-			t.Errorf("%s: the screens stand at %s (ready %v), want %s (ready %v)", s.name, got.Current, got.Ready, s.phase, s.ready)
-		}
-		if got.Current != p.Name || got.Ready != p.Ready {
-			t.Errorf("%s: the screens stand at %s (ready %v), jig next at %s (ready %v: %s)", s.name, got.Current, got.Ready, p.Name, p.Ready, p.Reason)
-		}
-		for i, ph := range p.Phases {
-			if got.States[i] != ph.State {
-				t.Errorf("%s: the screens have %s %s, jig next %s", s.name, ph.Name, got.States[i], ph.State)
-			}
-		}
-	})
-}
-
 // TestNextAndGateAdviseWhoReviews: when review is the phase that can start,
 // `jig next` and `jig gate` tell the session that asks whether it built the
 // ticket, and so whether it may read the round itself or has a subagent do it.
@@ -360,7 +317,7 @@ func TestNextAndGateAdviseWhoReviews(t *testing.T) {
 	deps := verifydeliver.Deps{Store: r.st, Home: r.home}
 
 	spawn := []string{
-		"spawn a subagent to review", "Agent tool", "subagent_type: general-purpose", "model: opus", "no worktree isolation",
+		"spawn a subagent to review", "Agent tool", "subagent_type: general-purpose", "model: opus", "isolation: worktree",
 		"`run_in_background: false` where the tool takes it", "TaskOutput (`block: true`", "the harness's notice that the subagent finished is the wait", "hand back at once, saying the round is open", "Never schedule a wakeup or call another tool to stall",
 		"You did not build " + T, "jig skill review", "jig review context " + T, "Reply with the verdict line only",
 		"must not run `jig review context` itself",

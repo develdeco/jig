@@ -19,16 +19,19 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// worktreesOf is the Worktrees of a roundRepo that has exactly these.
+func worktreesOf(dirs ...string) func() []string { return func() []string { return dirs } }
+
 // twoRepoFiles is the files of a round over the repos api (workspaces server
 // and lib, oracles test and lint) and web (workspaces ui and lib, oracle test),
 // read in apiDir and webDir.
 func twoRepoFiles(apiDir, webDir string) roundFiles {
 	return roundFiles{qualified: true, repos: []roundRepo{
-		{Name: "api", Dir: apiDir, Head: "api-head", Man: manifest.Manifest{
+		{Name: "api", Dir: apiDir, Worktrees: worktreesOf(apiDir), Head: "api-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "server", Path: "server"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/...", "lint": "go vet ./{path}/..."},
 		}},
-		{Name: "web", Dir: webDir, Head: "web-head", Man: manifest.Manifest{
+		{Name: "web", Dir: webDir, Worktrees: worktreesOf(webDir), Head: "web-head", Man: manifest.Manifest{
 			Workspaces: []manifest.Workspace{{ID: "ui", Path: "ui"}, {ID: "lib", Path: "lib"}},
 			Oracles:    map[string]string{"test": "go test ./{path}/..."},
 		}},
@@ -76,16 +79,6 @@ func TestRoundFilesNameAFileByItsRepo(t *testing.T) {
 		if got := rf.workspace(file); got != want {
 			t.Errorf("workspace(%q) = %q, want %q", file, got, want)
 		}
-	}
-	// The oracles that can prove a fix are those of the file's repo.
-	if got := rf.oracles("api/server/handler.go"); !reflect.DeepEqual(got, []string{"lint", "test"}) {
-		t.Errorf("oracles of an api file = %v, want lint and test", got)
-	}
-	if got := rf.oracles("web/ui/page.go"); !reflect.DeepEqual(got, []string{"test"}) {
-		t.Errorf("oracles of a web file = %v, want test alone", got)
-	}
-	if got := rf.oracles("ui/page.go"); got != nil {
-		t.Errorf("oracles of a file of no repo = %v, want none", got)
 	}
 	if got := rf.allOracles(); !reflect.DeepEqual(got, []string{"lint", "test"}) {
 		t.Errorf("allOracles = %v, want lint and test, once each", got)
@@ -159,7 +152,7 @@ func TestGateRepos(t *testing.T) {
 		{"a project of one with no slice", one, nil, []string{"app"}, nil},
 		{"two repos of three", three, []store.Slice{slice("d", "docs/site"), slice("s", "api/server"), slice("t", "api/lib")}, []string{"api", "docs"}, map[string][]string{"api": {"s", "t"}, "docs": {"d"}}},
 		{"the one repo that is not the first", three, []store.Slice{slice("u", "web/ui"), slice("v", "web/lib")}, []string{"web"}, map[string][]string{"web": {"u", "v"}}},
-		{"a fix slice names its repo like any slice", three, []store.Slice{slice("u", "web/ui"), {ID: "fix-1-api-server-test", Workspace: "api/server", FromGate: 1}}, []string{"api", "web"}, nil},
+		{"a fix slice names its repo like any slice", three, []store.Slice{slice("u", "web/ui"), {ID: "fix-1-api-server", Workspace: "api/server", FromGate: 1}}, []string{"api", "web"}, nil},
 	} {
 		repos, err := gateRepos(Deps{Cfg: c.cfg}, "JIG-1", c.slices)
 		if err != nil {
@@ -245,18 +238,18 @@ func TestBuiltInTheCommitsOfTheSlicesOfARepo(t *testing.T) {
 
 // TestReviewRequestOfOneRepoMatchesItsGolden: the request of a round in a
 // project of one repo is what it has always been, byte for byte: its scope,
-// base, head and worktree at the top, and no list of repos.
+// base and head at the top, and no list of repos.
 func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
-		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb", Worktree: "/lease/JIG-1-gate",
+		Ticket: "JIG-1", Round: 2, Scope: "delta", BaseSHA: "aaaa", HeadSHA: "bbbb",
 		Intent:        Intent{Source: "brief", Path: "/store/JIG-1/brief.md"},
 		IntentExcerpt: "/home/excerpt.md",
 		Recordings:    "/home/recordings.json",
 		SlicesPath:    "/store/JIG-1/slices.yaml",
 		JournalPath:   "/store/JIG-1/journal.ndjson",
 		Oracles:       []string{"lint", "test"},
-		OraclesPassed: []OracleRun{{Oracle: "test", Workspace: "alpha", Command: "go test ./alpha/...", ReusedFrom: "cccc", Seconds: 4, Slices: []string{"a"}}},
+		OraclesPassed: []SlicePass{{Slice: "a", Workspace: "alpha", Command: "go test ./alpha/...", Commit: "cccc", AtHead: "no", Seconds: 4}},
 		Open:          []OpenFinding{{ID: "r1-f1", File: "alpha/a.go", Line: 3, Title: "t", Detail: "d", Action: "fix", Risk: "high", RiskRationale: "r", Oracle: "test", Recurrences: 1}},
 		MustReview:    []string{"alpha/a.go", "beta/b.go"},
 		Probed: []ProbedEntry{{Round: 1, ResultProbe: ResultProbe{
@@ -274,7 +267,6 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   "scope": "delta",
   "base_sha": "aaaa",
   "head_sha": "bbbb",
-  "worktree": "/lease/JIG-1-gate",
   "intent": {
     "source": "brief",
     "path": "/store/JIG-1/brief.md"
@@ -289,14 +281,12 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
   ],
   "oracles_passed": [
     {
-      "oracle": "test",
+      "slice": "a",
       "workspace": "alpha",
       "command": "go test ./alpha/...",
-      "reused_from": "cccc",
-      "seconds": 4,
-      "slices": [
-        "a"
-      ]
+      "commit": "cccc",
+      "at_head": "no",
+      "seconds": 4
     }
   ],
   "open": [
@@ -352,15 +342,15 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 }
 
 // TestReviewRequestOfSeveralReposListsThem: a round in a project of several
-// repos lists each repo with its own worktree, branch, scope, base, head,
-// oracles and files to cover, and names no scope, base, head or worktree at the
+// repos lists each repo with its own branch, scope, base, head,
+// oracles and files to cover, and names no scope, base or head at the
 // top; a repo with nothing to cover still lists its files as [].
 func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	t.Parallel()
 	req := ReviewRequest{
 		Ticket: "JIG-1", Round: 1,
 		Repos: []RepoRequest{
-			{Repo: "api", Worktree: "/lease/api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
+			{Repo: "api", Branch: "jig/JIG-1", Scope: "full", BaseSHA: "a0", HeadSHA: "a1", Oracles: []string{"test"}, MustReview: []string{"api/server/handler.go"}},
 			{Repo: "web", Branch: "jig/JIG-1", Scope: "delta", BaseSHA: "w1", HeadSHA: "w1", Oracles: []string{"test"}},
 		},
 		MustReview: []string{"api/server/handler.go"},
@@ -373,7 +363,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"scope", "base_sha", "head_sha", "worktree"} {
+	for _, key := range []string{"scope", "base_sha", "head_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the request names %q at the top, want it only in each repo:\n%s", key, data)
 		}
@@ -382,7 +372,7 @@ func TestReviewRequestOfSeveralReposListsThem(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Repos) != 2 || back.Repos[0].Worktree != "/lease/api" || back.Repos[1].Repo != "web" {
+	if len(back.Repos) != 2 || back.Repos[0].Repo != "api" || back.Repos[1].Repo != "web" {
 		t.Fatalf("repos = %+v, want api and web", back.Repos)
 	}
 	var listed struct {
@@ -438,8 +428,6 @@ func TestValidateReviewResultInARoundOverSeveralRepos(t *testing.T) {
 		"a path of no repo":           {valid(finding("ui/page.go", "test")), `file "ui/page.go" names no repo of this round (api, web): write it as <repo>/<path>`},
 		"a repo the round lacks":      {valid(finding("docs/x.md", "test")), `names no repo of this round`},
 		"a file the head lacks":       {valid(finding("web/ui/missing.go", "test")), `neither present at head nor deleted`},
-		"an oracle of another repo":   {valid(finding("web/ui/page.go", "lint")), `oracle "lint" is not a manifest oracle`},
-		"no oracle where two exist":   {valid(finding("api/server/handler.go", "")), `must name one of the manifest's 2 oracles`},
 		"a must_review file not read": {ReviewResult{Findings: []ResultFinding{}, StillPresent: []StillPresentEntry{}, ReviewedPaths: read[:1]}, `missing must_review path "web/ui/page.go"`},
 	} {
 		err := validateReviewResult(req, c.result, rf, present, noDeleted)
@@ -448,9 +436,9 @@ func TestValidateReviewResultInARoundOverSeveralRepos(t *testing.T) {
 			t.Errorf("%s: err = %v, want REVIEW_INVALID with %q", name, err, c.want)
 		}
 	}
-	// web has one oracle, so a finding there needs to name none.
-	if err := validateReviewResult(req, valid(finding("web/ui/page.go", "")), rf, present, noDeleted); err != nil {
-		t.Errorf("a web finding with no oracle (web declares one): %v", err)
+	// Any text is a command, a manifest oracle of another repo included.
+	if err := validateReviewResult(req, valid(finding("web/ui/page.go", "lint")), rf, present, noDeleted); err != nil {
+		t.Errorf("a web finding naming a command that is not web's oracle: %v", err)
 	}
 	// A still_present entry's file is judged by its repo too.
 	still := ReviewResult{Findings: []ResultFinding{}, StillPresent: []StillPresentEntry{{Prior: "r1-f1", Line: 2}}, ReviewedPaths: read}
@@ -460,17 +448,16 @@ func TestValidateReviewResultInARoundOverSeveralRepos(t *testing.T) {
 }
 
 // TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo: a finding in web/ui/page.go
-// is in the workspace web/ui and takes the oracle of web's manifest; one in
-// api/lib is in api/lib. A finding in a repo with no oracle cannot be routed, and
-// the refusal names the repo; the fix slice of a kept finding builds in its
-// repo's workspace.
+// is in the workspace web/ui; one in api/lib is in api/lib; each keeps the
+// command it named. The fix slice of a kept finding builds in its repo's
+// workspace, and a repo whose manifest declares no oracle still gets one.
 func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 	t.Parallel()
 	rf := twoRepoFiles("", "")
 	finding := func(file, oracle string) ResultFinding {
 		return ResultFinding{File: file, Line: 4, Title: "t " + file, Detail: "d", Action: ActionFix, Risk: RiskHigh, RiskRationale: "r", Oracle: oracle}
 	}
-	result := ReviewResult{Findings: []ResultFinding{finding("web/ui/page.go", ""), finding("api/lib/lib.go", "lint"), finding("web/docs/read.md", "")}}
+	result := ReviewResult{Findings: []ResultFinding{finding("web/ui/page.go", "test"), finding("api/lib/lib.go", "lint"), finding("web/docs/read.md", "test")}}
 	reported, err := applyRound(1, map[string]Finding{}, result, nil, alwaysGreen, rf, defaultTestFixRisks(), false)
 	if err != nil {
 		t.Fatal(err)
@@ -480,7 +467,7 @@ func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 		byFile[f.File] = f
 	}
 	if f := byFile["web/ui/page.go"]; f.Workspace != "web/ui" || f.Oracle != "test" || f.Status != StatusOpen {
-		t.Errorf("finding in web/ui/page.go = %+v, want workspace web/ui, the one oracle test of web, open", f)
+		t.Errorf("finding in web/ui/page.go = %+v, want workspace web/ui, the command it named, open", f)
 	}
 	if f := byFile["api/lib/lib.go"]; f.Workspace != "api/lib" || f.Oracle != "lint" || f.Status != StatusOpen {
 		t.Errorf("finding in api/lib/lib.go = %+v, want workspace api/lib, oracle lint, open", f)
@@ -500,48 +487,17 @@ func TestApplyRoundOverSeveralReposKeepsAFindingInItsRepo(t *testing.T) {
 	for _, s := range slices {
 		got[s.ID] = s.Workspace + "/" + s.Oracle
 	}
-	if want := (map[string]string{"fix-1-api-lib-lint": "api/lib/lint", "fix-1-web-ui-test": "web/ui/test"}); !reflect.DeepEqual(got, want) {
+	if want := (map[string]string{"fix-1-api-lib": "api/lib/lint", "fix-1-web-ui": "web/ui/test"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("fix slices = %v, want %v: one for each repo, in its workspace, with its oracle", got, want)
 	}
 
-	// A repo whose manifest declares no oracle can prove no fix.
+	// A repo whose manifest declares no oracle still gets its fix slice: the
+	// reviewer's command is all it needs.
 	noOracle := twoRepoFiles("", "")
 	noOracle.repos[1].Man.Oracles = nil
-	_, _, err = routeRound(1, st, "JIG-1", nil, kept[:1], nil, nil, noOracle, 0, 0, 5)
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "GATE_NO_ORACLE" || !strings.Contains(ae.Msg, "the manifest of repo web has no oracles") {
-		t.Errorf("a finding in a repo with no oracle: err = %v, want GATE_NO_ORACLE naming web", err)
-	}
-	// The same refusal of a round over one repo does not name one.
-	_, _, err = routeRound(1, st, "JIG-1", nil, kept[:1], nil, nil, oneRepoFiles(manifest.Manifest{Workspaces: []manifest.Workspace{{ID: "root", Path: "."}}}), 0, 0, 5)
-	if !errors.As(err, &ae) || ae.Msg != "cannot build a fix slice, the manifest has no oracles" {
-		t.Errorf("a round over one repo with no oracle: err = %v", err)
-	}
-}
-
-// TestDefaultTriageJudgesAFindingByItsRepo: the build target of an ask in a round
-// over several repos is read from the manifest of the repo its file begins with.
-func TestDefaultTriageJudgesAFindingByItsRepo(t *testing.T) {
-	t.Parallel()
-	rf := twoRepoFiles("", "")
-	repos := map[string]manifest.Manifest{"api": rf.repos[0].Man, "web": rf.repos[1].Man}
-	in := TriageInput{
-		Repos: repos,
-		Asks: []Finding{
-			{ID: "r1-f1", File: "web/ui/page.go", Workspace: "web/ui", Oracle: "test"},
-			{ID: "r1-f2", File: "api/server/handler.go", Workspace: "api/server", Oracle: ""}, // api has two oracles, none named
-			{ID: "r1-f3", File: "api/server/handler.go", Workspace: "api/server", Oracle: "lint"},
-		},
-	}
-	out := DefaultTriage(in)
-	if d, ok := out.Asks["r1-f1"]; !ok || !d.Keep {
-		t.Errorf("Asks[r1-f1] = %+v, %v, want kept: web's one oracle resolves", d, ok)
-	}
-	if _, ok := out.Asks["r1-f2"]; ok {
-		t.Error("Asks[r1-f2] decided, want undecided: api has two oracles and the finding names none")
-	}
-	if d, ok := out.Asks["r1-f3"]; !ok || !d.Keep {
-		t.Errorf("Asks[r1-f3] = %+v, %v, want kept: lint is one of api's oracles", d, ok)
+	_, noOracleSlices, err := routeRound(1, st, "JIG-1", nil, kept[:1], nil, nil, noOracle, 0, 0, 5)
+	if err != nil || len(noOracleSlices) != 1 {
+		t.Errorf("a finding in a repo with no oracle: slices = %v, err = %v, want one fix slice", sliceIDs(noOracleSlices), err)
 	}
 }
 
@@ -554,14 +510,14 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	intent := reportIntentYAML{Source: "brief", SHA256: "x"}
 	one := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Repo: "app", Branch: "jig/JIG-1", Copy: "origin's", Head: "h1", Base: "b1", Scope: "full",
-		Target: "main", TargetSHA: "t1", Lease: "pool/app/JIG-1-gate", Intent: intent, Opened: "2026-01-01T00:00:00Z",
+		Target: "main", TargetSHA: "t1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 	}
 	data, err := yaml.Marshal(one)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const golden = "round: 1\nticket: JIG-1\nrepo: app\nbranch: jig/JIG-1\ncopy: origin's\nhead: h1\nbase: b1\nscope: full\n" +
-		"target: main\ntarget_sha: t1\nlease: pool/app/JIG-1-gate\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
+		"target: main\ntarget_sha: t1\nintent:\n    source: brief\n    sha256: x\nopened: \"2026-01-01T00:00:00Z\"\n"
 	if string(data) != golden {
 		t.Errorf("the open record of a round over one repo changed:\n%s\nwant:\n%s", data, golden)
 	}
@@ -572,8 +528,8 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	several := openRoundFile{
 		Round: 1, Ticket: "JIG-1", Branch: "jig/JIG-1", Intent: intent, Opened: "2026-01-01T00:00:00Z",
 		Repos: []openRepoFile{
-			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta", Lease: "pool/api/JIG-1-gate"},
-			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw", Lease: "pool/web/JIG-1-gate"},
+			{Repo: "api", Copy: "the clone's", Head: "a1", Base: "a0", Scope: "full", Target: "main", TargetSHA: "ta"},
+			{Repo: "web", Copy: "origin's", Head: "w1", Base: "w0", Scope: "delta", Target: "main", TargetSHA: "tw"},
 		},
 	}
 	data, err = yaml.Marshal(several)
@@ -584,7 +540,7 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha", "lease"} {
+	for _, key := range []string{"repo", "copy", "head", "base", "scope", "target", "target_sha"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("the open record of a round over several repos has %q at the top:\n%s", key, data)
 		}
@@ -598,10 +554,10 @@ func TestOpenRoundFileKeepsItsTopForOneRepoAndListsSeveral(t *testing.T) {
 	}
 }
 
-// oneRepoIn is the files of a round over one repo read in leaseDir, whose
+// oneRepoIn is the files of a round over one repo read in cloneDir, whose
 // manifest declares the oracles named.
-func oneRepoIn(leaseDir string, oracleNames []string) roundFiles {
-	return roundFiles{repos: []roundRepo{{Dir: leaseDir, Man: oraclesManifest(oracleNames)}}}
+func oneRepoIn(cloneDir string, oracleNames []string) roundFiles {
+	return roundFiles{repos: []roundRepo{{Dir: cloneDir, Worktrees: worktreesOf(cloneDir), Man: oraclesManifest(oracleNames)}}}
 }
 
 // TestReadRoundsNamesTheBaseOfEachRepoOfARoundOverSeveralRepos: the request of a

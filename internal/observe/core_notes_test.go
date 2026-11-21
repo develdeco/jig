@@ -70,6 +70,25 @@ func TestAFailureThatAnotherCommitFixedIsHistory(t *testing.T) {
 	}
 }
 
+func TestATimedOutVerificationIsToldAsFailed(t *testing.T) {
+	t.Parallel()
+	timedOut := newRig(t)
+	timedOut.onTicketBranch()
+	timedOut.handle(timedOut.ev(KindSessionStart))
+	timedOut.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: "1111111111111111", Attempt: 1, Outcome: "fail", Cause: journal.CauseTimeout, Summary: "slow"})
+	if res := timedOut.handle(timedOut.ev(KindPrompt)); !strings.Contains(res.Context, "verification FAILED") {
+		t.Errorf("prompt context = %q, want a timed out run told as failed", res.Context)
+	}
+
+	stopped := newRig(t)
+	stopped.onTicketBranch()
+	stopped.handle(stopped.ev(KindSessionStart))
+	stopped.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: "1111111111111111", Attempt: 1, Outcome: "fail", Cause: journal.CauseStopped, Summary: "stopped"})
+	if res := stopped.handle(stopped.ev(KindPrompt)); strings.Contains(res.Context, "verification FAILED") {
+		t.Errorf("prompt context = %q, want a stopped run not told as failed", res.Context)
+	}
+}
+
 func TestAnAnswerReachesTheSessionThatAsked(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
@@ -218,5 +237,22 @@ func TestAFailureOfAnOlderCommitJournaledAfterTheFixIsHistory(t *testing.T) {
 	res := r.handle(r.ev(KindPrompt))
 	if strings.Contains(res.Context, "FAILED") || !strings.Contains(res.Context, "verified "+newer[:12]) {
 		t.Errorf("prompt context = %q, want only the newer commit's pass", res.Context)
+	}
+}
+
+// TestAStoppedRunIsNotToldAsAFailure: jig's stop ended the oracle, so the
+// session hears of the run once, as one that could not run, and not as FAILED.
+func TestAStoppedRunIsNotToldAsAFailure(t *testing.T) {
+	t.Parallel()
+	r := newRig(t)
+	r.onTicketBranch()
+	r.handle(r.ev(KindSessionStart))
+	sha := r.commit("b", "b.txt")
+	r.add(journal.Line{Event: journal.EventOracle, Slice: "b", Commit: sha, Attempt: 1, Outcome: "fail", Cause: journal.CauseStopped, Summary: "was ended because jig was stopped"})
+	r.add(journal.Line{Event: journal.EventVerifyError, Slice: "b", Commit: sha, Attempt: 1, Summary: "the verification was stopped before the oracle finished"})
+
+	res := r.handle(r.ev(KindPrompt))
+	if strings.Contains(res.Context, "FAILED") || strings.Count(res.Context, "could not run") != 1 {
+		t.Errorf("context = %q, want one could-not-run note and no FAILED", res.Context)
 	}
 }

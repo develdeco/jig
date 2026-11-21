@@ -23,7 +23,6 @@ import (
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/media"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // A publish's pick, as PicksReport.Status says it: made from a picks file,
@@ -67,7 +66,7 @@ func pickRefused(format string, args ...any) error {
 }
 
 // picksStep is everything one publish's pick needs. head is the head publish
-// ships, the one the gate reviewed; leaseDir is a repository that holds it,
+// ships, the one the gate reviewed; cloneDir is a repository that holds it,
 // where the recorded commits are looked up; result is the pick an agent made
 // (the picks file), nil for none.
 type picksStep struct {
@@ -75,7 +74,7 @@ type picksStep struct {
 	result   *PicksResult
 	ticket   string
 	repoName string
-	leaseDir string
+	cloneDir string
 	head     string
 	lines    []journal.Line
 	// own is the set of files the ticket changed (ownSources); a recording is
@@ -93,7 +92,7 @@ type picksStep struct {
 // The error is publish's own failure, the journal line that could not be
 // written.
 func publishPicks(s picksStep) (PicksReport, *DemoRenderResult, error) {
-	cands, dropped, cerr := pickCandidates(s.d, s.ticket, s.lines, s.leaseDir, s.head, s.own)
+	cands, dropped, cerr := pickCandidates(s.d, s.ticket, s.lines, s.cloneDir, s.head, s.own)
 	report := PicksReport{Dropped: dropped}
 	if len(dropped) > 0 {
 		s.warn("jig: recordings left out of the choice for %s: %s\n", s.ticket, strings.Join(dropped, "; "))
@@ -207,14 +206,10 @@ func (s picksStep) picksDir() string {
 }
 
 // hostDirs are the directories of this machine a pick's words must not name,
-// as a rendered caption's are: the staging directory, the jig home, the gate
-// and publish leases and the store.
+// as a rendered caption's are: the staging directory, the jig home, the clone
+// and the store.
 func (s picksStep) hostDirs(dir string) []hostDir {
-	dirs := []hostDir{{dir, "<picks dir>"}, {s.d.Home, "<jig home>"}, {s.leaseDir, "<lease>"}, {s.d.Store.Root, "<store>"}}
-	if gate, err := pool.Dir(s.d.Home, s.repoName, s.ticket, pool.Gate); err == nil {
-		dirs = append(dirs, hostDir{gate, "<lease>"})
-	}
-	return dirs
+	return []hostDir{{dir, "<picks dir>"}, {s.d.Home, "<jig home>"}, {s.cloneDir, "<clone>"}, {s.d.Store.Root, "<store>"}}
 }
 
 // writeRequest writes the picks.json an agent picks from: the ticket, the head,

@@ -1,6 +1,6 @@
 // Package mergefacts reads whether the work of a ticket has merged: the fact a
-// ticket that waits for another is held on (decision 43 of the digester). A
-// ticket has merged in a repo when the pull request recorded for it (`jig
+// ticket that waits for another is held on. A ticket
+// has merged in a repo when the pull request recorded for it (`jig
 // publish --pr`, or a pr line in its journal) is merged, as the repo host says;
 // with none recorded, when its branch tip is an ancestor of the repo's target
 // branch on its origin. Nothing else stands for either: a patch that happens to
@@ -42,12 +42,69 @@ type Reader struct {
 }
 
 // Of is the merge fact of ticket: not met unless it published, then one fact
-// per repo its slices build in.
+// per repo its slices build in. A shared task (one that two issues list) is met
+// only when every issue's fact is: Of is then the first issue's fact that is
+// not met, else the first.
 func (r *Reader) Of(ticket string) (ready.Merge, error) {
 	if m, ok := r.memo[ticket]; ok {
 		return m, nil
 	}
-	lines, err := journal.Read(r.Store, ticket)
+	rec, err := r.Store.ReadTicket(ticket)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	containers, err := r.Store.ContainersOf(ticket, rec)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	var m ready.Merge
+	if len(containers) > 1 {
+		for i, issue := range containers {
+			got, err := r.OfFor(ticket, issue)
+			if err != nil {
+				return ready.Merge{}, err
+			}
+			if i == 0 || (m.Met() && !got.Met()) {
+				m = got
+			}
+		}
+	} else if m, err = r.of(ticket, ""); err != nil {
+		return ready.Merge{}, err
+	}
+	r.remember(ticket, m)
+	return m, nil
+}
+
+// OfFor is the merge fact of ticket into one issue: published into that issue,
+// the pull request its `into` names, and the branch-tip fallback against that
+// issue's branch. With no issue it is Of.
+func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
+	if issue == "" {
+		return r.Of(ticket)
+	}
+	key := ticket + "\x00" + issue
+	if m, ok := r.memo[key]; ok {
+		return m, nil
+	}
+	m, err := r.of(ticket, issue)
+	if err != nil {
+		return ready.Merge{}, err
+	}
+	r.remember(key, m)
+	return m, nil
+}
+
+func (r *Reader) remember(key string, m ready.Merge) {
+	if r.memo == nil {
+		r.memo = map[string]ready.Merge{}
+	}
+	r.memo[key] = m
+}
+
+// of is the merge fact of ticket read through its journal for issue ("" reads
+// the whole journal and the ticket's one container).
+func (r *Reader) of(ticket, issue string) (ready.Merge, error) {
+	lines, err := journal.ReadFor(r.Store, ticket, issue)
 	if err != nil {
 		return ready.Merge{}, err
 	}
@@ -66,14 +123,10 @@ func (r *Reader) Of(ticket string) (ready.Merge, error) {
 	// A ticket that has not published has nothing to look for: no host is
 	// asked and no clone is read.
 	if m.Published {
-		if m.Repos, err = r.repos(ticket, urls); err != nil {
+		if m.Repos, err = r.repos(ticket, issue, urls); err != nil {
 			return ready.Merge{}, err
 		}
 	}
-	if r.memo == nil {
-		r.memo = map[string]ready.Merge{}
-	}
-	r.memo[ticket] = m
 	return m, nil
 }
 
@@ -87,7 +140,7 @@ type repoRef struct {
 
 // repos judges each repo the ticket builds in. urls are the pull requests its
 // journal records, oldest first.
-func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) {
+func (r *Reader) repos(ticket, issue string, urls []string) ([]ready.RepoMerge, error) {
 	rec, err := r.Store.ReadTicket(ticket)
 	if err != nil {
 		return nil, err
@@ -95,6 +148,22 @@ func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) 
 	refs, err := r.builtIn(ticket)
 	if err != nil {
 		return nil, err
+	}
+	// The base the ticket's pull request goes into: its container's branch
+	// when it has one. The record is read only if a branch is looked at.
+	container, hasContainer := issue, issue != ""
+	if !hasContainer {
+		if container, hasContainer, err = r.Store.ContainerOf(ticket, rec); err != nil {
+			return nil, err
+		}
+	}
+	var crec store.Ticket
+	if hasContainer {
+		if crec, err = r.Store.ReadTicket(container); err != nil {
+			container = ""
+		}
+	} else {
+		container = ""
 	}
 	out := make([]ready.RepoMerge, 0, len(refs))
 	for _, repo := range refs {
@@ -109,7 +178,7 @@ func (r *Reader) repos(ticket string, urls []string) ([]ready.RepoMerge, error) 
 		}
 		// The branch is the way left when the pull request did not decide.
 		if ev.State == "" {
-			ev.Ancestor = r.inTarget(ticket, rec, repo)
+			ev.Ancestor = r.inTarget(ticket, rec, repo, container, crec)
 		}
 		out = append(out, ready.JudgeRepo(ev))
 	}
@@ -131,13 +200,30 @@ func (r *Reader) builtIn(ticket string) ([]repoRef, error) {
 	case 1:
 		return all, nil
 	}
-	slices, err := r.Store.ReadSlices(ticket)
-	if err != nil {
-		return nil, err
-	}
+	repos := ready.ProjectRepos(r.Cfg, r.Clones)
 	used := map[string]bool{}
-	for _, name := range ready.BuiltIn(ready.ProjectRepos(r.Cfg, r.Clones), slices) {
-		used[name] = true
+	// A multi-task or an issue builds nothing itself: it is in the repos its
+	// tasks build in (every repo while it has none placed).
+	owners := []string{ticket}
+	if rec, err := r.Store.ReadTicket(ticket); err == nil && rec.KindOrDefault() != store.KindTask {
+		if owners, err = r.Store.TasksUnder(ticket, rec); err != nil {
+			return nil, err
+		}
+		if len(owners) == 0 {
+			return all, nil
+		}
+	}
+	for _, id := range owners {
+		slices, err := r.Store.ReadSlices(id)
+		if err != nil {
+			if id == ticket {
+				return nil, err
+			}
+			continue
+		}
+		for _, name := range ready.BuiltIn(repos, slices) {
+			used[name] = true
+		}
 	}
 	var out []repoRef
 	for _, repo := range all {
@@ -189,19 +275,29 @@ func remoteBase(remote string) string {
 }
 
 // inTarget reports whether the ticket's branch tip in the repo's clone is an
-// ancestor of the repo's target branch on its origin: the clone's own
-// origin/<target>, as of its last fetch (nothing is fetched here). The branch
+// ancestor of the branch its pull request goes into on its origin: the
+// container's branch for a ticket with one (container, whose record is
+// crec), else the repo's target. That is the clone's own origin/<base>, as of
+// its last fetch (nothing is fetched here). The branch
 // is looked for as the clone has it, on the origin and local; either one
 // being in the target is enough. False when there is no clone, no origin
 // target, or no such branch: the lack of a branch is not evidence.
-func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef) bool {
+func (r *Reader) inTarget(ticket string, rec store.Ticket, repo repoRef, container string, crec store.Ticket) bool {
 	if repo.dir == "" {
 		return false
 	}
 	if fi, err := os.Stat(repo.dir); err != nil || !fi.IsDir() {
 		return false
 	}
-	target := "refs/remotes/origin/" + repo.target
+	base := repo.target
+	if container != "" {
+		cb, err := r.Store.ResolveTicketBranch(container, crec, repo.target)
+		if err != nil {
+			return false
+		}
+		base = cb
+	}
+	target := "refs/remotes/origin/" + base
 	if !hasCommit(repo.dir, target) {
 		return false
 	}

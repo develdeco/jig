@@ -1,5 +1,7 @@
 # The reviewer probes the critical paths, and jig keeps the probes across rounds
 
+**Amended 2026-11-18:** a probe's `command` can be the finding's own `--oracle`: the narrowest command that covers the mutated term is the narrowest that proves its fix.
+
 A gate round after the first reviews the delta since the last reviewed head (`scope: delta`), and `must_review` and `reviewed_paths` prove it read every file the delta changed. Nothing records which behavior a round tested. In jig-demo-shop's PRs #24 and #26 the same fix to `cart.Total` passed every oracle with a test suite that pinned no line total's quantity factor: dropping the factor changed no test result.
 
 - Both round-1 reviewers had `scope: full`, read all of `cart.go`, made one mutation check each (of the rounding term), found that gap and missed this one.
@@ -57,7 +59,7 @@ jig checks shape only: every field non-empty, the outcome one of the two, the fi
 | Round 1 | One test run per term in scope, plus a skip for each file of tests or docs. In the demo, 7 terms, about 30 s to 1 min. In a real repo, the terms times the narrowest command's `seconds`; not measured yet. |
 | Later rounds | None when the delta leaves the probed files alone, as a fix slice that only adds a test does, bar a new skip of that test file; otherwise the terms of the files it changed. Reading `probed` and `unprobed`: one line per row. |
 | jig | Per round, one `git diff -U0` per repo and one blob lookup per earlier probe or skip; timing the gate's own oracle runs. |
-| Saved | Each round a gap would otherwise have taken: a fix slice built, the oracles run, a review. About 3.5 minutes in the demo (#24's round-2 verdict to its round-3 clean), 32 to 35 minutes in MB-1 before ADRs 0017 and 0021. |
+| Saved | Each round a gap would otherwise have taken: a fix slice built, the oracles run, a review. About 3.5 minutes in the demo (#24's round-2 verdict to its round-3 clean), 32 to 35 minutes in an earlier measured ticket before ADRs 0017 and 0021. |
 
 Round 1 reports more findings, still bounded by `gate.fix_rounds`, the risk floor (ADR 0015) and the fix slice's size cap. The reviewer's effort per scope (ADR 0023) is unchanged.
 
@@ -66,7 +68,7 @@ Round 1 reports more findings, still bounded by `gate.fix_rounds`, the risk floo
 - A caught probe stays current while its file is unchanged, even when the delta changes the test that caught it. That test is in `must_review`, and a weakened test is a finding by reading.
 - A hunk counts as probed with one current probe in it, so an unprobed term inside a probed hunk shows nowhere; and a skip is the reviewer's judgment, which may be wrong. The review notes show the person both the probes and the skips with their reasons.
 - A probe or skip of an unchanged function outside every hunk counts toward no hunk; it is still listed under `probed`.
-- A repo whose narrowest test command is slow makes round 1 slower; `seconds` shows it before the sweep starts. The first real ticket built after this journals its probes per round, and its reviewer minutes are compared with MB-1's and BS-1's.
+- A repo whose narrowest test command is slow makes round 1 slower; `seconds` shows it before the sweep starts. The first real ticket built after this journals its probes per round, and its reviewer minutes are compared with those of the earlier measured tickets.
 
 ## Test seams
 
@@ -85,6 +87,7 @@ Round 1 reports more findings, still bounded by `gate.fix_rounds`, the risk floo
 - **One mutation per critical path.** A path has several terms (the demo's two have about seven), and one sample per path picks the freshest term, the one #26's round 2 picked.
 - **Probe only in the round that would go clean.** Fewest probes, but a gap found then costs another round: #26 would have gone like #24, in three rounds.
 - **A mutation-testing tool as a manifest oracle.** It takes the choice of mutants from the reviewer, but needs a tool and an output contract per language. Worth revisiting if recorded probes turn out too shallow.
+- **Builder probes in the ledger.** Tried and taken out: a builder's mutation runs joined the probe ledger and `jig verify` searched for text the change removed. Both added a step, a record and a check to every run, to answer a miss seen on one ticket. The branch `parked/builder-probes-and-pinned-text` keeps them, to bring back if later runs show the same miss on two or more tickets. The build skill's fix-slice rule now says to mutate after your last edit and that a survivor blocks the commit until a test catches it.
 
 ## Consequences
 

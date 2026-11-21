@@ -23,6 +23,11 @@ const (
 	// ticket is stacked on, which owes it a retarget); "Continue <chart>"
 	// resumes once it has.
 	CodeChartWaitsMerge = "CHART_WAITS_MERGE"
+	// CodeChartWaitsLand: a model chart has nothing left to brief, build, run or
+	// publish, and a landing is the person's word: "Land <T>" (or a merge on the
+	// host), then "Continue <issue>" (ADR 0064). A legacy chart has
+	// CodeChartWaitsMerge for the same stop.
+	CodeChartWaitsLand = "CHART_WAITS_LAND"
 	// CodeChartBlocked: nothing can start and no merge frees it.
 	CodeChartBlocked = "CHART_BLOCKED"
 	// CodeChartNotGraduated: the chart has entries with no ticket yet and
@@ -97,6 +102,10 @@ type ChartEntry struct {
 	// ID is the ticket the entry minted, "" until `jig graduate`.
 	ID    string
 	Title string
+	// Kind is the ticket's kind when it is not a task ("issue" or
+	// "multi-task"): such a ticket is not briefed or built, so the standing keeps
+	// its row but never offers it in the briefs or the run.
+	Kind string
 	// Rank is the ticket's rank, nil when unranked or not graduated.
 	Rank *int
 	// Needs are every edge of the entry, met or not.
@@ -105,6 +114,57 @@ type ChartEntry struct {
 	// it could not be read (Problem says why).
 	Ticket  *Ticket
 	Problem string
+	// After are the tickets that must land before this one may (land.Rules),
+	// and Into the branch it lands into: read for a model chart only.
+	After []string
+	Into  string
+	// SharedIssue is the chart's issue when the task is a task of two issues:
+	// its landing is asked for per issue.
+	SharedIssue string
+	// Container is where a multi-task stands before its own pull request
+	// (land.ReadinessOf), nil for any other entry or a legacy chart.
+	Container *ChartContainer
+}
+
+// The states a container is in, as land.ReadinessOf names them.
+const (
+	TailWaiting   = "waiting"
+	TailReady     = "ready"
+	TailPublished = "published"
+	TailLanded    = "landed"
+)
+
+// The codes of an issue's suite precondition, as internal/land names them
+// (cmd/jig tests that they are the same words).
+const (
+	CodeSuiteNotRun = "LAND_SUITE_NOT_RUN"
+	CodeSuiteFailed = "LAND_SUITE_FAILED"
+)
+
+// ChartContainer is where a multi-task stands before its own pull request: one
+// of the Tail states and the prompt that moves it ("Publish T" when ready).
+type ChartContainer struct {
+	State  string
+	Prompt string
+	// OnHost says the container is published and the host reports its pull
+	// requests merged, with no landed line: a merge to record, not to ask for.
+	OnHost bool
+}
+
+// ChartUnmet is one precondition of the issue's publish that is not met.
+type ChartUnmet struct {
+	Code, Why, Prompt string
+}
+
+// ChartTail is where the issue itself stands, as land.ReadinessOf says it.
+type ChartTail struct {
+	State string
+	// Waits are the children of the issue that have not landed.
+	Waits  []string
+	Unmet  []ChartUnmet
+	Prompt string
+	// OnHost is ChartContainer's, for the issue's own pull request.
+	OnHost bool
 }
 
 // ChartFacts are what the reader gathered of a chart.
@@ -114,6 +174,11 @@ type ChartFacts struct {
 	// Named are the ids of the tickets the person named: the run is over those
 	// only (see scopeNamed). Empty means the whole chart.
 	Named []string
+	// Issue is the issue the chart plans, "" for a legacy chart. A model chart
+	// (Issue set and Tail read) stops at each landing and ends on the issue's
+	// own landing (ADR 0064).
+	Issue string
+	Tail  *ChartTail
 }
 
 // ChartRow is one entry in the chart's standing.
@@ -125,7 +190,10 @@ type ChartRow struct {
 	// Wave is the longest chain of in-chart blockers over every edge, 0 for
 	// none, -1 for an entry on a cycle or waiting on one (the rule of
 	// internal/ready's Waves, over tickets instead of slices).
-	Wave   int
+	Wave int
+	// Kind is the ticket's kind when it is not a task: such a row offers no
+	// prompt, is not ready, and is not counted in the verdict.
+	Kind   string
 	Ticket *Ticket
 	Done   bool
 	Reach  string
@@ -143,9 +211,56 @@ type ChartEnd struct {
 	Because ChartNeed
 }
 
+// ChartLand is a landing the run waits for: a published, unlanded ticket (a
+// multi-task once its own pull request is published, the issue last).
+type ChartLand struct {
+	Pos int
+	ID  string
+	// Prompt is "Land <T>". After are the tickets that must land first, empty
+	// when the landing may be asked for now. State is the Land state in words:
+	// "waits for a merge", or "merged on the host, not recorded".
+	Prompt string
+	After  []string
+	State  string
+}
+
+// ChartPublish is a multi-task whose tasks have all landed: the main session
+// publishes it itself.
+type ChartPublish struct {
+	ID     string
+	Prompt string
+}
+
+// The stages of an issue's own standing, in the order of the run.
+const (
+	IssueLanding   = "landing"
+	IssueSuite     = "suite"
+	IssueFix       = "fix"
+	IssueUnmet     = "unmet"
+	IssuePublish   = "publish"
+	IssuePublished = "published"
+	IssueLanded    = "landed"
+)
+
+// ChartIssue is the issue's own standing in a model chart. Unmet is every
+// precondition not met; Code, Why and Prompt are the first's (or the issue's
+// own prompt at publish).
+type ChartIssue struct {
+	ID, Stage, Code, Why, Prompt string
+	Unmet                        []ChartUnmet
+}
+
 // Chart is where a chart stands.
 type Chart struct {
 	Name string
+	// Model says the chart plans an issue and runs by the model: it stops at
+	// each landing. Lands, Publish and Issue are set for it only.
+	Model bool
+	// Lands are the landings the run waits for, in row order, the issue's last.
+	Lands []ChartLand
+	// Publish are the multi-tasks to publish now.
+	Publish []ChartPublish
+	Issue   *ChartIssue
 	// Named are the ids the run was named over, in row order; nil for the whole
 	// chart as no one named it.
 	Named []string
@@ -224,7 +339,7 @@ func scopeNamed(f ChartFacts) ChartFacts {
 			byID[e.ID] = e
 		}
 	}
-	out := ChartFacts{Name: f.Name, Named: f.Named}
+	out := ChartFacts{Name: f.Name, Named: f.Named, Issue: f.Issue}
 	for _, e := range f.Entries {
 		if e.ID == "" || !named[e.ID] {
 			continue
@@ -264,7 +379,7 @@ func scopeNamed(f ChartFacts) ChartFacts {
 func (r ChartRow) Prompt() string {
 	t := r.Ticket
 	switch {
-	case t == nil || r.Done:
+	case t == nil || r.Done || r.Kind != "":
 		return ""
 	case t.Code == CodeBlocked && r.Reach != ReachHere:
 		return ""
@@ -303,7 +418,7 @@ func DeriveChart(f ChartFacts) Chart {
 		d.reachOf(i)
 		e := f.Entries[i]
 		row := ChartRow{
-			Pos: e.Pos, ID: e.ID, Title: e.Title, Rank: e.Rank, Wave: d.waveOf(i),
+			Pos: e.Pos, ID: e.ID, Title: e.Title, Rank: e.Rank, Wave: d.waveOf(i), Kind: e.Kind,
 			Ticket: e.Ticket, Done: d.done(i), Reach: d.reach[i], Problem: e.Problem,
 		}
 		if !row.Done {
@@ -329,7 +444,7 @@ func DeriveChart(f ChartFacts) Chart {
 			c.Ends = append(c.Ends, d.retargetEnds(r)...)
 			continue
 		}
-		if r.Ticket != nil && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
+		if r.Ticket != nil && d.f.Entries[d.byPos[r.Pos]].Kind == "" && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
 			c.Briefs = append(c.Briefs, r.ID)
 		}
 		if r.Reach != ReachAfterMerge {
@@ -346,7 +461,11 @@ func DeriveChart(f ChartFacts) Chart {
 			c.Started = true
 		}
 	}
-	c.Ready = len(c.Briefs) > 0 || len(c.Run) > 0
+	if d.f.Issue != "" {
+		c.Model = true
+		d.modelRows(&c)
+	}
+	c.Ready = len(c.Briefs) > 0 || len(c.Run) > 0 || len(c.Publish) > 0 || c.Issue.acts()
 	if scoped {
 		for _, r := range c.Rows {
 			c.Named = append(c.Named, r.ID)
@@ -546,7 +665,7 @@ func (d *chartDeriver) waveOf(i int) int {
 func (d *chartDeriver) runWaves(c *Chart) {
 	here := map[int]bool{}
 	for i, e := range d.f.Entries {
-		if e.ID != "" && d.reach[i] == ReachHere {
+		if e.ID != "" && e.Kind == "" && d.reach[i] == ReachHere {
 			here[i] = true
 		}
 	}
@@ -588,7 +707,7 @@ func (d *chartDeriver) runWaves(c *Chart) {
 func (d *chartDeriver) verdict(c *Chart) {
 	graduated, done := 0, 0
 	for _, r := range c.Rows {
-		if r.ID == "" {
+		if r.ID == "" || r.Kind != "" {
 			continue
 		}
 		graduated++
@@ -603,6 +722,10 @@ func (d *chartDeriver) verdict(c *Chart) {
 		if c.Ungraduated > 0 {
 			c.Reason = missing
 		}
+	case c.Model && len(c.Lands) > 0:
+		// Nothing is left to brief, build, run or publish and a landing is the
+		// person's word: the run stops here, whatever else is an end.
+		c.Code, c.Prompt, c.Reason = CodeChartWaitsLand, d.prompt(c, true), c.landReason()
 	case len(c.Rows) == 0:
 		// A chart just made: there is nothing to graduate, which graduate
 		// refuses, so the next step is to add entries and check them.
@@ -611,7 +734,9 @@ func (d *chartDeriver) verdict(c *Chart) {
 		c.Code, c.Reason = CodeChartNotGraduated, c.graduateStep()
 	case done == graduated && c.Ungraduated > 0:
 		c.Code, c.Reason = CodeChartNotGraduated, missing+": "+c.graduateStep()
-	case done == graduated && len(c.Ends) == 0:
+	case done == graduated && len(c.Ends) == 0 && (c.Issue == nil || c.Issue.Stage == IssueLanded):
+		// A model chart is done once the issue has landed, not once every
+		// ticket is published.
 		c.Code = CodeChartDone
 	case len(c.Ends) > 0:
 		root := c.RootEnds()
@@ -633,6 +758,10 @@ func (d *chartDeriver) verdict(c *Chart) {
 		c.Reason = d.waitsReason(end)
 	default:
 		c.Code = CodeChartBlocked
+		if c.Issue != nil && c.Issue.Why != "" && done == graduated {
+			c.Reason = c.Issue.Why
+			break
+		}
 		for _, r := range c.Rows {
 			if r.Reach == ReachBlocked && d.why[d.byPos[r.Pos]] != "" {
 				c.Reason = d.why[d.byPos[r.Pos]]
@@ -678,10 +807,15 @@ func endKey(id string, pos int) string {
 // ticket's own prompt.
 func (d *chartDeriver) prompt(c *Chart, resume bool) string {
 	if !d.scoped {
-		if resume {
-			return ContinuePrompt(c.Name)
+		// A model chart is asked for in its issue's id.
+		name := c.Name
+		if d.f.Issue != "" {
+			name = d.f.Issue
 		}
-		return TakePrompt(c.Name)
+		if resume {
+			return ContinuePrompt(name)
+		}
+		return TakePrompt(name)
 	}
 	var ids []string
 	for _, r := range c.Rows {
@@ -749,6 +883,14 @@ func (d *chartDeriver) waitsReason(end ChartEnd) string {
 			pr += " " + p.State
 		}
 		prs = append(prs, pr)
+	}
+	if d.f.Issue != "" && !end.Because.stacked() {
+		// In a model chart the edge is met only by the landing.
+		into := ""
+		if i, ok := d.byID[blocker]; ok && d.f.Entries[i].Into != "" {
+			into = " into " + d.f.Entries[i].Into
+		}
+		return fmt.Sprintf("%s waits for %s to land%s", end.ID, blocker, into)
 	}
 	out := fmt.Sprintf("%s waits for %s to merge", end.ID, blocker)
 	if len(prs) > 0 {

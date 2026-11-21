@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -643,7 +645,7 @@ func TestGenerateOrchestrator(t *testing.T) {
 	if mp.Store != fx.StoreDir || mp.Root != fx.OrchestratorDir || mp.Clones["api"] != fx.NestedDirs["api"] || mp.Clones["web"] != fx.NestedDirs["web"] {
 		t.Fatalf("machine map = %+v, want the store, the orchestrator and both clones", mp)
 	}
-	cfg, err := project.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
+	cfg, err := projecttest.LoadConfig(home, fx.StoreDir, "", fx.OrchestratorDir)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -681,5 +683,46 @@ func TestGenerateOrchestratorRefusesOtherShapes(t *testing.T) {
 		if _, err := Build(t.TempDir(), o); err == nil || !strings.Contains(err.Error(), "Orchestrator takes none of") {
 			t.Errorf("Build(%+v) = %v, want a refusal naming the options Orchestrator excludes", o, err)
 		}
+	}
+}
+
+// TestCodeRepoIsServedInProcess: a fixture's code repository, a lease cloned
+// from its remote and the bare remote itself are all repositories gitx serves
+// in process, so a test's own commits and pushes there start no git process:
+// the repo declares no conversion of any file.
+func TestCodeRepoIsServedInProcess(t *testing.T) {
+	fx := Generate(t, Opts{Home: t.TempDir()})
+
+	if _, err := gitx.OpenRepo(fx.RepoDir); err != nil {
+		t.Fatalf("OpenRepo(RepoDir) = %v, want the code repo served in process", err)
+	}
+	lease := filepath.Join(t.TempDir(), "lease")
+	if _, err := gitx.Run("", "clone", "-q", fx.RepoRemote, lease); err != nil {
+		t.Fatalf("clone of RepoRemote: %v", err)
+	}
+	repo, err := gitx.OpenRepo(lease)
+	if err != nil {
+		t.Fatalf("OpenRepo(lease cloned from RepoRemote) = %v, want it served in process", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(lease, "note.txt"), []byte("note\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
+	}
+	if committed, err := gitxtest.CommitAllEnv(repo, "lease step", env); err != nil || !committed {
+		t.Fatalf("CommitAllEnv in the lease = %v, %v; want a commit", committed, err)
+	}
+	if err := repo.Push("origin", "main"); err != nil {
+		t.Fatalf("Push of a branch the remote already has = %v, want nil and not ErrUseCLI", err)
+	}
+	want, _ := gitx.Run(lease, "rev-parse", "HEAD")
+	if got, _ := gitx.Run(fx.RepoRemote, "rev-parse", "main"); got != want {
+		t.Fatalf("remote main = %s, want the pushed %s", got, want)
+	}
+	if _, err := repo.Fetch("origin", "main"); err != nil {
+		t.Fatalf("Fetch from the bare remote = %v, want it served in process", err)
 	}
 }

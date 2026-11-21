@@ -52,7 +52,7 @@ func TestComputeReady(t *testing.T) {
 	}
 }
 
-// TestScheduleGroupsByRepoInOrder: slices of one repo run serially in
+// TestScheduleGroupsByRepoInOrder (Batches): slices of one repo run serially in
 // slices.yaml order, repos come in the order they first appear.
 func TestScheduleGroupsByRepoInOrder(t *testing.T) {
 	t.Parallel()
@@ -63,14 +63,11 @@ func TestScheduleGroupsByRepoInOrder(t *testing.T) {
 		{ID: "f", Workspace: "gamma"},
 	}
 	wsRepo := map[string]string{"alpha": "one", "beta": "one", "gamma": "two"}
-	if got, want := Schedule(slices, wsRepo), [][]string{{"a", "b"}, {"e", "f"}}; !reflect.DeepEqual(got, want) {
-		t.Errorf("Schedule = %v, want %v", got, want)
-	}
 	if got, want := Batches(slices, wsRepo), []Batch{{"one", []string{"a", "b"}}, {"two", []string{"e", "f"}}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Batches = %v, want %v", got, want)
 	}
-	if got := Schedule(nil, wsRepo); len(got) != 0 {
-		t.Errorf("Schedule of nothing = %v, want no batches", got)
+	if got := Batches(nil, wsRepo); len(got) != 0 {
+		t.Errorf("Batches of nothing = %v, want none", got)
 	}
 }
 

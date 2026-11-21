@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitbuild"
+	"github.com/develdeco/jig/internal/gitenv"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
@@ -95,11 +97,16 @@ func (e jigEnv) overrides() []string {
 }
 
 // gitTraceEnv is the variable the git-process budget counts git through
-// (internal/gitbudget, .github/git-budget.yaml): git writes a trace file per
+// (internal/gitbudget, CI's git process report): git writes a trace file per
 // process into the directory it names. A test whose amount of git work is
 // decided by scheduling, such as a race's retries, runs that work without
 // it, so the count stays a function of the code.
 const gitTraceEnv = "GIT_TRACE2_EVENT"
+
+// claudeConfigDirEnv names the directory Claude Code reads its user settings,
+// skills and memory from in place of ~/.claude, and where jig writes Claude
+// Code's global pieces when it is set.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
 
 // environ returns the process environment with e's variables replacing
 // whatever the process has under the same names (not appended beside them,
@@ -108,20 +115,26 @@ const gitTraceEnv = "GIT_TRACE2_EVENT"
 // into, and the jig under test must run the same whether or not the suite
 // records, and never write there.
 func (e jigEnv) environ() []string {
+	return e.environFrom(os.Environ())
+}
+
+// environFrom is environ over base in place of the process environment.
+func (e jigEnv) environFrom(base []string) []string {
 	drop := append(slices.Clone(e.unset), recordDirEnv)
-	// The marker the global git hook wrapper exports belongs to one commit's
-	// hooks, never to the suite; a test that needs it sets it through extra.
-	if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), "JIG_GITHOOK_WRAPPED") }) {
-		drop = append(drop, "JIG_GITHOOK_WRAPPED")
-	}
-	// A harness session the suite runs inside (Claude Code sets its id in the
-	// environment of what its agent runs) is not the jig under test's.
-	for _, name := range locate.HarnessSessionEnv {
+	// Some variables the suite's own process may carry are never the jig
+	// under test's, which gets one only from a test that sets it through
+	// extra: the marker the global git hook wrapper exports belongs to one
+	// commit's hooks; the id of a harness session the suite runs inside
+	// (Claude Code sets it in the environment of what its agent runs) names
+	// that session; and the Claude Code directory of the person running the
+	// suite is a real one, which a global install would write into.
+	inherited := append([]string{"JIG_GITHOOK_WRAPPED", claudeConfigDirEnv}, locate.HarnessSessionEnv...)
+	for _, name := range inherited {
 		if !slices.ContainsFunc(e.extra, func(kv string) bool { return sameEnvName(envName(kv), name) }) {
 			drop = append(drop, name)
 		}
 	}
-	return withoutEnv(replaceEnv(os.Environ(), e.overrides()), drop...)
+	return withoutEnv(replaceEnv(base, e.overrides()), drop...)
 }
 
 // withoutEnv returns base without the entries named like one of names.
@@ -231,12 +244,6 @@ func newFixture(t *testing.T, opts fixture.Opts) (fx *fixture.Fixture, env jigEn
 	return fx, env
 }
 
-// poolBuildLeaseDir returns the build lease directory for ticket under home,
-// matching pool.Acquire's layout: <home>/pool/<repoName>/<ticket>.
-func poolBuildLeaseDir(home, repoName, ticket string) string {
-	return filepath.Join(home, "pool", repoName, ticket)
-}
-
 // pinnedIdentityEnv pins author/committer identity and dates for scripted
 // test commits (divergent store pushes, target-branch moves), so any commit
 // this suite makes outside the fake backend is still deterministic.
@@ -280,19 +287,12 @@ func scriptedPush(t *testing.T, remote, relPath, content, message string) {
 	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 		t.Fatalf("scriptedPush: write %s: %v", full, err)
 	}
-	if _, err := gitx.Run(dir, "add", "-A"); err != nil {
-		t.Fatalf("scriptedPush: git add: %v", err)
-	}
-	if _, err := gitx.RunEnv(dir, pinnedIdentityEnv, "commit", "-m", message); err != nil {
-		t.Fatalf("scriptedPush: git commit: %v", err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Commit(dir, message)
 	branch, err := gitx.Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		t.Fatalf("scriptedPush: rev-parse HEAD: %v", err)
 	}
-	if _, err := gitx.Run(dir, "push", "origin", branch); err != nil {
-		t.Fatalf("scriptedPush: push: %v", err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Push(dir, "origin", branch)
 }
 
 // readJournal opens fx's store and reads ticket's journal.
@@ -327,7 +327,7 @@ func findJournalLine(lines []journal.Line, event, slice, outcome string) (journa
 	return journal.Line{}, false
 }
 
-// firstLine mirrors internal/session/fake.go's firstLine: the text up to its first
+// firstLine is the text up to its first
 // line break, or all of it if there is none. Used to derive expected commit
 // messages from scenario result.json summaries without hardcoding them.
 func firstLine(s string) string {
@@ -353,53 +353,6 @@ func scenarioResultSummary(t *testing.T, scenarioDir, slice, attempt string) str
 		t.Fatalf("scenarioResultSummary: parse %s: %v", path, err)
 	}
 	return res.Summary
-}
-
-// committedPatchSteps is every (slice, attempt) pair in the base fixture
-// scenario whose patch.diff is non-empty and therefore produces a commit in
-// the fake backend, in the order internal/fixture/fixture_test.go's own
-// TestPatchSequence applies them (that test is the generator package's own
-// authority on which attempts commit). TestEndToEndTwice uses it to derive
-// the expected pre-squash commit message SET without hardcoding scenario
-// content twice.
-var committedPatchSteps = []struct{ slice, attempt string }{
-	{"a", "1"},
-	{"b", "1"},
-	{"b", "2"},
-	{"c", "2"},
-	{"d", "1"},
-	{"fix-1", "1"},
-}
-
-// expectedSliceCommitMessages derives the exact commit message set the fake
-// backend produces for committedPatchSteps, reading each step's scenario
-// result.json rather than hardcoding the summaries.
-func expectedSliceCommitMessages(t *testing.T, fx *fixture.Fixture, ticket string) []string {
-	t.Helper()
-	var msgs []string
-	for _, step := range committedPatchSteps {
-		summary := scenarioResultSummary(t, fx.ScenarioDir, step.slice, step.attempt)
-		msgs = append(msgs, fmt.Sprintf("%s %s: %s", ticket, step.slice, firstLine(summary)))
-	}
-	return msgs
-}
-
-// assertSameMessageSet compares got and want as multisets (order-independent
-// but count-sensitive), fataling with a readable diff on mismatch.
-func assertSameMessageSet(t *testing.T, got, want []string) {
-	t.Helper()
-	gotSorted := append([]string(nil), got...)
-	wantSorted := append([]string(nil), want...)
-	sort.Strings(gotSorted)
-	sort.Strings(wantSorted)
-	if len(gotSorted) != len(wantSorted) {
-		t.Fatalf("commit message count = %d, want %d\ngot:  %v\nwant: %v", len(gotSorted), len(wantSorted), gotSorted, wantSorted)
-	}
-	for i := range gotSorted {
-		if gotSorted[i] != wantSorted[i] {
-			t.Fatalf("commit message set mismatch at sorted index %d:\ngot:  %v\nwant: %v", i, gotSorted, wantSorted)
-		}
-	}
 }
 
 // normalizeCRLF normalizes "\r\n" to "\n" for golden comparisons, matching
@@ -497,7 +450,19 @@ func keysOf(m map[string]bool) []string {
 
 // identityEnvNames are the variables that give git an author and committer
 // name and email; the dates are left alone.
-var identityEnvNames = []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"}
+var identityEnvNames = identityNames()
+
+// identityNames takes the author and committer variables from the one list
+// of git's hook variables, minus the dates.
+func identityNames() []string {
+	var out []string
+	for _, name := range gitenv.HookOnly {
+		if (strings.HasPrefix(name, "GIT_AUTHOR_") || strings.HasPrefix(name, "GIT_COMMITTER_")) && !strings.HasSuffix(name, "_DATE") {
+			out = append(out, name)
+		}
+	}
+	return out
+}
 
 // withoutIdentity returns e without the GIT_AUTHOR_* and GIT_COMMITTER_* name
 // and email the test binary pinned (gittest.PinIdentity), keeping the dates,
@@ -506,12 +471,13 @@ var identityEnvNames = []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMM
 func (e jigEnv) withoutIdentity() jigEnv { return e.without(identityEnvNames...) }
 
 // withGitGlobal returns e with a git global config of the test's own. The
-// test binary hermetic global config (gittest.Run) is shared by every test
-// and must stay as it is; a test that installs global git settings (a
-// core.hooksPath, say) would otherwise hand them to every parallel test's
-// commits. The returned env points GIT_CONFIG_GLOBAL at a file in the test
-// temp dir that includes the hermetic one, so `git config --global` from the
-// subprocess, or from a harness using the same env, writes only there.
+// test binary hermetic global config (gittest.Run) is shared by every test,
+// so git refuses every write to it; a test that installs global git settings
+// (a core.hooksPath, say) fails with "could not lock config file" until it
+// runs with this env. The returned env points GIT_CONFIG_GLOBAL at a file in
+// the test temp dir that includes the hermetic one, so `git config --global`
+// from the subprocess, or from a harness using the same env, writes only
+// there.
 func (e jigEnv) withGitGlobal(t *testing.T) jigEnv {
 	t.Helper()
 	hermetic := os.Getenv("GIT_CONFIG_GLOBAL")

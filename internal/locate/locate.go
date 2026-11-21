@@ -143,6 +143,10 @@ type Opts struct {
 	// branch, ticket, slice or session. A verb that only needs its store
 	// asks for this, and spends no git call on the rest.
 	StoreOnly bool
+	// Memo is the command's git memo: what Locate asks git about a
+	// repository (its top level, its clone root, its origin) is asked once
+	// per command. nil asks git each time.
+	Memo *gitx.Memo
 }
 
 // Locate resolves where cwd is under the jig home root jigHome. The order is
@@ -265,6 +269,9 @@ func (l *locator) attach() error {
 	case l.o.Slice != "":
 		w.Slice, w.SliceHow = l.o.Slice, HowArg
 	case l.o.Getenv("JIG_SLICE") != "":
+		// JIG_SLICE is a session's scope, like a claim: a green slice it names
+		// starts no verification. A Jig-Slice trailer names one commit's
+		// slice instead, and that commit is still verified.
 		w.Slice, w.SliceHow = l.o.Getenv("JIG_SLICE"), HowEnv
 	case st != nil && w.Ticket != "" && w.Session != "":
 		if slice := claimedSlice(st, w.Ticket, w.Session); slice != "" {

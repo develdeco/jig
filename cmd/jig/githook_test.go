@@ -6,14 +6,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/spawn"
+	"github.com/develdeco/jig/internal/project/projecttest"
 )
 
 func (ie installerEnv) gitEnv() []string { return []string{"GIT_CONFIG_GLOBAL=" + ie.gitGlobal} }
@@ -82,7 +80,7 @@ func TestGithookHereAndProjectInstallPerClone(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	a, b := ie.repo(t, "a"), ie.repo(t, "b")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"demo": {Clones: map[string]string{"a": a, "b": b}},
 	}); err != nil {
 		t.Fatal(err)
@@ -142,49 +140,6 @@ func TestGithookHereAndProjectInstallPerClone(t *testing.T) {
 // blockMarkerForTest is the line that opens the block in a repository's post-commit.
 const blockMarkerForTest = "# >>> jig >>>"
 
-func TestGithookPostCommitRecordsTheCommit(t *testing.T) {
-	t.Parallel()
-	ie := newInstallerEnv(t)
-	repo := ie.repo(t, "work")
-	if _, err := gitx.Run(repo, "commit", "-q", "--allow-empty", "-m", "one"); err != nil {
-		t.Fatal(err)
-	}
-	sha, err := gitx.RevParse(repo, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := time.Date(2026, 10, 1, 12, 30, 0, 123456789, time.UTC)
-	e := ie.env.inDir(repo).withClock(fixedClock(at))
-
-	out, code := runMain(t, e, "", "githook", "post-commit")
-	if code != 0 || out != "" {
-		t.Fatalf("exit %d, output %q, want a silent success", code, out)
-	}
-	lines, err := ledger.Read(ie.jigHome)
-	if err != nil || len(lines) != 1 {
-		t.Fatalf("ledger = %+v, %v, want one line", lines, err)
-	}
-	l := lines[0]
-	if l.Event != journal.EventGitCommit || l.Commit != sha || l.Cwd != repo || l.Branch != "main" || l.TS != "2026-10-01T12:30:00.123456789Z" {
-		t.Errorf("ledger line = %+v, want a git-commit of %s on main in %s at the clock's time", l, sha, repo)
-	}
-	if l.Ticket != "" || l.Session != "" || l.Harness != "" {
-		t.Errorf("ledger line carries more than commit, cwd and branch: %+v", l)
-	}
-
-	// A detached HEAD has no branch.
-	if _, err := gitx.Run(repo, "checkout", "-q", "--detach"); err != nil {
-		t.Fatal(err)
-	}
-	if _, code := runMain(t, e, "", "githook", "post-commit"); code != 0 {
-		t.Fatalf("detached: exit %d", code)
-	}
-	lines, _ = ledger.Read(ie.jigHome)
-	if len(lines) != 2 || lines[1].Branch != "" || lines[1].Commit != sha {
-		t.Errorf("ledger after a detached commit = %+v", lines)
-	}
-}
-
 func TestGithookPostCommitNeverFailsTheCommit(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
@@ -242,13 +197,14 @@ func TestGithookPostCommitIsHidden(t *testing.T) {
 	}
 }
 
-// TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables runs the
-// hook with the variables git and the wrapper export for one commit's hooks and
-// shows the verification it starts does not inherit them (a spawn with a nil
-// Env inherits the process environment, which the spawner reads when called).
-// It sets process environment, so it does not run in parallel.
-func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testing.T) {
-	fx, e, _ := observeRig(t)
+// TestGithookPostCommitRecordsTheCommitAndStartsNothing runs the hook with the
+// variables git and the wrapper export for one commit's hooks: the commit is
+// recorded in the ledger, no verification is started, and the variables are
+// gone from the process afterwards, while a person's own git configuration
+// through the environment stays. It sets process environment, so it does not
+// run in parallel.
+func TestGithookPostCommitRecordsTheCommitAndStartsNothing(t *testing.T) {
+	fx, e := observeRig(t)
 	if err := os.WriteFile(filepath.Join(fx.RepoDir, "alpha", "n.txt"), []byte("n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -275,30 +231,26 @@ func TestGithookPostCommitStartsTheVerificationWithoutTheHooksVariables(t *testi
 		t.Setenv(k, v)
 	}
 	e.unsetenv = processEnv().unsetenv // the remover the binary runs with
-	var seen []string
-	e = e.withSpawn(func(s spawn.Spec) (int, error) {
-		if s.Env != nil {
-			t.Errorf("spawn Env = %v, want nil (inherit)", s.Env)
-		}
-		seen = os.Environ()
-		return 777, nil
-	})
 	if out, code := runMain(t, e, "", "githook", "post-commit"); code != 0 || out != "" {
 		t.Fatalf("exit %d, output %q, want a silent success", code, out)
 	}
-	if seen == nil {
-		t.Fatal("the hook started no verification")
+	if got := ledgerEvents(t, fx.Home, journal.EventGitCommit); len(got) != 1 {
+		t.Errorf("git-commit lines = %+v, want the commit recorded", got)
 	}
+	if got := ledgerEvents(t, fx.Home, journal.EventVerifySpawned); len(got) != 0 {
+		t.Errorf("the hook started %+v ), want nothing", got)
+	}
+	seen := os.Environ()
 	for _, kv := range seen {
 		for _, name := range hookOnly {
 			if strings.EqualFold(strings.SplitN(kv, "=", 2)[0], name) {
-				t.Errorf("the verification inherits %s", kv)
+				t.Errorf("the process keeps %s", kv)
 			}
 		}
 	}
 	for _, kv := range kept {
 		if !slices.Contains(seen, kv) {
-			t.Errorf("the verification lost %s", kv)
+			t.Errorf("the process lost %s", kv)
 		}
 	}
 }

@@ -12,7 +12,7 @@ package verify
 //
 // The functions here are the frontier's, made to take what they used to read
 // from its run context (the jig home, the store id, the ticket and a journal
-// writer) in a recorder. D13 deletes the frontier's originals.
+// writer) in a recorder.
 
 import (
 	"bytes"

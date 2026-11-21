@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -62,71 +62,30 @@ func buildTicketOn(t *testing.T, fx *fixture.Fixture, env jigEnv, whole bool) bu
 	branch := fx.Branch
 	h.Branch(branch)
 
-	type built struct{ slice, sha string }
-	steps := []built{{"a", h.CommitScenario("a", 1)}}
+	// Each commit is proven right after it is made, as a builder does.
+	var last string
+	prove := func(slice string, attempt int) {
+		t.Helper()
+		last = h.CommitScenario(slice, attempt)
+		res := h.Verify(fx.Ticket, slice)
+		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pass") {
+			t.Fatalf("jig verify %s exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", slice, res.Code, res.Stdout, res.Stderr)
+		}
+	}
+	prove("a", 1)
 	if whole {
 		// Slice b's first attempt fails its test and is never verified; the
 		// second is the slice's commit.
 		h.CommitScenario("b", 1)
-		steps = append(steps, built{"b", h.CommitScenario("b", 2)}, built{"c", h.CommitScenario("c", 2)}, built{"d", h.CommitScenario("d", 1)})
+		prove("b", 2)
+		prove("c", 2)
+		prove("d", 1)
 	}
-	for _, s := range steps {
-		res := h.Jig("verify", fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	for _, s := range steps {
-		l := waitJournal(t, fx, fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail")
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	h.WaitVerifiers()
 	st, err := store.Open(fx.StoreDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: steps[len(steps)-1].sha, st: st}
-}
-
-// buildFix has the builder commit the scenario's patch for each slice given -
-// gate fix slices a round queued, which the scenario builds - and have the
-// commits verified, the way newBuiltTicket builds the ticket. It returns the
-// head the builder is at afterwards.
-func (b builtTicket) buildFix(t *testing.T, slices ...string) string {
-	t.Helper()
-	verifySlots <- struct{}{}
-	defer func() { <-verifySlots }()
-	type built struct{ slice, sha string }
-	var steps []built
-	for _, s := range slices {
-		steps = append(steps, built{s, b.builder.CommitScenario(s, 1)})
-	}
-	for _, s := range steps {
-		res := b.builder.Jig("verify", b.fx.Ticket, s.sha, "--slice", s.slice)
-		if res.Code != 0 || !strings.Contains(res.Stdout, "state: pending") {
-			t.Fatalf("jig verify %s exit = %d, want 0 and a pending worker\nstdout:\n%s\nstderr:\n%s", s.slice, res.Code, res.Stdout, res.Stderr)
-		}
-	}
-	for _, s := range steps {
-		l := waitJournal(t, b.fx, b.fx.Ticket, verifyWait, func(l journal.Line) bool {
-			if l.Slice != s.slice {
-				return false
-			}
-			return (l.Event == journal.EventVerified && l.Commit == s.sha) || (l.Event == journal.EventOracle && l.Outcome == "fail" && l.Commit == s.sha)
-		})
-		if l.Event != journal.EventVerified {
-			t.Fatalf("slice %s failed its oracle at %s: %s (journal line %+v)", s.slice, s.sha, l.Summary, l)
-		}
-	}
-	b.builder.WaitVerifiers()
-	return steps[len(steps)-1].sha
+	return builtTicket{whole: whole, fx: fx, env: env, builder: h, branch: branch, sha: last, st: st}
 }
 
 // workFile is a file of the ticket's work directory in the store.
@@ -159,7 +118,6 @@ type reviewRequest struct {
 	HeadSHA    string   `json:"head_sha"`
 	BaseSHA    string   `json:"base_sha"`
 	Scope      string   `json:"scope"`
-	Worktree   string   `json:"worktree"`
 	MustReview []string `json:"must_review"`
 }
 
@@ -234,115 +192,6 @@ func (b builtTicket) reviewedClean(t *testing.T, round int) jigResult {
 	return done
 }
 
-// TestGateReviewsClonesCopy: a branch built by hand in the operator clone and
-// not pushed anywhere is what `jig gate` reviews: it reads the clone's
-// committed copy, re-verifies it (reusing the pass `jig verify` recorded),
-// opens the round without making a gate/round-N directory, and hands the
-// reviewer a request. A reviewer in a session of its own reads it, reads the
-// code, and ends the round with `jig review done`: clean, and independent of the
-// builder.
-func TestGateReviewsClonesCopy(t *testing.T) {
-	t.Parallel()
-	b := newBuiltTicket(t, false)
-
-	gate := b.openRound(t)
-	for _, want := range []string{"round: 1", "branch: " + b.branch, "copy: the clone's", "head: " + b.sha, "scope: full"} {
-		if !strings.Contains(gate.Stdout, want) {
-			t.Errorf("jig gate output lacks %q\nstdout:\n%s", want, gate.Stdout)
-		}
-	}
-	if originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch) != "" {
-		t.Fatalf("the branch is on origin, but it was never pushed")
-	}
-	// The round is open, not made: its state is in the work directory, and the
-	// store has no gate/round-1 yet.
-	if _, err := os.Stat(b.roundDir("1")); err == nil {
-		t.Errorf("%s exists before `jig review done`", b.roundDir("1"))
-	}
-	openData := readFileOrFatal(t, b.workFile("gate.round-1.open.yaml"))
-	var open struct {
-		Round int    `yaml:"round"`
-		Head  string `yaml:"head"`
-		Copy  string `yaml:"copy"`
-		Lease string `yaml:"lease"`
-	}
-	if err := yaml.Unmarshal(openData, &open); err != nil {
-		t.Fatalf("parse the open record: %v", err)
-	}
-	if open.Round != 1 || open.Head != b.sha || open.Copy != "the clone's" || open.Lease == "" {
-		t.Errorf("open record = %+v, want round 1 at %s, the clone's copy and a lease", open, b.sha)
-	}
-	// The store is shared: neither the open record nor the request names a
-	// directory of this machine's jig home. The lease is written relative to it.
-	for _, name := range []string{"gate.round-1.open.yaml", "gate.round-1.review.json"} {
-		if strings.Contains(strings.ReplaceAll(string(readFileOrFatal(t, b.workFile(name))), `\\`, `\`), b.env.home) {
-			t.Errorf("%s names the jig home %s", name, b.env.home)
-		}
-	}
-	lease := filepath.Join(b.env.home, filepath.FromSlash(open.Lease))
-	// The oracle pass jig verify recorded stands for the gate's run of alpha's
-	// oracle; beta's, which no one verified, the gate ran itself.
-	var req struct {
-		OraclesPassed []struct {
-			Workspace  string `json:"workspace"`
-			ReusedFrom string `json:"reused_from"`
-		} `json:"oracles_passed"`
-	}
-	if err := json.Unmarshal(readFileOrFatal(t, b.workFile("gate.round-1.review.json")), &req); err != nil {
-		t.Fatal(err)
-	}
-	reused := map[string]string{}
-	for _, o := range req.OraclesPassed {
-		reused[o.Workspace] = o.ReusedFrom
-	}
-	if reused["alpha"] != b.sha || reused["beta"] != "" {
-		t.Errorf("oracles_passed reused_from = %v, want alpha reused from %s and beta run by the gate", reused, b.sha)
-	}
-	// The reviewer reads the code at the head in the worktree the open round
-	// names, which is jig's, not the clone.
-	if head := gitLog(t, lease, "rev-parse", "HEAD"); head != b.sha {
-		t.Errorf("the open round's worktree is at %s, want %s", head, b.sha)
-	}
-
-	// jig review context again prints the open round and opens no other.
-	r2 := newHarness(t, b.fx, b.env, "s-reviewer")
-	ctx := r2.Jig("review", "context", b.fx.Ticket, "--model", "test-model")
-	if ctx.Code != 0 || !strings.Contains(ctx.Stdout, "round: 1") || !strings.Contains(ctx.Stdout, "reviewer: s-reviewer") || !strings.Contains(ctx.Stdout, lease) {
-		t.Fatalf("jig review context exit = %d, want 0, the open round and its worktree %s\nstdout:\n%s\nstderr:\n%s", ctx.Code, lease, ctx.Stdout, ctx.Stderr)
-	}
-	r2.Bash("git log --oneline -3")
-
-	done := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
-		t.Fatalf("jig review done exit = %d, want 0, clean and independent\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-	rep := b.report(t, "1")
-	if rep["verdict"] != "clean" || rep["independent"] != true || rep["model"] != "test-model" {
-		t.Errorf("report.yaml = %v, want a clean round, independent: true, model test-model", rep)
-	}
-	reviewer, _ := rep["reviewer"].(map[string]any)
-	if reviewer["session"] != "s-reviewer" {
-		t.Errorf("report.yaml reviewer = %v, want session s-reviewer", reviewer)
-	}
-	if shas, _ := rep["reviewed_sha"].(map[string]any); shas["fixture-repo"] != b.sha {
-		t.Errorf("report.yaml reviewed_sha = %v, want %s", shas, b.sha)
-	}
-	if !strings.Contains(string(readFileOrFatal(t, filepath.Join(b.roundDir("1"), "report.yaml"))), "independent: true") {
-		t.Errorf("report.yaml does not say `independent: true`")
-	}
-	// The round is closed: there is no open round to close again.
-	if again := r2.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1)); again.Code == 0 || !strings.Contains(again.Stdout, "REVIEW_NOT_OPEN") {
-		t.Errorf("a second jig review done exit = %d, want REVIEW_NOT_OPEN\nstdout:\n%s", again.Code, again.Stdout)
-	}
-	// Nothing on the branch moved, and the gate pushed nothing of it.
-	if head := h2tip(t, b); head != b.sha {
-		t.Errorf("the clone's branch is at %s, want %s", head, b.sha)
-	}
-	if originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch) != "" {
-		t.Errorf("the gate pushed the branch to origin")
-	}
-}
-
 // h2tip is the sha the clone's branch is at.
 func h2tip(t *testing.T, b builtTicket) string {
 	t.Helper()
@@ -353,82 +202,6 @@ func h2tip(t *testing.T, b builtTicket) string {
 func originRefOrEmpty(t *testing.T, remote, refname string) string {
 	t.Helper()
 	return gitLog(t, remote, "for-each-ref", "--format=%(objectname)", refname)
-}
-
-// TestReviewByTheBuilderIsRecorded: the agent that built the change reads and
-// reports the round itself, in a session whose hooks report its calls (its
-// read of the round is a ledger tool line with no agent). Independence is a
-// fact of the round, not a condition of it: the round is recorded clean with
-// `independent: false`, `jig review done` exits 0 and says one of the builders
-// reviewed it, publish takes it, and the pull request's review notes say who
-// reviewed.
-func TestReviewByTheBuilderIsRecorded(t *testing.T) {
-	t.Parallel()
-	b := newBuiltTicket(t, true)
-	env, _ := githubClone(t, b)
-	b.env = env
-	b.builder.env = env
-	b.openRound(t)
-
-	if ctx := b.builder.Jig("review", "context", b.fx.Ticket); ctx.Code != 0 {
-		t.Fatalf("jig review context exit = %d\nstdout:\n%s\nstderr:\n%s", ctx.Code, ctx.Stdout, ctx.Stderr)
-	}
-	if hook := b.builder.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "command": "jig review context " + b.fx.Ticket}); hook.Code != 0 {
-		t.Fatalf("hook exit = %d\nstdout:\n%s\nstderr:\n%s", hook.Code, hook.Stdout, hook.Stderr)
-	}
-	done := b.builder.Jig("review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1))
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: false") {
-		t.Fatalf("jig review done by the builder exit = %d, want 0, verdict clean and independent: false\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-	if !strings.Contains(done.Stdout, "one of the builders") {
-		t.Errorf("the output does not say one of the builders reviewed the round:\n%s", done.Stdout)
-	}
-	rep := b.report(t, "1")
-	if rep["verdict"] != "clean" || rep["independent"] != false {
-		t.Errorf("report.yaml = %v, want a clean round with independent: false", rep)
-	}
-	clean := false
-	for _, l := range readJournal(t, b.fx, b.fx.Ticket) {
-		clean = clean || l.Event == journal.EventGateClean
-	}
-	if !clean {
-		t.Errorf("the journal has no clean round")
-	}
-
-	pub := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket, "--body")
-	if pub.Code != 0 {
-		t.Fatalf("jig publish --body after a builder's clean round exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
-	}
-	notes := string(readFileOrFatal(t, filepath.Join(b.st.TicketDir(b.fx.Ticket), "pr", "review-notes.md")))
-	if !strings.Contains(notes, "`s-builder`") || !strings.Contains(notes, "one of the builders") {
-		t.Errorf("the review notes do not say one of the builders, s-builder, reviewed the round:\n%s", notes)
-	}
-}
-
-// TestReviewDoneFlagSessionFindsTheAgent: a lone reviewer subagent shares its
-// parent's session id, which is a builder's. It reads the round, then reports
-// it with `--session` naming that id. The ledger says which agent of the
-// session read the round, so the round is recorded as that agent and is
-// independent of the builders, as it is with the environment's session.
-func TestReviewDoneFlagSessionFindsTheAgent(t *testing.T) {
-	t.Parallel()
-	b := newBuiltTicket(t, true)
-	b.openRound(t)
-
-	sub := newHarness(t, b.fx, b.env, "s-builder")
-	sub.Agent = "sub-rev"
-	if hook := sub.Hook("PostToolUse", map[string]any{"tool_name": "Bash", "command": "jig review context " + b.fx.Ticket}); hook.Code != 0 {
-		t.Fatalf("hook exit = %d\nstdout:\n%s\nstderr:\n%s", hook.Code, hook.Stdout, hook.Stderr)
-	}
-	done := runJig(t, b.env, b.fx.StoreDir, "review", "done", b.fx.Ticket, "--result", b.cleanResult(t, 1), "--session", "s-builder")
-	if done.Code != 0 || !strings.Contains(done.Stdout, "verdict: clean") || !strings.Contains(done.Stdout, "independent: true") {
-		t.Fatalf("jig review done --session exit = %d, want 0, verdict clean and independent: true\nstdout:\n%s\nstderr:\n%s", done.Code, done.Stdout, done.Stderr)
-	}
-	rep := b.report(t, "1")
-	reviewer, _ := rep["reviewer"].(map[string]any)
-	if rep["independent"] != true || reviewer["session"] != "s-builder" || reviewer["agent"] != "sub-rev" || reviewer["how"] != "flag" {
-		t.Errorf("report.yaml = %v, want independent, reviewer s-builder/sub-rev by flag", rep)
-	}
 }
 
 // githubClone makes the fixture's repo a GitHub repo as far as jig can tell:
@@ -446,7 +219,7 @@ func githubClone(t *testing.T, b builtTicket) (jigEnv, string) {
 func githubRemote(t *testing.T, fx *fixture.Fixture, env jigEnv) (jigEnv, string) {
 	t.Helper()
 	const remoteURL = "https://github.com/acme/fixture-repo.git"
-	if _, err := gitx.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(fx.Dir, env.environ(), "config", "--global", "url."+filepath.ToSlash(fx.RepoRemote)+".insteadOf", remoteURL); err != nil {
 		t.Fatalf("git config --global url.insteadOf: %v", err)
 	}
 	path := filepath.Join(fx.StoreDir, "project.yaml")
@@ -507,11 +280,7 @@ func TestPublishBodyThenPR(t *testing.T) {
 	b.openRound(t)
 	b.reviewedClean(t, 1)
 
-	gateLease := filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-gate")
-	if _, err := os.Stat(gateLease); err != nil {
-		t.Fatalf("test setup: the gate lease is not at %s: %v", gateLease, err)
-	}
-	leaseHead := gitLog(t, gateLease, "rev-parse", "HEAD")
+	cloneHead := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch)
 	originBefore := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch)
 	callsBefore := len(ghCalls(t, log))
 
@@ -533,8 +302,8 @@ func TestPublishBodyThenPR(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.home, "pool", "fixture-repo", b.fx.Ticket+"-publish")); err == nil {
 		t.Errorf("--body made a publish lease")
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != leaseHead {
-		t.Errorf("the gate lease moved from %s to %s", leaseHead, got)
+	if got := gitLog(t, b.fx.RepoDir, "rev-parse", "refs/heads/"+b.branch); got != cloneHead {
+		t.Errorf("the clone's %s moved from %s to %s", b.branch, cloneHead, got)
 	}
 	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != originBefore {
 		t.Errorf("origin's %s went from %q to %q", b.branch, originBefore, got)
@@ -598,68 +367,5 @@ func TestPublishBodyThenPR(t *testing.T) {
 	}
 	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != b.sha {
 		t.Errorf("origin's %s = %s, want the harness's push of %s", b.branch, got, b.sha)
-	}
-}
-
-// TestPublishBare: bare `jig publish --yes` pushes the head the clean round
-// reviewed exactly as it is - the same sha as the clone's, nothing reconciled,
-// squashed or committed on top - from a branch that was never on origin, and
-// opens the pull request through the host.
-func TestPublishBare(t *testing.T) {
-	t.Parallel()
-	b := newBuiltTicket(t, true)
-	env, log := githubClone(t, b)
-	b.env = env
-	b.builder.env = env
-	b.openRound(t)
-	b.reviewedClean(t, 1)
-	cloneLog := gitLog(t, b.fx.RepoDir, "log", "--format=%H", b.branch)
-
-	// Without --yes (and with no approval) a bare publish asks, and stdin is
-	// not a terminal: it is declined and pushes nothing.
-	declined := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket)
-	if declined.Code == 0 || !strings.Contains(declined.Stdout, "PUBLISH_DECLINED") {
-		t.Errorf("jig publish without --yes: exit = %d, want PUBLISH_DECLINED\nstdout:\n%s", declined.Code, declined.Stdout)
-	}
-	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != "" {
-		t.Fatalf("a declined publish pushed %s to origin", got)
-	}
-
-	pub := runJig(t, env, b.builder.Clone, "publish", b.fx.Ticket, "--yes")
-	if pub.Code != 0 || !strings.Contains(pub.Stdout, b.sha) || !strings.Contains(pub.Stdout, "opened") {
-		t.Fatalf("jig publish --yes exit = %d, want 0, the head and an opened pull request\nstdout:\n%s\nstderr:\n%s", pub.Code, pub.Stdout, pub.Stderr)
-	}
-	if got := originRefOrEmpty(t, b.fx.RepoRemote, "refs/heads/"+b.branch); got != b.sha {
-		t.Errorf("origin's %s = %s, want the reviewed head %s, unchanged", b.branch, got, b.sha)
-	}
-	if got := gitLog(t, b.fx.RepoRemote, "log", "--format=%H", b.branch); got != cloneLog {
-		t.Errorf("origin's history of %s is\n%s\nwant the clone's\n%s", b.branch, got, cloneLog)
-	}
-	if got := h2tip(t, b); got != b.sha {
-		t.Errorf("the clone's branch moved from %s to %s", b.sha, got)
-	}
-	var created string
-	for _, c := range ghCalls(t, log) {
-		if strings.HasPrefix(c, "pr create") {
-			created = c
-		}
-	}
-	if !strings.Contains(created, "--head "+b.branch) || !strings.Contains(created, "--base main") {
-		t.Errorf("gh pr create call = %q, want --head %s --base main", created, b.branch)
-	}
-	var prLine journal.Line
-	done := false
-	for _, l := range readJournal(t, b.fx, b.fx.Ticket) {
-		switch l.Event {
-		case journal.EventPr:
-			prLine = l
-		case journal.EventPublishDone:
-			done = true
-		case "reconcile", "squash", "memorize", "revalidate":
-			t.Errorf("publish journaled %+v, but it reconciles, squashes and memorizes nothing", l)
-		}
-	}
-	if prLine.Outcome != "opened" || prLine.Commit != b.sha || prLine.Branch != b.branch || !strings.Contains(prLine.URL, "/pull/") || !done {
-		t.Errorf("pr line = %+v, publish-done = %v, want an opened pull request for %s from %s", prLine, done, b.sha, b.branch)
 	}
 }

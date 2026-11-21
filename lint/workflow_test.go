@@ -328,7 +328,7 @@ func TestCIWorkflowPlan(t *testing.T) {
 		{"pull_request", []string{"internal/x/b.go"}, map[string]string{"internal/x/b.go": "//go:build !linux && !darwin\n\npackage x\n"}, true, false},
 		{"pull_request", []string{"internal/x/c.go"}, map[string]string{"internal/x/c.go": "package x\n\n// //go:build windows is not a constraint here.\n"}, false, false},
 		{"pull_request", []string{"internal/x/gone.go"}, nil, false, false},
-		{"pull_request", []string{"README.md", "DECISIONS.md", "docs/adr/0001-x.md", ".github/CONTRIBUTING.md", "LICENSE"}, nil, false, true},
+		{"pull_request", []string{"README.md", "NOTES.md", "docs/adr/0001-x.md", ".github/CONTRIBUTING.md", "LICENSE"}, nil, false, true},
 		{"pull_request", []string{"docs/adr/0001-x.md"}, nil, false, true},
 		{"pull_request", []string{"skills/intake/SKILL.md"}, nil, false, false},
 		{"pull_request", []string{"internal/x/testdata/a.md"}, nil, false, false},

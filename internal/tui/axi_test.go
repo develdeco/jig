@@ -183,6 +183,21 @@ func TestRoundsWithNoFindingsFileKeepTheirDash(t *testing.T) {
 	}
 }
 
+// TestParseStatusReadsAnIssueOrMultiTask: jig status of an issue or a
+// multi-task prints top-level ticket: and state: lines (the kind is the state)
+// and the children table, so the ticket screen reads a status, not an error.
+func TestParseStatusReadsAnIssueOrMultiTask(t *testing.T) {
+	t.Parallel()
+	out := strings.Join([]string{
+		"ticket: JIG-2", "state: multi-task", "kind: multi-task", "issue: JIG-1",
+		axi.Table("children", []string{"ticket", "kind", "title"}, [][]string{{"JIG-3", "task", "Part"}}),
+	}, "\n") + "\n"
+	info := parseStatus(out)
+	if info.Err != nil || info.State != "multi-task" {
+		t.Fatalf("info = %+v, want a status in state multi-task", info)
+	}
+}
+
 // TestParseStatusReadsTheClosureOfAClosedTicket: a ticket closed without a pull
 // request says how in the closed block of its status, and an open one has none.
 func TestParseStatusReadsTheClosureOfAClosedTicket(t *testing.T) {

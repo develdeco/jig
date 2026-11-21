@@ -121,7 +121,7 @@ func parseHarnesses(value string, def []string) ([]setup.Harness, error) {
 
 // projectSkillNames are the skills a project gets: the ones that run its work.
 func projectSkillNames() []string {
-	return []string{"here", "intake", "chart", "build", "review", "publish"}
+	return []string{"here", "intake", "chart", "build", "review", "publish", "land"}
 }
 
 // helperSkillNames are the skills that set jig up: they let an agent in any
@@ -155,13 +155,59 @@ func embeddedBody(name string) ([]byte, bool) {
 	return data, err == nil
 }
 
-// embeddedBodies maps every embedded skill to its text, for telling the files
-// `jig skills install` wrote from a person's own.
-func embeddedBodies() map[string][]byte {
-	out := map[string][]byte{}
+var refNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// embeddedRefs lists the reference names of the embedded skill called name
+// (skills/<name>/references/<ref>.md), sorted; none for a skill without any.
+func embeddedRefs(name string) []string {
+	if !skillNameRe.MatchString(name) {
+		return nil
+	}
+	entries, err := skillspkg.FS.ReadDir(name + "/references")
+	if err != nil {
+		return nil
+	}
+	var refs []string
+	for _, e := range entries {
+		if r, ok := strings.CutSuffix(e.Name(), ".md"); ok && !e.IsDir() {
+			refs = append(refs, r)
+		}
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+// embeddedRef is the text of reference ref of the embedded skill called name.
+func embeddedRef(name, ref string) ([]byte, bool) {
+	if !skillNameRe.MatchString(name) || !refNameRe.MatchString(ref) {
+		return nil, false
+	}
+	data, err := skillspkg.FS.ReadFile(name + "/references/" + ref + ".md")
+	return data, err == nil
+}
+
+// embeddedSkill is the embedded skill called name with its references.
+func embeddedSkill(name string) (setup.Skill, bool) {
+	body, ok := embeddedBody(name)
+	if !ok {
+		return setup.Skill{}, false
+	}
+	sk := setup.Skill{Name: name, Body: body}
+	for _, ref := range embeddedRefs(name) {
+		if b, ok := embeddedRef(name, ref); ok {
+			sk.Refs = append(sk.Refs, setup.Ref{Name: ref, Body: b})
+		}
+	}
+	return sk, true
+}
+
+// embeddedSkills maps every embedded skill to its text and references, for
+// telling the files `jig skills install` wrote from a person's own.
+func embeddedSkills() map[string]setup.Skill {
+	out := map[string]setup.Skill{}
 	for _, n := range embeddedNames() {
-		if b, ok := embeddedBody(n); ok {
-			out[n] = b
+		if sk, ok := embeddedSkill(n); ok {
+			out[n] = sk
 		}
 	}
 	return out
@@ -174,8 +220,6 @@ type skillSelection struct {
 	extras           []string
 }
 
-func (s skillSelection) empty() bool { return !s.project && !s.helpers && len(s.extras) == 0 }
-
 // resolve returns the selected skills the binary carries, each once, in the
 // order project set, helpers, extras. A name from a set the binary does not
 // carry yet (build, say, before the build skill lands) comes back in lacking;
@@ -187,10 +231,10 @@ func (s skillSelection) resolve() (have []setup.Skill, lacking []string, err err
 			return nil
 		}
 		seen[name] = true
-		body, ok := embeddedBody(name)
+		sk, ok := embeddedSkill(name)
 		switch {
 		case ok:
-			have = append(have, setup.Skill{Name: name, Body: body})
+			have = append(have, sk)
 		case required:
 			return &axi.Error{
 				Msg:  fmt.Sprintf("jig has no skill named %q", name),
@@ -240,14 +284,15 @@ func lackingNote(lacking []string) string {
 }
 
 // skillRoots are the skills directories of a scope: Claude Code's and the
-// shared agents one, under the person's home or under the project folder.
+// shared agents one, the person's own (in Claude Code's user directory and
+// the home's .agents) or under the project folder.
 func skillRoots(e env, req installReq) (roots []string, dir string, err error) {
 	if req.kind == scopeGlobal {
-		userHome, err := e.userHomeDir()
+		u, err := e.userDirs()
 		if err != nil {
 			return nil, "", err
 		}
-		return []string{filepath.Join(userHome, ".claude", "skills"), filepath.Join(userHome, ".agents", "skills")}, "", nil
+		return u.SkillRoots(), "", nil
 	}
 	dir, err = projectDir(req.target)
 	if err != nil {
@@ -318,7 +363,7 @@ func skillsSteps(e env, req installReq, sel skillSelection) ([]step, error) {
 				} else if len(sel.extras) > 0 {
 					names = sel.extras
 				}
-				removed, err := setup.RemoveSkills(root, names, embeddedBodies())
+				removed, err := setup.RemoveSkills(root, names, embeddedSkills())
 				if err != nil {
 					return "", err
 				}
@@ -371,14 +416,14 @@ func skillsSteps(e env, req installReq, sel skillSelection) ([]step, error) {
 // none is named: Claude Code's always, and the others' when the person has a
 // directory for the harness, so jig does not make one for a tool they do not
 // use.
-func defaultHintHarnesses(userHome string) []string {
+func defaultHintHarnesses(u setup.UserDirs) []string {
 	out := []string{"claude"}
 	for _, name := range setup.HintHarnesses() {
 		if name == "claude" {
 			continue
 		}
 		if h, ok := setup.HarnessNamed(name); ok {
-			if info, err := os.Stat(h.ConfigDir(userHome)); err == nil && info.IsDir() {
+			if info, err := os.Stat(h.ConfigDir(u)); err == nil && info.IsDir() {
 				out = append(out, name)
 			}
 		}
@@ -389,9 +434,9 @@ func defaultHintHarnesses(userHome string) []string {
 // hintHarnesses picks the harnesses whose memory file gets the hint: the ones
 // --harness names that have one, or those defaultHintHarnesses finds. A
 // --harness that names none of them is a refusal.
-func hintHarnesses(value, userHome string) ([]string, error) {
+func hintHarnesses(value string, u setup.UserDirs) ([]string, error) {
 	if strings.TrimSpace(value) == "" {
-		return defaultHintHarnesses(userHome), nil
+		return defaultHintHarnesses(u), nil
 	}
 	hs, err := parseHarnesses(value, nil)
 	if err != nil {
@@ -414,20 +459,20 @@ func hintHarnesses(value, userHome string) ([]string, error) {
 	return out, nil
 }
 
-// hintSteps plans the hint. Globally it goes in each harness's memory file in
-// the person's home. In a project it goes in CLAUDE.local.md, which git
+// hintSteps plans the hint. Globally it goes in each harness's memory file of
+// the person's own (Claude Code's in its user directory). In a project it goes in CLAUDE.local.md, which git
 // ignores, or, tracked, in the AGENTS.md the project shares (and in a CLAUDE.md
 // that does not import it).
 func hintSteps(e env, req installReq, harnesses []string) ([]step, error) {
 	type file struct{ harness, path string }
 	var files []file
 	if req.kind == scopeGlobal {
-		userHome, err := e.userHomeDir()
+		u, err := e.userDirs()
 		if err != nil {
 			return nil, err
 		}
 		for _, h := range harnesses {
-			files = append(files, file{h, setup.HintFile(h, userHome)})
+			files = append(files, file{h, setup.HintFile(h, u)})
 		}
 	} else {
 		dir, err := projectDir(req.target)

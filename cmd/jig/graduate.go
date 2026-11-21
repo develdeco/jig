@@ -121,6 +121,14 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 		}
 		createdIDs = append(createdIDs, id)
 		created[pos] = true
+		// The session that mints a task works on it from then on, as for
+		// `jig ticket new`: its brief is drafted before any journal line
+		// names the session. A multi-task has no brief to draft.
+		if rec, rerr := st.ReadTicket(id); rerr == nil && rec.KindOrDefault() == store.KindTask {
+			if terr := touchMinter(e, id); terr != nil {
+				fmt.Fprintf(e.stderr, "warning: the ledger could not record that this session works on %s: %v\n", id, terr)
+			}
+		}
 	}
 
 	// Claim never runs the checkpoint hook itself (internal/mirror's own
@@ -150,6 +158,9 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 				fmt.Sprintf("Check that charts/%s/tickets.yaml exists and is valid YAML", chart),
 			},
 		})
+	}
+	if err := recordExistingKinds(st, chart, entries, created); err != nil {
+		return renderErr(stdout, graduateFailure(chart, createdIDs, err))
 	}
 	refs, err := resolveChartEntryRefs(st, chart, entries)
 	if err != nil {
@@ -226,7 +237,9 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	}
 
 	helpLines := append([]string{}, advisories...)
-	helpLines = append(helpLines, "Write each ticket's brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate <id> --check`; run `jig validate <id>` once the person has confirmed the brief")
+	if tasks := createdTaskIDs(st, createdIDs); len(tasks) > 0 {
+		helpLines = append(helpLines, fmt.Sprintf("Write the brief.md and slices.yaml of each task (%s; the intake skill drafts both) and check them with `jig validate <id> --check`; run `jig validate <id>` once the person has confirmed the brief", strings.Join(tasks, ", ")))
+	}
 	blocks := []string{
 		axi.KV("graduate", [][2]string{{"chart", chart}, {"created", strconv.Itoa(len(createdIDs))}}),
 		axi.Table("entries", []string{"position", "id", "title", "status"}, rows),
@@ -234,6 +247,18 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	}
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// createdTaskIDs is the ids among ids that are tasks: an issue or a multi-task
+// has no brief or slices to write.
+func createdTaskIDs(st *store.Store, ids []string) []string {
+	var tasks []string
+	for _, id := range ids {
+		if rec, err := st.ReadTicket(id); err != nil || rec.KindOrDefault() == store.KindTask {
+			tasks = append(tasks, id)
+		}
+	}
+	return tasks
 }
 
 // errChartFullyGraduated is claimOneChartEntry's internal sentinel: a fresh
@@ -281,7 +306,10 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		if kerr != nil {
 			return "", nil, kerr
 		}
-		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, Slug: store.Slug(entries[i].Title), BlockedBy: toBlockedBy(refs[i])}
+		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, Slug: store.Slug(entries[i].Title), BlockedBy: toBlockedBy(refs[i]), Kind: entries[i].Kind}
+		if j := underIndex(entries, entries[i].Under); j >= 0 {
+			rec.Parent = entries[j].ID
+		}
 		newID, merr := st.Mint(key, rec)
 		if merr != nil {
 			return "", nil, merr
@@ -537,7 +565,9 @@ func chartEntryProblems(st *store.Store, cfg project.Config, entries []store.Cha
 			})
 		}
 	}
-	return out
+	out = append(out, chartKindProblems(st, chart, entries)...)
+	out = append(out, chartOwnContainerProblems(st, chart, entries)...)
+	return append(out, chartSharedProblems(st, chart, entries)...)
 }
 
 // entryRef is one already-validated blocked_by ref for a chart entry,

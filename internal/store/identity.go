@@ -36,7 +36,7 @@ func (s *Store) identity() (gitx.Identity, error) {
 	if s.ident.ok {
 		return s.ident.id, nil
 	}
-	id, err := gitx.ResolveIdentity(s.Root)
+	id, err := s.Memo.Identity(s.Root)
 	if err != nil {
 		return gitx.Identity{}, err
 	}

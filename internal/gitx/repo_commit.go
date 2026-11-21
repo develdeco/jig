@@ -24,10 +24,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// CommitAll stages every change and commits it to the checked-out branch,
-// as `git add -A && git commit` would, and reports whether there was
-// anything to commit. The author and committer are name and email, unless
-// GIT_AUTHOR_* or GIT_COMMITTER_* set them, as they do for the git program.
+// CommitAllAs stages every change and commits it to the checked-out branch, as
+// `git add -A && git commit` would, and reports whether there was anything to
+// commit. who gives the identity, unless GIT_AUTHOR_* or GIT_COMMITTER_* set
+// the author and committer, as they do for the git program; it is called once
+// there is something to commit, and not at all when there is none, so a lookup
+// that costs a process, or can fail, is paid only by a commit that needs it.
+// When who fails, so does CommitAllAs, having changed nothing a reader sees:
+// the objects it wrote stay unreferenced.
 //
 // It works from the index, as the git program does: a tracked file whose
 // size and modification time still match its index entry is not read, only
@@ -39,7 +43,8 @@ import (
 // reader never sees half of one.
 //
 // It returns ErrUseCLI, having changed nothing, when a git process holds
-// either lock, HEAD is not on a branch, a pinned date does not parse, the
+// either lock, HEAD is not on a branch, a merge, cherry-pick or revert is
+// in progress, a pinned date does not parse, the
 // index cannot be read or written back as it was, tracks anything but
 // plain files or marks one assume-unchanged, or the work tree has what the
 // git program would stage differently: a symbolic link, an executable file
@@ -47,23 +52,19 @@ import (
 // .gitattributes below the root, an ignore rule beyond plain globs (see
 // readPatterns), or names that core.ignoreCase or core.precomposeUnicode
 // would match differently.
-func (r *Repo) CommitAll(msg, name, email string) (bool, error) {
-	return r.CommitAllAs(msg, func() (Identity, error) {
-		return Identity{Name: name, Email: email}, nil
-	})
+func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, error) {
+	return r.CommitAllWith(msg, who, os.LookupEnv)
 }
 
-// CommitAllAs is CommitAll for a caller that has to look its identity up: who
-// is called once there is something to commit, and not at all when there is
-// none, so a lookup that costs a process, or can fail, is paid only by a
-// commit that needs it. When who fails, so does CommitAllAs, having changed
-// nothing a reader sees: the objects it wrote stay unreferenced.
-func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, error) {
-	authorTime, err := signatureTime("AUTHOR")
+// CommitAllWith is CommitAllAs reading the author, the committer and their dates
+// from env, which answers a variable name, in place of the process environment:
+// how a test pins them without editing the process's own.
+func (r *Repo) CommitAllWith(msg string, who func() (Identity, error), env envLookup) (bool, error) {
+	authorTime, err := signatureTime("AUTHOR", env)
 	if err != nil {
 		return false, err
 	}
-	committerTime, err := signatureTime("COMMITTER")
+	committerTime, err := signatureTime("COMMITTER", env)
 	if err != nil {
 		return false, err
 	}
@@ -85,18 +86,25 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 	}
 	branch := head.Target()
 	gitDir := r.gitDir()
-	indexLock, err := lock(filepath.Join(gitDir, "index"))
+	// A merge, cherry-pick or revert in progress makes the commit a merge
+	// commit or a pick's: the git program's to write.
+	for _, state := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
+		if _, err := os.Lstat(filepath.Join(gitDir, state)); err == nil {
+			return false, ErrUseCLI
+		}
+	}
+	indexLock, err := Lock(filepath.Join(gitDir, "index"))
 	if err != nil {
 		return false, err
 	}
-	defer indexLock.release()
-	branchLock, err := lock(refPath(gitDir, branch))
+	defer indexLock.Release()
+	branchLock, err := Lock(refPath(gitDir, branch))
 	if err != nil {
 		return false, err
 	}
-	defer branchLock.release()
+	defer branchLock.Release()
 
-	parent, err := refValue(repo, branch)
+	parent, err := RefValue(repo, branch)
 	if err != nil {
 		return false, err
 	}
@@ -108,7 +116,7 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 		}
 		parentTree = c.TreeHash
 	}
-	idx, indexTime, err := readIndex(gitDir)
+	idx, indexTime, err := ReadIndex(gitDir)
 	if err != nil {
 		return false, err
 	}
@@ -125,11 +133,11 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 		if !s.indexChanged {
 			return false, nil
 		}
-		indexData, err := encodeIndex(idx)
+		indexData, err := EncodeIndex(idx)
 		if err != nil {
 			return false, ErrUseCLI
 		}
-		return false, indexLock.commit(indexData)
+		return false, indexLock.Commit(indexData)
 	}
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	root, err := buildTree(repo, idx.Entries, "")
@@ -142,13 +150,13 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 	tree := root.hash
 	// Encoded before anything moves: an entry go-git cannot write (a time
 	// before 1970) leaves the whole commit to the git program.
-	indexData, err := encodeIndex(idx)
+	indexData, err := EncodeIndex(idx)
 	if err != nil {
 		return false, ErrUseCLI
 	}
 	if !parent.IsZero() && tree == parentTree {
 		if s.indexChanged {
-			return false, indexLock.commit(indexData)
+			return false, indexLock.Commit(indexData)
 		}
 		return false, nil
 	}
@@ -157,8 +165,8 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 		return false, err
 	}
 	c := &object.Commit{
-		Author:    *signature("AUTHOR", id, authorTime),
-		Committer: *signature("COMMITTER", id, committerTime),
+		Author:    *signature("AUTHOR", id, authorTime, env),
+		Committer: *signature("COMMITTER", id, committerTime, env),
 		Message:   strings.TrimRight(msg, "\n") + "\n",
 		TreeHash:  tree,
 	}
@@ -174,21 +182,21 @@ func (r *Repo) CommitAllAs(msg string, who func() (Identity, error)) (bool, erro
 		return false, fmt.Errorf("gitx: write commit in %s: %w", r.dir, err)
 	}
 	// The git program's order: the branch moves, then the index.
-	if err := branchLock.commit([]byte(commit.String() + "\n")); err != nil {
+	if err := branchLock.Commit([]byte(commit.String() + "\n")); err != nil {
 		return false, fmt.Errorf("gitx: update %s in %s: %w", branch, r.dir, err)
 	}
-	if err := indexLock.commit(indexData); err != nil {
+	if err := indexLock.Commit(indexData); err != nil {
 		return true, fmt.Errorf("gitx: write index in %s: %w", r.dir, err)
 	}
 	return true, nil
 }
 
-// readIndex reads the index in gitDir, and its modification time; an empty
+// ReadIndex reads the index in gitDir, and its modification time; an empty
 // index when there is none. An index go-git cannot read (the git program
 // writes one under index.skipHash or core.splitIndex), or one with an entry
 // marked assume-unchanged, which go-git's decoder does not keep, returns
 // ErrUseCLI.
-func readIndex(gitDir string) (*index.Index, time.Time, error) {
+func ReadIndex(gitDir string) (*index.Index, time.Time, error) {
 	path := filepath.Join(gitDir, "index")
 	fi, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -258,10 +266,10 @@ func assumesUnchanged(data []byte) bool {
 	return false
 }
 
-// encodeIndex encodes idx as the git program writes it, sorted. go-git's
+// EncodeIndex encodes idx as the git program writes it, sorted. go-git's
 // encoder writes no extensions, so no cached tree survives to disagree with
 // the entries.
-func encodeIndex(idx *index.Index) ([]byte, error) {
+func EncodeIndex(idx *index.Index) ([]byte, error) {
 	sort.Slice(idx.Entries, func(i, j int) bool { return idx.Entries[i].Name < idx.Entries[j].Name })
 	idx.Cache, idx.ResolveUndo, idx.EndOfIndexEntry = nil, nil, nil
 	var buf bytes.Buffer
@@ -440,7 +448,7 @@ func (s *scan) walk(parts []string, abs string, ps []gitignore.Pattern, ignored 
 			return err
 		}
 		entry.Hash, entry.ModifiedAt, entry.Size = h, info.ModTime(), uint32(info.Size())
-		fillStat(entry, info)
+		FillStat(entry, info)
 		s.indexChanged = true
 	}
 	return nil
@@ -456,7 +464,7 @@ func sameStat(entry *index.Entry, info os.FileInfo) bool {
 		return false
 	}
 	var now index.Entry
-	fillStat(&now, info)
+	FillStat(&now, info)
 	if !entry.CreatedAt.IsZero() && !now.CreatedAt.IsZero() && !sameTime(entry.CreatedAt, now.CreatedAt) {
 		return false
 	}
@@ -503,11 +511,11 @@ func (s *scan) writeBlob(path string) (plumbing.Hash, error) {
 	if err := w.Close(); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	return storeObject(s.repo, obj)
+	return StoreObject(s.repo, obj)
 }
 
-// storeObject writes obj unless the repository has it, and returns its hash.
-func storeObject(repo *git.Repository, obj plumbing.EncodedObject) (plumbing.Hash, error) {
+// StoreObject writes obj unless the repository has it, and returns its hash.
+func StoreObject(repo *git.Repository, obj plumbing.EncodedObject) (plumbing.Hash, error) {
 	h := obj.Hash()
 	if repo.Storer.HasEncodedObject(h) == nil {
 		return h, nil
@@ -651,7 +659,7 @@ func persistTree(repo *git.Repository, node *treeNode, known plumbing.Hash) erro
 			return err
 		}
 	}
-	_, err := storeObject(repo, node.obj)
+	_, err := StoreObject(repo, node.obj)
 	return err
 }
 
@@ -659,8 +667,8 @@ func persistTree(repo *git.Repository, node *treeNode, known plumbing.Hash) erro
 // "COMMITTER"): GIT_<role>_DATE when set, else now. A pinned date that does
 // not parse is ErrUseCLI, which CommitAllAs reports before it changes
 // anything.
-func signatureTime(role string) (time.Time, error) {
-	if v := os.Getenv("GIT_" + role + "_DATE"); v != "" {
+func signatureTime(role string, env envLookup) (time.Time, error) {
+	if v, _ := env("GIT_" + role + "_DATE"); v != "" {
 		t, ok := parseGitDate(v)
 		if !ok {
 			return time.Time{}, ErrUseCLI
@@ -672,12 +680,12 @@ func signatureTime(role string) (time.Time, error) {
 
 // signature is the git program's identity for role ("AUTHOR" or
 // "COMMITTER"): GIT_<role>_NAME and _EMAIL when set, else id, stamped when.
-func signature(role string, id Identity, when time.Time) *object.Signature {
+func signature(role string, id Identity, when time.Time, env envLookup) *object.Signature {
 	name, email := id.Name, id.Email
-	if v := os.Getenv("GIT_" + role + "_NAME"); v != "" {
+	if v, _ := env("GIT_" + role + "_NAME"); v != "" {
 		name = v
 	}
-	if v := os.Getenv("GIT_" + role + "_EMAIL"); v != "" {
+	if v, _ := env("GIT_" + role + "_EMAIL"); v != "" {
 		email = v
 	}
 	return &object.Signature{Name: name, Email: email, When: when}

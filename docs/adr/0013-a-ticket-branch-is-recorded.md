@@ -341,7 +341,7 @@ tracker's whole history of the branch, where the question asked here is only
 whether there is a pull request to update.
 
 **The memorize commit is a jig commit like any other.** The retrieval notes
-(`.claude/retrieval/<ticket>.md`) are committed on the branch by publish, and on
+(one file per ticket, in a directory of the repo's own) were committed on the branch by publish, and on
 an adopted branch they land on top of the author's commits and stay a commit of
 their own instead of folding into a squash. They are jig's addition to a branch
 someone else built, in a directory the author may not have; the merge of the
@@ -388,3 +388,10 @@ resumes a parked slice by the same rule. `jig requeue --from-brief-diff` on a
 ticket with no `brief.md` is refused with the slices' own remedies (`jig
 requeue --slice`, answering the question) instead of failing on the missing
 file. The journal still records what the builder reported.
+
+## Amendment: publish no longer commits retrieval notes
+
+The retrieval notes were a per-ticket file kept in the repository so a later session could skip a search. Publish now commits nothing on the branch: the memorize commit above
+no longer exists, the notes' directory is removed from the repository, and
+origin's branch is exactly the reviewed head. The rest of this ADR (a ticket
+branch is recorded, and jig's other commits on an adopted branch) stands.

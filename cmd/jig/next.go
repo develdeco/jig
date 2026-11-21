@@ -16,6 +16,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -31,7 +32,7 @@ func init() {
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 			{"topology", "also print every slice of the ticket with its repo, wave and blockers", false},
-			{"for", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already", false},
+			{"for", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already", false},
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
 		}, false},
@@ -66,7 +67,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	topology := fs.Bool("topology", false, "also print every slice of the ticket with its repo, wave and blockers")
-	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review or publish): says whether it can run now, what it waits for, or that it is done already")
+	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already")
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
@@ -106,7 +107,14 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 
 	var out any
 	var blocks []string
-	if chart, ok := chartNamed(st, ticket); ok {
+	chart, ok := chartNamed(st, ticket)
+	if !ok && *forFlag == "" && !*topology {
+		// An issue that has a chart is asked for its run: the chart's standing,
+		// with the prompt in the issue's id.
+		chart = chartOfIssueWord(st, ticket)
+		ok = chart != ""
+	}
+	if ok {
 		if *forFlag != "" || *topology {
 			return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("--for and --topology ask about a ticket: %s is a chart", chart), Code: "VALIDATION_ERROR"})
 		}
@@ -126,6 +134,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		n := chartOutput(c, m, chartSpend(st, c))
 		n.Named = c.Named
 		n.setWorkspaceOverlaps(st, cfg, mp)
+		n.setIssue(st, cfg, mp, merges)
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
 		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))
@@ -176,16 +185,39 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 // closed (`jig close`), such as "covered by develdeco/jig#82" or "not planned",
 // when it was.
 type nextTicket struct {
-	Ticket       string        `json:"ticket"`
-	Title        string        `json:"title,omitempty"`
-	State        string        `json:"state"`
-	Closed       string        `json:"closed,omitempty"`
-	Branch       string        `json:"branch"`
-	Distribution string        `json:"distribution,omitempty"`
-	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
+	Ticket       string `json:"ticket"`
+	Title        string `json:"title,omitempty"`
+	State        string `json:"state"`
+	Closed       string `json:"closed,omitempty"`
+	Branch       string `json:"branch"`
+	Distribution string `json:"distribution,omitempty"`
+	// Kind is named for a ticket that is not a task (an issue or a multi-task),
+	// which is not briefed or built: Chart (an issue's), Issues (a multi-task's)
+	// and Children say where it stands. Parent is a task's multi-task.
+	Kind      string        `json:"kind,omitempty"`
+	Parent    string        `json:"parent,omitempty"`
+	Chart     string        `json:"chart,omitempty"`
+	Issues    []string      `json:"issues,omitempty"`
+	Children  []nextChild   `json:"children,omitempty"`
+	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
+	// Prompt, Waits and Unmet are, for an issue or a multi-task, what its own
+	// pull request waits for: State is then waiting, ready, published or landed
+	// (land.ReadinessOf), Waits the children not landed and Unmet the
+	// preconditions not met; Prompt is what to ask next.
+	Prompt string      `json:"prompt,omitempty"`
+	Waits  []nextWait  `json:"waits,omitempty"`
+	Unmet  []nextUnmet `json:"unmet,omitempty"`
+	// Waived are an issue's suite waivers standing at its tips.
+	Waived []string `json:"waived,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
+	// Shared is, for a task two issues list, one row for each issue and repo:
+	// its branch, its pull request and where that stands.
+	Shared []nextIssueRow `json:"shared,omitempty"`
+	// LandsAfter is, for an issue suggested to land after others, one row for
+	// each: a suggestion, never a blocker.
+	LandsAfter []nextAfterRow `json:"lands_after,omitempty"`
 	// Conflicts are the files this ticket's branch cannot merge with another
 	// open ticket's (conflict.go); Clean are sharing pairs that merge fine.
 	Conflicts []ticketConflict `json:"conflicts,omitempty"`
@@ -214,6 +246,183 @@ type nextTicket struct {
 
 	// derived is the same derivation, for the help.
 	derived *phase.Ticket
+	// unpublished are the issues of a shared task with no pull request yet.
+	unpublished []string
+}
+
+// nextChild is one ticket under an issue (an entry of its chart, whose ID is
+// empty until it graduates) or under a multi-task.
+type nextChild struct {
+	ID    string `json:"id,omitempty"`
+	Title string `json:"title"`
+	Kind  string `json:"kind,omitempty"`
+}
+
+// nextWait is one child of a container that has not landed, with its standing.
+type nextWait struct {
+	Ticket   string `json:"ticket"`
+	Standing string `json:"standing"`
+}
+
+// nextUnmet is one precondition of a container's publish that is not met.
+type nextUnmet struct {
+	Code   string `json:"code"`
+	Why    string `json:"why"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// containerReadiness is where the issue or multi-task id stands before its own
+// pull request: land.ReadinessOf over the project's merge facts.
+func containerReadiness(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, id string) (land.Readiness, error) {
+	lm, ok := merges.(land.Merges)
+	if !ok {
+		lm = ofForOf{merges}
+	}
+	return land.ReadinessOf(land.Deps{Store: st, Cfg: cfg, Clones: mp.Clones, Merges: lm}, id)
+}
+
+// ofForOf reads a merge source that knows no shared task as one whose fact for
+// any issue is its fact.
+type ofForOf struct{ mergeSource }
+
+func (m ofForOf) OfFor(ticket, _ string) (ready.Merge, error) { return m.Of(ticket) }
+
+// nextNotATask is `jig next <ticket>` for an issue or a multi-task: its kind,
+// where it stands in the model and its children, and no phase, since it has no
+// brief or slices: nextForTicket adds the readiness of its own pull request,
+// with the prompt that moves it (land.ReadinessOf).
+func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
+	id := data.in.ID
+	n := nextTicket{Ticket: id, Title: data.title, State: kind, Kind: kind, Ready: []nextBatch{}}
+	switch kind {
+	case store.KindIssue:
+		if chart, _ := st.ChartOfIssue(id); chart != "" {
+			n.Chart = chart
+			if entries, err := st.ReadChart(chart); err == nil {
+				for _, e := range entries {
+					n.Children = append(n.Children, nextChild{ID: e.ID, Title: e.Title, Kind: e.Kind})
+				}
+			}
+		}
+	case store.KindMultiTask:
+		n.Issues, _ = st.IssuesOf(id)
+		ids, _ := st.Tickets()
+		for _, other := range ids {
+			if rec, err := st.ReadTicket(other); err == nil && rec.Parent == id {
+				n.Children = append(n.Children, nextChild{ID: other, Title: rec.Title})
+			}
+		}
+	}
+	return n
+}
+
+// ownBranchFacts adds to n, the `jig next` of an issue or a multi-task, its own
+// branch and, in each repo its tasks build in, where it starts and where its
+// pull request would go: facts only, since nothing here publishes either.
+func ownBranchFacts(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, rec store.Ticket, n nextTicket) (nextTicket, error) {
+	branch, err := ticketBranch(st, cfg, n.Ticket, rec)
+	if err != nil {
+		return nextTicket{}, err
+	}
+	plan, err := stack.Read(stackInput(st, cfg, mp, merges), n.Ticket)
+	if err != nil {
+		return nextTicket{}, err
+	}
+	n.Branch = branch
+	n.Stack = stackRows(plan, false)
+	return n, nil
+}
+
+// notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
+// multi-task: no phase and no ready table, and for `next` the prompt of its own
+// pull request, with the children not landed. `jig status <ticket>`
+// prints the same under its own shape: top-level ticket: and state: lines, which
+// the screens of the TUI read.
+func (n nextTicket) notATaskBlocks(verb string) []string {
+	var blocks []string
+	if verb == "status" {
+		blocks = []string{"ticket: " + n.Ticket, "state: " + n.State, "kind: " + n.Kind}
+		if n.Chart != "" {
+			blocks = append(blocks, "chart: "+n.Chart)
+		}
+		if len(n.Issues) > 0 {
+			blocks = append(blocks, "issue: "+strings.Join(n.Issues, ", "))
+		}
+	} else {
+		pairs := [][2]string{{"ticket", n.Ticket}}
+		if n.Title != "" {
+			pairs = append(pairs, [2]string{"title", n.Title})
+		}
+		pairs = append(pairs, [2]string{"state", n.State}, [2]string{"kind", n.Kind})
+		if n.Parent != "" {
+			pairs = append(pairs, [2]string{"parent", n.Parent})
+		}
+		if n.Branch != "" {
+			pairs = append(pairs, [2]string{"branch", n.Branch})
+		}
+		if n.Chart != "" {
+			pairs = append(pairs, [2]string{"chart", n.Chart})
+		}
+		if len(n.Issues) > 0 {
+			pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
+		}
+		if n.Prompt != "" {
+			pairs = append(pairs, [2]string{"prompt", n.Prompt})
+		}
+		blocks = []string{axi.KV("next", pairs)}
+		blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
+	}
+	if len(n.Children) > 0 {
+		var rows [][]string
+		for _, c := range n.Children {
+			id, kind := c.ID, c.Kind
+			if id == "" {
+				id = "-"
+			}
+			if kind == "" {
+				kind = store.KindTask
+			}
+			rows = append(rows, []string{id, kind, c.Title})
+		}
+		blocks = append(blocks, axi.Table("children", []string{"ticket", "kind", "title"}, rows))
+	} else {
+		blocks = append(blocks, "children: none")
+	}
+	if len(n.Waits) > 0 {
+		rows := make([][]string, len(n.Waits))
+		for i, w := range n.Waits {
+			rows[i] = []string{w.Ticket, w.Standing}
+		}
+		blocks = append(blocks, axi.Table("waits", []string{"ticket", "standing"}, rows))
+	}
+	if len(n.Unmet) > 0 {
+		rows := make([][]string, len(n.Unmet))
+		for i, u := range n.Unmet {
+			rows[i] = []string{u.Code, u.Why, u.Prompt}
+		}
+		blocks = append(blocks, axi.Table("unmet", []string{"code", "why", "prompt"}, rows))
+	}
+	help := fmt.Sprintf("A %s is not briefed or built: run `jig next <ticket>` on one of its tasks", n.Kind)
+	switch {
+	case verb == "next" && n.State == land.StateWaiting && len(n.Waits) == 0 && len(n.Unmet) > 0:
+		help = fmt.Sprintf("%s waits for %s", n.Ticket, n.Unmet[0].Why)
+		if n.Prompt != "" {
+			help += fmt.Sprintf(": ask `%s`", n.Prompt)
+		}
+	case verb == "next" && n.State == land.StateReady:
+		help = fmt.Sprintf("Every child of %s has landed: ask `%s`, which opens its pull request", n.Ticket, n.Prompt)
+	case verb == "next" && n.State == land.StatePublished:
+		help = fmt.Sprintf("%s has its pull request: ask `%s` to merge it", n.Ticket, n.Prompt)
+	case verb == "next" && n.State == land.StateWaiting && len(n.Children) == 0:
+		help = fmt.Sprintf("%s has no children yet: graduate its chart", n.Ticket)
+	case verb == "next" && n.State == land.StateWaiting:
+		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
+	}
+	if len(n.Waived) > 0 {
+		blocks = append(blocks, axi.KV("waived", waivedRows(n.Waived)))
+	}
+	blocks = append(blocks, afterBlock(n.LandsAfter)...)
+	return append(blocks, axi.Help(append(append([]string{help}, suiteHelp(n)...), afterHelp(n.Ticket, n.LandsAfter)...)...))
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
@@ -255,7 +464,7 @@ func parseAskedPhase(word, ticket string) (phase.Name, error) {
 	p, ok := phase.Parse(word)
 	switch {
 	case !ok:
-		return "", &axi.Error{Msg: fmt.Sprintf("--for %q is none of the phases", word), Code: "VALIDATION_ERROR", Help: []string{"The phases are brief, build, review and publish"}}
+		return "", &axi.Error{Msg: fmt.Sprintf("--for %q is none of the phases", word), Code: "VALIDATION_ERROR", Help: []string{"The phases are brief, build, review, publish and land"}}
 	case ticket == "":
 		return "", &axi.Error{Msg: "--for asks about a ticket: name one", Code: "VALIDATION_ERROR"}
 	}
@@ -296,7 +505,7 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 
 // setReviewer says who reviews the ticket when review is the phase that can
 // start now: whether the calling session (envSession) may review it itself, and
-// the advice for it (decision 39). It adds nothing when review is not ready, as
+// the advice for it. It adds nothing when review is not ready, as
 // while a round is open, whose reviewer is at work already, or when the
 // environment names no session.
 func (n *nextTicket) setReviewer(e env, d verifydeliver.Deps) {
@@ -409,10 +618,12 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
 }
 
-// blockerInput is blocker id as readiness sees it from a ticket that waits for
-// it: whether it published and whether it was closed.
-func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
-	published, err := isPublished(st, id)
+// blockerInputFor is blocker id as readiness sees it from the ticket dependent
+// that waits for it: whether it published and whether it was closed.
+func blockerInputFor(st *store.Store, dependent, id string) (ready.Ticket, error) {
+	// A blocker that is a shared task has published, for its dependent, when it
+	// published into the dependent's issue.
+	published, err := publishedFor(st, dependent, id, "")
 	if err != nil {
 		return ready.Ticket{}, err
 	}
@@ -423,9 +634,17 @@ func blockerInput(st *store.Store, id string) (ready.Ticket, error) {
 	return ready.Ticket{ID: id, Published: published, Closed: rec.Closed}, nil
 }
 
-// isPublished reports whether ticket's journal has a publish-done line.
+// isPublished reports whether ticket's journal has a publish-done line, and for
+// a shared task one into each of its issues (publishedAll).
 func isPublished(st *store.Store, id string) (bool, error) {
-	return journal.HasEvent(st, id, journal.EventPublishDone)
+	if done, err := journal.HasEvent(st, id, journal.EventPublishDone); err != nil || !done {
+		return false, err
+	}
+	lines, err := journal.Read(st, id)
+	if err != nil {
+		return false, err
+	}
+	return publishedAll(st, id, lines), nil
 }
 
 // nextForTicket works out what is ready to build on ticket id, and which phase
@@ -434,6 +653,30 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	data, err := readTicketData(st, id)
 	if err != nil {
 		return nextTicket{}, err
+	}
+	if k := data.rec.KindOrDefault(); k != store.KindTask {
+		n, err := ownBranchFacts(st, cfg, mp, merges, data.rec, nextNotATask(st, data, k))
+		if err != nil {
+			return nextTicket{}, err
+		}
+		if k == store.KindIssue {
+			if n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id); err != nil {
+				return nextTicket{}, err
+			}
+		}
+		r, err := containerReadiness(st, cfg, mp, merges, id)
+		if err != nil {
+			return nextTicket{}, err
+		}
+		n.State, n.Prompt = r.State, r.Prompt
+		for _, w := range r.Waits {
+			n.Waits = append(n.Waits, nextWait{Ticket: w.Ticket, Standing: w.Standing})
+		}
+		for _, u := range r.Unmet {
+			n.Unmet = append(n.Unmet, nextUnmet{Code: u.Code, Why: u.Why, Prompt: u.Prompt})
+		}
+		n.Waived = r.Waived
+		return n, nil
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
 	branch, err := ticketBranch(st, cfg, id, data.rec)
@@ -445,13 +688,13 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	// their work has merged.
 	inputs := []ready.Ticket{data.in}
 	for _, b := range data.in.Blockers {
-		in, err := blockerInput(st, b.Ticket)
+		in, err := blockerInputFor(st, id, b.Ticket)
 		if err != nil {
 			return nextTicket{}, err
 		}
 		inputs = append(inputs, in)
 	}
-	readMerges(merges, inputs)
+	readMerges(st, merges, inputs, true)
 	status := ready.Tickets(inputs)[0]
 	// A stacked ticket starts from its parent's branch where they share a
 	// repo, and its pull request goes there, until the parent merges.
@@ -462,7 +705,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
-		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
+		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: data.rec.Parent,
 	}
 	if data.rec.Closed != nil {
 		n.Closed = data.rec.Closed.Phrase()
@@ -481,6 +724,11 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		}
 	}
 	n.Stack = stackRows(plan, data.in.Published)
+	// A task two issues share has a pull request into each: one row for each
+	// issue and repo, and the publish each issue still needs.
+	if n.Shared, n.unpublished, err = sharedRows(st, stackInput(st, cfg, mp, merges), merges, id); err != nil {
+		return nextTicket{}, err
+	}
 	advice := ticketConflictAdvice(st, cfg, mp, id, merges)
 	n.Conflicts, n.CleanWith = advice.Conflicts, advice.Clean
 	for _, b := range ready.Batches(readySlices, place.Repo) {
@@ -565,6 +813,9 @@ func distributionAdvice(all []nextBatch) []string {
 }
 
 func (n nextTicket) blocks(topology bool) []string {
+	if n.Kind != "" {
+		return n.notATaskBlocks("next")
+	}
 	pairs := [][2]string{{"ticket", n.Ticket}}
 	if n.Title != "" {
 		pairs = append(pairs, [2]string{"title", n.Title})
@@ -572,6 +823,9 @@ func (n nextTicket) blocks(topology bool) []string {
 	pairs = append(pairs, [2]string{"state", n.State})
 	if n.Closed != "" {
 		pairs = append(pairs, [2]string{"closed", n.Closed})
+	}
+	if n.Parent != "" {
+		pairs = append(pairs, [2]string{"parent", n.Parent})
 	}
 	pairs = append(pairs, [2]string{"branch", n.Branch})
 	if n.Distribution != "" {
@@ -590,6 +844,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		blocks = append(blocks, axi.Table("blocked_by", []string{"ticket", "kind", "fact"}, rows))
 	}
 	blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
+	blocks = append(blocks, sharedBlocks(n.Shared)...)
 	if len(n.Ready) == 0 {
 		blocks = append(blocks, "ready: none")
 	} else {
@@ -625,7 +880,7 @@ func (n nextTicket) blocks(topology bool) []string {
 		}
 		blocks = append(blocks, axi.Table("topology", []string{"slice", "workspace", "repo", "state", "wave", "blocked_by"}, rows))
 	}
-	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), n.help()...)...))
+	return append(blocks, axi.Help(append(append(worktreeHelp(n.Ticket, n.Worktrees), conflictHelp(n.Ticket, n.Conflicts)...), append(n.help(), sharedHelp(n.Ticket, n.Shared, n.unpublished)...)...)...))
 }
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
@@ -676,6 +931,9 @@ func (n nextTicket) help() []string {
 	case ready.StateClosed:
 		return []string{fmt.Sprintf("%s is closed (%s): run `jig reopen %s` to work it again, or `jig next` to see a ticket that is ready", n.Ticket, n.Closed, n.Ticket)}
 	case ready.StateDone:
+		if t != nil && t.Current == phase.Land {
+			return []string{landAdvice(*t, n.Ticket, issuesOfRows(n.Shared))}
+		}
 		return []string{n.Ticket + " is published: run `jig next` to see the tickets that are left"}
 	case stateBehind:
 		if help := n.behindHelp(); len(help) > 0 {
@@ -765,6 +1023,9 @@ type nextStore struct {
 	// Next are the ids of the ready tickets in the order to start them: by
 	// rank, lowest first, then by id, the unranked last.
 	Next []string `json:"next"`
+	// IssueOrder are the issues with a predecessor they are suggested to land
+	// after that has not landed; a suggestion, never a wait.
+	IssueOrder []nextIssueOrder `json:"issue_order,omitempty"`
 	// SharedRanks are the ranks that more than one ready ticket holds.
 	SharedRanks []nextSharedRank `json:"shared_ranks,omitempty"`
 	// WorkspaceOverlaps are the workspaces that two ready tickets both build
@@ -780,6 +1041,9 @@ type nextRow struct {
 	Title  string `json:"title,omitempty"`
 	State  string `json:"state"`
 	Closed string `json:"closed,omitempty"`
+	// Kind is named for an issue or a multi-task, which is never ready to
+	// brief or build and never in the order to start.
+	Kind string `json:"kind,omitempty"`
 	// Rank is the ticket's rank (ticket.yaml), absent when it has none.
 	Rank      *int          `json:"rank,omitempty"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
@@ -856,7 +1120,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		datas[i] = readTicketDataOrProblem(st, id)
 		inputs[i] = datas[i].in
 	}
-	readMerges(merges, inputs)
+	readMerges(st, merges, inputs, false)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked
@@ -877,6 +1141,11 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 			out.Tickets = append(out.Tickets, row)
 			continue
 		}
+		if k := datas[i].rec.KindOrDefault(); k != store.KindTask {
+			row.State, row.Kind, row.Ready = k, k, []string{}
+			out.Tickets = append(out.Tickets, row)
+			continue
+		}
 		out.Tickets = append(out.Tickets, row)
 		if s.State == ready.StateReady {
 			ranked = append(ranked, ready.Ranked{ID: s.ID, Rank: datas[i].rec.Rank})
@@ -884,6 +1153,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 	}
 	out.Next = ready.ByPriority(ranked)
+	out.IssueOrder = issueOrder(afterDeps(st, cfg, mp, merges))
 	for _, s := range ready.SharedRanks(ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
@@ -971,6 +1241,7 @@ func (n nextStore) blocks() []string {
 		}
 		blocks = append(blocks, axi.Table("next", []string{"ticket", "rank", "title"}, order))
 	}
+	blocks = append(blocks, issueOrderBlock(n.IssueOrder)...)
 	blocks = append(blocks, chartBlocks(n.Charts)...)
 	for _, s := range n.SharedRanks {
 		blocks = append(blocks, fmt.Sprintf("warning: rank %d is shared by %s: they are ordered by id", s.Rank, andList(s.Tickets)))
@@ -1129,8 +1400,9 @@ func findOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 	return out
 }
 
-// testedPair is a pair of tickets of one repo whose branches share a changed
-// file, with what merging the two in memory gave (testPair).
+// testedPair is a pair of branches, one of each of two tickets of one repo,
+// that share a changed file, with what merging the two in memory gave
+// (testPair). Two tickets with several branches give several pairs.
 type testedPair struct {
 	Repo             string
 	A, B             string // ticket ids, A before B
@@ -1141,7 +1413,8 @@ type testedPair struct {
 }
 
 // scanOverlaps is findOverlaps with, besides, each pair of tickets that
-// shares a file, merged once however many files it shares.
+// shares a file, each pair of their branches that both change it merged once
+// however many files the pair shares.
 //
 // Only the branches of tickets open says are open are paired. A ticket named
 // in only limits the work to the pairs that hold it: the other tickets' files
@@ -1214,6 +1487,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		type touch struct {
 			tickets, branches map[string]bool
+			byTicket          map[string]map[string]bool
 		}
 		files := map[string]*touch{}
 		// One git process for each branch, started together: a session start
@@ -1235,27 +1509,27 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			for _, f := range changed[i] {
 				t := files[f]
 				if t == nil {
-					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}}
+					t = &touch{tickets: map[string]bool{}, branches: map[string]bool{}, byTicket: map[string]map[string]bool{}}
 					files[f] = t
 				}
 				t.tickets[b.ticket] = true
 				t.branches[b.branch] = true
+				if t.byTicket[b.ticket] == nil {
+					t.byTicket[b.ticket] = map[string]bool{}
+				}
+				t.byTicket[b.ticket][b.branch] = true
 			}
 		}
-		// A pair of tickets that shares a file is merged once, however many
-		// files it shares.
-		branchOf := map[string]string{}
-		for _, b := range bounds {
-			if _, ok := branchOf[b.ticket]; !ok {
-				branchOf[b.ticket] = b.branch
-			}
-		}
+		// A pair of branches of two tickets that both change a file is merged
+		// once, however many files the pair shares. A branch that lacks the
+		// file is not merged for it.
 		type verdict struct {
 			state string
 			files []string
 		}
-		tested := map[[2]string]verdict{}
-		pairAt := map[[2]string]int{}
+		type branchPair struct{ a, b string }
+		tested := map[branchPair]verdict{}
+		pairAt := map[branchPair]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
 			t := files[f]
 			if len(t.tickets) < 2 || (only != "" && !t.tickets[only]) {
@@ -1269,21 +1543,25 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 					if only != "" && ids[i] != only && ids[j] != only {
 						continue
 					}
-					key := [2]string{ids[i], ids[j]}
-					v, ok := tested[key]
-					if !ok {
-						v.state, v.files = testPair(dir, branchOf[ids[i]], branchOf[ids[j]])
-						tested[key] = v
-						pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: branchOf[ids[i]], BranchB: branchOf[ids[j]], State: v.state, Files: v.files})
-						pairAt[key] = len(pairs) - 1
-					}
-					pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
-					switch {
-					case v.state == pairConflict:
-						state = pairConflict
-						conflicted = append(conflicted, v.files...)
-					case v.state == pairUntested && state == pairClean:
-						state = pairUntested
+					for _, ba := range sortedStrings(mapKeys(t.byTicket[ids[i]])) {
+						for _, bb := range sortedStrings(mapKeys(t.byTicket[ids[j]])) {
+							key := branchPair{ba, bb}
+							v, ok := tested[key]
+							if !ok {
+								v.state, v.files = testPair(dir, ba, bb)
+								tested[key] = v
+								pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: ba, BranchB: bb, State: v.state, Files: v.files})
+								pairAt[key] = len(pairs) - 1
+							}
+							pairs[pairAt[key]].Shared = append(pairs[pairAt[key]].Shared, f)
+							switch {
+							case v.state == pairConflict:
+								state = pairConflict
+								conflicted = append(conflicted, v.files...)
+							case v.state == pairUntested && state == pairClean:
+								state = pairUntested
+							}
+						}
 					}
 				}
 			}
@@ -1313,4 +1591,32 @@ func mapKeys[V any](m map[string]V) []string {
 func sortedStrings(s []string) []string {
 	sort.Strings(s)
 	return s
+}
+
+// suiteHelp are the lines `jig next <issue>` adds for its suite: a failed run
+// is a fix task the session adds to the chart, and a task's pull request into
+// the issue's branch need not run the whole suite in CI. jig names both and
+// enforces neither.
+func suiteHelp(n nextTicket) []string {
+	var out []string
+	for _, u := range n.Unmet {
+		switch u.Code {
+		case land.SuiteFailed:
+			out = append(out, fmt.Sprintf("The suite failed, so add a fix task: an entry in the chart of %s (intake, then `jig graduate`) whose blocked_by is merged on the chart's last entries, the ones no entry depends on, so it starts from the issue's branch and its pull request goes into it; it reopens the suite at the new tip", n.Ticket))
+			return append(out, suiteCINote)
+		case land.SuiteNotRun:
+			return append(out, suiteCINote)
+		}
+	}
+	return out
+}
+
+// waivedRows is a list of sentences as the key-value rows of a block: one row each,
+// keyed by its position.
+func waivedRows(rows []string) [][2]string {
+	out := make([][2]string, len(rows))
+	for i, r := range rows {
+		out[i] = [2]string{fmt.Sprint(i + 1), r}
+	}
+	return out
 }

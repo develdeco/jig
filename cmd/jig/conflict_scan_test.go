@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -312,45 +315,96 @@ func TestAdviceMergesNothingForATicketThatSharesNoFile(t *testing.T) {
 	}
 }
 
+// slowGitEnv, when set to a number of seconds, puts a git on PATH that sleeps
+// that long before every call, to show how the scan behaves on a slow machine.
+// A plain run never sets it.
+const slowGitEnv = "JIG_TEST_SLOW_GIT_SECONDS"
+
+// slowGit puts the slow git shim on PATH for the rest of the test when
+// slowGitEnv asks for it.
+func slowGit(t *testing.T) {
+	t.Helper()
+	secs := os.Getenv(slowGitEnv)
+	if secs == "" {
+		return
+	}
+	n, err := strconv.Atoi(secs)
+	if err != nil || n < 1 {
+		t.Fatalf("%s = %q, want whole seconds", slowGitEnv, secs)
+	}
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A built program, not a script: a Windows batch file mangles arguments
+	// such as main^{commit}.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "shim.go")
+	prog := fmt.Sprintf(`package main
+
+import (
+	"os"
+	"os/exec"
+	"time"
+)
+
+func main() {
+	time.Sleep(%d * time.Second)
+	cmd := exec.Command(%q, os.Args[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+`, n, real)
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "bin")
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(bin, name), src)
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the slow git: %v: %s", err, out)
+	}
+	dir = bin
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestScanWithMoreBranchesThanDiffSlots: nine bound branches against four diff
 // slots, and against one: every branch's files arrive, the rows and pairs come
 // out in the same order each time, and the scan finishes. A slot that is never
-// released would hang the fifth branch (or the second, with one slot), so the
-// scan runs under a timeout and fails instead of hanging.
+// released would hang the fifth branch (or the second, with one slot). The test
+// sets no deadline of its own, which would measure how slow the machine is, not
+// whether a slot was lost: go test's -timeout ends a hung scan with a panic that
+// names this test.
 func TestScanWithMoreBranchesThanDiffSlots(t *testing.T) {
 	ids := []string{"T-1", "T-2", "T-3", "T-4", "T-5", "T-6", "T-7", "T-8", "T-9"}
 	r := newConflictRig(t, ids...)
 	for i, id := range ids {
 		r.branch(id+"-b", strings.Repeat("x", i+1)+"\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
 	}
+	slowGit(t)
 	real := diffConcurrency
 	defer func() { diffConcurrency = real }()
 
 	var first []string
 	for _, slots := range []int{4, 1, 4} {
 		diffConcurrency = func() int { return slots }
-		type result struct {
-			rows  []nextOverlap
-			pairs []testedPair
+		rows, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+		if len(rows) != 1 || len(rows[0].Tickets) != 9 || len(rows[0].Branches) != 9 {
+			t.Fatalf("slots %d: rows = %+v, want one row of f.txt holding all nine tickets and branches", slots, rows)
 		}
-		done := make(chan result, 1)
-		go func() {
-			rows, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
-			done <- result{rows, pairs}
-		}()
-		var got result
-		select {
-		case got = <-done:
-		case <-time.After(60 * time.Second):
-			t.Fatalf("the scan with %d diff slots and nine branches did not finish: a slot is never released", slots)
+		if len(pairs) != 36 {
+			t.Fatalf("slots %d: %d pairs, want all 36", slots, len(pairs))
 		}
-		if len(got.rows) != 1 || len(got.rows[0].Tickets) != 9 || len(got.rows[0].Branches) != 9 {
-			t.Fatalf("slots %d: rows = %+v, want one row of f.txt holding all nine tickets and branches", slots, got.rows)
-		}
-		if len(got.pairs) != 36 {
-			t.Fatalf("slots %d: %d pairs, want all 36", slots, len(got.pairs))
-		}
-		order := pairsOf(got.pairs)
+		order := pairsOf(pairs)
 		if first == nil {
 			first = order
 		} else if !reflect.DeepEqual(order, first) {
@@ -389,5 +443,184 @@ func TestAdviceJudgesAPublishedTicketByItsLatestPullRequest(t *testing.T) {
 	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, ticketOpenFilter(r.st, states), "T-1")
 	if got, want := pairsOf(pairs), []string{"T-1+T-3"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("pairs = %v, want %v: T-2's latest pull request is merged, T-3's is open", got, want)
+	}
+}
+
+// TestStoreOverlapsMarkAnUntriedPairUntested: two open tickets' branches share
+// a file but git cannot try their merge, so the row says untested, never clean.
+func TestStoreOverlapsMarkAnUntriedPairUntested(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	real := testPairWith
+	testPairWith = func(dir, a, b string) (string, []string) {
+		// The merge fails as a merge-tree call that errors does.
+		return real(dir, a, "no-such-ref")
+	}
+	t.Cleanup(func() { testPairWith = real })
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].File != "f.txt" {
+		t.Fatalf("rows = %+v, want f.txt only", rows)
+	}
+	if rows[0].Conflict != pairUntested || len(rows[0].Files) != 0 {
+		t.Errorf("row = %+v, want untested with no files: git cannot try the merge", rows[0])
+	}
+}
+
+// TestStoreOverlapsLeaveOutTicketsThatAreNotOpen: findOverlaps given an open
+// filter leaves out the branches of a ticket the filter rejects, so a file only
+// that ticket shares with another has no row.
+func TestStoreOverlapsLeaveOutTicketsThatAreNotOpen(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2", "T-3")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-2-b", topChangedAlt)
+	r.branch("T-3-c", topChangedNew)
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, func(id string) bool { return id != "T-3" })
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Tickets, []string{"T-1", "T-2"}) {
+		t.Fatalf("rows = %+v, want one row for T-1 and T-2 alone", rows)
+	}
+	rows = findOverlaps(r.st, r.cfg, r.mp, func(id string) bool { return id == "T-1" })
+	if len(rows) != 0 {
+		t.Errorf("rows = %+v, want none: one open ticket shares with nobody", rows)
+	}
+}
+
+// TestAdviceTestsEachBranchOfATicketThatHasSeveral: a ticket whose first branch
+// merges cleanly but whose second conflicts is told it conflicts, naming the
+// second branch.
+func TestAdviceTestsEachBranchOfATicketThatHasSeveral(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].File != "f.txt" || rows[0].Conflict != pairConflict {
+		t.Fatalf("rows = %+v, want one conflicting row naming f.txt", rows)
+	}
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	found := false
+	for _, p := range pairs {
+		if p.State == pairConflict && p.BranchA == "T-1-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pairs = %+v, want a conflicting pair on T-1-b", pairs)
+	}
+	var out bytes.Buffer
+	printConflicts(&out, r.st, r.cfg, r.mp, nil, "T-2")
+	if !strings.Contains(out.String(), "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice for T-2 does not list T-1-b:\n%s", out.String())
+	}
+}
+
+// TestAdviceMergesNoBranchThatLacksTheSharedFile: a branch that changes only
+// another file is not merged against the other ticket.
+func TestAdviceMergesNoBranchThatLacksTheSharedFile(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	gitIn(t, r.dir, "switch", "-c", "T-1-other", "main")
+	if err := os.WriteFile(filepath.Join(r.dir, "g.txt"), []byte("g\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, "add", "-A")
+	gitIn(t, r.dir, "commit", "-m", "other file")
+	gitIn(t, r.dir, "switch", "main")
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	if len(pairs) != 1 {
+		t.Errorf("pairs = %+v, want one pair", pairs)
+	}
+	for _, p := range pairs {
+		if p.BranchA == "T-1-other" || p.BranchB == "T-1-other" {
+			t.Errorf("pair %+v merges a branch that lacks the shared file", p)
+		}
+	}
+}
+
+// TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch: when one branch
+// pair of two tickets merges cleanly and another conflicts, the advice with
+// clean shares shows the conflict and no "merges cleanly" line for the ticket.
+func TestAdviceDoesNotCallATicketCleanThatHasAConflictingBranch(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", bottomChanged)
+	r.branch("T-1-b", topChanged)
+	r.branch("T-2-x", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-2")
+	text := strings.Join(conflictBlocks(adviceFromPairs(r.st, pairs, "T-2"), true), "\n")
+	if !strings.Contains(text, "app,T-1,f.txt,T-1-b") {
+		t.Errorf("the advice lacks the conflict row:\n%s", text)
+	}
+	if strings.Contains(text, "merges cleanly") {
+		t.Errorf("the advice calls T-1 clean though one of its branches conflicts:\n%s", text)
+	}
+}
+
+// TestAdviceNamesAConflictingBranchOnceWhenTwoBranchesHitIt: two branches of
+// the ticket in hand that conflict with the same branch of another ticket give
+// one conflict entry, not two.
+func TestAdviceNamesAConflictingBranchOnceWhenTwoBranchesHitIt(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-x", topChanged)
+	r.branch("T-2-a", topChangedAlt)
+	r.branch("T-2-b", topChangedNew)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "T-2")
+	a := adviceFromPairs(r.st, pairs, "T-2")
+	if len(a.Conflicts) != 1 || a.Conflicts[0].Ticket != "T-1" || a.Conflicts[0].Branch != "T-1-x" {
+		t.Errorf("conflicts = %+v, want T-1-x once", a.Conflicts)
+	}
+}
+
+// TestAdviceTestsEachBranchOfTheSecondTicket: the several branches may belong to
+// the ticket that sorts second; its conflicting branch is named in the other
+// ticket's advice.
+func TestAdviceTestsEachBranchOfTheSecondTicket(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-x", topChanged)
+	r.branch("T-2-a", bottomChanged)
+	r.branch("T-2-b", topChangedAlt)
+
+	_, pairs := scanOverlaps(r.st, r.cfg, r.mp, nil, "")
+	found := false
+	for _, p := range pairs {
+		if p.State == pairConflict && p.BranchB == "T-2-b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("pairs = %+v, want a conflicting pair on T-2-b", pairs)
+	}
+	var out bytes.Buffer
+	printConflicts(&out, r.st, r.cfg, r.mp, nil, "T-1")
+	if !strings.Contains(out.String(), "app,T-2,f.txt,T-2-b") {
+		t.Errorf("the advice for T-1 does not list T-2-b:\n%s", out.String())
+	}
+}
+
+// TestStoreOverlapsRankAConflictingPairOverALaterUntestedOne: a row with a
+// conflicting branch pair and a later untested one reads conflict.
+func TestStoreOverlapsRankAConflictingPairOverALaterUntestedOne(t *testing.T) {
+	r := newConflictRig(t, "T-1", "T-2")
+	r.branch("T-1-a", topChanged)
+	r.branch("T-1-b", topChangedNew)
+	r.branch("T-2-x", topChangedAlt)
+	real := testPairWith
+	testPairWith = func(dir, a, b string) (string, []string) {
+		if a == "T-1-a" {
+			return pairConflict, []string{"f.txt"}
+		}
+		return pairUntested, nil
+	}
+	t.Cleanup(func() { testPairWith = real })
+
+	rows := findOverlaps(r.st, r.cfg, r.mp, nil)
+	if len(rows) != 1 || rows[0].Conflict != pairConflict {
+		t.Errorf("rows = %+v, want one conflict row", rows)
 	}
 }

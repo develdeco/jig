@@ -19,8 +19,13 @@ const deltaMaxLines = 400
 
 // deltaReadLine is the `read` line of a delta round's context: what to read,
 // in one sentence. The rule lives here, in jig's output, and not in the review
-// skill (GATE-17).
-const deltaReadLine = "this is a delta round: read the delta block and the answers; for each function or constant the delta changes in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show"
+// skill.
+const deltaReadLine = "this is a delta round: read the delta block and the answers; for each function or constant the delta changes in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show; make independent reads in one step"
+
+// fullReadLine is the `read` line of a full round's context: the same rule as
+// the delta's, over the whole change. A file whose diff and touched code were
+// read counts as read for --reviewed.
+const fullReadLine = "this is a full round: read the change as its diff from base to head in the worktree, with enough context to see each changed function whole; then, for each function or constant the change alters in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show; make independent reads in one step; a file whose diff and touched code you read counts as read for --reviewed"
 
 // deltaDiff is one repo's delta as a delta round's context shows it: the diff
 // base..head, printed when short and held in Path when long, and the files it
@@ -50,25 +55,27 @@ func roundIsDelta(p verifydeliver.Prepared) bool {
 
 // computeDeltaDiffs reads the diff of each repo of a delta round and, over
 // deltaMaxLines, writes it beside the request. It is nil for a full round.
-func computeDeltaDiffs(p verifydeliver.Prepared) ([]deltaDiff, error) {
+// clones maps each repo to the clone the diff is read in: the commits are in its
+// object store.
+func computeDeltaDiffs(p verifydeliver.Prepared, clones map[string]string) ([]deltaDiff, error) {
 	if !roundIsDelta(p) {
 		return nil, nil
 	}
-	type src struct{ repo, lease, base, head string }
+	type src struct{ repo, dir, base, head string }
 	var srcs []src
 	if len(p.Repos) == 0 {
-		srcs = []src{{"", p.Lease, p.Base, p.Head}}
+		srcs = []src{{"", clones[p.Repo], p.Base, p.Head}}
 	}
 	for _, r := range p.Repos {
-		srcs = append(srcs, src{r.Repo, r.Lease, r.Base, r.Head})
+		srcs = append(srcs, src{r.Repo, clones[r.Repo], r.Base, r.Head})
 	}
 	var out []deltaDiff
 	for _, s := range srcs {
-		text, err := gitx.DiffPatch(s.lease, s.base, s.head)
+		text, err := gitx.DiffPatch(s.dir, s.base, s.head)
 		if err != nil {
 			return nil, err
 		}
-		changed, err := gitx.DiffNameOnly(s.lease, s.base, s.head, "AMTD")
+		changed, err := gitx.DiffNameOnly(s.dir, s.base, s.head, "AMTD")
 		if err != nil {
 			return nil, err
 		}

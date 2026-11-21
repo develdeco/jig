@@ -1,17 +1,18 @@
 package observe
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 )
 
-func TestPostCommitRecordsTheCommitAndStartsItsVerification(t *testing.T) {
+func TestPostCommitRecordsTheCommitAndStartsNothing(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.onTicketBranch()
+	r.claimed()
 	sha := r.commit("b", "b.txt")
 
 	res, err := Handle(r.d, Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
@@ -25,52 +26,38 @@ func TestPostCommitRecordsTheCommitAndStartsItsVerification(t *testing.T) {
 	if commits[0].Session != "" || commits[0].Ticket != "" || commits[0].Harness != "" {
 		t.Errorf("git-commit line carries more than commit, cwd and branch: %+v", commits[0])
 	}
-	got := r.started()
-	if len(got) != 1 || !strings.Contains(strings.Join(got[0].Args, " "), "--slice b") {
-		t.Fatalf("started %+v, want one worker for slice b", got)
+	if got := r.started(); len(got) != 0 {
+		t.Fatalf("a post-commit left %+v, want nothing started", got)
 	}
-	if strings.Contains(strings.Join(got[0].Args, " "), "--session") {
-		t.Errorf("worker args %v name a session; git's hook has none", got[0].Args)
-	}
-	// Seen again (a tool call of the commit), it is not started again.
-	if _, err := Handle(r.d, Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir}); err != nil || len(r.started()) != 1 {
-		t.Errorf("a second post-commit for the same commit: %v, %d workers", err, len(r.started()))
+	// Seen again, as git's hook and the tool call that made the commit both
+	// do, it still starts nothing.
+	if _, err := Handle(r.d, Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir}); err != nil || len(r.started()) != 0 {
+		t.Errorf("a second post-commit for the same commit: %v, left %+v", err, r.started())
 	}
 }
 
-func TestPostCommitTakesTheSliceFromTheSessionWhenTheCommitNamesNone(t *testing.T) {
+func TestPostCommitStartsNothingWhateverTheCommitNames(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.onTicketBranch()
-	r.add(journal.Line{Event: journal.EventClaim, Slice: "c", Session: "s9"})
-	r.commit("", "c.txt")
-	r.d.Getenv = func(k string) string {
-		if k == "JIG_SESSION" {
-			return "s9"
-		}
-		return ""
-	}
-	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
-	got := r.started()
-	if len(got) != 1 || !strings.Contains(strings.Join(got[0].Args, " "), "--slice c") || !strings.Contains(strings.Join(got[0].Args, " "), "--session s9") {
-		t.Errorf("started %+v, want one worker for slice c as session s9", got)
-	}
-}
-
-func TestPostCommitVerifiesNothingItCannotPlace(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.onTicketBranch()
-
-	r.commit("", "plain.txt") // no trailer and no claim
+	r.claimed()
+	r.commit("", "plain.txt") // no trailer: the session's claim is the slice
 	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
 	r.commit("zzz", "stray.txt") // a slice the ticket lacks
 	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
-	if len(r.started()) != 0 {
-		t.Errorf("started %+v, want nothing: neither commit names a slice of the ticket", r.started())
+	if err := r.st.WriteSliceState(r.fx.Ticket, "c", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatal(err)
 	}
-	if got := len(r.ledgerOf(journal.EventGitCommit)); got != 2 {
-		t.Errorf("git-commit lines = %d, want both commits recorded", got)
+	r.commit("c", "named.txt") // a green slice, named by the trailer
+	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
+	if got := r.started(); len(got) != 0 {
+		t.Errorf("left %+v, want nothing started for any of the commits", got)
+	}
+	if got := len(r.ledgerOf(journal.EventGitCommit)); got != 3 {
+		t.Errorf("git-commit lines = %d, want every commit recorded", got)
+	}
+	if st, err := r.st.ReadSliceState(r.fx.Ticket, "c"); err != nil || st.State != "green" {
+		t.Errorf("slice state = %+v, %v, want still green", st, err)
 	}
 
 	// Off the ticket branch the commit binds no ticket at all.
@@ -79,8 +66,8 @@ func TestPostCommitVerifiesNothingItCannotPlace(t *testing.T) {
 	}
 	r.commit("a", "off.txt")
 	r.handle(Event{Harness: "git", Kind: KindPostCommit, Cwd: r.fx.RepoDir})
-	if len(r.started()) != 0 {
-		t.Errorf("started %+v for a commit on main, want nothing", r.started())
+	if got := r.started(); len(got) != 0 {
+		t.Errorf("left %+v for a commit on main, want nothing", got)
 	}
 }
 
@@ -100,7 +87,7 @@ func TestPostCommitOutsideAnyProjectStillRecordsTheCommit(t *testing.T) {
 		t.Errorf("git-commit lines = %+v, want one in %s", got, repo)
 	}
 	if len(r.started()) != 0 {
-		t.Errorf("started %+v outside a project", r.started())
+		t.Errorf("left %+v outside a project", r.started())
 	}
 }
 
@@ -112,5 +99,17 @@ func TestPostCommitInADirectoryThatIsNoRepositoryIsAnError(t *testing.T) {
 	}
 	if _, err := Handle(r.d, Event{Kind: KindPostCommit}); err == nil {
 		t.Error("Handle with no directory succeeded, want an error")
+	}
+}
+
+// claimed makes the session s9 the holder of slice c and the commit's session.
+func (r *rig) claimed() {
+	r.t.Helper()
+	r.add(journal.Line{Event: journal.EventClaim, Slice: "c", Session: "s9"})
+	r.d.Getenv = func(k string) string {
+		if k == "JIG_SESSION" {
+			return "s9"
+		}
+		return ""
 	}
 }

@@ -105,3 +105,18 @@ func TestBuildResolvesTheOracleAndItsLastTime(t *testing.T) {
 		t.Errorf("without a clone: command %q, seconds %d, want neither", c.Slice.OracleCommand, c.OracleSeconds)
 	}
 }
+
+// TestFailedAttemptsLeaveOutAStoppedRun: a run jig's stop ended judged nothing
+// and takes no place among the failed attempts; a timeout still does.
+func TestFailedAttemptsLeaveOutAStoppedRun(t *testing.T) {
+	t.Parallel()
+	lines := []journal.Line{
+		{Slice: "b", Event: journal.EventOracle, Outcome: "fail", Attempt: 1, Summary: "real"},
+		{Slice: "b", Event: journal.EventOracle, Outcome: "fail", Attempt: 2, Cause: journal.CauseStopped},
+		{Slice: "b", Event: journal.EventOracle, Outcome: "fail", Attempt: 3, Cause: journal.CauseTimeout},
+	}
+	got := failedAttempts(lines, "b")
+	if len(got) != 2 || got[0].Attempt != 1 || got[1].Attempt != 3 {
+		t.Errorf("failed attempts = %+v, want attempts 1 and 3", got)
+	}
+}

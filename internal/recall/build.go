@@ -21,6 +21,9 @@ type Ticket struct {
 	State     string
 	Shipped   bool
 	BlockedBy []Blocker
+	// Facts are what a shipped ticket's journal says of its size and its
+	// builders' peak; nil when the caller did not read them.
+	Facts *Facts
 }
 
 // Open is an open (not yet shipped) ticket in a report.
@@ -78,6 +81,10 @@ type Report struct {
 	// latest MaxAnswerEntries, or with a query the ones that share a word
 	// with it, the most shared first.
 	Answers []LedgerEntry `json:"answers"`
+	// Receipts are the last MaxReceipts shipped tickets that have a recorded
+	// change size and a builder peak, newest first: what the project's own
+	// recent tickets cost, for sizing a new one against.
+	Receipts []Receipt `json:"receipts"`
 }
 
 // Build assembles the report for query (which may be empty) over tickets, all
@@ -87,6 +94,7 @@ func Build(tickets []Ticket, m Material, query string) Report {
 	r := Report{
 		Query: query, Tickets: []Open{}, Edges: []Edge{}, Duplicates: []Duplicate{},
 		Fog: []Fog{}, Platform: []Doc{}, Answers: []LedgerEntry{},
+		Receipts: receipts(tickets),
 	}
 	known := map[string]Ticket{}
 	for _, t := range tickets {
@@ -200,7 +208,7 @@ func answerTails(entries []LedgerEntry, query map[string]bool) []LedgerEntry {
 		e := c.e
 		answers := make([]Answer, len(e.Answers))
 		for i, a := range e.Answers {
-			answers[i] = Answer{ID: a.ID, Text: clip(a.Text, MaxItemRunes)}
+			answers[i] = Answer{ID: a.ID, By: a.By, Text: clip(a.Text, MaxItemRunes)}
 		}
 		e.Answers = answers
 		out = append(out, e)

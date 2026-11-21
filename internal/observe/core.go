@@ -11,7 +11,6 @@ import (
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -28,10 +27,6 @@ type Deps struct {
 	// Getenv reads the environment (JIG_SESSION, JIG_SLICE); nil reads an
 	// empty one.
 	Getenv func(string) string
-	// Executable is the jig binary a verification is started with, and Start
-	// starts it detached: spawn.Detached in production.
-	Executable string
-	Start      func(spawn.Spec) (int, error)
 	// OpenStore opens the store a located directory names, checking its
 	// schema; a nil store and a nil error when the store is not on this
 	// machine. The store layout is cmd/jig to know, so the core asks.
@@ -95,22 +90,6 @@ func Handle(d Deps, ev Event) (res Result, err error) {
 		res = h.postCommit()
 	}
 	return res, errors.Join(h.errs...)
-}
-
-// Run parses payload with the adapter, handles the event and returns what
-// the harness reads, in the adapter shape (nil for nothing). An event the
-// adapter does not map is ignored. Like Handle it never panics.
-func Run(d Deps, a Adapter, data []byte) (out []byte, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			out, err = nil, fmt.Errorf("observe: %s: panic: %v", a.Name(), r)
-		}
-	}()
-	ev, err := a.Parse(data)
-	if err != nil {
-		return nil, err
-	}
-	return RunEvent(d, a, ev)
 }
 
 // RunEvent is Run for an event already parsed.

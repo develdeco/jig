@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"syscall"
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/mirror"
 	"github.com/develdeco/jig/internal/project"
@@ -27,14 +29,34 @@ import (
 
 func main() {
 	gitx.ClearRepoEnv()
-	// The first interrupt cancels e.ctx, so a command that waits or streams
-	// can wind down; endAfterInterrupt makes sure one that does not watch it
-	// still ends, as it did when an interrupt simply killed the process.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	go endAfterInterrupt(ctx, stop, interruptGrace, os.Exit)
+	// The first interrupt, SIGTERM or SIGHUP (the signals a builder's shell, a
+	// closing terminal or a harness send) cancels e.ctx, so a command that
+	// waits or streams can wind down; endAfterInterrupt first ends every oracle
+	// this process is running, then makes sure a command that does not watch
+	// the context still ends, as it did when an interrupt simply killed the
+	// process. A SIGKILL cannot be handled: on Unix it leaves a running oracle
+	// behind (see `jig verify --help`); on Windows the oracle's job object ends
+	// it with jig.
+	ctx, stop := signal.NotifyContext(context.Background(), stopSignals(signal.Ignored)...)
+	go endAfterInterrupt(ctx, stop, interruptGrace, envrun.EndAll, os.Exit)
 	e := processEnv()
 	e.ctx = ctx
 	os.Exit(run(e, os.Args[1:], os.Stdout, os.Stdin))
+}
+
+// stopSignals are the signals that stop jig: SIGTERM always, and SIGINT and
+// SIGHUP unless the process was started ignoring them (nohup ignores SIGHUP,
+// a background job of a non-interactive shell ignores SIGINT). Notifying a
+// signal installs a handler for it and so ends its being ignored; jig leaves
+// an ignored signal as it found it, and a run protected that way keeps going.
+func stopSignals(ignored func(os.Signal) bool) []os.Signal {
+	sigs := []os.Signal{syscall.SIGTERM}
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGHUP} {
+		if !ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	return sigs
 }
 
 const (
@@ -46,23 +68,17 @@ const (
 	exitInterrupted = 130
 )
 
-// endAfterInterrupt waits for ctx to be cancelled by the first interrupt,
-// gives the signal back its default action (stop), so a second interrupt
-// ends the process at once, and ends the process itself through exit if the
-// run has not returned within grace.
-func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, exit func(int)) {
+// endAfterInterrupt waits for ctx to be cancelled by the first stop signal,
+// ends the oracles the process is running (endOracles) before anything else,
+// so the stop never waits on grace to end them, gives the signal back its
+// default action (stop), so a second one ends the process at once, and ends
+// the process itself through exit if the run has not returned within grace.
+func endAfterInterrupt(ctx context.Context, stop func(), grace time.Duration, endOracles func(), exit func(int)) {
 	<-ctx.Done()
+	endOracles()
 	stop()
 	time.Sleep(grace)
 	exit(exitInterrupted)
-}
-
-// Main dispatches one CLI invocation against the process's own environment
-// and working directory, and returns the process exit code. It is separated
-// from main() so a test can drive the binary's entry without spawning a
-// subprocess; a test that gives the run an environment of its own calls run.
-func Main(args []string, stdout io.Writer, stdin io.Reader) int {
-	return run(processEnv(), args, stdout, stdin)
 }
 
 // run dispatches one CLI invocation against e and returns the process exit
@@ -82,6 +98,12 @@ func run(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			Code: "VALIDATION_ERROR",
 			Help: []string{"Run `jig` with no arguments to see the command list"},
 		})
+	}
+	// One memo per run, so a command asks git each repository question once.
+	// The commands that outlive one command (a screen, a server) keep none for
+	// the process's life: their own requests re-enter run and get one each.
+	if e.memo == nil && v.Spec.Name != "tui" && v.Spec.Name != "mcp" {
+		e.memo = gitx.NewMemo()
 	}
 	return v.Run(e, rest, stdout, stdin)
 }
@@ -173,21 +195,7 @@ func splitOnce(s string, sep byte) (before, after string, ok bool) {
 	return s, "", false
 }
 
-// resolveStore resolves the store, project config and this machine's clone
-// mapping for cfg's project, honoring an explicit --store flag over cwd
-// resolution (locate.Locate's order: a jig.yaml marker, the machine map by
-// path and by remote, a store directory), and returns the jig home root it
-// read the mapping from, for
-// the packages that keep leases under it. stdout is the resolving command's
-// own writer: the checkpoint hook renders its sync report through it
-// (brief.md#Ownership and drift: "Drift lines print in the output of the
-// command whose checkpoint found them"), and a failed sync's warning lands
-// in the command's own structured output rather than bare stderr.
-func resolveStore(e env, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
-	return resolveStoreChecked(e, storeFlag, stdout, false)
-}
-
-// resolveStoreChecked is resolveStore's and
+// resolveStoreChecked is the shared implementation of
 // resolveStoreForProjectAllowingOldSchema's shared implementation:
 // allowOlderSchema says whether a schema_version older than
 // project.CurrentSchemaVersion passes the one schema check every command
@@ -205,7 +213,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
-	storePath, cfg, err := locateStore(jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
+	storePath, cfg, err := locateStore(e.memo, jigHome, cwd, absFrom(cwd, storeFlag), e.getenv)
 	if err != nil {
 		return nil, project.Config{}, project.MachineProject{}, "", err
 	}
@@ -219,6 +227,7 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 	// The marker says which tracker's ids lead the project's branch names;
 	// the store names every ticket's branch by it.
 	st.BranchesFrom = cfg.BranchesFrom
+	st.Memo = e.memo
 	// Every store checkpoint (Store.Push) syncs the GitHub mirror, from
 	// inside the command that made it: the mirror depends on the store
 	// (internal/mirror imports internal/store), never the reverse, so this
@@ -245,10 +254,10 @@ func resolveStoreChecked(e env, storeFlag string, stdout io.Writer, allowOlderSc
 }
 
 // resolveStoreForProject resolves the store, project config and machine
-// mapping the same way resolveStore does, except an explicit --project name
+// mapping the same way resolveStoreChecked does, except an explicit --project name
 // is tried first: it resolves the store path via the per-machine project
 // mapping (project.LoadMachine(jigHome)[name].Store), ahead of the
-// --store/cwd fallback chain resolveStore falls through to when projectFlag
+// --store/cwd fallback chain resolveStoreChecked falls through to when projectFlag
 // is empty.
 func resolveStoreForProject(e env, projectFlag, storeFlag string, stdout io.Writer) (*store.Store, project.Config, project.MachineProject, string, error) {
 	return resolveStoreForProjectChecked(e, projectFlag, storeFlag, stdout, false)
@@ -319,6 +328,25 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 		// opened into a branch that merged already goes nowhere useful.
 		d.Stack = func(ticket string) (stack.Plan, error) {
 			return stack.Read(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket)
+		}
+		d.StackFor = func(ticket, issue string) (stack.Plan, error) {
+			return stack.ReadFor(stackInput(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0)), ticket, issue)
+		}
+		// A multi-task or an issue publishes once its children have landed,
+		// which the host is asked about now.
+		d.Container = func(ticket string) (verifydeliver.ContainerStanding, error) {
+			r, err := containerReadiness(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, 0), ticket)
+			if err != nil {
+				return verifydeliver.ContainerStanding{}, err
+			}
+			s := verifydeliver.ContainerStanding{State: r.State, Verification: r.Verification}
+			for _, w := range r.Waits {
+				s.Waits = append(s.Waits, verifydeliver.ContainerWait{Ticket: w.Ticket, Standing: w.Standing})
+			}
+			for _, u := range r.Unmet {
+				s.Unmet = append(s.Unmet, verifydeliver.ContainerUnmet{Code: u.Code, Why: u.Why, Prompt: u.Prompt})
+			}
+			return s, nil
 		}
 	}
 	return d

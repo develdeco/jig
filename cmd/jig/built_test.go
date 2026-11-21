@@ -13,7 +13,7 @@ import (
 // jig builds nothing any more: an agent commits in the operator's clone and
 // jig verifies each commit. These helpers do what such an agent does with the
 // fixture's scenario patches - commit them on the ticket's branch in the clone,
-// each with the slice's trailer, and have `jig verify --wait` run the oracle
+// each with the slice's trailer, and have `jig verify` run the oracle
 // and mark the slice green - so a test starts from the state a built ticket
 // is in, with the work in the operator's clone and not pushed anywhere.
 
@@ -31,8 +31,7 @@ func commitScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attemp
 	t.Helper()
 	patch := filepath.Join(fx.ScenarioDir, "slices", slice, "attempt-"+strconv.Itoa(attempt), "patch.diff")
 	gitMust(t, fx.RepoDir, "apply", patch)
-	gitMust(t, fx.RepoDir, "add", "-A")
-	gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" "+slice+": scenario patch", "-m", "Jig-Slice: "+slice)
+	gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" "+slice+": scenario patch"+"\n\n"+"Jig-Slice: "+slice)
 	return gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
 }
 
@@ -42,11 +41,21 @@ func commitScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attemp
 func buildScenarioSlice(t *testing.T, fx *fixture.Fixture, slice string, attempt int) string {
 	t.Helper()
 	sha := commitScenarioSlice(t, fx, slice, attempt)
-	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", slice, "--wait", "--store", fx.StoreDir)
-	if code != 0 || !strings.Contains(out, "state: pass") {
-		t.Fatalf("jig verify %s %s: exit = %d, want 0 and a pass\n%s", slice, sha, code, out)
-	}
+	verifyHere(t, fx, slice)
 	return sha
+}
+
+// verifyHere is the one place the cmd/jig tests have jig prove a committed
+// slice the way a builder does: `jig verify` in the operator's clone, whose
+// HEAD is the commit just made. It fails the test unless the slice passed.
+// Every test that needs a green slice calls it, so a change to how a slice is
+// proven is a change here.
+func verifyHere(t *testing.T, fx *fixture.Fixture, slice string) {
+	t.Helper()
+	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, "--slice", slice, "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "state: pass") {
+		t.Fatalf("jig verify %s: exit = %d, want 0 and a pass\n%s", slice, code, out)
+	}
 }
 
 // buildFixtureTicket builds the fixture ticket the way an agent does: on the

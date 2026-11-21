@@ -89,7 +89,7 @@ func restampTicket(st *store.Store, ticket string) (restampResult, error) {
 		return res, nil
 	}
 
-	oldHeading := st.BriefHeadings(ticket, staleHashes)
+	resolved := resolveStamps(st, ticket, current, staleHashes)
 	stamps := map[string][]string{}
 	var journals []journal.Line
 	for _, sl := range stale {
@@ -100,9 +100,8 @@ func restampTicket(st *store.Store, ticket string) (restampResult, error) {
 				next = append(next, h)
 				continue
 			}
-			heading, found := oldHeading[h]
-			newHash, exists := current[heading]
-			if !found || !exists {
+			newHash, found := resolved[h]
+			if !found {
 				ok = false
 				res.unresolved = append(res.unresolved, []string{sl.ID, h})
 				continue
@@ -137,6 +136,23 @@ func restampTicket(st *store.Store, ticket string) (restampResult, error) {
 		return res, err
 	}
 	return res, nil
+}
+
+// resolveStamps maps each of stale, hashes no current section of ticket's
+// brief has, to the current hash of the heading it was the hash of in a
+// committed revision of brief.md, when the brief still has that heading;
+// current is the brief's headings and their hashes. A hash it leaves out (a
+// draft's, which no commit holds, or a removed heading's) cannot be restamped.
+// It decides both what --restamp writes and which stale stamps validate sends
+// to --restamp, so the two agree.
+func resolveStamps(st *store.Store, ticket string, current map[string]string, stale []string) map[string]string {
+	out := map[string]string{}
+	for h, heading := range st.BriefHeadings(ticket, stale) {
+		if hash, ok := current[heading]; ok {
+			out[h] = hash
+		}
+	}
+	return out
 }
 
 // dedupe drops repeats, keeping the first of each.

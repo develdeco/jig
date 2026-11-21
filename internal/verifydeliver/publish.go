@@ -7,7 +7,7 @@ package verifydeliver
 // of the same hand-off between jig and an agent that does the git and gh work:
 //
 //   - PublishBody renders the pull request body and the review notes for the
-//     reviewed head, and changes no lease and no branch;
+//     reviewed head, and changes no clone and no branch;
 //   - PublishRecordPR records a pull request somebody opened, after checking
 //     it is the ticket's branch;
 //   - PublishApprove records that a person approves the reviewed head;
@@ -21,7 +21,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -32,7 +31,6 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
@@ -57,6 +55,9 @@ type PublishOpts struct {
 	// ones an earlier publish stored, if any. It needs one repo, by o.Repo when
 	// the ticket builds in several.
 	What string
+	// Issue is the issue a shared task (one two issues list) is published into:
+	// `jig publish --issue`. A ticket with at most one container takes none.
+	Issue string
 }
 
 // PublishReport is Publish's result.
@@ -89,6 +90,10 @@ type PublishReport struct {
 	Picks PicksReport
 	// What is repo -> what the publish did with the What of its pull request.
 	What map[string]WhatReport
+	// FinalRun is repo -> what the repo's reviewed head has for a final run
+	// (`jig verify --final`). Publish says it and never refuses for lack of
+	// one.
+	FinalRun map[string]FinalRunReport
 	// Pending names the repos of the ticket that have no pull request
 	// recorded when the publish ended, in the project's order: the ones a
 	// publish narrowed with --repo left alone. The ticket is published when
@@ -149,21 +154,71 @@ type publishTarget struct {
 	// stacked on (Deps.Stack): the zero value when it is stacked on nothing
 	// here.
 	stack stack.Repo
+	// into is the container (issue or multi-task) the pull request goes into
+	// and the four publish lines name: the ticket's one container, or for a
+	// shared task the issue --issue named. "" for a ticket with none.
+	into string
+	// sharedWith are the other issues' pull requests of a shared task in this
+	// repo, which the body names.
+	sharedWith []prLink
+	// issues are the issues of a shared task, in chart order: nil for any
+	// other ticket. Each other issue's pull request is named in the body.
+	issues []string
 }
 
-// base is the branch the repo's pull request goes into: the branch of the
-// parent the ticket is stacked on while that has not merged in the repo, else
-// the repo's target.
+// readJournal is the ticket's journal as the pull request of this target sees
+// it (journal.ReadFor).
+func (t *publishTarget) readJournal(d Deps) ([]journal.Line, error) {
+	return journal.ReadFor(d.Store, t.ticket, t.into)
+}
+
+// appendLine appends a publish line to the ticket's journal, naming the
+// container it is for.
+func (t *publishTarget) appendLine(d Deps, l journal.Line) error {
+	if journal.IsPublishEvent(l.Event) {
+		l.Into = t.into
+	}
+	return journal.Append(d.Store, t.ticket, l)
+}
+
+// base is the branch the repo's pull request goes into: the plan's PRTarget
+// where the ticket is stacked on a parent that has not merged in the repo or
+// has a container (the container's branch), else the repo's target.
 func (t *publishTarget) base() string {
-	if t.stack.Shared() && t.stack.PRTarget != "" {
+	if (t.stack.Shared() || t.stack.Container != "") && t.stack.PRTarget != "" {
 		return t.stack.PRTarget
 	}
 	return t.target
 }
 
+// gitBase is base for what git reads in dir: a container's branch that the
+// clone holds no copy of (the host, not jig, refuses a base that is absent)
+// reads as the target, so a diff or a review check still has a ref to go on.
+func (t *publishTarget) gitBase(dir string) string {
+	base := t.base()
+	if base == t.target || dir == "" {
+		return base
+	}
+	if _, err := gitx.RevParse(dir, "refs/remotes/origin/"+base); err != nil {
+		return t.target
+	}
+	return base
+}
+
 // reviewedHead is the head the last clean gate round reviewed for the repo:
 // "" for a scripted round, which recorded none.
 func (t *publishTarget) reviewedHead() string { return t.gateRep.ReviewedSHA[t.repoName] }
+
+// readRev is the revision to read the repo's head at, in the operator's clone:
+// the reviewed head, else for a scripted round, which recorded none, the
+// ticket's branch. Never the clone's HEAD, which is whatever the person has
+// checked out.
+func (t *publishTarget) readRev() string {
+	if head := t.reviewedHead(); head != "" {
+		return head
+	}
+	return t.branch
+}
 
 // several is whether the ticket publishes in more than one repo.
 func (t *publishTarget) several() bool { return len(t.covered) > 1 }
@@ -186,23 +241,25 @@ func (t *publishTarget) bodySlices() []store.Slice {
 	return t.slices
 }
 
+// storeRefs are the store references of the last gate round that lie in this
+// repo: the lines the change adds here that name something only the store
+// holds.
+func (t *publishTarget) storeRefs() []StoreRef {
+	if !t.several() {
+		return t.gateRep.StoreRefs
+	}
+	var own []StoreRef
+	for _, r := range t.gateRep.StoreRefs {
+		if r.Repo == t.repoName {
+			own = append(own, r)
+		}
+	}
+	return own
+}
+
 // notesName is the name of the repo's review notes in the ticket's pr
 // directory.
 func (t *publishTarget) notesName() string { return reviewNotesFile(t.repoName, t.several()) }
-
-// report is the gate round's report as the repo's pull request shows it: when
-// the ticket publishes in several repos, with the reviewed head of this repo
-// alone.
-func (t *publishTarget) report() reportYAML {
-	rep := t.gateRep
-	if t.several() {
-		rep.ReviewedSHA = map[string]string{}
-		if sha := t.gateRep.ReviewedSHA[t.repoName]; sha != "" {
-			rep.ReviewedSHA[t.repoName] = sha
-		}
-	}
-	return rep
-}
 
 // ownFindings are the findings, and the paths the reviewer read, that belong
 // to this repo's pull request. In a project of several repos a round names a
@@ -298,7 +355,7 @@ func (t *publishTarget) oracleNames(man manifest.Manifest) []string {
 // disk. It returns a target for each repo the publish works in, the ticket's
 // repos in the project's order or the one --repo names. A refusal here leaves
 // nothing written.
-func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
+func readyToPublish(d Deps, ticket, repoFlag, issue string) ([]*publishTarget, error) {
 	if err := d.Store.Sync(); err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: sync store: %w", err)
 	}
@@ -310,6 +367,12 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	rec, err := d.Store.ReadTicket(ticket)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: read ticket record: %w", err)
+	}
+	// A shared task goes into the issue --issue names; any other ticket into
+	// its one container, if it has one.
+	into, issues, err := publishInto(d, ticket, rec, issue)
+	if err != nil {
+		return nil, err
 	}
 	slices, err := d.Store.ReadSlices(ticket)
 	if err != nil {
@@ -364,7 +427,12 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 	// read refuses the publish rather than opening a pull request into the
 	// wrong branch.
 	var plan stack.Plan
-	if d.Stack != nil {
+	switch {
+	case issues != nil && d.StackFor != nil:
+		if plan, err = d.StackFor(ticket, into); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read where %s goes into %s: %w", ticket, into, err)
+		}
+	case d.Stack != nil:
 		if plan, err = d.Stack(ticket); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: read what %s is stacked on: %w", ticket, err)
 		}
@@ -377,13 +445,72 @@ func readyToPublish(d Deps, ticket, repoFlag string) ([]*publishTarget, error) {
 		targets[i] = &publishTarget{
 			ticket: ticket, repo: gr.repo, repoName: gr.name, target: gr.target, rec: rec, branch: branch, title: title,
 			slices: slices, repoSlices: gr.slices, gateRep: gateRep, lastRound: lastRound,
-			covered: names, qualified: len(d.Cfg.Repos) > 1,
+			covered: names, qualified: len(d.Cfg.Repos) > 1, into: into, issues: issues,
 		}
 		if r, ok := plan.In(gr.name); ok {
 			targets[i].stack = r
 		}
+		if targets[i].sharedWith, err = sharedWithFor(d, targets[i]); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: read the pull requests of the other issues of %s: %w", ticket, err)
+		}
 	}
 	return targets, nil
+}
+
+// SharedTaskIssueNeeded is the code of the refusal of a publish of a shared
+// task that names no issue of its own.
+const SharedTaskIssueNeeded = "SHARED_TASK_ISSUE_NEEDED"
+
+// publishInto is the container a publish of ticket goes into and, for a shared
+// task, its issues. A ticket with at most one container takes no issue: it
+// goes into that one, and a ticket with none into the target (""). A shared
+// task needs --issue to be one of its issues; otherwise nothing is written
+// and the refusal lists each issue, with the pull request it has or none.
+func publishInto(d Deps, ticket string, rec store.Ticket, issue string) (into string, issues []string, err error) {
+	containers, err := d.Store.ContainersOf(ticket, rec)
+	if err != nil {
+		return "", nil, fmt.Errorf("verifydeliver: publish: read the containers of %s: %w", ticket, err)
+	}
+	if len(containers) <= 1 {
+		if issue != "" && (len(containers) == 0 || containers[0] != issue) {
+			return "", nil, &axi.Error{
+				Msg:  fmt.Sprintf("%s is not published into %s: it is not a task of that issue", ticket, issue),
+				Code: SharedTaskIssueNeeded,
+				Help: []string{fmt.Sprintf("Publish %s without --issue: only a task two issues share takes it.", ticket)},
+			}
+		}
+		if len(containers) == 1 {
+			into = containers[0]
+		}
+		return into, nil, nil
+	}
+	state := make([]string, len(containers))
+	for i, c := range containers {
+		lines, err := journal.ReadFor(d.Store, ticket, c)
+		if err != nil {
+			return "", nil, err
+		}
+		state[i] = c + ": no pull request"
+		for _, l := range lines {
+			if l.Event == journal.EventPr && l.URL != "" {
+				state[i] = c + ": " + l.URL
+			}
+		}
+	}
+	for _, c := range containers {
+		if c == issue {
+			return issue, containers, nil
+		}
+	}
+	msg := fmt.Sprintf("%s is a shared task: say which issue to publish it into with --issue", ticket)
+	if issue != "" {
+		msg = fmt.Sprintf("%s is a shared task, and %s is not one of its issues", ticket, issue)
+	}
+	return "", nil, &axi.Error{
+		Msg:  msg + " (" + strings.Join(state, "; ") + ")",
+		Code: SharedTaskIssueNeeded,
+		Help: []string{fmt.Sprintf("Run `jig publish %s --issue <ID>`, one of %s.", ticket, strings.Join(containers, ", "))},
+	}
 }
 
 // publishBranch is the ticket's branch, which has one name in every repo: it
@@ -430,11 +557,15 @@ type publishFuncs struct {
 	confirm     func(branch, ticket, openPR string, hasHost bool) bool
 	guardedPush func(dir, remote, branch string, confirmed bool) error
 	fetchOrigin func(dir string) error
-	warn        func(format string, args ...any)
+	// injectedFetch says fetchOrigin is the caller's own (Deps.FetchOrigin), not
+	// the default, which the choice of the copy that has just fetched makes
+	// redundant.
+	injectedFetch bool
+	warn          func(format string, args ...any)
 }
 
 func (d Deps) publishFuncs() publishFuncs {
-	f := publishFuncs{confirm: d.Confirm, guardedPush: d.GuardedPush, fetchOrigin: d.FetchOrigin, warn: d.Warn}
+	f := publishFuncs{confirm: d.Confirm, guardedPush: d.GuardedPush, fetchOrigin: d.FetchOrigin, injectedFetch: d.FetchOrigin != nil, warn: d.Warn}
 	// The confirm default covers the whole interactive seam - both the
 	// fmt.Printf prompt and the stdin read - so a test that hands its own
 	// never touches the real terminal: stubbing only the read half would
@@ -453,10 +584,7 @@ func (d Deps) publishFuncs() publishFuncs {
 		f.guardedPush = gitx.GuardedPush
 	}
 	if f.fetchOrigin == nil {
-		f.fetchOrigin = func(dir string) error {
-			_, err := gitx.Run(dir, "fetch", "origin")
-			return err
-		}
+		f.fetchOrigin = fetchOriginRefs
 	}
 	if f.warn == nil {
 		f.warn = func(format string, args ...any) {
@@ -466,12 +594,12 @@ func (d Deps) publishFuncs() publishFuncs {
 	return f
 }
 
-// shipment is one repo's publish while it is under way: the lease that holds
+// shipment is one repo's publish while it is under way: the clone that holds
 // the head to ship, what was learned of the repo before anything was written,
 // and the pull request body rendered for it.
 type shipment struct {
 	pt       *publishTarget
-	lease    pool.Lease
+	dir      string
 	shipping branchCopy
 	head     string
 	host     repohost.Host
@@ -483,40 +611,35 @@ type shipment struct {
 	pub         publication
 	// linked are the other repos' pull requests as the body on disk names them.
 	linked []prLink
+	// onOrigin says origin holds the head to ship already, so nothing is pushed.
+	onOrigin bool
 }
 
-// prepareShipment points a publish lease at the copy of the repo's branch
-// publish ships and checks everything that can refuse the publish, writing
-// nothing to the store: a refusal here leaves it as it was. built are the
-// commits jig built in the repo, which its copy of the branch must hold.
+// prepareShipment chooses the copy of the repo's branch publish ships, in the
+// repo's mapped clone, and checks everything that can refuse the publish,
+// writing nothing to the store and nothing in the clone: a refusal here leaves
+// both as they were. built are the commits jig built in the repo, which its
+// copy of the branch must hold.
 func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string) (*shipment, error) {
 	ticket, branch, repoName, target := pt.ticket, pt.branch, pt.repoName, pt.target
-	// The publish lease is re-pointed at the copy publish ships right after
-	// the acquire below, so its own copy of the branch is disposable: one left
-	// by an earlier attempt must not refuse the acquire (BRANCH_DIVERGED) over
-	// commits nobody keeps, which it does once the branch has reached origin
-	// another way.
-	if err := restoreLeaseBeforeAcquire(d.Home, repoName, ticket, pool.Publish, branch); err != nil {
-		return nil, err
-	}
-	lease, err := pool.Acquire(d.Home, repoName, pt.repo.Remote, target, branch, ticket, pool.Publish)
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: acquire lease: %w", err)
-	}
-	// The lease is pointed at the copy of the branch the gate reviewed, by the
-	// same function the gate uses: the clone's when it has the newer, origin's
-	// otherwise.
-	shipping, err := pointAtBranchCopy(d, lease.Dir, repoName, ticket, branch, pt.rec.Adopted(), built, "publish")
+	// The copy is chosen by the same function the gate uses: the clone's when
+	// it has the newer, origin's otherwise.
+	rc, err := chooseCopy(d, repoName, branch, built, "publish")
 	if err != nil {
 		return nil, err
 	}
-	if err := fn.fetchOrigin(lease.Dir); err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+	// The choice has just fetched origin, and asking again is a second process
+	// for the same answer. A publish whose caller supplies its own fetch
+	// (Deps.FetchOrigin) keeps it.
+	if fn.injectedFetch {
+		if err := fn.fetchOrigin(rc.Dir); err != nil {
+			return nil, fmt.Errorf("verifydeliver: publish: fetch origin: %w", err)
+		}
 	}
 	// A pull request into the branch of the parent the ticket is stacked on
 	// needs that branch on the origin: jig pushes no branch but the ticket's.
-	if base := pt.base(); base != target {
-		if _, err := gitx.RevParse(lease.Dir, "refs/remotes/origin/"+base); err != nil {
+	if base := pt.base(); base != target && pt.stack.Shared() {
+		if _, err := gitx.RevParse(rc.Dir, "refs/remotes/origin/"+base); err != nil {
 			return nil, &axi.Error{
 				Msg:  fmt.Sprintf("%s is stacked on %s, whose branch %s is not on the origin of %s, so no pull request can go into it", ticket, pt.stack.Parent, base, repoName),
 				Code: "PUBLISH_PARENT_NOT_PUSHED",
@@ -530,22 +653,16 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// commit that landed on the branch since would go out under a verdict that
 	// never saw it. Checked ahead of everything that writes, so a refusal
 	// leaves the store untouched.
-	shipHead, err := gitx.RevParse(lease.Dir, "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: resolve the head to ship: %w", err)
-	}
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, lease.Dir, "origin/"+pt.base()); err != nil {
+	shipHead := rc.Head
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, rc.Dir, "origin/"+pt.gitBase(rc.Dir)); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
 	// is already there must be a fast-forward from where it stands. Checked
 	// here for the same reason as above - git would refuse the push, but only
 	// after publish had written the store.
-	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
+	onOrigin, err := requireFastForward(rc.Dir, shipHead, branch, ticket, rc.Copy)
 	if err != nil {
-		return nil, fmt.Errorf("verifydeliver: publish: resolve build lease: %w", err)
-	}
-	if err := requireFastForward(lease.Dir, branch, buildDir, ticket, shipping); err != nil {
 		return nil, err
 	}
 	// Build the repo host from the repo's remote (or take the one d hands
@@ -562,12 +679,18 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// is on origin.
 	var openPR repohost.OpenPR
 	if host != nil {
-		if openPR, err = host.FindOpenPR(branch); err != nil {
+		find := func() (repohost.OpenPR, error) { return host.FindOpenPR(branch) }
+		if pt.issues != nil {
+			// A shared task has a pull request into each issue's branch from
+			// this one: the one into this issue's is the one to update.
+			find = func() (repohost.OpenPR, error) { return host.FindOpenPRInto(branch, pt.base()) }
+		}
+		if openPR, err = find(); err != nil {
 			return nil, fmt.Errorf("verifydeliver: publish: look for an open pull request from %s: %w", branch, err)
 		}
 	}
 
-	touchedFiles, err := diffFiles(lease.Dir, target, "HEAD")
+	touchedFiles, err := diffFiles(rc.Dir, target, shipHead)
 	if err != nil {
 		return nil, err
 	}
@@ -577,17 +700,17 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 			Code: "PUBLISH_NO_DIVERGENCE",
 		}
 	}
-	if err := checkNonEmptyRange(lease.Dir, target, "HEAD"); err != nil {
+	if err := checkNonEmptyRange(rc.Dir, target, shipHead); err != nil {
 		return nil, err
 	}
 
-	man, err := manifest.Resolve(lease.Dir)
+	man, err := manifest.ResolveAt(rc.Dir, shipHead)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
 	}
 	return &shipment{
-		pt: pt, lease: lease, shipping: shipping, head: shipHead, host: host, openPR: openPR,
-		touched: touchedFiles, oracleNames: pt.oracleNames(man),
+		pt: pt, dir: rc.Dir, shipping: rc.Copy, head: shipHead, host: host, openPR: openPR,
+		touched: touchedFiles, oracleNames: pt.oracleNames(man), onOrigin: onOrigin,
 	}, nil
 }
 
@@ -632,10 +755,11 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		_ = d.Store.Push(fmt.Sprintf("%s: publish failed: %s", ticket, failureCode(err)))
 	}()
 
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return PublishReport{}, err
 	}
+	allTargets, allErr := ticketTargets(d, ticket, o.Repo, targets)
 	picks, err := loadPicksFile(o.Picks)
 	if err != nil {
 		return PublishReport{}, err
@@ -644,7 +768,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	if err != nil {
 		return PublishReport{}, err
 	}
-	jlines, err := journal.Read(d.Store, ticket)
+	jlines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -675,7 +799,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	for _, sh := range ships {
 		sh.linked = linksFor(sh.pt, known)
 		sh.pub, err = renderPublication(d, sh.pt, renderInput{
-			dir: sh.lease.Dir, head: sh.head, touched: sh.touched, oracleNames: sh.oracleNames,
+			dir: sh.dir, head: sh.head, touched: sh.touched,
 			picks: picks, what: what, warn: fn.warn, links: sh.linked,
 		})
 		if err != nil {
@@ -720,12 +844,12 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 				continue
 			}
 			line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: sh.pt.branch, Provenance: provenance, Repo: sh.pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
-			if err := journal.Append(d.Store, ticket, line); err != nil {
+			if err := sh.pt.appendLine(d, line); err != nil {
 				return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 			}
 		}
 	}
-	jlines, err = journal.Read(d.Store, ticket)
+	jlines, err = journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -757,7 +881,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	}
 
 	report = PublishReport{
-		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, What: map[string]WhatReport{}, PRURL: map[string]string{},
+		Tier: "none", Head: map[string]string{}, PRBody: map[string]string{}, What: map[string]WhatReport{}, FinalRun: map[string]FinalRunReport{}, PRURL: map[string]string{},
 		PRUpdated: map[string]bool{}, PRRetargeted: map[string]string{}, PRNote: map[string]string{},
 		ReviewNotes: map[string]ReviewNotesReport{},
 	}
@@ -771,8 +895,13 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 			}
 			sh.linked = links
 		}
-		if err := fn.guardedPush(sh.lease.Dir, "origin", pt.branch, confirmed); err != nil {
-			return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+		// The reviewed head is pushed as it is, by its sha, from the clone: the
+		// clone's checkout and branches are not touched, and nothing is pushed
+		// when origin holds the head already.
+		if !sh.onOrigin {
+			if err := fn.guardedPush(sh.dir, "origin", sh.head+":refs/heads/"+pt.branch, confirmed); err != nil {
+				return PublishReport{}, inRepo(pt.qualified, pt.repoName, err)
+			}
 		}
 		prURL, prOutcome, retargeted, err := openOrUpdatePR(d, sh.host, pt, sh.pub, sh.openPR, fn.warn)
 		if err != nil {
@@ -780,7 +909,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		}
 		approval, _ := approvalOf(jlines, pt.lineRepo(), pt.reviewedHead())
 		line := journal.Line{Event: journal.EventPr, Outcome: prOutcome, Commit: sh.head, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval}
-		if err := journal.Append(d.Store, ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 		}
 		report.ReviewNotes[pt.repoName] = postPublishChecks(d, sh.host, ticket, prURL, pt.lineRepo(), sh.pub, fn.warn)
@@ -789,6 +918,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		report.Head[pt.repoName] = sh.head
 		report.PRBody[pt.repoName] = sh.pub.prPath
 		report.What[pt.repoName] = sh.pub.what
+		report.FinalRun[pt.repoName] = sh.pub.final
 		report.PRURL[pt.repoName] = prURL
 		report.PRUpdated[pt.repoName] = prOutcome == "updated"
 		if retargeted != "" {
@@ -825,7 +955,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 	// the branch is out: a publish that is declined or that fails before the
 	// push leaves no changelog or ledger entry behind to be written again by
 	// the one that follows.
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return PublishReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -838,7 +968,20 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		if err := writeStoreDocs(d, targets[0], unionNames(names...)); err != nil {
 			return PublishReport{}, err
 		}
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+		var spans []repoSpan
+		var spanErr error
+		if len(ships) == len(targets[0].covered) {
+			for _, sh := range ships {
+				spans = append(spans, repoSpan{dir: sh.dir, base: sh.pt.gitBase(sh.dir), head: sh.head})
+			}
+		} else {
+			// A publish of some of the repos finishes a ticket whose other
+			// repos an earlier one shipped.
+			if spanErr = allErr; spanErr == nil {
+				spans, spanErr = readSpans(d, allTargets)
+			}
+		}
+		if err := targets[0].appendLine(d, publishDoneLine(spans, spanErr, fn.warn)); err != nil {
 			return PublishReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
@@ -955,7 +1098,7 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: read questions: %w", err)
 	}
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := t.readJournal(d)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -976,13 +1119,12 @@ func writeStoreDocs(d Deps, t *publishTarget, oracleNames []string) error {
 
 // renderInput is what rendering a publication reads: the repository to read
 // commits from and the head the gate reviewed, the files the change touched,
-// the oracle names, and the picks file.
+// and the picks file.
 type renderInput struct {
-	dir         string
-	head        string
-	touched     []string
-	oracleNames []string
-	picks       *PicksResult
+	dir     string
+	head    string
+	touched []string
+	picks   *PicksResult
 	// what is the What given now, nil for none.
 	what *string
 	warn func(format string, args ...any)
@@ -995,10 +1137,12 @@ type renderInput struct {
 // body at prPath (store-relative), the media a pick staged, and the pick's
 // report.
 type publication struct {
-	prPath     string
-	title      string
-	picks      PicksReport
-	what       WhatReport
+	prPath string
+	title  string
+	picks  PicksReport
+	what   WhatReport
+	// final is what the repo's reviewed head has for a final run.
+	final      FinalRunReport
 	picked     *DemoRenderResult
 	demoResult DemoRenderResult
 	mediaDir   string
@@ -1019,7 +1163,7 @@ type publication struct {
 // map's clone may sit on an older main than the branch), so the trailer is the
 // publish.trailer of the jig.yaml at rev in dir when the store takes that
 // marker as its project's (Config.TakesMarker: a v3 store, not a member
-// marker, a project the store serves, as LoadConfig decides for the marker on
+// marker, a project the store serves, as LoadConfigWith decides for the marker on
 // disk). Otherwise (a v2 store, no jig.yaml at the head, a member marker,
 // another project's marker) it is cfg.PublishTrailer, the project's marker on
 // this machine. A head jig.yaml that cannot be read or does not parse takes
@@ -1058,7 +1202,7 @@ func reviewedTrailer(dir, rev string, cfg project.Config, warn func(format strin
 // picks file's, or an earlier pick of the same head and recordings.
 func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, error) {
 	ticket := t.ticket
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := t.readJournal(d)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1112,7 +1256,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 	picksReport, picked, err := publishPicks(picksStep{
 		d: d, result: in.picks, ticket: ticket, repoName: t.repoName,
-		leaseDir: in.dir, head: in.head, lines: lines, own: own, warn: in.warn,
+		cloneDir: in.dir, head: in.head, lines: lines, own: own, warn: in.warn,
 	})
 	if err != nil {
 		return publication{}, err
@@ -1125,20 +1269,20 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	if err != nil {
 		return publication{}, err
 	}
-	// The commands the oracles ran, from the journal's oracle lines for the
-	// reviewed head (the exact command that ran), never from a working tree,
-	// which may be another branch or a later head when the gate lease is gone.
-	// An oracle no line carries a command for is listed by its name alone.
+	// What the reviewed head has for a final run, from the journal's
+	// final-oracle lines at exactly that commit, never from a working tree,
+	// which may be another branch or a later head.
+	// Publish runs nothing: it says what a builder's `jig verify --final` left.
 	reviewed := t.reviewedHead()
 	if reviewed == "" {
 		reviewed = in.head
 	}
-	commands, reuse := oracleRan(lines, t.slices, in.dir, reviewed)
+	// Every repo the round reviewed has its line in every body, as the findings
+	// of every repo do in the review notes.
+	finals := finalRunsOf(lines, t.qualified, t.gateRep.ReviewedSHA, t.repoName, reviewed)
 	trailer := reviewedTrailer(in.dir, reviewed, d.Cfg, in.warn)
-	rep := t.report()
-	rep.Reuse = reuse
 	write := func(links []prLink) (string, DemoRenderResult, error) {
-		return writePRBody(d.Store, ticket, t.repoName, what, rep, in.oracleNames, commands, rounds, picked, links, t.stack, trailer)
+		return writePRBody(d.Store, ticket, t.repoName, what, finals, rounds, picked, links, t.stack, trailer)
 	}
 	prPath, demoResult, err := write(in.links)
 	if err != nil {
@@ -1166,8 +1310,8 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 	}
 
 	// Report any summary or caption left out of the rendered section because
-	// it named one of jig's own directories (the owner's decision on r1-f13,
-	// DECISIONS.md): independent of whether a pick stands, since a section can
+	// it named one of jig's own directories (a body is public, so it never
+	// names one): independent of whether a pick stands, since a section can
 	// be otherwise rendered in full.
 	if demoResult.ScrubbedSummary {
 		in.warn("jig: the demo summary for %s named one of jig's own directories and was left out of the pull request body\n", ticket)
@@ -1187,7 +1331,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		}
 		behavior = &cov
 	}
-	journaled, err := journal.Read(d.Store, ticket)
+	journaled, err := t.readJournal(d)
 	if err != nil {
 		return publication{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1199,13 +1343,13 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		if t.reviewedHead() != "" {
 			approvalLine = publishApprovalLine(lines, t.lineRepo(), t.reviewedHead())
 		}
-		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes))
+		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes), t.storeRefs())
 	}
 	if err := writeNotes(journaled); err != nil {
 		return publication{}, err
 	}
 	return publication{
-		prPath: prPath, title: t.title, picks: picksReport, what: whatReport, picked: picked, demoResult: demoResult,
+		prPath: prPath, title: t.title, picks: picksReport, what: whatReport, final: ownFinalRun(finals, t.repoName), picked: picked, demoResult: demoResult,
 		mediaDir: demoResult.MediaDir, mediaFiles: mediaFiles,
 		notesName:  t.notesName(),
 		writeNotes: writeNotes,
@@ -1376,8 +1520,8 @@ func checkMediaReferences(d Deps, host repohost.Host, ticket, prURL string, r pu
 	// read-back is a warning, not silence: media were just uploaded, and the
 	// read-back is the one signal that says whether the references actually
 	// point at them now. gh rewrites an image reference in place but leaves
-	// other forms as they were - a bare video path among them, "Videos",
-	// DECISIONS.md - so a reference still unrewritten is patched here, not
+	// other forms as they were - a bare video path among them, as a real gh run
+	// showed - so a reference still unrewritten is patched here, not
 	// merely reported: the URL gh appended for that file (recorded in the very
 	// body just read back) moves to where the reference stands, and the pull
 	// request gets a second edit with the fix. Only a name gh appended no URL
@@ -1417,6 +1561,8 @@ type RepoBody struct {
 	Title       string
 	// What is what the render did with the What of the pull request.
 	What WhatReport
+	// FinalRun is what the reviewed head has for a final run.
+	FinalRun FinalRunReport
 }
 
 // BodyReport is PublishBody's result.
@@ -1439,14 +1585,14 @@ type BodyReport struct {
 // pr-body line: the first step of publishing when an agent does the pushing.
 // A ticket that publishes in several repos gets a body for each (or the one
 // o.Repo names), each naming the pull requests of the others the journal
-// records and "pending" for those it does not. It changes no lease and no
+// records and "pending" for those it does not. It changes no clone and no
 // branch, runs nothing, and needs the reviewed head to be the tip of the
 // clone's branch or of origin's: a body for a head that is neither describes a
 // pull request nobody will open.
 func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	ticket := o.Ticket
 	fn := d.publishFuncs()
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return BodyReport{}, err
 	}
@@ -1466,7 +1612,6 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 		head    string
 		rev     string
 		touched []string
-		names   []string
 	}
 	reads := make([]reading, 0, len(targets))
 	for _, pt := range targets {
@@ -1479,26 +1624,19 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 			if err := checkBodyHead(d, pt, dir); err != nil {
 				return reading{}, err
 			}
-			rev := head
-			if rev == "" {
-				rev = "HEAD"
-			}
+			rev := pt.readRev()
 			touched, err := diffFiles(dir, pt.target, rev)
 			if err != nil {
 				return reading{}, err
 			}
-			man, err := manifest.Resolve(dir)
-			if err != nil {
-				return reading{}, fmt.Errorf("verifydeliver: publish: resolve manifest: %w", err)
-			}
-			return reading{pt: pt, dir: dir, head: head, rev: rev, touched: touched, names: pt.oracleNames(man)}, nil
+			return reading{pt: pt, dir: dir, head: head, rev: rev, touched: touched}, nil
 		}()
 		if err != nil {
 			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
 		reads = append(reads, rd)
 	}
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, targets[0].into)
 	if err != nil {
 		return BodyReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1507,18 +1645,18 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 	for _, rd := range reads {
 		pt := rd.pt
 		r, err := renderPublication(d, pt, renderInput{
-			dir: rd.dir, head: rd.rev, touched: rd.touched, oracleNames: rd.names, picks: picks, what: what, warn: fn.warn,
+			dir: rd.dir, head: rd.rev, touched: rd.touched, picks: picks, what: what, warn: fn.warn,
 			links: linksFor(pt, known),
 		})
 		if err != nil {
 			return BodyReport{}, inRepo(pt.qualified, pt.repoName, err)
 		}
 		line := journal.Line{Event: journal.EventPrBody, Commit: rd.head, Branch: pt.branch, Ref: r.prPath, Repo: pt.lineRepo()}
-		if err := journal.Append(d.Store, ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return BodyReport{}, fmt.Errorf("verifydeliver: publish: journal pr-body: %w", err)
 		}
 		report.Repos = append(report.Repos, RepoBody{
-			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title, What: r.what,
+			Repo: pt.repoName, Target: pt.base(), Head: rd.head, PRBody: r.prPath, Title: r.title, What: r.what, FinalRun: r.final,
 			ReviewNotes: filepath.ToSlash(filepath.Join(d.Store.TicketRelDir(ticket), "pr", r.notesName)),
 		})
 		if report.Picks.Status == "" && len(report.Picks.Dropped) == 0 {
@@ -1532,18 +1670,15 @@ func PublishBody(d Deps, o PublishOpts) (BodyReport, error) {
 }
 
 // readerDir is a repository to read the reviewed head from without changing
-// it: the gate lease the last round reviewed in, else the operator's clone.
+// it: the operator's clone, where the gate read it.
 func readerDir(d Deps, t *publishTarget) (string, error) {
-	if dir, err := pool.Dir(d.Home, t.repoName, t.ticket, pool.Gate); err == nil && pool.Usable(dir) {
-		return dir, nil
-	}
 	if clone := operatorClone(d, t.repoName); clone != "" {
 		return clone, nil
 	}
 	return "", &axi.Error{
-		Msg:  fmt.Sprintf("no checkout of %s holds the reviewed head: the gate lease is gone and no clone is mapped", t.repoName),
+		Msg:  fmt.Sprintf("no checkout of %s holds the reviewed head: no clone is mapped", t.repoName),
 		Code: "PUBLISH_NO_CHECKOUT",
-		Help: []string{fmt.Sprintf("Run `jig gate %s` again, or map the clone with `jig map %s=<path>`", t.ticket, t.repoName)},
+		Help: []string{fmt.Sprintf("Map the clone with `jig map %s=<path>`, then publish again", t.repoName)},
 	}
 }
 
@@ -1555,8 +1690,7 @@ type branchTip struct {
 
 // branchTips are the commits the ticket's branch is at in the places a
 // reviewed head can be found: the operator's clone (its branch, and its last
-// view of origin's), the repository dir reads from (its view of origin's) and,
-// for work an earlier jig built, the build lease.
+// view of origin's) and the repository dir reads from (its view of origin's).
 func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
 	var tips []branchTip
 	add := func(repo, ref string) {
@@ -1571,9 +1705,6 @@ func branchTips(d Deps, t *publishTarget, dir string) []branchTip {
 	add(clone, "refs/heads/"+t.branch)
 	add(clone, "refs/remotes/origin/"+t.branch)
 	add(dir, "refs/remotes/origin/"+t.branch)
-	if buildDir, err := pool.Dir(d.Home, t.repoName, t.ticket, pool.Build); err == nil && pool.Usable(buildDir) {
-		add(buildDir, "refs/heads/"+t.branch)
-	}
 	return tips
 }
 
@@ -1591,7 +1722,7 @@ func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "", "")
 	}
 	for _, tip := range branchTips(d, t, dir) {
-		covered, err := headReviewed(tip.dir, reviewed, tip.sha, "origin/"+t.base())
+		covered, err := headReviewed(tip.dir, reviewed, tip.sha, "origin/"+t.gitBase(tip.dir))
 		if err != nil {
 			return err
 		}
@@ -1626,6 +1757,8 @@ type RecordReport struct {
 	// Readback is what reading the pull request's title and body back from the
 	// host found against the render.
 	Readback Readback
+	// FinalRun is what the reviewed head has for a final run.
+	FinalRun FinalRunReport
 }
 
 // PublishRecordPR records the pull request at prURL, which somebody other than
@@ -1643,7 +1776,7 @@ type RecordReport struct {
 // posts the notes on it (postReviewNotes), matching earlier posts by the parsed
 // pull request without case and journaling its canonical url. A failed post is
 // a warning, and the pull request stays recorded; notes that could not be
-// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no lease and no branch and pushes
+// rendered for the reviewed head are not posted, and the report says so. It pushes the store, changes no clone and no branch and pushes
 // nothing of the repo.
 func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format string, args ...any)) (RecordReport, error) {
 	ticket := o.Ticket
@@ -1654,7 +1787,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	if err != nil {
 		return RecordReport{}, err
 	}
-	targets, err := readyToPublish(d, ticket, o.Repo)
+	targets, err := readyToPublish(d, ticket, o.Repo, o.Issue)
 	if err != nil {
 		return RecordReport{}, err
 	}
@@ -1666,6 +1799,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		}
 	}
 	pt := targets[0]
+	allTargets, allErr := ticketTargets(d, ticket, o.Repo, targets)
 	host, err := d.publishHost(pt.repo.Remote)
 	if err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: build repo host: %w", err)
@@ -1708,7 +1842,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 
 	// The other repos still waiting for a pull request: the publish is done
 	// with this one when there are none.
-	lines, err := journal.Read(d.Store, ticket)
+	lines, err := journal.ReadFor(d.Store, ticket, pt.into)
 	if err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
 	}
@@ -1725,7 +1859,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		oracleNames := pt.gateRep.OracleNames
 		if len(oracleNames) == 0 {
 			if dir, err := readerDir(d, pt); err == nil {
-				if man, err := manifest.Resolve(dir); err == nil {
+				if man, err := manifest.ResolveAt(dir, pt.readRev()); err == nil {
 					oracleNames = SortedOracleNames(man)
 				}
 			}
@@ -1747,7 +1881,7 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 	var notes ReviewNotesReport
 	renderFailed := false
 	if !notesRenderedFor(lines, pt.lineRepo(), reviewed) {
-		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo}); err != nil {
+		if _, err := PublishBody(d, PublishOpts{Ticket: ticket, Repo: o.Repo, Issue: o.Issue}); err != nil {
 			warn("jig: render the review notes of %s for the reviewed head: %v\n", ticket, err)
 			renderFailed = true
 			notes = ReviewNotesReport{Status: ReviewNotesNotPosted, Reason: "the review notes could not be rendered for the reviewed head: " + err.Error()}
@@ -1767,27 +1901,34 @@ func PublishRecordPR(d Deps, o PublishOpts, prURL string, warn func(format strin
 		warn("jig: the %s of %s differs from the render of %s: update the pull request with the title and body `jig publish %s --body` reports\n", readback.Differs, prURL, ticket, ticket)
 	}
 	approval, _ := approvalOf(lines, pt.lineRepo(), reviewed)
-	if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
+	if err := pt.appendLine(d, journal.Line{Event: journal.EventPr, Outcome: outcome, Commit: commit, URL: prURL, Branch: pt.branch, Repo: pt.lineRepo(), Approval: approval, BodyMatch: readback.Match}); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal pr: %w", err)
 	}
 	if notes.Status == "" {
 		notes = postReviewNotes(d, host, ticket, prURL, pt.lineRepo(), pt.notesName(), warn)
 	}
 	if len(pending) == 0 {
-		if err := journal.Append(d.Store, ticket, journal.Line{Event: journal.EventPublishDone}); err != nil {
+		var spans []repoSpan
+		spanErr := allErr
+		if spanErr == nil {
+			spans, spanErr = readSpans(d, allTargets)
+		}
+		if err := pt.appendLine(d, publishDoneLine(spans, spanErr, warn)); err != nil {
 			return RecordReport{}, fmt.Errorf("verifydeliver: publish: journal publish-done: %w", err)
 		}
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish", ticket)); err != nil {
 		return RecordReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
 	}
-	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback}, nil
+	return RecordReport{Repo: pt.repoName, URL: prURL, Branch: pt.branch, Commit: commit, Verified: verified, Pending: pending, ReviewNotes: notes, Readback: readback, FinalRun: finalRunAt(lines, pt.repoName, pt.lineRepo(), reviewed)}, nil
 }
 
 // RepoHead is the head a repo's pull request ships.
 type RepoHead struct {
 	Repo string
 	Head string
+	// FinalRun is what the head has for a final run, said and never required.
+	FinalRun FinalRunReport
 }
 
 // ApproveReport is PublishApprove's result.
@@ -1806,7 +1947,7 @@ type ApproveReport struct {
 // stands in for the confirmation a bare publish asks for, and a ticket that
 // publishes in several repos needs it for every one.
 func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, error) {
-	targets, err := readyToPublish(d, o.Ticket, o.Repo)
+	targets, err := readyToPublish(d, o.Ticket, o.Repo, o.Issue)
 	if err != nil {
 		return ApproveReport{}, err
 	}
@@ -1820,13 +1961,17 @@ func PublishApprove(d Deps, o PublishOpts, provenance string) (ApproveReport, er
 		}
 	}
 	report := ApproveReport{Branch: targets[0].branch, Provenance: provenance}
+	prior, err := journal.ReadFor(d.Store, o.Ticket, targets[0].into)
+	if err != nil {
+		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: read journal: %w", err)
+	}
 	for _, pt := range targets {
 		head := pt.reviewedHead()
 		line := journal.Line{Event: journal.EventPublishApproved, Commit: head, Branch: pt.branch, Provenance: provenance, Repo: pt.lineRepo(), Summary: approverIdentity(d.Store.Root)}
-		if err := journal.Append(d.Store, o.Ticket, line); err != nil {
+		if err := pt.appendLine(d, line); err != nil {
 			return ApproveReport{}, fmt.Errorf("verifydeliver: publish: journal publish-approved: %w", err)
 		}
-		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head})
+		report.Repos = append(report.Repos, RepoHead{Repo: pt.repoName, Head: head, FinalRun: finalRunAt(prior, pt.repoName, pt.lineRepo(), head)})
 	}
 	if err := d.Store.Push(fmt.Sprintf("%s: publish approved", o.Ticket)); err != nil {
 		return ApproveReport{}, fmt.Errorf("verifydeliver: publish: push store: %w", err)
@@ -1937,7 +2082,7 @@ func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, err
 		dirs = append(dirs, dir)
 	}
 	for _, dir := range dirs {
-		covered, err := headReviewed(dir, reviewed, head, "origin/"+pt.base())
+		covered, err := headReviewed(dir, reviewed, head, "origin/"+pt.gitBase(dir))
 		if err != nil {
 			return false, err
 		}
@@ -2019,54 +2164,57 @@ func checkReviewedIntent(st *store.Store, ticket string, rep reportYAML) error {
 	}
 }
 
-// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of branch
-// from dir that would not fast-forward origin's copy: origin has commits the
-// branch lacks, whether or not the branch has some origin lacks in turn. dir's
-// origin/<branch> is as of the fetch just made. A branch origin does not have
-// is a new branch, which has nothing to fast-forward. Publish pushes without
-// force, so git would refuse such a push in the end; this is the refusal made
-// early, with both sides counted, before publish writes to the store.
+// requireFastForward refuses, with PUBLISH_NOT_FAST_FORWARD, a push of head to
+// branch that would not fast-forward origin's copy: origin has commits head
+// lacks, whether or not head has some origin lacks in turn. dir's origin/<branch>
+// is as of the fetch just made. A branch origin does not have is a new branch,
+// which has nothing to fast-forward. It reports whether origin holds head
+// already, in which case there is nothing to push. Publish pushes without force,
+// so git would refuse such a push in the end; this is the refusal made early,
+// with both sides counted, before publish writes to the store.
 //
-// The copy publish ships was compared with origin's when the lease was pointed
-// at it (pointAtTicketBranch), and is refused there when neither holds the
-// other; what this catches is a push since, between the acquire's fetch and the
-// one publish makes right after.
+// The copy publish ships was compared with origin's when it was chosen
+// (chooseCopy), and is refused there when neither holds the other; what this
+// catches is a push since, between the choice's fetch and the one publish makes
+// right after.
 //
-// What to do about it depends on whose copy publish would ship (shipping).
-// The build lease's, at buildDir, is where jig's commits wait, so that is where
-// the two are integrated: jig merges nothing that is not its own. Origin's own
-// copy has nothing to integrate in anywhere - origin moved since the round, by
-// a push between publish's two fetches - and the way on is a round over the
-// branch as it is now.
-func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCopy) error {
+// What to do about it depends on whose copy publish would ship (shipping). The
+// clone's is the person's, so that is where the two are joined: jig merges
+// nothing that is not its own. Origin's own copy has nothing to join in
+// anywhere - origin moved since the round, by a push between publish's two
+// fetches - and the way on is a round over the branch as it is now.
+func requireFastForward(dir, head, branch, ticket string, shipping branchCopy) (onOrigin bool, err error) {
 	remoteRef := "refs/remotes/origin/" + branch
 	tip, err := originsTip(dir, branch)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: %w", err)
+		return false, fmt.Errorf("verifydeliver: publish: %w", err)
 	}
 	if tip == "" {
-		return nil
+		return false, nil
 	}
-	ok, err := gitx.IsAncestor(dir, remoteRef, "refs/heads/"+branch)
+	if tip == head {
+		return true, nil
+	}
+	ok, err := gitx.IsAncestor(dir, remoteRef, head)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: compare %s with origin/%s: %w", branch, branch, err)
 	}
 	if ok {
-		return nil
+		return false, nil
 	}
-	theirs, err := gitx.CommitsIn(dir, "refs/heads/"+branch+".."+remoteRef)
+	theirs, err := gitx.CommitsIn(dir, head+".."+remoteRef)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: list the commits of origin/%s the copy lacks: %w", branch, err)
 	}
-	ours, err := gitx.CommitsIn(dir, remoteRef+"..refs/heads/"+branch)
+	ours, err := gitx.CommitsIn(dir, remoteRef+".."+head)
 	if err != nil {
-		return fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
+		return false, fmt.Errorf("verifydeliver: publish: list the commits of %s origin lacks: %w", branch, err)
 	}
 	next := fmt.Sprintf("Origin's %s moved since the round: run `jig gate %s` to review it as it is now, then publish again", branch, ticket)
-	if shipping == buildLeasesCopy {
-		next = fmt.Sprintf("Integrate origin's copy in the build lease (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", buildDir, buildDir, branch, ticket)
+	if shipping == clonesCopy {
+		next = fmt.Sprintf("Join them in your clone (for example `git -C %s fetch origin && git -C %s merge origin/%s`), run `jig gate %s`, then publish again", dir, dir, branch, ticket)
 	}
-	return &axi.Error{
+	return false, &axi.Error{
 		Msg: fmt.Sprintf("pushing %s would not be a fast-forward: origin/%s has %d commit(s) the branch lacks, and the branch has %d commit(s) origin lacks",
 			branch, branch, len(theirs), len(ours)),
 		Code: "PUBLISH_NOT_FAST_FORWARD",
@@ -2075,108 +2223,4 @@ func requireFastForward(dir, branch, buildDir, ticket string, shipping branchCop
 			next,
 		},
 	}
-}
-
-// oracleCommandsRan is, for each oracle name, the commands that ran for it, one
-// for each workspace (the latest passing line for the oracle in that workspace)
-// and each distinct, in the order the journal first records the workspaces,
-// which for the gate's own runs is the manifest's: lines recorded at the
-// reviewed head or at a commit with the same tree (the rule the gate reuses a
-// pass by). They are the oracle line of a slice that names the oracle (a pass
-// the gate reused, in the slice's workspace) and the gate-oracle line of a run
-// the gate made itself (with its workspace). The line carries the exact command
-// that ran, so nothing here reads a manifest.
-func oracleCommandsRan(lines []journal.Line, built []store.Slice, dir, reviewed string) map[string][]string {
-	commands, _ := oracleRan(lines, built, dir, reviewed)
-	return commands
-}
-
-// oracleRan is oracleCommandsRan and, for each oracle name whose latest pass
-// stands on an earlier whole-suite run through the manifest's light rule, the
-// words that say so: the origin run it reused and the light command that ran.
-// A pass on a commit that differs from the reviewed head only in light paths
-// counts, so a head after a Markdown-only change still names its oracles; a
-// pass on the exact tree is never replaced by one of those.
-func oracleRan(lines []journal.Line, built []store.Slice, dir, reviewed string) (map[string][]string, map[string]string) {
-	if reviewed == "" {
-		return nil, nil
-	}
-	type sliceOf struct{ oracle, workspace string }
-	byID := map[string]sliceOf{}
-	for _, s := range built {
-		byID[s.ID] = sliceOf{s.Oracle, s.Workspace}
-	}
-	tree, haveTree, _ := gitx.Resolve(dir, reviewed+"^{tree}")
-	var light manifest.Light
-	if man, err := manifest.Resolve(dir); err == nil {
-		light = man.Light
-	}
-	type key struct{ oracle, workspace string }
-	var order []key
-	latest := map[key]string{}
-	exact := map[key]bool{}
-	lightDelta := map[string]bool{}
-	notes := map[key]string{}
-	for _, l := range lines {
-		if (l.Event != journal.EventOracle && l.Event != journal.EventGateOracle) || l.Outcome != "pass" || l.Command == "" || l.Commit == "" {
-			continue
-		}
-		name, workspace := l.Oracle, l.Workspace
-		if l.Event == journal.EventOracle {
-			name, workspace = byID[l.Slice].oracle, byID[l.Slice].workspace
-		}
-		if name == "" {
-			continue
-		}
-		sameTree := l.Commit == reviewed
-		if !sameTree {
-			other, found, _ := gitx.Resolve(dir, l.Commit+"^{tree}")
-			sameTree = haveTree && found && other == tree
-		}
-		ran := l.Ran
-		if !sameTree {
-			// Without a light rule no other tree can stand: no diff to take.
-			if !light.Declared() {
-				continue
-			}
-			ok, seen := lightDelta[l.Commit]
-			if !seen {
-				files, err := gitx.DiffNameOnly(dir, l.Commit, reviewed, "ACDMRTUXB")
-				ok = err == nil && light.Matches(files)
-				lightDelta[l.Commit] = ok
-			}
-			if !ok {
-				continue
-			}
-			ran = light.Oracle
-		}
-		k := key{name, workspace}
-		if exact[k] && !sameTree {
-			continue
-		}
-		if _, seen := latest[k]; !seen {
-			order = append(order, k)
-		}
-		latest[k] = l.Command
-		exact[k] = sameTree && l.Ran == ""
-		delete(notes, k)
-		if ran != "" {
-			origin := l.Commit
-			if l.ReusedFrom != "" {
-				origin = l.ReusedFrom
-			}
-			notes[k] = fmt.Sprintf("reused the whole-suite pass of %s, and the light oracle ran: `%s`", shortSHA(origin), strings.Join(strings.Fields(ran), " "))
-		}
-	}
-	commands := map[string][]string{}
-	reuse := map[string]string{}
-	for _, k := range order {
-		if !slices.Contains(commands[k.oracle], latest[k]) {
-			commands[k.oracle] = append(commands[k.oracle], latest[k])
-		}
-		if n, ok := notes[k]; ok {
-			reuse[k.oracle] = n
-		}
-	}
-	return commands, reuse
 }

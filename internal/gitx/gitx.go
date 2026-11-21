@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,21 +39,16 @@ func Run(dir string, args ...string) (string, error) {
 // RunEnv is Run with env appended to the process environment, for pinning an
 // identity (GIT_AUTHOR_NAME and friends) without persisting it.
 func RunEnv(dir string, env []string, args ...string) (string, error) {
-	var stdout, stderr bytes.Buffer
-	if err := run(dir, env, false, &stdout, &stderr, args); err != nil {
-		return "", callError(args, stderr.String(), err)
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return RunWith(dir, env, false, args...)
 }
 
-// RunReplaceEnv is Run with env as the call's whole process environment,
-// instead of appended to this process's own inherited one: a caller
-// resolving some other directory's identity, or lack of one, uses it so an
-// identity this process has pinned for its own commits (gittest.PinIdentity,
-// say) cannot shadow it.
-func RunReplaceEnv(dir string, env []string, args ...string) (string, error) {
+// RunWith is RunEnv that says what env is: appended to this process's own
+// inherited environment, or, with exact, the call's whole environment, so a
+// caller resolving some other directory's identity, or lack of one, is not
+// shadowed by an identity this process has pinned for its own commits.
+func RunWith(dir string, env []string, exact bool, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	if err := run(dir, env, true, &stdout, &stderr, args); err != nil {
+	if err := run(dir, env, exact, &stdout, &stderr, args); err != nil {
 		return "", callError(args, stderr.String(), err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
@@ -104,9 +100,87 @@ func runOnce(dir string, env []string, exact bool, stdout, stderr io.Writer, arg
 	} else {
 		cmd.Env = append(inheritedEnv(), env...)
 	}
+	cmd.Env = withCaller(cmd.Env, dir)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+// traceEnv is the variable git's trace2 event target is set by; gitbudget sets
+// it per package to count the git processes a test binary starts.
+const traceEnv = "GIT_TRACE2_EVENT"
+
+// withCaller names the Go function that asked for a git process, and the
+// directory it ran in, in the child's environment - only when env holds a
+// trace target, so an untraced call walks no stack and its environment is
+// exactly what it was. Git records them when its config lists them under
+// trace2.envVars (internal/gittest writes that line for test binaries), which
+// is how a trace file says who started the process.
+func withCaller(env []string, dir string) []string {
+	if !tracing(env) {
+		return env
+	}
+	abs := ""
+	if dir != "" {
+		abs = dir
+		if a, err := filepath.Abs(dir); err == nil {
+			abs = a
+		}
+	}
+	return append(env, "JIG_GIT_CALLER="+callerName(), "JIG_GIT_DIR="+abs)
+}
+
+// tracing reports whether env sets a trace target. The last entry of a name
+// wins, as in the child, and an empty value is git's "off".
+func tracing(env []string) bool {
+	on := false
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, traceEnv+"="); ok {
+			on = v != ""
+		}
+	}
+	return on
+}
+
+// ownFramePrefix is the function-name prefix of every frame in this package;
+// the dot keeps an external test package (gitx_test) out of it.
+const ownFramePrefix = "github.com/develdeco/jig/internal/gitx."
+
+// closureSuffix matches the suffix Go appends to a function literal's
+// name (".func1", ".func1.2"), so a closure is reported as its enclosing
+// function.
+var closureSuffix = regexp.MustCompile(`(\.func\d+(\.\d+)*)+$`)
+
+// callerName returns the package-qualified name of the first function on the
+// stack outside this package and outside the standard library, or "" when
+// there is none.
+func callerName() string {
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		name := f.Function
+		if name != "" && !strings.HasPrefix(name, ownFramePrefix) && !isStdlib(name) {
+			return closureSuffix.ReplaceAllString(name, "")
+		}
+		if !more {
+			return ""
+		}
+	}
+}
+
+// isStdlib reports whether a function name belongs to the standard library
+// or runtime: its import path's first element has no dot (os/exec.Command), or
+// it has no slash at all (testing.tRunner) and is not package main, which a
+// built command's own functions are named under (main.run).
+func isStdlib(name string) bool {
+	first, _, found := strings.Cut(name, "/")
+	if !found {
+		pkg, _, _ := strings.Cut(name, ".")
+		return pkg != "main"
+	}
+	return !strings.Contains(first, ".")
 }
 
 // gitCommand returns exec.Command("git", args...) with the PATH search
@@ -374,18 +448,11 @@ func parseHunks(patch string) ([]Hunk, error) {
 		case strings.HasPrefix(line, "diff --git "):
 			path, inHeader = "", true
 		case inHeader && strings.HasPrefix(line, "+++ "):
-			// git ends the line with a tab when the name holds a space.
-			name := strings.TrimSuffix(strings.TrimPrefix(line, "+++ "), "\t")
-			if strings.HasPrefix(name, `"`) {
-				unq, err := strconv.Unquote(name)
-				if err != nil {
-					return nil, fmt.Errorf("gitx: diff hunks: unquote %s: %w", name, err)
-				}
-				name = unq
+			name, err := newSidePath(line)
+			if err != nil {
+				return nil, fmt.Errorf("gitx: diff hunks: %w", err)
 			}
-			if name != "/dev/null" {
-				path = strings.TrimPrefix(name, "b/")
-			}
+			path = name
 		case strings.HasPrefix(line, "@@ "):
 			inHeader = false
 			m := hunkHeaderRe.FindStringSubmatch(line)
@@ -404,6 +471,80 @@ func parseHunks(patch string) ([]Hunk, error) {
 		}
 	}
 	return hunks, nil
+}
+
+// newSidePath reads a file header's "+++ " line: the file's path at head, or
+// "" for /dev/null (a deleted file).
+func newSidePath(line string) (string, error) {
+	// git ends the line with a tab when the name holds a space.
+	name := strings.TrimSuffix(strings.TrimPrefix(line, "+++ "), "\t")
+	if strings.HasPrefix(name, `"`) {
+		unq, err := strconv.Unquote(name)
+		if err != nil {
+			return "", fmt.Errorf("unquote %s: %w", name, err)
+		}
+		name = unq
+	}
+	if name == "/dev/null" {
+		return "", nil
+	}
+	return strings.TrimPrefix(name, "b/"), nil
+}
+
+// AddedLine is one line a diff adds, as the new side reads: Path is the file's
+// path at head, Line the line's 1-based number there and Text its content
+// without the line ending.
+type AddedLine struct {
+	Path string
+	Line int
+	Text string
+}
+
+// DiffAdded returns every line base..head adds in dir, in diff order, with
+// renames off as in DiffNameOnly, so a renamed file is all added lines at its
+// new path. Deleted and unchanged lines are left out, and a binary file and a
+// submodule add none. Paths come back repo-relative with forward slashes,
+// unquoted.
+func DiffAdded(dir, base, head string) ([]AddedLine, error) {
+	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
+		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, callError(args, stderr.String(), err)
+	}
+	return parseAdded(stdout.String())
+}
+
+// parseAdded reads DiffAdded's patch, which has no context lines: after a hunk
+// header every "+" line is an added one, numbered on from the header's new
+// start.
+func parseAdded(patch string) ([]AddedLine, error) {
+	var added []AddedLine
+	path, inHeader, next := "", false, 0
+	for _, line := range strings.Split(patch, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			path, inHeader = "", true
+		case inHeader && strings.HasPrefix(line, "+++ "):
+			name, err := newSidePath(line)
+			if err != nil {
+				return nil, fmt.Errorf("gitx: diff added: %w", err)
+			}
+			path = name
+		case strings.HasPrefix(line, "@@ "):
+			inHeader = false
+			m := hunkHeaderRe.FindStringSubmatch(line)
+			if m == nil {
+				return nil, fmt.Errorf("gitx: diff added: unreadable hunk header %q", line)
+			}
+			next, _ = strconv.Atoi(m[1])
+		case !inHeader && path != "" && strings.HasPrefix(line, "+"):
+			added = append(added, AddedLine{Path: path, Line: next, Text: line[1:]})
+			next++
+		}
+	}
+	return added, nil
 }
 
 // BlobsAtRev returns the object id of each of paths that is a blob in dir's
@@ -547,6 +688,7 @@ func lsTreeEntry(entry string) (entryType, path string, err error) {
 func CommonDir(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
+		InProcessReadTally.Add(1)
 		out = loc.commonDir
 	} else {
 		var err error
@@ -598,6 +740,7 @@ func SameDir(a, b string) bool {
 func TopLevel(dir string) (string, error) {
 	var out string
 	if loc, ok := discover(dir, os.LookupEnv); ok {
+		InProcessReadTally.Add(1)
 		out = loc.workTree
 	} else {
 		var err error
@@ -623,16 +766,6 @@ func CommitTime(dir, rev string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("gitx: parse commit time %q: %w", out, err)
 	}
 	return t, nil
-}
-
-// CommitOnAnyRemote reports whether sha is reachable from any remote-
-// tracking branch in dir.
-func CommitOnAnyRemote(dir, sha string) (bool, error) {
-	out, err := Run(dir, "branch", "-r", "--contains", sha)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) != "", nil
 }
 
 // IsLocalRemote reports whether url points at the local filesystem: an
@@ -772,4 +905,147 @@ func GuardedPush(dir, remote, refspec string, confirmed bool) error {
 		return fmt.Errorf("gitx: push %s %s: %w", remote, refspec, err)
 	}
 	return nil
+}
+
+// Standing says how a stands against b with one process: "git rev-list
+// --left-right --count a...b". ahead is the number of commits reachable from
+// a and not from b, behind the number reachable from b and not from a. Equal
+// tips are 0 and 0, a behind b 0 and N, a ahead of b N and 0, and histories
+// that forked, or share no commit at all, both nonzero. It answers what two
+// "merge-base --is-ancestor" calls do, in one process, and an unknown
+// revision is an error as it is there.
+func Standing(dir, a, b string) (ahead, behind int, err error) {
+	out, err := Run(dir, "rev-list", "--left-right", "--count", a+"..."+b)
+	if err != nil {
+		return 0, 0, err
+	}
+	l, r, ok := strings.Cut(strings.TrimSpace(out), "\t")
+	if !ok {
+		return 0, 0, fmt.Errorf("gitx: unexpected rev-list --count output %q", out)
+	}
+	if ahead, err = strconv.Atoi(l); err == nil {
+		behind, err = strconv.Atoi(r)
+	}
+	if err != nil {
+		return 0, 0, fmt.Errorf("gitx: unexpected rev-list --count output %q: %w", out, err)
+	}
+	return ahead, behind, nil
+}
+
+// DiffNameStatus is DiffNameOnly's two answers, the changed paths ("AMT":
+// added, modified, type-changed) and the deleted ones ("D"), from one
+// process: "git diff --name-status -z --no-renames", split in process. Renames
+// are off, so a renamed file is its new path changed and its old path
+// deleted, as in DiffNameOnly. Both lists keep git's tree order; any other
+// status letter (a path git cannot place) is in neither, as with the filters.
+func DiffNameStatus(dir, base, head string) (changed, deleted []string, err error) {
+	args := []string{"diff", "--name-status", "-z", "--no-renames", base, head}
+	var stdout, stderr bytes.Buffer
+	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
+		return nil, nil, callError(args, stderr.String(), err)
+	}
+	raw := strings.TrimSuffix(stdout.String(), "\x00")
+	if raw == "" {
+		return nil, nil, nil
+	}
+	fields := strings.Split(raw, "\x00")
+	if len(fields)%2 != 0 {
+		return nil, nil, fmt.Errorf("gitx: unexpected diff --name-status -z output: %d fields", len(fields))
+	}
+	for i := 0; i < len(fields); i += 2 {
+		switch fields[i] {
+		case "A", "M", "T":
+			changed = append(changed, fields[i+1])
+		case "D":
+			deleted = append(deleted, fields[i+1])
+		}
+	}
+	return changed, deleted, nil
+}
+
+// FilesAtRev is FileExistsAtRev for several paths: for each of paths, whether
+// it is a blob (not a tree, not a submodule) in dir's tree at rev. A path the
+// repository is read in process for is answered there, as FileExistsAtRev
+// answers it; the rest, which are all of them in a repository gitx declines
+// (alternates, a pack index too large to read, and the other declines), go to
+// one "git cat-file --batch-check" that also checks rev, instead of a
+// rev-parse and an ls-tree a path. A rev that does not name a commit is an
+// error, as it is there. A path that cannot be a line of that protocol (a
+// newline, an empty or relative one) is asked alone, as FileExistsAtRev does.
+func FilesAtRev(dir, rev string, paths []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(paths))
+	var batch, alone []string
+	for _, p := range paths {
+		if _, seen := out[p]; seen {
+			continue
+		}
+		if et, found, ok := treeEntryInProcess(dir, rev, p, os.LookupEnv); ok {
+			out[p] = found && et == "blob"
+			continue
+		}
+		out[p] = false
+		if batchablePath(p) && !strings.ContainsAny(rev, "\n\x00") {
+			batch = append(batch, p)
+		} else {
+			alone = append(alone, p)
+		}
+	}
+	for _, p := range alone {
+		exists, err := FileExistsAtRev(dir, rev, p)
+		if err != nil {
+			return nil, err
+		}
+		out[p] = exists
+	}
+	if len(batch) == 0 {
+		return out, nil
+	}
+	var in strings.Builder
+	in.WriteString(rev + "^{commit}\n")
+	for _, p := range batch {
+		in.WriteString(rev + ":" + p + "\n")
+	}
+	got, err := RunInput(dir, []byte(in.String()), "cat-file", "--batch-check")
+	if err != nil {
+		return nil, fmt.Errorf("gitx: files at rev: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(got, "\r\n"), "\n")
+	if len(lines) != len(batch)+1 {
+		return nil, fmt.Errorf("gitx: files at rev: cat-file --batch-check answered %d lines for %d questions", len(lines), len(batch)+1)
+	}
+	if strings.HasSuffix(strings.TrimRight(lines[0], "\r"), " missing") {
+		return nil, fmt.Errorf("gitx: files at rev: rev %q does not resolve to a commit", rev)
+	}
+	for i, p := range batch {
+		fields := strings.Fields(strings.TrimRight(lines[i+1], "\r"))
+		// An object answers "<oid> <type> <size>"; a missing one echoes the
+		// input with " missing", so a path named "x blob" is not read by its
+		// words: only a line that opens with an object id and ends in a size
+		// is an answer.
+		out[p] = len(fields) == 3 && fields[1] == "blob" && isObjectID(fields[0]) && isDigits(fields[2])
+	}
+	return out, nil
+}
+
+// batchablePath reports whether p can be one "rev:path" line of git's
+// object-name protocol: not empty, on one line, and not a form git reads
+// relative to something ("./x", "../x", "/x", ":x").
+func batchablePath(p string) bool {
+	if p == "" || strings.ContainsAny(p, "\n\r\x00") {
+		return false
+	}
+	return !(strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") ||
+		strings.HasPrefix(p, ":") || p == "." || p == "..")
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

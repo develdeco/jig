@@ -1,5 +1,7 @@
 # A published stacked ticket can be behind, and a head is reviewed through merges git would make
 
+**Amended 2026-11-21:** a gate at the head a clean round reviewed is carried too; a merge is no longer required.
+
 [ADR 0010](0010-ticket-dependencies-live-on-the-ticket.md) made a stacked child start from its parent's branch and told the child's session to restack or retarget when the parent moved or merged. [ADR 0037](0037-a-chart-is-run-from-the-main-session.md) made a chart run end when every ticket is published. The two met badly. A child published into its parent's branch is published, so its standing was done. Once the parent merged, the child still owed a merge of the target and a publish that pointed its pull request at the target, and nothing said so: the correction notes reach only a session working on the child's branch, and a chart run has no such session. The chart read `CHART_DONE` with a pull request that went into a branch about to be deleted.
 
 Finishing that work showed three more gaps. The merge of the target changes the head, and publish refuses a head no clean round reviewed, so a merge git made on its own cost a whole new gate round that asked the reviewer for nothing. A merge resolved by hand got a delta round, but the delta from the reviewed head carried every file the target brought in. And publish looked for the open pull request into the base it was about to use, so when the host did not retarget a child's pull request it found none and opened a second one.

@@ -407,7 +407,7 @@ func TestPullRequestsByIDsFailsOnAnErrorThatIsNotAGoneNode(t *testing.T) {
 }
 
 // TestAddSubIssueAndBlockedBySendTheirMutations checks AddSubIssue,
-// AddBlockedBy and RemoveBlockedBy post the mutation brief.md#The GitHub
+// AddBlockedBy and RemoveBlockedBy post the mutation the
 // client names, with the node ids they were given as variables. The
 // blocked-by pair must name the blocker by GitHub's input field,
 // blockingIssueId: GitHub checks the input field, not the variable's name,
@@ -502,7 +502,7 @@ func TestFetchIssuesReadsCurrentState(t *testing.T) {
 
 // TestFetchIssuesLeavesOutAGoneIssue checks a gone issue - answered in the
 // real API's own shape, a null alongside a NOT_FOUND at path ["nodes", i] -
-// has no entry rather than failing the read (brief.md#Adoption: the sync
+// has no entry rather than failing the read (the sync
 // recreates it), while any other error still fails it.
 func TestFetchIssuesLeavesOutAGoneIssue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -651,7 +651,7 @@ func TestCreateIssueRefusesOnBadCredentials(t *testing.T) {
 	}
 }
 
-// fakeProjectServer is a fake GraphQL server for brief.md#The board's own
+// fakeProjectServer is a fake GraphQL server for the board's own
 // mutations and queries, matched the same way fakeGraphQL is, by substring
 // on the request's query text. project, repo and linkedRepoIDs model the
 // server's one project's current state, mutated as EnsureProject's own
@@ -797,8 +797,8 @@ func (s *fakeProjectServer) handleUpdateField(vars map[string]any, w http.Respon
 	_, _ = fmt.Fprintf(w, `{"data":{"updateProjectV2Field":{"projectV2Field":%s}}}`, data)
 }
 
-// TestEnsureProjectCreatesMissingFieldsAndLinksRepo checks brief.md#The
-// board's own creation path: an empty project gets its Status field (every
+// TestEnsureProjectCreatesMissingFieldsAndLinksRepo checks the board's
+// own creation path: an empty project gets its Status field (every
 // one of the six options) and its Store ID field created, and the issue
 // repo linked, since none of that exists yet.
 func TestEnsureProjectCreatesMissingFieldsAndLinksRepo(t *testing.T) {
@@ -845,8 +845,8 @@ func TestEnsureProjectCreatesMissingFieldsAndLinksRepo(t *testing.T) {
 
 // TestEnsureProjectKeepsExistingOptionsAndAddsMissing checks that a Status
 // field already on the project, with some of its options, is rewritten to
-// add only the missing ones, keeping every existing option's id
-// (brief.md#The board: "an option's id keeps it").
+// add only the missing ones, keeping every existing option's id,
+// since an option's id keeps it.
 func TestEnsureProjectKeepsExistingOptionsAndAddsMissing(t *testing.T) {
 	fps := newFakeProjectServer()
 	fps.fields = []projectFieldNode{
@@ -955,7 +955,7 @@ func TestEnsureProjectAddsTheNotPlannedOptionOnce(t *testing.T) {
 	}
 }
 
-// TestEnsureProjectRefusesWhenProjectIsNil checks brief.md#The board's
+// TestEnsureProjectRefusesWhenProjectIsNil checks the board's
 // refusal: a project GraphQL resolves to null - gone, or a token without
 // the project scope, which look the same from here - is refused with
 // MIRROR_PROJECT_NOT_FOUND, naming `gh auth refresh -s project`.
@@ -1042,8 +1042,8 @@ func TestPlaceItemRefusesAnUnknownStatus(t *testing.T) {
 	}
 }
 
-// TestDoRetriesOnServerErrorThenSucceeds checks brief.md#The GitHub
-// client's retry: a call that fails with a server error (5xx) twice is
+// TestDoRetriesOnServerErrorThenSucceeds checks the client's
+// retry: a call that fails with a server error (5xx) twice is
 // retried and succeeds on its third attempt, well within maxAttempts.
 // RepositoryIsPublic sends exactly one query, so attempts counts do's own
 // retries alone.
@@ -1138,7 +1138,7 @@ func TestDoRetriesAGraphQLRateLimitedError(t *testing.T) {
 	}
 }
 
-// TestDoThrottlesMutationsOneAtATime checks brief.md#The GitHub client's
+// TestDoThrottlesMutationsOneAtATime checks the client's
 // pacing: two mutations sent back to back (AddComment, a single-request
 // call with no query step ahead of it) leave the client at least
 // MutationInterval apart. They are timed where the client hands each

@@ -65,6 +65,8 @@ type work struct {
 	Where   locate.Where
 	Ticket  string
 	Session string
+	// Memo is the run's git memo (nil asks git each time).
+	Memo *gitx.Memo
 }
 
 // resolveWork finds the store, then the ticket (ticketArg, else the branch
@@ -92,6 +94,7 @@ func resolveWork(e env, stdout io.Writer, f workFlags, ticketArg string) (work, 
 		Slice:     val(f.slice),
 		Session:   val(f.session),
 		Getenv:    e.getenv,
+		Memo:      e.memo,
 		NoMap:     true,
 	})
 	if err != nil {
@@ -110,7 +113,7 @@ func resolveWork(e env, stdout io.Writer, f workFlags, ticketArg string) (work, 
 	if err := requireTicket(st, where.Ticket); err != nil {
 		return work{}, err
 	}
-	return work{St: st, Cfg: cfg, MP: mp, JigHome: jigHome, Where: where, Ticket: where.Ticket, Session: where.Session}, nil
+	return work{St: st, Cfg: cfg, MP: mp, JigHome: jigHome, Where: where, Ticket: where.Ticket, Session: where.Session, Memo: e.memo}, nil
 }
 
 // slice returns the slice the work is on, which must be one of the ticket.
@@ -190,9 +193,9 @@ func (w work) buildDir() string {
 	if clone == "" {
 		return ""
 	}
-	if there, err := gitx.CommonDir(w.Where.Cwd); err == nil {
-		if here, err := gitx.CommonDir(clone); err == nil && gitx.SameDir(there, here) {
-			if top, err := gitx.TopLevel(w.Where.Cwd); err == nil {
+	if there, err := w.Memo.CommonDir(w.Where.Cwd); err == nil {
+		if here, err := w.Memo.CommonDir(clone); err == nil && gitx.SameDir(there, here) {
+			if top, err := w.Memo.TopLevel(w.Where.Cwd); err == nil {
 				return top
 			}
 		}

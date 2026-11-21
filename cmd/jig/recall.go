@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/recall"
 	"github.com/develdeco/jig/internal/store"
@@ -96,6 +97,14 @@ func recallTickets(st *store.Store) ([]recall.Ticket, error) {
 		}
 		if datas[i].problem != "" {
 			t.State = stateInvalid
+		}
+		if t.Shipped {
+			// A journal that cannot be read leaves the ticket out of the
+			// receipts; it is no reason to refuse the report.
+			if lines, err := journal.Read(st, s.ID); err == nil {
+				f := recall.FactsOf(lines)
+				t.Facts = &f
+			}
 		}
 		for _, b := range datas[i].in.Blockers {
 			t.BlockedBy = append(t.BlockedBy, recall.Blocker{Ticket: b.Ticket, Kind: b.Kind})

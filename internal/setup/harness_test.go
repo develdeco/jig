@@ -252,7 +252,7 @@ func TestHarnessPlanDeletesAFileThatHeldOnlyJigs(t *testing.T) {
 		}
 		t.Run(h.Name, func(t *testing.T) {
 			t.Parallel()
-			path := filepath.Join(t.TempDir(), "sub", filepath.Base(h.GlobalFile("x")))
+			path := filepath.Join(t.TempDir(), "sub", filepath.Base(h.GlobalFile(UserDirs{Home: "x"})))
 			plan, err := h.Plan(path, "jig", false)
 			if err != nil || !plan.Changed() || plan.Delete {
 				t.Fatalf("install plan: %+v, %v", plan, err)
@@ -321,7 +321,7 @@ func TestHarnessFiles(t *testing.T) {
 		if !ok {
 			t.Fatalf("no harness %s", c.name)
 		}
-		if got := filepath.ToSlash(h.GlobalFile(home)); got != "h/me/"+c.global {
+		if got := filepath.ToSlash(h.GlobalFile(UserDirs{Home: home})); got != "h/me/"+c.global {
 			t.Errorf("%s global = %s", c.name, got)
 		}
 		if got := filepath.ToSlash(h.ProjectFile(dir, false)); got != "w/proj/"+c.project {
@@ -336,6 +336,63 @@ func TestHarnessFiles(t *testing.T) {
 	}
 	if _, ok := HarnessNamed("emacs"); ok {
 		t.Error("HarnessNamed(emacs) found one")
+	}
+}
+
+// TestHarnessFilesFollowClaudesDirectory: a Claude Code directory of its own
+// (CLAUDE_CONFIG_DIR, resolved by the caller) moves Claude Code's global hook
+// file and config directory there, and no other harness's; with none they
+// stay under <home>/.claude.
+func TestHarnessFilesFollowClaudesDirectory(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join("h", "me")
+	moved := UserDirs{Home: home, Claude: filepath.Join("c", "work")}
+	for _, h := range Harnesses() {
+		atHome := UserDirs{Home: home}
+		if h.Name == "claude" {
+			if got := filepath.ToSlash(h.GlobalFile(moved)); got != "c/work/settings.json" {
+				t.Errorf("claude global with a directory of its own = %s", got)
+			}
+			if got := filepath.ToSlash(h.ConfigDir(moved)); got != "c/work" {
+				t.Errorf("claude config dir with a directory of its own = %s", got)
+			}
+			if got := filepath.ToSlash(h.ConfigDir(atHome)); got != "h/me/.claude" {
+				t.Errorf("claude config dir = %s", got)
+			}
+			continue
+		}
+		if got, want := h.GlobalFile(moved), h.GlobalFile(atHome); got != want {
+			t.Errorf("%s global moved with Claude Code's directory: %s, want %s", h.Name, got, want)
+		}
+		if got, want := h.ConfigDir(moved), h.ConfigDir(atHome); got != want || !strings.HasPrefix(filepath.ToSlash(got), "h/me/.") {
+			t.Errorf("%s config dir = %s, want %s under the home", h.Name, got, want)
+		}
+	}
+}
+
+// TestUserDirs: Claude Code's directory is the one given, else the home's
+// .claude; the skills roots are Claude Code's, then the home's .agents.
+func TestUserDirs(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join("h", "me")
+	for _, c := range []struct {
+		u      UserDirs
+		claude string
+		roots  []string
+	}{
+		{UserDirs{Home: home}, "h/me/.claude", []string{"h/me/.claude/skills", "h/me/.agents/skills"}},
+		{UserDirs{Home: home, Claude: filepath.Join("c", "work")}, "c/work", []string{"c/work/skills", "h/me/.agents/skills"}},
+	} {
+		if got := filepath.ToSlash(c.u.ClaudeDir()); got != c.claude {
+			t.Errorf("%+v ClaudeDir = %s, want %s", c.u, got, c.claude)
+		}
+		var roots []string
+		for _, r := range c.u.SkillRoots() {
+			roots = append(roots, filepath.ToSlash(r))
+		}
+		if !slices.Equal(roots, c.roots) {
+			t.Errorf("%+v SkillRoots = %v, want %v", c.u, roots, c.roots)
+		}
 	}
 }
 

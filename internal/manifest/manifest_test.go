@@ -29,32 +29,10 @@ func oracleNames(m Manifest) []string {
 	return names
 }
 
-// TestResolveTable covers the three v0.1 manifest-resolution cases: package.json-
-// derived oracles, jig.yaml workspace override, and envs coming only from
-// jig.yaml.
+// TestResolveTable covers manifest resolution: the jig.yaml workspace override,
+// and envs coming only from jig.yaml.
 func TestResolveTable(t *testing.T) {
-	t.Run("package.json derives one oracle per script, no jig.yaml", func(t *testing.T) {
-		dir := t.TempDir()
-		writeFile(t, filepath.Join(dir, "package.json"), `{"scripts":{"test":"jest","lint":"eslint ."}}`)
-
-		m, err := Resolve(dir)
-		if err != nil {
-			t.Fatalf("Resolve: %v", err)
-		}
-		want := map[string]string{"test": "npm run test", "lint": "npm run lint"}
-		if !reflect.DeepEqual(m.Oracles, want) {
-			t.Errorf("Oracles = %v, want %v", m.Oracles, want)
-		}
-		wantWS := []Workspace{{ID: "root", Path: "."}}
-		if !reflect.DeepEqual(m.Workspaces, wantWS) {
-			t.Errorf("Workspaces = %v, want %v", m.Workspaces, wantWS)
-		}
-		if len(m.Envs) != 0 {
-			t.Errorf("Envs = %v, want empty", m.Envs)
-		}
-	})
-
-	t.Run("declared jig.yaml workspaces replace detected", func(t *testing.T) {
+	t.Run("declared jig.yaml workspaces replace the root workspace", func(t *testing.T) {
 		dir := t.TempDir()
 		writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
 		writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), `
@@ -72,9 +50,8 @@ workspaces:
 		if !reflect.DeepEqual(m.Workspaces, want) {
 			t.Errorf("Workspaces = %v, want %v", m.Workspaces, want)
 		}
-		// detected go.mod oracle survives since jig.yaml declared none.
-		if m.Oracles["test"] != "go test ./..." {
-			t.Errorf("Oracles[test] = %q, want detected default", m.Oracles["test"])
+		if len(m.Oracles) != 0 {
+			t.Errorf("Oracles = %v, want none: jig.yaml declared none and a go.mod detects none", m.Oracles)
 		}
 	})
 
@@ -385,4 +362,79 @@ func TestResolveTimeout(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestAGoModOrPackageJSONDetectsNoOracle: a repo with no declaration has no
+// named oracle, whatever build file it holds; its root workspace is as ever.
+func TestAGoModOrPackageJSONDetectsNoOracle(t *testing.T) {
+	t.Parallel()
+	const goMod = "module example.invalid/x\n\ngo 1.27\n"
+	const pkg = `{"scripts":{"test":"jest","lint":"eslint ."}}`
+	cases := []struct {
+		name  string
+		files map[string]string
+	}{
+		{"go.mod", map[string]string{"go.mod": goMod}},
+		{"package.json with scripts", map[string]string{"package.json": pkg}},
+		{"both", map[string]string{"go.mod": goMod, "package.json": pkg}},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		for name, content := range c.files {
+			writeFile(t, filepath.Join(dir, name), content)
+		}
+		m, err := Resolve(dir)
+		if err != nil {
+			t.Fatalf("%s: Resolve: %v", c.name, err)
+		}
+		if len(m.Oracles) != 0 {
+			t.Errorf("%s: Oracles = %v, want none", c.name, m.Oracles)
+		}
+		if want := []Workspace{{ID: "root", Path: "."}}; !reflect.DeepEqual(m.Workspaces, want) {
+			t.Errorf("%s: Workspaces = %v, want %v", c.name, m.Workspaces, want)
+		}
+	}
+}
+
+// TestAMalformedPackageJSONDoesNotMakeTheManifestUnreadable: package.json is
+// never read, so a broken one neither fails Resolve nor hides a declaration's
+// oracles.
+func TestAMalformedPackageJSONDoesNotMakeTheManifestUnreadable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "package.json"), `{"scripts": {`)
+	if m, err := Resolve(dir); err != nil || len(m.Oracles) != 0 {
+		t.Errorf("no declaration: Oracles = %v, err = %v, want none and no error", m.Oracles, err)
+	}
+	writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), "oracles:\n  lint: eslint .\n")
+	m, err := Resolve(dir)
+	if err != nil {
+		t.Fatalf("beside a declaration: Resolve: %v", err)
+	}
+	if want := map[string]string{"lint": "eslint ."}; !reflect.DeepEqual(m.Oracles, want) {
+		t.Errorf("Oracles = %v, want %v", m.Oracles, want)
+	}
+}
+
+// TestDeclaredOraclesResolveWithoutDetection: a declared name maps to its
+// command with {path} substituted, and a name nothing declares is the literal.
+func TestDeclaredOraclesResolveWithoutDetection(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.invalid/x\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(dir, ".claude", "jig.yaml"), "oracles:\n  lint: \"golangci-lint run ./{path}/...\"\n")
+	m, err := Resolve(dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if want := []Workspace{{ID: "root", Path: "."}}; !reflect.DeepEqual(m.Workspaces, want) {
+		t.Errorf("Workspaces = %v, want the root workspace %v", m.Workspaces, want)
+	}
+	ws := Workspace{ID: "alpha", Path: "src/alpha"}
+	if got := m.OracleCmd("lint", ws); got != "golangci-lint run ./src/alpha/..." {
+		t.Errorf("OracleCmd(declared) = %q", got)
+	}
+	if got := m.OracleCmd("test", ws); got != "test" {
+		t.Errorf("OracleCmd(undeclared) = %q, want the literal %q: a go.mod declares no test oracle", got, "test")
+	}
 }

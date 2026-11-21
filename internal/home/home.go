@@ -1,31 +1,20 @@
-// Package home resolves jig's per-machine root. Root reads it once, from the
+// Package home resolves jig's per-machine root. RootFrom reads it once, from the
 // JIG_HOME environment variable or the real home directory; every
-// home-anchored path (the machine mapping, the worktree pool, the
-// evidence tree) is derived from a root its caller passes in, so the binary
+// home-anchored path (the machine mapping, the evidence tree) is derived from a root its caller passes in, so the binary
 // resolves the root once and a test hands each package its own root instead of
 // touching the environment or the real home directory.
 package home
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
 
-// Root returns the jig home directory: $JIG_HOME if set, else <user home>/.config/jig.
-// It reads the process's environment; a caller that holds an environment of its
-// own resolves the root from that with RootFrom.
-func Root() (string, error) {
-	return RootFrom(os.Getenv)
-}
-
-// RootFrom is Root against the environment getenv reads, in place of the
-// process's: $JIG_HOME if getenv gives one, else <user home>/.config/jig with
+// RootFrom is the jig home root as the environment getenv reads gives it:
+// $JIG_HOME if getenv gives one, else <user home>/.config/jig with
 // the user home UserDirFrom finds. The binary passes os.Getenv; a command that
 // runs in a process beside others (a test) passes the environment it was
 // given, so what it resolves never depends on a variable another sets.
@@ -64,7 +53,9 @@ func UserDirFrom(getenv func(string) string) (string, error) {
 	return "", errors.New(enverr + " is not defined")
 }
 
-// PoolDir returns the worktree pool root under the jig home root.
+// PoolDir returns the root of the pool of leases an earlier jig kept under the
+// jig home root. This jig makes none; the directory is read only by the
+// migration's refusal to leave work in one (migrate.CheckNoLeases).
 func PoolDir(root string) string {
 	return filepath.Join(root, "pool")
 }
@@ -83,34 +74,10 @@ func IntentExcerptDir(root string) string {
 	return filepath.Join(root, "intent-excerpts")
 }
 
-// IntentScratchDir returns the directory under the jig home root whose
-// subdirectories are the working directories of gate intent-inference
-// summarizer dispatches: one fresh, empty directory per dispatch, made and
-// removed by the caller. It lives under the jig home, never the lease (the
-// code under review) and never the store.
-func IntentScratchDir(root string) string {
-	return filepath.Join(root, "intent-scratch")
-}
-
-// BaselinePath returns the file under the jig home root that holds the output
-// lines of the latest passing run of an oracle command:
-// <root>/baselines/<key>.txt, key being a hash of the repo, the workspace and
-// the command, so each combination has one file and the latest pass replaces
-// it. It lives under the jig home, never the store or the repo: it is
-// machine-local and means nothing elsewhere.
-func BaselinePath(root, repo, workspace, command string) string {
-	h := sha256.New()
-	for _, part := range []string{repo, workspace, command} {
-		fmt.Fprintf(h, "%d:%s;", len(part), part)
-	}
-	return filepath.Join(root, "baselines", hex.EncodeToString(h.Sum(nil)[:16])+".txt")
-}
-
 // The evidence tree is <root>/evidence/<storeID>/<ticket>/...: a fifth home
 // beside the four ARCHITECTURE.md names, kept out of the store's git on purpose
-// (media are large and the store is a long-lived repo) and out of any lease (a
-// lease is rewound between rounds), so it lives with the machine, like the
-// pool. RecordDir, PicksDir and ReviewDir name the three kinds of directory in
+// (media are large and the store is a long-lived repo), so it lives with the
+// machine, like the mapping. RecordDir, PicksDir and ReviewDir name the three kinds of directory in
 // it. Each part a caller supplies (the store id, the ticket, a sha, a run) must
 // name a single directory, so no spelling can climb out of the tree.
 

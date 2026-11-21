@@ -9,18 +9,18 @@ import (
 
 // SafetyHit is one publish-safety scanner match: the 1-based line number in
 // the scanned title+body text (the title is line 1, the body's own lines
-// follow), and the full line it matched on (brief.md#Publish safety).
+// follow), and the full line it matched on.
 type SafetyHit struct {
 	Line int
 	Text string
 }
 
-// emailRE matches an email address, brief.md#Publish safety's first
+// emailRE matches an email address, the first
 // built-in pattern.
 var emailRE = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 
 // exampleEmailDomains are the reserved example domains an email address on
-// them is not a hit for (brief.md#Publish safety).
+// them is not a hit for.
 var exampleEmailDomains = map[string]bool{
 	"example.com": true,
 	"example.org": true,
@@ -45,29 +45,29 @@ func isExemptEmail(addr string) bool {
 	return strings.HasSuffix(domain, ".invalid")
 }
 
-// windowsHomeRE and unixHomeRE match a home directory path, brief.md
-// #Publish safety's second built-in pattern.
+// windowsHomeRE and unixHomeRE match a home directory path, the second
+// built-in pattern.
 var (
 	windowsHomeRE = regexp.MustCompile(`[A-Za-z]:\\Users\\[^\\\s]+`)
 	unixHomeRE    = regexp.MustCompile(`/home/[^/\s]+`)
 )
 
-// privateKeyHeaderRE matches a private key header line, brief.md#Publish
-// safety's last built-in pattern. The space between the two words is
+// privateKeyHeaderRE matches a private key header line, the last
+// built-in pattern. The space between the two words is
 // spelled as a character class so this source itself does not contain
 // them joined by a literal space, which the publish-safety scan flags.
 var privateKeyHeaderRE = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE[ ]KEY-----`)
 
 // tokenPrefixes are the GitHub, Anthropic and AWS token prefixes
-// brief.md#Publish safety names as a built-in pattern.
+// that count as a built-in pattern.
 var tokenPrefixes = []string{
 	"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_",
 	"sk-ant-",
 	"AKIA", "ASIA",
 }
 
-// matchesBuiltin reports whether line trips one of brief.md#Publish
-// safety's built-in patterns.
+// matchesBuiltin reports whether line trips one of the built-in
+// patterns.
 func matchesBuiltin(line string) bool {
 	for _, addr := range emailRE.FindAllString(line, -1) {
 		if !isExemptEmail(addr) {
@@ -102,7 +102,7 @@ func matchesTerm(line string, terms []string) bool {
 
 // ScanTitleAndBody scans title (as its own line) and body (split on "\n")
 // against the built-in patterns and terms, returning every line that hit,
-// in order, numbered from 1 (brief.md#Publish safety).
+// in order, numbered from 1.
 func ScanTitleAndBody(title, body string, terms []string) []SafetyHit {
 	lines := append([]string{title}, strings.Split(body, "\n")...)
 	var hits []SafetyHit
@@ -115,14 +115,13 @@ func ScanTitleAndBody(title, body string, terms []string) []SafetyHit {
 }
 
 // publishTermsFile is the terms file's own name, read from the jig home
-// root (brief.md#Publish safety: "The file lives on the machine, never in
-// the store or a repo").
+// root: the file lives on the machine, never in the store or a repo.
 const publishTermsFile = "publish-terms.txt"
 
 // LoadPublishTerms reads home's publish-terms.txt, one term per line,
 // lower-cased for ScanTitleAndBody's case-insensitive match; blank lines and
 // "#" comments are ignored. A missing file (or an empty home) means no
-// terms, not an error (brief.md#Publish safety).
+// terms, not an error.
 func LoadPublishTerms(home string) ([]string, error) {
 	if home == "" {
 		return nil, nil

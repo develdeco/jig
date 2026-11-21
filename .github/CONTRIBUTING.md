@@ -1,6 +1,6 @@
 # Contributing
 
-jig is a Go project. Building needs only Go 1.27.3+; testing also needs `git`
+jig is a Go project. Building needs only Go 1.27.4+; testing also needs `git`
 on PATH, since the suite spawns real git commands against local, file-path
 repos, and an sh, which jig runs every oracle and env class command through
 ([ADR 0042](../docs/adr/0042-every-oracle-runs-through-sh.md)): on Windows,
@@ -26,16 +26,16 @@ builds differently (a `_windows` file or one with a build constraint,
 `go.mod`, `go.sum`, `.gitattributes`, a workflow); every push to main, the
 daily run and every release run it on all three, so a Windows-only failure
 shows on main and is fixed forward. A pull request that changes only docs
-runs `./lint`, whose tests are the only ones that read them. jig's gate runs
-it as this repo's `test` oracle
-(`.claude/jig.yaml`). A jig build slice's own oracle runs when its builder
-reports green.
+runs `./lint`, whose tests are the only ones that read them. The full suite
+is CI's alone: a jig gate round and publish run no test. A jig build slice's own
+oracle runs when its builder runs `jig verify`, and a ticket's last run is
+`jig verify --final`, the union of its slices' commands at the reviewed head.
 
 ## Making a change
 
 - Keep commits to one logical change each, with a conventional commit message
   (`fix:`, `feat:`, `docs:`, `ci:`, and so on).
-- A change to the command screen, the secret-path screen, or the guarded push
+- A change to the guarded push
   needs a test that exercises the behavior it changes - see the Safety
   section of [ARCHITECTURE.md](../ARCHITECTURE.md#safety).
 - [ARCHITECTURE.md](../ARCHITECTURE.md) describes how the packages fit
@@ -46,14 +46,10 @@ reports green.
   and docs share.
 - Write an ADR (`docs/adr/000N-title.md`, following the existing ones) when a
   decision constrains future design - a choice later work has to live with
-  or deliberately reverse. Record a judgment call in `docs/build-log/<TICKET>.md`
-  instead when it resolved something ambiguous during a build but doesn't bind
-  future design - the "what was ambiguous, what was chosen, and why" log. It is
-  one file per ticket, so two branches never conflict on it; a hand PR with no
-  ticket that has a judgment call uses a lowercase slug of its branch as the
-  name, and a bump or routine change writes no entry. `DECISIONS.md` is the
-  history before this folder and is not edited. A stale fact in a build-log
-  file is corrected in that file; `DECISIONS.md` stays untouched.
+  or deliberately reverse. A comment says why; a build's judgment call (what
+  was ambiguous, what was chosen and why) is recorded with jig, in the store,
+  not in a repo file.
+  `lint.TestADRNumbersAreUnique` fails when two ADR files share a number.
 
 ## Pull requests
 
@@ -92,6 +88,12 @@ reports green.
 be at most 100 lines and 6000 bytes, and its frontmatter needs a `name:`
 matching the directory name and a `description:` of at most 50 words.
 
+## Changing jig's own workflow
+
+A change to jig's own workflow (a step, command, record or check every run
+pays for) needs a miss seen on two or more tickets and the cost it saves.
+Prefer removing what caused the miss.
+
 ## Testing rules
 
 - Tests never touch the network. Every git remote used in a test is a bare,
@@ -99,10 +101,25 @@ matching the directory name and a `description:` of at most 50 words.
 - Every package whose tests run git wires `internal/gittest` into
   `TestMain` (`gittest.Run`), which points git at a generated, hermetic
   config and stops background maintenance from outliving the test process.
+  Git refuses every write to that shared config, so a test that sets global
+  git config gives itself a config of its own (in e2e, `withGitGlobal`).
+- A function only tests reach is test support, and lives where only tests
+  import it (a `_test.go` file of the package, or a package such as
+  `internal/gitx/gitxtest` that only tests import): CI's Linux leg runs
+  `deadcode ./cmd/jig` and fails, printing the list, when it prints anything.
 - Only `internal/gitx` runs git, as a program or in process:
   `lint.TestNoGitSpawnOutsideGitx` parses every other package and fails the
   build if one calls `os/exec` on a program that resolves to `git`, and
   `lint.TestNoGoGitOutsideGitx` if one imports go-git.
+- The code under test runs real git on real repositories. Only a test's own
+  setup and builder moves (add and commit everything, push a branch, fetch
+  one) run in process, and only through gitx: `internal/gitbuild` makes the
+  move with `gitx.Repo` where gitx accepts the repository, and runs the git
+  program where it declines (a hook, a non-bare remote, the first push of a
+  branch, a merge in progress). A fixture's code repository declares no
+  conversion in its root `.gitattributes`, as the store does, so gitx accepts
+  it. Moves gitx does not do (apply, checkout, merge, switch, reset, branch)
+  stay `gitx.RunEnv` at the call site.
 - No test in `internal/` edits process-global state: the environment
   (`t.Setenv`, `os.Setenv`, `os.Unsetenv`), the working directory
   (`t.Chdir`, `os.Chdir`), or a package-level variable declared in the
@@ -114,7 +131,7 @@ matching the directory name and a `description:` of at most 50 words.
 - Every test gets its own `t.TempDir()`, and its own jig home, so a test
   run never touches a real machine's: packages take the jig home root as an
   argument (`fixture.Opts.Home`, `verifydeliver.Deps.Home`,
-  `pool.Acquire`), and a test passes a `t.TempDir()`.
+  `home.MachinePath`), and a test passes a `t.TempDir()`.
   `cmd/jig` takes what it reads from the process (the environment, the
   working directory, the terminal check, the clock, the process spawner) as an `env`
   per run, so a `cmd/jig` test hands `run` an env of its own (`testEnv(home)`)
@@ -126,18 +143,32 @@ matching the directory name and a `description:` of at most 50 words.
   serial: the one that checks `Main` reads the process's `JIG_HOME`, and the
   one that sets git's commit dates in the environment, which the `git
   commit` child reads from it.
-- Each package's git process count is compared with main's. CI's Linux leg
+- A setup that several tests repeat, and that only reads or is changed in a
+  copy of its own, is built once per test binary and copied, not rebuilt: a
+  fixture shape (`fixture.Build`) is a template, and a state only the test's
+  own package can build (a built ticket, a repository's history) is a named
+  scenario (`fixture.Scenario`) with an equivalence test that builds it both
+  ways and compares them. Write a history as one `git fast-import` stream
+  rather than a command per commit.
+- Each package's git process count is reported beside main's. CI's Linux leg
   runs every test binary through `internal/gitbudget`, which counts the
   processes git's own trace sees; the push run on main saves those counts as
   a baseline in the Actions cache, and a pull request's leg restores the
-  newest one. A package whose count rises above its baseline by more than
-  the larger of 5% and 100 processes (`.github/git-budget.yaml`) fails the
-  leg, and the job summary lists every package's baseline, count and
-  verdict. A real increase is accepted with the `git-budget-accepted` pull
-  request label and a re-run of the failed job; nothing is committed. With
-  no baseline (the cache entry is evicted after 7 unused days) the leg
-  passes and says so. Counts differ by OS, so read them from CI's Linux
-  summary, not a local run.
+  newest one. The job summary lists every package's main count, its count
+  and the change; nothing fails and there is no label to add. With no
+  baseline (the cache entry is evicted after 7 unused days) the leg passes
+  and the summary says so. Counts differ by OS, so read them from CI's Linux
+  summary, not a local run. Under the hermetic config every test binary runs
+  with (`internal/gittest` lists `trace2.envVars = JIG_GIT_CALLER,JIG_GIT_DIR`),
+  each trace file also names the Go function that asked `gitx` for the process
+  and the directory it ran in, from which the test is derived (the nearest
+  `Test`, `Fuzz`, `Example` or `Benchmark` path component, so two tests that
+  agree in their first 64 characters share a row). `report` prints the top 20
+  callers across the packages and each package's top 10 callers and tests
+  after the table, in the job summary too, and CI uploads every count as
+  `callers.tsv` (the `git-callers` artifact, kept 7 days: package, `caller` or
+  `test`, name, count). A process started under a config of its own records
+  no caller and counts as `(unattributed)`.
 - `e2e` records each jig run it makes, as an SVG with a tag beside it, into
   the directory named by `JIG_RECORD_DIR` when the build sets it (jig does,
   for the oracle run at a builder's green; ADR 0029). Unset, it records
@@ -161,40 +192,7 @@ jig to run the e2e suite against it instead of a binary built from the tree.
 CI's `claude-cli` job runs it on all three platforms, on every pull request
 but a docs-only one, every push to main and once a day, with the latest CLI release installed,
 and every release runs it with its own binaries, as they are installed,
-before and after it is published. The headless backend of `internal/session`
-has its own opt-in live test (`TestHeadlessLiveCLI`, run with `-run Live
-./internal/session`) for the reviewer evaluation below.
-
-## Live review eval
-
-`internal/revieweval` scores the gate reviewer against a labeled corpus
-(`testdata/revieweval`) by dispatching a real reviewer session against it.
-It is opt-in, since it runs real model sessions, which need a signed-in
-`claude` CLI and spend tokens:
-
-```sh
-JIG_REVIEWEVAL_BACKEND=headless go test -count=1 -timeout 0 -v -run TestEvalLive ./internal/revieweval
-```
-
-A case's result is a measurement, not a pass/fail gate on the build: each
-round reads PASS, PROVISIONAL (nothing failed, but some findings still
-need a person's label) or FAIL, and a refused round stays a measurement.
-A round that comes back Failed fails the test itself: a dispatch failure,
-a judge error, the judge changing the case repo, or a reviewer that wrote
-no result at all, since the eval has nothing to score there. Cases run one at a time and
-the report is rewritten after each one, so the command above (`-timeout
-0` disables Go's own default) keeps whatever finished on disk if the run
-is interrupted. Environment variables: `JIG_REVIEWEVAL_MODEL` (reviewer
-model; default the rung `jig gate` itself picks once an unattended
-ticket's builders have already used the cheapest rung),
-`JIG_REVIEWEVAL_JUDGE_MODEL` (judge model; default the reviewer model),
-`JIG_REVIEWEVAL_CORPUS` (default `testdata/revieweval`), and
-`JIG_REVIEWEVAL_REPORT` (the text report's path; the JSON report is
-written beside it with a `.json` suffix). Left unset, the report still
-lands on disk, under the user cache dir (`os.UserCacheDir()`, then
-`jig/revieweval/report.txt`, falling back to `os.TempDir()` only when there
-is no cache dir) - the run logs that path once at the start, so it never
-has to be found by guessing.
+before and after it is published.
 
 ## Reporting a bug
 

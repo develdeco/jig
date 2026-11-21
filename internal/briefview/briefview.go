@@ -3,7 +3,7 @@
 // itself, served on the loopback address. It is jig's one viewer, and a
 // minimal one: no script, no stylesheet or font fetched, no other file of the
 // store reachable. Any other viewer is the project's choice and never named
-// here (chart decision 14).
+// here.
 package briefview
 
 import (

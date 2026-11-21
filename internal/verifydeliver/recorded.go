@@ -25,13 +25,12 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // openRepoFile is what an open round settled of one repo of a project of
 // several: the openRoundFile's own repo, copy, head, base, scope, target,
-// target_sha and lease, for each repo the round covers.
+// and target_sha, for each repo the round covers.
 type openRepoFile struct {
 	Repo      string `yaml:"repo"`
 	Copy      string `yaml:"copy"`
@@ -40,7 +39,10 @@ type openRepoFile struct {
 	Scope     string `yaml:"scope"`
 	Target    string `yaml:"target"`
 	TargetSHA string `yaml:"target_sha"`
-	Lease     string `yaml:"lease"`
+	// Carried is the merge a delta round carried rather than read, and
+	// CarriedRef the ref it brought in; absent when there is none.
+	Carried    string `yaml:"carried,omitempty"`
+	CarriedRef string `yaml:"carried_ref,omitempty"`
 }
 
 // openRoundFile is work/gate.round-N.open.yaml: what jig settled when it
@@ -62,14 +64,16 @@ type openRoundFile struct {
 	Scope     string `yaml:"scope,omitempty"`
 	Target    string `yaml:"target,omitempty"`
 	TargetSHA string `yaml:"target_sha,omitempty"`
-	// Lease is the gate lease the round's head is checked out in: the
-	// pristine worktree the reviewer reads. It, IntentExcerpt and Recordings
-	// are paths under the jig home, written relative to it: the record is in
-	// the store, which is shared and must not name this machine's directories.
-	Lease   string           `yaml:"lease,omitempty"`
-	Repos   []openRepoFile   `yaml:"repos,omitempty"`
-	Adopted bool             `yaml:"adopted,omitempty"`
-	Intent  reportIntentYAML `yaml:"intent"`
+	// IntentExcerpt and Recordings are paths under the jig home, written
+	// relative to it: the record is in the store, which is shared and must not
+	// name this machine's directories. A record an older jig wrote also holds a
+	// `lease` path, which is read as nothing.
+	// Carried and CarriedRef are openRepoFile's, of the one repo.
+	Carried    string           `yaml:"carried,omitempty"`
+	CarriedRef string           `yaml:"carried_ref,omitempty"`
+	Repos      []openRepoFile   `yaml:"repos,omitempty"`
+	Adopted    bool             `yaml:"adopted,omitempty"`
+	Intent     reportIntentYAML `yaml:"intent"`
 	// IntentExcerpt is the excerpt of the author's own agent session the
 	// request points the reviewer at, when it does; IntentNote is why it does
 	// not when no intent is stated either.
@@ -88,21 +92,22 @@ type openRoundFile struct {
 }
 
 // PreparedRepo is what an open round settled of one repo of a project of
-// several: Prepared's own Repo, Copy, Head, Base, Scope, Target, TargetSHA and
-// Lease.
+// several: Prepared's own Repo, Copy, Head, Base, Scope, Target and TargetSHA.
 type PreparedRepo struct {
 	Repo              string
 	Copy              string
 	Head, Base, Scope string
 	Target, TargetSHA string
-	Lease             string
+	// Carried and CarriedRef are the merge the round carried, and the ref it
+	// brought in, "" when there is none.
+	Carried, CarriedRef string
 }
 
 // Prepared is an open round: what GatePrepare settled, and the request a
 // reviewer is handed. GateFinish closes it.
 //
 // A round in a project of one repo has that repo's settings in Repo, Copy,
-// Head, Base, Scope, Target, TargetSHA and Lease. A round in a project of
+// Head, Base, Scope, Target and TargetSHA. A round in a project of
 // several has them in Repos, one entry for each repo the ticket's slices
 // build in, and leaves those fields empty (Covered gives either as a list).
 type Prepared struct {
@@ -110,15 +115,16 @@ type Prepared struct {
 	Round  int
 	Repo   string
 	Branch string
-	// Copy names whose copy of the branch the round reviews: "the clone's",
-	// "origin's" or "the build lease's".
+	// Copy names whose copy of the branch the round reviews: "the clone's" or
+	// "origin's".
 	Copy string
 	// Head is the commit under review; Base and Scope say what it is reviewed
 	// against.
 	Head, Base, Scope string
 	Target, TargetSHA string
-	// Lease is the pristine worktree of Head the reviewer reads.
-	Lease string
+	// CarriedMerge and CarriedRef are the merge the round carried and the ref it
+	// brought in, of the one repo of a project of one; "" when it carried none.
+	CarriedMerge, CarriedRef string
 	// Repos are the repos of a round in a project of several.
 	Repos        []PreparedRepo
 	Adopted      bool
@@ -129,11 +135,15 @@ type Prepared struct {
 	Opened       time.Time
 	// Reviewer is what the reviewer told jig of itself, if it did.
 	Reviewer Provenance
-	// Carried is set when no round was left open: the head only merged the
-	// target into the head a reviewer read, so the gate recorded a clean round
-	// that carries that verdict over (GATE-16), and this is its report. The
+	// Carried is set when no round was left open: the head added nothing to
+	// read past the head a reviewer read (that head itself, or a clean merge of
+	// the target past it), so the gate recorded a clean round
+	// that carries that verdict over, and this is its report. The
 	// other fields hold only the ticket, the round and the branch.
 	Carried *GateReport
+	// Queued names the fix slices a gate queued for pending keeps instead of
+	// opening a round: set alone, with no round open.
+	Queued []string
 	// Request is the review.json at RequestPath.
 	Request ReviewRequest
 	// RequestPath is the reviewer's copy of the request, under the jig home:
@@ -181,7 +191,7 @@ func writeOpenFile(st *store.Store, of openRoundFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: create work dir: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := store.AtomicWrite(path, data); err != nil {
 		return fmt.Errorf("verifydeliver: write the open round: %w", err)
 	}
 	return nil
@@ -211,12 +221,11 @@ func homeAbs(jigHome, rel string) string {
 }
 
 // preparedOf joins an open record with its request, spelling out the paths the
-// store keeps relative to the jig home jigHome (the lease, the excerpt, the
+// store keeps relative to the jig home jigHome (the excerpt, the
 // recordings list): the request a reviewer reads names them as they are on
 // this machine.
 func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewRequest) Prepared {
 	opened, _ := time.Parse(time.RFC3339Nano, of.Opened)
-	req.Worktree = homeAbs(jigHome, of.Lease)
 	req.IntentExcerpt = homeAbs(jigHome, of.IntentExcerpt)
 	req.Recordings = homeAbs(jigHome, of.Recordings)
 	requestPath := homeAbs(jigHome, of.Request)
@@ -225,24 +234,19 @@ func preparedOf(jigHome string, st *store.Store, of openRoundFile, req ReviewReq
 	}
 	var repos []PreparedRepo
 	if len(of.Repos) > 0 {
-		req.Repos = append([]RepoRequest(nil), req.Repos...)
-		leases := map[string]string{}
 		for _, r := range of.Repos {
-			lease := homeAbs(jigHome, r.Lease)
-			leases[r.Repo] = lease
 			repos = append(repos, PreparedRepo{
 				Repo: r.Repo, Copy: r.Copy, Head: r.Head, Base: r.Base, Scope: r.Scope,
-				Target: r.Target, TargetSHA: r.TargetSHA, Lease: lease,
+				Target: r.Target, TargetSHA: r.TargetSHA,
+				Carried: r.Carried, CarriedRef: r.CarriedRef,
 			})
-		}
-		for i := range req.Repos {
-			req.Repos[i].Worktree = leases[req.Repos[i].Repo]
 		}
 	}
 	return Prepared{
 		Ticket: of.Ticket, Round: of.Round, Repo: of.Repo, Branch: of.Branch, Copy: of.Copy,
 		Head: of.Head, Base: of.Base, Scope: of.Scope, Target: of.Target, TargetSHA: of.TargetSHA,
-		Lease: req.Worktree, Repos: repos, Adopted: of.Adopted,
+		CarriedMerge: of.Carried, CarriedRef: of.CarriedRef,
+		Repos: repos, Adopted: of.Adopted,
 		Intent: req.Intent, IntentSHA256: of.Intent.SHA256, IntentNote: of.IntentNote,
 		Yes: of.Yes, Opened: opened, Reviewer: of.Reviewer, Request: req,
 		RequestPath: requestPath,
@@ -276,20 +280,21 @@ func (p Prepared) Covered() []PreparedRepo {
 	}
 	return []PreparedRepo{{
 		Repo: p.Repo, Copy: p.Copy, Head: p.Head, Base: p.Base, Scope: p.Scope,
-		Target: p.Target, TargetSHA: p.TargetSHA, Lease: p.Lease,
+		Target: p.Target, TargetSHA: p.TargetSHA,
+		Carried: p.CarriedMerge, CarriedRef: p.CarriedRef,
 	}}
 }
 
-// roundInput is the input of the round as far as its files are checked: its
-// leases and where its request is kept.
+// roundInput is the input of the round as far as its files are checked: the
+// clones it reads and where its request is kept.
 func (p Prepared) roundInput(d Deps) RoundInput {
 	in := RoundInput{Store: d.Store, Ticket: p.Ticket, Round: p.Round, Home: d.Home, Branch: p.Branch}
 	if !p.qualified() {
-		in.LeaseDir, in.RepoName, in.Target = p.Lease, p.Repo, p.Target
+		in.CloneDir, in.Head, in.RepoName, in.Target = operatorClone(d, p.Repo), p.Head, p.Repo, p.Target
 		return in
 	}
 	for _, r := range p.Repos {
-		in.Repos = append(in.Repos, RoundRepo{Name: r.Repo, Target: r.Target, LeaseDir: r.Lease})
+		in.Repos = append(in.Repos, RoundRepo{Name: r.Repo, Target: r.Target, CloneDir: operatorClone(d, r.Repo), Head: r.Head})
 	}
 	return in
 }
@@ -308,8 +313,13 @@ func (p Prepared) roundInput(d Deps) RoundInput {
 func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	var run *gateRun
 	defer func() { run.pushFailure(err) }()
-	if run, err = gatePrepare(d, o); err != nil {
+	if run, err = gatePrepare(d, o, true); err != nil {
 		return Prepared{}, err
+	}
+	if len(run.queued) > 0 {
+		// A pending keep was queued as a fix slice: no suite ran and no round
+		// opened, and the next gate opens one once the slice is built.
+		return Prepared{Ticket: run.ticket, Branch: run.branch, Queued: run.queued}, nil
 	}
 	in := run.roundInput()
 	in.Recorded = true
@@ -318,8 +328,8 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		return Prepared{}, err
 	}
 	if prep.Empty {
-		// Nothing to read: the head only merged the target into the head a
-		// reviewer read (GATE-16). The oracles have run; the verdict carries.
+		// Nothing to read: the head is the one a reviewer read, or only
+		// merged the target into it. The oracles have run; the verdict carries.
 		report, carried, err := run.carryOver(prep)
 		if err != nil {
 			return Prepared{}, err
@@ -342,20 +352,22 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 	}
 	for i, gr := range run.repos {
 		rp := prep.Repos[i]
-		tip, err := originTip(gr.lease.Dir, gr.target)
+		tip, err := originTip(gr.dir, gr.target)
 		if err != nil {
 			return Prepared{}, inRepo(run.qualified, gr.name, err)
 		}
 		repo := openRepoFile{
 			Repo: gr.name, Copy: string(gr.copy), Head: rp.Head, Base: rp.Base, Scope: rp.Scope,
-			Target: gr.target, TargetSHA: tip, Lease: homeRel(d.Home, absPath(gr.lease.Dir)),
+			Target: gr.target, TargetSHA: tip,
+			Carried: rp.Carried, CarriedRef: rp.CarriedRef,
 		}
 		if run.qualified {
 			of.Repos = append(of.Repos, repo)
 			continue
 		}
 		of.Repo, of.Copy, of.Head, of.Base, of.Scope = repo.Repo, repo.Copy, repo.Head, repo.Base, repo.Scope
-		of.Target, of.TargetSHA, of.Lease = repo.Target, repo.TargetSHA, repo.Lease
+		of.Target, of.TargetSHA = repo.Target, repo.TargetSHA
+		of.Carried, of.CarriedRef = repo.Carried, repo.CarriedRef
 	}
 	if hadPrev && maps.Equal(prev.heads(), of.heads()) {
 		// The round is the same and so is its reviewer, which the journal
@@ -550,8 +562,7 @@ func (dr Draft) kinds() int {
 
 // AppendDraft checks d against the open round and appends it to the round's
 // findings drafts. What it checks is what needs no other draft: the fields
-// ParseReviewResult checks of a finding, a probe or a skip, an oracle that is
-// one of the manifest's, a prior that names a finding under open or
+// ParseReviewResult checks of a finding, a probe or a skip, a prior that names a finding under open or
 // dismissed, and a file of a probe or a skip in a repo of the round. That the
 // file exists at the head, that no two drafts share a prior and that the
 // reviewed paths cover must_review are checked when the round is done. It
@@ -577,8 +588,7 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultFinding(len(existing), f); err != nil {
 			return 0, err
 		}
-		// A round over several repos names a file "<repo>/<path>", and the
-		// oracles a finding can name are those of its repo.
+		// A round over several repos names a file "<repo>/<path>".
 		rf := p.Request.files()
 		file, err := normalizeRepoRelPath(f.File)
 		if err != nil {
@@ -586,13 +596,6 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		}
 		if _, _, ok := rf.of(file); !ok {
 			return 0, reviewInvalid(rf.unknownRepoFile(f.File))
-		}
-		oracles := rf.oracles(file)
-		if f.Oracle != "" && !inStrings(oracles, f.Oracle) {
-			return 0, reviewInvalid(fmt.Sprintf("oracle %q is not a manifest oracle (%s)", f.Oracle, strings.Join(oracles, ", ")))
-		}
-		if f.Oracle == "" && len(oracles) > 1 && (f.Action == ActionFix || f.Action == ActionAsk) {
-			return 0, reviewInvalid(fmt.Sprintf("a finding with action %q must name one of the manifest's %d oracles (%s)", f.Action, len(oracles), strings.Join(oracles, ", ")))
 		}
 		if f.Prior != "" && !known[f.Prior] {
 			return 0, reviewInvalid(fmt.Sprintf("prior %q does not name a finding under open or dismissed", f.Prior))
@@ -704,26 +707,16 @@ func marshalResult(r ReviewResult) ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
 }
 
-func inStrings(list []string, s string) bool {
-	for _, have := range list {
-		if have == s {
-			return true
-		}
-	}
-	return false
-}
-
 // GateFinish closes the open round p with the reviewer's report rr, which the
 // caller parsed strictly (ParseReviewResult, or DraftResult): it checks it the
 // way a launched reviewer's is checked, and records the round exactly as every
 // round is recorded (finish) - findings bookkeeping, routing, the round's
 // files, fix slices, the journal and the push.
 //
-// What replaces the guard that kept a launched reviewer out of the lease is
-// checked first: the lease is still at the round's head with no tracked file
-// changed, and the clone's branch has not moved on (REVIEW_STALE_HEAD), so the
-// round is a verdict on the branch as it is. A round over several repos checks
-// each repo's lease and branch. prov is who the caller says reported (a zero
+// What is checked first is that the clone's branch has not moved on
+// (REVIEW_STALE_HEAD), so the round is a verdict on the branch as it is. A round
+// over several repos checks each repo's branch. The reviewer reads in a
+// worktree of its own, so there is no checkout of the round's to have changed. prov is who the caller says reported (a zero
 // Session: jig looks for them, LedgerReviewer, and otherwise says it does not
 // know); whether they built what they reviewed decides independent - over the
 // builders of every repo the ticket's slices build in, since the ledger and the
@@ -746,22 +739,11 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 
 	qualified := p.qualified()
 	for _, r := range p.Covered() {
-		if !pool.Usable(r.Lease) {
+		if operatorClone(d, r.Repo) == "" {
 			return GateReport{}, inRepo(qualified, r.Repo, &axi.Error{
-				Msg:  fmt.Sprintf("the gate lease of round %d is gone", p.Round),
-				Code: "REVIEW_NOT_OPEN",
-				Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
-			})
-		}
-		changed, err := leaseChanged(r.Lease, r.Head)
-		if err != nil {
-			return GateReport{}, inRepo(qualified, r.Repo, fmt.Errorf("verifydeliver: review done: %w", err))
-		}
-		if changed {
-			return GateReport{}, inRepo(qualified, r.Repo, &axi.Error{
-				Msg:  "the gate lease changed since the round opened; a reviewer reads it and edits nothing",
-				Code: "REVIEW_INVALID",
-				Help: []string{fmt.Sprintf("Open the round again with `jig gate %s`", p.Ticket)},
+				Msg:  fmt.Sprintf("the clone round %d was opened in is not mapped on this machine", p.Round),
+				Code: "CLONE_NOT_MAPPED",
+				Help: []string{fmt.Sprintf("Map it with `jig map %s=<path to your clone of the repo>`, then close the round again", r.Repo)},
 			})
 		}
 	}
@@ -797,15 +779,16 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	repos := make([]*gateRepo, len(covered))
 	var diff scopeDiff
 	for i, r := range covered {
-		man, err := manifest.Resolve(r.Lease)
+		clone := operatorClone(d, r.Repo)
+		man, err := manifest.ResolveAt(clone, r.Head)
 		if err != nil {
 			return GateReport{}, inRepo(qualified, r.Repo, fmt.Errorf("verifydeliver: review done: resolve manifest: %w", err))
 		}
 		repos[i] = &gateRepo{
 			name: r.Repo, target: r.Target, man: man, copy: branchCopy(r.Copy),
-			lease: pool.Lease{Dir: r.Lease, Repo: r.Repo, Branch: p.Branch},
+			dir: clone, head: r.Head,
 		}
-		one, err := computeScopeDiff(r.Lease, r.Base, r.Head, openByRepo[r.Repo])
+		one, err := computeScopeDiff(clone, r.Base, r.Head, openByRepo[r.Repo])
 		if err != nil {
 			return GateReport{}, inRepo(qualified, r.Repo, err)
 		}
@@ -873,7 +856,8 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	review := &Review{
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
-		Effort: prov.Effort, Hunks: p.Request.Hunks,
+		Effort: prov.Effort, Hunks: p.Request.Hunks, StoreRefs: p.Request.StoreRefs,
+		Carried: carriedOfCovered(covered),
 	}
 	if qualified {
 		for _, r := range covered {
@@ -956,8 +940,9 @@ const (
 )
 
 // TriageTarget encodes the build target a kept ask lacked (the workspace its
-// file lies in, the oracle that proves the fix), the person's choice, in the
-// triage line's Command.
+// file lies in, the command that proves the fix), the person's choice, in the
+// triage line's Command: `workspace=W` when there is one, then `oracle=` and
+// the command to the end of the line, which may hold spaces.
 func TriageTarget(workspace, oracle string) string {
 	var parts []string
 	if workspace != "" {
@@ -969,15 +954,28 @@ func TriageTarget(workspace, oracle string) string {
 	return strings.Join(parts, " ")
 }
 
-// triageTarget decodes TriageTarget.
+// triageTarget decodes TriageTarget, and a line written before the command
+// could hold spaces (`workspace=W oracle=O`, one word each) alike.
 func triageTarget(command string) (workspace, oracle string) {
-	for _, part := range strings.Fields(command) {
-		if v, ok := strings.CutPrefix(part, "workspace="); ok {
-			workspace = v
-		}
-		if v, ok := strings.CutPrefix(part, "oracle="); ok {
-			oracle = v
-		}
+	rest := command
+	if v, ok := strings.CutPrefix(rest, "workspace="); ok {
+		workspace, rest, _ = strings.Cut(v, " ")
 	}
+	oracle, _ = strings.CutPrefix(rest, "oracle=")
 	return workspace, oracle
+}
+
+// carriedOfCovered is the carried merge of each covered repo that had one.
+func carriedOfCovered(covered []PreparedRepo) map[string]CarriedMerge {
+	var out map[string]CarriedMerge
+	for _, r := range covered {
+		if r.Carried == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]CarriedMerge{}
+		}
+		out[r.Repo] = CarriedMerge{SHA: r.Carried, Ref: r.CarriedRef}
+	}
+	return out
 }

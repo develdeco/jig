@@ -200,7 +200,7 @@ func sliceText(ticket string, g SliceGuess) string {
 		}
 		fmt.Fprintf(&b, " It touched the workspaces of slices %s: ", listed(names, 5))
 	}
-	fmt.Fprintf(&b, "amend it with `%s`, or say which slice it is with `jig verify %s %s --slice <slice>`.", amend, ticket, sha)
+	fmt.Fprintf(&b, "amend it with `%s`, or, with it checked out, say which slice it is with `jig verify %s --slice <slice>`.", amend, ticket)
 	return b.String()
 }
 

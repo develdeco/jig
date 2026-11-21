@@ -1,7 +1,7 @@
 // Package migrate implements `jig store migrate`: the one-time move of a
 // v1 store (tickets at the store root, one ticket_format id) onto layout v2
 // (tickets/<id>/, schema_version 2, every id carrying an area key), per the
-// operator's rename map (brief.md#The rename map, brief.md#The migration).
+// operator's rename map.
 package migrate
 
 import (

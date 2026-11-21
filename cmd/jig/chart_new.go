@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -17,6 +18,9 @@ func init() {
 	registerVerb(verb{
 		Spec: cmdSpec{"chart", "make a chart: jig chart new <name> --title <t>", []flagSpec{
 			{"title", "chart title (required)", false},
+			{"issue", "id of the issue ticket the chart plans", false},
+			{"need", "what the person needs: mints the chart's issue with this text as its body", false},
+			{"key", "key to mint the issue under with --need", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
@@ -60,6 +64,9 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 
 	fs := newFlagSet(e, "chart new")
 	title := fs.String("title", "", "chart title (required)")
+	issueFlag := fs.String("issue", "", "id of the issue ticket the chart plans")
+	needFlag := fs.String("need", "", "what the person needs: mints the chart's issue with this text as its body")
+	keyFlag := fs.String("key", "", "key to mint the issue under with --need")
 	storeFlag := fs.String("store", "", "explicit store path")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	positionals, handled, err := parseWithPositionals(stdout, fs, rest)
@@ -84,15 +91,56 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	st, _, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
+	needSet := false
+	fs.Visit(func(f *flag.Flag) { needSet = needSet || f.Name == "need" })
+	if needSet && strings.TrimSpace(*needFlag) == "" {
+		return renderErr(stdout, &axi.Error{Msg: "--need must not be empty: it is the issue's body", Code: "VALIDATION_ERROR", Help: []string{chartNewUsage}})
+	}
+	if needSet && *issueFlag != "" {
+		return renderErr(stdout, &axi.Error{Msg: "--need and --issue exclude each other: --need makes the issue, --issue names one that exists", Code: "VALIDATION_ERROR", Help: []string{chartNewUsage}})
+	}
+
+	st, cfg, _, _, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	mintKey := ""
+	if needSet {
+		// An undeclared --key is refused before anything is minted.
+		if mintKey, err = cfg.ResolveKey(*keyFlag); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 	if err := st.Sync(); err != nil {
 		return renderErr(stdout, err)
 	}
 	if err := chartNameTaken(st, name); err != nil {
 		return renderErr(stdout, err)
+	}
+	issue := ""
+	issueMinted := false
+	if needSet {
+		// The name was checked above and no chart holds it, so a refused name
+		// has minted nothing. The slug is the title's, as `jig ticket new`
+		// gives it.
+		issue, err = st.Claim(
+			func() (string, []string, error) {
+				id, err := st.Mint(mintKey, store.Ticket{Title: heading, Body: strings.TrimSpace(*needFlag), Slug: store.Slug(heading), Kind: store.KindIssue})
+				if err != nil {
+					return "", nil, err
+				}
+				return id, []string{st.TicketRelDir(id)}, nil
+			},
+			func(id string) string { return fmt.Sprintf("%s: new ticket", id) },
+		)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		issueMinted = true
+	} else if *issueFlag != "" {
+		if issue, err = checkNewChartIssue(st, *issueFlag); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 
 	// Claim commits the chart's folder alone and, on a store with an origin,
@@ -104,7 +152,12 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 			if err := chartNameTaken(st, name); err != nil {
 				return "", nil, err
 			}
-			if err := st.CreateChart(name, heading); err != nil {
+			if issue != "" {
+				if _, err := checkNewChartIssue(st, issue); err != nil {
+					return "", nil, err
+				}
+			}
+			if err := st.CreateChartWithIssue(name, heading, issue); err != nil {
 				return "", nil, err
 			}
 			return name, []string{st.ChartRelDir(name)}, nil
@@ -112,6 +165,13 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 		func(id string) string { return fmt.Sprintf("chart %s: new chart", id) },
 	)
 	if err != nil {
+		if issueMinted {
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("issue %s was made but its chart %q was not: %v", issue, name, err),
+				Code: "VALIDATION_ERROR",
+				Help: []string{fmt.Sprintf("Make the chart for it: jig chart new %s --title %q --issue %s", name, heading, issue)},
+			})
+		}
 		return renderErr(stdout, err)
 	}
 
@@ -119,8 +179,12 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 	// sync: the mirror opens its issue now, before any ticket graduates under it.
 	st.RunCheckpointHook()
 
+	fields := [][2]string{{"name", name}, {"title", heading}, {"folder", filepath.Join(st.Root, st.ChartRelDir(name))}}
+	if issueMinted {
+		fields = append(fields, [2]string{"issue", issue})
+	}
 	axi.Render(stdout,
-		axi.KV("chart", [][2]string{{"name", name}, {"title", heading}, {"folder", filepath.Join(st.Root, st.ChartRelDir(name))}}),
+		axi.KV("chart", fields),
 		axi.Help(
 			fmt.Sprintf("Fill charts/%s/map.md and add the chart's tickets to charts/%s/tickets.yaml", name, name),
 			fmt.Sprintf("Check them with `jig validate %s`: it lists every problem and mints nothing", name),
@@ -131,7 +195,7 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 }
 
 // chartNewUsage is the help line of a refusal for a missing name or title.
-const chartNewUsage = "Run `jig chart new <name> --title \"<title>\"`"
+const chartNewUsage = "Run `jig chart new <name> --title \"<title>\" [--need \"<what is needed>\" | --issue <ID>]`"
 
 // withHelp is err with line as its Help when it is a *axi.Error with none.
 func withHelp(err error, line string) error {
@@ -147,8 +211,7 @@ func withHelp(err error, line string) error {
 // checkNewChartName refuses a name `jig chart new` cannot give a chart: one
 // validateChartName refuses, one outside chartNameRule or longer than
 // maxChartNameLen, and one checkTicketID refuses, because chartNamed never
-// reads such a word as a chart (a name ending in a lease suffix such as
-// "-gate" would be a chart that `jig next` could not reach).
+// reads such a word as a chart.
 func checkNewChartName(name string) error {
 	invalid := func(reason string) error {
 		return &axi.Error{
@@ -160,9 +223,6 @@ func checkNewChartName(name string) error {
 	const rule = `use lower-case letters, digits, "-" and "_", starting and ending with a letter or digit, at most 64 characters`
 	if validateChartName(name) != nil || len(name) > maxChartNameLen || !chartNameRule.MatchString(name) {
 		return invalid(rule)
-	}
-	if err := checkTicketID(name); err != nil {
-		return invalid("a name that ends in \"-gate\" or \"-publish\" is reserved for a ticket's leases, so `jig next` could not reach the chart by it")
 	}
 	return nil
 }

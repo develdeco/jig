@@ -11,15 +11,21 @@ import (
 )
 
 // deltaContext opens round 2 over a one-file change (beta.go) after round 1
-// filed a note on that file and a person kept it, and prints round 2's review
-// context.
+// filed a note on that file and a person kept it (the gate queues the keep's
+// slice, which is built, empty, beside the change), and prints round 2's
+// review context.
 func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) (*fixture.Fixture, string) {
 	t.Helper()
 	fx, e := floorNoteRound1(t)
 	if out, code := runMain(t, e, "", "triage", fx.Ticket, "r1-f1", "keep", "--reason", "Worth doing now.", "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig triage keep: exit = %d\n%s", code, out)
 	}
+	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "fix-2-q-beta") {
+		t.Fatalf("jig gate: exit = %d, want 0 and the kept note's slice queued\n%s", code, out)
+	}
 	change(t, fx)
+	gitMust(t, fx.RepoDir, "commit", "--allow-empty", "-m", fx.Ticket+" fix-2-q-beta: done with the change", "-m", "Jig-Slice: fix-2-q-beta")
+	verifyHere(t, fx, "fix-2-q-beta")
 	if out, code := runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir); code != 0 {
 		t.Fatalf("jig gate: exit = %d, want 0 (round 2 opens)\n%s", code, out)
 	}
@@ -30,7 +36,7 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 	return fx, out
 }
 
-// TestADeltaRoundsContextHoldsOnlyItsDelta (GATE-17): a round 2 over one
+// TestADeltaRoundsContextHoldsOnlyItsDelta: a round 2 over one
 // changed file prints that file's diff, the kept note it answers, the file in
 // must_review and the read line, and none of the round 1 reading: no
 // recordings, no whole-change hunks count.
@@ -55,16 +61,17 @@ func TestADeltaRoundsContextHoldsOnlyItsDelta(t *testing.T) {
 			t.Errorf("a delta round's context lacks %q\n%s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"recordings:", "hunks:", "open[", "delta.diff"} {
+	for _, unwanted := range []string{"recordings:", "hunks:", "open[", "delta.diff", "this is a full round"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("a delta round's context holds %q, which round 1 read\n%s", unwanted, out)
 		}
 	}
 }
 
-// TestAFullRoundsContextIsUnchanged: round 1 prints the whole change's hunks
-// count and the open table, and no delta or answers block.
-func TestAFullRoundsContextIsUnchanged(t *testing.T) {
+// TestAFullRoundsContextHoldsItsReadLine: round 1 prints the whole change's
+// hunks count, the open table and the full read line, and no delta or answers
+// block.
+func TestAFullRoundsContextHoldsItsReadLine(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
 	e := testEnv(fx.Home).atTerminal()
@@ -76,12 +83,12 @@ func TestAFullRoundsContextIsUnchanged(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("review context: exit = %d\n%s", code, out)
 	}
-	for _, want := range []string{"scope: full", "hunks: ", "unprobed: ", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]"} {
+	for _, want := range []string{"scope: full", "hunks: ", "unprobed: ", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]", fullReadLine} {
 		if !strings.Contains(out, want) {
 			t.Errorf("a full round's context lacks %q\n%s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"delta:", "answers[", "read: "} {
+	for _, unwanted := range []string{"delta:", "answers[", "this is a delta round"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("a full round's context holds %q\n%s", unwanted, out)
 		}
@@ -106,12 +113,8 @@ func TestALongDeltaIsHeldInAFileBesideTheRequest(t *testing.T) {
 		if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		gitMust(t, fx.RepoDir, "add", "-A")
-		gitMust(t, fx.RepoDir, "commit", "-m", fx.Ticket+" d: long change", "-m", "Jig-Slice: d")
-		sha := gitMust(t, fx.RepoDir, "rev-parse", "HEAD")
-		if o, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, sha, "--slice", "d", "--wait", "--store", fx.StoreDir); code != 0 || !strings.Contains(o, "state: pass") {
-			t.Fatalf("jig verify: exit = %d\n%s", code, o)
-		}
+		gitBuilder(t).Commit(fx.RepoDir, fx.Ticket+" d: long change"+"\n\n"+"Jig-Slice: d")
+		verifyHere(t, fx, "d")
 	})
 	if strings.Contains(out, "filler line") || strings.Contains(out, "  diff: |") {
 		t.Errorf("a long delta's context prints the diff\n%s", out)

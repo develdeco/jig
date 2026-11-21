@@ -266,22 +266,6 @@ var buildEventNames = []string{
 	journal.EventFixSlice, journal.EventSliceAdd,
 }
 
-// verifying lists the slices whose latest verify-pending has had no result
-// since: a worker is running (or died; the stall shows that).
-func (t *ticket) verifying() map[string]bool {
-	out := map[string]bool{}
-	for _, slice := range t.sliceIDsFromLines() {
-		p := t.latest(slice, journal.EventVerifyPending)
-		if p < 0 {
-			continue
-		}
-		if t.latest(slice, journal.EventOracle, journal.EventVerified, journal.EventVerifyError) < p {
-			out[slice] = true
-		}
-	}
-	return out
-}
-
 // sliceIDsFromLines are the slices the journal names, in order of first
 // appearance.
 func (t *ticket) sliceIDsFromLines() []string {
@@ -543,10 +527,8 @@ var relevantSliceEvents = []string{
 }
 
 // slices are the ticket's slices: the store's list when a status has been
-// read (its states are the store's, with verifying laid over a slice a worker
-// is checking), else the slices the journal names.
+// read (its states are the store's), else the slices the journal names.
 func (t *ticket) slices(zone *time.Location) []sliceRow {
-	verifying := t.verifying()
 	var out []sliceRow
 	if t.status != nil && len(t.status.Slices) > 0 {
 		for _, s := range t.status.Slices {
@@ -562,8 +544,12 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	}
 	for i := range out {
 		r := &out[i]
-		if verifying[r.ID] && (r.State == StateQueued || r.State == StateBuilding) {
-			r.State = StateVerifying
+		if r.State == StateBuilding {
+			// The store sets a failed slice back to building; the recorded
+			// last run says it failed.
+			if run, failed := t.lastRunFailed(r.ID); failed && run.Cause == "" {
+				r.State = StateFail
+			}
 		}
 		if p := t.latest(r.ID, relevantSliceEvents...); p >= 0 {
 			l := t.lines[p]
@@ -608,12 +594,14 @@ func describe(l events.Envelope) string {
 	case journal.EventRelease:
 		return "released" + by(l.Session)
 	case journal.EventVerifyPending:
-		return "verify pending " + short(l.Commit)
+		return "verification requested for " + short(l.Commit)
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return "oracle pass " + short(l.Commit)
 		}
 		return strings.TrimSpace("oracle " + l.Outcome + " " + firstOf(l.Summary, l.Signature))
+	case journal.EventFinalOracle:
+		return strings.TrimSpace("final run " + l.Outcome + " " + short(l.Commit))
 	case journal.EventVerified:
 		return "verified " + short(l.Commit)
 	case journal.EventVerifyError:
@@ -624,6 +612,8 @@ func describe(l events.Envelope) string {
 		return strings.TrimSpace(l.Ref + " answered" + who + " " + l.Summary)
 	case journal.EventNote:
 		return "note " + l.Summary
+	case journal.EventCall:
+		return strings.TrimSpace("call " + l.Ref + " " + l.Summary)
 	case journal.EventStall:
 		return strings.TrimSpace("stalled " + firstOf(l.Summary, l.Outcome))
 	case journal.EventGateOpen:
@@ -668,14 +658,20 @@ func eventState(l events.Envelope) string {
 	switch l.Event {
 	case journal.EventClaim, journal.EventDispatch, journal.EventRequeue, journal.EventFixSlice:
 		return StateBuilding
-	case journal.EventVerifyPending:
-		return StateVerifying
 	case journal.EventOracle:
 		if l.Outcome == "pass" {
 			return StateGreen
 		}
 		return StateStalled
+	case journal.EventFinalOracle:
+		if l.Outcome == "pass" && l.Uncovered == "" {
+			return StateGreen
+		}
+		return StateStalled
 	case journal.EventGateOracle:
+		if l.Outcome == "fail" {
+			return StateStalled
+		}
 		return StateGreen
 	case journal.EventVerified, journal.EventGateClean, journal.EventPublishDone:
 		return StateGreen
@@ -683,7 +679,7 @@ func eventState(l events.Envelope) string {
 		return StateStalled
 	case journal.EventQuestion:
 		return StateNeedsInput
-	case journal.EventAnswer, journal.EventApproval, journal.EventRevalidate:
+	case journal.EventAnswer, journal.EventCall, journal.EventApproval, journal.EventRevalidate:
 		return StateOK
 	case eventBriefSeen, eventSlicesSeen:
 		return StateBuilding
@@ -700,63 +696,4 @@ func eventState(l events.Envelope) string {
 		return StatePublishing
 	}
 	return ""
-}
-
-// phase is where the ticket stands, in one state and a few words: derived
-// from the journal, and from the store's word on its slices once a status
-// has been read.
-func (t *ticket) phase(zone *time.Location) (state, label string) {
-	pub := t.publish()
-	lastRound := t.latest("", journal.EventGateOpen, journal.EventGateRound, journal.EventGateClean)
-	build := t.latest("", buildEventNames...)
-
-	switch {
-	case pub.Done:
-		return StatePublished, "published"
-	case lastRound >= 0 && t.lines[lastRound].Event == journal.EventGateClean:
-		if t.latest("", journal.EventPrBody, journal.EventPublishApproved, journal.EventPr) > lastRound {
-			return StatePublishing, "publishing"
-		}
-		return StateReady, "ready to publish"
-	case lastRound >= 0 && t.lines[lastRound].Event == journal.EventGateOpen:
-		return StateReviewing, "in review"
-	case lastRound >= 0 && t.lines[lastRound].Event == journal.EventGateRound && build < lastRound:
-		return StateFindings, "review found asks"
-	}
-
-	if len(t.openQuestions(zone, "")) > 0 {
-		return StateNeedsInput, "needs input"
-	}
-	if t.status != nil && t.status.State != "" {
-		switch t.status.State {
-		case "stalled":
-			return StateStalled, "stalled"
-		case "parked":
-			return StateNeedsInput, "needs input"
-		case "env-blocked":
-			return StateEnvBlocked, "env blocked"
-		case "green":
-			return StateGreen, "built"
-		case "new", "queued":
-			// Nothing was claimed: the word is the ticket's own, not the
-			// building the journal's lines might otherwise suggest.
-			return StateQueued, t.status.State
-		}
-		if len(t.verifying()) > 0 {
-			return StateVerifying, "verifying"
-		}
-		return StateBuilding, "building"
-	}
-	for _, id := range t.sliceIDsFromLines() {
-		if t.guessSliceState(id) == StateStalled {
-			return StateStalled, "stalled"
-		}
-	}
-	if len(t.verifying()) > 0 {
-		return StateVerifying, "verifying"
-	}
-	if build >= 0 {
-		return StateBuilding, "building"
-	}
-	return StateQueued, firstOf(t.rosterState, "queued")
 }

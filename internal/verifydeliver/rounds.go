@@ -34,8 +34,17 @@ const (
 type RoundRecord struct {
 	Round int
 	// CarriedFrom is the round whose verdict a clean round carries over
-	// (GATE-16), 0 for a round a reviewer read.
+	// (the head added nothing to read past the reviewed head: that head itself, or a
+	// clean merge of the target), 0 for a round a reviewer read.
 	CarriedFrom int
+	// StoreRefs are the lines the round's change adds that name something only
+	// the store holds, as report.yaml records them: none for a round that has
+	// none and for one an older jig recorded.
+	StoreRefs []StoreRef
+	// CarriedMerge is repo -> the merge of the target a delta round carried
+	// rather than read, as report.yaml records it: nil for a round with none and
+	// for one an older jig recorded.
+	CarriedMerge map[string]CarriedMerge
 	// Verdict is RoundClean, RoundFindings or VerdictNotIndependent.
 	Verdict string
 	// Reviewer is who reported the round: the report's own record of them, else
@@ -148,6 +157,8 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 		}
 		rec.Model, rec.Effort = rep.Model, rep.Effort
 		rec.CarriedFrom = rep.CarriedFrom
+		rec.StoreRefs = rep.StoreRefs
+		rec.CarriedMerge = rep.CarriedMerge
 		if rep.Reviewer != nil {
 			rec.Reviewer = *rep.Reviewer
 		}
@@ -236,7 +247,7 @@ func harnessOf(lines []journal.Line, session string) string {
 }
 
 // reviewedHeadOf is the head a round reviewed: the head the reviewer read, else
-// the head the gate ran its oracles on. With several repos it names each.
+// the head the round was opened on. With several repos it names each.
 func reviewedHeadOf(rep reportYAML) string {
 	heads := rep.ReviewedSHA
 	if len(heads) == 0 {

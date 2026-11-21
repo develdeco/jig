@@ -12,9 +12,8 @@ import (
 // each from the first of these that has it, the same rank order
 // internal/mirror's ResolveTicketTitleBody applies on a schema-2 store, plus
 // the one rank that only ever matters here, on the v1 store this reads
-// before deleting tracker/ticket.md (brief.md#The migration step 4, "its
-// tracker/ticket.md history step moves from the mirror into the
-// migration"):
+// before deleting tracker/ticket.md (the migration takes over from the mirror the step of
+// reading that file's history):
 //  1. its ticket.yaml (title:, body:);
 //  2. its entry in a chart's tickets.yaml (title:, body:);
 //  3. the latest committed <ticket>/tracker/ticket.md whose commit is not

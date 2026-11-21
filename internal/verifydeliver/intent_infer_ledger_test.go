@@ -84,7 +84,7 @@ func newLedgerRound(t *testing.T) ledgerRound {
 	writeSyntheticClaudeSession(t, userHome, "session-unrelated", dir, diffFiles, intentInferSessionMTime)
 	return ledgerRound{
 		in: RoundInput{
-			Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir, RepoName: "fixture-repo", Target: "main",
+			Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir, RepoName: "fixture-repo", Target: "main",
 			OperatorClone: dir, Home: jigHome, UserHome: userHome, Intent: Intent{Source: IntentSourceNone},
 		},
 		head: head, diffFiles: diffFiles, userHome: userHome, jigHome: jigHome,
@@ -127,7 +127,7 @@ func TestIntentExcerptComesFromTheTicketsSessionTheLedgerNames(t *testing.T) {
 	t.Parallel()
 	r := newLedgerRound(t)
 	ticketTranscript := filepath.Join(t.TempDir(), "elsewhere", "session-ticket.jsonl")
-	writeStatingTranscript(t, ticketTranscript, r.in.LeaseDir, "Please clamp percentages. "+ticketSessionWords)
+	writeStatingTranscript(t, ticketTranscript, r.in.CloneDir, "Please clamp percentages. "+ticketSessionWords)
 	claimedBy(t, r.in.Store, "JIG-1", "session-ticket")
 	recordSession(t, r.jigHome, ledger.Registration{ID: "session-ticket", Ticket: "JIG-1", Transcript: ticketTranscript})
 	recordSession(t, r.jigHome, ledger.Registration{ID: "session-unrelated", Ticket: "JIG-9", Transcript: filepath.Join(r.userHome, ".claude", "projects", "proj1", "session-unrelated.jsonl")})
@@ -157,7 +157,7 @@ func TestIntentExcerptReadsOnlyTheTicketsSessions(t *testing.T) {
 		path := filepath.Join(transcripts, id+".jsonl")
 		// Every transcript mentions the diff's files, so that only the ledger's
 		// records can tell the reader from the builders.
-		writeStatingTranscript(t, path, r.in.LeaseDir, words, r.diffFiles...)
+		writeStatingTranscript(t, path, r.in.CloneDir, words, r.diffFiles...)
 		recordSession(t, r.jigHome, ledger.Registration{ID: id, Ticket: "JIG-1", Transcript: path})
 	}
 	claimedBy(t, r.in.Store, "JIG-1", "session-claimer")
@@ -200,7 +200,7 @@ func TestIntentExcerptTakesTheBestMatchOfTheTicketsSessions(t *testing.T) {
 		"session-first": nil, "session-second": r.diffFiles[:1], "session-third": r.diffFiles,
 	} {
 		path := filepath.Join(transcripts, id+".jsonl")
-		writeStatingTranscript(t, path, r.in.LeaseDir, id+"-words", mentioned...)
+		writeStatingTranscript(t, path, r.in.CloneDir, id+"-words", mentioned...)
 		recordSession(t, r.jigHome, ledger.Registration{ID: id, Ticket: "JIG-1", Transcript: path})
 	}
 	for _, id := range []string{"session-first", "session-second", "session-third"} {
@@ -227,7 +227,7 @@ func TestIntentExcerptTakesTheTicketsDriver(t *testing.T) {
 	r := newLedgerRound(t)
 	r.in.Store, r.in.Ticket = st, fx.Ticket
 	driverTranscript := filepath.Join(t.TempDir(), "session-driver.jsonl")
-	writeStatingTranscript(t, driverTranscript, r.in.LeaseDir, ticketSessionWords)
+	writeStatingTranscript(t, driverTranscript, r.in.CloneDir, ticketSessionWords)
 	recordSession(t, r.jigHome, ledger.Registration{ID: "session-driver", Transcript: driverTranscript})
 
 	if ids := ticketSessionIDs(r.in); len(ids) != 1 || ids[0] != "session-driver" {
@@ -268,7 +268,7 @@ func TestIntentExcerptFallsBackToTheSearchWhenTheLedgerHasNothingToRead(t *testi
 			t.Parallel()
 			r := newLedgerRound(t)
 			present := filepath.Join(t.TempDir(), "session-ticket.jsonl")
-			writeStatingTranscript(t, present, r.in.LeaseDir, ticketSessionWords)
+			writeStatingTranscript(t, present, r.in.CloneDir, ticketSessionWords)
 			claimedBy(t, r.in.Store, "JIG-1", "session-ticket")
 			if reg := tc.reg(present); reg != nil {
 				recordSession(t, r.jigHome, *reg)
@@ -289,7 +289,7 @@ func TestIntentExcerptSaysWhyThereIsNoneWhenNeitherFindsOne(t *testing.T) {
 	userHome, jigHome := newIntentInferHomes(t) // no transcripts to search
 	dir, head := newIntentInferLease(t)
 	in := RoundInput{
-		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, LeaseDir: dir, RepoName: "fixture-repo", Target: "main",
+		Store: newReviewStore(t), Ticket: "JIG-1", Round: 1, CloneDir: dir, RepoName: "fixture-repo", Target: "main",
 		OperatorClone: dir, Home: jigHome, UserHome: userHome,
 	}
 	claimedBy(t, in.Store, "JIG-1", "session-ticket")

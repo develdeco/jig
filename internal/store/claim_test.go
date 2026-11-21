@@ -235,8 +235,7 @@ func TestClaimRemintsAfterRejectedPushPreservesUnrelatedDirtyState(t *testing.T)
 }
 
 // TestClaimRefusesRatherThanOrphaningAConcurrentCommit covers the other half
-// of the same race, r1-f6 called out as fixed per the human's decision
-// (slice fix-3-r1-f6): another process on this same clone commits its own
+// of the same race: another process on this same clone commits its own
 // work (as Store.Sync's or Store.Push's own `add -A` would) on top of this
 // claim's own commit, in the window between the two. A rejected push's
 // undo, `reset --soft` to the pre-write HEAD, cannot discard this claim's

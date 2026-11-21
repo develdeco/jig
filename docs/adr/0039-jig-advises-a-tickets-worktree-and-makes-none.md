@@ -1,5 +1,7 @@
 # jig advises a ticket's worktree and makes none
 
+**Amended by [ADR 0056](0056-a-gate-round-and-publish-work-in-no-lease-of-jigs.md):** its clause "never in jig's pool, whose leases are for jig's phases" has nothing left to say, since jig keeps no pool and no lease for any phase, and the reviewer's worktree (`<clone>.worktrees/<TICKET>-review`) is the second one jig advises. The rest stands.
+
 [ADR 0037](0037-a-chart-is-run-from-the-main-session.md) had each build subagent of a chart run work in its own worktree, and left the git to the skill. The `chart` skill spelled out `git worktree add <dir> -b <branch> <base>`, so every run worked out three things for itself: where the folder goes, what the base is (the parent's branch for a stacked ticket, the target otherwise, and `jig next` already knew it), and whether the branch exists already. A ticket that builds in two repos needed two folders that never collide. Nothing ever removed a worktree, so a finished chart left one folder for each ticket beside the clone. And a chart run starts several subagents at once, each wanting its own approval for git and the oracles, so the person was asked the same thing once for every parallel subagent.
 
 jig already advises a session's context and runs none of the tools ([ADR 0034](0034-jig-advises-context-and-runs-no-context-tool.md)). A worktree is the same kind of thing: the session's own checkout, made with the session's own tools.
@@ -21,6 +23,14 @@ jig already advises a session's context and runs none of the tools ([ADR 0034](0
 **The skill asks once.** Before the first wave the `chart` skill names what the builds run (`jig`, `git` with the worktree commands, and the oracles in the tickets' `slices.yaml`) and asks the person to allow them once. One yes covers the run, in place of a prompt for each parallel subagent. jig sets no permission. The skill runs the adds one at a time, because git's records of a repository's worktrees are not safe against parallel adds, and removes each ticket's worktrees after its publish.
 
 **git answers.** `gitx.Worktrees` runs `git worktree list --porcelain`. The advice asks it only when the ticket's branch exists in the clone, read in process, since no work tree can hold a branch that is not there, and once for each clone in a command, however many tickets it decides. An error from either question is no worktree.
+
+## Amended
+
+The add command above is advice for a harness with no worktree method of its own; the remove command removes a worktree the harness kept, whatever the harness. A harness has one (Claude Code's Agent `isolation: worktree`, or its worktree entry), so the harness makes the worktree and jig gives what to work on: a row's `branch` and `base`, and the `dir` where a worktree holds the branch (`present`, `remove`). `command` stays on an `add` and a `remove` row: the help lines present an add's as advice for a harness with no method, never as the way, and a remove's as what removes a kept worktree.
+
+A worktree the harness made is tied to the ticket by its branch, the one thing jig already finds a worktree by. The harness names its branch (or leaves a detached HEAD), so the session renames it inside the worktree with `git branch -m <branch>` (on a detached HEAD, which git refuses to rename, `git switch -c <branch>`), using the branch the row names; a branch the clone has already is switched to instead, since a branch outlives a removed worktree. A worktree the harness starts at its own HEAD is reset to the row's `base` before anything is committed there. From then on `jig next` shows the row `present` with the worktree's `dir` and `jig here` run in it binds the ticket. No jig verb renames.
+
+A row in a clone the harness's worktree does not reach (another repo than the session's, or a harness with no worktree method) is added with the row's `command`: the main session runs these one at a time, since git's records of a repository's worktrees are not safe against parallel adds, and a nested builder of a multi-repo ticket runs its own repo's. A builder with no harness worktree never renames or resets in the person's clone. Removal is the harness's for a clean worktree; one it kept is removed after the publish with the `remove` command, never forced.
 
 ## Rejected alternatives
 

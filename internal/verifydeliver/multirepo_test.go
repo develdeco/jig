@@ -79,13 +79,13 @@ func TestRecordedPRsAndTheLinksOfARepo(t *testing.T) {
 
 	pt := &publishTarget{repoName: "web", covered: []string{"api", "web", "docs"}}
 	got := linksFor(pt, known)
-	if want := []prLink{{"api", "https://h/api/pull/2"}, {"docs", ""}}; !reflect.DeepEqual(got, want) {
+	if want := []prLink{{Repo: "api", URL: "https://h/api/pull/2"}, {Repo: "docs"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("linksFor(web) = %v, want the api's url and docs pending: %v", got, want)
 	}
 	if got := linksFor(&publishTarget{repoName: "web", covered: []string{"web"}}, known); len(got) != 0 {
 		t.Errorf("linksFor of a ticket in one repo = %v, want none", got)
 	}
-	if !sameLinks(nil, nil) || !sameLinks(got, got) || sameLinks([]prLink{{"api", ""}}, []prLink{{"api", "u"}}) || sameLinks([]prLink{{"api", ""}}, nil) {
+	if !sameLinks(nil, nil) || !sameLinks(got, got) || sameLinks([]prLink{{Repo: "api"}}, []prLink{{Repo: "api", URL: "u"}}) || sameLinks([]prLink{{Repo: "api"}}, nil) {
 		t.Errorf("sameLinks does not tell the same pull requests from other ones")
 	}
 }
@@ -137,7 +137,7 @@ func TestPartOfSection(t *testing.T) {
 	if got := renderPartOfSection("JIG-1", nil); got != "" {
 		t.Errorf("a ticket in one repo has a Part of section: %q", got)
 	}
-	got := renderPartOfSection("JIG-1", []prLink{{"api", "https://h/api/pull/2"}, {"docs", ""}})
+	got := renderPartOfSection("JIG-1", []prLink{{Repo: "api", URL: "https://h/api/pull/2"}, {Repo: "docs"}})
 	want := "## Part of JIG-1\n\n- also api: https://h/api/pull/2\n- also docs: pending\n\n"
 	if got != want {
 		t.Errorf("renderPartOfSection = %q, want %q", got, want)
@@ -189,14 +189,8 @@ func TestPublishTargetShowsItsOwnRepo(t *testing.T) {
 
 	rep := reportYAML{ReviewedSHA: map[string]string{"api": "aaa", "web": "bbb"}, OracleNames: []string{"lint", "test"}}
 	web.gateRep, alone.gateRep = rep, rep
-	if got := web.report().ReviewedSHA; !reflect.DeepEqual(got, map[string]string{"web": "bbb"}) {
-		t.Errorf("the web's report shows reviewed heads %v, want its own alone", got)
-	}
 	if got := web.reviewedHead(); got != "bbb" {
 		t.Errorf("the web's reviewed head = %q, want bbb", got)
-	}
-	if got := alone.report().ReviewedSHA; !reflect.DeepEqual(got, rep.ReviewedSHA) {
-		t.Errorf("a ticket in one repo shows reviewed heads %v, want the round's as they are", got)
 	}
 	// The round's oracle names are the union of the repos'; a pull request names
 	// those its own manifest declares.

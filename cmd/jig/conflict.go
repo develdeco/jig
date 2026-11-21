@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -71,6 +73,8 @@ func ticketConflictAdvice(st *store.Store, cfg project.Config, mp project.Machin
 
 func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflictAdvice {
 	a := conflictAdvice{Ticket: ticket}
+	type tk struct{ repo, ticket string }
+	conflicting := map[tk]bool{}
 	for _, p := range pairs {
 		other, otherBranch := p.A, p.BranchA
 		switch ticket {
@@ -82,16 +86,28 @@ func adviceFromPairs(st *store.Store, pairs []testedPair, ticket string) conflic
 		}
 		switch p.State {
 		case pairConflict:
+			conflicting[tk{p.Repo, other}] = true
 			first := firstInNextOrder(st, p.A, p.B)
 			for _, f := range p.Files {
-				a.Conflicts = append(a.Conflicts, ticketConflict{Repo: p.Repo, Ticket: other, File: f, Branch: otherBranch, First: first})
+				c := ticketConflict{Repo: p.Repo, Ticket: other, File: f, Branch: otherBranch, First: first}
+				// Two branches of the ticket in hand that conflict with the
+				// same branch of another ticket give one entry.
+				if !slices.Contains(a.Conflicts, c) {
+					a.Conflicts = append(a.Conflicts, c)
+				}
 			}
 		case pairClean:
 			if len(p.Shared) > 0 {
-				a.Clean = append(a.Clean, cleanShare{Repo: p.Repo, Ticket: other, File: p.Shared[0]})
+				c := cleanShare{Repo: p.Repo, Ticket: other, File: p.Shared[0]}
+				if !slices.Contains(a.Clean, c) {
+					a.Clean = append(a.Clean, c)
+				}
 			}
 		}
 	}
+	// A ticket with any branch pair that conflicts is not also said to merge
+	// cleanly: conflict outranks clean.
+	a.Clean = slices.DeleteFunc(a.Clean, func(c cleanShare) bool { return conflicting[tk{c.Repo, c.Ticket}] })
 	return a
 }
 
@@ -176,7 +192,7 @@ func readHereConflicts(c hereCtx) (conflictAdvice, bool) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return conflictAdvice{}, false
 	}
-	cfg, mp, ok := locatedProject(c.Where, c.JigHome)
+	cfg, mp, ok := locatedProject(c.e.memo, c.Where, c.JigHome)
 	if !ok {
 		return conflictAdvice{}, false
 	}
@@ -185,8 +201,8 @@ func readHereConflicts(c hereCtx) (conflictAdvice, bool) {
 
 // locatedProject is the project config and the machine's mapping of it for
 // where; ok is false when either cannot be read.
-func locatedProject(where locate.Where, jigHome string) (project.Config, project.MachineProject, bool) {
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+func locatedProject(m *gitx.Memo, where locate.Where, jigHome string) (project.Config, project.MachineProject, bool) {
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return project.Config{}, project.MachineProject{}, false
 	}
@@ -197,7 +213,7 @@ func locatedProject(where locate.Where, jigHome string) (project.Config, project
 	return cfg, machine[cfg.Name], true
 }
 
-// printConflicts tells the session, before a gate runs its oracle or a publish
+// printConflicts tells the session, before a gate round opens or a publish
 // pushes, which other open tickets' branches the ticket's cannot merge with:
 // the same warning, table and help as `jig here`, and nothing for a clean
 // pair. It is advice: it changes no exit code, round or verdict.

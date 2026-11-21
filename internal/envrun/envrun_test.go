@@ -239,7 +239,7 @@ func TestShellOutputHelper(t *testing.T) {
 
 // TestShellOutputDoesNotPassOnTheRecordDirItInherited: jig can run inside a
 // recording oracle run, so its own environment may hold JIG_RECORD_DIR. A
-// command ShellOutput runs (the gate's oracle) must not see it, and a command
+// command ShellOutput runs (an oracle run) must not see it, and a command
 // ShellOutputEnv gives one must see that one and no other. The environment is
 // set on a child process, never on this one.
 func TestShellOutputDoesNotPassOnTheRecordDirItInherited(t *testing.T) {
@@ -276,7 +276,7 @@ func TestPWDHelper(t *testing.T) {
 // TestShellOutputGivesTheChildThePWDOfItsDir: a command's environment is the
 // inherited one with the PWD os/exec sets for the directory it runs in. Setting
 // Env by hand drops that PWD, and a child exec'd without a shell resetting it
-// (as a session's claude is, which internal/session's test pins) gets jig's
+// (as a harness's claude is) gets jig's
 // own, which names another directory. The subtests through sh only show that
 // a command runs with the right PWD, since sh discards a PWD that is not its
 // cwd; ChildEnv's own assertion is what pins the function. Windows has no PWD.
@@ -439,7 +439,7 @@ func runShHelper(t *testing.T, set map[string]string) string {
 
 // TestWithNoShEveryCommandFails: on a machine with no sh, ShellOutput,
 // ShellOutputEnv and Shell each fail and say why, and none passes a command
-// it did not run: the gate's oracle runs and an env class's up and check
+// it did not run: a builder's verify run and an env class's up and check
 // rest on it. The child's PATH is an empty directory, so it finds neither
 // git nor sh.
 func TestWithNoShEveryCommandFails(t *testing.T) {

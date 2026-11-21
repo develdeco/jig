@@ -11,7 +11,14 @@ import (
 type Answer struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// By is "call" when the builder made the call itself and recorded it
+	// (the bullet reads "- q-004 (call): ..."), "" for an answer a person
+	// gave or an agent relayed.
+	By string `json:"by,omitempty"`
 }
+
+// callMarker follows the id of a call's bullet in a ledger entry.
+const callMarker = " (call)"
 
 // LedgerEntry is one ticket's entry in the store's ledger.md: the heading
 // "## <ticket> - <title>" and the answers the person gave while it was built.
@@ -54,7 +61,11 @@ func ParseLedger(text string) []LedgerEntry {
 		case !inAnswers || trimmed == "":
 		case strings.HasPrefix(trimmed, "- "):
 			id, text, _ := strings.Cut(strings.TrimPrefix(trimmed, "- "), ": ")
-			cur.Answers = append(cur.Answers, Answer{ID: strings.TrimSpace(id), Text: strings.TrimSpace(text)})
+			a := Answer{ID: strings.TrimSpace(id), Text: strings.TrimSpace(text)}
+			if bare, ok := strings.CutSuffix(a.ID, callMarker); ok {
+				a.ID, a.By = bare, "call"
+			}
+			cur.Answers = append(cur.Answers, a)
 		case trimmed == "none":
 		case len(cur.Answers) > 0:
 			last := &cur.Answers[len(cur.Answers)-1]

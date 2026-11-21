@@ -7,7 +7,7 @@ description: Publishes a ticket's reviewed branch - renders the pull request bod
 
 Run `jig next <T>`. If the phase it names is not publish, tell the person what it needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch. Publishing needs every slice green and a clean round (`PUBLISH_NOT_CLEAN`); the review notes say whether its reviewer built part of the change. A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again.
+jig publishes the head the last clean gate round reviewed, **unchanged**: it reconciles, squashes and commits nothing on the branch. Publishing needs every slice green and a clean round (`PUBLISH_NOT_CLEAN`); the review notes say whether its reviewer built part of the change. A branch that moved since the round (`PUBLISH_UNREVIEWED_HEAD`) needs `jig gate T-1` again. After the last clean round, run `jig verify T-1 --final` in the worktree at the reviewed head, before publishing: publish runs no test and only says when the head has none.
 
 ## Two ways, one hand-off
 
@@ -20,7 +20,7 @@ gh pr create --head <branch> --base <base> --title "<title>" --body-file <pr_bod
 jig publish T-1 --pr <url>             # checks the PR is from the ticket's branch (and the reviewed head), then records it
 ```
 
-The `--body` output gives the branch, base, title and the `pr_body` path to hand to `gh`. The branch is the ticket's recorded one, else `<id>-<slug>`. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. `--pr` posts the review notes once per content: post nothing yourself. It also reads the title and body back and journals whether they are the render's (`body_match`: `matches`, `differs`, `unknown`); on `differs`, `gh pr edit` it with the `--body` output. When the last is recorded, run the `git worktree remove` the result gives for each worktree the ticket still has (git refuses one with changes).
+The `--body` output gives the branch, base, title and the `pr_body` path to hand to `gh`. The branch is the ticket's recorded one, else `<id>-<slug>`. `--pr` refuses a pull request from another branch (`PR_HEAD_MISMATCH`) or at another commit; with no pull-request host it records the URL unverified and says so. `--pr` posts the review notes once per content: post nothing yourself. It also reads the title and body back and journals whether they are the render's (`body_match`: `matches`, `differs`, `unknown`); on `differs`, `gh pr edit` it with the `--body` output. When the last is recorded, the result advises a `git worktree remove` for each worktree the ticket still has: it removes one the harness kept, or one made with no worktree method (git refuses one with changes).
 
 Or jig pushes and opens it:
 
@@ -30,7 +30,7 @@ jig publish T-1            # asks before it pushes; --yes stands in for the answ
 
 It pushes the reviewed head as it is (never forced: `PUBLISH_NOT_FAST_FORWARD` when origin moved past it), opens the pull request or updates the branch's open one, and posts the review notes as a comment unless these exact notes are already on it.
 
-A ticket built in several repos publishes one pull request for each, from one branch name; each body names the others under `## Part of T-1` (`pending` until recorded). `--body` renders them all, or one with `--repo <r>`; push, open and record each with `jig publish T-1 --pr <url> --repo <r>`. When the last is recorded, render the bodies again and update the pull requests with the urls. Bare `jig publish` does it all, and `--approve` approves every repo's head.
+Read `jig skill publish multi-repo` when the ticket was built in several repos.
 
 A start-to-finish run that names the publish asks the person to approve it (the reviewed head and the body's first lines) and, on their yes, publishes the first way; a prompt that told you to go with your recommendations needs no yes. In a chart run (`jig skill chart`) the main session asks once for every ticket reviewed clean. A run that names no publish stops after the review and relays the publish prompt.
 
@@ -48,21 +48,15 @@ The body is `## What`, `## Demo` (when picked) and `## Verification`, then the t
 
 ## Recordings for the demo
 
-When the ticket's own tests recorded scenarios and nobody picked, `--body` and `jig publish` report `picks: pending` and name a `picks_request` file: the candidates, each with an id, and the intent. Pick the recordings that show the change, compose them into flows, and write the answer:
-
-```
-{"flows": [{"title": "...", "items": [{"id": "r2"}, {"id": "r3", "caption": "..."}]}], "summary": "..."}
-```
-
-then run `jig publish T-1 --body --picks answer.json` (or the bare publish with `--picks`). Pick a few; an id is used once; flows keep their step order. A refused pick publishes with no demo and says why; a pick that stood is reused for the same head and recordings.
+Read `jig skill publish demo` when `--body` or `jig publish` reports `picks: pending`.
 
 ## A published ticket that is behind
 
-`jig next T-1` says `state: behind` for a published ticket stacked on a parent that has since moved or merged. In a checkout of its branch run the `merge` its `stack` row names, then bare `jig publish T-1`: it pushes the merge and points the branch's open pull request at its base, opening no second one. A merge git made by itself needs no new round; a hand-resolved merge or any other commit needs `jig gate T-1` first (`PUBLISH_UNREVIEWED_HEAD`), which reviews your resolution alone.
+Read `jig skill publish stacked` when `jig next` says `state: behind`.
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person (none once the pull request is recorded) and stop. Publish is the last phase: no skill follows it, even in a start-to-finish run.
+Once the pull request is recorded, `jig next <T>` names `Land <T>`: tell the person it is theirs to say (`jig skill land`), never run it yourself, and stop. No skill follows publish in a start-to-finish run.
 
 ## Never
 

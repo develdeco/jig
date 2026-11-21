@@ -9,7 +9,7 @@ import (
 )
 
 // init registers `jig here`'s verification section (sections.go). `jig here`
-// itself lists the commits that verified and those still being verified
+// itself lists the commits that verified
 // (verificationsIn); this section adds how the located slice stands at the
 // repo's HEAD, which it cannot show: a failed verification, a verification
 // that could not run, and the time and summary of each.
@@ -36,10 +36,19 @@ type hereVerifyHeadInfo struct {
 	State   string `json:"state"`
 	Attempt int    `json:"attempt,omitempty"`
 	Seconds int    `json:"seconds,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	// CPUSeconds, PeakMemory and PeakBasis are what the latest oracle line's
+	// process tree used, told in words ("63.2", "1.4 GiB", "sampled peak");
+	// absent when the line carries none.
+	CPUSeconds string `json:"cpu_seconds,omitempty"`
+	PeakMemory string `json:"peak_memory,omitempty"`
+	PeakBasis  string `json:"peak_basis,omitempty"`
+	Summary    string `json:"summary,omitempty"`
 	// Light says a pass stood on an earlier whole-suite run: "lint only,
 	// reusing <sha>".
 	Light string `json:"light,omitempty"`
+	// NotCounted says a failed run never judged the code: "timed out, not
+	// counted" or "stopped, not counted".
+	NotCounted string `json:"not_counted,omitempty"`
 }
 
 // hereVerifyHead reads how HEAD of the located repo stands for the located
@@ -63,7 +72,12 @@ func hereVerifyHead(c hereCtx) (*hereVerifyHeadInfo, error) {
 	if v.State == journal.VerifyNone {
 		return nil, nil
 	}
-	return &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords()}, nil
+	info := &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords(), NotCounted: v.NotCounted()}
+	info.CPUSeconds = cpuWords(v.CPUMs)
+	if info.PeakMemory = memoryWords(v.PeakBytes); info.PeakMemory != "" {
+		info.PeakBasis = basisWords(v.PeakBasis)
+	}
+	return info, nil
 }
 
 // hereVerifyBlocks renders the section: one verification block for HEAD.
@@ -79,8 +93,17 @@ func hereVerifyBlocks(c hereCtx) ([]string, error) {
 	if h.Seconds > 0 {
 		kv = append(kv, [2]string{"seconds", strconv.Itoa(h.Seconds)})
 	}
+	if h.CPUSeconds != "" {
+		kv = append(kv, [2]string{"cpu_seconds", h.CPUSeconds})
+	}
+	if h.PeakMemory != "" {
+		kv = append(kv, [2]string{"peak_memory", h.PeakMemory}, [2]string{"peak_basis", h.PeakBasis})
+	}
 	if h.Light != "" {
 		kv = append(kv, [2]string{"pass", h.Light})
+	}
+	if h.NotCounted != "" {
+		kv = append(kv, [2]string{"run", h.NotCounted})
 	}
 	if h.Summary != "" {
 		kv = append(kv, [2]string{"summary", h.Summary})

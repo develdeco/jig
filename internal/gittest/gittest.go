@@ -1,6 +1,6 @@
 // Package gittest runs a test binary's git hermetically: no background
 // maintenance outlives a test, and no host git config leaks into one. It is
-// a leaf package, importing nothing else from this module.
+// a leaf package, importing only internal/gitenv from this module.
 package gittest
 
 import (
@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/develdeco/jig/internal/gitenv"
 )
 
 var (
 	mu       sync.Mutex
 	cleanups []func()
+	pinned   bool
 )
 
 // Run writes a git config with maintenance.auto=false, receive.autogc=false
@@ -23,11 +26,20 @@ var (
 // with no config file), points GIT_CONFIG_GLOBAL at it, sets
 // GIT_CONFIG_NOSYSTEM=1, and runs m. Every git process the binary spawns,
 // including git-receive-pack on the far side of a local push, then runs
-// without detached maintenance or host config. After m.Run() it runs the
-// AtExit funcs in LIFO order and returns the exit code:
+// without detached maintenance or host config. The config is read-only to
+// git: every write to it fails with "could not lock config file", so a test
+// that installs global settings (a core.hooksPath, say) points
+// GIT_CONFIG_GLOBAL at a file of its own that includes this one, and no
+// setting of one test reaches another. After m.Run() it runs the
+// AtExit funcs in LIFO order and returns the exit code. Before m runs it also
+// removes from the binary's environment every variable in gitenv.HookOnly,
+// plus EMAIL, which git reads as an identity: a person's shell exports them,
+// and no test should depend on whose shell runs it. What PinIdentity pinned
+// is kept:
 //
 //	func TestMain(m *testing.M) { os.Exit(gittest.Run(m)) }
 func Run(m *testing.M) int {
+	dropShellEnv()
 	dir, err := os.MkdirTemp("", "jig-gittest")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gittest: create temp dir: %v\n", err)
@@ -39,10 +51,23 @@ func Run(m *testing.M) int {
 	// The files need not exist: git reads a missing one as empty. Forward
 	// slashes, since a backslash escapes in a config value.
 	body := "[maintenance]\n\tauto = false\n[receive]\n\tautogc = false\n[gc]\n\tautoDetach = false\n" +
+		// Lists the variables gitx sets when git is tracing, so a trace file
+		// names the Go function and directory behind each git process.
+		"[trace2]\n\tenvVars = JIG_GIT_CALLER,JIG_GIT_DIR\n" +
 		fmt.Sprintf("[core]\n\texcludesFile = %q\n\tattributesFile = %q\n",
 			filepath.ToSlash(filepath.Join(dir, "ignore")), filepath.ToSlash(filepath.Join(dir, "attributes")))
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "gittest: write %s: %v\n", cfg, err)
+		return 1
+	}
+	// Every parallel test of the binary reads this one file, so a setting one
+	// test writes to it runs in every other test's git. Git changes a config
+	// file only through <file>.lock, created exclusively; a directory under
+	// that name is a lock no git process can take, on every platform and as
+	// root, so every write fails and every read still works. A read-only
+	// file would not do: git replaces the file by renaming over it.
+	if err := os.Mkdir(cfg+".lock", 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "gittest: hold the lock of %s: %v\n", cfg, err)
 		return 1
 	}
 	if err := os.Setenv("GIT_CONFIG_GLOBAL", cfg); err != nil {
@@ -57,6 +82,22 @@ func Run(m *testing.M) int {
 	code := m.Run()
 	runCleanups()
 	return code
+}
+
+// dropShellEnv unsets the shell's git identity and hook variables, except the
+// ones PinIdentity set on purpose.
+func dropShellEnv() {
+	keep := map[string]bool{}
+	if pinned {
+		for _, kv := range pinnedIdentity {
+			keep[kv[0]] = true
+		}
+	}
+	for _, name := range append(append([]string{}, gitenv.HookOnly...), "EMAIL") {
+		if !keep[name] {
+			_ = os.Unsetenv(name)
+		}
+	}
 }
 
 // pinnedIdentity is the fixture identity and date PinIdentity sets, matching
@@ -81,6 +122,7 @@ var pinnedIdentity = [][2]string{
 //	    os.Exit(gittest.Run(m))
 //	}
 func PinIdentity() {
+	pinned = true
 	for _, kv := range pinnedIdentity {
 		_ = os.Setenv(kv[0], kv[1])
 	}

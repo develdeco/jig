@@ -9,15 +9,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
-	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/spawn"
 )
 
 // testEnv is the env a test hands run: JIG_HOME is jigHome, the operator's
@@ -36,22 +36,14 @@ func testEnv(jigHome string) env {
 }
 
 // envFrom is the production env with its variable lookup answering only
-// from vars, no GitHub client, and no way to start a process: a test that
-// spawns hands the env its own spawner (withSpawn).
+// from vars and no GitHub client.
 func envFrom(vars map[string]string) env {
 	e := processEnv()
 	e.getenv = func(key string) string { return vars[key] }
+	e.getwd = startingDir
 	e.mirrorClient = noGitHub()
-	e.spawn = refuseSpawn
 	e.unsetenv = func(string) {}
 	return e
-}
-
-// refuseSpawn is the spawner every test env starts with, so a command that
-// would start a detached process fails the test that did not expect it,
-// rather than leaving one running.
-func refuseSpawn(spawn.Spec) (int, error) {
-	return 0, errors.New("spawn not allowed in test env")
 }
 
 // noGitHub is the mirror client every test env starts with. It refuses each
@@ -85,13 +77,6 @@ func (e env) inDir(dir string) env {
 // so a scripted stdin answers the triage prompts as a person would.
 func (e env) atTerminal() env {
 	e.stdinIsTerminal = func(io.Reader) bool { return true }
-	return e
-}
-
-// withSpawn returns e with fn as the spawner a command starts detached
-// processes through.
-func (e env) withSpawn(fn func(spawn.Spec) (int, error)) env {
-	e.spawn = fn
 	return e
 }
 
@@ -129,33 +114,6 @@ func (e env) withStdoutTerminal(yes bool) env {
 
 // fixedClock is a clock that always reads t.
 func fixedClock(t time.Time) func() time.Time { return func() time.Time { return t } }
-
-// spawnRecorder is a spawner that records the Specs it was asked to start and
-// answers with a pid (or an error) of the test's choosing, without starting
-// anything.
-type spawnRecorder struct {
-	// PID is the pid every spawn reports; Err, if set, is what it fails with.
-	PID int
-	Err error
-
-	mu    sync.Mutex
-	specs []spawn.Spec
-}
-
-// Spawn is the func to hand withSpawn.
-func (r *spawnRecorder) Spawn(s spawn.Spec) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.specs = append(r.specs, s)
-	return r.PID, r.Err
-}
-
-// Specs returns the Specs spawned so far, oldest first.
-func (r *spawnRecorder) Specs() []spawn.Spec {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]spawn.Spec(nil), r.specs...)
-}
 
 // newFixture is fixture.Generate with the fixture's machine mapping under a
 // jig home of its own, never the one the process environment names. The
@@ -316,29 +274,13 @@ func TestProcessEnvOperatorHomeAgreesWithTheStdlib(t *testing.T) {
 }
 
 // TestTestEnvSeamsAndTheirHelpers pins the seams a test env starts with: it
-// cannot start a process, and the helpers replace the context, clock, PATH
+// is a production env with nothing of the host, and the helpers replace the context, clock, PATH
 // lookup, executable and terminal checks without changing the env they were
 // called on.
 func TestTestEnvSeamsAndTheirHelpers(t *testing.T) {
 	t.Parallel()
 
 	e := testEnv(t.TempDir())
-	if _, err := e.spawn(spawn.Spec{Path: "x"}); err == nil || !strings.Contains(err.Error(), "spawn not allowed in test env") {
-		t.Errorf("testEnv spawn error = %v, want \"spawn not allowed in test env\"", err)
-	}
-
-	rec := &spawnRecorder{PID: 4242}
-	withSpawn := e.withSpawn(rec.Spawn)
-	pid, err := withSpawn.spawn(spawn.Spec{Path: "jig", Args: []string{"verify"}})
-	if err != nil || pid != 4242 {
-		t.Errorf("recorded spawn = %d, %v, want 4242, nil", pid, err)
-	}
-	if specs := rec.Specs(); len(specs) != 1 || specs[0].Path != "jig" || len(specs[0].Args) != 1 {
-		t.Errorf("recorded specs = %+v, want the one spawned", specs)
-	}
-	if _, err := e.spawn(spawn.Spec{}); err == nil {
-		t.Errorf("withSpawn changed the env it was called on")
-	}
 
 	at := time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)
 	if got := e.withClock(fixedClock(at)).now(); !got.Equal(at) {
@@ -375,7 +317,7 @@ func TestProcessEnvSeamsHaveProductionDefaults(t *testing.T) {
 	if e.ctx == nil || e.ctx.Err() != nil {
 		t.Errorf("processEnv ctx = %v, want a live context", e.ctx)
 	}
-	if e.spawn == nil || e.lookPath == nil || e.stdoutIsTerminal == nil || e.executable == nil || e.now == nil {
+	if e.lookPath == nil || e.stdoutIsTerminal == nil || e.executable == nil || e.now == nil {
 		t.Fatalf("processEnv left a seam nil: %+v", e)
 	}
 	if before, got, after := time.Now(), e.now(), time.Now(); got.Before(before) || got.After(after) {
@@ -411,7 +353,8 @@ func TestEndAfterInterrupt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	exited := make(chan int, 1)
-	go endAfterInterrupt(ctx, func() { close(stopped) }, 10*time.Millisecond, func(code int) { exited <- code })
+	oraclesEnded := make(chan struct{})
+	go endAfterInterrupt(ctx, func() { close(stopped) }, 10*time.Millisecond, func() { close(oraclesEnded) }, func(code int) { exited <- code })
 
 	select {
 	case code := <-exited:
@@ -431,5 +374,29 @@ func TestEndAfterInterrupt(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Errorf("stop was not called before exiting")
+	}
+	select {
+	case <-oraclesEnded:
+	default:
+		t.Errorf("the running oracles were not ended before exiting")
+	}
+}
+
+// TestStopSignalsLeaveIgnoredSignalsIgnored: a jig started with SIGHUP or
+// SIGINT ignored (nohup, a background job) keeps ignoring it; SIGTERM always
+// stops.
+func TestStopSignalsLeaveIgnoredSignalsIgnored(t *testing.T) {
+	t.Parallel()
+	got := func(ignore ...os.Signal) []os.Signal {
+		return stopSignals(func(s os.Signal) bool { return slices.Contains(ignore, s) })
+	}
+	if want := []os.Signal{syscall.SIGTERM, os.Interrupt, syscall.SIGHUP}; !slices.Equal(got(), want) {
+		t.Errorf("stop signals = %v, want %v", got(), want)
+	}
+	if want := []os.Signal{syscall.SIGTERM, os.Interrupt}; !slices.Equal(got(syscall.SIGHUP), want) {
+		t.Errorf("with SIGHUP ignored = %v, want %v", got(syscall.SIGHUP), want)
+	}
+	if want := []os.Signal{syscall.SIGTERM, syscall.SIGHUP}; !slices.Equal(got(os.Interrupt), want) {
+		t.Errorf("with SIGINT ignored = %v, want %v", got(os.Interrupt), want)
 	}
 }

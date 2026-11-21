@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 )
@@ -15,15 +16,15 @@ import (
 // well as a mapped one. Locate records a clone it recognizes in the machine
 // map; the resolution needs nothing of the repo, the branch or the ticket, so
 // it asks for the store alone.
-func locateStore(jigHome, cwd, storeFlag string, getenv func(string) string) (string, project.Config, error) {
-	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: storeFlag, Getenv: getenv, StoreOnly: true})
+func locateStore(m *gitx.Memo, jigHome, cwd, storeFlag string, getenv func(string) string) (string, project.Config, error) {
+	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: storeFlag, Getenv: getenv, StoreOnly: true, Memo: m})
 	if err != nil {
 		return "", project.Config{}, err
 	}
 	if where.StorePath == "" {
 		return "", project.Config{}, noStoreError(where)
 	}
-	cfg, err := project.LoadConfig(jigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+	cfg, err := project.LoadConfigWith(m, jigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return "", project.Config{}, err
 	}

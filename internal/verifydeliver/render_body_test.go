@@ -20,8 +20,8 @@ func TestRenderWhatSectionKeepsItsOwnSections(t *testing.T) {
 	}
 }
 
-// TestRenderVerificationSectionIsTheGates: the oracles green at the reviewed
-// head and one line per gate round with its scope and verdict, and nothing of
+// TestRenderVerificationSectionIsTheGates: what the reviewed head has for a
+// final run and one line per gate round with its scope and verdict, and nothing of
 // the findings, the tier or a path in the store.
 func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 	t.Parallel()
@@ -36,21 +36,22 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 		{Round: 7, Verdict: RoundClean, CarriedFrom: 6},
 		{Round: 8, Verdict: VerdictNotIndependent},
 	}
-	got := renderVerificationSection(reportYAML{ReviewedSHA: map[string]string{"fixture-repo": "0123456789abcdef"}}, []string{"go-test", "go-vet", "lint"}, map[string][]string{"go-test": {"go test ./a/...", "go test ./b/..."}, "go-vet": {"go vet\n  ./..."}}, rounds)
+	final := FinalRunReport{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunPass, Seconds: 12, Command: "(go test ./a/...) && (go vet ./...)"}
+	got := renderVerificationSection([]FinalRunReport{final}, rounds)
 	want := "## Verification\n\n" +
-		"Oracles green at the reviewed head 0123456:\n\n- go-test: `go test ./a/...`\n- go-test: `go test ./b/...`\n- go-vet: `go vet ./...`\n- lint\n\n" +
+		"Final run at the reviewed head 0123456: pass in 12 s: `(go test ./a/...) && (go vet ./...)`\n\n" +
 		"Gate rounds:\n\n- Round 1 (full): 2 fix slices asked\n- Round 2 (delta): clean\n- Round 3: clean\n- Round 4: 1 fix slice asked\n- Round 5: asks for the person\n- Round 6: notes only\n- Round 7: carried over\n- Round 8: not-independent\n"
 	if got != want {
 		t.Fatalf("renderVerificationSection =\n%s\nwant\n%s", got, want)
 	}
-	for _, banned := range []string{"Findings:", "Revalidation", "first comment", "pr/"} {
+	for _, banned := range []string{"Findings:", "Revalidation", "first comment", "pr/", "Oracles green"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("renderVerificationSection = %q, want no %q", got, banned)
 		}
 	}
 
 	// A ticket reviewed clean in one round, the common case, still names it.
-	one := renderVerificationSection(reportYAML{}, []string{"test"}, nil, []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}})
+	one := renderVerificationSection(nil, []RoundRecord{{Round: 1, Verdict: RoundClean, Scope: "full"}})
 	if want := "Gate rounds:\n\n- Round 1 (full): clean\n"; !strings.Contains(one, want) {
 		t.Errorf("renderVerificationSection with one round = %q, want it to hold %q", one, want)
 	}
@@ -59,14 +60,31 @@ func TestRenderVerificationSectionIsTheGates(t *testing.T) {
 func TestRenderVerificationSectionWithoutAReviewedHeadOrRounds(t *testing.T) {
 	t.Parallel()
 
-	if got, want := renderVerificationSection(reportYAML{}, []string{"test"}, nil, nil), "## Verification\n\nOracles green:\n\n- test\n"; got != want {
+	none := FinalRunReport{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunNone}
+	if got, want := renderVerificationSection([]FinalRunReport{none}, nil), "## Verification\n\nNo final run at the reviewed head 0123456\n"; got != want {
 		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
 	}
-	two := reportYAML{ReviewedSHA: map[string]string{"web": "bbbbbbbbb", "api": "aaaaaaaaa"}}
-	if got, want := renderVerificationSection(two, []string{"test"}, nil, nil), "Oracles green at the reviewed heads api aaaaaaa, web bbbbbbb:\n"; !strings.Contains(got, want) {
+	failed := FinalRunReport{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunFail, Seconds: 4, Command: "go test ./a/..."}
+	if got, want := renderVerificationSection([]FinalRunReport{failed}, nil), "## Verification\n\nFinal run at the reviewed head 0123456 failed: `go test ./a/...`\n"; got != want {
+		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
+	}
+	// A command that cannot sit in a code span is left out with its colon.
+	ticked := FinalRunReport{Repo: "fixture-repo", Head: "0123456789abcdef", Outcome: FinalRunPass, Seconds: 9, Command: "echo `date`"}
+	if got, want := renderVerificationSection([]FinalRunReport{ticked}, nil), "## Verification\n\nFinal run at the reviewed head 0123456: pass in 9 s\n"; got != want {
+		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
+	}
+	ticked.Outcome = FinalRunFail
+	if got, want := renderVerificationSection([]FinalRunReport{ticked}, nil), "## Verification\n\nFinal run at the reviewed head 0123456 failed\n"; got != want {
+		t.Fatalf("renderVerificationSection = %q, want %q", got, want)
+	}
+	two := []FinalRunReport{
+		{Repo: "api", Head: "aaaaaaaaa", Outcome: FinalRunPass, Seconds: 3, Command: "go test ./api"},
+		{Repo: "web", Head: "bbbbbbbbb", Outcome: FinalRunNone},
+	}
+	if got, want := renderVerificationSection(two, nil), "- api: Final run at the reviewed head aaaaaaa: pass in 3 s: `go test ./api`\n- web: No final run at the reviewed head bbbbbbb\n"; !strings.Contains(got, want) {
 		t.Fatalf("renderVerificationSection = %q, want it to hold %q", got, want)
 	}
-	if got, want := renderVerificationSection(reportYAML{}, nil, nil, nil), "## Verification\n"; got != want {
+	if got, want := renderVerificationSection(nil, nil), "## Verification\n"; got != want {
 		t.Fatalf("renderVerificationSection with nothing = %q, want %q", got, want)
 	}
 }

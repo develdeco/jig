@@ -14,7 +14,6 @@ import (
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
-	"github.com/develdeco/jig/internal/spawn"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -39,9 +38,8 @@ func (c *testClock) advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// rig is a fixture with the core wired to it: a clock of its own, a process
-// starter that records what it was asked to start, and a store opened the way
-// cmd/jig opens one.
+// rig is a fixture with the core wired to it: a clock of its own and a store
+// opened the way cmd/jig opens one.
 type rig struct {
 	t     *testing.T
 	fx    *fixture.Fixture
@@ -49,8 +47,8 @@ type rig struct {
 	d     Deps
 	clock *testClock
 
-	mu     sync.Mutex
-	starts []spawn.Spec
+	// startSet is whether unverified has recorded the ticket's start.
+	startSet bool
 }
 
 func newRig(t *testing.T) *rig {
@@ -62,15 +60,8 @@ func newRig(t *testing.T) *rig {
 	}
 	r := &rig{t: t, fx: fx, st: st, clock: &testClock{now: time.Now()}}
 	r.d = Deps{
-		JigHome:    fx.Home,
-		Now:        r.clock.Now,
-		Executable: filepath.Join(fx.Dir, "bin", "jig"),
-		Start: func(s spawn.Spec) (int, error) {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			r.starts = append(r.starts, s)
-			return 4200 + len(r.starts), nil
-		},
+		JigHome: fx.Home,
+		Now:     r.clock.Now,
 		OpenStore: func(w locate.Where) (*store.Store, project.Config, error) {
 			cfg, err := project.Load(filepath.Join(w.StorePath, "project.yaml"))
 			if err != nil {
@@ -178,10 +169,22 @@ func (r *rig) add(l journal.Line) {
 	}
 }
 
-func (r *rig) started() []spawn.Spec {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]spawn.Spec(nil), r.starts...)
+// started is what a verification started on a commit leaves behind: the
+// ledger's verify-spawned lines and the journal's verify-pending lines. A
+// commit starts nothing, so a test that saw a commit expects it empty.
+func (r *rig) started() []journal.Line {
+	r.t.Helper()
+	out := r.ledgerOf(journal.EventVerifySpawned)
+	lines, err := journal.Read(r.st, r.fx.Ticket)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventVerifyPending {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // hooksOf is the hook lines of the events of one kind.

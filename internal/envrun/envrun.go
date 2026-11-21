@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/develdeco/jig/internal/manifest"
@@ -104,8 +106,8 @@ func Shell(cmd, dir string) error {
 // scenarios record into (ADR 0029). jig sets it only on a builder's green
 // oracle run; unset means do not record. Because the variable is how a run
 // opts in, jig never passes it on from its own environment to a command in
-// this package (an oracle run, an env class's up, check and down) or to a
-// headless session (internal/session), both through ChildEnv. jig can itself
+// this package (an oracle run, an env class's up, check and down), through
+// ChildEnv. jig can itself
 // run inside a recording oracle run (it tests itself), and these must not
 // record into that run's directory. git and gh run no scenarios and may
 // inherit it.
@@ -143,19 +145,28 @@ next:
 	return out
 }
 
-// ShellOutput runs cmd like Shell and returns its combined stdout and
-// stderr, which a failed oracle run hands back to the session that must fix
-// it. A run longer than limit is killed and reported as failed, and Wait
-// stops waiting on its pipes shortly after, so a hung command cannot hold
-// the caller. The kill ends the shell's whole process tree (KillTree).
-func ShellOutput(cmd, dir string, limit time.Duration) (string, error) {
-	return ShellOutputEnv(cmd, dir, limit, nil)
-}
-
 // ErrTimedOut is what a command the wedge guard killed for outliving its limit
 // matches under errors.Is. A kill is read from this, never from the error's
 // text, which embeds the command and so can hold any words.
 var ErrTimedOut = errors.New("did not finish within its limit")
+
+// ErrStopped is what a command ended because the jig process running it was
+// stopped (EndAll) matches under errors.Is. It is a run that reached no
+// verdict, so a caller must not read it as the command failing.
+var ErrStopped = errors.New("was ended because jig was stopped")
+
+// StoppedError is the error of a command ended by EndAll.
+type StoppedError struct{ Cmd string }
+
+func (e *StoppedError) Error() string {
+	return fmt.Sprintf("shell %q: %s", e.Cmd, "was ended because jig was stopped")
+}
+
+// Is reports a StoppedError as ErrStopped.
+func (e *StoppedError) Is(target error) bool { return target == ErrStopped }
+
+// stopFlag records that EndAll ended a run; the guards embed it.
+type stopFlag struct{ stopped atomic.Bool }
 
 // TimedOutError is the error of a command killed for outliving Limit.
 type TimedOutError struct {
@@ -174,31 +185,40 @@ func (e *TimedOutError) Reason() string { return "did not finish within " + e.Li
 // Is reports a TimedOutError as ErrTimedOut.
 func (e *TimedOutError) Is(target error) bool { return target == ErrTimedOut }
 
-// ShellOutputEnv is ShellOutput with extra environment variables, each as
-// "NAME=value", added to the process environment for this command alone. It
-// sets them on the command, never on the process, since two runs of jig's
-// loop may be in flight at once. The command inherits the process environment
-// (ChildEnv: without an inherited RecordDirEnv, so a run given none does not
-// record into the directory of an outer jig run), and a variable in env
-// replaces an inherited one of the same name.
-func ShellOutputEnv(cmd, dir string, limit time.Duration, env []string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+// ShellStream runs cmd like Shell with extra environment variables and hands the command's combined stdout and
+// stderr to w as it is produced, instead of returning it. A limit of 0 or less
+// bounds nothing. The process tree is guarded as ever: ended with the jig
+// process that runs it, and killed at its limit.
+func ShellStream(cmd, dir string, limit time.Duration, env []string, w io.Writer) (Usage, error) {
+	ctx, cancel := context.Background(), func() {}
+	if limit > 0 {
+		ctx, cancel = context.WithTimeout(ctx, limit)
+	}
 	defer cancel()
 	c, err := shCommand(ctx, cmd, dir, env)
 	if err != nil {
-		return "", err
+		return Usage{}, err
 	}
-	NewProcessGroup(c)
-	c.Cancel = func() error { return KillTree(c) }
+	c.Stdout, c.Stderr = w, w
+	g := newGuard(c)
 	c.WaitDelay = 10 * time.Second
-	out, err := c.CombinedOutput()
+	var use Usage
+	err = g.start()
+	if err == nil {
+		err = c.Wait()
+		use = g.usage()
+		g.release()
+	}
+	if g.stopped.Load() {
+		return Usage{}, &StoppedError{Cmd: cmd}
+	}
 	if ctx.Err() != nil {
-		return string(out), &TimedOutError{Cmd: cmd, Limit: limit}
+		return use, &TimedOutError{Cmd: cmd, Limit: limit}
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("shell %q: %w", cmd, err)
+		return use, fmt.Errorf("shell %q: %w", cmd, err)
 	}
-	return string(out), nil
+	return use, nil
 }
 
 // Sh is the sh every command of this package runs through, on every OS, so
@@ -270,6 +290,44 @@ func shCommand(ctx context.Context, cmd, dir string, env []string) (*exec.Cmd, e
 	c.Dir = dir
 	c.Env = append(append(ChildEnv(c), env...), commandEnv+"="+cmd)
 	return c, nil
+}
+
+// SyntaxError is a command the sh of this package cannot parse; Msg is sh's
+// own message.
+type SyntaxError struct {
+	Msg string
+}
+
+func (e *SyntaxError) Error() string { return "sh cannot parse the command: " + e.Msg }
+
+// CheckSyntax asks Sh whether it can parse cmd, without running it: `sh -n`
+// with cmd on standard input, which hands sh the bytes as written on every OS
+// (the command line is what Git's sh on Windows rewrites). It returns a
+// *SyntaxError carrying sh's message when sh rejects cmd, and another error
+// when sh could not be asked (no sh found, or it would not start).
+func CheckSyntax(cmd string) error {
+	return checkSyntax(Sh, cmd)
+}
+
+// checkSyntax is CheckSyntax with find giving the sh to ask.
+func checkSyntax(find func() (string, error), cmd string) error {
+	sh, err := find()
+	if err != nil {
+		return err
+	}
+	c := exec.Command(sh, "-n")
+	c.Stdin = strings.NewReader(cmd)
+	var out bytes.Buffer
+	c.Stdout, c.Stderr = &out, &out
+	err = c.Run()
+	if err == nil {
+		return nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return &SyntaxError{Msg: strings.TrimSpace(out.String())}
+	}
+	return fmt.Errorf("ask %s to parse the command: %w", sh, err)
 }
 
 // substitute replaces {ticket} and {port} placeholders in cmd.

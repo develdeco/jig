@@ -72,7 +72,7 @@ func init() {
 // dismissed, and the oracles that passed.
 func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full bool, deltas []deltaDiff) []string {
 	req := p.Request
-	// A delta round reads only its delta (GATE-17): it drops what round 1 read.
+	// A delta round reads only its delta: it drops what round 1 read.
 	delta := full && roundIsDelta(p)
 	deltaFiles := deltaFileSet(deltas)
 	kv := [][2]string{
@@ -86,7 +86,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 			[2]string{"head", p.Head},
 			[2]string{"base", p.Base},
 			[2]string{"scope", p.Scope},
-			[2]string{"worktree", p.Lease},
 		)
 	}
 	kv = append(kv,
@@ -117,6 +116,7 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		kv = append(kv,
 			[2]string{"hunks", strconv.Itoa(len(req.Hunks))},
 			[2]string{"unprobed", strconv.Itoa(unprobed)},
+			[2]string{"read", fullReadLine},
 		)
 	}
 	if p.Reviewer.Known() {
@@ -139,9 +139,9 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		}
 		var repoRows [][]string
 		for _, r := range p.Repos {
-			repoRows = append(repoRows, []string{r.Repo, r.Copy, r.Head, r.Base, r.Scope, r.Lease, strconv.Itoa(mustBy[r.Repo])})
+			repoRows = append(repoRows, []string{r.Repo, r.Copy, r.Head, r.Base, r.Scope, strconv.Itoa(mustBy[r.Repo])})
 		}
-		blocks = append(blocks, axi.Table("repos", []string{"repo", "copy", "head", "base", "scope", "worktree", "must_review"}, repoRows))
+		blocks = append(blocks, axi.Table("repos", []string{"repo", "copy", "head", "base", "scope", "must_review"}, repoRows))
 	}
 	if !full {
 		return blocks
@@ -170,9 +170,9 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	blocks = append(blocks, axi.Table("dismissed", []string{"id", "file:line", "title"}, dismissedRows))
 	var oracleRows [][]string
 	for _, o := range req.OraclesPassed {
-		oracleRows = append(oracleRows, []string{o.Oracle, o.Workspace, strconv.Itoa(o.Seconds), strings.Join(o.Slices, ","), o.ReusedFrom, o.Ran})
+		oracleRows = append(oracleRows, []string{o.Slice, o.Workspace, o.Command, shortSHA(o.Commit), o.AtHead, strconv.Itoa(o.Seconds)})
 	}
-	blocks = append(blocks, axi.Table("oracles_passed", []string{"oracle", "workspace", "seconds", "slices", "reused_from", "ran"}, oracleRows))
+	blocks = append(blocks, axi.Table("oracles_passed", []string{"slice", "workspace", "command", "commit", "at_head", "seconds"}, oracleRows))
 	// The probe ledger (ADR 0036): what earlier rounds probed, current or
 	// stale at this head, and the hunks of the change nothing covers yet - the
 	// sweep's work list.
@@ -226,7 +226,7 @@ func reviewTicket(e env, st *store.Store, jigHome string, positionals []string, 
 	if err != nil {
 		return "", err
 	}
-	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: st.Root, Getenv: e.getenv, NoMap: true})
+	where, err := locate.Locate(jigHome, cwd, locate.Opts{StoreFlag: st.Root, Getenv: e.getenv, NoMap: true, Memo: e.memo})
 	if err != nil {
 		return "", err
 	}
@@ -300,9 +300,14 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		if p, err = verifydeliver.GatePrepare(deps, verifydeliver.GateOpts{Ticket: ticket}); err != nil {
 			return renderErr(stdout, err)
 		}
+		if len(p.Queued) > 0 {
+			// No round opened: a kept finding was queued, and there is nothing
+			// to review until its slice is built.
+			return printQueuedKeeps(stdout, ticket, p.Queued)
+		}
 		if p.Carried != nil {
 			return renderErr(stdout, &axi.Error{
-				Msg:  fmt.Sprintf("round %d of %s needs no reviewer: the head only merges the target into the head round %d reviewed, so the gate recorded it as carried over", p.Round, ticket, p.Carried.CarriedFrom),
+				Msg:  fmt.Sprintf("round %d of %s needs no reviewer: the head adds nothing to read past the head round %d reviewed, so the gate recorded it as carried over", p.Round, ticket, p.Carried.CarriedFrom),
 				Code: "REVIEW_NOT_OPEN",
 				Help: []string{fmt.Sprintf("Run `jig status %s` for the round, then publish", ticket)},
 			})
@@ -335,19 +340,20 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 	p.Request.Hunks = verifydeliver.HunksWithDrafts(p, drafts)
-	deltas, err := computeDeltaDiffs(p)
+	deltas, err := computeDeltaDiffs(p, mp.Clones)
 	if err != nil {
 		return renderErr(stdout, err)
 	}
 	blocks := roundBlocks(p, moved, true, deltas)
+	blocks = append(blocks, reviewerWorktreeBlocks(p, mp.Clones, dirExists)...)
 	help := []string{
-		"Read the code in the worktree at the head, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in the worktree, putting the file back",
+		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in your worktree, putting the file back",
 		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current, caught probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
 	}
 	if len(p.Repos) > 0 {
-		help = append([]string{help[0], fmt.Sprintf("This round covers the repos %s: read each in its own worktree (the repos table), and name every file as <repo>/<path>, as the must_review paths do - in --file, in --reviewed and in a result file", repoNames(p.Repos))}, help[1:]...)
+		help = append([]string{help[0], fmt.Sprintf("This round covers the repos %s: read each in its own worktree (one for each repo in the worktree table), and name every file as <repo>/<path>, as the must_review paths do - in --file, in --reviewed and in a result file", repoNames(p.Repos))}, help[1:]...)
 	}
 	blocks = append(blocks, axi.Help(help...))
 	axi.Render(stdout, blocks...)

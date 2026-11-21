@@ -31,8 +31,9 @@ type Line struct {
 	Effort  string `json:"effort,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
 	// Carried is a gate-clean line's number of the round whose verdict it
-	// carries over (GATE-16): the head only merged the target into the head
-	// that round reviewed, and no reviewer ran. It names the one round that
+	// carries over: the head added nothing to read past the head
+	// that round reviewed (it is that head, or a clean merge of the target past
+	// it), and no reviewer ran. It names the one round that
 	// was really reviewed, so a chain of carried rounds all name the same one.
 	// 0 for every other line.
 	Carried int `json:"carried,omitempty"`
@@ -54,9 +55,21 @@ type Line struct {
 	// ran for, since an oracle has a command for each workspace.
 	Workspace string `json:"workspace,omitempty"`
 	Env       string `json:"env,omitempty"`
+	// Slices is a final-oracle line's slice ids: the slices whose commands the
+	// run was the union of, in slices.yaml order. Omitted when empty.
+	Slices []string `json:"slices,omitempty"`
 	// Seconds is an oracle line's wall time, in whole seconds: what the next
 	// builder of the same command is told (ADR 0024).
 	Seconds int `json:"seconds,omitempty"`
+	// CPUMs, PeakBytes and PeakBasis are what an oracle run's whole process
+	// tree used: its CPU time in whole milliseconds (at least 1 for a measured
+	// run), the most memory it held at once, and how that peak was measured
+	// (PeakBasisJob or PeakBasisSampled). Each is omitted when it could not be
+	// measured; not measured is not zero. They are the store's history of what
+	// a run cost, read by other tickets and other machines.
+	CPUMs     int64  `json:"cpu_ms,omitempty"`
+	PeakBytes uint64 `json:"peak_bytes,omitempty"`
+	PeakBasis string `json:"peak_basis,omitempty"`
 	// Head is a result line's lease head when that turn of the attempt
 	// ended: with the attempt's dispatch line's commit (its base), the
 	// range of the attempt's own commits (ADR 0025).
@@ -94,6 +107,29 @@ type Line struct {
 	// at most 600 bytes; the full tail lives in a machine-local log.
 	Signature string `json:"signature,omitempty"`
 	Summary   string `json:"summary,omitempty"`
+	// Cause is why a failed oracle line's run never judged the code: CauseTimeout
+	// (the wedge guard's kill) or CauseStopped (jig was told to stop). It is
+	// omitted for a run that ended with the test's own result, and on every line
+	// written before the field existed.
+	Cause string `json:"cause,omitempty"`
+	// The fields below are an oracle line's record of the run `jig verify`
+	// witnessed, which holds every input and fact needed to run it again by
+	// hand: Dir is the directory the command ran in, Flags the flags and the
+	// `--` command `jig verify` was given, Commit HEAD when the run started and
+	// HeadEnd HEAD when it ended, TreeBefore and TreeAfter whether the working
+	// tree was clean (TreeClean) or not (TreeDirty) then. Uncovered is why the
+	// run covers no commit (the Uncovered constants): every reader of
+	// verification state skips a line that has it. Each is omitted when empty,
+	// so a line an older jig wrote reads back with none.
+	Dir string `json:"dir,omitempty"`
+	// Subject is the first line of the message of the commit an oracle line's
+	// run was of, so a reader of the journal can name the change.
+	Subject    string `json:"subject,omitempty"`
+	Flags      string `json:"flags,omitempty"`
+	HeadEnd    string `json:"head_end,omitempty"`
+	TreeBefore string `json:"tree_before,omitempty"`
+	TreeAfter  string `json:"tree_after,omitempty"`
+	Uncovered  string `json:"uncovered,omitempty"`
 	// Provenance says who a line speaks for: "person", "agent" or "jig".
 	Provenance string `json:"provenance,omitempty"`
 	// Approval is the publish approval a pr line's head had when the pull
@@ -114,6 +150,14 @@ type Line struct {
 	// publish there opens one pull request for each repo; a project of one
 	// repo leaves it out.
 	Repo string `json:"repo,omitempty"`
+	// Into is the container (the issue or multi-task) a pr-body,
+	// publish-approved, pr, publish-done or landed line is for: the one whose branch
+	// the pull request goes into. A ticket that has a container writes it; a
+	// line with none is read as the ticket's one container (ReadFor).
+	Into string `json:"into,omitempty"`
+	// Base is the branch a landed line's pull request merged into, as the host
+	// says.
+	Base string `json:"base,omitempty"`
 	// Ref is the id of the subject the line is about: a question (q-001),
 	// a review finding (r1-f2) or a note's fingerprint.
 	Ref string `json:"ref,omitempty"`
@@ -135,16 +179,32 @@ type Line struct {
 	Jig string `json:"jig,omitempty"`
 	// Spend is what a spend line records: tokens and dollars.
 	Spend *Spend `json:"spend,omitempty"`
+	// Change is the size of the change a publish-done line shipped. A line
+	// without it is of a publish that recorded none.
+	Change *ChangeSize `json:"change,omitempty"`
+}
+
+// ChangeSize is how much code a published change touched: the files it
+// changed, and their bytes at the merge base with the publish base (a file the
+// change adds has none there and counts with 0). A ticket in several repos
+// records the sum over its repos.
+type ChangeSize struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
 }
 
 // Spend is a spend line's cost: the token counts a transcript's usage
 // records sum to, and the dollars they priced at.
 type Spend struct {
-	Input      int64   `json:"input,omitempty"`
-	Output     int64   `json:"output,omitempty"`
-	CacheRead  int64   `json:"cache_read,omitempty"`
-	CacheWrite int64   `json:"cache_write,omitempty"`
-	USD        float64 `json:"usd,omitempty"`
+	Input      int64 `json:"input,omitempty"`
+	Output     int64 `json:"output,omitempty"`
+	CacheRead  int64 `json:"cache_read,omitempty"`
+	CacheWrite int64 `json:"cache_write,omitempty"`
+	// Peak is the largest single request of the session's or agent's
+	// transcript (input, cache reads and cache writes of one message). A line
+	// without it, or with 0, has no known peak.
+	Peak int64   `json:"peak,omitempty"`
+	USD  float64 `json:"usd,omitempty"`
 }
 
 // Recording is one file a scenario recorded: its name inside the recording
@@ -318,31 +378,49 @@ func Read(st *store.Store, ticket string) ([]Line, error) {
 	return lines, nil
 }
 
-// FailedAttempts counts slice's attempts that failed at the work: a result
-// line whose outcome is not needs-input, flawed-brief or blocked-by-env, for
-// an attempt with no verified line. A question, a flawed brief or a blocked
-// environment is not the builder failing, and a green that verified is a
-// success; a green that did not verify is a failure. The staircase climbs a
-// rung per failed attempt (ADR 0019).
-func FailedAttempts(lines []Line, slice string) int {
-	verified := map[int]bool{}
-	for _, l := range lines {
-		if l.Slice == slice && l.Event == "verified" {
-			verified[l.Attempt] = true
-		}
+// IsPublishEvent reports whether event is one of the four publish lines that
+// carry Into: pr-body, publish-approved, pr and publish-done.
+func IsPublishEvent(event string) bool {
+	switch event {
+	case EventPrBody, EventPublishApproved, EventPr, EventPublishDone:
+		return true
 	}
-	failed := map[int]bool{}
-	for _, l := range lines {
-		if l.Slice != slice || l.Event != "result" || verified[l.Attempt] {
-			continue
-		}
-		switch l.Outcome {
-		case "needs-input", "flawed-brief", "blocked-by-env":
-			continue
-		}
-		failed[l.Attempt] = true
+	return false
+}
+
+// ReadFor is Read as the issue's container sees it: every line, except that,
+// for a ticket that two issues list (a shared task), a publish or landed line of another
+// issue is dropped. A publish line that names no Into is the one container's of
+// a ticket that has one, so a journal written before a ticket could be shared
+// reads as it did; a shared task has no such one, and its line with none is of
+// neither issue. With no issue, and for a ticket with at most one container, it
+// is Read.
+func ReadFor(st *store.Store, ticket, issue string) ([]Line, error) {
+	lines, err := Read(st, ticket)
+	if err != nil || issue == "" {
+		return lines, err
 	}
-	return len(failed)
+	// Whether the ticket is shared is asked once, and only when a publish line
+	// could be dropped: a ticket with at most one container drops none.
+	shared, known := false, false
+	kept := lines[:0:0]
+	for _, l := range lines {
+		if (IsPublishEvent(l.Event) || l.Event == EventLanded) && l.Into != issue {
+			if !known {
+				known = true
+				if rec, err := st.ReadTicket(ticket); err == nil {
+					if cs, err := st.ContainersOf(ticket, rec); err == nil {
+						shared = len(cs) > 1
+					}
+				}
+			}
+			if shared {
+				continue
+			}
+		}
+		kept = append(kept, l)
+	}
+	return kept, nil
 }
 
 // BuiltCommits returns the commit of every event=verified line, without
@@ -385,6 +463,27 @@ func GreenClaims(lines []Line) []string {
 		}
 	}
 	return commits
+}
+
+// The bases of an oracle line's PeakBytes: the exact peak committed memory of
+// a Windows job object, and the largest sum of resident sets seen by samples
+// of a Unix process group (a lower bound). Figures of different bases are not
+// compared with each other. They are envrun's BasisJob and BasisSampled.
+const (
+	PeakBasisJob     = "job"
+	PeakBasisSampled = "sampled"
+)
+
+// SetUsage records what a run's process tree used on l: cpu in whole
+// milliseconds, rounded up so a measured run is at least 1, and the peak with
+// its basis. A figure that is zero was not measured and is left unset.
+func (l *Line) SetUsage(cpu time.Duration, peakBytes uint64, basis string) {
+	if cpu > 0 {
+		l.CPUMs = int64((cpu + time.Millisecond - 1) / time.Millisecond)
+	}
+	if peakBytes > 0 && basis != "" {
+		l.PeakBytes, l.PeakBasis = peakBytes, basis
+	}
 }
 
 // LastOracleSeconds is the wall time of the latest oracle run of command,
@@ -515,3 +614,9 @@ func PRURLs(st *store.Store, ticket string) ([]string, error) {
 	}
 	return urls, nil
 }
+
+// The causes of a failed oracle line (Line.Cause).
+const (
+	CauseTimeout = "timeout"
+	CauseStopped = "stopped"
+)

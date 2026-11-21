@@ -7,12 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/store"
@@ -85,6 +85,12 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 
+	if rec, err := st.ReadTicket(ticket); err == nil {
+		if k := rec.KindOrDefault(); k != store.KindTask {
+			return validateNotATask(st, cfg, ticket, k, stdout)
+		}
+	}
+
 	var blocks []string
 	if *restamp {
 		res, err := restampTicket(st, ticket)
@@ -94,11 +100,11 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		blocks = append(blocks, axi.Table("restamped", []string{"id", "state", "sections"}, res.restamped))
 		if len(res.unresolved) > 0 {
 			blocks = append(blocks, axi.Table("unresolved", []string{"id", "hash"}, res.unresolved))
-			axi.Render(stdout, blocks...)
+			axi.Render(stdout, append(blocks, sectionsTable(st, ticket)...)...)
 			return renderErr(stdout, &axi.Error{
 				Msg:  fmt.Sprintf("ticket %s has stamps that no committed brief revision or current heading explains", ticket),
 				Code: "VALIDATION_ERROR",
-				Help: []string{fmt.Sprintf("Add a replacement with `jig slice add %s`, or fix the stamp by hand", ticket)},
+				Help: []string{fmt.Sprintf("Replace each unresolved hash with the sha256 of the section the slice cites, from the `sections` table, or add a replacement slice with `jig slice add %s`", ticket)},
 			})
 		}
 	}
@@ -111,6 +117,9 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	if len(problems) > 0 {
+		// The section hashes are printed beside the problems: a stale stamp's
+		// remedy can be to paste one of them.
+		axi.Render(stdout, append(blocks, sectionsTable(st, ticket)...)...)
 		return renderErr(stdout, &axi.Error{
 			Msg:  fmt.Sprintf("ticket %s failed validation", ticket),
 			Code: "VALIDATION_ERROR",
@@ -147,25 +156,37 @@ func cmdValidate(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			{"provenance", approval.Provenance}, {"brief_sha256", approval.BriefSHA256},
 		}))
 	}
-	if data, rerr := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md")); rerr == nil {
-		hashes := store.BriefSectionHashes(data)
-		headings := make([]string, 0, len(hashes))
-		for h := range hashes {
-			headings = append(headings, h)
-		}
-		sort.Strings(headings)
-		rows := make([][]string, 0, len(headings))
-		for _, h := range headings {
-			rows = append(rows, []string{h, hashes[h]})
-		}
-		blocks = append(blocks, axi.Table("sections", []string{"heading", "sha256"}, rows))
-	}
+	blocks = append(blocks, sectionsTable(st, ticket)...)
 	if table := advisoryTable(advisories); table != "" {
 		blocks = append(blocks, table)
 	}
 	blocks = append(blocks, axi.Help(nextLines...))
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// sectionsTable is the block of ticket's brief sections and their hashes, the
+// ones a slice's from_brief cites: one block, or none when brief.md cannot be
+// read or has no sections.
+func sectionsTable(st *store.Store, ticket string) []string {
+	data, err := os.ReadFile(filepath.Join(st.TicketDir(ticket), "brief.md"))
+	if err != nil {
+		return nil
+	}
+	hashes := store.BriefSectionHashes(data)
+	if len(hashes) == 0 {
+		return nil
+	}
+	headings := make([]string, 0, len(hashes))
+	for h := range hashes {
+		headings = append(headings, h)
+	}
+	sort.Strings(headings)
+	rows := make([][]string, 0, len(headings))
+	for _, h := range headings {
+		rows = append(rows, []string{h, hashes[h]})
+	}
+	return []string{axi.Table("sections", []string{"heading", "sha256"}, rows)}
 }
 
 // validateChart implements `jig validate <chart>`: every problem of the chart's
@@ -227,13 +248,13 @@ func validateChart(st *store.Store, cfg project.Config, chart string, stdout io.
 // the repos its slices build in agree, returning every problem found (nil
 // means valid). Two ids around a ticket are reserved by jig's own machinery
 // and reported as problems on their own: the ticket id, which names the
-// ticket's pool leases (see pool.CheckTicket for the suffixes it refuses), and
-// the slice id "gate", which the gate reviewer's dispatch uses as its own
-// session slice name (checked below, alongside every other slice id).
+// ticket's folder (see store.CheckTicketID), and the slice id "gate", which the
+// gate reviewer's dispatch uses as its own session slice name (checked below,
+// alongside every other slice id).
 func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProject, ticket string) ([]string, error) {
-	// An id that cannot name its leases is the only problem worth reporting
+	// An id that cannot name its folder is the only problem worth reporting
 	// on its own: every path below is derived from it.
-	if err := pool.CheckTicket(ticket); err != nil {
+	if err := store.CheckTicketID(ticket); err != nil {
 		return []string{err.Error()}, nil
 	}
 
@@ -246,16 +267,11 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 		problems = append(problems, `brief.md has no "## " sections`)
 	}
 
-	aliasProblems, err := st.CheckAliases()
+	recordProblems, err := validateTicketRecord(st, cfg, ticket)
 	if err != nil {
 		return nil, err
 	}
-	problems = append(problems, aliasProblems...)
-
-	problems = append(problems, validateTicketDeps(st, ticket)...)
-	problems = append(problems, validateTicketClosed(st, ticket)...)
-	problems = append(problems, validateUpstreamEdges(st, ticket)...)
-	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
+	problems = append(problems, recordProblems...)
 
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
@@ -288,11 +304,34 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 
 	problems = append(problems, validateWorkspaces(ready.ProjectRepos(cfg, mp.Clones), slices)...)
 
+	var staleHashes []string
 	for _, sl := range slices {
 		for _, h := range sl.FromBrief {
 			if !hashExists(h) {
-				problems = append(problems, fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section; run `jig validate %s --restamp` if the slice's work is still right, or `jig requeue %s --from-brief-diff` to rebuild it first", sl.ID, h, ticket, ticket))
+				staleHashes = append(staleHashes, h)
 			}
+		}
+	}
+	var restampable map[string]string
+	if len(staleHashes) > 0 {
+		restampable = resolveStamps(st, ticket, hashes, staleHashes)
+	}
+
+	for _, sl := range slices {
+		built, read := false, false
+		for _, h := range sl.FromBrief {
+			if hashExists(h) {
+				continue
+			}
+			if !read {
+				state, err := st.ReadSliceState(ticket, sl.ID)
+				if err != nil {
+					return nil, err
+				}
+				built, read = state.State != "queued", true
+			}
+			_, canRestamp := restampable[h]
+			problems = append(problems, staleStampProblem(ticket, sl.ID, h, canRestamp, built))
 		}
 		for _, b := range sl.BlockedBy {
 			if !ids[b] {
@@ -309,6 +348,27 @@ func validateTicket(st *store.Store, cfg project.Config, mp project.MachineProje
 	}
 
 	return problems, nil
+}
+
+// staleStampProblem is validate's line for a from_brief hash of slice that no
+// current brief section has, naming the remedy that works for it. --restamp
+// fixes it only when canRestamp (resolveStamps ties it to a current heading);
+// any other stamp, a draft's never committed, a placeholder or a removed
+// heading's, takes the section's hash from the sections table validate prints.
+// A built slice (its state is not queued) is also offered the requeue that
+// rebuilds it, which runs first because it finds the slice by its stale stamp.
+func staleStampProblem(ticket, slice, hash string, canRestamp, built bool) string {
+	line := fmt.Sprintf("slice %s: from_brief hash %s does not match any current brief section", slice, hash)
+	remedy := "replace it with the sha256 of the section it cites, from the `sections` table"
+	if canRestamp {
+		remedy = fmt.Sprintf("run `jig validate %s --restamp` if the slice's work is still right", ticket)
+	} else {
+		line += ", and no committed brief revision ties it to a current heading"
+	}
+	if built {
+		remedy += fmt.Sprintf(", or `jig requeue %s --from-brief-diff` to rebuild it first", ticket)
+	}
+	return line + "; " + remedy
 }
 
 // findBlockedByCycle runs a DFS over slices' blocked_by edges and returns a
@@ -413,6 +473,120 @@ func validateTicketDeps(st *store.Store, ticket string) []string {
 	return problems
 }
 
+// validateTicketRecord is the problems of a ticket's record and its edges:
+// aliases, blockers, parent, closure, upstream edges and branch. An issue or a
+// multi-task has no brief or slices, so this is all `jig validate` checks of it.
+func validateTicketRecord(st *store.Store, cfg project.Config, ticket string) ([]string, error) {
+	problems, err := st.CheckAliases()
+	if err != nil {
+		return nil, err
+	}
+	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketAfter(st, ticket)...)
+	problems = append(problems, validateTicketParent(st, ticket)...)
+	problems = append(problems, validateTicketOwnContainer(st, ticket)...)
+	problems = append(problems, validateTicketClosed(st, ticket)...)
+	problems = append(problems, validateUpstreamEdges(st, ticket)...)
+	problems = append(problems, validateTicketBranch(st, cfg, ticket)...)
+	problems = append(problems, validateIssueChart(st, ticket)...)
+	return problems, nil
+}
+
+// validateIssueChart is the problem of an issue no chart plans: an issue never
+// lacks its chart, so a half-made pair (an issue minted, its chart not
+// written) is found here and not left silent.
+func validateIssueChart(st *store.Store, ticket string) []string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || rec.KindOrDefault() != store.KindIssue {
+		return nil
+	}
+	if chart, err := st.ChartOfIssue(ticket); err != nil || chart != "" {
+		return nil
+	}
+	return []string{fmt.Sprintf("issue has no chart: run `jig chart new <name> --title \"<title>\" --issue %s`", ticket)}
+}
+
+// validateNotATask implements `jig validate <ticket>` for an issue or a
+// multi-task: the record checks only, no brief to approve.
+func validateNotATask(st *store.Store, cfg project.Config, ticket, kind string, stdout io.Writer) int {
+	problems, err := validateTicketRecord(st, cfg, ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	if len(problems) > 0 {
+		return renderErr(stdout, &axi.Error{
+			Msg:  fmt.Sprintf("ticket %s failed validation", ticket),
+			Code: "VALIDATION_ERROR",
+			Help: problems,
+		})
+	}
+	axi.Render(stdout,
+		"valid: yes",
+		axi.KV("ticket", [][2]string{{"id", ticket}, {"kind", kind}}),
+		axi.Help(fmt.Sprintf("A %s has no brief or slices: `jig next %s` shows its tasks", kind, ticket)),
+	)
+	return 0
+}
+
+// validateTicketOwnContainer is the problem of a task whose blocked_by names a
+// container it is part of (its multi-task, or an issue that lists it): the
+// container publishes only after its tasks have landed, so the task would wait
+// for it forever.
+func validateTicketOwnContainer(st *store.Store, ticket string) []string {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil || len(rec.BlockedBy) == 0 {
+		return nil
+	}
+	containers, err := st.ContainersOf(ticket, rec)
+	if err != nil {
+		return nil
+	}
+	// A task under a multi-task is part of the multi-task's issue too: the
+	// issue publishes after the multi-task, and the multi-task after the task.
+	for _, c := range slices.Clone(containers) {
+		if crec, err := st.ReadTicket(c); err == nil && crec.KindOrDefault() == store.KindMultiTask {
+			issues, err := st.IssuesOf(c)
+			if err != nil {
+				return nil
+			}
+			containers = append(containers, issues...)
+		}
+	}
+	var problems []string
+	for _, b := range rec.BlockedBy {
+		id, err := st.ResolveTicket(b.Ticket)
+		if err != nil {
+			continue
+		}
+		if slices.Contains(containers, id) {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: blocked_by %q is a container %s is part of: it publishes only after its tasks have landed, so the wait never ends", b.Ticket, ticket))
+		}
+	}
+	return problems
+}
+
+// validateTicketParent checks a ticket's parent: it must be a ticket of kind
+// multi-task, and only a task has one. A ticket.yaml that cannot be read is
+// validateTicketDeps to report.
+func validateTicketParent(st *store.Store, ticket string) []string {
+	t, err := st.ReadTicket(ticket)
+	if err != nil || t.Parent == "" {
+		return nil
+	}
+	var problems []string
+	if k := t.KindOrDefault(); k != store.KindTask {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q on a ticket of kind %s; only a task has a parent", t.Parent, k))
+	}
+	if err := requireTicketID(st, t.Parent); err != nil {
+		problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is not a ticket of the store", t.Parent))
+	} else if pt, perr := st.ReadTicket(t.Parent); perr == nil {
+		if k := pt.KindOrDefault(); k != store.KindMultiTask {
+			problems = append(problems, fmt.Sprintf("ticket.yaml: parent %q is a %s, not a multi-task", t.Parent, k))
+		}
+	}
+	return problems
+}
+
 // validateTicketClosed checks the closed entry of ticket.yaml when it has one,
 // returning every problem found (nil means open or valid): a reason that is
 // none of covered, superseded and not-planned, a missing by where the reason
@@ -444,7 +618,7 @@ func validateTicketClosed(st *store.Store, ticket string) []string {
 }
 
 // validateTicketBranch checks ticket's optional recorded branch through the
-// same Store.TicketBranch validation every build lease, gate round and
+// same Store.TicketBranch validation every build, gate round and
 // publish runs, so a bad hand-edited branch (equal to the target of one of the
 // project's repos, or not a name git itself would accept) is reported here,
 // where it is cheap to fix, before one of those fails on it. The branch has
@@ -482,7 +656,7 @@ func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBl
 			return d
 		}
 		var d []store.TicketBlockedBy
-		if pool.CheckTicket(id) == nil {
+		if store.CheckTicketID(id) == nil {
 			d, _ = st.ReadTicketDeps(id)
 		}
 		if id == ticket && prospective != nil {
@@ -547,13 +721,16 @@ func ticketDepsCycle(st *store.Store, ticket string, prospective *store.TicketBl
 // or a closing parenthesis, in a decision wherever the brief puts it (a bullet,
 // a numbered item or a paragraph, under any heading, bold or not, the tag on
 // the first line or a wrapped one). A block counts once however many tags it
-// holds. Prose that explains the tag (it is quoted or backticked) is not one.
+// holds. A tag inside an inline code span or a double-quoted span is a
+// mention, prose that explains the tag or quotes a line naming it, not a
+// decision's tag: those spans are dropped from a block before it is matched.
 func defaultedDecisions(brief []byte) int {
 	n := 0
 	var block []string
 	inFence := false
 	flush := func() {
-		if defaultedTag.MatchString(strings.Join(block, " ")) {
+		text := quotation.ReplaceAllString(dropCodeSpans(strings.Join(block, " ")), "")
+		if defaultedTag.MatchString(text) {
 			n++
 		}
 		block = block[:0]
@@ -582,9 +759,58 @@ func defaultedDecisions(brief []byte) int {
 var listItem = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s`)
 
 // defaultedTag matches the tag: defaulted, then a date or a closing
-// parenthesis (or "(defaulted;" and "(defaulted,"), not preceded by a quote or
-// backtick (prose about the tag).
-var defaultedTag = regexp.MustCompile(`\(defaulted[;,]|(?:^|[^"` + "`" + `A-Za-z0-9])defaulted(?:\s+\d{4}-\d{2}-\d{2}|\s*\))`)
+// parenthesis (or "(defaulted;" and "(defaulted,"), not inside a longer word.
+// It is matched only on text whose code spans and quotations, the mentions of
+// the tag, are already dropped.
+var defaultedTag = regexp.MustCompile(`\(defaulted[;,]|(?:^|[^A-Za-z0-9])defaulted(?:\s+\d{4}-\d{2}-\d{2}|\s*\))`)
+
+// quotation matches a double-quoted span, straight or curly. Single quotes
+// are left alone: an apostrophe would pair with the next one.
+var quotation = regexp.MustCompile(`"[^"]*"|“[^”]*”`)
+
+// dropCodeSpans removes s's inline code spans as CommonMark reads them: a run
+// of backticks opens a span and the next run of the same length closes it. A
+// run that nothing closes stays as text.
+func dropCodeSpans(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		open := backtickRun(s, i)
+		end := -1
+		for j := i + open; j < len(s); {
+			if s[j] != '`' {
+				j++
+				continue
+			}
+			run := backtickRun(s, j)
+			if run == open {
+				end = j + run
+				break
+			}
+			j += run
+		}
+		if end < 0 {
+			b.WriteString(s[i : i+open])
+			i += open
+			continue
+		}
+		i = end
+	}
+	return b.String()
+}
+
+// backtickRun is the length of the run of backticks that starts at s[i].
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
+}
 
 // checkNext is the help --check prints: show the person the brief and ask
 // about its decisions, then validate. defaulted is the number of decisions

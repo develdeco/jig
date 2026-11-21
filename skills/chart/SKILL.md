@@ -5,7 +5,7 @@ description: Runs a chart's tickets from the main session - every brief first, t
 
 # chart
 
-Run `jig next <chart>` (several tickets: `--tickets A,B`; their chart is in `jig next`'s `charts`). If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket: `jig graduate <chart>` first. The standing is derived: re-read it.
+Run `jig next <chart>` (or `jig next <issue>` for an issue's chart; several tickets: `--tickets A,B`; their chart is in `jig next`'s `charts`). If the chart is not `ready`, relay its `reason` and `prompt` and stop. Entries with no ticket: `jig graduate <chart>` first. The standing is derived: re-read it.
 
 Three prompts make a chart run: one aimed at a chart or some of its tickets ("Take A and B to PR", "Continue A and B"), a yes to intake's confirm question, intake's explicit launch. One ticket alone: run it alone.
 
@@ -13,28 +13,27 @@ You are the main session. Every question to the person is yours; a subagent cann
 
 ## Briefs
 
-`briefs` lists the tickets to brief; brief them all before any build: a subagent per ticket (sonnet, background) drafts its brief with intake (its ticket exists: never mint or approve), marks each recommended answer it takes, checks it with `jig validate <T> --check`, hands back its questions. Meanwhile ask a numbered round with recommendations, record answers, send a changed one to its drafter, confirm once, then `jig validate <T>` each. Ask and wait, unless told to go with your recommendations (ADR 0035).
+`briefs` lists the tickets to brief; brief them all before any build: a subagent per ticket (sonnet, background) drafts its brief with intake (its ticket exists: never mint or approve), marks each recommended answer it takes, sizes it against the `jig recall` receipts as intake says, checks it with `jig validate <T> --check`, hands back its questions. Meanwhile ask a numbered round with recommendations, record answers, send a changed one to its drafter, confirm once, then `jig validate <T>` each. Ask and wait, unless told to go with your recommendations (ADR 0035).
 
 ## Builds
 
 Before the first wave, ask once to allow what the builds run (`jig`, `git`, the tickets' oracles); one yes covers it. A run going with the recommendations, intake's explicit launch included, asks nothing: permission settings decide, a refused command hands its ticket back and the report names it.
 
-Stack the later (Plan order) on the earlier with `jig depend <later> --on <earlier> --kind stacked` for each `workspace_overlaps` pair before a wave and, with one workspace, each `conflicts` row of `jig next <T>` at each wave's start and after its hand-backs, before Publish; `jig validate <T> --check`, re-read the chart, say so. Parallel only if the person says so (merged by hand).
+Before each wave read `jig skill chart stacked`: it says how overlaps and a published ticket that is behind are handled.
 
-Go through `run` wave by wave (no edge lies inside one). Start a subagent per wave ticket (`subagent_type: general-purpose`, `model: sonnet` unless the person named another, background), each in its own worktree: run the `add` commands of the ticket's `worktrees` (`jig next <T>`, or the chart's), one at a time, and re-read `jig next <T>` when a stacked ticket's wave starts. `present`: use its `dir`. `no_clone`: tell the person; do not start it. Its prompt:
+Go through `run` wave by wave (no edge lies inside one). Start a wave's subagents in one step, and run independent commands in one step. Start a subagent per wave ticket (`subagent_type: general-purpose`, `model: sonnet` unless the person named another, background). Read the ticket's `worktrees` (`jig next <T>`, or the chart's). An `add` row in this session's repo (its `clone`): start the subagent with `isolation: worktree` (you run no `add`), from the row's `branch` and `base`. Any other row (an `add` in another clone or with no worktree method, a multi-repo ticket's other clones, `present`, `no_clone`): `jig skill chart worktrees`. The prompt states the builder's case, which it never infers from where it finds itself. `<where>`, with isolation, is: "Tie your worktree to the ticket first with `git branch -m <branch>` (detached HEAD: `git switch -c <branch>`; the clone has the branch: `git switch <branch>`; it lacks it: also `git reset --hard <base>`). Work only there, on branch <branch>." Its prompt:
 
 ```
-You are building ticket <T>. Work only in the worktree of each repo (`dir` of its rows), on branch <branch>; run every command there.
+You are building ticket <T>. <where> Run every command there.
 Build it with `jig skill build`: claim each slice with `--unattended`, commit with its `Jig-Slice` trailer.
-Slices ready in several repos (`jig next <T>`): build one repo yourself; start a nested builder per other repo in the background with this prompt, told to build only its repo's slices, never gate or nest (a hold saying to gate is yours: it hands back), and wait for them before the gate. Relay a builder's question: end your turn with the question, its id and default; resume it when resumed. No Agent tool: build repos in turn, hand back at green; I start the reviewer.
 Stuck: `jig ask --slice <slice> "<question>"` with your default, then end your turn with the question, id and default. I answer and resume you.
-When every slice is green, open the gate (`jig gate <T>`) and have your own reviewer subagent review it if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them, have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or as `jig gate` says.
+When every slice is green, open the gate (`jig gate <T>`) and have your own reviewer subagent review it if you have the Agent tool (`jig skill review`). A round that only queues fixes: build them, proving each term the fix adds as `jig skill build` says, and have them reviewed again. End your turn when a round is clean or leaves an ask, with its verdict, or as `jig gate` says.
 Never publish. Never answer your own question.
 ```
 
-Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the call returned one). jig holds a subagent at its stop while a verification runs, changes are uncommitted, or every slice is green with no round open: not stuck, wait.
+Read `jig skill chart multi-repo` when `jig next <T>` shows slices ready in several repos.
 
-A `run` ticket in publish is published and behind (`state: behind`): no build subagent. For each `stack` row with a `merge`, run that merge yourself in a checkout of the ticket's branch (its worktree; `worktrees` give the add when it is gone). A clean merge needs no review; one resolved by hand needs `jig gate <T>` and a clean round first. Then publish.
+Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the call returned one). jig holds a subagent at its stop while a commit has no recorded result, changes are uncommitted, or every slice is green with no round open: not stuck, wait.
 
 ## Relay
 
@@ -42,13 +41,15 @@ A subagent's question: put it to the person with its default, record it with `ji
 
 ## Publish
 
-Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. Remove a ticket's worktrees only once published, one at a time, with the `remove` commands of `jig publish --pr` or `jig next <T>`; git refuses one with changes: commit or discard, never force.
+Tickets whose `jig next <T>` names publish are reviewed clean. Ask once for the group (each reviewed head, body's first lines), then a subagent per ticket publishes it (`jig skill publish`: demo, body, CI budgets), removing no worktree, and hands back the url; a stacked ticket's publisher starts after its parent's hands back. A go-with-your-recommendations prompt needs no yes. A clean harness worktree is the harness's to clean up; one it kept is removed only once published, one at a time, with the `remove` command of `jig publish --pr` or `jig next <T>` as advice; git refuses one with changes: commit or discard, never force.
 
 ## Ends
 
 After each wave re-read `jig next <chart>` (same `--tickets`) and start the next. A ticket behind a `merged` edge, or nothing reachable, ends the run: say what is published, what waits on which pull request or unnamed ticket (`ends`), and that `prompt` resumes the same tickets. Do not wait for a merge. Say the `spend` line.
 
+When `jig next` shows `lands`, `publish` or an `issue`, the chart plans an issue: read `jig skill chart issue`. Its run stops at each landing and goes on after `Land X`.
+
 ## Never
 
 - Do not start a ticket `run` does not list, or build in this clone while subagents build.
-- Do not merge a pull request, or answer for the person unless told to go with your recommendations.
+- Merge a pull request only at the person's word (`jig skill land`); answer for the person only when told to go with your recommendations.

@@ -131,15 +131,15 @@ func searchedExcerpt(in RoundInput, head string, diffFiles []string) (path, note
 		return "", excerptFailed("could not resolve the operator's clone identity", err)
 	}
 
-	mergeBase, err := gitx.MergeBase(in.LeaseDir, "origin/"+in.Target, head)
+	mergeBase, err := gitx.MergeBase(in.CloneDir, "origin/"+in.Target, head)
 	if err != nil {
 		return "", excerptFailed("could not resolve the ticket's merge base", err)
 	}
-	baseTime, err := gitx.CommitTime(in.LeaseDir, mergeBase)
+	baseTime, err := gitx.CommitTime(in.CloneDir, mergeBase)
 	if err != nil {
 		return "", excerptFailed("could not read the merge base's commit time", err)
 	}
-	headTime, err := gitx.CommitTime(in.LeaseDir, head)
+	headTime, err := gitx.CommitTime(in.CloneDir, head)
 	if err != nil {
 		return "", excerptFailed("could not read the head commit time", err)
 	}

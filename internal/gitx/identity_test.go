@@ -7,17 +7,17 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitenv"
 )
 
 // withoutPinnedIdentity runs "git var" with this process's environment minus
-// any author or committer variable, so a host's own variables cannot answer
+// the git identity and hook variables, so a host's own variables cannot answer
 // for the repo's config, or for its absence. It stands in for ResolveIdentity's
 // own call, without editing the process environment to get there.
 func withoutPinnedIdentity(dir string) func(string) (string, error) {
-	drop := map[string]bool{
-		"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true, "GIT_AUTHOR_DATE": true,
-		"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true, "GIT_COMMITTER_DATE": true,
-		"EMAIL": true,
+	drop := map[string]bool{"EMAIL": true}
+	for _, name := range gitenv.HookOnly {
+		drop[name] = true
 	}
 	var kept []string
 	for _, kv := range os.Environ() {

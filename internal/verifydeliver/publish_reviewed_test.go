@@ -10,19 +10,8 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/session"
 	"github.com/develdeco/jig/internal/store"
 )
-
-// reviewerBackend is a reviewer that finds nothing: every round it is
-// dispatched for is clean, and records the head it reviewed.
-func reviewerBackend(t *testing.T) session.Backend {
-	t.Helper()
-	return stubBackend{run: func(sd session.Dispatch) error {
-		writeMustReviewResult(t, sd)
-		return nil
-	}}
-}
 
 // reviewedClean builds the fixture's slices and runs one reviewer round over
 // the result, which is clean: unlike the scripted rounds gateToClean plays, a
@@ -37,10 +26,7 @@ func reviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 // gateReviewedClean runs one reviewer round, which must be clean.
 func gateReviewedClean(t *testing.T, fx *fixture.Fixture, d Deps) GateReport {
 	t.Helper()
-	report, err := Gate(d, newReviewerGateSource(reviewerBackend(t)), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
+	report := recordedRound(t, d, GateOpts{Ticket: fx.Ticket}, cleanReport)
 	if report.Verdict != "clean" || report.ReviewedSHA["fixture-repo"] == "" {
 		t.Fatalf("reviewer round: verdict %q, reviewed head %q, want a clean round that recorded the head it reviewed", report.Verdict, report.ReviewedSHA["fixture-repo"])
 	}
@@ -180,7 +166,7 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		other := cloneFrom(t, fx.RepoRemote)
 		run(t, other, "checkout", branch)
 		pushed = writeAndCommit(t, other, "more.txt", "pushed after the round", "a commit pushed to the ticket's branch")
-		run(t, other, "push", "origin", branch)
+		builder(t).Push(other, "origin", branch)
 
 		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
 		if got := gateReviewedClean(t, fx, d).ReviewedSHA["fixture-repo"]; got != pushed {
@@ -196,7 +182,7 @@ func TestPublishShipsOnlyTheHeadTheGateReviewed(t *testing.T) {
 		writeAndCommit(t, other, "side.txt", "work that is not on the target", "a side branch")
 		run(t, other, "checkout", branch)
 		run(t, other, "merge", "--no-ff", "--no-edit", "side")
-		run(t, other, "push", "origin", branch)
+		builder(t).Push(other, "origin", branch)
 
 		wantRefusedUntouched(t, "PUBLISH_UNREVIEWED_HEAD")
 

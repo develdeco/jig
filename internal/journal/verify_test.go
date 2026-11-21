@@ -1,9 +1,6 @@
 package journal
 
-import (
-	"reflect"
-	"testing"
-)
+import "testing"
 
 const (
 	shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -11,9 +8,9 @@ const (
 )
 
 // TestVerificationState reads the latest record of one (commit, slice) from
-// the lines that mention it: the digester's verify-pending and verify-error
-// lines and the frontier's oracle and verified lines alike, the last in
-// journal order winning.
+// the lines that mention it: the digester's verify-error line and the
+// frontier's oracle and verified lines alike, the last in journal order
+// winning. A verify-pending line is no result and is skipped.
 func TestVerificationState(t *testing.T) {
 	t.Parallel()
 	pending := Line{TS: "t1", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 1, Session: "s1"}
@@ -31,20 +28,18 @@ func TestVerificationState(t *testing.T) {
 	}{
 		{"no lines", nil, shaA, "a", Verification{}},
 		{"an empty sha matches nothing", []Line{{Slice: "a", Event: EventVerifyPending}}, "", "a", Verification{}},
-		{"pending", []Line{pending}, shaA, "a", Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
-		{"a pending line's subject is no outcome", []Line{{TS: "t1", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 1, Session: "s1", Summary: "cart: fix Total"}}, shaA, "a",
-			Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
+		{"pending alone is no result", []Line{pending}, shaA, "a", Verification{}},
 		{"pending then a pass", []Line{pending, passed}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t2", Seconds: 7}},
 		{"the verified line keeps the oracle line's time", []Line{pending, passed, verified}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t3", Seconds: 7}},
 		{"a verified line alone is a pass", []Line{verified}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t3"}},
 		{"a fail carries its summary", []Line{pending, failed}, shaA, "a", Verification{State: VerifyFail, Attempt: 1, TS: "t2", Seconds: 3, Summary: "FAIL TestClamp"}},
 		{"an error carries its reason", []Line{pending, errored}, shaA, "a", Verification{State: VerifyError, Attempt: 1, TS: "t2", Summary: "no worktree"}},
-		{"a rerun replaces the outcome with its pending", []Line{pending, failed, {TS: "t9", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 2}}, shaA, "a",
-			Verification{State: VerifyPending, Attempt: 2, TS: "t9"}},
+		{"a rerun's pending line hides no earlier outcome", []Line{pending, failed, {TS: "t9", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 2}}, shaA, "a",
+			Verification{State: VerifyFail, Attempt: 1, TS: "t2", Seconds: 3, Summary: "FAIL TestClamp"}},
 		{"another commit is another verification", []Line{pending, passed}, shaB, "a", Verification{}},
 		{"another slice is another verification", []Line{pending, passed}, shaA, "b", Verification{}},
-		{"a recorded line says nothing", []Line{pending, {Slice: "a", Event: EventRecorded, Commit: shaA, Attempt: 1}}, shaA, "a", Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
-		{"an oracle line with no outcome says nothing", []Line{pending, {Slice: "a", Event: EventOracle, Commit: shaA}}, shaA, "a", Verification{State: VerifyPending, Attempt: 1, TS: "t1", Session: "s1"}},
+		{"a recorded line says nothing", []Line{passed, {Slice: "a", Event: EventRecorded, Commit: shaA, Attempt: 1}}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t2", Seconds: 7}},
+		{"an oracle line with no outcome says nothing", []Line{passed, {Slice: "a", Event: EventOracle, Commit: shaA}}, shaA, "a", Verification{State: VerifyPass, Attempt: 1, TS: "t2", Seconds: 7}},
 		{"a commit-less oracle line (a dirty tree) matches no commit", []Line{{Slice: "a", Event: EventOracle, Outcome: "pass"}}, shaA, "a", Verification{}},
 	} {
 		if got := VerificationState(c.lines, c.sha, c.slice); got != c.want {
@@ -53,29 +48,18 @@ func TestVerificationState(t *testing.T) {
 	}
 }
 
-// TestPending lists the verifications whose latest record is a pending line,
-// in the order the lines were written, and not the ones a later line settled.
-func TestPending(t *testing.T) {
+// TestAnOldPendingLineSaysNothingOfAVerification: a verify-pending line an old
+// worker wrote is no result, whoever wrote it and whatever follows; it still
+// parses as a line, but no reader of verification state sees it.
+func TestAnOldPendingLineSaysNothingOfAVerification(t *testing.T) {
 	t.Parallel()
-	lines := []Line{
-		{TS: "1", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 1},
-		{TS: "2", Slice: "b", Event: EventVerifyPending, Commit: shaA, Attempt: 1, Session: "s"},
-		{TS: "3", Slice: "a", Event: EventOracle, Outcome: "pass", Commit: shaA, Attempt: 1},
-		{TS: "4", Slice: "a", Event: EventVerifyPending, Commit: shaB, Attempt: 2},
-		{TS: "5", Slice: "c", Event: EventVerifyPending, Commit: shaA, Attempt: 1},
-		{TS: "6", Slice: "c", Event: EventVerifyError, Commit: shaA, Attempt: 1},
-		{TS: "7", Slice: "b", Event: EventVerifyPending, Commit: shaA, Attempt: 2},
-		{TS: "8", Slice: "d", Event: EventVerifyPending, Attempt: 1}, // no commit: not a verification of one
+	pending := Line{TS: "1", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 1, Session: "s", Summary: "cart: fix Total"}
+	if v := VerificationState([]Line{pending}, shaA, "a"); v.State != VerifyNone {
+		t.Errorf("a pending line alone = %+v, want no verification", v)
 	}
-	want := []PendingVerification{
-		{Slice: "a", Commit: shaB, Attempt: 2, TS: "4"},
-		{Slice: "b", Commit: shaA, Attempt: 2, TS: "7"},
-	}
-	if got := Pending(lines); !reflect.DeepEqual(got, want) {
-		t.Errorf("Pending = %+v, want %+v", got, want)
-	}
-	if got := Pending(nil); len(got) != 0 {
-		t.Errorf("Pending(nil) = %+v, want none", got)
+	errored := Line{TS: "2", Slice: "a", Event: EventVerifyError, Commit: shaA, Attempt: 1, Summary: "no worktree"}
+	if v := VerificationState([]Line{pending, errored, {TS: "3", Slice: "a", Event: EventVerifyPending, Commit: shaA, Attempt: 2}}, shaA, "a"); v.State != VerifyError || v.Attempt != 1 {
+		t.Errorf("an error then a pending line = %+v, want the error", v)
 	}
 }
 
@@ -118,5 +102,25 @@ func TestNextAttemptIgnoresFixSliceLines(t *testing.T) {
 	lines = append(lines, Line{Slice: "fix-1", Event: EventDispatch, Attempt: 1})
 	if got := NextAttempt(lines, "fix-1"); got != 2 {
 		t.Errorf("NextAttempt after a first verification = %d, want 2", got)
+	}
+}
+
+// TestVerificationStateSkipsAnUncoveredLine: a run that covers no commit is
+// recorded and says nothing of the commit: it neither makes a failure nor a
+// pass of it, and a covering line before or after it stands as if it were not
+// there.
+func TestVerificationStateSkipsAnUncoveredLine(t *testing.T) {
+	const sha = "abc123"
+	uncovered := Line{Event: EventOracle, Outcome: "pass", Slice: "a", Commit: sha, Attempt: 2, Uncovered: UncoveredDirtyBefore}
+	if v := VerificationState([]Line{uncovered}, sha, "a"); v.State != VerifyNone {
+		t.Errorf("an uncovered pass alone = %+v, want no verification", v)
+	}
+	fail := Line{Event: EventOracle, Outcome: "fail", Slice: "a", Commit: sha, Attempt: 3, Uncovered: UncoveredOtherCmd}
+	covering := Line{Event: EventOracle, Outcome: "pass", Slice: "a", Commit: sha, Attempt: 1}
+	if v := VerificationState([]Line{covering, fail}, sha, "a"); v.State != VerifyPass || v.Attempt != 1 {
+		t.Errorf("a pass then an uncovered failure = %+v, want the pass", v)
+	}
+	if got := BuiltCommits([]Line{uncovered}); len(got) != 0 {
+		t.Errorf("BuiltCommits of an uncovered run = %v, want none: no verified line is written for it", got)
 	}
 }

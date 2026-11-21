@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -71,7 +70,11 @@ func answersBlock(questions []store.Question) string {
 		if q.Status != "answered" || q.Answer == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", q.ID, oneLine(q.Body), oneLine(q.Answer)))
+		id := q.ID
+		if q.Kind == store.KindCall {
+			id += " (call)"
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s -> %s", id, oneLine(q.Body), oneLine(q.Answer)))
 	}
 	if len(lines) == 0 {
 		return "none"
@@ -108,6 +111,34 @@ func writeLedgerEntry(st *store.Store, ticket, title string, slices []store.Slic
 	return editStoreDoc(st.LedgerPath(), "ledger", func(text string) string {
 		return store.ReplaceLedgerEntry(text, ticket, entry)
 	})
+}
+
+// RefreshLedgerEntry rewrites the ticket's ledger entry, in place, from the
+// store as it is now: the same entry a republish writes, so an answer or a
+// call recorded after the publish shows without one. A ledger with no entry
+// for the ticket (it is not published) is left as it is, and a ledger that
+// does not exist is not created.
+func RefreshLedgerEntry(st *store.Store, ticket string) error {
+	existing, err := fileshare.ReadFile(st.LedgerPath())
+	if os.IsNotExist(err) || (err == nil && !store.HasLedgerEntry(string(existing), ticket)) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read: %w", err)
+	}
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read ticket record: %w", err)
+	}
+	sls, err := st.ReadSlices(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read slices: %w", err)
+	}
+	questions, err := st.ReadQuestions(ticket)
+	if err != nil {
+		return fmt.Errorf("verifydeliver: ledger: read questions: %w", err)
+	}
+	return writeLedgerEntry(st, ticket, publishTitle(st.TicketName(ticket, rec), ticket), sls, questions)
 }
 
 // writeContractIndexEntry puts this ticket's contract-index entry in the
@@ -364,15 +395,15 @@ type authorCommit struct {
 // branch's tip as the author left it when the ticket adopted it
 // (store.WriteStartSHA/StartSHAPath). Nil when there is nothing before that
 // point (the branch forked from origin/target at exactly startSHA).
-func adoptedAuthorCommits(leaseDir, target, startSHA string) ([]authorCommit, error) {
-	base, err := gitx.MergeBase(leaseDir, "origin/"+target, startSHA)
+func adoptedAuthorCommits(cloneDir, target, startSHA string) ([]authorCommit, error) {
+	base, err := gitx.MergeBase(cloneDir, "origin/"+target, startSHA)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: render: merge-base origin/%s %s: %w", target, startSHA, err)
 	}
 	if base == startSHA {
 		return nil, nil
 	}
-	out, err := gitx.Run(leaseDir, "log", "--reverse", "--format=%H%x09%s", base+".."+startSHA)
+	out, err := gitx.Run(cloneDir, "log", "--reverse", "--format=%H%x09%s", base+".."+startSHA)
 	if err != nil {
 		return nil, fmt.Errorf("verifydeliver: render: list author commits %s..%s: %w", base, startSHA, err)
 	}
@@ -460,26 +491,23 @@ func renderSlicesSection(slices []store.Slice, commits map[string]string, author
 }
 
 // renderVerificationSection renders the ## Verification section, the gates
-// and nothing of the review's findings: the oracles green at the last clean
-// gate round (oracleNames, the manifest's own, sorted, each with the command
-// that ran, from commands) at the reviewed head,
-// and one line per gate round with its scope and verdict. The findings, who
-// reviewed and how the change was fixed are the review notes' (the pull
-// request's first comment), never the body's.
-func renderVerificationSection(rep reportYAML, oracleNames []string, commands map[string][]string, rounds []RoundRecord) string {
+// and nothing of the review's findings: what the reviewed head has for a final
+// run (finals, one for each repo the round reviewed: the run `jig verify
+// --final` recorded at exactly that commit, or the words that say there is
+// none) and one line per gate round with its scope and verdict. A gate round
+// runs no command, so the section names no oracle. The findings, who reviewed
+// and how the change was fixed are the review notes' (the pull request's first
+// comment), never the body's.
+func renderVerificationSection(finals []FinalRunReport, rounds []RoundRecord) string {
 	var b strings.Builder
 	b.WriteString("## Verification\n\n")
 
-	if len(oracleNames) > 0 {
-		fmt.Fprintf(&b, "Oracles green%s:\n\n", reviewedHeadWords(rep.ReviewedSHA))
-		for _, name := range oracleNames {
-			lines := oracleLines(name, commands[name])
-			for i, line := range lines {
-				if note := rep.Reuse[name]; note != "" && i == len(lines)-1 {
-					line += " (" + note + ")"
-				}
-				fmt.Fprintf(&b, "- %s\n", line)
-			}
+	switch {
+	case len(finals) == 1:
+		fmt.Fprintf(&b, "%s\n\n", finals[0].Words())
+	case len(finals) > 1:
+		for _, f := range finals {
+			fmt.Fprintf(&b, "- %s: %s\n", f.Repo, f.Words())
 		}
 		b.WriteString("\n")
 	}
@@ -519,58 +547,6 @@ func roundLine(r RoundRecord) string {
 	return "notes only"
 }
 
-// oracleLines are the lines an oracle takes in the Verification section: one
-// for each distinct command that ran for it (one for each workspace), or its
-// name alone when none is named.
-func oracleLines(name string, commands []string) []string {
-	var out []string
-	for _, c := range commands {
-		if line := oracleLine(name, c); !slices.Contains(out, line) {
-			out = append(out, line)
-		}
-	}
-	if len(out) == 0 {
-		return []string{name}
-	}
-	return out
-}
-
-// oracleLine is an oracle as the Verification section lists it: its name and,
-// when the journal gives one, the command that ran (on one line, in code), so
-// a reader of the body sees what ran. A command that cannot sit in a code span
-// is left out and the name stands alone.
-func oracleLine(name, command string) string {
-	command = strings.Join(strings.Fields(command), " ")
-	if command == "" || strings.Contains(command, "`") {
-		return name
-	}
-	return name + ": `" + command + "`"
-}
-
-// reviewedHeadWords is " at the reviewed head <sha>" for the heads the gate
-// reviewed, each named by its repo when there are several, and "" for a
-// scripted round, which recorded none.
-func reviewedHeadWords(reviewed map[string]string) string {
-	switch len(reviewed) {
-	case 0:
-		return ""
-	case 1:
-		for _, sha := range reviewed {
-			return " at the reviewed head " + shortSHA(sha)
-		}
-	}
-	repos := make([]string, 0, len(reviewed))
-	for repo := range reviewed {
-		repos = append(repos, repo)
-	}
-	sort.Strings(repos)
-	parts := make([]string, len(repos))
-	for i, repo := range repos {
-		parts[i] = repo + " " + shortSHA(reviewed[repo])
-	}
-	return " at the reviewed heads " + strings.Join(parts, ", ")
-}
-
 // DemoFile is one media file the pull request's ## Demo section shows, as
 // publish staged it: its name in the staging directory, its sha256 and size,
 // and the caption shown beside it.
@@ -593,8 +569,7 @@ type DemoRenderResult struct {
 	// ScrubbedSummary is set when the pick's summary named one of jig's own
 	// directories (any spelling jig may have handed the pick session, a WSL
 	// mount among them) and was left out of the rendered section for it,
-	// rather than published verbatim (the owner's decision on r1-f13,
-	// DECISIONS.md).
+	// rather than published verbatim (the pull request body is public).
 	ScrubbedSummary bool
 	// ScrubbedCaptions names every staged file whose own caption (or flow
 	// title) was left out of the rendered section for the same reason.
@@ -603,7 +578,7 @@ type DemoRenderResult struct {
 
 // demoCaptionRenderCap bounds a caption's length in the rendered pull
 // request body. A published, public pull request shows a short label beside a
-// file, not a paragraph (the owner's decision on r1-f13, DECISIONS.md).
+// file, not a paragraph.
 const demoCaptionRenderCap = 200
 
 // capDemoCaption truncates caption to demoCaptionRenderCap runes for the
@@ -672,8 +647,7 @@ func escapeDemoHTML(text string) string {
 // The second return is picked itself, the section publish rendered from the
 // recordings it picked (ADR 0029), or the zero value when there is no pick: a
 // body has a ## Demo section only from a pick.
-func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
-	oracleNames []string, commands map[string][]string, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo, trailer string) (string, DemoRenderResult, error) {
+func writePRBody(st *store.Store, ticket, repoName, what string, finals []FinalRunReport, rounds []RoundRecord, picked *DemoRenderResult, links []prLink, stacked stack.Repo, trailer string) (string, DemoRenderResult, error) {
 	relPath := filepath.Join(st.TicketRelDir(ticket), "pr", repoName+".md")
 	fullPath := filepath.Join(st.Root, relPath)
 
@@ -696,7 +670,7 @@ func writePRBody(st *store.Store, ticket, repoName, what string, rep reportYAML,
 	}
 	b.WriteString(demoResult.Section)
 
-	b.WriteString(renderVerificationSection(rep, oracleNames, commands, rounds))
+	b.WriteString(renderVerificationSection(finals, rounds))
 	b.WriteString(renderTrailer(trailer))
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -728,6 +702,9 @@ func renderTrailer(trailer string) string {
 type prLink struct {
 	Repo string
 	URL  string
+	// Issue, when set, makes the link another issue's pull request of the same
+	// shared task (Repo is then empty): the body says it is shared with it.
+	Issue string
 }
 
 // pendingPR is what a link says of a repo whose pull request is not opened yet.
@@ -744,6 +721,10 @@ func renderPartOfSection(ticket string, links []prLink) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Part of %s\n\n", ticket)
 	for _, l := range links {
+		if l.Issue != "" {
+			fmt.Fprintf(&b, "Shared with %s (pull request %s)\n", l.Issue, l.URL)
+			continue
+		}
 		url := l.URL
 		if url == "" {
 			url = pendingPR
@@ -756,14 +737,14 @@ func renderPartOfSection(ticket string, links []prLink) string {
 
 // renderStackedSection renders the ## Stacked on <parent> section a pull
 // request has while it goes into the branch of the parent its ticket is
-// stacked on: which branch that is, and that it goes into the target once the
+// stacked on: which branch that is, and that it goes into the container's branch, else the target, once the
 // parent merges. A pull request into its repo's target has none.
 func renderStackedSection(ticket string, r stack.Repo) string {
 	if !r.Shared() || r.PRTarget == "" {
 		return ""
 	}
 	return fmt.Sprintf("## Stacked on %s\n\n%s builds on %s: this pull request goes into `%s`, the branch of %s. Once %s merges, retarget it to `%s`.\n\n",
-		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Target)
+		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Base())
 }
 
 // findingOutcome pairs one finding with how it ended. status is the bucket
@@ -829,7 +810,7 @@ func riskOrder(risk string) int {
 // ticket's `jig triage` lines, TriageDecisions; nil for none): "dismissed by a
 // person", "kept by an agent", with the decision's reason. A finding with no
 // such line reads as before: "dismissed by a human". A repeat of an
-// already-dismissed finding (ApplyRound's rule 2) resets its own Triage field
+// already-dismissed finding (applyRound's rule 2) resets its own Triage field
 // to "" on purpose, so the wording comes from the line, never from that field.
 func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDecision, lastRound int, slices []store.Slice) (outcomes []findingOutcome, reviewedPaths []string, lastSummary string, err error) {
 	latest := make(map[string]Finding)
@@ -882,7 +863,7 @@ func collectFindingsWithOutcomes(ticketDir string, decisions map[string]TriageDe
 			o.status = "addressed"
 			o.detail = "addressed at " + strings.Join(cleared[id], ", ")
 		case len(cleared[id]) > 0 && decisions[id].Outcome == TriageKeep && (f.Status == StatusAsked || f.Status == StatusNoted):
-			// A keep the closing round found already fixed (GATE-15): it was
+			// A keep the closing round found already fixed: it was
 			// kept, no slice was built from it, and a later round no longer
 			// reported it.
 			o.status = "fixed"
@@ -931,7 +912,7 @@ func (o findingOutcome) continuedWithChange() bool {
 
 // sortFindingOutcomes sorts outcomes by risk, high first, then by finding id
 // for a stable order within a risk: the order both review-notes' own
-// Findings section and (through DECISIONS.md's own rule) any other reader of
+// Findings section and any other reader of
 // this slice can rely on.
 func sortFindingOutcomes(outcomes []findingOutcome) {
 	sort.SliceStable(outcomes, func(i, j int) bool {
@@ -969,15 +950,15 @@ func reviewerLines(rounds []RoundRecord) []string {
 		}
 		label := fmt.Sprintf("Round %d", r.Round)
 		if r.CarriedFrom > 0 {
-			// No reviewer read this round: its head only merged the target
-			// into the head a reviewer read (GATE-16).
-			out = append(out, fmt.Sprintf("- %s: carried over from round %d (the head only merges the target into the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
+			// No reviewer read this round: its head added nothing to read past
+			// the head a reviewer read.
+			out = append(out, fmt.Sprintf("- %s: carried over from round %d (nothing to read past the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
 			continue
 		}
 		if len(what) > 0 {
 			label += " (" + strings.Join(what, ", ") + ")"
 		}
-		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+".")
+		out = append(out, "- "+label+": reviewed by "+reviewerWho(r.Reviewer, r.Independent)+carriedWords(r)+".")
 	}
 	return out
 }
@@ -1037,7 +1018,7 @@ func reviewNotesFile(repo string, several bool) string {
 // approval, for the line on who approved it; approvalLine, the line on who
 // approved the publish, comes from the caller ("" for none), and so does
 // slicesSection, the rendered ## Slices (renderSlicesSection, "" for none).
-func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string) error {
+func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string, storeRefs []StoreRef) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1055,6 +1036,10 @@ func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRo
 
 	if lines := reviewerLines(rounds); len(lines) > 0 {
 		b.WriteString("## Reviewers\n\n" + strings.Join(lines, "\n") + "\n\n")
+	}
+
+	if len(storeRefs) > 0 {
+		b.WriteString(storeRefsNotes(storeRefs))
 	}
 
 	if lastSummary != "" {
@@ -1218,7 +1203,7 @@ func checkUnrewrittenReferences(body string, mediaFiles []DemoFile) []string {
 // re-matching the line's text; or (ok=false) when body carries no such
 // line at or after byte offset from. gh appends one for a file it attached
 // but found no recognized reference to rewrite in place (a bare video path,
-// the one form "Videos" names, DECISIONS.md), never for one it already
+// the one form a real gh run left as it stood), never for one it already
 // rewrote.
 //
 // The search starts at from, never byte 0: gh always appends this link
@@ -1375,4 +1360,30 @@ func decidedWording(verb, outcome string, d TriageDecision, fallbackReason, lega
 		return verb + " by " + who + ": " + reason
 	}
 	return verb + " by " + who
+}
+
+// carriedWords says, for a round that carried a merge of the target rather than
+// read it, which one: "; the merge of <ref> at <short sha> was carried, not
+// read", each repo's prefixed by its name when the round spans several. "" for
+// a round without the record.
+func carriedWords(r RoundRecord) string {
+	if len(r.CarriedMerge) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(r.CarriedMerge))
+	for name := range r.CarriedMerge {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	qualified := strings.Contains(r.Head, ":")
+	var b strings.Builder
+	for _, name := range names {
+		m := r.CarriedMerge[name]
+		b.WriteString("; ")
+		if qualified {
+			b.WriteString(name + ": ")
+		}
+		fmt.Fprintf(&b, "the merge of %s at %s was carried, not read", m.Ref, shortSHA(m.SHA))
+	}
+	return b.String()
 }

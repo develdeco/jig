@@ -10,14 +10,14 @@ import (
 )
 
 // renderSyncReport prints report's user-visible outcome through w: what
-// brief.md#jig trackers sync lists - "created, updated and reopened or
-// closed issues, links added and removed, fields set, and every drift
-// line" - plus whatever a publish-safety hit skipped or a missing issue
+// `jig trackers sync` lists - created, updated and reopened or closed
+// issues, links added and removed, fields set, and every drift line - plus
+// whatever a publish-safety hit skipped or a missing issue
 // left unlinked. Both `jig trackers sync` and the checkpoint hook wired
-// into every other command (resolveStore) render the same report through
-// this one function, so the two places brief.md#Ownership and drift names
-// ("drift lines print in the output of the command whose checkpoint found
-// them, and in jig trackers sync's") print the same shape. A table with no
+// into every other command (resolveStoreChecked) render the same report through
+// this one function, so the two places drift lines print (the output of the
+// command whose checkpoint found them, and jig trackers sync's) print the
+// same shape. A table with no
 // rows is left out, so a checkpoint whose sync changed nothing prints
 // nothing. dryRun labels the created table "would_create" rather than
 // "created", the only difference between a checkpoint's and a dry run's
@@ -101,6 +101,18 @@ func renderSyncReport(w io.Writer, report mirror.SyncReport, dryRun bool) bool {
 			rows = append(rows, []string{fmt.Sprintf("%s/%s#%d", p.Owner, p.Repo, p.Number), p.Status})
 		}
 		axi.Render(w, axi.Table("placed", []string{"item", "status"}, rows))
+	}
+
+	if len(report.PlanComments) > 0 {
+		label := "plan_commented"
+		if dryRun {
+			label = "would_plan_comment"
+		}
+		rows := make([][]string, len(report.PlanComments))
+		for i, c := range report.PlanComments {
+			rows[i] = []string{c.Ticket, fmt.Sprintf("%d", c.Tickets)}
+		}
+		axi.Render(w, axi.Table(label, []string{"issue_ticket", "tickets"}, rows))
 	}
 
 	if len(report.NotLinked) > 0 {

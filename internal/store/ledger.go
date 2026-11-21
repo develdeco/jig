@@ -51,6 +51,16 @@ func ReplaceLedgerEntry(ledger, ticket, entry string) string {
 	return replaceEntry(ledger, ticket, entry, ledgerEntries)
 }
 
+// HasLedgerEntry reports whether ledger holds an entry for ticket.
+func HasLedgerEntry(ledger, ticket string) bool {
+	for _, line := range splitLines(ledger) {
+		if id, _, _, ok := ledgerEntries.head(line); ok && id == ticket {
+			return true
+		}
+	}
+	return false
+}
+
 // ReplaceContractIndexEntry is ReplaceLedgerEntry for the contract index,
 // whose entry is the one "- <ticket>: ..." line, entry, ending in a newline.
 func ReplaceContractIndexEntry(index, ticket, entry string) string {

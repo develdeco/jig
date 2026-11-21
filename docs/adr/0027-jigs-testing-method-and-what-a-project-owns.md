@@ -1,5 +1,9 @@
 # jig's testing method, and what a project owns
 
+**Amended by [ADR 0055](0055-a-repo-with-no-declaration-has-no-named-oracle.md):** its clauses "a repo with no `.claude/jig.yaml` gets the detected oracles" and "the detected default, such as `test` for a Go repo" no longer hold: a repo with no declaration has no named oracle, and jig's own declaration is gone. The rest stands.
+
+**Amended by the intake skill's bug shape:** a bug has no REPRO slice of its own. jig verifies a slice only when its oracle passes, so a slice red before any fix could never go green; the repro test is the fix slice's first commit, red on the base, and the fix turns it green. GUARDRAIL and prefactoring slices still stay their own, as below.
+
 jig shapes the tests of every repo it builds through its intake skill, which writes the briefs, its build and review prompts, and its own oracle runs. Each piece has its own ADR. Two principles the owner settled on 2026-10-05 had no home, and neither did the question of where testing knowledge lives.
 
 ## The method
@@ -19,7 +23,7 @@ The intake skill carries the chain and diet principles into every brief, sizes s
 
 Testing knowledge lives in three places, and each fact has one owner:
 - **jig's method**, the same for any repo: the skills, the prompts and jig's contract ADRs. Example: the intake skill.
-- **The project's facts**, declared by the project and read by jig, never imposed: its oracles and invariant paths (`.claude/jig.yaml`) and its conventions (CLAUDE.md, AGENTS.md, CONTRIBUTING). Example: jig's own CONTRIBUTING rule that no test in `internal/` edits process-global state, from BS-1, and jig's own `test` oracle with its longer timeout.
+- **The project's facts**, declared by the project and read by jig, never imposed: its oracles and invariant paths (`.claude/jig.yaml`) and its conventions (CLAUDE.md, AGENTS.md, CONTRIBUTING). Example: jig's own CONTRIBUTING rule that no test in `internal/` edits process-global state, from the first measured run, and jig's own `test` oracle with its longer timeout.
 - **A run's choices**, such as how one diet is cut: they live in that run's plan and briefs. Example: the build-speed run's verifydeliver-first diet.
 
 ## No greenfield mode

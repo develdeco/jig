@@ -18,21 +18,12 @@ type finding struct {
 }
 
 // findings collects what is outstanding on the located ticket: verifications
-// still running, tracked files changed and not committed, questions still
+// still running or not clear, tracked files changed and not committed, questions still
 // open, and the notes the session has not heard (an enforced note it was
 // not yet refused a Stop for, whether or not it heard it).
 func (h *handler) findings(mem sessionMemory) []finding {
 	ticket := h.w.Ticket
-	var out []finding
-	for _, v := range h.inFlight() {
-		sha := short12(v.commit)
-		out = append(out, finding{
-			ref:      "pending:" + sha + ":" + v.slice,
-			text:     fmt.Sprintf("verification of %s for slice %s is still running", sha, v.slice),
-			hint:     fmt.Sprintf("wait for it with `jig verify %s %s --slice %s --wait`", ticket, sha, v.slice),
-			blocking: true,
-		})
-	}
+	out := h.verificationFindings()
 	if files := h.dirtyTracked(); len(files) > 0 {
 		out = append(out, finding{
 			ref:      "dirty:" + fingerprint(files),

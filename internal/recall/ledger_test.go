@@ -10,6 +10,7 @@ const sampleLedger = "# Ledger\n" +
 	"\n## JIG-2 - Greeting tone\n\nDelivered 1 slice(s).\n\n**Answers:**\n" +
 	"- q-001: Formal or casual? -> Casual.\n" +
 	"- q-002: Which locale?\n  Only English -> English first.\n" +
+	"- q-003 (call): Which tone? -> Casual.\n" +
 	"\n## JIG-3\n\nDelivered 1 slice(s).\n\n**Answers:**\n- q-001: Keep the flag? -> Yes - and rename it.\n"
 
 func TestParseLedger(t *testing.T) {
@@ -20,6 +21,7 @@ func TestParseLedger(t *testing.T) {
 		{Ticket: "JIG-2", Title: "Greeting tone", Answers: []Answer{
 			{ID: "q-001", Text: "Formal or casual? -> Casual."},
 			{ID: "q-002", Text: "Which locale? Only English -> English first."},
+			{ID: "q-003", Text: "Which tone? -> Casual.", By: "call"},
 		}},
 		{Ticket: "JIG-3", Answers: []Answer{{ID: "q-001", Text: "Keep the flag? -> Yes - and rename it."}}},
 	}

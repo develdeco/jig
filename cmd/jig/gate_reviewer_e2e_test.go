@@ -249,11 +249,11 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 			t.Fatalf("round 1 findings table missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "fix-1-alpha-test") {
-		t.Fatalf("round 1 report missing the kept fix's slice fix-1-alpha-test:\n%s", out)
+	if !strings.Contains(out, "fix-1-alpha") {
+		t.Fatalf("round 1 report missing the kept fix's slice fix-1-alpha:\n%s", out)
 	}
-	if !strings.Contains(out, "fix-1-r1-f3") {
-		t.Fatalf("round 1 report missing the kept ask's slice fix-1-r1-f3:\n%s", out)
+	if !strings.Contains(out, "fix-1-beta") {
+		t.Fatalf("round 1 report missing the kept ask's slice fix-1-beta:\n%s", out)
 	}
 	if strings.Contains(out, "needs_a_human[") && !strings.Contains(out, "needs_a_human[0]") {
 		t.Fatalf("round 1 must leave nothing needing a human (the ask was kept):\n%s", out)
@@ -275,18 +275,20 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSlices after round 1: %v", err)
 	}
-	if !hasSlice(slices1, "fix-1-alpha-test") || !hasSlice(slices1, "fix-1-r1-f3") {
-		t.Fatalf("expected slices fix-1-alpha-test and fix-1-r1-f3; got %+v", slices1)
+	if !hasSlice(slices1, "fix-1-alpha") || !hasSlice(slices1, "fix-1-beta") {
+		t.Fatalf("expected slices fix-1-alpha and fix-1-beta; got %+v", slices1)
 	}
-	if hasSlice(slices1, "fix-1-beta-test") {
-		t.Fatalf("the noted (below-floor) fix (beta workspace) must not build its own slice; got %+v", slices1)
+	for _, sl := range slices1 {
+		if sl.ID == "fix-1-beta" && (len(sl.Findings) != 1 || sl.Findings[0] != "r1-f3") {
+			t.Fatalf("the noted (below-floor) beta fix must not ride the beta slice; got %+v", sl)
+		}
 	}
 
 	// --- build both round 1 fix slices to green.
-	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
+	for _, s := range []string{"fix-1-alpha", "fix-1-beta"} {
 		buildScenarioSlice(t, fx, s, 1)
 	}
-	for _, s := range []string{"fix-1-alpha-test", "fix-1-r1-f3"} {
+	for _, s := range []string{"fix-1-alpha", "fix-1-beta"} {
 		state, err := st.ReadSliceState(ticket, s)
 		if err != nil {
 			t.Fatalf("read slice state %s: %v", s, err)
@@ -317,8 +319,8 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	if strings.Contains(out, "r1-f3") {
 		t.Fatalf("round 2 must not re-report the cleared ask r1-f3:\n%s", out)
 	}
-	if !strings.Contains(out, "fix-2-alpha-test") {
-		t.Fatalf("round 2 report missing the recurrence's new fix slice fix-2-alpha-test:\n%s", out)
+	if !strings.Contains(out, "fix-2-alpha") {
+		t.Fatalf("round 2 report missing the recurrence's new fix slice fix-2-alpha:\n%s", out)
 	}
 
 	// The round 2 report and findings table only ever list findings
@@ -345,25 +347,25 @@ func TestRecordedGateRoundsThroughMain(t *testing.T) {
 	}
 	var fix2Goal string
 	for _, s := range slices2 {
-		if s.ID == "fix-2-alpha-test" {
+		if s.ID == "fix-2-alpha" {
 			fix2Goal = s.Goal
 		}
 	}
 	if fix2Goal == "" {
-		t.Fatal("fix-2-alpha-test not found in slices.yaml")
+		t.Fatal("fix-2-alpha not found in slices.yaml")
 	}
-	if !strings.Contains(fix2Goal, "fix-1-alpha-test") {
-		t.Fatalf("fix-2-alpha-test's goal must name the previous fix slice fix-1-alpha-test:\n%s", fix2Goal)
+	if !strings.Contains(fix2Goal, "fix-1-alpha") {
+		t.Fatalf("fix-2-alpha's goal must name the previous fix slice fix-1-alpha:\n%s", fix2Goal)
 	}
 
 	// --- build the round 2 recurrence's fix slice to green.
-	buildScenarioSlice(t, fx, "fix-2-alpha-test", 1)
-	state, err := st.ReadSliceState(ticket, "fix-2-alpha-test")
+	buildScenarioSlice(t, fx, "fix-2-alpha", 1)
+	state, err := st.ReadSliceState(ticket, "fix-2-alpha")
 	if err != nil {
-		t.Fatalf("read slice state fix-2-alpha-test: %v", err)
+		t.Fatalf("read slice state fix-2-alpha: %v", err)
 	}
 	if state.State != "green" {
-		t.Fatalf("slice fix-2-alpha-test state = %q, want green", state.State)
+		t.Fatalf("slice fix-2-alpha state = %q, want green", state.State)
 	}
 
 	// --- round 3: clean. The scenario's own review-result.json reports

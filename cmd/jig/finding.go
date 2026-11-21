@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/envrun"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -20,7 +23,7 @@ const (
 	findingActionUsage     = "who acts: fix (objective, does not change what the intent asks for), ask (only a person can decide) or note (nothing to change, a human reviewer should know)"
 	findingRiskUsage       = "how much harm follows if this part of the change is wrong: low, medium or high"
 	findingRationaleUsage  = "why that risk"
-	findingOracleUsage     = "the manifest oracle that best proves the fix (required with more than one oracle, for a fix or an ask)"
+	findingOracleUsage     = "the narrowest command that proves the fix everywhere its rule applies, a literal (the test the fix adds or extends, by name, or a search that must come back empty); one command sh can run, its explanation in --detail; required for a fix"
 	findingPriorUsage      = "the id of the earlier finding (open or dismissed in the request) this one is a changed version of"
 	findingStillPresentUse = "instead of a new finding: the id of an earlier finding (open or dismissed in the request) that is still present and unchanged, with --line its current line"
 )
@@ -111,6 +114,21 @@ func cmdFinding(e env, args []string, stdout io.Writer) int {
 			Code: "REVIEW_NOT_OPEN",
 			Help: []string{fmt.Sprintf("Open one with `jig gate %s` (or `jig review context %s`)", ticket, ticket)},
 		})
+	}
+
+	if strings.TrimSpace(*oracle) != "" {
+		// A reviewer who is not told here has no later chance: the gate copies
+		// an oracle into a fix slice after the round has closed. With no sh
+		// found the finding is stored, since any oracle's run would fail the
+		// same way and rewording cannot help.
+		var se *envrun.SyntaxError
+		if err := envrun.CheckSyntax(*oracle); errors.As(err, &se) {
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("--oracle is not a command sh can run: %s", se.Msg),
+				Code: "ORACLE_NOT_RUNNABLE",
+				Help: []string{"An oracle is one runnable command, nothing else: put its explanation in --detail", "File the finding again with the command alone in --oracle"},
+			})
+		}
 	}
 
 	kind := "finding"

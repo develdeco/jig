@@ -35,9 +35,10 @@ func TestRunPushesTheLinesAndTheStateToTheStoreRemote(t *testing.T) {
 	if after == before {
 		t.Fatal("the store remote did not move: nothing was pushed")
 	}
-	// Two checkpoints: the pending line, then the outcome.
-	if n, err := gitx.Run(r.fx.StoreRemote, "rev-list", "--count", before+".."+after); err != nil || n != "2" {
-		t.Errorf("commits pushed = %q, %v, want 2: pending and the outcome", n, err)
+	// One checkpoint: nothing is pending while a command runs, so the run's
+	// lines go out together once it has ended.
+	if n, err := gitx.Run(r.fx.StoreRemote, "rev-list", "--count", before+".."+after); err != nil || n != "1" {
+		t.Errorf("commits pushed = %q, %v, want 1: the outcome", n, err)
 	}
 	if msg, _ := gitx.Run(r.fx.StoreRemote, "log", "-1", "--format=%s"); msg == "" {
 		t.Error("the pushed commit has no message")
@@ -74,15 +75,15 @@ func TestRunKeepsTheLinesWhenThePushNeverGoesThrough(t *testing.T) {
 	if res.State != journal.VerifyPass || res.PushErr == "" {
 		t.Errorf("Result = %+v, want a pass with the push error", res)
 	}
-	if got, want := events(r.lines()), []string{"verify-pending", "oracle:pass", "verified"}; !reflect.DeepEqual(got, want) {
+	if got, want := events(r.lines()), []string{"oracle:pass", "verified"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("journal events = %v, want %v", got, want)
 	}
 	if st := r.state("a"); st.State != "green" {
 		t.Errorf("slice a state = %+v, want green", st)
 	}
-	// Two checkpoints, each tried three times with two waits between.
+	// One checkpoint, tried three times with two waits between.
 	half := 500 * time.Millisecond
-	if want := []time.Duration{half, 2 * half, half, 2 * half}; !reflect.DeepEqual(waits, want) {
+	if want := []time.Duration{half, 2 * half}; !reflect.DeepEqual(waits, want) {
 		t.Errorf("waits = %v, want %v", waits, want)
 	}
 	if !strings.Contains(r.log.String(), "push failed after 3 tries") {

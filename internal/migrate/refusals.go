@@ -3,12 +3,13 @@ package migrate
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/pool"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -81,20 +82,31 @@ func CheckLevelWithOrigin(st *store.Store) error {
 	}
 }
 
-// CheckNoLeases refuses when this machine's lease pool under jigHome holds
-// a lease (build, gate or publish) for any of oldIDs, in any of repoNames -
-// the migration renames a ticket's folder and every later command works it
-// under its new id, so a lease still checked out under the old one would be
-// orphaned. The refusal lists every such lease's directory.
+// leaseSuffixes follow a ticket's id in the directory of a lease an earlier
+// jig kept in the jig home's pool: the build lease (<repo>/<id>), the gate
+// lease (<repo>/<id>-gate) and the publish lease (<repo>/<id>-publish). This
+// jig makes none, but a build lease of v0.1.2 can hold work nobody pushed.
+var leaseSuffixes = []string{"", "-gate", "-publish"}
+
+// CheckNoLeases refuses when this machine's lease pool under jigHome, which an
+// earlier jig kept and this one reads only here, holds a lease (build, gate or
+// publish) for any of oldIDs, in any of repoNames - the migration renames a
+// ticket's folder and every later command works it under its new id, so a
+// lease still checked out under the old one would be orphaned. The refusal
+// lists every such lease's directory.
 func CheckNoLeases(jigHome string, repoNames, oldIDs []string) error {
 	var leases []string
+	poolDir, err := filepath.Abs(home.PoolDir(jigHome))
+	if err != nil {
+		return fmt.Errorf("migrate: resolve the lease pool: %w", err)
+	}
 	for _, repoName := range repoNames {
 		for _, id := range oldIDs {
-			for _, role := range []pool.Role{pool.Build, pool.Gate, pool.Publish} {
-				dir, err := pool.Dir(jigHome, repoName, id, role)
-				if err != nil {
-					continue
-				}
+			if !singleName(repoName) || store.CheckTicketID(id) != nil {
+				continue
+			}
+			for _, suffix := range leaseSuffixes {
+				dir := filepath.Join(poolDir, repoName, id+suffix)
 				if _, err := os.Stat(dir); err == nil {
 					leases = append(leases, dir)
 				}
@@ -112,10 +124,16 @@ func CheckNoLeases(jigHome string, repoNames, oldIDs []string) error {
 	}
 }
 
+// singleName says name is one directory name: not empty, not "." or "..", with
+// no path separator.
+func singleName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
+}
+
 // BranchWarnings reports one warning line per (repo, old id) whose
 // jig/<old id> branch is still on that repo's origin: after the migration
-// the ticket is the new id and jig names its branch <new id>-<slug>
-// (brief.md#The migration step 2). The old branch still binds to the ticket,
+// the ticket is the new id and jig names its branch <new id>-<slug>.
+// The old branch still binds to the ticket,
 // through the old id the migration leaves as an alias, but it is no longer
 // the name jig offers for new work, so it is better merged or closed first.
 // A repo whose origin cannot be reached is skipped silently - this is

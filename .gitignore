@@ -1,6 +1,12 @@
 # build artifacts (the README quickstart builds into the repo root)
 /jig
 /jig.exe
+/gitbudget
+/gitbudget.exe
 
 # goreleaser output
 /dist/
+
+# a binary go build leaves in cmd/jig
+/cmd/jig/jig
+/cmd/jig/jig.exe

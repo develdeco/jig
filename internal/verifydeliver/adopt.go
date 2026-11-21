@@ -7,7 +7,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -24,9 +23,9 @@ type gateBranch struct {
 	Adopting bool
 	// Built is the commits the journal records jig built on the ticket's
 	// branch and verified (journal.BuiltCommits), in journal order; none while
-	// an adopted branch is only the author's. They stay in the build lease until
+	// an adopted branch is only the author's. They stay in the clone until
 	// someone pushes them, so once there are any, origin's copy of the branch
-	// may lack them, and the round chooses its copy by that (chooseBuiltCopy).
+	// may lack them, and the round refuses a copy that does (chooseCopy).
 	Built []string
 }
 
@@ -141,80 +140,6 @@ func jigBuilt(st *store.Store, ticket string, slices []store.Slice, lines []jour
 	return false, nil
 }
 
-// chooseBuiltCopy points a gate or publish lease at the copy of the ticket's
-// branch that command works on once jig has built on it: the copy that holds
-// the commits jig built. The command (step, "gate" or "publish") has just
-// acquired leaseDir on the branch, at origin's copy when origin has one. A gate
-// round reviews the copy this chooses and publish ships it, so the two cannot
-// disagree about which head is the branch's.
-//
-// The rule is the branch's, not the kind of ticket's: the ticket's own
-// default branch (<ticket>-<slug>) stands where an adopted branch does once a publish has pushed
-// it, and is judged the same way. jig's commits stay in the build lease until
-// someone pushes them - publish does - so which copy holds them all depends on
-// where they are now, and is judged the way the pool's sync rule judges a
-// lease against origin (pool.Compare), on the build lease's copy against
-// origin's:
-//
-//   - origin has no copy of the branch: the build lease's is the only one. That
-//     is the ticket's own default branch until a publish pushes it (an adopted
-//     branch is on origin by definition), and there is nothing to compare;
-//   - the build lease's copy is InStep with origin's, or Behind it: origin
-//     holds every commit the lease does, so it holds the ones jig built - an
-//     earlier publish pushed them as they are, or the human did - and whatever
-//     was added since, by the author or by a publish (the merge of the target,
-//     the memorize commit). The command works on origin's copy;
-//   - it is Ahead: jig's commits are not on origin yet, and origin has
-//     nothing the lease lacks. The command works on the lease's copy;
-//   - the two have Diverged, and the build lease's copy holds a commit jig
-//     built that origin lacks: neither copy holds both that commit and what
-//     origin has that the lease lacks - the author's commit, or the squash a
-//     first publish pushed in place of the commits it was made of - and a round
-//     or a publish over either would say nothing of the other's. The command is
-//     refused with BRANCH_DIVERGED, as the next build is; jig merges nothing
-//     that is not its own. Merging origin's branch into the build lease is the
-//     way on, and leaves the lease Ahead;
-//   - the two have Diverged, and the build lease's copy holds no commit jig
-//     built that origin lacks (pool.HoldsUnpushedBuilt, the rule the build's
-//     re-cut applies to the same lease): what it holds of its own is an
-//     attempt's leftovers, the history an author's rewrite replaced, or
-//     leftovers on top of jig's commits that origin already has, so it counts
-//     as a build lease that does not hold the branch. Origin's copy holds
-//     whatever of jig's has been pushed, and the check below says whether it
-//     holds all of it;
-//   - this machine's build lease does not hold the branch: origin's copy.
-//
-// Whichever copy that is must then hold every commit the journal records jig
-// built (pool.RequireBuilt), or the command is refused (BUILD_LEASE_MISSING):
-// they are on another machine, or lost, and reviewing or shipping less than
-// the ticket built would say nothing of it. It is one rule for every copy, not
-// a rule for the case of no lease: a build lease cut afresh on this machine, or
-// one that built its own commits without the ones another machine built, lacks
-// them too. The frontier applies the same rule before it builds on an adopted
-// branch. A branch origin does not have is the build lease's alone, and holds
-// what the lease does by definition.
-func chooseBuiltCopy(d Deps, leaseDir, repoName, ticket, branch string, built []string, step string) (branchCopy, error) {
-	buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: resolve build lease: %w", step, err)
-	}
-	tip, err := originsTip(leaseDir, branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: %w", step, err)
-	}
-	if tip == "" {
-		return pointAtBuildLeasesCopy(d, leaseDir, repoName, ticket, branch, step)
-	}
-	copyOf, err := pointAtBuiltCopy(d, leaseDir, buildDir, repoName, ticket, branch, built, step)
-	if err != nil {
-		return "", err
-	}
-	if err := pool.RequireBuilt(leaseDir, "HEAD", buildDir, ticket, branch, "jig "+step+" "+ticket, built); err != nil {
-		return "", err
-	}
-	return copyOf, nil
-}
-
 // originsTip is the sha branch has on origin as dir last fetched it, or "" when
 // origin has no such branch.
 func originsTip(dir, branch string) (string, error) {
@@ -225,144 +150,18 @@ func originsTip(dir, branch string) (string, error) {
 	return tip, nil
 }
 
-// branchCopy names whose copy of a ticket's branch a gate or publish lease was
-// left at: the build lease's, where jig's commits wait until someone pushes
-// them, or origin's. What is to be done about a refusal depends on it, since
-// only the build lease is jig's to integrate anything in.
+// branchCopy names whose copy of a ticket's branch a gate or publish works on:
+// the clone's, where jig's commits wait until someone pushes them, or origin's.
+// What is to be done about a refusal depends on it, since only the clone's is
+// the person's to integrate anything in.
 type branchCopy string
 
 const (
-	originsCopy     branchCopy = "origin's"
-	buildLeasesCopy branchCopy = "the build lease's"
+	originsCopy branchCopy = "origin's"
 	// clonesCopy is the copy in the operator's own clone: committed work the
 	// person (or the agent working for them) has not pushed yet.
 	clonesCopy branchCopy = "the clone's"
 )
-
-// pointAtBuildLeasesCopy points leaseDir at the build lease's copy of the
-// branch, pristine: the copy of a branch origin does not have.
-func pointAtBuildLeasesCopy(d Deps, leaseDir, repoName, ticket, branch, step string) (branchCopy, error) {
-	if err := fetchTicketBranchFromBuildLease(d.Home, leaseDir, repoName, ticket, branch); err != nil {
-		return "", err
-	}
-	if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: restore lease before oracles: %w", step, err)
-	}
-	return buildLeasesCopy, nil
-}
-
-// pointAtBuiltCopy is chooseBuiltCopy's choice between the build lease's copy
-// of a branch origin has and origin's; built is the commits the journal
-// records jig built. It says which it chose.
-func pointAtBuiltCopy(d Deps, leaseDir, buildDir, repoName, ticket, branch string, built []string, step string) (branchCopy, error) {
-	origin := func() (branchCopy, error) {
-		if err := resetLeasePristine(leaseDir, "origin/"+branch); err != nil {
-			return "", fmt.Errorf("verifydeliver: %s: restore lease to origin/%s: %w", step, branch, err)
-		}
-		return originsCopy, nil
-	}
-	if !pool.Usable(buildDir) {
-		return origin()
-	}
-	if _, found, _ := gitx.Resolve(buildDir, "refs/heads/"+branch); !found {
-		return origin()
-	}
-	if err := fetchTicketBranchFromBuildLease(d.Home, leaseDir, repoName, ticket, branch); err != nil {
-		return "", err
-	}
-	standing, err := pool.Compare(leaseDir, branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: compare the build lease's %s with origin's: %w", step, branch, err)
-	}
-	switch standing {
-	case pool.InStep, pool.Behind:
-		return origin()
-	case pool.Ahead:
-		if err := resetLeasePristine(leaseDir, "HEAD"); err != nil {
-			return "", fmt.Errorf("verifydeliver: %s: restore lease before oracles: %w", step, err)
-		}
-		return buildLeasesCopy, nil
-	default:
-		// The lease's copy was just fetched into the gate lease as its own
-		// branch, so it is there that it is asked what it holds.
-		unpushed, err := pool.HoldsUnpushedBuilt(leaseDir, branch, built)
-		if err != nil {
-			return "", fmt.Errorf("verifydeliver: %s: judge the build lease's copy of %s: %w", step, branch, err)
-		}
-		if !unpushed {
-			return origin()
-		}
-		return "", pool.DivergedError(leaseDir, pool.Build, buildDir, branch)
-	}
-}
-
-// pointAtTicketBranch points a gate or publish lease, just acquired on the
-// ticket's branch, at the copy of it that command works on. A gate round
-// reviews that copy and publish ships it, and both come here, so they cannot
-// disagree about which head is the branch's:
-//
-//   - an adopted branch jig has built nothing on is the author's: origin's
-//     copy, exactly (neither lease ever commits to it);
-//   - any other is whichever copy holds jig's commits (chooseBuiltCopy): the
-//     build lease's while origin has no copy, as the ticket's own default branch
-//     does until a publish pushes it, and after that by comparing the two.
-//
-// The lease is left pristine at that copy: pool.Acquire never resets an
-// existing local branch (a deliberate rule so a same-run slice's commits on it
-// survive later acquires), so without this a lease an earlier, killed run left
-// dirty or ahead would have its leftovers reviewed, or shipped, or on a branch
-// that has reached origin would work from the stale local copy instead of
-// origin's current tip. built is the commits the journal records jig built on
-// the branch; step names the command, "gate" or "publish". It says whose copy
-// the lease was left at.
-func pointAtTicketBranch(d Deps, leaseDir, repoName, ticket, branch string, adopted bool, built []string, step string) (branchCopy, error) {
-	if adopted && len(built) == 0 {
-		if err := resetLeasePristine(leaseDir, "origin/"+branch); err != nil {
-			return "", fmt.Errorf("verifydeliver: %s: restore lease to origin/%s: %w", step, branch, err)
-		}
-		return originsCopy, nil
-	}
-	return chooseBuiltCopy(d, leaseDir, repoName, ticket, branch, built, step)
-}
-
-// pointAtBranchCopy points a gate or publish lease, just acquired on the
-// ticket's branch, at the copy of it that command works on, now that the work
-// happens in the operator's own clone and not in a lease of jig's:
-//
-//   - the clone has the branch (a committed ref; whatever is dirty in its
-//     working tree is not part of the branch and is never read): its copy is
-//     compared with origin's the way the pool's sync rule compares a lease's
-//     (pool.Compare). Origin has no copy, or the clone's is ahead of it: the
-//     clone's. Origin's is ahead of the clone's, or the two are one: origin's
-//     (it holds everything the clone's does). Each has commits the other
-//     lacks: refused, BRANCH_DIVERGED, because jig merges nothing that is not
-//     its own and the person decides how their branch and origin's are
-//     joined;
-//   - the clone has no copy of it (no clone is mapped, the work is on another
-//     machine, or a build lease of an earlier jig holds it): the rule
-//     pointAtTicketBranch always had, over the build lease and origin;
-//   - no copy anywhere: refused, BRANCH_NOT_FOUND. The branch is not cut from
-//     the target, so a round is never made over a branch nobody has.
-//
-// The lease is left pristine at the copy chosen. step names the command,
-// "gate" or "publish"; built is the commits the journal records jig built,
-// which only the build lease's rule holds the copy to. It says whose copy the
-// lease was left at.
-func pointAtBranchCopy(d Deps, leaseDir, repoName, ticket, branch string, adopted bool, built []string, step string) (branchCopy, error) {
-	if clone := operatorClone(d, repoName); clone != "" {
-		tip, err := branchTipIn(clone, branch)
-		if err != nil {
-			return "", fmt.Errorf("verifydeliver: %s: %w", step, err)
-		}
-		if tip != "" {
-			return pointAtClonesCopy(leaseDir, clone, branch, step)
-		}
-	}
-	if err := requireACopy(d, leaseDir, repoName, ticket, branch, adopted, step); err != nil {
-		return "", err
-	}
-	return pointAtTicketBranch(d, leaseDir, repoName, ticket, branch, adopted, built, step)
-}
 
 // branchTipIn is the sha of refs/heads/<branch> in the repository at dir, or
 // "" when it has no such branch.
@@ -372,101 +171,4 @@ func branchTipIn(dir, branch string) (string, error) {
 		return "", fmt.Errorf("look up %s in %s: %w", branch, dir, err)
 	}
 	return strings.TrimSpace(tip), nil
-}
-
-// requireACopy refuses, BRANCH_NOT_FOUND, a branch that origin, the build
-// lease and the clone all lack. The clone was asked before this, so what is
-// left to look in is origin as the lease last fetched it and the build lease.
-// The build lease's copy counts for a ticket's own default branch, which lives
-// there until a publish pushes it, and not for an adopted branch, which is on
-// origin by definition: one that is gone from origin is a branch nobody can
-// open a pull request from.
-func requireACopy(d Deps, leaseDir, repoName, ticket, branch string, adopted bool, step string) error {
-	tip, err := originsTip(leaseDir, branch)
-	if err != nil {
-		return fmt.Errorf("verifydeliver: %s: %w", step, err)
-	}
-	if tip != "" {
-		return nil
-	}
-	if buildDir, err := pool.Dir(d.Home, repoName, ticket, pool.Build); err == nil && !adopted && pool.Usable(buildDir) {
-		if _, found, _ := gitx.Resolve(buildDir, "refs/heads/"+branch); found {
-			return nil
-		}
-	}
-	return &axi.Error{
-		Msg:  fmt.Sprintf("branch %q is neither in your clone nor on origin", branch),
-		Code: "BRANCH_NOT_FOUND",
-		Help: []string{
-			fmt.Sprintf("Commit the work on %s in your clone (a branch's committed state is what the %s reads), or push it, then rerun", branch, step),
-		},
-	}
-}
-
-// pointAtClonesCopy fetches branch from the clone into the lease and points
-// the lease at the copy to work on (pointAtBranchCopy's first rule).
-func pointAtClonesCopy(leaseDir, clone, branch, step string) (branchCopy, error) {
-	if err := fetchBranchFrom(leaseDir, clone, branch); err != nil {
-		return "", err
-	}
-	tip, err := originsTip(leaseDir, branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: %w", step, err)
-	}
-	if tip == "" {
-		return clonesCopy, restorePristine(leaseDir, "HEAD", step)
-	}
-	standing, err := pool.Compare(leaseDir, branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: compare the clone's %s with origin's: %w", step, branch, err)
-	}
-	switch standing {
-	case pool.Behind:
-		return originsCopy, restorePristine(leaseDir, "origin/"+branch, step)
-	case pool.Ahead, pool.InStep:
-		return clonesCopy, restorePristine(leaseDir, "HEAD", step)
-	}
-	ours, err := gitx.CommitsIn(leaseDir, "refs/remotes/origin/"+branch+"..refs/heads/"+branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: list the commits of the clone's %s origin lacks: %w", step, branch, err)
-	}
-	theirs, err := gitx.CommitsIn(leaseDir, "refs/heads/"+branch+"..refs/remotes/origin/"+branch)
-	if err != nil {
-		return "", fmt.Errorf("verifydeliver: %s: list the commits of origin/%s the clone lacks: %w", step, branch, err)
-	}
-	return "", &axi.Error{
-		Msg: fmt.Sprintf("branch %s has diverged: the clone at %s has %d commit(s) origin/%s lacks, and origin/%s has %d the clone lacks",
-			branch, clone, len(ours), branch, branch, len(theirs)),
-		Code: "BRANCH_DIVERGED",
-		Help: []string{
-			"jig merges, rebases and resets neither side: each has commits the other lacks",
-			fmt.Sprintf("Join them in your clone (for example `git -C %s fetch origin && git -C %s merge origin/%s`), then rerun", clone, clone, branch),
-		},
-	}
-}
-
-// restorePristine resets the lease to rev, clean, on behalf of step.
-func restorePristine(leaseDir, rev, step string) error {
-	if err := resetLeasePristine(leaseDir, rev); err != nil {
-		return fmt.Errorf("verifydeliver: %s: restore lease to %s: %w", step, rev, err)
-	}
-	return nil
-}
-
-// fetchBranchFrom points the lease's own branch at the copy the repository at
-// source has: committed work only, whatever source's working tree holds.
-// Fetching into refs/heads/<branch> fails while that branch is the lease's
-// HEAD, so HEAD steps off it first, and the branch is checked out again after.
-func fetchBranchFrom(leaseDir, source, branch string) error {
-	refspec := fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch)
-	if _, err := gitx.Run(leaseDir, "checkout", "--detach", "HEAD"); err != nil {
-		return fmt.Errorf("verifydeliver: detach HEAD before fetch: %w", err)
-	}
-	if _, err := gitx.Run(leaseDir, "fetch", source, refspec); err != nil {
-		return fmt.Errorf("verifydeliver: fetch %s from %s: %w", branch, source, err)
-	}
-	if _, err := gitx.Run(leaseDir, "checkout", branch); err != nil {
-		return fmt.Errorf("verifydeliver: checkout %s: %w", branch, err)
-	}
-	return nil
 }

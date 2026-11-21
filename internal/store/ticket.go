@@ -60,14 +60,47 @@ type Ticket struct {
 	// BlockedBy is the ticket's own blockers, written by jig graduate.
 	BlockedBy []TicketBlockedBy
 	// Aliases is every earlier id this ticket has carried. Every rewrite of
-	// the record keeps them; nothing but L3's migration (out of scope here)
-	// writes them for real - in this ticket only tests set them. Store.
+	// the record keeps them; nothing but the v1-to-v2 migration
+	// writes them for real; tests set them directly. Store.
 	// ResolveTicket is the one place an alias turns back into this ticket's
 	// current id.
 	Aliases []string
 	// Closed is the ticket's closure: set when it was closed without a pull
 	// request (`jig close`), nil while it is open. See Closed.
 	Closed *Closed
+	// Kind is the ticket's kind: KindIssue, KindTask or KindMultiTask. Empty
+	// reads as a task (KindOrDefault), so a ticket recorded before the field
+	// existed is a task and no store is rewritten.
+	Kind string
+	// Parent is the id of the multi-task this task sits under; empty for any
+	// other ticket. A ticket's issue is not recorded here: it is the issue of
+	// the chart that lists the ticket.
+	Parent string
+	// After is the issues this issue is suggested to land after, written by
+	// `jig depend --after`. It is a suggestion shown by `jig next` and `jig
+	// land`, never a blocker: nothing that reads BlockedBy reads it, and only
+	// an issue has any.
+	After []string
+}
+
+// The three kinds a ticket can have.
+const (
+	KindIssue     = "issue"
+	KindTask      = "task"
+	KindMultiTask = "multi-task"
+)
+
+// KindOrDefault is the ticket's kind, a task when none is recorded.
+func (t Ticket) KindOrDefault() string {
+	if t.Kind == "" {
+		return KindTask
+	}
+	return t.Kind
+}
+
+// ValidKind reports whether k is one of the three kinds.
+func ValidKind(k string) bool {
+	return k == KindIssue || k == KindTask || k == KindMultiTask
 }
 
 // Adopted reports whether the ticket adopted a branch: a recorded branch is
@@ -89,6 +122,9 @@ type ticketFile struct {
 	BlockedBy     []TicketBlockedBy `yaml:"blocked_by,omitempty"`
 	Aliases       []string          `yaml:"aliases,omitempty"`
 	Closed        *closedFile       `yaml:"closed,omitempty"`
+	Kind          string            `yaml:"kind,omitempty"`
+	Parent        string            `yaml:"parent,omitempty"`
+	After         []string          `yaml:"after,omitempty"`
 }
 
 // literalString marshals as a YAML literal block scalar ("|"), the same
@@ -175,6 +211,13 @@ func ReadTicketFile(path string) (Ticket, error) {
 			},
 		}
 	}
+	if f.Kind != "" && !ValidKind(f.Kind) {
+		return Ticket{}, &axi.Error{
+			Msg:  fmt.Sprintf("%s has kind %q; must be %q, %q or %q", path, f.Kind, KindIssue, KindTask, KindMultiTask),
+			Code: "TICKET_RECORD_INVALID",
+			Help: []string{fmt.Sprintf("Fix or remove the kind in %s", path)},
+		}
+	}
 	if f.SchemaVersion > ticketSchemaVersion {
 		return Ticket{}, &axi.Error{
 			Msg:  fmt.Sprintf("%s has schema_version %d, newer than this jig version understands (%d)", path, f.SchemaVersion, ticketSchemaVersion),
@@ -182,7 +225,7 @@ func ReadTicketFile(path string) (Ticket, error) {
 			Help: []string{"Upgrade jig to a version that understands this ticket.yaml schema"},
 		}
 	}
-	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases}
+	t := Ticket{Title: f.Title, Body: string(f.Body), Slug: f.Slug, Branch: f.Branch, Rank: f.Rank, BlockedBy: f.BlockedBy, Aliases: f.Aliases, Kind: f.Kind, Parent: f.Parent, After: f.After}
 	if f.Closed != nil {
 		c := Closed(*f.Closed)
 		t.Closed = &c
@@ -281,6 +324,11 @@ func writeTicketFile(path string, t Ticket) error {
 		Rank:          t.Rank,
 		BlockedBy:     t.BlockedBy,
 		Aliases:       t.Aliases,
+		Parent:        t.Parent,
+		After:         t.After,
+	}
+	if t.Kind != KindTask {
+		f.Kind = t.Kind
 	}
 	if t.Closed != nil {
 		c := closedFile(*t.Closed)
@@ -312,6 +360,21 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 		t.Branch = branch
 		if t.Slug == "" {
 			t.Slug = Slug(t.Title)
+		}
+	})
+}
+
+// SetTicketKind gives a ticket whose record has no kind the kind and, when it
+// has none, the parent: jig graduate's record of an existing entry. A kind
+// already recorded is never changed, nor is a parent already recorded. A kind
+// of task writes none, since an absent kind is a task.
+func (s *Store) SetTicketKind(ticket, kind, parent string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		if t.Kind == "" && kind != KindTask {
+			t.Kind = kind
+		}
+		if t.Parent == "" {
+			t.Parent = parent
 		}
 	})
 }
@@ -417,7 +480,7 @@ func (s *Store) SetMigratedTicket(ticket, oldID, title, body string, blockedBy [
 //
 // A ticket.yaml ReadTicket refuses (an unknown key, a newer schema_version)
 // is returned as is: its *axi.Error already carries its own code and the
-// next step, which matters on this path, where every build lease, gate
+// next step, which matters on this path, where every build, gate
 // round and publish would otherwise fail with no more than a bare message.
 //
 // A recorded branch equal to target, one git itself would refuse as a ref
@@ -555,7 +618,7 @@ func (s *Store) branchNameFault(branch, target string) *branchFault {
 // "<id>:" that heading may lead with (briefSlug). Tickets minted through jig
 // have a title, so this is a ticket whose folder was made by hand. A ticket
 // with no slug from either is named by the bare id: the "jig/<id>" prefix
-// went with the branches named for their titles (decision 31), and a
+// went with the branches named for their titles, and a
 // jig/<id> branch still binds to its ticket (TicketForBranch).
 func (s *Store) defaultBranch(ticket string, rec Ticket) (string, error) {
 	slug := rec.Slug
@@ -622,4 +685,31 @@ func (s *Store) defaultBranchOr(ticket string, rec Ticket) string {
 		return name
 	}
 	return ticket
+}
+
+// SetTicketAfter records other in ticket's after list, once, leaving the rest
+// of the record untouched. It only writes the file: `jig depend --after`
+// checks the edge and commits it through Claim.
+func (s *Store) SetTicketAfter(ticket, other string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		for _, a := range t.After {
+			if a == other {
+				return
+			}
+		}
+		t.After = append(t.After, other)
+	})
+}
+
+// RemoveTicketAfter removes other from ticket's after list.
+func (s *Store) RemoveTicketAfter(ticket, other string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		var kept []string
+		for _, a := range t.After {
+			if a != other {
+				kept = append(kept, a)
+			}
+		}
+		t.After = kept
+	})
 }

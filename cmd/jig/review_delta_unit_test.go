@@ -14,7 +14,7 @@ import (
 // an excerpt, and hunks of the whole change in a/a.go and a/other.go.
 func deltaPrepared(intent string) verifydeliver.Prepared {
 	return verifydeliver.Prepared{
-		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "delta", Lease: "/lease",
+		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "delta",
 		Intent: verifydeliver.Intent{Source: intent},
 		Request: verifydeliver.ReviewRequest{
 			Recordings:    "/rec/recordings.json",
@@ -28,7 +28,7 @@ func deltaPrepared(intent string) verifydeliver.Prepared {
 	}
 }
 
-// TestADeltaRoundDropsWhatRound1Read (GATE-17): recordings, the whole
+// TestADeltaRoundDropsWhatRound1Read: recordings, the whole
 // change's hunks count, unprobed hunks outside the delta and the intent
 // excerpt of a stated intent are not printed; the excerpt of intent none is.
 func TestADeltaRoundDropsWhatRound1Read(t *testing.T) {
@@ -109,8 +109,7 @@ func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "f.go"), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		gitMust(t, dir, "add", "-A")
-		gitMust(t, dir, "commit", "-q", "-m", name+" base")
+		gitBuilder(t).Commit(dir, name+" base")
 		base = gitMust(t, dir, "rev-parse", "HEAD")
 		return dir, base, base
 	}
@@ -125,14 +124,14 @@ func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
 	p := deltaPrepared(verifydeliver.IntentSourceBrief)
 	p.RequestPath = filepath.Join(t.TempDir(), "review.json")
 	p.Repos = []verifydeliver.PreparedRepo{
-		{Repo: "api", Lease: apiDir, Base: apiBase, Head: apiHead, Scope: "delta"},
-		{Repo: "web", Lease: webDir, Base: webBase, Head: webHead, Scope: "delta"},
+		{Repo: "api", Base: apiBase, Head: apiHead, Scope: "delta"},
+		{Repo: "web", Base: webBase, Head: webHead, Scope: "delta"},
 	}
 	p.Request.Hunks = []verifydeliver.HunkEntry{
 		{File: "api/f.go", From: 1, To: 1},
 		{File: "web/f.go", From: 2, To: 2},
 	}
-	diffs, err := computeDeltaDiffs(p)
+	diffs, err := computeDeltaDiffs(p, map[string]string{"api": apiDir, "web": webDir})
 	if err != nil {
 		t.Fatal(err)
 	}

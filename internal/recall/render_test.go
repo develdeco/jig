@@ -10,7 +10,7 @@ func TestBlocksRenderEverySectionTheReportHas(t *testing.T) {
 	m := Material{
 		Charts: []Chart{{Name: "uploads", Map: "## Not yet specified (fog)\n\n- Does a cancelled upload resume?\n"}},
 		Docs:   []DocText{{Path: "platform/errors.md", Bytes: 40, Text: "# Error codes\n\nA retry follows a NETWORK code.\n"}},
-		Ledger: "## JIG-7 - Add retry\n\n**Answers:**\n- q-001: How often? -> Three times, with backoff.\n",
+		Ledger: "## JIG-7 - Add retry\n\n**Answers:**\n- q-001: How often? -> Three times, with backoff.\n- q-002 (call): Which unit? -> Seconds.\n",
 	}
 	r := Build(sampleTickets(), m, "retry fetch client backoff")
 	out := strings.Join(r.Blocks(), "\n")
@@ -22,7 +22,7 @@ func TestBlocksRenderEverySectionTheReportHas(t *testing.T) {
 		"fog[1]{chart,item}:\n  uploads,Does a cancelled upload resume?\n",
 		"platform[1]{path,title,bytes}:\n  platform/errors.md,Error codes,40\n",
 		"platform_lines[2]{path,kind,line}:\n  platform/errors.md,head,# Error codes\n",
-		"answers[1]{ticket,title,id,text}:\n  JIG-7,Add retry,q-001,\"How often? -> Three times, with backoff.\"",
+		"answers[2]{ticket,title,id,by,text}:\n  JIG-7,Add retry,q-001,,\"How often? -> Three times, with backoff.\"\n  JIG-7,Add retry,q-002,call,Which unit? -> Seconds.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("blocks lack %q:\n%s", want, out)

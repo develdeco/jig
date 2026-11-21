@@ -162,7 +162,7 @@ func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 	t.Parallel()
 	states := []string{
-		StateQueued, StateBuilding, StateVerifying, StateGreen, StateNeedsInput, StateStalled, StateEnvBlocked,
+		StateQueued, StateBuilding, StateGreen, StateNeedsInput, StateStalled, StateEnvBlocked,
 		StateReviewing, StateFindings, StateReady, StatePublishing, StatePublished, StateAsk, StateKept, StateDismissed,
 		StateOK, StateFail,
 	}
@@ -199,7 +199,7 @@ func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 	}
 	// The slice states, which sit side by side in one column, have distinct colors too.
 	colors := map[string]string{}
-	for _, s := range []string{StateQueued, StateBuilding, StateVerifying, StateGreen, StateNeedsInput, StateStalled} {
+	for _, s := range []string{StateQueued, StateBuilding, StateGreen, StateNeedsInput, StateStalled} {
 		c := lookOf(s).Color
 		if other, dup := colors[c]; dup {
 			t.Errorf("%q and %q share color %s", s, other, c)

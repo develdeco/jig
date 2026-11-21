@@ -72,7 +72,7 @@ func indented(lines []string) []string {
 }
 
 // cmdShare implements `jig share [--store-remote <url>] [--remote <name>=<url>]...
-// [--create] [--yes]` (decision 30 of the digester chart): a project is local
+// [--create] [--yes]`: a project is local
 // until it is shared, and sharing is the push. It sets the remotes it is given
 // (or creates the repositories through the host's CLI when asked), writes the
 // store's remote into jig.yaml and commits it, pushes the store and the
@@ -103,7 +103,7 @@ func cmdShare(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err != nil {
 		return renderErr(stdout, err)
 	}
-	where, err := locate.Locate(p.jigHome, cwd, locate.Opts{Getenv: e.getenv, StoreOnly: true})
+	where, err := locate.Locate(p.jigHome, cwd, locate.Opts{Getenv: e.getenv, StoreOnly: true, Memo: e.memo})
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -129,6 +129,7 @@ func cmdShare(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		StoreDir:    where.StorePath,
 		StoreRemote: storeURL,
 		Remotes:     given,
+		Memo:        e.memo,
 		Create:      *create,
 	})
 	if err != nil {

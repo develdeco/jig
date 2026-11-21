@@ -7,8 +7,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RewriteProjectYAML rewrites data, a v1 project.yaml, onto schema 2
-// (brief.md#The migration step 6): schema_version becomes 2; ticket_format
+// RewriteProjectYAML rewrites data, a v1 project.yaml, onto schema 2:
+// schema_version becomes 2; ticket_format
 // is removed, replaced in its own slot by keys: (sorted, for a stable
 // diff); tracker: becomes trackers: in its own slot, "local" becoming []
 // and any other value (a store that had already adopted a trackers: list

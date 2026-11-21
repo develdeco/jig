@@ -8,7 +8,7 @@
 
 **Plan order decides the pair's direction.** The tickets of a pair are in the order of `tickets.yaml`, not the wave's order (which puts a ranked ticket first). The later ticket gets the edge.
 
-**Only a pair in one wave, with no edge between them, is listed, and only tickets still to build.** A pair in different waves already has an edge between them. A wave drops the needs that are met, so a stacked pair whose parent is reviewed clean shares a wave again; it is already stacked, so a pair with an edge either way, met or not, is left out, and so is a ticket past build (reviewed, published or behind). The list empties as the edges are added: the skill can act on "every listed pair" and read again. (The first version listed a stacked pair again once the parent's round was clean; the review of #213 found it, F2.)
+**Only a pair in one wave, with no edge between them, is listed, and only tickets still to build.** A pair in different waves already has an edge between them. A wave drops the needs that are met, so a stacked pair whose parent is reviewed clean shares a wave again; it is already stacked, so a pair with an edge either way, met or not, is left out, and so is a ticket past build (reviewed, published or behind). The list empties as the edges are added: the skill can act on "every listed pair" and read again. (The first version listed a stacked pair again once the parent's round was clean; the review of #213 found it.)
 
 **It is computed in `cmd/jig`, not in the derivation.** `nextChart.setWorkspaceOverlaps` reads each ticket's slices of a wave and calls `workspaceOverlaps`, the rule `jig next` uses, once per wave. `phase.DeriveChart`, `phase.ChartFacts` and `chartFacts` do not change. A ticket with no slices, or whose files cannot be read, has no site and overlaps nothing.
 
@@ -17,7 +17,7 @@
 - **An implicit edge in `DeriveChart`.** It would hide an order the person can neither see nor change in the ticket's file, and a pure derivation would need the project's repos.
 - **Serializing every overlap in jig's own run.** A person who wants two in parallel says so; the skill leaves them in one wave then, and they merge by hand.
 - **Listing every pair of the run, edge or not.** The list would never empty, and the skill could not act on "every listed pair".
-- **Writing the edge from jig.** jig never edits a ticket's `blocked_by` after graduation. (2026-11-08: `jig depend`, GRAPH-23, now writes `blocked_by` after graduation; this decision keeps the session's edge, not jig's own run, as the overlap answer.)
+- **Writing the edge from jig.** jig never edits a ticket's `blocked_by` after graduation. (2026-11-08: `jig depend` now writes `blocked_by` after graduation; this decision keeps the session's edge, not jig's own run, as the overlap answer.)
 
 ## Consequences
 

@@ -1,6 +1,6 @@
 module github.com/develdeco/jig
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -10,7 +10,7 @@ require (
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/muesli/termenv v0.16.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

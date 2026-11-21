@@ -50,6 +50,13 @@ func (r Report) Blocks() []string {
 			blocks = append(blocks, axi.Table("duplicates", []string{"ticket", "score", "in", "state", "title"}, rows))
 		}
 	}
+	if len(r.Receipts) > 0 {
+		rows := make([][]string, len(r.Receipts))
+		for i, x := range r.Receipts {
+			rows[i] = []string{x.Ticket, strconv.Itoa(x.Files), strconv.FormatInt(x.Bytes, 10), strconv.FormatInt(x.Peak, 10)}
+		}
+		blocks = append(blocks, axi.Table("receipts", []string{"ticket", "files", "bytes", "peak"}, rows))
+	}
 	if len(r.Fog) > 0 {
 		var rows [][]string
 		for _, f := range r.Fog {
@@ -83,10 +90,10 @@ func (r Report) Blocks() []string {
 		var rows [][]string
 		for _, e := range r.Answers {
 			for _, a := range e.Answers {
-				rows = append(rows, []string{e.Ticket, e.Title, a.ID, a.Text})
+				rows = append(rows, []string{e.Ticket, e.Title, a.ID, a.By, a.Text})
 			}
 		}
-		blocks = append(blocks, axi.Table("answers", []string{"ticket", "title", "id", "text"}, rows))
+		blocks = append(blocks, axi.Table("answers", []string{"ticket", "title", "id", "by", "text"}, rows))
 	}
 	return blocks
 }

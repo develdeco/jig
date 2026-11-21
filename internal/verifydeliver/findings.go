@@ -34,7 +34,8 @@ const (
 // RoutedWhy vocabulary: the reason jig forced a finding to asked despite
 // the reviewer's own label (Finding.RoutedWhy) - budget for one parked past
 // the fix budget, recurrence for one forced by the recurrence bound,
-// build-target for one missing a workspace or an oracle jig can resolve.
+// build-target for one missing a workspace or the command its reviewer
+// should have named.
 // Empty (no constant) for a reviewer's own ask, which jig never had to
 // force.
 const (
@@ -62,7 +63,7 @@ type Finding struct {
 	Status        string `yaml:"status"`
 	Recurrences   int    `yaml:"recurrences"`
 	// Triage, Decision and RoutedAs are additive fields beyond what the
-	// reviewer reports. ApplyRound (this file) sets RoutedAs when the
+	// reviewer reports. applyRound (this file) sets RoutedAs when the
 	// recurrence bound or a missing build target forces asked despite the
 	// reviewer's own label, and carries Decision forward on a recurrence
 	// (rule 1); routing and triage (route.go) decide Triage, and Decision
@@ -83,7 +84,7 @@ type findingsYAML struct {
 	ReviewedPaths []string  `yaml:"reviewed_paths"`
 	Findings      []Finding `yaml:"findings"`
 	Cleared       []string  `yaml:"cleared,omitempty"`
-	// KeptFixed are the keeps this round spent as fixed (GATE-15), each with
+	// KeptFixed are the keeps this round spent as fixed, each with
 	// who kept it; their ids are in Cleared too.
 	KeptFixed []KeptFixed `yaml:"kept_fixed,omitempty"`
 	Summary   string      `yaml:"summary,omitempty"`
@@ -98,7 +99,7 @@ type findingsYAML struct {
 // queues toward a fix slice (open), ask needs a human (asked), note is
 // recorded only and leaves the open set (noted). Every action jig
 // recognizes is handled explicitly; ParseReviewResult already rejects any
-// other action before a result ever reaches ApplyRound, so an unrecognized
+// other action before a result ever reaches applyRound, so an unrecognized
 // one here is a programming error, not a case to guess at silently - it is
 // returned up the call chain rather than folded into note, which would let
 // an unvalidated caller's mistake reach the open set as if it were a
@@ -191,8 +192,8 @@ func findingHasGreenFixSlice(id string, existingSlices []store.Slice, sliceGreen
 // risk, risk_rationale and oracle, the entry's own line, and prior set to
 // its own id, and appends it to a copy of result.Findings; result.Findings
 // itself, and the reviewer's raw result.json on disk, stay untouched. The
-// caller runs this once per round, right before ApplyRound, so recurrence
-// counting, routing, triage, the fix budget and revieweval's scoring all
+// caller runs this once per round, right before applyRound, so recurrence
+// counting, routing, triage and the fix budget all
 // see exactly what a full re-report of that finding would give them.
 // validateReviewResult has already rejected a still_present entry whose
 // prior names nothing under open or dismissed before this ever runs, so
@@ -211,42 +212,7 @@ func ExpandStillPresent(result ReviewResult, known map[string]Finding) ReviewRes
 	return out
 }
 
-// ApplyRound applies one validated reviewer round's result onto known, the
-// cumulative fold of every earlier round (rules 1, 2 and 4 below): it
-// assigns ids to new findings and resolves recurrences and the recurrence
-// bound. It returns this round's own reported findings - every finding
-// reported this round - with a provisional Status - routing
-// and triage (route.go) still have to run on it, dismissing some and
-// keeping others, before it is final. known is untouched. Rule 3's
-// clearing is not decided here: ClearingAfterTriage needs reported's final,
-// post-triage statuses, so the caller runs it only after routeRound.
-//
-// existingSlices is the ticket's slices.yaml as of before this round;
-// sliceGreen reports one existing slice's live state by id. Together they
-// decide whether a re-report is a genuine recurrence: recurrences only
-// counts up once a fix slice that already records the finding's id has
-// gone green, since that is the premise the recurrence bound rests on - a
-// fix slice that finished without resolving it - rather than a finding
-// merely reported again before any slice for it was ever built, or while
-// one is still queued or building (an undecided ask re-reported, or a
-// round run with --early).
-//
-// fixRisks is the set of risks whose fix findings become fix slices; a fix
-// finding whose risk is not in this set is routed as a note instead.
-//
-// budgetReached is this ticket's own fix budget state (the gate's earlier
-// rounds that appended at least one fix slice, compared against
-// gate.fix_rounds, computed once by the caller): true parks every
-// would-be open fix as asked (RoutedWhyBudget) instead of letting it queue
-// a fix slice. A finding the risk floor already routes as a note, or that
-// the recurrence bound or a missing build target already forces to asked,
-// never reaches the budget, since it was never going to become an open fix
-// on its own.
-func ApplyRound(round int, known map[string]Finding, result ReviewResult, existingSlices []store.Slice, sliceGreen func(sliceID string) (bool, error), man manifest.Manifest, fixRisks []string, budgetReached bool) (reported []Finding, err error) {
-	return applyRound(round, known, result, existingSlices, sliceGreen, oneRepoFiles(man), fixRisks, budgetReached)
-}
-
-// applyRound is ApplyRound over the files of a round, which say which repo's
+// applyRound is the findings bookkeeping of a round over its files, which say which repo's
 // manifest a finding's file and oracle are judged against: a round over several
 // repos names its files "<repo>/<path>" and its workspaces "<repo>/<id>"
 // (roundrepos.go).
@@ -258,8 +224,6 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if ferr != nil {
 			return nil, fmt.Errorf("verifydeliver: findings: finding file %q: %w", rf.File, ferr)
 		}
-		oracleNames := files.oracles(file)
-
 		var id string
 		var prior Finding
 		var hasPrior bool
@@ -312,13 +276,8 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		if rf.Oracle != "" {
 			f.Oracle = rf.Oracle
 		}
-		// An omitted oracle defaults to the manifest's sole oracle when it
-		// has exactly one (there is no choice to make); a recurrence whose
-		// prior occurrence never got an oracle resolved this same way
-		// falls back to the same default rather than staying empty.
-		if resolved, ok := resolveOracle(f.Oracle, oracleNames); ok {
-			f.Oracle = resolved
-		}
+		// An omitted oracle stays empty: jig never picks a command for a
+		// reviewer, not even a manifest's only oracle.
 		f.Recurrences = recurrences
 		// Triage, RoutedAs and RoutedWhy are always this round's own
 		// routing, decided afresh below, never carried: a continuation (an
@@ -364,15 +323,11 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 		// is a record, not a question put to a person.
 		belowFloor := wasOpen && !isRiskInFloor(f.Risk, fixRisks)
 		// A fix finding missing part of its build target - no declared
-		// workspace for its file, or no oracle jig can resolve against the
-		// current manifest (an oracle recorded before the manifest changed,
-		// say) - can never become a fix slice on its own; jig routes it to
-		// the human as an ask instead. A zero-oracle manifest is not this
-		// case: routeRound fails the whole round with GATE_NO_ORACLE before
-		// triage ever runs, so nothing here needs to force individual
-		// findings to ask over it.
-		missingOracle := len(oracleNames) > 0 && !validOracle(f.Oracle, oracleNames)
-		missingBuildTarget := wasOpen && (f.Workspace == "" || missingOracle)
+		// workspace for its file, or no command (a recurrence whose prior
+		// never named one) - can never become a fix slice on its own; jig
+		// routes it to the human as an ask instead.
+		noWorkspace, noOracle := BuildTargetGaps(f)
+		missingBuildTarget := wasOpen && (noWorkspace || noOracle)
 		// The fix budget: once a ticket's used budget (gate rounds that
 		// queued a fix slice) equals gate.fix_rounds, a would-be open fix -
 		// one the recurrence bound, a missing build target and the risk
@@ -430,7 +385,7 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // ClearingAfterTriage computes rule 3's clearing set: known's open
 // findings not present in reported (id-wise) clear when this
 // round reviewed their file, or their file no longer exists at head
-// (existsAtHead checks the lease directly, whatever the scope diff says -
+// (existsAtHead checks the head directly, whatever the scope diff says -
 // a file gone before this round's base, or never in a full-scope diff
 // after a rebase, clears a finding on it just the same). An asked finding
 // never clears here: only a person keeping or dismissing it moves it out
@@ -447,10 +402,7 @@ func applyRound(round int, known map[string]Finding, result ReviewResult, existi
 // asked - must reflect what a human actually kept, not merely what the
 // reviewer reported before triage dismissed some of it (a finding the
 // human dismisses at triage must not go on blocking an unrelated open
-// finding in the same file from clearing). revieweval's own runner calls
-// this with reported straight from ApplyRound, no routing or triage in
-// between, on purpose - that package never runs the triage hook at all -
-// so that caller is not a bug to fix either.
+// finding in the same file from clearing).
 func ClearingAfterTriage(known map[string]Finding, reported []Finding, reviewedPaths, changedPaths []string, existsAtHead func(file string) (bool, error)) (cleared []string, err error) {
 	reviewedSet := map[string]bool{}
 	for _, p := range reviewedPaths {
@@ -565,7 +517,7 @@ func outstandingNotes(cum map[string]Finding, reported []Finding) []Finding {
 // foldFindings applies one round's findings.yaml content onto cum in
 // place: the latest occurrence of each id wins, and cleared
 // removes an id. It is the single operation both the historical fold
-// (cumulativeFindings) and a round just applied (ApplyRound's result) use,
+// (cumulativeFindings) and a round just applied (applyRound's result) use,
 // so the two always agree.
 func foldFindings(cum map[string]Finding, findings []Finding, cleared []string) {
 	for _, f := range findings {
@@ -619,7 +571,7 @@ func openFindingsList(cum map[string]Finding) []Finding {
 // open/asked for both), but it must stay a citable `prior` target, or its
 // identity and recurrence count are lost the moment a round notes it:
 // prior is the only structural channel a later round has to continue the
-// same finding, and the recurrence bound (ApplyRound's rule 1) must apply
+// same finding, and the recurrence bound (applyRound's rule 1) must apply
 // to that finding whatever label it wore in between, not reset because a
 // note interrupted it.
 func openAndNotedFindingsList(cum map[string]Finding) []Finding {
@@ -767,26 +719,8 @@ func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 	}, nil
 }
 
-// OutstandingAsks returns ticket's cumulative still-asked findings, sorted
-// by risk then id, across every gate round recorded so far. It is the
-// state `jig status` shows between rounds so a waiting decision is
-// visible even when no gate round is running: the same fold Gate itself
-// uses, read one round past the last one recorded.
-//
-// Unlike Gate's own fold (cumulativeFindings), a round whose findings.yaml
-// cannot be read or parsed is skipped rather than failing the call, and its
-// round number is returned in unreadable. A gate round must refuse to run
-// on bookkeeping it cannot read, but `jig status` is the command a person
-// runs when something is already wrong, and refusing to show a ticket's
-// slices because one round's file is corrupt helps nobody. Skipping is not
-// hiding: the caller is handed the rounds it skipped and says so.
-func OutstandingAsks(st *store.Store, ticket string) (asks []Finding, unreadable []int, err error) {
-	asks, _, unreadable, err = OutstandingFindings(st, ticket)
-	return asks, unreadable, err
-}
-
-// OutstandingFindings is OutstandingAsks and, beside the asks, the ticket's
-// cumulative noted findings, sorted the same way: what a person may decide
+// OutstandingFindings is the ticket's cumulative outstanding asks and, beside
+// them, its cumulative noted findings, sorted the same way: what a person may decide
 // with `jig triage`. A note is no outstanding work; it is listed because a
 // person can still take it up.
 func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding, unreadable []int, err error) {
@@ -843,7 +777,7 @@ var riskRank = map[string]int{RiskHigh: 0, RiskMedium: 1, RiskLow: 2}
 // itself is clean, never merely because this round reported nothing new -
 // an earlier round's finding can still be open or asked with nothing new
 // reported against it this round. cleared lists the ids this round cleared
-// (rule 3); findings is every finding this round reported (ApplyRound's
+// (rule 3); findings is every finding this round reported (applyRound's
 // "reported"), after routing and triage have set each one's final Status,
 // Triage, Decision and RoutedAs. keptFixed are the keeps this round spent as
 // fixed, each listed with who kept it, as the gate report does.

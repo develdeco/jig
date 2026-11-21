@@ -55,7 +55,27 @@ func roundsBlocks(st *store.Store, ticket string) ([]string, error) {
 			dashed(r.Scope), dashed(r.Base), dashed(r.Head), files, strconv.Itoa(len(r.KeptFixed)),
 		})
 	}
-	return []string{axi.Table("rounds", roundColumns, rows)}, nil
+	blocks := []string{axi.Table("rounds", roundColumns, rows)}
+	// The lines a round's change adds that name something only the store
+	// holds, from each round's report: a block only when a round holds some.
+	var refRows [][]string
+	var rest []verifydeliver.StoreRef
+	for _, r := range recs {
+		for _, ref := range r.StoreRefs {
+			if len(refRows) == verifydeliver.StoreRefsLimit {
+				rest = append(rest, ref)
+				continue
+			}
+			refRows = append(refRows, []string{strconv.Itoa(r.Round), ref.Repo, ref.File + ":" + strconv.Itoa(ref.Line), ref.ID})
+		}
+	}
+	if len(refRows) > 0 {
+		if len(rest) > 0 {
+			refRows = append(refRows, []string{verifydeliver.StoreRefsMore(rest), "", "", ""})
+		}
+		blocks = append(blocks, axi.Table("store_references", []string{"round", "repo", "file:line", "id"}, refRows))
+	}
+	return blocks, nil
 }
 
 // dashed is s, or "-" when it is empty: the mark a table cell uses for nothing.

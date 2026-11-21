@@ -6,6 +6,8 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/clonebehind"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
 )
 
@@ -48,13 +50,31 @@ func hereCloneInfo(r clonebehind.Result) hereCloneJSON {
 	return info
 }
 
+// cloneNamedByMap is the path jig here and jig doctor name the clone dir
+// belongs to by: the machine map's spelling of the clone, found with symlinks
+// resolved on both sides (git reports /private/var where the map holds /var),
+// else the clone root itself. A linked worktree is named as its clone.
+func cloneNamedByMap(m *gitx.Memo, jigHome, dir string) string {
+	root := locate.CloneRoot(m, dir)
+	if machine, err := project.LoadMachine(jigHome); err == nil {
+		for _, mp := range machine {
+			for _, mapped := range mp.Clones {
+				if gitx.SameDir(mapped, root) {
+					return mapped
+				}
+			}
+		}
+	}
+	return root
+}
+
 // hereCloneJudged is the judgment of the located clone, and whether it is
 // one to name (behind or diverged).
 func hereCloneJudged(c hereCtx) (clonebehind.Result, bool) {
 	if c.Where.RepoDir == "" {
 		return clonebehind.Result{}, false
 	}
-	r := clonebehind.Check(c.Where.RepoDir, hereCloneTarget(c))
+	r := clonebehind.Check(c.e.memo, cloneNamedByMap(c.e.memo, c.Where.JigHome, c.Where.RepoDir), hereCloneTarget(c))
 	return r, r.State == clonebehind.Behind || r.State == clonebehind.Diverged
 }
 
@@ -64,12 +84,12 @@ func hereCloneTarget(c hereCtx) string {
 	var repos []project.Repo
 	switch {
 	case c.Where.StorePath != "":
-		if cfg, err := project.LoadConfig(c.Where.JigHome, c.Where.StorePath, c.Where.Project, c.Where.Root, c.Where.RepoDir); err == nil {
+		if cfg, err := project.LoadConfigWith(c.e.memo, c.Where.JigHome, c.Where.StorePath, c.Where.Project, c.Where.Root, c.Where.RepoDir); err == nil {
 			repos = cfg.Repos
 		}
 	case c.Where.Root != "":
 		if m, err := project.LoadMarker(filepath.Join(c.Where.Root, project.MarkerFile)); err == nil {
-			repos = project.WithMarkerRepos(project.Config{Name: c.Where.Project}, c.Where.Root, m).Repos
+			repos = project.WithMarkerRepos(c.e.memo, project.Config{Name: c.Where.Project}, c.Where.Root, m).Repos
 		}
 	}
 	for _, r := range repos {

@@ -207,7 +207,7 @@ func followVerb(rows []stepRow, verb chartTicket) (followed []stepRow, behind bo
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.
 func needsYou(d phase.Ticket) bool {
-	for _, p := range d.Phases {
+	for _, p := range d.Work() {
 		if p.State == phase.StateCurrent && hasSub(p, phase.SubNeedsYou) {
 			return true
 		}

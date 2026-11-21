@@ -53,7 +53,7 @@ func TestBuildListsTheQuestionsAndNotesOfTheSlice(t *testing.T) {
 	}
 	text := strings.Join(c.Blocks(), "\n")
 	for _, want := range []string{
-		"questions[1]{id,status,question,answer,provenance}:\n  q-001,answered,Percent or ratio?,Percent.,person\n",
+		"questions[1]{id,status,question,answer,provenance,kind}:\n  q-001,answered,Percent or ratio?,Percent.,person,-\n",
 		"notes[2]{ts,slice,session,note}:\n",
 	} {
 		if !strings.Contains(text, want) {

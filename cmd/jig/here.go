@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/project"
@@ -70,6 +71,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 		Slice:     *sliceFlag,
 		Session:   *sessionFlag,
 		Getenv:    e.getenv,
+		Memo:      e.memo,
 		NoMap:     *noMap,
 	})
 	if err != nil {
@@ -85,7 +87,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	}
 
 	hc := hereCtx{e: e, Where: where, JigHome: jigHome, memo: &hereMemo{}}
-	if hc.Store, _, err = openLocatedStore(where); err != nil {
+	if hc.Store, _, err = openLocatedStore(e.memo, where); err != nil {
 		return renderErr(stdout, err)
 	}
 	if hc.Store != nil && (where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias) {
@@ -129,13 +131,13 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 // that its schema is one this binary reads, with the project config it holds.
 // A directory whose store is not on this machine has none: the store is nil
 // and so is the error.
-func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) {
+func openLocatedStore(m *gitx.Memo, where locate.Where) (*store.Store, project.Config, error) {
 	if where.StorePath == "" {
 		return nil, project.Config{}, nil
 	}
 	// The store config is completed with the project's repos from its marker,
 	// as locateStore does for a verb: a v3 store lists none itself.
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return nil, project.Config{}, err
 	}
@@ -146,6 +148,7 @@ func openLocatedStore(where locate.Where) (*store.Store, project.Config, error) 
 	if err != nil {
 		return nil, project.Config{}, err
 	}
+	st.Memo = m
 	return st, cfg, nil
 }
 
@@ -203,7 +206,9 @@ type hereView struct {
 	slices    []hereSlice
 	verified  []hereVerified
 	questions []hereQuestion
-	pending   []herePending
+	// states are the commits whose verification is not clear (no recorded
+	// result, failed, stopped, timed out or could not run).
+	states []hereVerificationState
 	// prompt is what to ask an agent to move the ticket on (internal/phase), "" when
 	// it is published or its phase could not be told.
 	prompt string
@@ -215,6 +220,18 @@ type hereSlice struct {
 	Attempts  int      `json:"attempts"`
 	BlockedBy []string `json:"blocked_by"`
 	Question  string   `json:"question,omitempty"`
+	// LastRun is the slice's last witnessed run, covering or not; absent for a
+	// slice with no oracle line.
+	LastRun *hereLastRun `json:"last_run,omitempty"`
+}
+
+// hereLastRun is a slice's last run of `jig verify` and whether it covers the
+// slice's last commit (verify.LastRun).
+type hereLastRun struct {
+	Commit  string `json:"commit"`
+	Result  string `json:"result"`
+	Covers  string `json:"covers"`
+	Seconds int    `json:"seconds,omitempty"`
 }
 
 type hereVerified struct {
@@ -227,12 +244,6 @@ type hereQuestion struct {
 	ID    string `json:"id"`
 	Slice string `json:"slice"`
 	Body  string `json:"body"`
-}
-
-type herePending struct {
-	Slice  string `json:"slice"`
-	Commit string `json:"commit"`
-	Since  string `json:"since,omitempty"`
 }
 
 // buildHereView reads the ticket Where names, if it names one and the store
@@ -274,7 +285,16 @@ func buildHereView(hc hereCtx) (hereView, error) {
 	if err != nil {
 		return v, err
 	}
-	v.verified, v.pending = verificationsIn(lines)
+	v.verified = verificationsIn(lines)
+	truth := hereTruth(hc, lines, sliceIDs(st, ticket))
+	v.states = statesOf(truth.Outstanding())
+	for _, r := range truth.LastRuns() {
+		for i := range v.slices {
+			if v.slices[i].ID == r.Slice {
+				v.slices[i].LastRun = &hereLastRun{Commit: r.Line.Commit, Result: r.Result, Covers: r.Covers, Seconds: r.Line.Seconds}
+			}
+		}
+	}
 	// The phase is best-effort here: `jig here` runs on every session start,
 	// and a ticket it cannot derive still has its state to show.
 	if t, err := derivePhase(st, ticket); err == nil {
@@ -284,34 +304,18 @@ func buildHereView(hc hereCtx) (hereView, error) {
 }
 
 // verificationsIn reads a journal for the commits that verified (a verified
-// line, once per commit and slice) and for those still being verified: a
-// verify-pending line no oracle or verify-error line of the same commit and
-// slice has followed.
-func verificationsIn(lines []journal.Line) (verified []hereVerified, pending []herePending) {
+// line, once per commit and slice).
+func verificationsIn(lines []journal.Line) []hereVerified {
 	type key struct{ commit, slice string }
 	seen := map[key]bool{}
+	var verified []hereVerified
 	for _, l := range lines {
 		if l.Event == journal.EventVerified && l.Commit != "" && !seen[key{l.Commit, l.Slice}] {
 			seen[key{l.Commit, l.Slice}] = true
 			verified = append(verified, hereVerified{Slice: l.Slice, Commit: l.Commit, Attempt: l.Attempt})
 		}
 	}
-	for i, l := range lines {
-		if l.Event != journal.EventVerifyPending || l.Commit == "" {
-			continue
-		}
-		done := false
-		for _, later := range lines[i+1:] {
-			if later.Commit == l.Commit && later.Slice == l.Slice && (later.Event == journal.EventOracle || later.Event == journal.EventVerifyError) {
-				done = true
-				break
-			}
-		}
-		if !done {
-			pending = append(pending, herePending{Slice: l.Slice, Commit: l.Commit, Since: l.TS})
-		}
-	}
-	return verified, pending
+	return verified
 }
 
 // blocks renders the identity block, the ticket's blocks and then each of
@@ -360,9 +364,13 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 			if s.Question != "" {
 				question = s.Question
 			}
-			rows = append(rows, []string{s.ID, s.State, fmt.Sprint(s.Attempts), blocked, question})
+			covers := "-"
+			if s.LastRun != nil {
+				covers = s.LastRun.Covers
+			}
+			rows = append(rows, []string{s.ID, s.State, covers, fmt.Sprint(s.Attempts), blocked, question})
 		}
-		blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question"}, rows))
+		blocks = append(blocks, axi.Table("slices", []string{"id", "state", "covers", "attempts", "blocked_by", "question"}, rows))
 		if len(v.verified) > 0 {
 			var vrows [][]string
 			for _, x := range v.verified {
@@ -379,12 +387,8 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 			}
 			blocks = append(blocks, axi.Table("questions", []string{"id", "slice", "question"}, qrows))
 		}
-		if len(v.pending) > 0 {
-			var prows [][]string
-			for _, p := range v.pending {
-				prows = append(prows, []string{p.Slice, shortSHA(p.Commit)})
-			}
-			blocks = append(blocks, axi.Table("pending_verifications", []string{"slice", "commit"}, prows))
+		if len(v.states) > 0 {
+			blocks = append(blocks, statesTable(v.states))
 		}
 	}
 
@@ -414,9 +418,9 @@ func (v hereView) help(hc hereCtx) []string {
 		a, _ := hereConflicts(hc)
 		return append(conflictHelp(w.Ticket, a.Conflicts), fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt)))
 	case w.Branch != "":
-		return []string{fmt.Sprintf("Branch %s binds no ticket: work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief; to take a ticket that exists run `jig next`, or name one: `jig here <ticket>`", w.Branch)}
+		return []string{fmt.Sprintf("Branch %s binds no ticket: work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue); to take a ticket that exists run `jig next`, or name one: `jig here <ticket>`", w.Branch)}
 	default:
-		return []string{"Work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which decides brief or chart and mints a ticket for a brief; to take a ticket that exists run `jig next`"}
+		return []string{"Work asked for with no ticket is fresh work, planned first with the intake skill (`jig skill intake`), which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue); to take a ticket that exists run `jig next`"}
 	}
 }
 
@@ -462,10 +466,10 @@ type hereRefJSON struct {
 }
 
 type hereStateJSON struct {
-	Slices               []hereSlice    `json:"slices"`
-	Verified             []hereVerified `json:"verified"`
-	Questions            []hereQuestion `json:"questions"`
-	PendingVerifications []herePending  `json:"pending_verifications"`
+	Slices             []hereSlice             `json:"slices"`
+	Verified           []hereVerified          `json:"verified"`
+	Questions          []hereQuestion          `json:"questions"`
+	VerificationStates []hereVerificationState `json:"verification_states"`
 }
 
 // json builds the --json object: the located parts, the ticket's state, and
@@ -493,7 +497,7 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 		out.Session = &hereRefJSON{ID: w.Session, How: w.SessionHow}
 	}
 	if hc.Store != nil && w.Ticket != "" {
-		st := &hereStateJSON{Slices: v.slices, Verified: v.verified, Questions: v.questions, PendingVerifications: v.pending}
+		st := &hereStateJSON{Slices: v.slices, Verified: v.verified, Questions: v.questions, VerificationStates: v.states}
 		if st.Slices == nil {
 			st.Slices = []hereSlice{}
 		}
@@ -503,8 +507,8 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 		if st.Questions == nil {
 			st.Questions = []hereQuestion{}
 		}
-		if st.PendingVerifications == nil {
-			st.PendingVerifications = []herePending{}
+		if st.VerificationStates == nil {
+			st.VerificationStates = []hereVerificationState{}
 		}
 		out.State = st
 	}

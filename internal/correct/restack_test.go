@@ -95,6 +95,31 @@ func TestCheckTellsARetargetOnlyToTheSessionThatFoundIt(t *testing.T) {
 	}
 }
 
+// TestRetargetNoteNamesTheContainersBranch: for a task with a container whose
+// parent merged, the retarget note names the container's branch, never the
+// target.
+func TestRetargetNoteNamesTheContainersBranch(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	plan := stack.Plan{Ticket: "JIG-1", Repos: []stack.Repo{{
+		Repo: "app", Target: "main", StartFrom: "origin/I-1-issue", PRTarget: "I-1-issue", Parent: "JIG-0", ParentBranch: "jig/JIG-0",
+		Container: "I-1", ContainerBranch: "I-1-issue",
+		Merged: true, Head: "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00", Retarget: true,
+	}}}
+	in := w.input()
+	in.Stack = func() (stack.Plan, error) { return plan, nil }
+	notes, err := Check(in)
+	if err != nil || len(notes) != 1 || notes[0].Kind != KindRetarget {
+		t.Fatalf("Check = %+v, %v, want the retarget", notes, err)
+	}
+	if want := "merge I-1-issue (`git merge origin/I-1-issue`); `jig publish` points the PR at I-1-issue, but the hand-off (`--body`, then `--pr`) does not: run `gh pr edit <pr> --base I-1-issue`."; !strings.Contains(notes[0].Text, want) {
+		t.Errorf("the retarget text %q lacks %q", notes[0].Text, want)
+	}
+	if strings.Contains(notes[0].Text, "main") {
+		t.Errorf("the retarget text %q names the target", notes[0].Text)
+	}
+}
+
 // TestCheckKeepsTheOtherNotesWhenTheStackCannotBeRead: a stack that cannot be
 // read is an error, and the notes of the other detectors still come back.
 func TestCheckKeepsTheOtherNotesWhenTheStackCannotBeRead(t *testing.T) {

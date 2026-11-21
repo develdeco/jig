@@ -1,8 +1,0 @@
-{
-  "findings": [],
-  "still_present": [],
-  "reviewed_paths": [
-    "users/lookup.go"
-  ],
-  "summary": "Nothing to report."
-}

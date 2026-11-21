@@ -20,9 +20,7 @@ type verb struct {
 	Spec cmdSpec
 	// Order sorts the verb in help and in registeredVerbs, then by Name. The
 	// verbs that predate the registry hold 100..240 in their old order; each
-	// later ticket has a band from 300 up (D3 300s, D8 310s, D6 320, D10
-	// 330s, D4 340s, D15 350, D16 360, D14 370, D9 380, D12 390, D17 400s,
-	// D5 500s, D7 900).
+	// later ticket has a band from 300 up.
 	Order int
 	// Run executes the verb.
 	Run runFunc
@@ -37,6 +35,9 @@ type verb struct {
 	// NoFlagSet marks a hidden verb that never builds a FlagSet (it reads a
 	// hook payload on stdin, say). Its Spec.Flags must be nil.
 	NoFlagSet bool
+	// Note is a line of the verb's own help (`jig <verb> -h`), under its flags,
+	// for a limit the flags do not say.
+	Note string
 }
 
 // verbRegistry is a set of verbs by name. The binary has exactly one,

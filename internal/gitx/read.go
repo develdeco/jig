@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-git/go-git/v5/plumbing"
 )
@@ -99,12 +100,20 @@ type reader struct {
 	dbDone bool
 }
 
+// InProcessReadTally counts the questions taken in process instead of by the
+// git program: newReader (every in-process read),
+// CommonDir and TopLevel add one once the repository
+// is discovered, so a repository gitx declines adds none. The tests that bound
+// what a session-start call costs read it.
+var InProcessReadTally atomic.Int64
+
 // newReader discovers the repository dir is in, or returns nil.
 func newReader(dir string, env envLookup) *reader {
 	loc, ok := discover(dir, env)
 	if !ok {
 		return nil
 	}
+	InProcessReadTally.Add(1)
 	return &reader{loc: loc}
 }
 
@@ -237,12 +246,6 @@ func Resolve(dir, rev string) (string, bool, error) {
 // followed), if there is one.
 func ResolveCommit(dir, rev string) (string, bool, error) {
 	return resolve(dir, rev+"^{commit}", false)
-}
-
-// ResolveCommitTrusted is ResolveCommit for a repository whose owner is
-// trusted, as pool.Usable's probe does (git is run with safe.directory=*).
-func ResolveCommitTrusted(dir, rev string) (string, bool, error) {
-	return resolve(dir, rev+"^{commit}", true)
 }
 
 // resolve is Resolve, and whether the git program is run trusting the
@@ -620,29 +623,4 @@ func GitPaths(dir string, names ...string) ([]string, error) {
 		lines[i] = line
 	}
 	return lines, nil
-}
-
-// workTreeProbeInProcess is WorkTreeProbe without the git program.
-func workTreeProbeInProcess(dir string, env envLookup) (string, bool) {
-	loc, ok := discover(dir, env)
-	if !ok {
-		return "", false
-	}
-	if loc.prefix == "" {
-		return "true", true
-	}
-	return "true\n" + loc.prefix, true
-}
-
-// WorkTreeProbe returns what "git -c safe.directory=* rev-parse
-// --is-inside-work-tree --show-prefix" prints in dir, with the owner of the
-// repository trusted: "true" at the top level of a work tree, "true" and the
-// path below the top (with a trailing slash) on a following line inside one.
-// Anything else (a bare repository, the inside of a git directory, no
-// repository) is the git program's answer or error.
-func WorkTreeProbe(dir string) (string, error) {
-	if out, ok := workTreeProbeInProcess(dir, os.LookupEnv); ok {
-		return out, nil
-	}
-	return Run(dir, "-c", "safe.directory=*", "rev-parse", "--is-inside-work-tree", "--show-prefix")
 }

@@ -28,8 +28,8 @@ type phaseOut struct {
 	} `json:"phase"`
 }
 
-// phaseStates is the state of each of the four phases, in order, as one
-// string: "dcpp" is the brief done, the build current, the rest pending.
+// phaseStates is the state of each of the five phases, in order, as one
+// string: "dcppp" is the brief done, the build current, the rest pending.
 func (p phaseOut) states() string {
 	var out string
 	for _, ph := range p.Phase.Phases {
@@ -41,7 +41,7 @@ func (p phaseOut) states() string {
 // expectPhase checks both forms of one `jig next <ticket>` answer, in text and
 // in JSON: the phase the ticket is at, whether that phase can start, the code
 // that says why not, the prompt that starts it and the state of each phase
-// ("dcpp" is the brief done, the build current, the rest pending). The chain
+// ("dcppp" is the brief done, the build current, the rest pending). The chain
 // calls it at the points a ticket passes through (TestDigesterFlow); the rules
 // behind each answer are pinned at their seams, internal/phase's TestDerive and
 // cmd/jig's TestNextNamesThePhaseAndPrompt.

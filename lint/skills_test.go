@@ -68,10 +68,10 @@ func TestSkillsBudget(t *testing.T) {
 			}
 
 			if lines := strings.Count(string(normalizeEOL(data)), "\n"); lines > 100 {
-				t.Errorf("%s: %d lines, budget is <=100", path, lines)
+				t.Errorf("%s: %d lines, budget is <=100%s", path, lines, capRemedy)
 			}
 			if n := len(normalizeEOL(data)); n > 6000 {
-				t.Errorf("%s: %d bytes, budget is <=6000", path, n)
+				t.Errorf("%s: %d bytes, budget is <=6000%s", path, n, capRemedy)
 			}
 
 			fm := frontmatter(t, path, normalizeEOL(data))
@@ -145,5 +145,33 @@ func TestArchitectureDoc(t *testing.T) {
 	}
 	if found == 0 {
 		t.Fatalf("%s: \"## Module responsibilities\" table has no package-dir rows", path)
+	}
+}
+
+// TestNoSkillSaysJigRunsTheOracleOnACommit: jig starts nothing on a commit, so
+// no skill or reference may tell a session that jig runs the oracle for each
+// commit: the builder runs `jig verify` itself.
+func TestNoSkillSaysJigRunsTheOracleOnACommit(t *testing.T) {
+	root := repoRoot(t)
+	stale := regexp.MustCompile(`(?i)jig runs the oracle on|jig (runs|starts)[^.\n]*(oracle|verification)[^.\n]*(each|every|any) commit`)
+	var files []string
+	for _, pattern := range []string{"*/SKILL.md", "*/references/*.md"} {
+		m, err := filepath.Glob(filepath.Join(root, "skills", pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, m...)
+	}
+	if len(files) == 0 {
+		t.Fatal("lint: no skill files found")
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hit := stale.FindString(string(data)); hit != "" {
+			t.Errorf("%s says %q: jig starts nothing on a commit, the builder runs `jig verify`", f, hit)
+		}
 	}
 }

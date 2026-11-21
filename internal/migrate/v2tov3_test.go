@@ -9,6 +9,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -196,7 +197,7 @@ func TestPlanV2toV3AndApply(t *testing.T) {
 		m.Repos[0].Name != "demo-app" || m.Repos[0].Target != "develop" || m.Repos[0].Remote != "https://example.invalid/org/demo-app.git" {
 		t.Errorf("marker = %+v", m)
 	}
-	cfg, err := project.LoadConfig(in.JigHome, in.Store.Root, "demo", clone)
+	cfg, err := projecttest.LoadConfig(in.JigHome, in.Store.Root, "demo", clone)
 	if err != nil || len(cfg.Repos) != 1 || cfg.Repos[0].Name() != "demo-app" || cfg.Repos[0].TargetBranch() != "develop" || cfg.Repos[0].Remote != "https://example.invalid/org/demo-app.git" {
 		t.Errorf("the migrated project reads as %+v, %v; want the v2 repo back", cfg.Repos, err)
 	}

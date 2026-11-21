@@ -5,8 +5,9 @@ package skills
 
 import "embed"
 
-// FS embeds every skills/<name>/SKILL.md file, rooted at this directory
-// (each file is reachable at "<name>/SKILL.md").
+// FS embeds every skills/<name>/SKILL.md file and every reference beside it,
+// rooted at this directory (reachable at "<name>/SKILL.md" and
+// "<name>/references/<ref>.md").
 //
-//go:embed */SKILL.md
+//go:embed */SKILL.md */references/*.md
 var FS embed.FS

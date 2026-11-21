@@ -126,7 +126,9 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 	for attempt := 1; attempt <= maxClaimAttempts; attempt++ {
 		pre, havePre := s.headSHA()
 
+		directDone := s.DirectTrackerWrites()
 		id, paths, err := write()
+		directDone()
 		if err != nil {
 			return "", s.undoFailedWrite(err, pre, havePre, paths)
 		}

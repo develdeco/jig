@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	skillsUsageGlobal    = "for you, on this machine: the skills in full under ~/.claude/skills and ~/.agents/skills"
+	skillsUsageGlobal    = "for you, on this machine: the skills in full under ~/.claude/skills ($CLAUDE_CONFIG_DIR/skills when it is set) and ~/.agents/skills"
 	skillsUsageProject   = "the named project of this machine: one stub in its .claude/skills and .agents/skills that git ignores"
 	skillsUsageHere      = "the project or repository you are in, as --project does"
 	skillsUsageHelpers   = "the helper skills jig-init and jig-attach instead of the project set"
@@ -46,7 +46,7 @@ func init() {
 		},
 	})
 	registerVerb(verb{
-		Spec: cmdSpec{"skills install", "install every skill under ~/.claude/skills (--project: ./.claude/skills)", []flagSpec{
+		Spec: cmdSpec{"skills install", "install every skill under ~/.claude/skills, or $CLAUDE_CONFIG_DIR/skills (--project: ./.claude/skills)", []flagSpec{
 			{"project", skillsInstallUsageProject, false},
 			{"dest", skillsInstallUsageDest, false},
 		}, true},
@@ -162,7 +162,8 @@ func cmdSkillsInstall(e env, args []string, stdout io.Writer) int {
 // skillsDestRoot resolves the directory skill subdirectories are installed
 // under: an explicit --dest wins; otherwise --project resolves to
 // ./.claude/skills under the current directory; otherwise it defaults to
-// <user home>/.claude/skills.
+// the skills directory of Claude Code's user directory: <user home>/.claude,
+// or $CLAUDE_CONFIG_DIR when it is set.
 func skillsDestRoot(e env, projectFlag bool, destFlag string) (string, error) {
 	if destFlag != "" {
 		return destFlag, nil
@@ -174,11 +175,11 @@ func skillsDestRoot(e env, projectFlag bool, destFlag string) (string, error) {
 		}
 		return filepath.Join(cwd, ".claude", "skills"), nil
 	}
-	home, err := e.userHomeDir()
+	u, err := e.userDirs()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".claude", "skills"), nil
+	return u.SkillRoots()[0], nil
 }
 
 // installedSkill is one skill written to disk by installSkills.
@@ -216,6 +217,16 @@ func installSkills(root string) ([]installedSkill, error) {
 		dest := filepath.Join(dir, "SKILL.md")
 		if err := os.WriteFile(dest, data, 0o644); err != nil {
 			return nil, err
+		}
+		for _, ref := range embeddedRefs(name) {
+			text, _ := embeddedRef(name, ref)
+			rdest := filepath.Join(dir, "references", ref+".md")
+			if err := os.MkdirAll(filepath.Dir(rdest), 0o755); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(rdest, text, 0o644); err != nil {
+				return nil, err
+			}
 		}
 		installed = append(installed, installedSkill{Name: name, Path: dest})
 	}

@@ -2,7 +2,6 @@ package store
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -55,7 +54,7 @@ func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 					Help: []string{"Two items cannot be one remote item: remove the record that is wrong, then run `jig trackers sync` again"},
 				}
 			}
-			if err := os.Remove(filepath.Join(s.Root, filepath.FromSlash(from))); err != nil {
+			if err := s.tRemove(filepath.Join(s.Root, filepath.FromSlash(from))); err != nil {
 				s.invalidateTrackerIndex()
 				return moved, err
 			}
@@ -66,7 +65,7 @@ func (s *Store) MoveFlatTrackerRecords() ([]TrackerMove, error) {
 			s.invalidateTrackerIndex()
 			return moved, err
 		}
-		if err := os.Rename(filepath.Join(s.Root, filepath.FromSlash(from)), s.TrackerRecordPath(e)); err != nil {
+		if err := s.tRename(filepath.Join(s.Root, filepath.FromSlash(from)), s.TrackerRecordPath(e)); err != nil {
 			s.invalidateTrackerIndex()
 			return moved, err
 		}

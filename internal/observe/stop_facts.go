@@ -3,6 +3,7 @@ package observe
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -10,7 +11,10 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // unattended reports whether nobody is watching the agent: it holds a claim
@@ -134,54 +138,107 @@ func (h *handler) markerUnattended() bool {
 	return false
 }
 
-// verification is a verification of a commit for a slice that has no
-// outcome yet.
-type verification struct{ commit, slice string }
-
-// inFlightWindow is how long a worker the ledger says was started is taken
-// to be running when the journal has no outcome of it: a worker that died
-// leaves that, and `jig verify --wait` on the commit runs it again.
-const inFlightWindow = 10 * time.Minute
-
-// pendingMaxAge is how old a verify-pending line may be and still count as a
-// verification under way: an oracle is bound by the manifest timeout (30
-// minutes unless it says otherwise), so a record older than this is a worker
-// that died.
-const pendingMaxAge = 2 * time.Hour
-
-// inFlight lists the verifications of the ticket still running: those the
-// journal shows pending, and those whose worker the ledger shows started
-// (the machine started it a moment ago) before the worker wrote its first
-// line.
-func (h *handler) inFlight() []verification {
+// verificationFindings tells the state of the ticket's verifications as the
+// agent is about to stop. A commit with no recorded result holds an
+// unattended session, since no run is recorded for it and the clearing command
+// runs the oracle. A failed, stopped, timed-out or could-not-run verification
+// is told and holds nobody back: the builder may stop, and the slice stays
+// building. An old verify-pending line is no result and is neither held on nor
+// said.
+func (h *handler) verificationFindings() []finding {
 	lines, err := h.journal()
 	if err != nil {
 		h.fail(err)
 		return nil
 	}
-	var out []verification
-	oldest := h.d.Now().Add(-pendingMaxAge)
-	for _, p := range journal.Pending(lines) {
-		if at, err := time.Parse(time.RFC3339Nano, p.TS); err == nil && at.Before(oldest) {
+	truth := h.verifyTruth(lines)
+	// Only a slice's building tip is held to a result: an older commit of the
+	// slice, or one it has a verified line at or after, is history
+	// (Truth.Outstanding), the rule `jig here` and `jig status` share.
+	rows := truth.Outstanding()
+
+	var out []finding
+	for _, r := range rows {
+		if !r.State.Unclear() {
 			continue
 		}
-		out = append(out, verification{p.Commit, p.Slice})
+		if !r.State.Holds() && !h.building(r.Slice) {
+			// A failed or stopped run is told to a builder still on the slice;
+			// once the slice is green, stalled or parked it is history.
+			continue
+		}
+		sha := short12(r.Commit)
+		f := finding{ref: r.Told() + ":" + sha + ":" + r.Slice, blocking: r.State.Holds()}
+		switch r.State {
+		case phase.VerifyNoResult:
+			f.text = fmt.Sprintf("commit %s for slice %s has no recorded result", sha, r.Slice)
+			f.hint = fmt.Sprintf("verify it with `jig verify %s --slice %s`", h.w.Ticket, r.Slice)
+		case phase.VerifyFailed:
+			if r.Cause != "" {
+				f.text = fmt.Sprintf("verification of %s for slice %s %s; run it again with `%s`", sha, r.Slice, r.Cause, r.Clear)
+			} else {
+				f.text = fmt.Sprintf("verification of %s for slice %s failed: %s", sha, r.Slice, r.FailLine)
+			}
+		default:
+			f.text = fmt.Sprintf("verification of %s for slice %s could not run: %s; run it again with `%s`", sha, r.Slice, r.Error, r.Clear)
+		}
+		out = append(out, f)
 	}
-	cutoff := h.d.Now().Add(-inFlightWindow)
-	h.fail(ledger.ReadBackward(h.d.JigHome, spawnWindow, func(l journal.Line) bool {
-		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil && at.Before(cutoff) {
-			return false
-		}
-		if l.Event != journal.EventVerifySpawned || l.Ticket != h.w.Ticket || l.Commit == "" {
-			return true
-		}
-		v := verification{l.Commit, l.Slice}
-		if journal.VerificationState(lines, v.commit, v.slice).State == journal.VerifyNone && !slices.Contains(out, v) {
-			out = append(out, v)
-		}
-		return true
-	}))
 	return out
+}
+
+// verifyTruth gathers what the derivation of the ticket's verifications reads.
+// The branch is read, with one git log, only when the ticket was found by the
+// branch the work is on and has a start sha; the commits are then those of that
+// branch.
+func (h *handler) verifyTruth(lines []journal.Line) verify.Truth {
+	t := verify.Truth{Ticket: h.w.Ticket, Lines: lines}
+	if sl, err := h.st.ReadSlices(h.w.Ticket); err == nil {
+		for _, s := range sl {
+			t.Slices = append(t.Slices, s.ID)
+		}
+	}
+	if h.w.TicketHow == locate.HowBranch || h.w.TicketHow == locate.HowBranchAlias {
+		dir := h.w.Root
+		if dir == "" {
+			dir = h.w.RepoDir
+		}
+		repo, target := h.repoAndTarget()
+		start := verify.StartSHA(h.st, h.w.Ticket, repo)
+		if start == "" && dir != "" && target != "" {
+			// A branch no claim started from (the work was begun by hand) has
+			// no recorded start: its commits are those past the target branch,
+			// as origin has it, else as the clone has it.
+			for _, ref := range []string{"refs/remotes/origin/" + target, "refs/heads/" + target} {
+				if base, err := gitx.MergeBase(dir, "HEAD", ref); err == nil && base != "" {
+					start = base
+					break
+				}
+			}
+		}
+		if start != "" && dir != "" {
+			if c, parents, err := verify.BranchCommits(dir, start, "HEAD"); err == nil {
+				t.Commits, t.Parents, t.BranchKnown = c, parents, true
+			}
+		}
+	}
+	return t
+}
+
+// repoAndTarget is the located repo name in the project and its target
+// branch. A repo the project does not list has no target (a commit with no
+// known fork point is not held to one); the project's only repo is the repo
+// of a Locate that named none.
+func (h *handler) repoAndTarget() (name, target string) {
+	for _, r := range h.cfg.Repos {
+		if h.w.Repo != "" && r.Name() == h.w.Repo {
+			return r.Name(), r.TargetBranch()
+		}
+	}
+	if len(h.cfg.Repos) == 1 {
+		return h.cfg.Repos[0].Name(), h.cfg.Repos[0].TargetBranch()
+	}
+	return h.w.Repo, ""
 }
 
 // dirtyTracked lists the tracked files of the session directory that have
@@ -205,4 +262,10 @@ func (h *handler) dirtyTracked() []string {
 func fingerprint(parts []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+// building reports whether the slice is being built now.
+func (h *handler) building(slice string) bool {
+	ss, err := h.st.ReadSliceState(h.w.Ticket, slice)
+	return err == nil && ss.State == "building"
 }

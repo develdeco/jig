@@ -17,7 +17,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -53,10 +52,9 @@ func cleanReport(p Prepared) ReviewResult {
 
 // TestGatePrepareOpensARoundWithoutMakingOne: the gate over a branch only the
 // operator's clone has opens round 1: the request and the open record are in
-// the store's work directory, the lease is a pristine checkout of the clone's
-// head, and there is no gate/round-1 yet. Neither file names a directory of
-// this machine's jig home (the store is shared); the Prepared a caller gets
-// spells the lease out.
+// the store's work directory, the round is at the clone's head and made no
+// directory under the jig home, and there is no gate/round-1 yet. Neither file
+// names a directory of this machine's jig home (the store is shared).
 func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	t.Parallel()
 	fx, d, head := cloneBuilt(t)
@@ -68,8 +66,11 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if p.Round != 1 || p.Head != head || p.Branch != ticketBranch(fx.Ticket) || p.Copy != string(clonesCopy) || p.Scope != "full" {
 		t.Fatalf("Prepared = round %d at %s on %s from %s (%s), want round 1 at %s on the ticket's branch from the clone's copy, full", p.Round, p.Head, p.Branch, p.Copy, p.Scope, head)
 	}
-	if got := run(t, p.Lease, "rev-parse", "HEAD"); got != head || p.Request.Worktree != p.Lease || p.Lease != gateLeaseOf(t, fx, fx.Ticket) {
-		t.Fatalf("lease %q (request worktree %q) at %s, want the gate lease checked out at the clone's head %s", p.Lease, p.Request.Worktree, got, head)
+	if _, err := os.Stat(filepath.Join(fx.Home, "pool")); err == nil {
+		t.Fatal("the round made a pool directory under the jig home")
+	}
+	if got := run(t, fx.RepoDir, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("the clone is at %s after the round, want %s untouched", got, head)
 	}
 	if originRef(t, fx.RepoRemote, "refs/heads/"+p.Branch) != "" {
 		t.Fatal("the gate pushed the branch to origin")
@@ -94,16 +95,15 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 	if err := yaml.Unmarshal(data, &open); err != nil {
 		t.Fatal(err)
 	}
-	if open.Lease != "pool/fixture-repo/JIG-1-gate" || open.Head != head || open.Opened == "" {
-		t.Errorf("open record = %+v, want the lease relative to the jig home, the head and the time it opened", open)
+	if open.Head != head || open.Opened == "" {
+		t.Errorf("open record = %+v, want the head and the time it opened", open)
 	}
 
 	again, ok, err := CurrentRound(d, fx.Ticket)
 	if err != nil || !ok {
 		t.Fatalf("CurrentRound = ok %v, %v, want the round just opened", ok, err)
 	}
-	again.Request.Worktree = p.Request.Worktree
-	if !reflect.DeepEqual(again.Request, p.Request) || again.Lease != p.Lease || again.Head != head {
+	if !reflect.DeepEqual(again.Request, p.Request) || again.Head != head {
 		t.Errorf("CurrentRound = %+v, want what GatePrepare returned: %+v", again, p)
 	}
 }
@@ -127,6 +127,42 @@ func TestGatePrepareRefusesWhatHasNoCopy(t *testing.T) {
 	if lines, _ := journal.Read(d.Store, fx.Ticket); len(lines) != 0 {
 		t.Fatalf("the refused gate journaled %+v", lines)
 	}
+
+	// A branch only another machine has built on: the journal records the
+	// commit jig built, neither the clone nor origin holds it, and the round is
+	// refused instead of reviewing less than the ticket built. Pushing it from
+	// the machine that built it is the way on.
+	t.Run("the chosen copy lacks a commit jig built", func(t *testing.T) {
+		t.Parallel()
+		const ticket, branch = "JIG-2", "add-retry"
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d := newDeps(t, fx)
+		d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
+		newAdoptTicket(t, d, ticket)
+		authorBranch(t, fx, branch)
+		if _, err := GatePrepare(d, GateOpts{Ticket: ticket, Branch: branch}); err != nil {
+			t.Fatalf("GatePrepare adopting %s: %v", branch, err)
+		}
+		other := cloneFrom(t, fx.RepoRemote)
+		run(t, other, "checkout", branch)
+		elsewhere := writeAndCommit(t, other, "fix.txt", "jig's fix", ticket+" fix-1: built on another machine")
+		journalBuilt(t, d.Store, ticket, "fix-1", elsewhere, 1)
+
+		_, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != "BUILT_COMMITS_MISSING" {
+			t.Fatalf("GatePrepare: err = %v, want an *axi.Error BUILT_COMMITS_MISSING", err)
+		}
+		if len(ae.Help) == 0 || !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, elsewhere[:7]) {
+			t.Fatalf("refusal = %+v, want it to name the branch and the missing commit %s, and carry help", ae, elsewhere[:7])
+		}
+
+		builder(t).Push(other, "origin", branch)
+		p, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		if err != nil || p.Head != elsewhere || p.Copy != string(originsCopy) {
+			t.Fatalf("GatePrepare after the push = %+v (%v), want origin's copy at %s", p, err, elsewhere)
+		}
+	})
 }
 
 // TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins: the copy the round
@@ -144,25 +180,34 @@ func TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins(t *testing.T) {
 		wantHead func(clone, origin string) string
 	}{
 		{"clone ahead of origin", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			writeAndCommit(t, clone, "more.txt", "only the clone", "a commit only the clone has")
 		}, string(clonesCopy), func(clone, _ string) string { return clone }},
 		{"origin ahead of the clone", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			other := cloneFrom(t, fx.RepoRemote)
 			run(t, other, "checkout", branch)
 			writeAndCommit(t, other, "more.txt", "only origin", "a commit only origin has")
-			run(t, other, "push", "origin", branch)
+			builder(t).Push(other, "origin", branch)
 		}, string(originsCopy), func(_, origin string) string { return origin }},
 		{"in step", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 		}, string(clonesCopy), func(clone, _ string) string { return clone }},
+		{"origin's branch rewritten since the clone last fetched it", func(t *testing.T, fx *fixture.Fixture, clone string) {
+			builder(t).Push(clone, "origin", branch)
+			run(t, clone, "fetch", "origin")
+			other := cloneFrom(t, fx.RepoRemote)
+			run(t, other, "checkout", branch)
+			run(t, other, "reset", "--hard", "HEAD~1")
+			writeAndCommit(t, other, "rewritten.txt", "origin's rewrite", "a commit that replaces the clone's tip on origin")
+			run(t, other, "push", "--force", "origin", branch)
+		}, "", nil},
 		{"diverged", func(t *testing.T, fx *fixture.Fixture, clone string) {
-			run(t, clone, "push", "origin", branch)
+			builder(t).Push(clone, "origin", branch)
 			other := cloneFrom(t, fx.RepoRemote)
 			run(t, other, "checkout", branch)
 			writeAndCommit(t, other, "origin.txt", "only origin", "a commit only origin has")
-			run(t, other, "push", "origin", branch)
+			builder(t).Push(other, "origin", branch)
 			writeAndCommit(t, clone, "clone.txt", "only the clone", "a commit only the clone has")
 		}, "", nil},
 	}
@@ -190,6 +235,34 @@ func TestGatePrepareChoosesBetweenTheClonesCopyAndOrigins(t *testing.T) {
 			}
 		})
 	}
+
+	// An adopted branch jig built nothing on is the author's: origin's copy,
+	// as it is now, and whatever the author pushes next.
+	t.Run("an adopted branch jig built nothing on", func(t *testing.T) {
+		t.Parallel()
+		const ticket, adopted = "JIG-2", "add-retry"
+		fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
+		d := newDeps(t, fx)
+		d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
+		newAdoptTicket(t, d, ticket)
+		tip := authorBranch(t, fx, adopted)
+
+		p, err := GatePrepare(d, GateOpts{Ticket: ticket, Branch: adopted})
+		if err != nil {
+			t.Fatalf("GatePrepare: %v", err)
+		}
+		if p.Copy != string(originsCopy) || p.Head != tip || p.Branch != adopted {
+			t.Fatalf("round reviews %s at %s on %s, want origin's copy at %s on %s", p.Copy, p.Head, p.Branch, tip, adopted)
+		}
+		pushed := authorPush(t, fx, adopted, "more.txt")
+		again, err := GatePrepare(d, GateOpts{Ticket: ticket})
+		if err != nil || again.Head != pushed || again.Copy != string(originsCopy) {
+			t.Fatalf("GatePrepare after the author pushed = %+v (%v), want origin's copy at %s", again, err, pushed)
+		}
+		if got := originRef(t, fx.RepoRemote, "refs/heads/"+adopted); got != pushed {
+			t.Fatalf("origin's %s = %s, want %s untouched: gating pushes nothing", adopted, got, pushed)
+		}
+	})
 }
 
 // TestReopeningARoundKeepsItsDraftsOnlyWhileTheHeadStands: `jig gate` over a
@@ -257,7 +330,7 @@ func TestAppendDraftHoldsADraftToTheRulesOfAResult(t *testing.T) {
 		"an unknown action":                   {Finding: &ResultFinding{File: file, Title: "t", Action: "maybe", Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown risk":                     {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: "huge", RiskRationale: "r"}},
 		"an absolute file":                    {Finding: &ResultFinding{File: "/etc/passwd", Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r"}},
-		"an unknown oracle":                   {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r", Oracle: "nope"}},
+		"a fix naming no command":             {Finding: &ResultFinding{File: file, Title: "t", Action: ActionFix, Risk: RiskLow, RiskRationale: "r"}},
 		"an unknown prior":                    {Finding: &ResultFinding{File: file, Title: "t", Action: ActionNote, Risk: RiskLow, RiskRationale: "r", Prior: "r1-f1"}},
 		"a still_present of an unknown prior": {StillPresent: &StillPresentEntry{Prior: "r1-f1", Line: 3}},
 		"neither":                             {},
@@ -538,6 +611,42 @@ func TestBuildersAreTheAgentsThatChangedTheBranch(t *testing.T) {
 			t.Errorf("JudgeIndependence(%+v) = %q (%v), want %q", who, got, err, want)
 		}
 	}
+
+	// A ticket built in two repos: the journal's lines name the repo each was
+	// made in, and the builder of either repo is a builder of the ticket. No
+	// hook reported either session's calls, so each is unknown, and a session
+	// that built none of it is independent of both.
+	o := orchestratorTicket(t, "api", "web")
+	for _, l := range []journal.Line{
+		{Event: journal.EventClaim, Session: "s-api", Slice: o.slice["api"], Repo: "api"},
+		{Event: journal.EventOracle, Session: "s-web", Slice: o.slice["web"], Repo: "web", Outcome: "pass"},
+		{Event: journal.EventGateOpen, Session: "s-opener"},
+	} {
+		if err := journal.Append(o.d.Store, o.ticket, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	both, err := Builders(o.d, o.ticket, o.branch)
+	if err != nil {
+		t.Fatalf("Builders over two repos: %v", err)
+	}
+	names = nil
+	for _, b := range both {
+		names = append(names, b.Session+"/"+b.Agent)
+	}
+	if want := []string{"s-api/", "s-web/"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("builders of a ticket in two repos = %v, want %v", names, want)
+	}
+	for who, want := range map[string]Independence{
+		"s-api":      IndependentUnknown,
+		"s-web":      IndependentUnknown,
+		"s-opener":   IndependentYes,
+		"s-reviewer": IndependentYes,
+	} {
+		if got, err := JudgeIndependence(o.d, o.ticket, o.branch, Provenance{Session: who}); err != nil || got != want {
+			t.Errorf("JudgeIndependence(%s) over two repos = %q (%v), want %q", who, got, err, want)
+		}
+	}
 }
 
 // TestIndependenceReadsAndWritesAsAPlainYAMLScalar: true and false are YAML
@@ -579,22 +688,6 @@ func TestGateFinishRefusesWhatItCannotStandBehind(t *testing.T) {
 		}
 		_, err = GateFinish(d, p, cleanReport(p), Provenance{})
 		wantAxiCode(t, err, "REVIEW_NOT_OPEN")
-	})
-	t.Run("the lease changed", func(t *testing.T) {
-		t.Parallel()
-		fx, d, _ := cloneBuilt(t)
-		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(p.Lease, p.Request.MustReview[0]), []byte("edited by the reviewer\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		_, err = GateFinish(d, p, cleanReport(p), Provenance{})
-		wantAxiCode(t, err, "REVIEW_INVALID")
-		if _, statErr := os.Stat(gateRoundDir(d.Store, fx.Ticket, 1)); statErr == nil {
-			t.Fatal("a refused report made gate/round-1")
-		}
 	})
 	t.Run("the branch moved", func(t *testing.T) {
 		t.Parallel()
@@ -662,7 +755,7 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 	in := TriageInput{
 		Fixes: []Finding{{ID: "r1-f9"}},
 		Asks: []Finding{
-			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha"}, {ID: "r1-f4"},
+			{ID: "r1-f1", Workspace: ""}, {ID: "r1-f2", Workspace: "alpha"}, {ID: "r1-f3", Workspace: "alpha", Oracle: "test"}, {ID: "r1-f4"},
 		},
 	}
 
@@ -680,7 +773,6 @@ func TestRecordedTriageAppliesWhatAPersonDecidedAndNothingElse(t *testing.T) {
 
 	// With --yes the asks nobody decided that have a full build target are kept
 	// as DefaultTriage keeps them; r1-f4 has no workspace and stays undecided.
-	in.Manifest.Oracles = map[string]string{"test": "true"}
 	res = recordedTriage(d, fx.Ticket, true)(in)
 	if got := res.Asks["r1-f3"]; !got.Keep || got.Human {
 		t.Errorf("Asks[r1-f3] with --yes = %+v, want kept by default, not by a human", got)
@@ -782,57 +874,6 @@ func TestReadStatusSaysWhereTheGateAndThePublishStand(t *testing.T) {
 	}
 }
 
-// TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone: with no clone
-// holding the branch, the choice is the one the build lease and origin always
-// had (pointAtTicketBranch); a branch no copy has is BRANCH_NOT_FOUND; and an
-// adopted branch gone from origin is, too, whatever the build lease holds,
-// since a branch nobody can open a pull request from is not one to review.
-func TestPointAtBranchCopyFallsBackToTheBuildLeaseWithoutAClone(t *testing.T) {
-	t.Parallel()
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	d := newDeps(t, fx)
-	// What the choice reads is the journal's built commits, the build lease and
-	// origin: no gate round is needed.
-	driveBuild(t, fx, "rung-a")
-	branch := ticketBranch(fx.Ticket)
-	acquire := func(t *testing.T, branch string) string {
-		t.Helper()
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Publish)
-		if err != nil {
-			t.Fatalf("acquire the publish lease: %v", err)
-		}
-		return lease.Dir
-	}
-	point := func(t *testing.T, adopted bool) (branchCopy, error) {
-		t.Helper()
-		lines, err := journal.Read(d.Store, fx.Ticket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pointAtBranchCopy(d, acquire(t, branch), "fixture-repo", fx.Ticket, branch, adopted, journal.BuiltCommits(lines), "publish")
-	}
-
-	// A clone that is mapped but lacks the branch changes nothing.
-	d.Machine = project.MachineProject{Clones: map[string]string{"fixture-repo": fx.RepoDir}}
-	if got, err := point(t, false); err != nil || got != buildLeasesCopy {
-		t.Fatalf("copy = %v (%v), want the build lease's: the branch is built there and not pushed", got, err)
-	}
-
-	// Gone from the build lease and absent from origin: no copy.
-	if err := os.RemoveAll(buildLeaseDir(t, fx)); err != nil {
-		t.Fatal(err)
-	}
-	_, err := point(t, false)
-	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
-
-	// An adopted branch whose only copy is the build lease's is refused too.
-	buildLeaseDir(t, fx) // a fresh build lease, on the branch cut from main
-	run(t, buildLeaseOf(t, fx, fx.Ticket), "checkout", "-B", branch, "origin/main")
-	writeAndCommit(t, buildLeaseOf(t, fx, fx.Ticket), "built.txt", "built", "built")
-	_, err = point(t, true)
-	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
-}
-
 // TestRecordReviewerJournalsWhoReadsTheRound: the first time review context
 // names a reviewer, the journal says so with the round, the session and what
 // it runs on; naming the same one again writes nothing more, and another
@@ -906,51 +947,5 @@ func TestRecordReviewerJournalsWhoReadsTheRound(t *testing.T) {
 	}
 	if got := gate(); got[len(got)-2] != "open 1" || got[len(got)-1] != "s-other 1  " {
 		t.Errorf("after a gate-open the reviewer was not said after = %q, want it said again", got)
-	}
-}
-
-// TestPublishListsEveryRoundsReviewer: a builder whose hooks report its calls
-// reviews round 1 (independent: false), and the round after it is the whole
-// change again, which a reviewer who built none of it reviews. The review
-// notes of the publish list both rounds, so the builder's review stays on
-// record beside the independent one.
-func TestPublishListsEveryRoundsReviewer(t *testing.T) {
-	t.Parallel()
-	fx, d, _ := cloneBuilt(t)
-	useGithubHost(t, &d, "", "")
-	if err := journal.Append(d.Store, fx.Ticket, journal.Line{Slice: "a", Event: journal.EventVerifyPending, Session: "s-builder", Commit: strings.Repeat("a", 40)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := ledger.Append(d.Home, journal.Line{Event: journal.EventTool, Session: "s-builder", Ticket: fx.Ticket, Command: "go test ./..."}); err != nil {
-		t.Fatal(err)
-	}
-	for n, reviewer := range []Provenance{{Session: "s-builder", How: ReviewerByEnv}, {Session: "s-rev", How: ReviewerByFlag}} {
-		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
-		if err != nil {
-			t.Fatalf("GatePrepare round %d: %v", n+1, err)
-		}
-		if p.Request.Scope != "full" {
-			t.Errorf("round %d scope = %q, want full: round 1 is the first, and round 2 follows a builder's round", n+1, p.Request.Scope)
-		}
-		if _, err := GateFinish(d, p, cleanReport(p), reviewer); err != nil {
-			t.Fatalf("GateFinish round %d: %v", n+1, err)
-		}
-	}
-	report, err := PublishBody(d, PublishOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("PublishBody: %v", err)
-	}
-	notes, err := os.ReadFile(filepath.Join(d.Store.Root, filepath.FromSlash(report.Repos[0].ReviewNotes)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"- Round 1 (full",
-		"): reviewed by session `s-builder`, one of the builders: not an independent review.\n- Round 2 (full",
-		"): reviewed by session `s-rev`, none of the builders.\n",
-	} {
-		if !strings.Contains(string(notes), want) {
-			t.Errorf("the review notes lack %q:\n%s", want, notes)
-		}
 	}
 }

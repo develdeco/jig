@@ -24,13 +24,21 @@ type Question struct {
 	// it), "agent" (an agent relayed what a person said) or "" (an answer
 	// recorded before provenance existed, or no answer yet).
 	Provenance string
+	// Kind is "" for a question put to a person and KindCall for a judgment
+	// call a builder made and recorded itself.
+	Kind string
 }
+
+// KindCall is the Kind of a judgment call: a question the builder answered
+// itself, recorded so a reviewer and the ledger can see what was chosen.
+const KindCall = "call"
 
 type questionFrontMatter struct {
 	ID         string `yaml:"id"`
 	Slice      string `yaml:"slice"`
 	Status     string `yaml:"status"`
 	Provenance string `yaml:"provenance,omitempty"`
+	Kind       string `yaml:"kind,omitempty"`
 }
 
 func (s *Store) questionsDir(ticket string) string {
@@ -79,6 +87,27 @@ func (s *Store) AddQuestion(ticket, slice, body string) (Question, error) {
 	return q, nil
 }
 
+// AddCall records a judgment call about slice ("" for the whole ticket): body
+// is what was ambiguous and answer what the builder chose, written as an
+// answered question under the next unused id with provenance "agent" and
+// kind KindCall. It is allocated and written under the same lock as
+// AddQuestion.
+func (s *Store) AddCall(ticket, slice, body, answer string) (Question, error) {
+	release, _, err := Lock(filepath.Join(s.questionsDir(ticket), "next"), 30*time.Second)
+	if err != nil {
+		return Question{}, err
+	}
+	defer release()
+	q := Question{
+		ID: s.NextQuestionID(ticket), Slice: slice, Status: "answered", Body: body,
+		Answer: answer, Provenance: "agent", Kind: KindCall,
+	}
+	if err := s.WriteQuestion(ticket, q); err != nil {
+		return Question{}, err
+	}
+	return q, nil
+}
+
 // ReadQuestion reads the one question qid of ticket. A question that is not
 // there is an error that satisfies os.IsNotExist.
 func (s *Store) ReadQuestion(ticket, qid string) (Question, error) {
@@ -102,7 +131,7 @@ func (s *Store) WriteQuestion(ticket string, q Question) error {
 }
 
 func renderQuestion(q Question) string {
-	fm := questionFrontMatter{ID: q.ID, Slice: q.Slice, Status: q.Status, Provenance: q.Provenance}
+	fm := questionFrontMatter{ID: q.ID, Slice: q.Slice, Status: q.Status, Provenance: q.Provenance, Kind: q.Kind}
 	fmYAML, _ := yaml.Marshal(fm)
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -156,6 +185,7 @@ func parseQuestion(id string, data []byte) (Question, error) {
 		Body:       body,
 		Answer:     answer,
 		Provenance: fm.Provenance,
+		Kind:       fm.Kind,
 	}, nil
 }
 

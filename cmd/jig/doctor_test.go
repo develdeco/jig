@@ -347,29 +347,3 @@ func TestDoctorWritesNothing(t *testing.T) {
 		t.Errorf("doctor wrote something: git status %q -> %q", before, after)
 	}
 }
-
-// TestDoctorSaysWhenClaudeReadsAnotherDirectory: jig writes to ~/.claude; a
-// Claude Code started with CLAUDE_CONFIG_DIR reads somewhere else, and doctor
-// says so.
-func TestDoctorSaysWhenClaudeReadsAnotherDirectory(t *testing.T) {
-	t.Parallel()
-	ie := newInstallerEnv(t)
-	ie.env = ie.env.inDir(ie.root)
-	out, _ := runMain(t, ie.env, "", "doctor")
-	if strings.Contains(out, "CLAUDE_CONFIG_DIR") {
-		t.Errorf("a note about a variable that is not set:\n%s", out)
-	}
-	other := filepath.Join(ie.root, "claude-elsewhere")
-	e := ie.env
-	get := e.getenv
-	e.getenv = func(k string) string {
-		if k == "CLAUDE_CONFIG_DIR" {
-			return other
-		}
-		return get(k)
-	}
-	out, _ = runMain(t, e, "", "doctor")
-	if !strings.Contains(out, "CLAUDE_CONFIG_DIR is set to") || !strings.Contains(out, other) || !strings.Contains(out, filepath.Join(ie.userHome, ".claude")) {
-		t.Errorf("no note about CLAUDE_CONFIG_DIR:\n%s", out)
-	}
-}

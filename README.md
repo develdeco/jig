@@ -37,8 +37,8 @@ the step under way, its part under way opened with how far it has come, what it
 is and its latest move; then one activity log, newest first, each line tagged
 with its step and sub-step:
 
-1. **Brief.** The prompt names no ticket, so the session mints SHOP-1 with
-   `jig ticket new`, and the TUI opens it. It drafts `brief.md` and
+1. **Brief.** The prompt names no ticket, so intake makes the issue and its chart with
+   `jig chart new --need`, `jig graduate` mints SHOP-1, and the TUI opens it. It drafts `brief.md` and
    `slices.yaml` with the intake skill, asks the person to confirm the brief,
    and records the approval.
 2. **Build.** The session claims the slice and commits with a `Jig-Slice:`
@@ -85,7 +85,7 @@ records.
 ## Getting started
 
 No release carries this design yet (v0.1.x is the earlier one, which ran its own
-builder sessions), so install from `main`, with Go 1.27.3 or newer:
+builder sessions), so install from `main`, with Go 1.27.4 or newer:
 
 ```sh
 go install github.com/develdeco/jig/cmd/jig@main
@@ -116,7 +116,7 @@ and stops with the prompt that asks for the next one.
 | You ask your agent | What the session does | What jig does |
 |---|---|---|
 | "Plan a ticket for <what you want>" | drafts `brief.md` and `slices.yaml` with you (the `intake` skill), checking them with `jig validate --check`, and runs `jig validate` once you agree | checks the brief, the slices and the repo agree, and records your approval |
-| "Build SHOP-1" | claims each ready slice, builds it, commits with a `Jig-Slice:` trailer | verifies every commit in the background and tells the session how it went |
+| "Build SHOP-1" | claims each ready slice, builds it, commits with a `Jig-Slice:` trailer and runs `jig verify` in its own worktree | records the run, marks the slice green on a covering pass, and tells the session how it went |
 | (the session is unsure) | asks with `jig ask` | parks the question; you answer from the TUI (`a`) or `jig answer` |
 | "Review SHOP-1" | in a session that did none of the ticket's work, reads `jig review context`, records findings and closes the round; in the session that built it, spawns a subagent to do that, since a reviewer must not have built what it reviews | routes findings into fix slices, and checks the reviewer built none of the change |
 | "Publish SHOP-1" | renders the body with `jig publish --body`, pushes and opens the PR, records it with `--pr` | or pushes and opens it itself with `jig publish` after your yes (the TUI's `p`) |
@@ -144,7 +144,7 @@ events --follow` prints. A ticket is four steps taken in order (brief, build,
 review, publish), each with how long it has taken (the step under way counting
 on, the steps' total in the panel's title) and its state in a few words:
 "approved by <name> (person) · 5 sections, 3 slices", "1 of 3 green ·
-verifying slice clamp at bbbbbbb", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
+slice clamp is being built", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the
 change", "pull request opened · <url>". The steps are the same answer `jig next`
 gives, so the screen and the command never disagree about where a ticket stands.
 Under them a block named after the step under the cursor lists what the step is
@@ -152,7 +152,7 @@ made of (the brief drafted, its slices written and its approval; each slice of
 the build; each review round with its asks and fixes; the publish's body, pull
 request and changelog, with your approval first when jig pushes for you), each
 with its state. The part that matters now (your turn, a failure, else the work under way)
-opens: its line shows how far it has come (`claimed ━━ committed ━━ verifying ──
+opens: its line shows how far it has come (`claimed ━━ run ──
 verified` for a slice) and how long it has run, and under it are fields that
 say what it is (a slice's goal, who holds it, what checks it and its commit; a
 round's reviewer; the brief's sections and slices; the pull request's branch)
@@ -189,8 +189,7 @@ cursor, and the screen is the standing `jig next <chart>` prints, read again onc
 its tickets' events quiet down; a merge on the host writes no line, so while the
 chart ends at a merge the screen reads it every two minutes, and `r` reads it
 now. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
-4f2a91c0 held at its stop · verification of 7f03c55 for slice apply is still
-running").
+4f2a91c0 held at its stop · commit 7f03c55 for slice apply has no recorded result").
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
@@ -203,23 +202,27 @@ With the hooks installed, a directory in a jig project gets jig's voice at four
 moments, and a directory in no project gets nothing:
 
 - **Session start**: what `jig here` prints - the project, the ticket the branch
-  names, its slices and their states, open questions, verifications still running,
+  names, its slices and their states, open questions, commits not yet verified,
   and the prompt that asks for the ticket's next phase; on a branch with no ticket,
   that work asked for without one is planned first with the intake skill, which
-  decides brief or chart and mints a ticket for a brief.
+  writes the need first, makes an issue and its chart for each need, and
+  decides brief or chart for each (a need raised later is another issue).
   The harness's session id is set as `JIG_SESSION` for the session's shell
   commands where the harness allows it (Claude Code does), and asked of the
   agent where it does not.
 - **A commit lands**: git's post-commit hook or the harness's PostToolUse hook
-  starts `jig verify` for it, whichever sees it first.
+  records it and starts nothing. The builder runs `jig verify` in its own
+  worktree, in the foreground or as the harness's background task: the slice's
+  oracle runs there, with its output on the builder's screen, and jig records
+  the run.
 - **The next shell command or prompt**: what the session has not heard yet, once - a
   verification's outcome, an answer to its question, a stall (the same failure
   twice), a brief edited under verified work, a commit outside every slice or one
   that names no slice, a stacked ticket's parent that moved on or merged, a ticket
   over its budget.
 - **Stop**: a person at the keys is shown what is left. A session that claimed its
-  slice with `--unattended` is held back once for each loose end - a verification
-  still running, uncommitted files, a failed run, an approved publish not yet
+  slice with `--unattended` is held back once for each loose end - a commit with
+  no recorded result, uncommitted files, a failed run, an approved publish not yet
   done, every slice green with no review opened. In a chart run the same hold
   falls on the build subagent that claimed (Claude Code's `SubagentStop`), never
   on the main session that started it, and each of them hears a note once.
@@ -233,7 +236,11 @@ and `<jig home>/logs/observe.log` has what went wrong.
 (the project you are in; `jig attach` is the same) or `--project <name>`. The
 pieces are `--skills`, `--hooks`, `--githook` and `--hint`, and `--artifacts` is
 all four. `jig doctor` lists what is in place and what each missing piece costs,
-and `--uninstall` takes away exactly what the same flags wrote.
+and `--uninstall` takes away exactly what the same flags wrote. Globally,
+Claude Code's skills, hooks and hint go in `~/.claude`, or in
+`$CLAUDE_CONFIG_DIR` when it is set, where Claude Code reads them: run `jig
+setup` and `jig doctor` with the same `CLAUDE_CONFIG_DIR` as the sessions they
+serve, once for each directory you use.
 
 | You are | Run | What you get |
 |---|---|---|
@@ -336,8 +343,6 @@ that name a local host. See
   [ADR 0032](docs/adr/0032-jig-attaches-to-the-harness.md) is the one behind
   this design, and [ADR 0033](docs/adr/0033-phases-are-asked-for-by-prompt.md)
   the one behind asking for a phase by prompt.
-- [docs/build-log/](docs/build-log/) - the build log, one file per ticket;
-  [DECISIONS.md](DECISIONS.md) is the log before it.
 - [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) - how to build, test and
   change jig.
 - [skills/](skills/) - the session skills embedded in the binary.

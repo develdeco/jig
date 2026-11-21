@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
@@ -21,6 +22,15 @@ import (
 // Store is a truth-repo checkout rooted at Root.
 type Store struct {
 	Root string
+
+	// checkpointNotice and checkpointBound, when set, replace the package
+	// defaults of the checkpoint lock's wait (a test shortens them).
+	checkpointNotice, checkpointBound time.Duration
+
+	// checkpointTryLock, when set, replaces TryLock for the checkpoint lock's
+	// waits, so a test can see the timeouts the wait is split into without
+	// timing a wall clock.
+	checkpointTryLock func(path string, timeout time.Duration) (release func(), held bool, err error)
 
 	// AfterCheckpoint, when set, runs once after every Push that actually
 	// lands (committed, and pushed when the store has an origin): the
@@ -61,6 +71,12 @@ type Store struct {
 	// ident is the person's git identity, resolved on first use by
 	// identity (identity.go).
 	ident identityCache
+
+	// Memo is the command's git memo: the identity and the origin the Store
+	// reads are asked of git once per command, however many Stores the command
+	// makes of one repository. nil asks git each time. The command that opens
+	// the store sets it, as it does BranchesFrom.
+	Memo *gitx.Memo
 
 	// writer is the name this clone writes under in writers mode, resolved on
 	// first use by writerName (writers.go).
@@ -105,7 +121,8 @@ func (s *Store) invalidateAliasClaims() {
 // explicitly once the claim lands.
 //
 // What the hook wrote to the tracker tree goes out with it: the sync's
-// record writes land in the working tree, and this commits and pushes them
+// record writes are pending while it runs (HoldTrackerWrites), so no claim on
+// the clone meets them unstaged, and this applies, commits and pushes them
 // once the hook is done (landTrackerWrites), a sync that failed part-way
 // included, since the records it did write are true. A ticket's last
 // checkpoint is a checkpoint like any other, with no next one to carry them.
@@ -113,6 +130,7 @@ func (s *Store) RunCheckpointHook() {
 	if s.AfterCheckpoint == nil {
 		return
 	}
+	s.HoldTrackerWrites()
 	hookErr := s.AfterCheckpoint(s)
 	landErr := s.landTrackerWrites(false)
 	if hookErr != nil {
@@ -208,7 +226,7 @@ func (s *Store) TrackerLinkPath(e TrackerEntry, o TrackerOwner) string {
 
 // HasRemote reports whether the store has a git remote named "origin".
 func (s *Store) HasRemote() bool {
-	_, err := gitx.Run(s.Root, "remote", "get-url", "origin")
+	_, err := s.Memo.OriginURL(s.Root, "origin")
 	return err == nil
 }
 
@@ -647,7 +665,9 @@ func (s *Store) Push(msg string) error {
 // that stopped on a conflict leaves a rebase in progress (Sync and Push
 // refused any rebase or merge that was already there, so this one is jig's
 // own, unless another process working on the same store started one in
-// between, a race recorded in DECISIONS.md): the conflicting paths are read
+// between - Sync and Push do not serialize against each other across
+// processes, so the abort can end a rebase the other is resolving): the
+// conflicting paths are read
 // structurally (`git ls-files -u`, before anything else touches the index)
 // so the report can name them, then the rebase is aborted with a best-effort
 // `rebase --abort`, and the result reported as STORE_CONFLICT either way,

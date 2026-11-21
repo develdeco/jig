@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
-	"github.com/develdeco/jig/internal/spawn"
+	"github.com/develdeco/jig/internal/setup"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -21,7 +22,7 @@ import (
 // the working directory it resolves the store, the repo and every relative path
 // flag against, and the seams (the terminal checks,
 // the flag-set hook, the mirror's GitHub client, the chart write, and the
-// context, clock, process spawner, executable and PATH lookups below). run
+// context, clock, executable and PATH lookups below). run
 // hands it to every command, and cmd/jig reads those only through it, never
 // through os.Getenv, os.Getwd, os.UserHomeDir, time.Now or a package-level
 // variable. The binary runs on processEnv; a test builds an env of its own,
@@ -29,7 +30,7 @@ import (
 // parallel.
 //
 // env does not reach what a run starts or calls into: the child processes it
-// spawns (git, the oracles, the verification workers, and the `gh auth token`
+// spawns (git, the oracles, and the `gh auth token`
 // the mirror runs, which reads GH_TOKEN and GITHUB_TOKEN itself) inherit the
 // process's environment and working directory. A test must not use env to
 // set those.
@@ -65,11 +66,8 @@ type env struct {
 	ctx context.Context
 	// now is the clock: time.Now in production.
 	now func() time.Time
-	// spawn starts a detached process that outlives this one and returns its
-	// pid: spawn.Detached in production. A test env refuses.
-	spawn func(spawn.Spec) (int, error)
 	// executable is the path of the running jig binary, as os.Executable
-	// gives it, for a command that starts itself as a detached worker.
+	// gives it, for a command that names the binary it runs as.
 	executable func() (string, error)
 	// lookPath finds a program on PATH as exec.LookPath does.
 	lookPath func(file string) (string, error)
@@ -84,6 +82,12 @@ type env struct {
 	// os.Stderr in production. The screens (`jig tui`) own the terminal, so
 	// a command they run writes it into the output they show instead.
 	stderr io.Writer
+	// memo is the command's git memo: what the run asks git about a
+	// repository (its remote URL, top level, common directory, author
+	// identity) it asks once. run makes one when the field is nil, except for
+	// the commands that outlive one command (`jig tui`, `jig mcp`); a test sets
+	// it to read what the run asked. A nil memo asks git every time.
+	memo *gitx.Memo
 }
 
 // processEnv is the env of the binary: the process's own environment and
@@ -96,7 +100,6 @@ func processEnv() env {
 
 		ctx:              context.Background(),
 		now:              time.Now,
-		spawn:            spawn.Detached,
 		executable:       os.Executable,
 		lookPath:         exec.LookPath,
 		stdoutIsTerminal: stdoutIsTerminal,
@@ -120,6 +123,30 @@ func (e env) jigHome() (string, error) {
 // environment, by os.UserHomeDir's rule.
 func (e env) userHomeDir() (string, error) {
 	return home.UserDirFrom(e.getenv)
+}
+
+// claudeConfigDirEnv is the variable Claude Code reads its user directory
+// from (settings, skills, memory) in place of ~/.claude.
+const claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+
+// userDirs resolves where the operator's own harness files are from e's
+// environment: the home directory (userHomeDir), and Claude Code's user
+// directory, which is $CLAUDE_CONFIG_DIR made absolute against e's working
+// directory when it is set and not empty, else <home>/.claude, as Claude
+// Code itself reads it. Every global Claude Code piece jig writes or checks
+// is found through it.
+func (e env) userDirs() (setup.UserDirs, error) {
+	h, err := e.userHomeDir()
+	if err != nil {
+		return setup.UserDirs{}, err
+	}
+	u := setup.UserDirs{Home: h}
+	if dir := e.getenv(claudeConfigDirEnv); dir != "" {
+		if u.Claude, err = e.abs(dir); err != nil {
+			return setup.UserDirs{}, err
+		}
+	}
+	return u, nil
 }
 
 // abs makes path absolute against e's working directory, where filepath.Abs

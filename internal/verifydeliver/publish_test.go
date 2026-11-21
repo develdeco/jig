@@ -13,7 +13,6 @@ import (
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/pool"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -58,12 +57,7 @@ func advanceTarget(t *testing.T, fx *fixture.Fixture) {
 	if err := os.WriteFile(filepath.Join(clone, "UPSTREAM.md"), []byte("upstream moved on\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if _, err := gitx.Run(clone, "add", "-A"); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	if _, err := gitx.RunEnv(clone, buildGitEnv, "commit", "-m", "upstream: unrelated change"); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
+	builder(t).Commit(clone, "upstream: unrelated change")
 	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {
 		t.Fatalf("push: %v", err)
 	}
@@ -187,22 +181,12 @@ func journalLen(t *testing.T, d Deps, ticket string) int {
 	return len(lines)
 }
 
-// publishLeaseDir returns the fixture ticket's publish lease directory.
-func publishLeaseDir(t *testing.T, fx *fixture.Fixture) string {
-	t.Helper()
-	dir, err := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Publish)
-	if err != nil {
-		t.Fatalf("resolve publish lease: %v", err)
-	}
-	return dir
-}
-
 // TestPublishFullChain is the one chain of the publish: a ticket gated clean by
 // scripted rounds publishes its reviewed head as it is. The target has moved on
 // since the gate, and publish still reconciles nothing, squashes nothing and
 // commits nothing: origin's branch is exactly the build lease's, commit for
 // commit, the journal holds no reconcile, revalidate, memorize or squash line,
-// and no retrieval notes were added to the branch. What a publish leaves in the
+// and nothing else was added to the branch. What a publish leaves in the
 // store - changelogs, the ledger entry, the contract index, the evidence - is
 // written once the branch is out.
 //
@@ -482,7 +466,7 @@ func TestPublishFullChain(t *testing.T) {
 		if len(pushes.confirmed) != 1 || !pushes.confirmed[0] {
 			t.Fatalf("guardedPush confirmed = %v, want true after an accepted prompt", pushes.confirmed)
 		}
-		if prompted != branch || len(pushes.branches) != 1 || pushes.branches[0] != branch {
+		if prompted != branch || len(pushes.branches) != 1 || !strings.HasSuffix(pushes.branches[0], ":refs/heads/"+branch) {
 			t.Fatalf("prompt named branch %q and push named %q, want both to name the ticket's own branch %q", prompted, pushes.branches, branch)
 		}
 		if promptedTicket != fx.Ticket {
@@ -522,6 +506,22 @@ func TestPublishFullChain(t *testing.T) {
 	step(t, "a review notes comment that cannot be posted still publishes, with a warning", func(t *testing.T) {
 		dd := gh(t, "", "pr comment")
 		dd.GuardedPush = (&pushRecorder{}).push
+		// The latest round records a store reference: the review notes the
+		// publish writes carry it, by place and not by what it cites.
+		reportPath := filepath.Join(gateRoundDir(d.Store, fx.Ticket, 2), "report.yaml")
+		reportBefore, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		withRefs := append(append([]byte(nil), reportBefore...), []byte("store_refs:\n  - {repo: fixture-repo, file: alpha/note.go, line: 4, id: ZQX-7}\n")...)
+		if err := os.WriteFile(reportPath, withRefs, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.WriteFile(reportPath, reportBefore, 0o644); err != nil {
+				t.Error(err)
+			}
+		}()
 		var warning string
 		dd.Warn = func(format string, args ...any) { warning = fmt.Sprintf(format, args...) }
 		journalBefore := journalLen(t, dd, fx.Ticket)
@@ -543,8 +543,12 @@ func TestPublishFullChain(t *testing.T) {
 		if calls := ghCallsNow(t); ghCalls(calls, "pr", "create") != 1 {
 			t.Errorf("pr create not called or called multiple times: %v", calls)
 		}
-		if _, err := os.Stat(reviewNotesPath); err != nil {
-			t.Errorf("review notes file was not kept at %s: %v", reviewNotesPath, err)
+		notes, err := os.ReadFile(reviewNotesPath)
+		if err != nil {
+			t.Fatalf("review notes file was not kept at %s: %v", reviewNotesPath, err)
+		}
+		if !strings.Contains(string(notes), "## Store references\n\nThe change adds 1 line that names something only the jig store holds:\n\n- alpha/note.go:4\n") || strings.Contains(string(notes), "ZQX-7") {
+			t.Errorf("review notes lack the store references section, or name what a line cites:\n%s", notes)
 		}
 		var publishDone bool
 		for _, l := range journalFrom(t, dd, fx.Ticket, journalBefore) {
@@ -662,8 +666,6 @@ func TestPublishFullChain(t *testing.T) {
 		advanceTarget(t, fx)
 
 		dd := d
-		oracles := &oracleRecorder{}
-		dd.Oracle = oracles.run
 		var gotBranch, gotPR string
 		var gotHasHost bool
 		dd.Confirm = func(branch, _, openPR string, hasHost bool) bool {
@@ -681,9 +683,6 @@ func TestPublishFullChain(t *testing.T) {
 		}
 		if report.Tier != "none" {
 			t.Fatalf("Tier = %q, want none: publish revalidates nothing", report.Tier)
-		}
-		if ran := oracles.ran(); len(ran) != 0 {
-			t.Fatalf("publish ran oracles %v, want none", ran)
 		}
 		if head := report.Head["fixture-repo"]; head != buildHead {
 			t.Fatalf("Head[fixture-repo] = %q, want the reviewed head %s", head, buildHead)
@@ -740,9 +739,6 @@ func TestPublishFullChain(t *testing.T) {
 		if got := run(t, fx.RepoRemote, "log", "--format=%H", fx.Branch); got != buildLog {
 			t.Fatalf("origin's history of %s is\n%s\nwant the build lease's\n%s", fx.Branch, got, buildLog)
 		}
-		if _, err := gitx.Run(publishLeaseDir(t, fx), "cat-file", "-e", buildHead+":.claude/retrieval/"+fx.Ticket+".md"); err == nil {
-			t.Fatal("the reviewed head holds retrieval notes: publish committed on the branch")
-		}
 
 		ticketDir := d.Store.TicketDir(fx.Ticket)
 		for _, f := range []string{
@@ -792,27 +788,39 @@ func TestPublishFullChain(t *testing.T) {
 		}
 	})
 
-	step(t, "the build lease is in step with the branch publish pushed", func(t *testing.T) {
-		lease, err := pool.Acquire(fx.Home, "fixture-repo", fx.RepoRemote, "main", branch, fx.Ticket, pool.Build)
-		if err != nil {
-			t.Fatalf("build Acquire after a publish: %v, want the build lease in step with origin's branch", err)
-		}
-		standing, err := pool.Compare(lease.Dir, branch)
-		if err != nil || standing != pool.InStep {
-			t.Fatalf("the build lease stands %v against origin (%v), want in step", standing, err)
+	step(t, "the clone is in step with the branch publish pushed", func(t *testing.T) {
+		ahead, behind, err := gitx.Standing(fx.RepoDir, "refs/heads/"+branch, "refs/remotes/origin/"+branch)
+		if err != nil || ahead != 0 || behind != 0 {
+			t.Fatalf("the clone's %s stands %d ahead and %d behind origin's (%v), want in step", branch, ahead, behind, err)
 		}
 	})
 
-	step(t, "the branch's copy is origin's once a publish pushed it", func(t *testing.T) {
-		wantCopy(t, d, fx, fx.Ticket, branch, false, originsCopy, "publish pushed the build lease's head as it is, so the two are one")
+	step(t, "the branch's copy is the clone's once a publish pushed it, at the published head", func(t *testing.T) {
+		wantCopyAt(t, d, fx, branch, clonesCopy, originRef(t, fx.RepoRemote, "refs/heads/"+branch), "publish pushed the clone's head as it is, so the two are one")
 	})
 
-	step(t, "and with no build lease here", func(t *testing.T) {
-		if err := os.RemoveAll(buildLeaseOf(t, fx, fx.Ticket)); err != nil {
-			t.Fatalf("remove the build lease: %v", err)
-		}
-		wantCopy(t, d, fx, fx.Ticket, branch, false, originsCopy, "it holds every commit jig built, exactly as it built them")
+	step(t, "and with the branch in no clone", func(t *testing.T) {
+		run(t, fx.RepoDir, "checkout", "--detach", "origin/main")
+		run(t, fx.RepoDir, "branch", "-D", branch)
+		wantCopyAt(t, d, fx, branch, originsCopy, originRef(t, fx.RepoRemote, "refs/heads/"+branch), "it holds every commit jig built, exactly as it built them")
 	})
+}
+
+// wantCopyAt requires the gate's and publish's choice of copy of branch to be
+// want, at the head wantHead.
+func wantCopyAt(t *testing.T, d Deps, fx *fixture.Fixture, branch string, want branchCopy, wantHead, why string) {
+	t.Helper()
+	lines, err := journal.Read(d.Store, fx.Ticket)
+	if err != nil {
+		t.Fatalf("journal.Read: %v", err)
+	}
+	got, err := chooseCopy(d, "fixture-repo", branch, journal.BuiltCommits(lines), "publish")
+	if err != nil {
+		t.Fatalf("chooseCopy: %v", err)
+	}
+	if got.Copy != want || got.Head != wantHead {
+		t.Errorf("copy = %v at %s, want %v at %s: %s", got.Copy, got.Head, want, wantHead, why)
+	}
 }
 
 // TestPublishTitlesThePullRequestWithTheRecordedTitle: the pull request opened

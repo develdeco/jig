@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/session"
 )
 
 // gateCleanReviewerRound drives one real, reviewer-sourced gate round to a
@@ -19,15 +18,7 @@ import (
 func gateCleanReviewerRound(t *testing.T, fx *fixture.Fixture, d Deps) {
 	t.Helper()
 	driveBuild(t, fx, "rung-a")
-	reviewer := stubBackend{run: func(sd session.Dispatch) error {
-		writeMustReviewResult(t, sd)
-		return nil
-	}}
-	report, err := Gate(d, newReviewerGateSource(reviewer), GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate: %v", err)
-	}
-	if report.Verdict != "clean" {
+	if report := recordedRound(t, d, GateOpts{Ticket: fx.Ticket}, cleanReport); report.Verdict != "clean" {
 		t.Fatalf("verdict = %q, want clean", report.Verdict)
 	}
 }

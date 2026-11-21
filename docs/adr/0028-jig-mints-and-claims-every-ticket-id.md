@@ -7,8 +7,8 @@ tied an id to a round trip the store itself did not need: `jig ticket new`
 neither committed nor pushed what it minted, so two clones of one store
 could compute the same next id and both write it, and an id minted by
 opening a tracker issue could not be retried without leaving an orphan
-behind if the write that followed failed. The store-layout destination
-(decision 7) settles this the other way: the store is the source of truth,
+behind if the write that followed failed. The store as the destination of
+all state settles this the other way: the store is the source of truth,
 and a tracker only ever mirrors it. An id is store state like any other, so
 minting it must be the store's own, atomic act, not a side effect of asking
 some other system to agree.
@@ -91,10 +91,18 @@ surfaces as a merge or rebase conflict, only as a different id on each.
   the store is truth, and a tracker only ever projects it outward - is not
   superseded; this ADR is the sharper form of exactly that for ids.
 
-See [DECISIONS.md](../../DECISIONS.md) for the attempt bound, the lock
-path, and the claim commit's exact shape.
+The mint holds the store's own lock (`.jig-mint`, a sidecar with the same
+30-second timeout as every other store writer) across the scan for the next id
+and the write of the record, so two mints on one clone never compute the same
+id. The claim runs in a retry loop bounded at five attempts: it stages exactly
+the paths the write reported and commits them under a pathspec-scoped commit,
+so nothing else dirty in the store rides along. A rejected push is undone
+scoped to those paths, never repo-wide, and a commit another process made in
+between is never rewound: the claim then refuses `ID_NOT_CLAIMED` and leaves
+both commits for the operator. The last rejection also refuses
+`ID_NOT_CLAIMED`, leaving no folder, no commit and no claim behind.
 
-## Amendment: an id gains an area key (T-26)
+## Amendment: an id gains an area key
 
 `Store.Mint` took a `project.yaml` `ticket_format` string (`"JIG-{n}"`),
 parsed it into a regexp, and used that to both scan for the next number and
@@ -103,13 +111,13 @@ of area key to its one-line meaning - and an id is `<key>-<n>`, counted per
 key; `Mint` takes the bare key to mint under, already resolved against the
 project's declared keys (`project.Config.ResolveKey`) before it is ever
 called, and computes `<key>-<n>` itself. `ticket_format` is still read, but
-only as the one key a pre-migration store declares (`<KEY>-{n}`), until L3's
+only as the one key a pre-migration store declares (`<KEY>-{n}`), until the
 migration writes `keys:` for it.
 
 `Store.TicketIDs` dropped its `format` parameter: it lists every id-shaped
 store-root folder under any key, declared or not, sorted by key then by
 number, rather than the folders one specific format matched. This is the
-one function minting's own per-key count and A6's mirror both read tickets
+one function minting's own per-key count and the mirror both read tickets
 through, so a key removed from `project.yaml` still lists - and keeps - the
 tickets minted under it, where a format-scoped list would have dropped
 them.
@@ -121,14 +129,14 @@ always `<key>-<n>` - a key is uppercase letters and digits with no `-`, and
 longer; they stay as a defensive check on a value this ADR's claim
 guarantee still depends on being safe to write under.
 
-## Amendment: a ticket keeps its earlier ids as aliases (T-26)
+## Amendment: a ticket keeps its earlier ids as aliases
 
 An id gaining a key (above) only matters once a ticket can actually move to
 a keyed one without losing the id it was minted, found, or talked about
 under before. `ticket.yaml` gains `aliases:`, a list of a ticket's earlier
 ids, kept unchanged by every rewrite of the record the same way every other
 field is; no command in this ticket renames a ticket or writes a real one -
-only a test does, standing in for the migration (L3) that will.
+only a test does, standing in for the migration that will.
 
 This ADR's claim guarantee - an id, once claimed, names exactly one ticket
 - would otherwise break the moment an alias exists: an id or alias that two

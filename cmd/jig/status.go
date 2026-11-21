@@ -59,12 +59,14 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	// A chart (a ticket of that name wins) prints where it stands: the tables
 	// `jig next <chart>` prints, from the same derivation.
 	if chart, ok := chartNamed(st, ticket); ok {
-		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
+		c, m, err := deriveChart(st, cfg, mp, chart, merges)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
 		n.setWorkspaceOverlaps(st, cfg, mp)
+		n.setIssue(st, cfg, mp, merges)
 		axi.Render(stdout, n.blocks("status")...)
 		return 0
 	}
@@ -76,13 +78,27 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, orChartHint(st, ticket, err))
 	}
 
+	// An issue or a multi-task has no slices to count: it prints as `jig next` does.
+	if rec, err := st.ReadTicket(ticket); err == nil {
+		if k := rec.KindOrDefault(); k != store.KindTask {
+			data, err := readTicketData(st, ticket)
+			if err != nil {
+				return renderErr(stdout, err)
+			}
+			axi.Render(stdout, nextNotATask(st, data, k).notATaskBlocks("status")...)
+			return 0
+		}
+	}
+
 	// The advice it ends with reads where the ticket stands as `jig next` does,
 	// its stack plan laid on it: a published ticket owed a merge is not done. The
 	// screens of the TUI run this command every few seconds on a quiet ticket, so
 	// the plan's open pull requests are read through the listing's max age rather
 	// than asked of the host each time: a parent that merged shows in the hint
 	// within that age, as it does in the listing.
-	out, err := renderStatusWith(st, ticket, statusSections(), plannedStanding(cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)))
+	merges := newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge)
+	sections := append(statusSectionsWithBranch(cfg, mp), sharedStatusSection(cfg, mp, merges))
+	out, err := renderStatusWith(st, ticket, sections, plannedStanding(cfg, mp, merges))
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -90,29 +106,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	return 0
 }
 
-// RenderStatus renders the exact `jig status` golden format for ticket:
-// ticket/state lines, a slices table (a slice's id, state, attempts,
-// blocked_by, question and goal, then the workspace and oracle it names as
-// slices.yaml has them and, for a fix slice, the round it came from), a
-// questions table (or "questions:
-// none"), a parked table (present only while a slice is needs-input) and a
-// stalled table (present only while a slice is stalled), the blocks of every
-// registered status section (registerStatusSection), and a contextual help
-// hint. A ticket that adopted a branch names it on a branch line under the
-// ticket's. The parked and stalled tables are the custody surface: they make
-// "awaiting a human" (parked) and "stuck" (stalled) unmistakable and distinct
-// from each other and from ordinary in-progress work.
-func RenderStatus(st *store.Store, ticket string) (string, error) {
-	return renderStatus(st, ticket, statusSections())
-}
-
-// renderStatus is RenderStatus over the given sections: each one's blocks
-// follow the status blocks and come before the help line.
-func renderStatus(st *store.Store, ticket string, sections []statusSection) (string, error) {
-	return renderStatusWith(st, ticket, sections, derivePhase)
-}
-
-// renderStatusWith is renderStatus with the word on where the ticket stands
+// renderStatusWith renders the status of a ticket and each section's blocks, with the word on where the ticket stands
 // given: the advice it ends with is the advice of that phase.
 func renderStatusWith(st *store.Store, ticket string, sections []statusSection, standing standingOf) (string, error) {
 	slices, err := st.ReadSlices(ticket)
@@ -598,8 +592,8 @@ func plannedStanding(cfg project.Config, mp project.MachineProject, merges merge
 		if err != nil {
 			return phase.Ticket{}, err
 		}
-		if mayBeBehind(st, ticket, rec) {
-			if t, err := derivePhasePlanned(st, cfg, mp, ticket, rec, merges); err == nil {
+		if mayBeBehind(st, ticket, rec, "") {
+			if t, err := derivePhasePlanned(st, cfg, mp, ticket, rec, merges, ""); err == nil {
 				return t, nil
 			}
 		}
@@ -654,7 +648,7 @@ func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (stri
 
 	// A stalled slice outranks every hint below except an open question
 	// (checked above), and env-blocked in turn outranks everything but
-	// stalled (matching the state: line's own precedence in RenderStatus):
+	// stalled (matching the state: line's own precedence in renderStatusWith):
 	// both are stuck, not merely unfinished, so the worse of the two is
 	// reported the moment it is found rather than waited out - checked in
 	// two full passes, not one combined pass, so a stalled slice later in
@@ -694,6 +688,11 @@ func nextStepHintWith(st *store.Store, ticket string, standing standingOf) (stri
 	t, err := standing(st, ticket)
 	if err != nil {
 		return "", err
+	}
+	if t.Current == phase.Land && t.Code == phase.CodeDone {
+		if issues := sharedIssues(st, ticket); issues != nil {
+			return landAdvice(t, ticket, issues), nil
+		}
 	}
 	return phaseAdvice(t, ticket), nil
 }

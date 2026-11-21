@@ -141,15 +141,6 @@ func TestGuardedPush(t *testing.T) {
 		}
 	})
 
-	t.Run("non-local confirmed classifies as non-local without pushing", func(t *testing.T) {
-		// Do not call GuardedPush with confirmed=true here: that would
-		// attempt an actual network push to a fake remote. Assert only
-		// the URL classifier that GuardedPush relies on for its decision.
-		if IsLocalRemote("https://example.invalid/fake/repo.git") {
-			t.Fatal("expected https URL to classify as non-local")
-		}
-	})
-
 	t.Run("local remote pushes without confirmation", func(t *testing.T) {
 		remoteDir := t.TempDir()
 		if _, err := Run(remoteDir, "init", "--bare", "-b", "main"); err != nil {
@@ -348,11 +339,11 @@ func TestDiffNameOnly(t *testing.T) {
 	}
 }
 
-// TestDiffHunks checks the new side of each hunk: a changed line, a content
-// line that reads "+++" inside a hunk, a deletion-only hunk left out, a
-// renamed file as all new lines at its new path, a deleted file with no hunk,
-// a submodule pointer that moved with none either, and a name with a space.
-func TestDiffHunks(t *testing.T) {
+// TestDiffAdded checks the added lines with their new-side numbers: a changed
+// line, a line that reads "+++" inside a hunk, a deletion-only change that adds
+// none, a renamed file as all added lines at its new path, a deleted file, a
+// binary file and a submodule pointer with none, and a name with a space.
+func TestDiffAdded(t *testing.T) {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
@@ -374,6 +365,7 @@ func TestDiffHunks(t *testing.T) {
 	write("gone.txt", "x\n")
 	write("old.txt", "o\n")
 	write("with space.txt", "1\n")
+	write("blob.bin", "a\x00b\n")
 	run("add", "-A")
 	run("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,sub")
 	run("commit", "-m", "c1")
@@ -383,6 +375,7 @@ func TestDiffHunks(t *testing.T) {
 	}
 	write("keep.txt", "a\nB\nc\n++ plus\n")
 	write("del.txt", "1\n3\n")
+	write("blob.bin", "a\x00c\n")
 	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
 		t.Fatal(err)
 	}
@@ -394,18 +387,34 @@ func TestDiffHunks(t *testing.T) {
 	run("update-index", "--add", "--cacheinfo", "160000,2222222222222222222222222222222222222222,sub")
 	run("commit", "-m", "c2")
 
-	got, err := DiffHunks(dir, base, "HEAD")
+	got, err := DiffAdded(dir, base, "HEAD")
+	if err != nil {
+		t.Fatalf("DiffAdded: %v", err)
+	}
+	want := []AddedLine{
+		{Path: "keep.txt", Line: 2, Text: "B"},
+		{Path: "keep.txt", Line: 4, Text: "++ plus"},
+		{Path: "new.txt", Line: 1, Text: "o"},
+		{Path: "with space.txt", Line: 2, Text: "2"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DiffAdded = %+v, want %+v", got, want)
+	}
+
+	// The hunks the same changes make: the added lines grouped by run, and
+	// the rename, deletion, binary file and submodule as in DiffAdded.
+	hunks, err := DiffHunks(dir, base, "HEAD")
 	if err != nil {
 		t.Fatalf("DiffHunks: %v", err)
 	}
-	want := []Hunk{
+	wantHunks := []Hunk{
 		{Path: "keep.txt", From: 2, To: 2},
 		{Path: "keep.txt", From: 4, To: 4},
 		{Path: "new.txt", From: 1, To: 1},
 		{Path: "with space.txt", From: 2, To: 2},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("DiffHunks = %+v, want %+v", got, want)
+	if !reflect.DeepEqual(hunks, wantHunks) {
+		t.Fatalf("DiffHunks = %+v, want %+v", hunks, wantHunks)
 	}
 }
 
@@ -447,7 +456,8 @@ func TestBlobsAtRev(t *testing.T) {
 
 // TestFileExistsAtRev checks a present file, an absent one, a deleted one
 // (present at base, gone at head), a directory (a tree, not a blob), and a
-// rev that does not resolve to a commit.
+// rev that does not resolve to a commit; then PathExistsAtRev on the same
+// repository, which differs only for a directory.
 func TestFileExistsAtRev(t *testing.T) {
 	dir := t.TempDir()
 	run := func(args ...string) string {
@@ -516,59 +526,29 @@ func TestFileExistsAtRev(t *testing.T) {
 	if _, err := FileExistsAtRev(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "here.txt"); err == nil {
 		t.Error("FileExistsAtRev with a bad rev: want an error, got nil")
 	}
-}
 
-// TestPathExistsAtRev checks the one case FileExistsAtRev reports false for
-// that PathExistsAtRev must not: a directory tracked at rev. Everything
-// else - a present file, an absent one, a nested path, a bad rev - behaves
-// the same as FileExistsAtRev, since both share one lookup.
-func TestPathExistsAtRev(t *testing.T) {
-	dir := t.TempDir()
-	run := func(args ...string) string {
-		t.Helper()
-		out, err := Run(dir, args...)
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		return out
-	}
-	run("init", "-b", "main")
-	run("config", "user.name", "jig-fixture")
-	run("config", "user.email", "fixture@example.invalid")
-	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
-		t.Fatalf("mkdir sub: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "sub", "f.txt"), []byte("z"), 0o644); err != nil {
-		t.Fatalf("write sub/f.txt: %v", err)
-	}
-	run("add", "-A")
-	run("commit", "-m", "c1")
-	head, err := RevParse(dir, "HEAD")
-	if err != nil {
-		t.Fatalf("rev-parse head: %v", err)
-	}
-
-	cases := []struct {
-		rev, path string
-		want      bool
+	// PathExistsAtRev shares the lookup and reports a directory tracked at
+	// rev too; --literal-pathspecs makes "sub/" name no entry while "sub" does.
+	pathCases := []struct {
+		path string
+		want bool
 	}{
-		{head, "sub", true},            // a directory, unlike FileExistsAtRev
-		{head, "sub/", false},          // --literal-pathspecs: "sub/" names no entry, "sub" does
-		{head, "sub/f.txt", true},      // a nested blob
-		{head, "sub/never.txt", false}, // a missing path under an existing directory
-		{head, "never.txt", false},     // a missing top-level path
-		{head, ".", false},             // ls-tree names no entry "."
+		{"sub", true},            // a directory, unlike FileExistsAtRev
+		{"sub/", false},          // names no entry
+		{"sub/f.txt", true},      // a nested blob
+		{"sub/never.txt", false}, // a missing path under an existing directory
+		{"never.txt", false},     // a missing top-level path
+		{".", false},             // ls-tree names no entry "."
 	}
-	for _, c := range cases {
-		got, err := PathExistsAtRev(dir, c.rev, c.path)
+	for _, c := range pathCases {
+		got, err := PathExistsAtRev(dir, head, c.path)
 		if err != nil {
-			t.Fatalf("PathExistsAtRev(%s, %s): %v", c.rev, c.path, err)
+			t.Fatalf("PathExistsAtRev(%s): %v", c.path, err)
 		}
 		if got != c.want {
-			t.Errorf("PathExistsAtRev(%s, %s) = %v, want %v", c.rev, c.path, got, c.want)
+			t.Errorf("PathExistsAtRev(%s) = %v, want %v", c.path, got, c.want)
 		}
 	}
-
 	if _, err := PathExistsAtRev(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "sub"); err == nil {
 		t.Error("PathExistsAtRev with a bad rev: want an error, got nil")
 	}

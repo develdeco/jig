@@ -41,8 +41,7 @@ type PullRequest struct {
 }
 
 // IssueState is an issue's current state on GitHub, as FetchIssues reads it
-// before the "drift" slice decides whether to overwrite anything
-// (brief.md#Ownership and drift).
+// before the "drift" slice decides whether to overwrite anything.
 type IssueState struct {
 	Title string
 	Body  string
@@ -59,7 +58,7 @@ type IssueState struct {
 }
 
 // ItemFields is a board item's current Status (the option's name) and Store
-// ID (the text), the jig-owned fields brief.md#Ownership and drift compares.
+// ID (the text), the jig-owned fields the drift check compares.
 // Either is "" when the project carries no value for that field yet.
 type ItemFields struct {
 	Status, StoreID string
@@ -96,7 +95,7 @@ func batches(ids []string) [][]string {
 
 // ProjectV2 is a GitHub Project's resolved identity and the field/option ids
 // PlaceItem writes items through: looked up fresh by EnsureProject at every
-// sync and recorded nowhere (brief.md#The board: "records none of them").
+// sync and recorded nowhere.
 type ProjectV2 struct {
 	ID string
 	// StatusFieldID is the project's "Status" single-select field.
@@ -116,104 +115,96 @@ type Client interface {
 	CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error)
 	// CloseIssueNotPlanned closes the issue nodeID identifies with the
 	// "not planned" state reason, as Claim does when another clone's push
-	// landed the same ticket or chart's issue first (brief.md#Syncing at
-	// every checkpoint).
+	// landed the same ticket or chart's issue first.
 	CloseIssueNotPlanned(ctx context.Context, nodeID string) error
 	// AddComment adds a comment with body to the issue (or other
 	// commentable) subjectID identifies.
 	AddComment(ctx context.Context, subjectID, body string) error
 	// PullRequestsByHeads returns, for each of branches, owner/repo's pull
 	// requests, in any state, whose head branch is exactly that branch
-	// (brief.md#Status and pull requests), ordered by number. A branch with
+	// ordered by number. A branch with
 	// none has no entry.
 	PullRequestsByHeads(ctx context.Context, owner, repo string, branches []string) (map[string][]PullRequest, error)
 	// PullRequestsByIDs returns the current number, state and repository of
 	// each pull request nodeIDs identifies, skipping any id GitHub no
-	// longer resolves to a pull request (brief.md#Status and pull requests:
-	// "then any recorded in its prs: that this query no longer finds"). A
+	// longer resolves to a pull request: the recorded prs: entries that
+	// PullRequestsByHeads no longer finds. A
 	// gone id comes back from GitHub as a NOT_FOUND "errors" entry alongside
 	// a null in data.nodes, not a null alone; this is tolerated rather than
 	// treated as a fatal error.
 	PullRequestsByIDs(ctx context.Context, nodeIDs []string) ([]PullRequest, error)
 	// AddSubIssue makes subIssueID a sub-issue of parentID, replacing
-	// whatever parent it had (brief.md#Links: "a ticket that becomes a
-	// sub-issue goes last").
+	// whatever parent it had; a ticket that becomes a sub-issue is linked
+	// last.
 	AddSubIssue(ctx context.Context, parentID, subIssueID string) error
-	// AddBlockedBy records that issueID is blocked by blockingID
-	// (brief.md#Links).
+	// AddBlockedBy records that issueID is blocked by blockingID.
 	AddBlockedBy(ctx context.Context, issueID, blockingID string) error
 	// RemoveBlockedBy removes blockingID from issueID's blocked-by edges:
-	// brief.md#Links's own drift rule for a blocked-by edge added on GitHub
-	// to a ticket that jig's own store does not list (brief.md#Ownership
-	// and drift).
+	// the drift rule for a blocked-by edge added on GitHub to a ticket that
+	// jig's own store does not list.
 	RemoveBlockedBy(ctx context.Context, issueID, blockingID string) error
 	// EnsureProject resolves the GitHub Project at ownerLogin (a user when
 	// isOrg is false, an org when true), number number: creating its Status
-	// field (with every option brief.md#The board lists, keeping any
+	// field (with every option of the board's Status set, keeping any
 	// existing option's id, name, color and description) and its "Store ID"
 	// text field when either is missing, and linking repoOwner/repoName to
-	// it when that repo is not linked yet (brief.md#The board). A project
+	// it when that repo is not linked yet. A project
 	// GraphQL cannot resolve - gone, or a token without the project scope,
 	// which looks identical from here - is refused with
 	// MIRROR_PROJECT_NOT_FOUND.
 	EnsureProject(ctx context.Context, ownerLogin string, isOrg bool, number int, repoOwner, repoName string) (ProjectV2, error)
 	// PlaceItem adds contentID (an issue's or a pull request's node id) to
 	// proj, idempotently, then sets its Status and Store ID fields, and
-	// returns the item's node id (brief.md#The board).
+	// returns the item's node id.
 	PlaceItem(ctx context.Context, proj ProjectV2, contentID, status, storeID string) (itemID string, err error)
 	// RepositoryIsPublic reports whether owner/repo is public, the gate
-	// brief.md#Publish safety scans a title and body against before they are
-	// written ("A private issue repo is not scanned").
+	// the publish-safety scan of a title and body checks before they are
+	// written: a private issue repo is not scanned.
 	RepositoryIsPublic(ctx context.Context, owner, repo string) (bool, error)
 	// FetchIssues reads each of nodeIDs' current title, body, open/closed
 	// state, parent, sub-issues and blocked-by links, the baseline the
-	// "drift" slice compares the store's own value against
-	// (brief.md#Ownership and drift). An id that no longer resolves - the
-	// issue was deleted, or its repository was - has no entry
-	// (brief.md#Adoption: "a recorded issue that is gone from GitHub gets a
-	// new issue").
+	// "drift" slice compares the store's own value against. An id that no longer resolves - the
+	// issue was deleted, or its repository was - has no entry, so the sync
+	// gives it a new issue.
 	FetchIssues(ctx context.Context, nodeIDs []string) (map[string]IssueState, error)
-	// UpdateIssue sets nodeID's title and body (brief.md#Syncing at every
-	// checkpoint, step 4).
+	// UpdateIssue sets nodeID's title and body.
 	UpdateIssue(ctx context.Context, nodeID, title, body string) error
 	// CloseIssueCompleted closes nodeID with the "completed" state reason,
-	// the state a Done ticket's or chart's issue gets (brief.md#Status and
-	// pull requests: "A Done issue is closed as completed").
+	// the state a Done ticket's or chart's issue gets: a Done issue is closed
+	// as completed.
 	CloseIssueCompleted(ctx context.Context, nodeID string) error
 	// ReopenIssue reopens nodeID, for an issue the store now says is not Done
 	// but GitHub (or an earlier sync) left closed.
 	ReopenIssue(ctx context.Context, nodeID string) error
-	// RemoveSubIssue removes subIssueID from parentID's sub-issues: brief.md
-	// #Links's own drift rule, "a sub-issue added on GitHub to a chart's
-	// issue that is no ticket's issue is taken out again".
+	// RemoveSubIssue removes subIssueID from parentID's sub-issues: the drift
+	// rule that takes a sub-issue added on GitHub to a chart's issue, when it
+	// is no ticket's issue, out again.
 	RemoveSubIssue(ctx context.Context, parentID, subIssueID string) error
 	// ItemFieldValues reads each of itemIDs' current Status and Store ID,
-	// the baseline brief.md#Ownership and drift compares a board item's
-	// owned fields against. An item that no longer resolves has no entry,
+	// the baseline the drift check compares a board item's owned fields
+	// against. An item that no longer resolves has no entry,
 	// and reads as one with no values, which places it again.
 	ItemFieldValues(ctx context.Context, itemIDs []string) (map[string]ItemFields, error)
 	// LookupProject reports whether the GitHub Project at ownerLogin/number
-	// resolves at all, with no mutation: a dry run's own read of brief.md
-	// #The board's project, which cannot call EnsureProject without risking
-	// the field or link mutation that a plain preview must withhold.
+	// resolves at all, with no mutation: a dry run's own read of the board's
+	// project, which cannot call EnsureProject without risking the field or
+	// link mutation that a plain preview must withhold.
 	LookupProject(ctx context.Context, ownerLogin string, isOrg bool, number int) (bool, error)
 }
 
-// defaultMutationInterval and defaultBackoffBase are brief.md#The GitHub
-// client's own defaults - "one mutation per second, as GitHub asks of
-// clients that create content" and the first wait of maxAttempts's own
-// retry with backoff (1s, 2s, 4s between the 4 attempts the brief names,
-// "defaulted, as the bridge") - used whenever a GraphQLClient's own
-// MutationInterval or BackoffBase field is zero (production never sets
-// either; this package's own tests do, to run at full speed).
+// defaultMutationInterval and defaultBackoffBase are the client's own defaults
+// - one mutation per second, as GitHub asks of clients that create content, and
+// the first wait of maxAttempts's own retry with backoff (1s, 2s, 4s between
+// the 4 attempts) - used whenever a GraphQLClient's own MutationInterval or
+// BackoffBase field is zero (production never sets either; this package's own
+// tests do, to run at full speed).
 const (
 	defaultMutationInterval = time.Second
 	defaultBackoffBase      = time.Second
 )
 
 // maxAttempts is how many times do sends one query or mutation before
-// giving up on a retryable failure (brief.md#The GitHub client: "4
-// attempts in all").
+// giving up on a retryable failure: 4 attempts in all.
 const maxAttempts = 4
 
 // GraphQLClient is Client over GitHub's GraphQL API.
@@ -254,7 +245,7 @@ func New(endpoint, token string) *GraphQLClient {
 
 // graphQLError is one entry of a GraphQL response's top-level "errors".
 // Type is "RATE_LIMITED" on the one GraphQL-level error do's retry treats
-// as retryable (brief.md#The GitHub client); GitHub answers most REST-style
+// as retryable; GitHub answers most REST-style
 // rate limiting with an HTTP status instead (handled in doOnce directly),
 // but a GraphQL mutation can also hit its own, reported this way. Type is
 // "NOT_FOUND" with Path ["nodes", i] when a nodes(ids:) query is handed an
@@ -322,8 +313,7 @@ type graphQLRequest struct {
 // mutation (query's text starts with "mutation", the bridge's own
 // convention every mutation* const above follows) is paced at most one per
 // second (throttle) before it is sent; a request that fails with a server
-// error or a rate limit is retried with backoff, up to maxAttempts in all
-// (brief.md#The GitHub client).
+// error or a rate limit is retried with backoff, up to maxAttempts in all.
 func (c *GraphQLClient) do(ctx context.Context, query string, variables map[string]any, out any, opts ...doOption) error {
 	mutation := strings.HasPrefix(strings.TrimSpace(query), "mutation")
 
@@ -461,7 +451,7 @@ func (c *GraphQLClient) doOnce(ctx context.Context, query string, variables map[
 
 // repositoryQuery looks up a repository's own GraphQL node id and
 // visibility: the id is what createIssue's input needs, and isPrivate is
-// brief.md#Publish safety's gate ("A private issue repo is not scanned").
+// the publish-safety gate: a private issue repo is not scanned.
 const repositoryQuery = `query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) { id isPrivate }
 }`
@@ -544,7 +534,7 @@ func (c *GraphQLClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 // closeIssueMutation closes an issue as not planned: the bridge's own shape
 // for the duplicate case, where another clone's push claimed the same
 // ticket or chart's issue first and this one's is withdrawn instead of left
-// open (brief.md#Syncing at every checkpoint).
+// open.
 const closeIssueMutation = `mutation($issueId: ID!) {
   closeIssue(input: {issueId: $issueId, stateReason: NOT_PLANNED}) {
     issue { id }
@@ -582,8 +572,7 @@ func (c *GraphQLClient) AddComment(ctx context.Context, subjectID, body string) 
 // field per branch, so a sync asks once per repo rather than once per
 // ticket. GitHub's search (used until headRefName replaced it) matches head:
 // as a prefix, so a search for "jig/T-2" also turns up a pull request whose
-// head is "jig/T-23" - an exact match is what brief.md#Status and pull
-// requests asks for.
+// head is "jig/T-23" - an exact match is what is wanted.
 func pullRequestsByHeadsQuery(n int) string {
 	var b strings.Builder
 	b.WriteString("query($owner: String!, $name: String!")
@@ -638,8 +627,8 @@ func (c *GraphQLClient) PullRequestsByHeads(ctx context.Context, owner, repo str
 
 // pullRequestsByIDsQuery fetches each node id's current number, state and
 // owning repository, for the recorded prs: entries PullRequestsByHeads'
-// exact head match no longer finds (brief.md#Status and pull requests: a
-// merged pull request's head branch is usually gone by then). A null node
+// exact head match no longer finds: a
+// merged pull request's head branch is usually gone by then. A null node
 // means GitHub no longer has it: alongside that null, GitHub's real
 // nodes(ids:) resolver also reports a NOT_FOUND "errors" entry at path
 // ["nodes", i], which PullRequestsByIDs tolerates via toleratingGoneNodes
@@ -694,7 +683,7 @@ func (c *GraphQLClient) PullRequestsByIDs(ctx context.Context, nodeIDs []string)
 }
 
 // addSubIssueMutation makes a sub-issue of a parent issue, replacing
-// whatever parent it had (brief.md#The GitHub client).
+// whatever parent it had.
 const addSubIssueMutation = `mutation($issueId: ID!, $subIssueId: ID!) {
   addSubIssue(input: {issueId: $issueId, subIssueId: $subIssueId, replaceParent: true}) {
     issue { id }
@@ -710,8 +699,7 @@ func (c *GraphQLClient) AddSubIssue(ctx context.Context, parentID, subIssueID st
 	return nil
 }
 
-// addBlockedByMutation records that one issue is blocked by another
-// (brief.md#The GitHub client).
+// addBlockedByMutation records that one issue is blocked by another.
 const addBlockedByMutation = `mutation($issueId: ID!, $blockingIssueId: ID!) {
   addBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
     issue { id }
@@ -728,7 +716,7 @@ func (c *GraphQLClient) AddBlockedBy(ctx context.Context, issueID, blockingID st
 }
 
 // removeBlockedByMutation removes one issue from another's blocked-by
-// edges (brief.md#The GitHub client).
+// edges.
 const removeBlockedByMutation = `mutation($issueId: ID!, $blockingIssueId: ID!) {
   removeBlockedBy(input: {issueId: $issueId, blockingIssueId: $blockingIssueId}) {
     issue { id }
@@ -746,7 +734,7 @@ func (c *GraphQLClient) RemoveBlockedBy(ctx context.Context, issueID, blockingID
 
 // fetchIssuesQuery reads each issue's title, body, open/closed state,
 // parent, sub-issues and blocked-by links, the "drift" slice's own read of
-// GitHub's current state (brief.md#Ownership and drift). GitHub answers a
+// GitHub's current state. GitHub answers a
 // gone id with a null in data.nodes and a NOT_FOUND "errors" entry at path
 // ["nodes", i], which FetchIssues tolerates via toleratingGoneNodes.
 const fetchIssuesQuery = `query($ids: [ID!]!) {
@@ -831,7 +819,7 @@ func (c *GraphQLClient) UpdateIssue(ctx context.Context, nodeID, title, body str
 }
 
 // closeIssueCompletedMutation closes an issue as completed, the state a Done
-// ticket's or chart's issue gets (brief.md#Status and pull requests).
+// ticket's or chart's issue gets.
 const closeIssueCompletedMutation = `mutation($issueId: ID!) {
   closeIssue(input: {issueId: $issueId, stateReason: COMPLETED}) {
     issue { id }
@@ -880,7 +868,7 @@ func (c *GraphQLClient) RemoveSubIssue(ctx context.Context, parentID, subIssueID
 
 // itemFieldValuesQuery reads each project item's current field values,
 // naming each by its field's own name so Status and Store ID need no field
-// id to read back (brief.md#Ownership and drift). A gone item comes back as
+// id to read back. A gone item comes back as
 // a null with a NOT_FOUND at path ["nodes", i], tolerated as for issues.
 const itemFieldValuesQuery = `query($ids: [ID!]!) {
   nodes(ids: $ids) {
@@ -939,12 +927,12 @@ func (c *GraphQLClient) ItemFieldValues(ctx context.Context, itemIDs []string) (
 }
 
 // statusOptionSpec is one option every mirrored project's Status field must
-// carry, in brief.md#The board's own order.
+// carry, in the board's own order.
 type statusOptionSpec struct {
 	Name, Color, Description string
 }
 
-// statusOptions are brief.md#The board's five Status options, then the one a
+// statusOptions are the board's five Status options, then the one a
 // ticket closed without being built (superseded, or not planned) is placed
 // under. A project that has the first five gets the sixth added, keeping
 // every option it has.
@@ -990,8 +978,8 @@ type projectV2Node struct {
 // projectV2Query looks up a user's or an org's ProjectV2 by number, with its
 // fields (id, name, and - for a single-select field - its options) and the
 // repositories already linked to it. $root is substituted with "user" or
-// "organization" (brief.md#The trackers entry: project: says which kind of
-// owner it has).
+// "organization", whichever kind of owner the tracker entry's project:
+// names.
 const projectV2QueryFormat = `query($login: String!, $number: Int!) {
   %s(login: $login) {
     projectV2(number: $number) {
@@ -1009,8 +997,7 @@ const projectV2QueryFormat = `query($login: String!, $number: Int!) {
 
 // lookupProjectV2 resolves ownerLogin's ProjectV2 number, returning nil when
 // GraphQL resolved no project - a project that does not exist, or a token
-// without the project scope, both of which GitHub answers with a null field
-// (brief.md#The board).
+// without the project scope, both of which GitHub answers with a null field.
 func (c *GraphQLClient) lookupProjectV2(ctx context.Context, ownerLogin string, isOrg bool, number int) (*projectV2Node, error) {
 	root := "user"
 	if isOrg {
@@ -1046,8 +1033,7 @@ const createProjectV2FieldMutation = `mutation($projectId: ID!, $name: String!, 
 }`
 
 // updateProjectV2FieldMutation rewrites a single-select field's options,
-// keeping every option whose id is given and adding the rest
-// (brief.md#The board: "an option's id keeps it").
+// keeping every option whose id is given and adding the rest, since an option's id keeps it.
 const updateProjectV2FieldMutation = `mutation($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
   updateProjectV2Field(input: {fieldId: $fieldId, singleSelectOptions: $options}) {
     projectV2Field {
@@ -1056,9 +1042,8 @@ const updateProjectV2FieldMutation = `mutation($fieldId: ID!, $options: [Project
   }
 }`
 
-// linkProjectV2ToRepositoryMutation links a repository to a project
-// (brief.md#The board: "links the project to the issue repo when it is not
-// linked").
+// linkProjectV2ToRepositoryMutation links a repository to a project, so the
+// project is linked to the issue repo when it is not linked yet.
 const linkProjectV2ToRepositoryMutation = `mutation($projectId: ID!, $repositoryId: ID!) {
   linkProjectV2ToRepository(input: {projectId: $projectId, repositoryId: $repositoryId}) {
     repository { id }
@@ -1168,7 +1153,7 @@ func (c *GraphQLClient) linkRepository(ctx context.Context, projectID, repoID st
 }
 
 // ensureFields resolves node's Status and Store ID fields, creating or
-// completing either as brief.md#The board requires.
+// completing either as the board requires.
 func (c *GraphQLClient) ensureFields(ctx context.Context, node *projectV2Node) (statusField projectFieldNode, storeIDFieldID string, err error) {
 	var haveStatus bool
 	for _, f := range node.Fields.Nodes {
@@ -1205,8 +1190,8 @@ func (c *GraphQLClient) ensureFields(ctx context.Context, node *projectV2Node) (
 }
 
 // LookupProject reports whether ownerLogin/number resolves to a project,
-// reading only (brief.md#The board's project lookup, the read a dry run can
-// make without EnsureProject's own field or link mutation).
+// reading only: the read a dry run can make without EnsureProject's own
+// field or link mutation.
 func (c *GraphQLClient) LookupProject(ctx context.Context, ownerLogin string, isOrg bool, number int) (bool, error) {
 	node, err := c.lookupProjectV2(ctx, ownerLogin, isOrg, number)
 	if err != nil {
@@ -1216,8 +1201,7 @@ func (c *GraphQLClient) LookupProject(ctx context.Context, ownerLogin string, is
 }
 
 // EnsureProject resolves the project, creates any missing field or option,
-// and links repoOwner/repoName to it when it is not linked yet
-// (brief.md#The board).
+// and links repoOwner/repoName to it when it is not linked yet.
 func (c *GraphQLClient) EnsureProject(ctx context.Context, ownerLogin string, isOrg bool, number int, repoOwner, repoName string) (ProjectV2, error) {
 	node, err := c.lookupProjectV2(ctx, ownerLogin, isOrg, number)
 	if err != nil {
@@ -1296,7 +1280,7 @@ func (c *GraphQLClient) setItemText(ctx context.Context, projectID, itemID, fiel
 }
 
 // PlaceItem adds contentID to proj, then sets its Status and Store ID field
-// values, returning the item's node id (brief.md#The board).
+// values, returning the item's node id.
 func (c *GraphQLClient) PlaceItem(ctx context.Context, proj ProjectV2, contentID, status, storeID string) (string, error) {
 	itemID, err := c.addProjectItem(ctx, proj.ID, contentID)
 	if err != nil {

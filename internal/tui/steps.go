@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -153,27 +152,11 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 			s.State = StateEnvBlocked
 		case counts[StateNeedsInput] > 0:
 			s.State = StateNeedsInput
-		case counts[StateVerifying] > 0:
-			s.State = StateVerifying
+		case counts[StateFail] > 0:
+			s.State = StateFail
 		}
 	}
 	return s
-}
-
-// roundReviewer is the session that took round n to review it: the latest
-// gate-reviewer line since the round last opened, or "". A round reopened at
-// a moved head starts with no reviewer, and one reopened at the same head
-// names its reviewer again.
-func (t *ticket) roundReviewer(n int) string {
-	for i := len(t.lines) - 1; i >= 0; i-- {
-		switch l := t.lines[i]; {
-		case l.Event == journal.EventGateOpen:
-			return ""
-		case l.Event == journal.EventGateReviewer && l.Attempt == n:
-			return l.Session
-		}
-	}
-	return ""
 }
 
 // reviewRow is the review: no round yet, a round open, findings to decide,
@@ -289,9 +272,9 @@ var headerWords = map[stepState]string{
 	{stepBuild, StateQueued}:       "waiting to build",
 	{stepBuild, StateReady}:        "ready to build",
 	{stepBuild, StateBuilding}:     "build in progress",
-	{stepBuild, StateVerifying}:    "build verifying",
 	{stepBuild, StateNeedsInput}:   "build needs you",
 	{stepBuild, StateStalled}:      "build stalled",
+	{stepBuild, StateFail}:         "build failing",
 	{stepBuild, StateEnvBlocked}:   "build blocked by its environment",
 	{stepReview, StateQueued}:      "waiting to review",
 	{stepReview, StateReady}:       "ready to review",

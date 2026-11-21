@@ -18,55 +18,29 @@ import (
 // for a verification the worktree is detached at the commit, so HEAD is the
 // commit and no artifact is declared, which leaves the descent from the
 // start sha as the check that matters.
-func verifyGreen(leaseDir, startSHA string, res outcome.Result) (reason string, ok bool) {
+func verifyGreen(cloneDir, startSHA string, res outcome.Result) (reason string, ok bool) {
 	if res.Commit == "" {
 		return "commit missing", false
 	}
 	if res.Commit == startSHA {
 		return "commit is the run's start sha: no new work", false
 	}
-	if !gitx.HasCommit(leaseDir, res.Commit) {
+	if !gitx.HasCommit(cloneDir, res.Commit) {
 		return fmt.Sprintf("commit %s not found in lease", res.Commit), false
 	}
-	if _, err := gitx.Run(leaseDir, "merge-base", "--is-ancestor", startSHA, res.Commit); err != nil {
+	if _, err := gitx.Run(cloneDir, "merge-base", "--is-ancestor", startSHA, res.Commit); err != nil {
 		return fmt.Sprintf("commit %s is not a descendant of start sha %s", res.Commit, startSHA), false
 	}
-	if _, err := gitx.Run(leaseDir, "merge-base", "--is-ancestor", res.Commit, "HEAD"); err != nil {
+	if _, err := gitx.Run(cloneDir, "merge-base", "--is-ancestor", res.Commit, "HEAD"); err != nil {
 		return fmt.Sprintf("commit %s is not reachable from HEAD", res.Commit), false
 	}
 	for _, a := range res.Artifacts {
 		path := filepath.ToSlash(a)
-		if !gitx.HasPathAt(leaseDir, res.Commit, path) {
+		if !gitx.HasPathAt(cloneDir, res.Commit, path) {
 			return fmt.Sprintf("artifact %s missing at commit %s", a, res.Commit), false
 		}
 	}
 	return "", true
-}
-
-// cleanHead returns dir's HEAD sha when its working tree is clean (nothing
-// modified, staged or untracked), else "": an oracle run is evidence about a
-// commit only when the tree it ran on was exactly that commit. Copied from
-// the frontier.
-func cleanHead(dir string) string {
-	status, err := gitx.Run(dir, "status", "--porcelain")
-	if err != nil || strings.TrimSpace(status) != "" {
-		return ""
-	}
-	head, err := gitx.RevParse(dir, "HEAD")
-	if err != nil {
-		return ""
-	}
-	return head
-}
-
-// dirtyTree returns dir's uncommitted changes (git status, untracked files
-// included) for a message, or "" when there are none or git cannot say.
-func dirtyTree(dir string) string {
-	status, err := gitx.Run(dir, "status", "--porcelain")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(status)
 }
 
 // startSHA is the sha a verified commit must descend from, as far as it can

@@ -8,7 +8,7 @@ import (
 )
 
 // TestSliceMovesFollowWhatTheSessionDoes pins the state each action leaves a
-// slice in, from every state it can be in (decision 2 of the digester): a
+// slice in, from every state it can be in: a
 // claim makes it building and a release queued, both clearing what stalled
 // it, and neither touching green or a slice parked on a question; a question
 // parks a slice that is queued or being worked; an answer sends a parked slice

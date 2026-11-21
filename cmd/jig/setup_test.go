@@ -9,6 +9,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/setup"
 )
 
@@ -262,7 +263,7 @@ func TestSetupHarnessAllWritesEveryHarnessAndUninstallRemovesThem(t *testing.T) 
 	}
 	var files []string
 	for _, h := range setup.Harnesses() {
-		f := h.GlobalFile(ie.userHome)
+		f := h.GlobalFile(setup.UserDirs{Home: ie.userHome})
 		files = append(files, f)
 		if !exists(f) {
 			t.Errorf("%s: %s was not written", h.Name, f)
@@ -275,7 +276,7 @@ func TestSetupHarnessAllWritesEveryHarnessAndUninstallRemovesThem(t *testing.T) 
 		t.Fatalf("uninstall: exit %d\n%s", code, out)
 	}
 	for _, h := range setup.Harnesses() {
-		f := h.GlobalFile(ie.userHome)
+		f := h.GlobalFile(setup.UserDirs{Home: ie.userHome})
 		switch h.Name {
 		case "claude", "gemini":
 			// Settings files that are the person's: left, with jig's entries out.
@@ -294,7 +295,7 @@ func TestSetupProjectUntrackedForm(t *testing.T) {
 	t.Parallel()
 	ie := newInstallerEnv(t)
 	repo := ie.markedProject(t, "app", "project: demo\nkind: project\n")
-	if err := project.SaveMachine(ie.jigHome, map[string]project.MachineProject{
+	if err := projecttest.SaveMachine(ie.jigHome, map[string]project.MachineProject{
 		"demo": {Store: filepath.Join(ie.root, "store"), Clones: map[string]string{"app": repo}, Root: repo},
 	}); err != nil {
 		t.Fatal(err)

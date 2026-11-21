@@ -27,16 +27,16 @@ The owner walked a harness session beside `jig tui` through the whole flow in a 
 
 ## Consequences
 
-- Amends [ADR 0033](0033-phases-are-asked-for-by-prompt.md): decision 37 (a run of several phases is the prompt) gains a run aimed at a chart, and decision 39 no longer holds that a subagent and its parent are one agent to the hooks, since a note and a hold now follow the agent id (a review's independence still follows who ran `jig review context`, and the main session still never reads the round). The planner no longer mints first (DECISIONS.md, "The reviewer subagent runs in the foreground, and the planner mints its ticket", is superseded in its minting half): the TUI, which tied the drafting to the ticket at the mint, now opens on the ticket after the grilling, not before.
+- Amends [ADR 0033](0033-phases-are-asked-for-by-prompt.md): decision 37 (a run of several phases is the prompt) gains a run aimed at a chart, and decision 39 no longer holds that a subagent and its parent are one agent to the hooks, since a note and a hold now follow the agent id (a review's independence still follows who ran `jig review context`, and the main session still never reads the round). The planner no longer mints first, which supersedes the earlier rule that it mints with `jig ticket new` before its first question: the TUI, which tied the drafting to the ticket at the mint, now opens on the ticket after the grilling, not before.
 - Amends [ADR 0035](0035-start-to-finish-and-recommendations-are-separate.md): a chart verdict ends a start-to-finish run, and the same person's moments stay theirs in a chart run unless the prompt hands them over.
 - `CONTEXT.md` gains *Chart run* and *Chart standing* and corrects *Chart* (jig reads `map.md`'s sections), *Intake*, *Start-to-finish run*, *Note* and *Unattended*.
 - `ARCHITECTURE.md` changes in the hooks (a `SubagentStop`), notes (per session and agent, the claim holder), the TUI (eight screens), `internal/phase`, `internal/recall`, `internal/ledger` and `internal/observe` rows, and the skills paragraph.
 - A project that attached jig before this has no `SubagentStop` entry until it runs `jig attach` or `jig hooks` again; `jig doctor` lists the missing entry, and until then a build subagent is never held at its stop.
 - The skills stay under the 6000 bytes and 100 lines the lint allows: the new `chart` skill is its own, and intake gave up a few sentences to make room.
 
-## Amendment: a screen that waits on a merge is read again on a timer (GRAPH-15)
+## Amendment: a screen that waits on a merge is read again on a timer
 
-The chart screen was read again on open, on `r`, and after the screen had been quiet since an event of one of the chart's tickets. A merge on the host writes no line to any journal, so a chart that ended at a pull request showed "waits for a merge" until a person pressed `r` or something happened to one of its tickets. The owner decided that a screen that waits on a merge is read again on a timer, every two minutes (chart flow, C14).
+The chart screen was read again on open, on `r`, and after the screen had been quiet since an event of one of the chart's tickets. A merge on the host writes no line to any journal, so a chart that ended at a pull request showed "waits for a merge" until a person pressed `r` or something happened to one of its tickets. The owner decided that a screen that waits on a merge is read again on a timer, every two minutes.
 
 - **The rule.** A screen waits on a merge when it shows a wait that only the host can end. The TUI reads that screen again every `Config.MergeEvery`, and a screen that waits on nothing is not read on the timer.
 - **Which screens wait.** The chart screen waits when the last read that printed a chart listed at least one entry in `ends`, the tickets the run stops at, each behind a merge. A read that printed no chart leaves that as it was, so one blank read does not stop the timer. A ticket's screens (ticket, brief, build, review, publish, slice) wait when the ticket is published with a pull request on record and is not closed. The project's list waits on nothing, an unpublished ticket waits on nothing, and a closed ticket waits on nothing.
@@ -54,11 +54,11 @@ Consequences:
 - The chart verb asks the host about the pull requests it names on every read, so a merge shows in the next tick's read. The listing `jig next --json`, which the tick also reads, may take an open pull request's state from this machine's memory when it is under two minutes old, so a blocker in the listing can read an open pull request up to two minutes late.
 - A merge judged by ancestry shows once something fetched the clone: a person's `git fetch`, or a pull. The timer does not fetch.
 - A ticket's screens show no host state of their own pull request, since no verb they read prints one. The tick changes what a ticket screen shows only when its status changed.
-- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart standing*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row) and the README say the same.
 
-## Amendment: the chart screen's activity includes the chart's store history (GRAPH-16)
+## Amendment: the chart screen's activity includes the chart's store history
 
-A chart has no journal, so the chart screen's Activity panel showed its tickets' lines and nothing else. A map edit or a graduation leaves no ticket line: a chart whose map was just edited, or that was just graduated, read "nothing yet". The store is a git repo, and the commits that touched `charts/<name>/` are the chart's own history. The owner decided the chart screen shows them as part of its activity (chart flow, C13).
+A chart has no journal, so the chart screen's Activity panel showed its tickets' lines and nothing else. A map edit or a graduation leaves no ticket line: a chart whose map was just edited, or that was just graduated, read "nothing yet". The store is a git repo, and the commits that touched `charts/<name>/` are the chart's own history. The owner decided the chart screen shows them as part of its activity.
 
 - **The history.** `jig next <chart> --json` gains a `history` key: the commits of the store's `HEAD` that changed anything under `charts/<name>/`, as git's path-limited log gives them, newest first, each as `{sha, time, subject}` with the committer time in UTC. It is the 20 newest (`chartHistoryLimit`), always present, and `[]` when it cannot be read (the store is not a git repository, it has no commit, git fails): a problem is a row, never a reason to hide the chart. Only `--json` reads it. The text of `jig next` and `jig status` is the session's, which has no use for it, and starts no extra git process.
 - **One git call.** `gitx.PathLog` runs one `git log` with the paths taken literally. Path-limited history with git's merge simplification is what the git program computes, and `internal/gitx/read.go` keeps history walks on it. `Store.ChartHistory` asks it for the chart's folder, which `Store.ChartRelDir` names in one place beside `ChartFile`.
@@ -67,7 +67,7 @@ A chart has no journal, so the chart screen's Activity panel showed its tickets'
 
 Rejected alternatives:
 
-- **A chart journal.** A file the chart's actions append to would record the run, which decision 4 of the chart's map rejected, and would be a second copy of what git holds.
+- **A chart journal.** A file the chart's actions append to would record the run, which was rejected, and would be a second copy of what git holds.
 - **The TUI reading the store itself.** `TestTheScreensReadNoStore` forbids the screens importing `store`, `project` and `gitx`: they learn everything from a verb's output, and this stays one.
 - **An in-process log walk in `internal/gitx`.** Merge simplification and the path filter are git's to compute, and a second implementation would drift from it.
 
@@ -75,11 +75,11 @@ Consequences:
 
 - Every JSON read of a chart starts one `git log` in the store clone, so the git budgets of the packages whose tests read one (`.github/git-budget.yaml`) move up.
 - The Activity shows the time of day of an old commit, as it does for a ticket's line, with no date.
-- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart history*), `ARCHITECTURE.md` (the chart paragraph and the `internal/gitx/`, `internal/store/` and `internal/tui/` rows) say the same.
 
 ## Amendment: the chart screen details the ticket under the cursor (2026-11-02)
 
-The chart screen drew the same Run and Activity panels whichever ticket the cursor stood on. A run builds each ticket with a subagent of its own, so the person asked who holds a slice, which agent claimed it, how far it has come and whether that agent was held at its stop, and had to open the ticket to see. The owner decided the chart screen details the ticket under the cursor from what the ticket screens already read (chart flow, C10). What the owner left open was taken at the recommended answer (2026-11-02, proceed with the plan).
+The chart screen drew the same Run and Activity panels whichever ticket the cursor stood on. A run builds each ticket with a subagent of its own, so the person asked who holds a slice, which agent claimed it, how far it has come and whether that agent was held at its stop, and had to open the ticket to see. The owner decided the chart screen details the ticket under the cursor from what the ticket screens already read. What the owner left open was taken at the recommended answer (2026-11-02, proceed with the plan).
 
 - **The panel.** A Detail panel sits between the Tickets and the Run panels, and its top edge ends with the id of the ticket under the cursor. It is drawn whenever the chart has a ticket row, and not for a chart of fog entries only. Its rows are the Run panel's rows (label, text, weight), never rows the cursor can stand on, so what the cursor's index means does not change. It has four rows at most (`detailMax`).
 - **No new read.** The data is the stream and `jig status <T>`, which the ticket screens read. There is no new verb, no new field in any JSON and no new read. Moving the cursor draws the panel again and runs nothing.
@@ -100,11 +100,11 @@ Consequences:
 
 - On an 80 by 24 screen the map line and the Run panel's waves give way to the panel, and a taller screen keeps them.
 - A harness with no hooks shows the holder and never the agent, and a hold only the hooks write is never shown.
-- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row), the README and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart detail*), `ARCHITECTURE.md` (the `jig tui` paragraph and the `internal/tui/` row) and the README say the same.
 
 ## Amendment: a subagent drafts each brief and publishes each ticket (2026-11-03)
 
-A chart run kept the briefs and the publish work in the main session. The main session ran out of context once, in the publish work (rendering bodies, picking demos, keeping each pull request within the CI budgets), not while briefing, and it had spent a share of its context on seven briefs. The owner decided the `chart` skill hands both to subagents (chart run, C16, map decision 30). What the owner left open was taken at the recommended answer (2026-11-03, take them, continue).
+A chart run kept the briefs and the publish work in the main session. The main session ran out of context once, in the publish work (rendering bodies, picking demos, keeping each pull request within the CI budgets), not while briefing, and it had spent a share of its context on seven briefs. The owner decided the `chart` skill hands both to subagents. What the owner left open was taken at the recommended answer (2026-11-03, take them, continue).
 
 - **A drafter per ticket.** The main session starts one subagent per ticket (Agent tool, `model: sonnet`, in the background) that drafts `brief.md` and `slices.yaml` with the intake skill, takes the recommended answer for every question the ticket leaves open and marks it, checks the files with `jig validate <T> --check` until it prints `valid: yes`, and hands back its questions with their defaults. Meanwhile the main session asks the person one numbered round across the tickets, records the answers, sends a changed answer to its drafter (SendMessage) to redraft, confirms once and runs `jig validate <T>` for each. The person's moments stay theirs (ADR 0035).
 - **A publisher per ticket.** After the one yes for the group (a prompt to go with recommendations needs none) the main session starts one subagent per ticket that follows `jig skill publish`: it renders the body, picks the demo, keeps the pull request within the budgets CI asks, opens it, records it and hands back the url. It asks the person nothing: a question it cannot settle ends its turn with the question and its default. The main session keeps the waves, the questions, the approvals and the removal of the worktrees, one at a time.
@@ -120,4 +120,4 @@ Consequences:
 - The main session keeps the run: the waves, the questions and the approvals. Drafters and publishers are Sonnet subagents with no approval of their own.
 - The skill text grew by at most 150 net bytes, inside the budget the chart skill shares with ADRs 0044 and 0045 (6000 bytes and 100 lines).
 - A publisher's `gh` and push may meet a permission prompt the one yes for the builds does not cover: the group's yes is the place to say it.
-- `CONTEXT.md` (*Chart run*), `ARCHITECTURE.md` (the Phases paragraph) and `DECISIONS.md` say the same.
+- `CONTEXT.md` (*Chart run*), `ARCHITECTURE.md` (the Phases paragraph) say the same.

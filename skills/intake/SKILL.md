@@ -7,21 +7,25 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and its prompt; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
-Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
+Before the verdict write the need: what the person needs, never how it is planned, from the prompt or the conversation; it is the step's `--need`.
+
+Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. Either verdict starts with one step that makes the issue and its chart: `jig chart new <name> --title "<t>" --need "<the need>"`.
 
 ## Recall, then grill
 
-Before round one run `jig recall <the work, briefly>`. It lists open tickets and edges, naming those near your words (extend or block on one; never mint twice), and each chart's fog, platform documents, shipped answers. A settled question is not asked again. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
+Before round one run `jig recall <the work, briefly>`. It lists open tickets and edges, naming those near your words (extend or block on one; never mint twice), and each chart's fog, platform documents, shipped answers, and the last shipped tickets' files, bytes and builder peak. A settled question is not asked again. Size each ticket from the code it will touch (the files and their bytes, read while scouting) against those receipts: where it would touch more than the recent tickets whose builders kept a low peak, split by area into tickets that each build and verify alone. The table advises; nothing refuses a size. A round asks the whole **frontier** (every question whose prerequisites are settled), numbered, each recommended. Facts are yours (read-only scouts draft sections with real oracles); only decisions go to the person. Stop when the frontier is empty. Tag every decision user-confirmed or defaulted.
 
 ## Three shapes
 
 | Shape | Digs | Opening slice | Gate leans on |
 |---|---|---|---|
 | feature | behavior, acceptance, out-of-scope, seams | first tracer bullet | spec axis |
-| bug | repro, expected-vs-actual, regression window, seams | REPRO slice: oracle red before any fix | the regression test, unchanged |
+| bug | repro, expected-vs-actual, regression window, seams | the fix slice, its first commit the repro test, red on the base | the repro test, unchanged |
 | refactor | behavior contract, current coverage, seams | GUARDRAIL slice: missing coverage lands green first | guardrails staying green |
 
 A test diet is a refactor: its PR names each removed test's seam test and `go test -cover` before/after.
+
+A bug has no REPRO slice: jig verifies a slice only when its oracle passes, so one red before any fix could never go green. The fix slice's first commit adds the repro test, red on the base; the fix commit turns it green, and the slice's oracle runs that test.
 
 ## Seams
 
@@ -29,16 +33,20 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 ## Brief output (single ticket)
 
-- Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
+- The task is minted by `jig graduate` from one `tickets.yaml` entry (title, body scoped to the work), never by `jig ticket new`; use the id and folder it prints, never your own. The chart name is the title's lowercase slug unless named. On a ticket that exists and no chart lists, its entry carries its `id`: no second task; one a chart lists takes no step. Steps: `jig skill intake chart-verdict`.
 - `brief.md`: `## `-sectioned behavioral spec.
-- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; REPRO, GUARDRAIL and prefactoring slices (first) stay separate. A slice proving itself with the whole suite names that manifest oracle (e.g. `test`) so the gate reuses its pass; a narrower one, a literal command. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
-- `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (hashes; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`; after a brief edit, `jig validate <T> --restamp`, or `jig requeue <T> --from-brief-diff` first to rebuild.
+- `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; GUARDRAIL and prefactoring slices (first) stay separate. A slice's oracle is a literal command naming what it adds or keeps, or a manifest oracle's name when that is the proof; nothing names a whole suite so a gate can reuse it. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
+- `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (it prints the section hashes, even when it fails; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`. A stamp a brief edit left stale: do what its line says.
 
 ## Chart output
 
-Make a chart with `jig chart new <name> --title "<t>"`, not by hand. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, a re-run makes only new ones.
+A batch spanning areas takes a chart verdict; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
 
-A batch spanning areas takes a chart verdict, ordering its tickets; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
+Read `jig skill intake chart-verdict` when the verdict is a chart, for either verdict's first step, or after a chart verdict ended the run.
+
+Read `jig skill intake needs` when the prompt states several needs or a need comes after an issue was made.
+
+Where a change is written: what the person needs, to the issue's `body` (its `ticket.yaml`); how the work is planned, to the chart (`tickets.yaml` entries, the map's decisions); a briefing, to its task's `brief.md`.
 
 ## Done when
 
@@ -49,11 +57,3 @@ Without `--check`, `valid: yes` records the approval `jig claim --unattended` re
 ## Then
 
 Relay `jig next <T>`'s `prompt:` and stop, unless the prompt named later phases (a start-to-finish run): then go on to the next skill (build, review, publish).
-
-A chart verdict ends a ticket run: report what graduated and what `jig next <chart>` says, then read the prompt's intent from its words (examples, no phrase list); unsure, ask.
-
-- **No intent** (nothing past the brief: "fix this: ...", "fix this, go with your recommendations"): name the prompts that launch one ticket ("Take <ticket> to PR"), several ("Take A and B to PR") or the chart ("Take <chart> to PR"), stop, ask nothing.
-- **Intent, not fully explicit** ("take it to PR", "fix this and open a PR", "take it from brief to PR, go with your recommendations"): ask once to confirm the launch it implied (the chart, or the tickets carrying a named ticket's work), "not now" the other answer; the run goes with your recommendations only if the yes says so; unattended, stop. Why: a ticket's terms ask for a ticket run, which a chart verdict ends.
-- **Fully explicit** (recommendations and working to the end, whatever the shape: "go with your recommendations, keep going until it is all done", "fix it end to end with your recommendations, I'll be away"): say why in one line, run `jig skill chart`, ask nothing.
-
-A named ticket whose grilling ends in a chart enters `tickets.yaml` with its own `id`, `title` and `body` scoped to its part; graduate keeps it `existing`.

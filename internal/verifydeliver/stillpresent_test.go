@@ -1,15 +1,10 @@
 package verifydeliver
 
 import (
-	"encoding/json"
-	"os"
 	"reflect"
 	"testing"
 
-	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/manifest"
-	"github.com/develdeco/jig/internal/session"
-	"github.com/develdeco/jig/internal/store"
 )
 
 // TestParseReviewResultStillPresentRules covers result.json's still_present
@@ -57,11 +52,11 @@ func TestParseReviewResultStillPresentRules(t *testing.T) {
 }
 
 // TestValidateReviewResultStillPresentRules covers the still_present rules
-// that need the request and the lease's head.
+// that need the request and the round's head.
 func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Parallel()
 
-	leaseDir := t.TempDir()
+	cloneDir := t.TempDir()
 	present := func(string) (bool, error) { return true, nil }
 	absent := func(string) (bool, error) { return false, nil }
 	noDeleted := map[string]bool{}
@@ -75,7 +70,7 @@ func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Run("open and dismissed ids pass", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 3}, {Prior: "r1-f2", Line: 4}}
-		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), present, noDeleted); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
@@ -83,134 +78,37 @@ func TestValidateReviewResultStillPresentRules(t *testing.T) {
 	t.Run("id names nothing", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r9-f9", Line: 1}}
-		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("id appears twice", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}, {Prior: "r1-f1", Line: 2}}
-		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("id is also a finding's prior", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings[0].Prior = "r1-f1"
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), present, noDeleted))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), present, noDeleted))
 	})
 
 	t.Run("earlier finding's file neither present nor deleted", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings = nil
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		invalid(t, validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), absent, noDeleted))
+		invalid(t, validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), absent, noDeleted))
 	})
 
 	t.Run("earlier finding's file deleted in the scope diff", func(t *testing.T) {
 		req, result := validRequestAndResult()
 		result.Findings = nil
 		result.StillPresent = []StillPresentEntry{{Prior: "r1-f1", Line: 1}}
-		if err := validateReviewResult(req, result, oneRepoIn(leaseDir, []string{"test"}), absent, map[string]bool{"a.go": true}); err != nil {
+		if err := validateReviewResult(req, result, oneRepoIn(cloneDir, []string{"test"}), absent, map[string]bool{"a.go": true}); err != nil {
 			t.Fatalf("validateReviewResult: %v", err)
 		}
 	})
-}
-
-// TestGateFoldsAStillPresentEntryLikeAFullReport drives two real gate
-// rounds: round 1 reports a fix finding, its fix slice goes green, and
-// round 2 confirms the finding by id and a new line in still_present. The
-// fold must carry it exactly as a full re-report would: the same id, its
-// earlier text, the new line, one recurrence, still open, so a new fix slice
-// is queued. The reviewer's raw result.json keeps the short form.
-func TestGateFoldsAStillPresentEntryLikeAFullReport(t *testing.T) {
-	t.Parallel()
-
-	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
-	driveBuild(t, fx, "rung-a")
-	d := newDeps(t, fx)
-
-	round := 0
-	var round2Result string
-	backend := stubBackend{run: func(sd session.Dispatch) error {
-		round++
-		reviewData, err := os.ReadFile(sd.SliceJSON)
-		if err != nil {
-			t.Fatalf("read review.json: %v", err)
-		}
-		var req ReviewRequest
-		if err := json.Unmarshal(reviewData, &req); err != nil {
-			t.Fatalf("parse review.json: %v", err)
-		}
-		var result ReviewResult
-		switch round {
-		case 1:
-			result = ReviewResult{
-				Findings: []ResultFinding{{
-					File: "alpha/alpha.go", Line: 1, Title: "needs a fix",
-					Detail: "the first round's detail", Action: ActionFix, Risk: RiskMedium,
-					RiskRationale: "the first round's rationale", Oracle: "test",
-				}},
-				ReviewedPaths: req.MustReview,
-			}
-		case 2:
-			round2Result = sd.ResultJSON
-			result = ReviewResult{
-				StillPresent:  []StillPresentEntry{{Prior: "r1-f1", Line: 7}},
-				ReviewedPaths: req.MustReview,
-			}
-		default:
-			t.Fatalf("unexpected round %d", round)
-		}
-		return os.WriteFile(sd.ResultJSON, marshalReviewResult(t, result), 0o644)
-	}}
-	src := newReviewerGateSource(backend)
-
-	report1, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 1: %v", err)
-	}
-	if len(report1.FixSlices) != 1 {
-		t.Fatalf("round 1 FixSlices = %v, want exactly one", report1.FixSlices)
-	}
-	if err := d.Store.WriteSliceState(fx.Ticket, report1.FixSlices[0], store.SliceState{State: "green"}); err != nil {
-		t.Fatalf("mark round 1 fix slice green: %v", err)
-	}
-	if err := d.Store.Push(fx.Ticket + ": mark " + report1.FixSlices[0] + " green"); err != nil {
-		t.Fatalf("push round 1 fix slice state: %v", err)
-	}
-
-	report2, err := Gate(d, src, GateOpts{Ticket: fx.Ticket})
-	if err != nil {
-		t.Fatalf("Gate round 2: %v", err)
-	}
-	if len(report2.FixSlices) != 1 {
-		t.Fatalf("round 2 FixSlices = %v, want one: the confirmed fix finding is still open", report2.FixSlices)
-	}
-	ff2, ok, err := readFindingsYAML(d.Store, fx.Ticket, 2)
-	if err != nil || !ok {
-		t.Fatalf("read round 2 findings.yaml: ok=%v err=%v", ok, err)
-	}
-	if len(ff2.Findings) != 1 {
-		t.Fatalf("round 2 findings = %+v, want exactly r1-f1", ff2.Findings)
-	}
-	f := ff2.Findings[0]
-	if f.ID != "r1-f1" || f.Status != StatusOpen || f.Recurrences != 1 || f.Line != 7 ||
-		f.File != "alpha/alpha.go" || f.Title != "needs a fix" || f.Detail != "the first round's detail" ||
-		f.Action != ActionFix || f.Risk != RiskMedium || f.RiskRationale != "the first round's rationale" || f.Oracle != "test" {
-		t.Errorf("round 2 r1-f1 = %+v, want the round-1 finding at line 7, open, 1 recurrence", f)
-	}
-
-	raw, err := os.ReadFile(round2Result)
-	if err != nil {
-		t.Fatalf("read round 2 result.json: %v", err)
-	}
-	onDisk, err := ParseReviewResult(raw)
-	if err != nil {
-		t.Fatalf("parse round 2 result.json: %v", err)
-	}
-	if len(onDisk.Findings) != 0 || len(onDisk.StillPresent) != 1 {
-		t.Errorf("round 2 result.json = %+v, want the reviewer's short form as written", onDisk)
-	}
 }
 
 // TestExpandStillPresentFoldsLikeAFullReport: for every kind of earlier

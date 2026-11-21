@@ -14,7 +14,7 @@ import (
 )
 
 // shop1 is a ticket in the middle of its build with three slices: round is
-// green, clamp is being verified at a commit, cart waits for clamp.
+// green, clamp is being built, cart waits for clamp.
 func shop1() []events.Envelope {
 	return []events.Envelope{
 		jl(at(0, 0), "SHOP-1", "", journal.EventApproval, with("s-planner", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),

@@ -28,8 +28,7 @@ func deltaRepo(t *testing.T, base, change map[string]string) (dir, baseSHA, head
 				t.Fatal(err)
 			}
 		}
-		gitMust(t, dir, "add", "-A")
-		gitMust(t, dir, "commit", "-q", "-m", "c")
+		gitBuilder(t).Commit(dir, "c")
 	}
 	write(base)
 	baseSHA = gitMust(t, dir, "rev-parse", "HEAD")
@@ -41,7 +40,7 @@ func deltaRepo(t *testing.T, base, change map[string]string) (dir, baseSHA, head
 // its files from git (computeDeltaDiffs), then the render (roundBlocks) - over
 // repos, with the round's hunks read from git as the gate reads them, named
 // with the repo as the round names them. qualified is false for a single repo.
-func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, qualified bool) (string, []deltaDiff) {
+func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, clones map[string]string, qualified bool) (string, []deltaDiff) {
 	t.Helper()
 	p := deltaPrepared(verifydeliver.IntentSourceBrief)
 	p.RequestPath = filepath.Join(t.TempDir(), "review.json")
@@ -49,10 +48,10 @@ func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, qualifie
 	if qualified {
 		p.Repos = repos
 	} else {
-		p.Lease, p.Base, p.Head = repos[0].Lease, repos[0].Base, repos[0].Head
+		p.Base, p.Head = repos[0].Base, repos[0].Head
 	}
 	for _, r := range repos {
-		hunks, err := gitx.DiffHunks(r.Lease, r.Base, r.Head)
+		hunks, err := gitx.DiffHunks(clones[r.Repo], r.Base, r.Head)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -64,7 +63,7 @@ func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, qualifie
 			p.Request.Hunks = append(p.Request.Hunks, verifydeliver.HunkEntry{File: name, From: h.From, To: h.To})
 		}
 	}
-	diffs, err := computeDeltaDiffs(p)
+	diffs, err := computeDeltaDiffs(p, clones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +78,7 @@ func TestASingleRepoDeltaListsItsModifiedFilesHunksThroughGit(t *testing.T) {
 	dir, base, head := deltaRepo(t,
 		map[string]string{"beta/beta.go": "package beta\n", "beta/other.go": "package beta\n"},
 		map[string]string{"beta/beta.go": "package beta\n// changed\n"})
-	out, _ := realDeltaContext(t, []verifydeliver.PreparedRepo{{Lease: dir, Base: base, Head: head, Scope: "delta"}}, false)
+	out, _ := realDeltaContext(t, []verifydeliver.PreparedRepo{{Base: base, Head: head, Scope: "delta"}}, map[string]string{"": dir}, false)
 	if want := "unprobed[1]{hunk}:\n  \"beta/beta.go:2-2\"\n"; !strings.Contains(out+"\n", want) {
 		t.Errorf("the work list is not exactly beta/beta.go:2-2\n%s", out)
 	}
@@ -92,7 +91,7 @@ func TestADeltaThatAddsAFileListsItsHunksThroughGit(t *testing.T) {
 	dir, base, head := deltaRepo(t,
 		map[string]string{"beta/beta.go": "package beta\n"},
 		map[string]string{"beta/beta.go": "package beta\n// changed\n", "beta/new.go": "package beta\n// new\n"})
-	out, diffs := realDeltaContext(t, []verifydeliver.PreparedRepo{{Lease: dir, Base: base, Head: head, Scope: "delta"}}, false)
+	out, diffs := realDeltaContext(t, []verifydeliver.PreparedRepo{{Base: base, Head: head, Scope: "delta"}}, map[string]string{"": dir}, false)
 	if len(diffs) != 1 || strings.Join(diffs[0].Files, ",") != "beta/beta.go,beta/new.go" {
 		t.Errorf("delta files = %+v, want beta/beta.go and beta/new.go", diffs)
 	}
@@ -114,9 +113,9 @@ func TestAMultiRepoDeltaLabelsEachRepoAndNamesItsLongDiffFile(t *testing.T) {
 	apiDir, apiBase, apiHead := deltaRepo(t, map[string]string{"a.go": "package api\n"}, map[string]string{"a.go": "package api\n// x\n"})
 	webDir, webBase, webHead := deltaRepo(t, map[string]string{"w.go": "package web\n"}, map[string]string{"w.go": long.String()})
 	out, diffs := realDeltaContext(t, []verifydeliver.PreparedRepo{
-		{Repo: "api", Lease: apiDir, Base: apiBase, Head: apiHead, Scope: "delta"},
-		{Repo: "web", Lease: webDir, Base: webBase, Head: webHead, Scope: "delta"},
-	}, true)
+		{Repo: "api", Base: apiBase, Head: apiHead, Scope: "delta"},
+		{Repo: "web", Base: webBase, Head: webHead, Scope: "delta"},
+	}, map[string]string{"api": apiDir, "web": webDir}, true)
 	if !strings.Contains(out, "delta:\n  repo: api\n") || !strings.Contains(out, "  repo: web\n") {
 		t.Errorf("the delta block lacks a repo label per repo\n%s", out)
 	}

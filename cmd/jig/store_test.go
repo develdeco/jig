@@ -8,16 +8,16 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/mirror/github"
-	"github.com/develdeco/jig/internal/pool"
-	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // migrateFixture is a v1 store, with an origin, carrying two tickets (T-1
 // with a chart entry, a blocked_by on T-2 and a tracker/github.yaml record;
-// T-2 plain) - the seam brief.md#Seams names: "a v1 test store that has a
-// chart, a published ticket and a tracker/github.yaml".
+// T-2 plain) - a v1 test store that has a chart, a published ticket and a
+// tracker/github.yaml.
 type migrateFixture struct {
 	work, remote, repoRemote string
 }
@@ -222,7 +222,7 @@ func TestStoreMigrateApplyEndToEnd(t *testing.T) {
 	// a machine-mapped clone of the product repo, unrelated to the
 	// migration itself.
 	productClone := t.TempDir()
-	if _, err := project.InitProject(jigHome, fx.work, map[string]string{"product-repo": productClone}); err != nil {
+	if _, err := projecttest.InitProject(jigHome, fx.work, map[string]string{"product-repo": productClone}); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 	for _, id := range []string{"GRAPH-1", "T-1"} {
@@ -263,11 +263,8 @@ func TestStoreMigrateRefusesALeaseStillHeld(t *testing.T) {
 	mapPath := writeMigrateMap(t, migrateMapYAML)
 	jigHome := t.TempDir()
 
-	leaseDir, err := pool.Dir(jigHome, "product-repo", "T-1", pool.Build)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(leaseDir, 0o755); err != nil {
+	cloneDir := filepath.Join(home.PoolDir(jigHome), "product-repo", "T-1")
+	if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -322,8 +319,8 @@ func TestStoreMigrateWarnsAboutABranchStillOnOrigin(t *testing.T) {
 // project.yaml declares trackers: github: directly, with no tracker: key
 // (RewriteProjectYAML's "already adopted a trackers: list of its own"
 // branch), so the migration's project.yaml rewrite leaves it untouched. This
-// is the seam brief.md#Seams names: "A6's mirror sync against its fake
-// GraphQL server, on a migrated store".
+// is the seam of the mirror sync against its fake GraphQL server, on a
+// migrated store.
 func newMigrateFixtureWithMirroredTickets(t *testing.T) migrateFixture {
 	t.Helper()
 	dir := t.TempDir()
@@ -403,14 +400,14 @@ func (c *countingMirrorClient) UpdateIssue(ctx context.Context, nodeID, title, b
 }
 
 // TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace covers the gap the
-// gate finding named: brief.md#Seams's "A6's mirror sync against its fake
-// GraphQL server, on a migrated store" and brief.md's critical path "after
-// the migration, a sync updates each mirrored issue in place and creates
-// none". T-1 and T-2 both already carry a tracker/github.yaml record before
-// the migration moves their folders; afterwards, jig trackers sync must find
-// each record at its ticket's new path (through Store.TicketRelDir,
-// internal/mirror/record.go) and update its issue in place, never mistake
-// the moved ticket for a new one and create a duplicate.
+// gate finding named: the mirror sync against its fake GraphQL server, on a
+// migrated store, where after the migration a sync updates each mirrored issue
+// in place and creates none. T-1 and T-2 both already carry a
+// tracker/github.yaml record before the migration moves their folders;
+// afterwards, jig trackers sync must find each record at its ticket's new path
+// (through Store.TicketRelDir, internal/mirror/record.go) and update its issue
+// in place, never mistake the moved ticket for a new one and create a
+// duplicate.
 func TestStoreMigrateThenSyncUpdatesEachMirroredIssueInPlace(t *testing.T) {
 	t.Parallel()
 	fx := newMigrateFixtureWithMirroredTickets(t)

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/fixture"
-	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitbuild"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -57,10 +57,7 @@ func commitAuthored(t *testing.T, dir string, c authorCommit) {
 			t.Fatalf("commitAuthored: write %s: %v", rel, err)
 		}
 	}
-	gitLog(t, dir, "add", "-A")
-	if _, err := gitx.RunEnv(dir, pinnedIdentityEnv, "commit", "-m", c.message); err != nil {
-		t.Fatalf("commitAuthored: commit %q: %v", c.message, err)
-	}
+	gitbuild.New(t, pinnedIdentityEnv).Commit(dir, c.message)
 }
 
 const retrySource = `package alpha
@@ -129,8 +126,8 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	const branch = "add-retry"
 
 	// The fixture repo's own alpha.go fails its Clamp test at main (a build
-	// slice fixes it), so the author's branch fixes it first: the gate runs
-	// every oracle over the branch it reviews, and this one has to pass them.
+	// slice fixes it), so the author's branch fixes it first: the builder's
+	// verify of the slices has to pass on the branch the gate reviews.
 	alpha, err := os.ReadFile(filepath.Join(fx.RepoDir, "alpha", "alpha.go"))
 	if err != nil {
 		t.Fatalf("read the fixture's alpha.go: %v", err)
@@ -191,13 +188,12 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 		t.Fatalf("jig claim fix-1 exit = %d, want 0 on the adopted branch %s\nstdout:\n%s\nstderr:\n%s", claim.Code, branch, claim.Stdout, claim.Stderr)
 	}
 	h.git("apply", filepath.Join(fx.ScenarioDir, "slices", "fix-1", "attempt-1", "patch.diff"))
-	h.git("add", "-A")
-	h.git("commit", "-m", ticket+" fix-1: document Add", "-m", "Jig-Slice: fix-1")
+	h.builder().Commit(h.Clone, ticket+" fix-1: document Add\n\nJig-Slice: fix-1")
 	jigFix := h.git("rev-parse", "HEAD")
 	if got := h.git("rev-parse", "HEAD~1"); got != authorNext {
 		t.Fatalf("the fix commit's parent is %s, want the author's latest tip %s: the fix was not built on top of the author's commits, the mid-loop push included", got, authorNext)
 	}
-	if verify := h.Jig("verify", ticket, jigFix, "--slice", "fix-1", "--wait"); verify.Code != 0 || !strings.Contains(verify.Stdout, "state: pass") {
+	if verify := h.Verify(ticket, "fix-1"); verify.Code != 0 || !strings.Contains(verify.Stdout, "state: pass") {
 		t.Fatalf("jig verify fix-1 exit = %d, want 0 and a pass\nstdout:\n%s\nstderr:\n%s", verify.Code, verify.Stdout, verify.Stderr)
 	}
 	// The author's branch on origin is untouched: jig's commits stay in the
@@ -223,12 +219,11 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if g2.Code != 0 || !strings.Contains(g2.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate round 2 exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g2.Code, g2.Stdout, g2.Stderr)
 	}
-	gateLease := filepath.Join(env.home, "pool", "fixture-repo", ticket+"-gate")
-	if got := gitLog(t, gateLease, "symbolic-ref", "--short", "HEAD"); got != branch {
-		t.Fatalf("the gate lease is on %q, want the reviewed branch %q", got, branch)
+	if !strings.Contains(g2.Stdout, "copy: the clone's") {
+		t.Fatalf("round 2 did not review the clone's copy\nstdout:\n%s", g2.Stdout)
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != jigFix {
-		t.Fatalf("round 2 reviewed %s, want the branch with the fix commit, %s", got, jigFix)
+	if got := h.git("rev-parse", "refs/heads/"+branch); got != jigFix {
+		t.Fatalf("the clone's %s is at %s, want the fix commit %s the round reviewed", branch, got, jigFix)
 	}
 
 	// The clean round makes the ticket publishable like any other, adopted or
@@ -301,7 +296,7 @@ func TestGateBranchRoundFixesBuildOnTheReviewedBranch(t *testing.T) {
 	if g3.Code != 0 || !strings.Contains(g3.Stdout, "verdict: clean") {
 		t.Fatalf("jig gate after the publish exit = %d, want a clean round\nstdout:\n%s\nstderr:\n%s", g3.Code, g3.Stdout, g3.Stderr)
 	}
-	if got := gitLog(t, gateLease, "rev-parse", "HEAD"); got != head {
-		t.Fatalf("the round after the publish reviewed %s, want origin's copy, %s", got, head)
+	if got := h.git("rev-parse", "refs/heads/"+branch); got != head {
+		t.Fatalf("the clone's %s is at %s after the publish, want what origin holds, %s", branch, got, head)
 	}
 }

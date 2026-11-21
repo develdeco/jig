@@ -7,13 +7,9 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +17,7 @@ import (
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/store"
@@ -119,20 +116,20 @@ func TestWithGitGlobalIsPerTest(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if _, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "core.hooksPath", "/some/hooks"); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "core.hooksPath", "/some/hooks"); err != nil {
 		t.Fatalf("git config --global: %v", err)
 	}
-	if got, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "--get", "core.hooksPath"); err != nil || got != "/some/hooks" {
+	if got, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "--get", "core.hooksPath"); err != nil || got != "/some/hooks" {
 		t.Errorf("core.hooksPath = %q, %v, want /some/hooks in the test file", got, err)
 	}
-	if got, err := gitx.RunReplaceEnv(dir, env.environ(), "config", "--global", "--includes", "--get", "maintenance.auto"); err != nil || got != "false" {
+	if got, err := gitxtest.RunReplaceEnv(dir, env.environ(), "config", "--global", "--includes", "--get", "maintenance.auto"); err != nil || got != "false" {
 		t.Errorf("maintenance.auto = %q, %v, want false through the include of the hermetic config", got, err)
 	}
 	shared := readFileOrFatal(t, hermetic)
 	if strings.Contains(string(shared), "hooksPath") {
 		t.Errorf("the shared hermetic config took the test setting:\n%s", shared)
 	}
-	if _, err := gitx.RunReplaceEnv(dir, jigEnv{home: t.TempDir()}.environ(), "config", "--global", "--get", "core.hooksPath"); err == nil {
+	if _, err := gitxtest.RunReplaceEnv(dir, jigEnv{home: t.TempDir()}.environ(), "config", "--global", "--get", "core.hooksPath"); err == nil {
 		t.Errorf("another test sees the core.hooksPath this test installed")
 	}
 }
@@ -167,7 +164,7 @@ func TestWithoutIdentityLetsConfigDecideTheAuthor(t *testing.T) {
 		{"config", "user.email", "store.person@example.invalid"},
 		{"commit", "--allow-empty", "-m", "by config"},
 	} {
-		if _, err := gitx.RunReplaceEnv(dir, bare.environ(), args...); err != nil {
+		if _, err := gitxtest.RunReplaceEnv(dir, bare.environ(), args...); err != nil {
 			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 		}
 	}
@@ -488,124 +485,5 @@ func TestHarnessBashRunsTheCommandInTheClone(t *testing.T) {
 	}
 	if res := h.Bash("go version"); res.Code != 0 || !strings.HasPrefix(res.Stdout, "go version") {
 		t.Errorf("Bash(go version) = exit %d, %q, want the go toolchain answered", res.Code, res.Stdout)
-	}
-}
-
-// longLived starts a process that stays up until it is killed, and returns it
-// with a channel closed once it has exited and been reaped.
-func longLived(t *testing.T) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "120", "127.0.0.1")
-	} else {
-		cmd = exec.Command("sleep", "120")
-	}
-	return startReaped(t, cmd)
-}
-
-// shortLived starts a process that exits at once, and returns it with a
-// channel closed once it has exited and been reaped.
-func shortLived(t *testing.T) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", "exit", "0")
-	} else {
-		cmd = exec.Command("true")
-	}
-	return startReaped(t, cmd)
-}
-
-func startReaped(t *testing.T, cmd *exec.Cmd) (*exec.Cmd, <-chan struct{}) {
-	t.Helper()
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start %v: %v", cmd.Args, err)
-	}
-	done := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cmd.Process.Kill()
-		<-done
-	})
-	return cmd, done
-}
-
-// TestHarnessWaitVerifiers pins WaitVerifiers against the ledger: a worker
-// that has exited is waited for without complaint, one still running when
-// the wait is out is reported and killed, and nothing is left to report on a
-// second call.
-func TestHarnessWaitVerifiers(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-wait")
-	h.VerifierWait = 400 * time.Millisecond
-	var reports []string
-	h.reportf = func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }
-
-	h.WaitVerifiers() // no ledger at all
-	if len(reports) != 0 {
-		t.Fatalf("WaitVerifiers with no workers reported %q", reports)
-	}
-
-	quick, quickDone := shortLived(t)
-	stuck, stuckDone := longLived(t)
-	<-quickDone
-	for _, pid := range []int{quick.Process.Pid, stuck.Process.Pid} {
-		if err := ledger.Append(env.home, journal.Line{Event: journal.EventVerifySpawned, PID: pid}); err != nil {
-			t.Fatalf("ledger.Append: %v", err)
-		}
-	}
-
-	h.WaitVerifiers()
-	if len(reports) != 1 || !strings.Contains(reports[0], strconv.Itoa(stuck.Process.Pid)) {
-		t.Fatalf("WaitVerifiers reported %q, want exactly the worker still running (%d)", reports, stuck.Process.Pid)
-	}
-	select {
-	case <-stuckDone:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the worker still running was not killed")
-	}
-
-	h.WaitVerifiers()
-	if len(reports) != 1 {
-		t.Errorf("a second WaitVerifiers reported again: %q", reports)
-	}
-}
-
-// TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord: a verify-spawned
-// line names a pid, and the pid can belong to another process by the time a
-// test ends (Windows reuses them at once). A process that started after the
-// line was written is not the worker: the harness neither waits for it nor
-// kills it.
-func TestHarnessNeverKillsAProcessStartedAfterTheWorkerRecord(t *testing.T) {
-	t.Parallel()
-	fx, env := newFixture(t, fixture.Opts{})
-	h := newHarness(t, fx, env, "s-reused")
-	h.VerifierWait = 400 * time.Millisecond
-	var reports []string
-	h.reportf = func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }
-
-	other, otherDone := longLived(t)
-	earlier := time.Now().Add(-time.Minute)
-	if err := ledger.Append(env.home, journal.Line{TS: ledger.Stamp(earlier), Event: journal.EventVerifySpawned, PID: other.Process.Pid}); err != nil {
-		t.Fatalf("ledger.Append: %v", err)
-	}
-
-	h.WaitVerifiers()
-	h.killVerifiers()
-	if len(reports) != 0 {
-		t.Errorf("WaitVerifiers reported %q for a process that started after the worker's line", reports)
-	}
-	select {
-	case <-otherDone:
-		t.Fatal("the harness killed a process that started after the worker's line")
-	case <-time.After(500 * time.Millisecond):
-	}
-	if !pidAlive(other.Process.Pid) {
-		t.Fatal("the later process is gone")
 	}
 }

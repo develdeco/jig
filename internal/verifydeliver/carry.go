@@ -1,9 +1,10 @@
 package verifydeliver
 
-// A carried round (GATE-16): a head that only merges the target into the head
-// a reviewer read has nothing new to read, so the gate runs the oracles, as it
-// always does, and records the round itself with the verdict of the round that
-// was really reviewed. No reviewer is opened and no file is left to close.
+// A carried round: a head that adds nothing to read past the head a reviewer
+// read (a clean merge of the target, or no commit past it) has nothing new to
+// read, so the gate records the round itself with the verdict of the round that
+// was really reviewed. No reviewer is opened and no file is left to close, and
+// nothing is reasoned from the gate having run the oracle.
 
 import (
 	"fmt"
@@ -18,8 +19,8 @@ import (
 // carryOver records the round r opened as a clean round carrying over the
 // verdict of the round that reviewed the branch before, when prep says the
 // head adds nothing to read (prep.Empty) in every repo and each repo's head is
-// that round's own or only merges of the target past it (classifyLine, with
-// the target ref the gate uses). It reports false, recording nothing, for any
+// that round's own or only clean merges of the target past it (classifyLine,
+// with the target ref the gate uses). It reports false, recording nothing, for any
 // other round: a hand-resolved merge, an ordinary commit, a first round, a
 // round a scripted gate recorded, or an earlier verdict that left work open.
 func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
@@ -31,7 +32,7 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	}
 	repos := make([]RoundRepo, len(r.repos))
 	for i, gr := range r.repos {
-		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, LeaseDir: gr.lease.Dir}
+		repos[i] = RoundRepo{Name: gr.name, Target: gr.target, MergeRef: gr.mergeRef, ScopeBase: gr.scopeBase, CloneDir: gr.dir, Head: gr.head}
 	}
 	origin, rep, ok, err := carriedFrom(r.d.Store, r.ticket, r.n, prep, r.intent.Source, r.intentSHA256)
 	if err != nil || !ok {
@@ -40,14 +41,19 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 	heads, targetSHA, mergeTips, mergeRefs := map[string]string{}, map[string]string{}, map[string]string{}, map[string]string{}
 	for i, rp := range prep.Repos {
 		heads[rp.Repo] = rp.Head
-		tip, err := gitx.RevParse(repos[i].LeaseDir, "origin/"+repos[i].Target)
+		tip, err := gitx.RevParse(repos[i].CloneDir, "origin/"+repos[i].Target)
 		if err != nil {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve origin/%s: %w", repos[i].Target, err))
 		}
 		targetSHA[rp.Repo] = tip
+		// Only a repo that merged has a merge ref to name; a repo that merged
+		// nothing may be stacked on a parent branch that is not on origin.
+		if rp.Line != lineClean {
+			continue
+		}
 		ref := mergeRefOf(repos[i].MergeRef, repos[i].Target)
 		mergeRefs[rp.Repo] = ref
-		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].LeaseDir, ref); err != nil {
+		if mergeTips[rp.Repo], err = gitx.RevParse(repos[i].CloneDir, ref); err != nil {
 			return GateReport{}, false, inRepo(r.qualified, rp.Repo, fmt.Errorf("verifydeliver: gate: resolve %s: %w", ref, err))
 		}
 	}
@@ -64,6 +70,8 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 		ReviewedBase: heads,
 		Scope:        "delta",
 		CarriedFrom:  origin,
+		// None ran, so the refs are those of the round that was read.
+		StoreRefs: rep.StoreRefs,
 	}
 	if r.gb.Adopted {
 		report.Branch = r.branch
@@ -85,8 +93,8 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 }
 
 // carriedFrom is the round whose verdict round n carries over, with its report,
-// when every repo's head is that round's own or only merges of the target past
-// it (prep's Line) and a reviewer read that round: false for a first round, a
+// when every repo's head is that round's own or only clean merges of the target
+// past it (prep's Line) and a reviewer read that round: false for a first round, a
 // round a scripted gate recorded, a hand-resolved merge and anything else. A
 // carried round names the round that was really reviewed, so a chain of them
 // all name the one.
@@ -94,27 +102,21 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep, intentS
 	if n < 2 || len(prep.Repos) == 0 {
 		return 0, reportYAML{}, false, nil
 	}
-	merged := false
 	for _, rp := range prep.Repos {
 		if rp.Prior == "" || (rp.Line != lineSame && rp.Line != lineClean) {
 			return 0, reportYAML{}, false, nil
 		}
-		merged = merged || rp.Line == lineClean
 	}
-	if !merged {
-		// The gate run again on the head a reviewer read opens a round, as it
-		// always has: only a merge brings in something to carry over.
-		return 0, reportYAML{}, false, nil
-	}
-	// A decision a person made since the last round is applied by the next
-	// round that closes, and a carried round applies nothing: it waits for a
-	// round a reviewer reads.
+	// A decision a person made since the last round, or a keep the gate queued
+	// as a fix slice, is applied by the next round a reviewer reads, and a
+	// carried round applies nothing (its gate-clean line would spend it): it
+	// waits for a round a reviewer reads.
 	decisions, err := ReadTriageDecisions(st, ticket)
 	if err != nil {
 		return 0, reportYAML{}, false, err
 	}
 	for _, d := range decisions {
-		if d.Pending {
+		if d.Pending || d.Queued {
 			return 0, reportYAML{}, false, nil
 		}
 	}
@@ -156,23 +158,6 @@ func carriedNote(origin, prior int, prep ReviewPrep, qualified bool, tips, refs 
 		parts = append(parts, what)
 	}
 	return fmt.Sprintf("Carried over from round %d: %s; the oracle ran and passed.", origin, strings.Join(parts, "; "))
-}
-
-// carriedOver is carriedFrom and carriedNote for a launched round with nothing
-// to read: the round it carries, or 0 and no note.
-func carriedOver(in RoundInput, prep ReviewPrep) (origin int, note string, err error) {
-	origin, _, ok, err := carriedFrom(in.Store, in.Ticket, in.Round, prep, in.Intent.Source, intentSHA256(in.Intent.Source, in.IntentText))
-	if err != nil || !ok {
-		return 0, "", err
-	}
-	tips, refs := map[string]string{}, map[string]string{}
-	for _, r := range in.repoList() {
-		refs[r.Name] = mergeRefOf(r.MergeRef, r.Target)
-		if tip, terr := gitx.RevParse(r.LeaseDir, refs[r.Name]); terr == nil {
-			tips[r.Name] = tip
-		}
-	}
-	return origin, carriedNote(origin, in.Round-1, prep, in.qualified(), tips, refs), nil
 }
 
 // mergeRefOf is the ref a merge must bring in to count as the target's

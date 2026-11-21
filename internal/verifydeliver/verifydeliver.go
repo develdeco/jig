@@ -1,5 +1,5 @@
-// Package verifydeliver implements jig's second pipeline: gate (review +
-// re-verification rounds) and publish (the pull request body, the push and the
+// Package verifydeliver implements jig's second pipeline: gate (review
+// rounds, which run no command) and publish (the pull request body, the push and the
 // pull request). It shares no in-memory state with package frontier; the
 // store on disk is the only interface between them.
 //
@@ -11,8 +11,7 @@
 // (PublishRecordPR) or pushes the reviewed head and opens it (Publish). Publish
 // reconciles nothing, squashes nothing and commits nothing on the ticket
 // branch, so the person's branch never diverges from origin's because of it.
-// The one launched reviewer left is the source internal/revieweval measures
-// reviewers with (a Launcher starts its sessions; this package starts none).
+// This package starts no session.
 package verifydeliver
 
 import (
@@ -35,9 +34,9 @@ type Deps struct {
 	Store   *store.Store
 	Cfg     project.Config
 	Machine project.MachineProject
-	// Home is the jig home root whose pool holds the gate and publish
-	// leases: the binary's env resolves it (cmd/jig/env.go), a test's own
-	// directory in tests.
+	// Home is the jig home root, under which the evidence and the reviewer's
+	// copy of a request are kept: the binary's env resolves it
+	// (cmd/jig/env.go), a test's own directory in tests.
 	Home string
 	// UserHome is the operator's own home directory, where their local
 	// agent sessions keep transcripts (the binary's env resolves it, as
@@ -58,16 +57,12 @@ type Deps struct {
 	StdinIsTerminal func() bool
 	// GuardedPush pushes branch to origin. nil means gitx.GuardedPush.
 	GuardedPush func(dir, remote, branch string, confirmed bool) error
-	// FetchOrigin refreshes the view of origin. nil means the default fetch.
+	// FetchOrigin refreshes the view of origin. nil means the default fetch,
+	// which a publish skips because choosing the copy to ship has just fetched;
+	// one set here is always called.
 	FetchOrigin func(dir string) error
 	// Warn reports a soft-failure warning. nil means the default stderr write.
 	Warn func(format string, args ...any)
-	// Oracle runs one of the gate's own oracle commands in a lease and
-	// returns its combined output, the way a verification runs a slice's
-	// oracle at a commit. nil means the real run, bounded by oracleLimit
-	// with its process tree killed past it; a test that is not about the
-	// gate's oracle run hands one that passes.
-	Oracle func(cmd, dir string) (string, error)
 	// Prompt is what to ask an agent to move ticket on, in the words of the
 	// phase the ticket is at ("Build SHOP-1"): a refusal that sends a person
 	// back to an earlier phase names it. nil, or "", names none.
@@ -78,14 +73,13 @@ type Deps struct {
 	// says so. nil reads none, so every pull request goes into its repo's
 	// target.
 	Stack func(ticket string) (stack.Plan, error)
-}
-
-// oracle is d.Oracle, or the real run when it is nil.
-func (d Deps) oracle() oracleFunc {
-	if d.Oracle != nil {
-		return d.Oracle
-	}
-	return shellOracle
+	// StackFor is Stack for one issue of a shared task (stack.ReadFor): the
+	// plan a publish into that issue's branch uses. nil reads Stack's.
+	StackFor func(ticket, issue string) (stack.Plan, error)
+	// Container says where a multi-task or an issue stands before its own
+	// pull request (land.ReadinessOf): PublishContainer opens it only when its
+	// children have landed. nil refuses a container's publish.
+	Container func(ticket string) (ContainerStanding, error)
 }
 
 // publishHost is the host d hands Publish for the repo it ships: d.Host when
@@ -100,7 +94,7 @@ func (d Deps) publishHost(remote string) (repohost.Host, error) {
 
 // primaryRepo returns v0.1's single repo and its target branch (defaulting
 // to "main" when unset). A v3 project whose jig.yaml was not found on this
-// machine has no repos (project.LoadConfig): it comes back as the zero repo,
+// machine has no repos (project.LoadConfigWith): it comes back as the zero repo,
 // which the first thing that needs a clone of it refuses, rather than an
 // index out of range.
 func primaryRepo(cfg project.Config) (project.Repo, string, string) {

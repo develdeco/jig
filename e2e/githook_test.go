@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/gitx/gitxtest"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -45,7 +46,7 @@ func newHookRepo(t *testing.T) *hookRepo {
 
 func (r *hookRepo) git(args ...string) string {
 	r.t.Helper()
-	out, err := gitx.RunReplaceEnv(r.clone, r.gitEnv, args...)
+	out, err := gitxtest.RunReplaceEnv(r.clone, r.gitEnv, args...)
 	if err != nil {
 		r.t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
@@ -54,7 +55,7 @@ func (r *hookRepo) git(args ...string) string {
 
 // tryCommit makes an empty commit and returns git's error, if any.
 func (r *hookRepo) tryCommit(msg string) error {
-	_, err := gitx.RunReplaceEnv(r.clone, r.gitEnv, "commit", "-q", "--allow-empty", "-m", msg)
+	_, err := gitxtest.RunReplaceEnv(r.clone, r.gitEnv, "commit", "-q", "--allow-empty", "-m", msg)
 	return err
 }
 
@@ -104,7 +105,7 @@ func (r *hookRepo) jig(args ...string) jigResult {
 }
 
 func (r *hookRepo) globalHooksPath() string {
-	out, err := gitx.RunReplaceEnv(r.work, r.gitEnv, "config", "--global", "--get", "core.hooksPath")
+	out, err := gitxtest.RunReplaceEnv(r.work, r.gitEnv, "config", "--global", "--get", "core.hooksPath")
 	if err != nil {
 		return ""
 	}
@@ -203,11 +204,11 @@ func TestGitHookChainsThePreviousHooksPath(t *testing.T) {
 	r.hook(previous, "pre-commit", "echo prev >> \""+r.path("prev-pre-commit")+"\"\n")
 	r.hook(previous, "pre-push", "cat > \""+r.path("prev-push-stdin")+"\"\n")
 	r.hook(r.ownHooks(), "pre-push", "cat > \""+r.path("own-push-stdin")+"\"\n")
-	if _, err := gitx.RunReplaceEnv(r.work, r.gitEnv, "config", "--global", "core.hooksPath", filepath.ToSlash(previous)); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(r.work, r.gitEnv, "config", "--global", "core.hooksPath", filepath.ToSlash(previous)); err != nil {
 		t.Fatal(err)
 	}
 	origin := filepath.Join(r.work, "origin.git")
-	if _, err := gitx.RunReplaceEnv(r.work, r.gitEnv, "init", "-q", "--bare", origin); err != nil {
+	if _, err := gitxtest.RunReplaceEnv(r.work, r.gitEnv, "init", "-q", "--bare", origin); err != nil {
 		t.Fatal(err)
 	}
 	r.git("remote", "add", "origin", filepath.ToSlash(origin))

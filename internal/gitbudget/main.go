@@ -1,29 +1,37 @@
-// Command gitbudget holds each test package to a budget of git processes.
+// Command gitbudget reports the git processes each test package starts.
 //
 // CI's Linux leg runs every test binary through it (go test -exec), and it
 // points git's own trace, GIT_TRACE2_EVENT, at a directory of the package's
 // own. git then writes one file there for every git process the package's
 // tests start, in the test binary and in anything the binary runs (the jig
 // binary e2e builds, a git that starts another git). A step after go test
-// compares those counts with the baseline main's last run measured, so a
-// change that adds git work beyond the threshold fails its pull request
-// until a person accepts it, and nothing is committed to a budget.
+// shows those counts beside the baseline main's last run measured, so a
+// change that adds git work is seen in its pull request's job summary. A
+// count never fails anything.
 //
 // Usage:
 //
 //	gitbudget <test binary> [args...]
-//	gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>...
+//	gitbudget report <baseline or -> <count dir> <package>...
 //	gitbudget write <baseline file> <count dir> <package>...
 //
 // The first form runs the test binary, counting into $GITBUDGET_DIR when it
 // is set; go test runs it in the package's directory, which names the
-// package. check compares the named packages' counts with the baseline (a
-// yaml packages map; "-" or a missing file means none, and the check passes
-// saying so) and fails on a count above its baseline plus max(margin
-// percent of it, slack processes) from the config; a decrease never
-// fails, and -accepted turns the overs into passes. It prints a table and
+// package. report shows the named packages' counts beside the baseline (a
+// yaml packages map; "-" or a missing file means none, and the report says
+// so) with each change and percent, and exits 0 unless a file it must read
+// is unreadable or a package is not in the module. It prints a table and
 // appends it as Markdown to $GITHUB_STEP_SUMMARY. write records the counts
 // as the baseline. Packages are import paths, as go list prints them.
+//
+// Each trace file also says who started its git process, when the process
+// ran under a git config that lists trace2.envVars = JIG_GIT_CALLER,
+// JIG_GIT_DIR (internal/gittest writes it for test binaries; internal/gitx
+// sets both variables while git traces): the Go function that called gitx,
+// and the directory it ran in, from which the test is derived. report reads
+// only the head of each file and, after the table, prints and summarizes the
+// top callers across the packages and each package's top callers and tests,
+// and writes every count to callers.tsv in the count directory.
 package main
 
 import (
@@ -42,12 +50,12 @@ func main() {
 // run is main with its arguments, environment and output passed in.
 func run(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: gitbudget <test binary> [args...] | gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
+		fmt.Fprintln(stderr, "usage: gitbudget <test binary> [args...] | gitbudget report <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
 		return 2
 	}
 	switch args[0] {
-	case "check", "write":
-		return checkOrWrite(args[0], args[1:], getenv, stdout, stderr)
+	case "report", "write":
+		return reportOrWrite(args[0], args[1:], getenv, stdout, stderr)
 	}
 	dir := os.Getenv("GITBUDGET_DIR")
 	env := os.Environ()
@@ -84,28 +92,20 @@ func setEnv(env []string, name, value string) []string {
 	return append(out, name+"="+value)
 }
 
-// checkOrWrite is the check and write commands; getenv names where the job
+// reportOrWrite is the report and write commands; getenv names where the job
 // summary goes ($GITHUB_STEP_SUMMARY).
-func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
-	accepted := false
-	if cmd == "check" && len(args) > 0 && args[0] == "-accepted" {
-		accepted, args = true, args[1:]
-	}
+func reportOrWrite(cmd string, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	// write <baseline file> <count dir> <package>...
-	// check <config> <baseline or -> <count dir> <package>...
+	// report <baseline or -> <count dir> <package>...
 	var file, countDir, base string
 	var packages []string
-	need := 3
-	if cmd == "check" {
-		need = 4
-	}
-	if len(args) < need {
-		fmt.Fprintln(stderr, "usage: gitbudget check [-accepted] <config> <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
+	if len(args) < 3 {
+		fmt.Fprintln(stderr, "usage: gitbudget report <baseline or -> <count dir> <package>... | gitbudget write <baseline file> <count dir> <package>...")
 		return 2
 	}
 	file, countDir, packages = args[0], args[1], args[2:]
-	if cmd == "check" {
-		base, countDir, packages = args[1], args[2], args[3:]
+	if cmd == "report" {
+		base = file
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -139,11 +139,6 @@ func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout,
 		fmt.Fprintf(stdout, "gitbudget: wrote %d packages' counts to %s\n", len(counts), file)
 		return 0
 	}
-	c, err := readConfig(file)
-	if err != nil {
-		fmt.Fprintf(stderr, "gitbudget: %v\n", err)
-		return 1
-	}
 	var b *baseline
 	if base != "-" {
 		if b, err = readBaseline(base); err != nil {
@@ -152,13 +147,31 @@ func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout,
 		}
 	}
 	var plain, md string
-	ok := true
 	if b == nil {
 		plain, md = formatCounts(counts, false), formatCounts(counts, true)
 	} else {
-		var rows []row
-		rows, ok = c.check(b.Packages, counts, accepted)
-		plain, md = formatRows(rows, c), markdownRows(rows, c)
+		rows := compare(b.Packages, counts)
+		plain, md = formatRows(rows), markdownRows(rows)
+	}
+	// Who started the processes is reported like the counts: nothing here
+	// changes the exit code, and a failure to read or write it is a warning.
+	as := attributions{}
+	for rel := range counts {
+		a, err := attribute(filepath.Join(countDir, countDirName(rel)))
+		if err != nil {
+			fmt.Fprintf(stderr, "gitbudget: attribution of %s: %v\n", rel, err)
+			continue
+		}
+		if a.total > 0 {
+			as[rel] = a
+		}
+	}
+	plain += formatAttribution(as, false)
+	md += formatAttribution(as, true)
+	if len(as) > 0 {
+		if err := writeCallers(countDir, as); err != nil {
+			fmt.Fprintf(stderr, "gitbudget: %v\n", err)
+		}
 	}
 	fmt.Fprint(stdout, plain)
 	if path := getenv("GITHUB_STEP_SUMMARY"); path != "" {
@@ -166,11 +179,7 @@ func checkOrWrite(cmd string, args []string, getenv func(string) string, stdout,
 			fmt.Fprintf(stderr, "gitbudget: summary: %v\n", err)
 		}
 	}
-	if ok {
-		return 0
-	}
-	fmt.Fprintln(stdout, "\nA count is over its baseline plus the allowance. If the change means it, add the git-budget-accepted label to the pull request and re-run this job.")
-	return 1
+	return 0
 }
 
 // appendFile appends text to the file at path, making it if need be.

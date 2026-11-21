@@ -1233,7 +1233,7 @@ func TestGraduateCommitAndTable(t *testing.T) {
 	}
 }
 
-// TestGraduateRunsItsOwnCheckpointSync is the symmetric fix to r2-f8's
+// TestGraduateRunsItsOwnCheckpointSync is the symmetric case to
 // TestTicketNewRunsItsOwnCheckpointSync: `jig graduate` reaches the store
 // through Store.Claim alone too, so it must run the checkpoint sync itself,
 // explicitly, once every entry's claim has landed - one sync covering every
@@ -1266,7 +1266,7 @@ func TestGraduateRunsItsOwnCheckpointSync(t *testing.T) {
 	}
 }
 
-// TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers r4-f2: a
+// TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure covers a
 // chart whose first entry claims cleanly but whose second entry's mint fails
 // for a standing reason (here, a plain file named DEMO-2 sitting where that id's
 // ticket folder must go, so CreateTicketRecord's own MkdirAll refuses it)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/home"
 	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/mergefacts"
@@ -45,13 +46,19 @@ type nextStack struct {
 	Parent       string `json:"parent,omitempty"`
 	ParentBranch string `json:"parent_branch,omitempty"`
 	ParentHead   string `json:"parent_head,omitempty"`
-	Merged       bool   `json:"merged,omitempty"`
-	StartFrom    string `json:"start_from"`
-	PRTarget     string `json:"pr_target"`
-	Restack      bool   `json:"restack,omitempty"`
-	Retarget     bool   `json:"retarget,omitempty"`
-	Merge        string `json:"merge,omitempty"`
-	Publish      string `json:"publish,omitempty"`
+	// Container is the ticket whose branch the pull request goes into, and
+	// ContainerBranch that branch; Push, when the clone holds no copy of the
+	// branch, the command that creates it on the origin from where it is cut.
+	Container       string `json:"container,omitempty"`
+	ContainerBranch string `json:"container_branch,omitempty"`
+	Push            string `json:"push,omitempty"`
+	Merged          bool   `json:"merged,omitempty"`
+	StartFrom       string `json:"start_from"`
+	PRTarget        string `json:"pr_target"`
+	Restack         bool   `json:"restack,omitempty"`
+	Retarget        bool   `json:"retarget,omitempty"`
+	Merge           string `json:"merge,omitempty"`
+	Publish         string `json:"publish,omitempty"`
 }
 
 // stackRows are the repos of plan as nextStack rows; none when the ticket is
@@ -60,14 +67,18 @@ type nextStack struct {
 // --repo when the ticket has several rows, since the plan, the lookup of the
 // pull request and the update are each repo's own).
 func stackRows(plan stack.Plan, published bool) []nextStack {
-	if !plan.Stacked() {
+	if !plan.Stacked() && !plan.HasContainer() && plan.Kind == "" {
 		return nil
 	}
 	rows := make([]nextStack, 0, len(plan.Repos))
 	for _, r := range plan.Repos {
 		row := nextStack{
 			Repo: r.Repo, Parent: r.Parent, ParentBranch: r.ParentBranch, ParentHead: r.ParentHead, Merged: r.Merged,
+			Container: r.Container, ContainerBranch: r.ContainerBranch,
 			StartFrom: r.StartFrom, PRTarget: r.PRTarget, Restack: r.Behind, Retarget: r.Retarget,
+		}
+		if r.Container != "" && r.ContainerHead == "" && r.ContainerFrom != "" {
+			row.Push = "git push origin " + r.ContainerFrom + ":refs/heads/" + r.ContainerBranch
 		}
 		if r.Behind || r.Retarget {
 			row.Merge = "git merge " + r.StartFrom
@@ -96,6 +107,8 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 	for i, r := range rows {
 		parent := r.Parent
 		switch {
+		case parent == "" && r.Container != "":
+			parent = r.Container
 		case parent == "":
 			parent = "-"
 		case r.Merged:
@@ -126,6 +139,9 @@ func stackBlocks(ticket string, rows []nextStack) []string {
 		case r.Parent != "" && !r.Merged && r.ParentHead == "":
 			blocks = append(blocks, fmt.Sprintf("note: the clone of %s holds no copy of %s, the branch of %s: fetch it (`git fetch origin`) before %s starts from it",
 				r.Repo, r.ParentBranch, r.Parent, ticket))
+		case r.Push != "":
+			blocks = append(blocks, fmt.Sprintf("note: the clone of %s holds no copy of %s, the branch of %s: fetch it (`git fetch origin`); if the origin has none either, create it there from its own base: `%s`",
+				r.Repo, r.ContainerBranch, r.Container, r.Push))
 		}
 	}
 	return blocks
@@ -163,15 +179,15 @@ func cachedMergeReader(st *store.Store, cfg project.Config, mp project.MachinePr
 // from the machine mapping, and whether a parent merged from what this
 // machine knows (cachedMergeReader). A ticket stacked on nothing is told from
 // its record alone: the hook asks at every event.
-func locatedStack(where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
+func locatedStack(m *gitx.Memo, where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
 	rec, err := st.ReadTicket(where.Ticket)
 	if err != nil {
 		return stack.Plan{}, err
 	}
-	if !stack.StackedOnAny(rec) {
+	if !hasStackFacts(st, where.Ticket, rec) {
 		return stack.Plan{Ticket: where.Ticket}, nil
 	}
-	cfg, err := project.LoadConfig(where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+	cfg, err := project.LoadConfigWith(m, where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
 	if err != nil {
 		return stack.Plan{}, err
 	}
@@ -183,6 +199,22 @@ func locatedStack(where locate.Where, st *store.Store, jigHome string) (stack.Pl
 	return stack.Read(stackInput(st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome)), where.Ticket)
 }
 
+// hasStackFacts says the task's stack plan can say something: its record names
+// a stacked blocker, or it has a container (a parent, or the one chart with an
+// issue that lists it). The record is checked first, so a ticket outside every
+// chart costs one pass over the charts' files and no more. An issue and a
+// multi-task have none here: `jig next` reads their own branch.
+func hasStackFacts(st *store.Store, id string, rec store.Ticket) bool {
+	if rec.KindOrDefault() != store.KindTask {
+		return false
+	}
+	if stack.StackedOnAny(rec) || rec.Parent != "" {
+		return true
+	}
+	_, ok, err := st.ContainerOf(id, rec)
+	return err == nil && ok
+}
+
 // hereStack is the stack plan of the located ticket; ok is false when `jig
 // here` located no store or no ticket, or the ticket is stacked on nothing. A
 // plan that cannot be read is no plan here: `jig next <ticket>` says why.
@@ -190,8 +222,8 @@ func hereStack(c hereCtx) (stack.Plan, bool) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return stack.Plan{}, false
 	}
-	plan, err := locatedStack(c.Where, c.Store, c.JigHome)
-	if err != nil || !plan.Stacked() {
+	plan, err := locatedStack(c.e.memo, c.Where, c.Store, c.JigHome)
+	if err != nil || (!plan.Stacked() && !plan.HasContainer()) {
 		return stack.Plan{}, false
 	}
 	return plan, true

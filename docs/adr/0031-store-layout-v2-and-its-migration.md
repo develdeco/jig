@@ -10,8 +10,7 @@ and nothing told `project.yaml`'s readers which `schema_version` a given
 store actually followed, since `project.yaml` declared the field but
 nothing ever checked it.
 
-Two decisions of the store-layout map settle this (chart decisions 1, 6, 9
-and 13): real tickets move under `tickets/<id>/`, and `schema_version` is
+Two decisions settle this: real tickets move under `tickets/<id>/`, and `schema_version` is
 enforced from the one place every command loads `project.yaml`. Both
 landed with an area key on every id (ADR 0028's `ticket_format` replaced
 by `keys:`, an earlier slice of this same ticket): an id is `<key>-<n>`,
@@ -30,7 +29,7 @@ folder under `tickets/`, under any key, sorted by key then number - the
 one function minting's per-key counter, the GitHub mirror, and every other
 listing that shows many tickets read tickets through. A ticket folder's
 own contents (brief, slices, journal, gate rounds, changelogs, `pr/`, and
-A6's `tracker/github.yaml`) are unchanged by the move.
+the mirror's `tracker/github.yaml`) are unchanged by the move.
 
 `project.Config.CheckSchemaVersion`, called once from `cmd/jig`'s
 `resolveStore` (the one place every command loads `project.yaml`), refuses
@@ -40,8 +39,8 @@ upgraded to understand it), and one older than 2 for every command except
 rewriting it onto schema 2 - and `jig help`/`jig version`, which never
 resolve a store at all. A schema-2 `project.yaml` refuses `ticket_format`
 and `tracker:` outright, since the migration is what rewrites them into
-`keys:` and `trackers:`; the v1 reads that once made sense of them (`L1`'s
-`tracker: local`, `L2`'s `ticket_format`-as-key, `MintLocalID`, and the
+`keys:` and `trackers:`; the v1 reads that once made sense of them (the
+earlier `tracker: local`, `ticket_format`-as-key, `MintLocalID`, and the
 mirror's own read of `tracker/ticket.md` history) are gone with them.
 
 The alias scan `Store.ResolveTicket` reads (`Store.aliasClaims`, memoized
@@ -56,7 +55,7 @@ resolve at once, not only after its next write of its own.
 Older jig builds cannot be made to refuse a v2 store on their own, since
 they never checked `schema_version` at all - so the upgrade is a
 one-time, operator-run procedure, not something jig enforces across every
-clone at once (chart decision 13). `jig store migrate --map <file>` reads
+clone at once. `jig store migrate --map <file>` reads
 an operator-supplied rename map - `keys:` (the new area keys and their
 meaning) and `tickets:` (every existing ticket's old id to its new key) -
 and refuses a ticket the map leaves out, one the store does not have, an
@@ -115,22 +114,21 @@ Branches in the product repos, and the machine's evidence tree (keyed by
 old ids, which belong to tickets in flight the migration's own branch
 warning already tells the operator to finish first), are the operator's to
 carry forward, not jig's to rewrite. jig's own store's migration - the
-owner's rename map and the rehearsal-then-cutover procedure of chart
-decision 13 - runs after this ticket merges, using the command this ADR
+owner's rename map and the rehearsal-then-cutover procedure - runs after this ticket merges, using the command this ADR
 describes.
 
 ## Amendment: jig's own store was migrated
 
-The last paragraph above said jig's own store would be migrated after this ticket merged. It was: the owner's rename map gave its 43 tickets nine area keys and kept every old id as an alias, a `pre-v2` tag marks the store as it was, and the v3 step followed. DECISIONS.md has the account.
+The last paragraph above said jig's own store would be migrated after this ticket merged. It was: the owner's rename map gave its 43 tickets nine area keys and kept every old id as an alias, a `pre-v2` tag marks the store as it was, and the v3 step followed. Each step was a reviewed pull request of its own, rehearsed first on a scratch clone, after the twelve stale leases of merged tickets (which the migration refuses to move past) were removed. The first sync after the move updated the 46 issues in place and created none.
 
-## Amendment: the tracker tree (L4)
+## Amendment: the tracker tree
 
 The mirror's records move out of the ticket and chart folders into `trackers/<provider>/<scope>/<remote id>.yaml`, each with a relative symlink at `<remote id>` to its ticket or chart. The record names its owner (`ticket:` or `chart:`) and the provider keeps every other key; the link is rebuilt from the records on every sync, with no provider and no network, and `jig validate` checks the tree and reports what is wrong as advisories. A record still in an old place is read as a fallback and moved into the tree by the next sync. The schema stays at 3 (2 for a v2 store): the tree is part of the layout both read.
 
 ## Amendment: a tracker entry is a folder
 
-Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/STORE-6`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). DECISIONS.md has the account.
+Each remote item of the tracker tree became a folder, `trackers/<provider>/<scope>/<remote id>/`, holding `record.yaml` and a link named by the store id (`101/ABC-1`), where the tree had `<remote id>.yaml` and a link at `<remote id>`. A tree in the old layout is read as a fallback and moved by the next sync; the schema stays at 3 (2 for a v2 store). A record that cannot be read refuses a sync (`MIRROR_RECORD_INVALID`) before anything is written, since it names no ticket and the ticket would look like one with no issue and get a second; the tree's findings in `jig validate` are advisories.
 
 ## Amendment: the ledger and the contract index are rewritten
 
-"Out of scope" above said every other history file is read by id and an old id resolves through its alias. That holds for the files a command opens by ticket, and not for two the store keeps by text: `ledger.md` and `platform/contract-index.md`. A publish writes one entry into each under the ticket's id, and `jig recall` reads the ledger's entries by the id in their headings, so after jig's own store migrated they named ids that no longer existed (`T-22` for what is now `TRACK-1`). The migration now renames the ticket id in each ledger entry heading and each contract index line through the same rename map, and the dry run lists either file when it would rewrite it. A ticket the file holds more than once, from a publish that appended on every run, is left with its newest entry in the place of its first, and the dry run counts what it drops. Otherwise only the id changes: a title or an answer that mentions one is the person's words. Every new id differs from every old one (the map's keys must not clash with the old ids' own), so a file already renamed is not renamed again. See DECISIONS.md.
+"Out of scope" above said every other history file is read by id and an old id resolves through its alias. That holds for the files a command opens by ticket, and not for two the store keeps by text: `ledger.md` and `platform/contract-index.md`. A publish writes one entry into each under the ticket's id, and `jig recall` reads the ledger's entries by the id in their headings, so after jig's own store migrated they named ids that no longer existed (an old id for what is now a new one). The migration now renames the ticket id in each ledger entry heading and each contract index line through the same rename map, and the dry run lists either file when it would rewrite it. A ticket the file holds more than once, from a publish that appended on every run, is left with its newest entry in the place of its first, and the dry run counts what it drops. The newest entry wins because a publish regenerates an entry whole from the ticket's current state, and every duplicate in the file goes, not only those the rename makes, so the result is the same on any store. Otherwise only the id changes: a title or an answer that mentions one is the person's words. Every new id differs from every old one (the map's keys must not clash with the old ids' own), so a file already renamed is not renamed again.

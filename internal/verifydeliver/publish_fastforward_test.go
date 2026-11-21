@@ -10,7 +10,6 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/pool"
 )
 
 // whenPublishFetchesOrigin runs move just before publish's fetch of origin, the
@@ -114,7 +113,7 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 			run(t, foreign, "clone", fx.RepoRemote, ".")
 			run(t, foreign, "checkout", "-b", branch, oldMain)
 			writeAndCommit(t, foreign, "theirs.txt", "not in the build lease", "someone else's commit")
-			run(t, foreign, "push", "origin", branch)
+			builder(t).Push(foreign, "origin", branch)
 			theirs = originRef(t, fx.RepoRemote, "refs/heads/"+branch)
 		})
 		journalBefore := journalLen(t, d, fx.Ticket)
@@ -126,16 +125,12 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 		if !errors.As(err, &ae) {
 			t.Fatalf("err = %v, want an *axi.Error", err)
 		}
-		buildDir, perr := pool.Dir(fx.Home, "fixture-repo", fx.Ticket, pool.Build)
-		if perr != nil {
-			t.Fatal(perr)
-		}
 		if !strings.Contains(ae.Msg, branch) || !strings.Contains(ae.Msg, "1 commit(s) the branch lacks") {
 			t.Errorf("the refusal %q does not name the branch and origin's one commit the copy lacks", ae.Msg)
 		}
 		help := strings.Join(ae.Help, "\n")
-		if !strings.Contains(help, "git -C "+buildDir+" fetch origin && git -C "+buildDir+" merge origin/"+branch) || !strings.Contains(help, "never forces") {
-			t.Errorf("the refusal's help = %q, want the merge in the build lease at %s and that publish never forces", help, buildDir)
+		if !strings.Contains(help, "jig gate "+fx.Ticket) || !strings.Contains(help, "never forces") {
+			t.Errorf("the refusal's help = %q, want a new round and that publish never forces", help)
 		}
 		if got := originRef(t, fx.RepoRemote, "refs/heads/main"); got != mainBefore {
 			t.Fatalf("origin's main = %s, want %s unchanged", got, mainBefore)
@@ -149,8 +144,8 @@ func TestPublishRefusesAPushThatIsNotAFastForward(t *testing.T) {
 
 		_, err := Publish(d, PublishOpts{Ticket: fx.Ticket, Yes: true})
 		wantAxiCode(t, err, "BRANCH_DIVERGED")
-		if !strings.Contains(err.Error(), "the build lease at "+buildLeaseOf(t, fx, fx.Ticket)) {
-			t.Errorf("the refusal %q does not name the build lease to integrate in", err)
+		if !strings.Contains(strings.ReplaceAll(err.Error(), `\\`, `\`), "the clone at "+fx.RepoDir) {
+			t.Errorf("the refusal %q does not name the clone to integrate in", err)
 		}
 		wantNothingWritten(t, theirs, journalBefore, storeHead)
 	})
@@ -167,14 +162,16 @@ func TestRequireFastForward(t *testing.T) {
 	writeAndCommit(t, clone, "f1.txt", "one", "one")
 	run(t, clone, "push", "origin", "feature")
 	run(t, clone, "fetch", "origin")
+	head := func() string { return run(t, clone, "rev-parse", "HEAD") }
 
-	// Equal, and ahead: a fast-forward.
-	if err := requireFastForward(clone, "feature", "/build", "T-1", buildLeasesCopy); err != nil {
-		t.Errorf("a copy equal to origin's: %v", err)
+	// Equal: a fast-forward, and nothing to push.
+	if onOrigin, err := requireFastForward(clone, head(), "feature", "T-1", clonesCopy); err != nil || !onOrigin {
+		t.Errorf("a copy equal to origin's: on origin %v, %v, want a fast-forward with nothing to push", onOrigin, err)
 	}
+	// Ahead: a fast-forward with something to push.
 	writeAndCommit(t, clone, "f1.txt", "two", "two")
-	if err := requireFastForward(clone, "feature", "/build", "T-1", buildLeasesCopy); err != nil {
-		t.Errorf("a copy ahead of origin's: %v", err)
+	if onOrigin, err := requireFastForward(clone, head(), "feature", "T-1", clonesCopy); err != nil || onOrigin {
+		t.Errorf("a copy ahead of origin's: on origin %v, %v, want a fast-forward with a push to make", onOrigin, err)
 	}
 
 	// Behind: origin's copy has a commit the local one lacks.
@@ -184,37 +181,40 @@ func TestRequireFastForward(t *testing.T) {
 	writeAndCommit(t, other, "g.txt", "theirs", "theirs")
 	run(t, other, "push", "origin", "feature")
 	run(t, clone, "fetch", "origin")
-	wantAxiCode(t, requireFastForward(clone, "feature", "/build", "T-1", buildLeasesCopy), "PUBLISH_NOT_FAST_FORWARD")
+	_, err := requireFastForward(clone, head(), "feature", "T-1", clonesCopy)
+	wantAxiCode(t, err, "PUBLISH_NOT_FAST_FORWARD")
 
 	// What the refusal says to do depends on whose copy publish would ship. The
-	// build lease's is where jig's commits wait, so that is where origin's is
-	// merged in. Origin's own copy has nothing to merge into anywhere: origin
-	// moved since the round (a push between publish's two fetches), and the way
-	// on is a round over the branch as it is.
-	var fromBuild, fromOrigin *axi.Error
-	if !errors.As(requireFastForward(clone, "feature", "/build", "T-1", buildLeasesCopy), &fromBuild) ||
-		!errors.As(requireFastForward(clone, "feature", "/build", "T-1", originsCopy), &fromOrigin) {
+	// clone's is the person's, so that is where origin's is merged in. Origin's
+	// own copy has nothing to merge into anywhere: origin moved since the round
+	// (a push between publish's two fetches), and the way on is a round over the
+	// branch as it is.
+	var fromClone, fromOrigin *axi.Error
+	_, errClone := requireFastForward(clone, head(), "feature", "T-1", clonesCopy)
+	_, errOrigin := requireFastForward(clone, head(), "feature", "T-1", originsCopy)
+	if !errors.As(errClone, &fromClone) || !errors.As(errOrigin, &fromOrigin) {
 		t.Fatal("a copy behind origin's was not refused with an *axi.Error")
 	}
 	// The message counts the commits each side lacks: origin's one the copy lacks,
 	// and none of the copy's that origin lacks.
-	if !strings.Contains(fromBuild.Msg, "1 commit(s) the branch lacks") || !strings.Contains(fromBuild.Msg, "0 commit(s) origin lacks") {
-		t.Errorf("the refusal %q does not count origin's one commit the copy lacks and none of the copy's", fromBuild.Msg)
+	if !strings.Contains(fromClone.Msg, "1 commit(s) the branch lacks") || !strings.Contains(fromClone.Msg, "0 commit(s) origin lacks") {
+		t.Errorf("the refusal %q does not count origin's one commit the copy lacks and none of the copy's", fromClone.Msg)
 	}
-	if help := strings.Join(fromBuild.Help, "\n"); !strings.Contains(help, "git -C /build fetch origin && git -C /build merge origin/feature") || !strings.Contains(help, "jig gate") {
-		t.Errorf("help for the build lease's copy = %q, want the merge in the build lease, then the gate", help)
+	if help := strings.Join(fromClone.Help, "\n"); !strings.Contains(help, "git -C "+clone+" fetch origin && git -C "+clone+" merge origin/feature") || !strings.Contains(help, "jig gate") {
+		t.Errorf("help for the clone's copy = %q, want the merge in the clone, then the gate", help)
 	}
-	if help := strings.Join(fromOrigin.Help, "\n"); !strings.Contains(help, "run `jig gate T-1`") || strings.Contains(help, "/build") || !strings.Contains(help, "never forces") {
-		t.Errorf("help for origin's own copy = %q, want a round over the branch as it is, no build lease named, and that publish never forces", help)
+	if help := strings.Join(fromOrigin.Help, "\n"); !strings.Contains(help, "run `jig gate T-1`") || strings.Contains(help, "merge origin/") || !strings.Contains(help, "never forces") {
+		t.Errorf("help for origin's own copy = %q, want a round over the branch as it is, no merge named, and that publish never forces", help)
 	}
 
 	// Diverged: each has a commit the other lacks.
 	writeAndCommit(t, clone, "h.txt", "mine", "mine")
-	wantAxiCode(t, requireFastForward(clone, "feature", "/build", "T-1", buildLeasesCopy), "PUBLISH_NOT_FAST_FORWARD")
+	_, err = requireFastForward(clone, head(), "feature", "T-1", clonesCopy)
+	wantAxiCode(t, err, "PUBLISH_NOT_FAST_FORWARD")
 
 	// A branch origin does not have has nothing to fast-forward.
 	run(t, clone, "checkout", "-b", "never-pushed")
-	if err := requireFastForward(clone, "never-pushed", "/build", "T-1", buildLeasesCopy); err != nil {
-		t.Errorf("a branch that is not on origin: %v", err)
+	if onOrigin, err := requireFastForward(clone, head(), "never-pushed", "T-1", clonesCopy); err != nil || onOrigin {
+		t.Errorf("a branch that is not on origin: on origin %v, %v", onOrigin, err)
 	}
 }

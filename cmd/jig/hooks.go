@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	hooksUsageGlobal    = "your own settings, for every project: ~/.claude/settings.json"
+	hooksUsageGlobal    = "your own settings, for every project: ~/.claude/settings.json ($CLAUDE_CONFIG_DIR/settings.json when it is set)"
 	hooksUsageProject   = "the named project of this machine: its .claude/settings.local.json, which git ignores (Claude Code ignores project hooks in an untrusted folder and with --bare)"
 	hooksUsageHere      = "the project or repository you are in, as --project does"
 	hooksUsageHarness   = "the harness to edit: claude (the default), codex, gemini, cursor, copilot or opencode"
@@ -187,11 +187,11 @@ type hookPlan struct {
 func planHooks(e env, t scopeTarget, h setup.Harness, command string, tracked, uninstall bool) (hookPlan, error) {
 	hp := hookPlan{Harness: h, Scope: t, Tracked: tracked}
 	if t.Kind == scopeGlobal {
-		userHome, err := e.userHomeDir()
+		u, err := e.userDirs()
 		if err != nil {
 			return hp, err
 		}
-		hp.Path = h.GlobalFile(userHome)
+		hp.Path = h.GlobalFile(u)
 	} else {
 		dir, err := projectDir(t)
 		if err != nil {

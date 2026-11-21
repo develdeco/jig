@@ -18,13 +18,14 @@ import (
 // The actions of a nextWorktree row (ADR 0039).
 const (
 	// worktreeAdd: the ticket's work is wanted in the repo and no work tree
-	// holds its branch, so the row gives the git command that adds one.
+	// holds its branch, so the row names the branch and base to work on and
+	// gives the git command that adds one as advice.
 	worktreeAdd = "add"
 	// worktreePresent: the work is wanted and a work tree holds the branch,
 	// the clone's own or a linked one.
 	worktreePresent = "present"
 	// worktreeRemove: the ticket ended and a linked worktree still holds its
-	// branch, so the row gives the git command that removes it.
+	// branch, so the row gives the git command that removes it as advice.
 	worktreeRemove = "remove"
 	// worktreeNoClone: the work is wanted in a repo that has no clone on this
 	// machine.
@@ -36,7 +37,9 @@ const (
 const worktreesDirSuffix = ".worktrees/"
 
 // nextWorktree is one repo's worktree of a ticket as jig advises it. jig adds
-// and removes none: Command is what the session runs (ADR 0039).
+// and removes none and the harness makes the worktree: Branch and Base say what
+// to work on and from where. An add's Command is advice for a harness with no
+// worktree method; a remove's removes a worktree the harness kept (ADR 0039).
 type nextWorktree struct {
 	Repo    string `json:"repo"`
 	Action  string `json:"action"`            // add, present, remove or no_clone
@@ -44,8 +47,12 @@ type nextWorktree struct {
 	Clone   string `json:"clone,omitempty"`   // the repo's clone on this machine
 	Dir     string `json:"dir,omitempty"`     // where the worktree goes (add) or is (present, remove)
 	Base    string `json:"base,omitempty"`    // add of a branch the clone lacks: its start point
-	Command string `json:"command,omitempty"` // the git command to run (add, remove)
+	Command string `json:"command,omitempty"` // add: advice for a harness with no worktree method; remove: what removes a kept worktree
 	Note    string `json:"note,omitempty"`    // no_clone: what to know
+
+	// existing says an add is of a branch the clone has already: its tie is a
+	// switch, not a rename. Not part of the row jig prints.
+	existing bool
 }
 
 // worktreeFacts are what the rows of one ticket are decided from. Every caller
@@ -195,6 +202,7 @@ func (s *worktreeSource) rows(f worktreeFacts) []nextWorktree {
 			row.Dir = advised
 			add := "git -C " + gitPath(clone) + " worktree add " + gitPath(row.Dir)
 			if exists {
+				row.existing = true
 				row.Command = add + " " + f.Branch
 			} else {
 				row.Base = startPoint(s.cfg, f.Plan, repo)
@@ -304,17 +312,32 @@ func worktreeBlocks(rows []nextWorktree) []string {
 	return blocks
 }
 
-// worktreeHelp are the lines that tell a session to run the commands of the
-// rows: one for each add and each remove, none for a repo whose worktree is
-// there already.
+// worktreeHelp are the lines about the worktrees of the rows: one for each add
+// and each remove, none for a repo whose worktree is there already. The harness
+// makes a worktree by its own method, so an add's git command is advice for a
+// harness with none; a remove's command is what removes a worktree the harness
+// kept (ADR 0039).
 func worktreeHelp(ticket string, rows []nextWorktree) []string {
 	var help []string
 	for _, r := range rows {
 		switch r.Action {
 		case worktreeAdd:
-			help = append(help, fmt.Sprintf("Add the worktree of %s in %s: `%s`", ticket, r.Repo, r.Command))
+			// A branch the clone lacks is tied by a rename, one it has by a
+			// switch.
+			work, tie := "work on branch "+r.Branch, "`git switch "+r.Branch+"`"
+			if !r.existing {
+				tie = "`git branch -m " + r.Branch + "` (on a detached HEAD `git switch -c " + r.Branch + "`)"
+				if r.Base != "" {
+					work += " from base " + r.Base
+				}
+			}
+			help = append(help, fmt.Sprintf(
+				"Add the worktree of %s in %s: %s in a worktree your harness makes, then %s inside it; a harness with no worktree method runs `%s`",
+				ticket, r.Repo, work, tie, r.Command))
 		case worktreeRemove:
-			help = append(help, fmt.Sprintf("Remove the worktree of %s in %s (git refuses one with changes): `%s`", ticket, r.Repo, r.Command))
+			help = append(help, fmt.Sprintf(
+				"Remove the worktree of %s in %s once published: `%s` removes a worktree the harness kept, or one made with no worktree method (git refuses one with changes)",
+				ticket, r.Repo, r.Command))
 		}
 	}
 	return help

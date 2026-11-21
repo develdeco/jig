@@ -1,5 +1,5 @@
-// Package phase derives where a ticket stands: which of its four phases
-// (brief, build, review and publish) is current, whether that phase can start
+// Package phase derives where a ticket stands: which of its phases
+// (brief, build, review, publish and land) is current, whether that phase can start
 // now, why not, the prompt that starts it, and the sub-steps of each phase.
 // Every command that advises the next step reads this one derivation, so a
 // session, a person and the TUI get the same answer.
@@ -25,7 +25,7 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// Name is one of the four phases of a ticket.
+// Name is one of the phases of a ticket.
 type Name string
 
 // The phases, in the order a ticket goes through them.
@@ -34,10 +34,18 @@ const (
 	Build   Name = "build"
 	Review  Name = "review"
 	Publish Name = "publish"
+	// Land is the fifth phase: the merge of the published pull requests, made by
+	// the session at the person's word and recorded by `jig land` (ADR 0061).
+	Land Name = "land"
 )
 
 // Names are the phases in order.
-var Names = [4]Name{Brief, Build, Review, Publish}
+var Names = [5]Name{Brief, Build, Review, Publish, Land}
+
+// Work is how many of the phases are the work of a ticket, brief to publish:
+// the TUI draws these, and a ticket's Current is among them until it is
+// published and not landed.
+const Work = 4
 
 // Parse is the phase a word names, and false for a word that names none.
 func Parse(s string) (Name, bool) {
@@ -71,6 +79,8 @@ func Prompt(p Name, ticket string) string {
 		return "Review " + ticket
 	case Publish:
 		return "Publish " + ticket
+	case Land:
+		return "Land " + ticket
 	}
 	return ""
 }
@@ -291,7 +301,7 @@ type Facts struct {
 	Notes    []Ask
 	Blockers []Blocker
 	// Open is the round open now, nil when none is. The journal's gate-open
-	// line is not enough: a gate that failed on its oracles wrote it and
+	// line is not enough: a gate that failed before its round opened wrote it and
 	// opened nothing. OpenRoundIn reads the journal for a caller that has no
 	// store to ask.
 	Open      *OpenRound
@@ -307,6 +317,14 @@ type Facts struct {
 	// done, and the ticket's own standing says so. The brief, build and review
 	// phases stay done, since the merge is part of the work that follows them.
 	Restacks []Restack
+	// Landed says every pull request the ticket published has a landed line,
+	// as the caller read them; Derive also reads the journal lines (LandedIn),
+	// so a caller that passes the lines need not set it.
+	Landed bool
+	// MergedOnHost says the host reports the ticket's pull requests merged: the
+	// caller that asked the host sets it. A published ticket with that and no
+	// landed line is merged on the host, not recorded.
+	MergedOnHost bool
 
 	// SessionName words a session id wherever the answer names a session (who
 	// took a round, who holds a slice). role is the part the session plays in
@@ -328,8 +346,11 @@ type Facts struct {
 
 // Ticket is where a ticket stands.
 type Ticket struct {
-	Phases [4]Phase
-	// Current is the first phase not done, the last when all are.
+	Phases [5]Phase
+	// Current is the first phase not done. When every phase is done it is
+	// Publish, the last of the work (Work): a landed ticket reads as a published
+	// one always did. A published ticket that has not landed is at Land, with
+	// the code PHASE_DONE as before and the prompt `Land T`.
 	Current Name
 	// Ready is whether Current can start now.
 	Ready bool
@@ -403,7 +424,7 @@ func (t Ticket) For(p Name) Asked {
 	i := p.index()
 	switch {
 	case i < 0:
-		a.Reason = fmt.Sprintf("%q is none of the phases (brief, build, review, publish)", string(p))
+		a.Reason = fmt.Sprintf("%q is none of the phases (brief, build, review, publish, land)", string(p))
 	case t.d != nil && t.d.f.Closed != "":
 		a.Code, a.Reason = CodeClosed, t.d.closedReason()
 	case t.Phases[i].State == StateDone:
@@ -412,6 +433,8 @@ func (t Ticket) For(p Name) Asked {
 		if t.Prompt != "" {
 			a.Warning += "; prompt: " + t.Prompt
 		}
+	case p == Land && t.Current == Land:
+		a.Ready = true
 	case p == t.Current:
 		a.Ready, a.Code, a.Reason = t.Ready, t.Code, t.Reason
 	default:
@@ -446,11 +469,14 @@ var startedEvents = map[string]bool{
 // sliceView is a slice with what the journal says of it.
 type sliceView struct {
 	Slice
-	verifying      bool
-	pendingCommit  string
 	verifiedCommit string
-	claimed        bool
-	claimedBy      string
+	// failed: the slice's latest covering run failed, judging the code, and
+	// nothing has verified it since. It only reads failed while the store has
+	// the slice building, the state `jig verify` sets a failed slice back to,
+	// as the TUI's rows do.
+	failed    bool
+	claimed   bool
+	claimedBy string
 }
 
 // publishView is what the journal says of the publish since the last round
@@ -511,13 +537,16 @@ type digest struct {
 	notes      []Ask
 	slices     []sliceView
 	pub        publishView
+	// landed and hasPR are what land read of the lines: every pull request has
+	// a landed line, and some repo has a pull request.
+	landed, hasPR bool
 }
 
 // OpenRoundIn is the round the journal says is open: the latest gate-open line
 // with no gate-round or gate-clean line after it, its number, and the session
 // of the latest gate-reviewer line for it ("" when none). A caller that can
 // read the store asks it instead (verifydeliver.ReadStatus), since a gate that
-// failed on its oracles leaves a gate-open line and no open round.
+// failed before its round opened leaves a gate-open line and no open round.
 func OpenRoundIn(lines []journal.Line) *OpenRound {
 	open, closed, closedN := -1, -1, 0
 	for i, l := range lines {
@@ -587,9 +616,11 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	publishP, own := d.publish(reviewDone)
 	publishDone := pub && !d.owed() || own && reviewDone
 
-	t := Ticket{Phases: [4]Phase{briefP, buildP, reviewP, publishP}, d: d}
-	done := [4]bool{briefDone, buildDone, reviewDone, publishDone}
-	cur := len(done) - 1
+	landP, landDone := d.land(publishDone)
+
+	t := Ticket{Phases: [5]Phase{briefP, buildP, reviewP, publishP, landP}, d: d}
+	done := [5]bool{briefDone, buildDone, reviewDone, publishDone, landDone}
+	cur := Work - 1
 	for i, dn := range done {
 		if !dn {
 			cur = i
@@ -717,10 +748,15 @@ func (d *digest) readAsks() {
 // decisionOf is a with its pending decision laid over it.
 func (d *digest) decisionOf(a Ask) Ask {
 	if a.Decision == "" {
+		queued := false
 		for i := len(d.lines) - 1; i > d.lastClosed; i-- {
 			l := d.lines[i]
+			if l.Event == journal.EventKeepQueued && l.Ref == a.ID {
+				queued = true // a gate queued the keep's slice: still decided, no longer pending
+				continue
+			}
 			if l.Event == journal.EventTriage && l.Ref == a.ID && (l.Outcome == "keep" || l.Outcome == "dismiss") {
-				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, true
+				a.Decision, a.DecidedBy, a.Pending = l.Outcome, l.Provenance, !queued
 				break
 			}
 		}
@@ -728,30 +764,34 @@ func (d *digest) decisionOf(a Ask) Ask {
 	return a
 }
 
-// readSlices lays the journal over each slice: whether a worker is verifying
-// it, the commit that verified it, who holds it.
+// readSlices lays the journal over each slice: the commit that verified it,
+// who holds it. An old verify-pending line is read by nothing here: a commit
+// has a recorded result or none.
 func (d *digest) readSlices() {
 	for _, s := range d.f.Slices {
 		v := sliceView{Slice: s}
-		pending, resolved, claim, release := -1, -1, -1, -1
+		claim, release := -1, -1
 		for i, l := range d.lines {
 			if l.Slice != s.ID {
 				continue
 			}
 			switch l.Event {
-			case journal.EventVerifyPending:
-				pending, v.pendingCommit = i, l.Commit
 			case journal.EventVerified:
-				resolved, v.verifiedCommit = i, l.Commit
-			case journal.EventOracle, journal.EventVerifyError:
-				resolved = i
+				v.verifiedCommit = l.Commit
+				v.failed = false
+			case journal.EventOracle:
+				// The latest run that covered a commit decides (an uncovered one
+				// says nothing of a commit), and it is a failure only when it
+				// judged the code: a run a stop or a timeout ended did not.
+				if l.Uncovered == "" {
+					v.failed = l.Outcome == "fail" && l.Cause == ""
+				}
 			case journal.EventClaim:
 				claim, v.claimedBy = i, l.Session
 			case journal.EventRelease:
 				release = i
 			}
 		}
-		v.verifying = pending >= 0 && pending > resolved
 		v.claimed = claim >= 0 && claim > release
 		d.slices = append(d.slices, v)
 	}
@@ -969,8 +1009,7 @@ func (d *digest) briefSubs(planned int, odd string) []Sub {
 	return subs
 }
 
-// build is the build phase and whether all its slices are green, none of them
-// being verified.
+// build is the build phase and whether all its slices are green.
 func (d *digest) build(prevDone bool) (Phase, bool) {
 	f := d.f
 	p := Phase{Name: Build}
@@ -995,7 +1034,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 	for _, s := range d.slices {
 		state, detail := d.sliceState(s)
 		p.Subs = append(p.Subs, Sub{Key: "slice:" + s.ID, Label: sliceLabel(s.Slice), State: state, Detail: detail})
-		if s.State == sliceGreen && !s.verifying {
+		if s.State == sliceGreen {
 			green++
 		}
 		if s.FromGate > 0 {
@@ -1024,7 +1063,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 // untouched is whether no slice has been started.
 func (d *digest) untouched() bool {
 	for _, s := range d.slices {
-		if s.State != sliceQueued || s.verifying {
+		if s.State != sliceQueued {
 			return false
 		}
 	}
@@ -1040,16 +1079,16 @@ func sliceLabel(s Slice) string {
 	return "slice " + s.ID
 }
 
-// sliceState is the sub-step state and detail of a slice, with the journal's
-// word on a verification laid over the store's state.
+// sliceState is the sub-step state and detail of a slice, from the store's
+// state with the journal's word on who holds it.
 func (d *digest) sliceState(s sliceView) (state, detail string) {
 	switch {
 	case s.OpenQuestion || s.State == sliceNeedsInput:
 		return SubNeedsYou, "waits for your answer"
 	case s.State == sliceStalled:
 		return SubFailed, "stalled"
-	case s.verifying:
-		return SubActive, "verifying " + short(s.pendingCommit)
+	case s.failed && s.State == sliceBuilding:
+		return SubFailed, "failed its last run"
 	case s.State == sliceGreen:
 		return SubDone, strings.TrimSpace("verified " + short(s.verifiedCommit))
 	case s.State == sliceEnvBlocked:
@@ -1082,19 +1121,19 @@ func (d *digest) unmet(s Slice) []string {
 }
 
 // buildFocus is what matters most in a build under way: a question for the
-// person, a stall, a wait for the environment, a verification, a builder.
+// person, a stall, a wait for the environment, a builder.
 func (d *digest) buildFocus() string {
-	for _, want := range []string{"needs", "stalled", "env", "verifying", "building"} {
+	for _, want := range []string{"needs", "stalled", "failed", "env", "building"} {
 		for _, s := range d.slices {
 			switch {
 			case want == "needs" && (s.OpenQuestion || s.State == sliceNeedsInput):
 				return "slice " + s.ID + " needs your answer"
 			case want == "stalled" && s.State == sliceStalled:
 				return "slice " + s.ID + " stalled"
+			case want == "failed" && s.failed && s.State == sliceBuilding:
+				return "slice " + s.ID + " failed its last run"
 			case want == "env" && s.State == sliceEnvBlocked:
 				return "slice " + s.ID + " waits for its environment"
-			case want == "verifying" && s.verifying:
-				return "verifying slice " + s.ID + " at " + short(s.pendingCommit)
 			case want == "building" && s.State == sliceBuilding:
 				return "slice " + s.ID + " is being built"
 			}
@@ -1144,7 +1183,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 	if len(d.asks) > 0 {
 		sub := Sub{Key: "asks", Label: "asks", State: SubNeedsYou, Detail: fmt.Sprintf("%d to decide", len(undecided))}
 		if len(undecided) == 0 {
-			sub.State, sub.Detail = SubWaiting, fmt.Sprintf("%d decided, applied at the next round", len(d.asks))
+			sub.State, sub.Detail = SubWaiting, fmt.Sprintf("%d decided, queued or applied at the next gate", len(d.asks))
 		}
 		p.Subs = append(p.Subs, sub)
 	}
@@ -1153,7 +1192,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 			Detail: fmt.Sprintf("%d of %d green", fixesTotal-fixesOpen, fixesTotal)})
 	}
 	if len(d.notes) > 0 {
-		p.Subs = append(p.Subs, Sub{Key: "notes", Label: "notes", State: SubWaiting, Detail: fmt.Sprintf("%d decided, applied at the next round", len(d.notes))})
+		p.Subs = append(p.Subs, Sub{Key: "notes", Label: "notes", State: SubWaiting, Detail: fmt.Sprintf("%d decided, queued or applied at the next gate", len(d.notes))})
 	}
 	clean := hasRound && last.Clean && !d.builtSince && open == nil && len(d.notes) == 0
 	if open == nil && !clean {
@@ -1209,7 +1248,7 @@ func (d *digest) fixesOf(n int) (open, total int) {
 			continue
 		}
 		total++
-		if s.State != sliceGreen || s.verifying {
+		if s.State != sliceGreen {
 			open++
 		}
 	}
@@ -1380,6 +1419,9 @@ func (d *digest) ready(t *Ticket) {
 		// Published, and owed a merge: the publish is ready again.
 	case f.Published:
 		t.Ready, t.Code, t.Reason, t.Prompt = false, CodeDone, f.Ticket+" is published", ""
+		if t.Current == Land {
+			t.Prompt = Prompt(Land, f.Ticket)
+		}
 	case t.Current == Build && len(f.Blockers) > 0:
 		reasons := make([]string, len(f.Blockers))
 		for i, b := range f.Blockers {
@@ -1438,11 +1480,6 @@ func (d *digest) builtReason() string {
 	f := d.f
 	if len(d.slices) == 0 {
 		return f.Ticket + " has no slices built yet"
-	}
-	for _, s := range d.slices {
-		if s.verifying {
-			return fmt.Sprintf("slice %s is being verified at %s", s.ID, short(s.pendingCommit))
-		}
 	}
 	green := 0
 	var behind []string

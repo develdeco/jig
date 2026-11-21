@@ -7,7 +7,7 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// gate7Rounds writes the shape of GATE-7's first two rounds into a store and
+// gate7Rounds writes the shape of a review's first two rounds into a store and
 // returns the ticket's directory, the way a gate leaves them: round 1 files a
 // medium fix (r1-f1) that stays open, and a low fix the risk floor routes to
 // the notes (r1-f3) beside a note the reviewer itself labeled (r1-f5); round 2
@@ -46,7 +46,7 @@ func gate7Rounds(t *testing.T) (*store.Store, string) {
 	return st, ticketDir
 }
 
-// TestReviewNotesReadAddressedAndKeepFirstVersion is GATE-7's record: a note
+// TestReviewNotesReadAddressedAndKeepFirstVersion is the record of a run where a note
 // the builder fixed read "noted", and a finding continued as a lower risk lost
 // its first title. The notes must say r1-f3 was addressed at round 2 (and the
 // body count it apart from fixed and noted), show r1-f1's medium round-1 title
@@ -59,7 +59,7 @@ func TestReviewNotesReadAddressedAndKeepFirstVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectFindingsWithOutcomes: %v", err)
 	}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, lastSummary, outcomes, nil, reviewedPaths, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	notes := readNotes(t, st, "T-1", "review-notes.md")
@@ -157,7 +157,7 @@ func TestFindingOutcomeAddressedNeedsNoSliceAndKeepsFirstVersion(t *testing.T) {
 		t.Errorf("r1-f4 = %+v, want its first and latest risk", o)
 	}
 	st := &store.Store{Root: t.TempDir()}
-	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil, ""); err != nil {
+	if err := writeReviewNotes(st, "T-1", "review-notes.md", "", 2, nil, "", outcomes, nil, nil, nil, nil, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := "  - History: medium at round 1: four; continued at round 2 as low: four\n"; !strings.Contains(readNotes(t, st, "T-1", "review-notes.md"), want) {
