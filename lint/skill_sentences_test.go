@@ -69,7 +69,7 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 		"A finding names the rule broken. Before filing, search the change for the same rule's other instances",
 		"`--oracle` proves the rule across them",
 		"An `--action ask` about a rule lays out every case it must decide, with one recommended answer.",
-		"a search that must come back empty",
+		"a search that must come back empty, such as `! git grep -n '<pattern>'`",
 	)
 	wantAll(t, "skills/review rounds", skillFile(t, "review", "rounds"),
 		"--still-present",
@@ -81,16 +81,31 @@ func TestSkillSentencesBuildReadAndFix(t *testing.T) {
 	wantAll(t, "skills/build", skillFile(t, "build"),
 		"Read the function, not the file: find code with `grep -n` or the LSP",
 		"Make independent reads in one step; an edit's result shows it applied.",
-		"Fix the rule each finding names wherever its oracle reaches.",
+		"Fix the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches.",
 		"mutate each term the fix adds (operand, condition, constant, return) after your last edit",
 		"a survivor blocks the commit until a test catches it",
 	)
 	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
 		"Read the function, not the file",
 		"make independent reads in one step",
-		"fixes the rule each finding names wherever its oracle reaches",
+		"fixes the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches",
 		"mutate each term the fix adds after your last edit",
 		"a survivor blocks the commit until a test catches it",
+	)
+}
+
+func TestSkillSentencesBuildBroadChecks(t *testing.T) {
+	wantAll(t, "skills/build", skillFile(t, "build"),
+		"Before the first `jig gate`, and after each merge of the target into the branch before the gate that follows it",
+		"run each package the change touches in full, plus the checks the project's CI runs that no package covers",
+		"each through `jig verify <T> --` so the run is witnessed",
+		"Fix a failure in a recorded fix commit and run again until it passes.",
+	)
+	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
+		"Before the first `jig gate` for <ticket>, and after each merge of the target into the branch before the gate that follows it",
+		"run each package your change touches in full, plus the checks the project's CI runs that no package covers",
+		"each through `jig verify <ticket> --`",
+		"fix a failure in a recorded fix commit until it passes",
 	)
 }
 

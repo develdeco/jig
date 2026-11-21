@@ -30,7 +30,7 @@ Read `jig skill build claim` before claiming when nobody is watching, when the c
 
 - Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change.
 - Read the function, not the file: find code with `grep -n` or the LSP, read that range; for tests, the one you change and one neighbour as the pattern. Make independent reads in one step; an edit's result shows it applied.
-- A fix slice's goal names the findings it fixes. Fix the rule each finding names wherever its oracle reaches. Before committing, mutate each term the fix adds (operand, condition, constant, return) after your last edit, and run its oracle: a survivor blocks the commit until a test catches it.
+- A fix slice's goal names the findings it fixes. Fix the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches. Before committing, mutate each term the fix adds (operand, condition, constant, return) after your last edit, and run its oracle: a survivor blocks the commit until a test catches it.
 - Commit as you land, each commit with the trailer that ties it to the slice:
 
 ```
@@ -39,6 +39,7 @@ git commit -m "<message>" -m "Jig-Slice: <slice>"
 
   The trailer names the slice for `jig verify`, and is how the next slice's context finds what this one built. `jig here` shows what is verified.
 - When the slice's work is committed, run `jig verify` in your own worktree, in the foreground or as the harness's background task. jig starts nothing on a commit: `jig verify` runs the slice's oracle where you are, in your environment, shows its output, and records the run. Read that output and fix until the footer says `covers: yes`. A slice is green only on that covering pass at your last commit, so commit first and leave the tree alone while it runs. `--dry-run` shows what would run, and `--no-record` is for exploring: it writes nothing. After the last clean gate round, `jig verify T-1 --final` runs the union of the ticket's slice commands at the reviewed head: the ticket's last run.
+- Before the first `jig gate`, and after each merge of the target into the branch before the gate that follows it, run each package the change touches in full, plus the checks the project's CI runs that no package covers (its lint and static analysis, as its CI configuration names them), each through `jig verify <T> --` so the run is witnessed. Fix a failure in a recorded fix commit and run again until it passes.
 - Never edit the store's files by hand. A slice needing more work is `jig slice add <T> --id --goal --oracle`.
 
 ## Stuck? Ask
