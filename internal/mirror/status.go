@@ -10,6 +10,7 @@ import (
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mirror/github"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/store"
@@ -176,7 +177,8 @@ const (
 )
 
 // TicketStatus derives ticket's Status:
-// Done when it was closed as covered or any of prs merged; Not planned when it
+// Done when it was closed as covered, its journal records it landed or any of
+// prs merged; Not planned when it
 // was closed as superseded or not planned; In review when one of prs is open;
 // In progress when its journal is not empty or any slice has left queued;
 // Briefed when it has a brief.md; Backlog otherwise. A closure wins over every
@@ -192,6 +194,15 @@ func TicketStatus(st *store.Store, ticket string, prs []PRRef) (string, error) {
 		}
 		return StatusNotPlanned, nil
 	}
+	lines, err := journal.Read(st, ticket)
+	if err != nil {
+		return "", err
+	}
+	// A landing the journal records is Done with no pull request known: every
+	// pull request the ticket published has a landed line.
+	if landed, _ := phase.LandedIn(lines); landed {
+		return StatusDone, nil
+	}
 	for _, pr := range prs {
 		if strings.EqualFold(pr.State, "MERGED") {
 			return StatusDone, nil
@@ -203,10 +214,6 @@ func TicketStatus(st *store.Store, ticket string, prs []PRRef) (string, error) {
 		}
 	}
 
-	lines, err := journal.Read(st, ticket)
-	if err != nil {
-		return "", err
-	}
 	slices, err := st.ReadSlices(ticket)
 	if err != nil {
 		return "", err

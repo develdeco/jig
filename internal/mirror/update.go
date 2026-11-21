@@ -321,13 +321,17 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 // issueStatus is an issue ticket's board Status: ChartStatus over the Statuses
 // of the tickets of its chart, mirrored or not (a ticket the sync did not
 // carry is read from the store alone, with no pull request known). own is the
-// ticket's Status on its own, kept when it was closed or has no chart yet.
+// ticket's Status on its own, kept when it was closed, is Done (the issue
+// landed, whatever its tasks read) or has no chart yet.
 func issueStatus(st *store.Store, ticket, own string, statusByTicket map[string]string) (string, error) {
 	rec, err := st.ReadTicket(ticket)
 	if err != nil {
 		return "", err
 	}
 	if rec.Closed != nil {
+		return own, nil
+	}
+	if own == StatusDone {
 		return own, nil
 	}
 	chart, err := st.ChartOfIssue(ticket)
