@@ -80,6 +80,11 @@ const (
 	EventVerifySpawned = "verify-spawned"
 	EventNoteDelivered = "note-delivered"
 	EventHook          = "hook"
+	// EventLandNamed is the line `jig land` leaves in the ledger when it names a
+	// merge for the session to make: the landed line that follows is then an
+	// agent's or a person's, and without it a merged pull request is a merge
+	// made on the host.
+	EventLandNamed = "land-named"
 )
 
 // The provenance of a landed line: who made the landing known. A session that
