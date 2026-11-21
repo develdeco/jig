@@ -33,6 +33,10 @@ A pull request the host reports `CONFLICTING` is named with the merge that resol
 
 An issue or a multi-task lands by the same verb once its own pull request is recorded: it waits for its tasks (or the tickets of its chart) to land in its branch, then names its merge into the target.
 
+## A suggested order
+
+An issue can be suggested to land after another (`jig depend <issue> --after <issue>`). `jig land` then prints a `lands_after` table and says `<issue> is suggested to land after <id>, not landed`. That is a note to repeat to the person, never a stop: it refuses nothing, so land as the person said. A person who wants the order kept says "Land the other first".
+
 ## Then
 
 Say what landed and what `jig land` names next, and stop. Do not land the next ticket unless the person said to.

@@ -9,6 +9,44 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 )
 
+// TestAfterRecordIsStrictAndWrittenOnlyWhenNotEmpty: after round-trips, an
+// empty list writes no key, and removing the last id removes the key.
+func TestAfterRecordIsStrictAndWrittenOnlyWhenNotEmpty(t *testing.T) {
+	t.Parallel()
+	st := &Store{Root: t.TempDir()}
+	if err := st.CreateTicketRecord("T-1", Ticket{Title: "i", Kind: KindIssue}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(st.TicketFilePath("T-1"))
+	if strings.Contains(string(raw), "after:") {
+		t.Fatalf("an empty after was written:\n%s", raw)
+	}
+	for i := 0; i < 2; i++ {
+		if err := st.SetTicketAfter("T-1", "T-2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.ReadTicket("T-1")
+	if err != nil || len(got.After) != 1 || got.After[0] != "T-2" || got.Kind != KindIssue {
+		t.Fatalf("read = %+v, %v", got, err)
+	}
+	if err := st.RemoveTicketAfter("T-1", "T-2"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(st.TicketFilePath("T-1"))
+	if strings.Contains(string(raw), "after:") {
+		t.Errorf("a cleared after stays:\n%s", raw)
+	}
+	if err := os.WriteFile(st.TicketFilePath("T-1"), []byte("schema_version: 1\nafterr: [T-2]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.ReadTicket("T-1")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || ae.Code != "TICKET_RECORD_INVALID" {
+		t.Errorf("a misspelt key = %v", err)
+	}
+}
+
 // TestTicketKindDefaultsToTaskAndIsWrittenOnlyWhenNot: an absent kind reads as
 // a task and the file writes none for a task; any other kind and a parent are
 // written and read back.

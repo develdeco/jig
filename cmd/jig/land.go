@@ -92,9 +92,21 @@ func cmdLand(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	for _, n := range v.Notes {
 		notes = append(notes, "Note: "+n)
 	}
+	// The suggested order of issues is shown and never enforced: the note is the
+	// person's to repeat, and the landing goes on.
+	var order []string
+	if rec, err := st.ReadTicket(ticket); err == nil && rec.KindOrDefault() == store.KindIssue {
+		if rows, err := land.Suggestions(deps, ticket); err == nil {
+			order = afterBlock(landRows(rows))
+			notes = append(notes, land.PendingNote(ticket, rows)...)
+		}
+	}
+	if followers, err := land.Followers(deps, ticket); err == nil {
+		notes = append(notes, land.FollowerNotes(followers)...)
+	}
 	switch {
 	case len(v.Merge) > 0:
-		return renderMerge(e, stdout, st, jigHome, ticket, v, notes)
+		return renderMerge(e, stdout, st, jigHome, ticket, v, notes, order)
 	case len(v.Record) > 0:
 		return recordLanded(e, stdin, stdout, deps, jigHome, ticket, v, notes)
 	}
@@ -123,7 +135,7 @@ func landDeps(e env, st *store.Store, cfg project.Config, mp project.MachineProj
 // renderMerge names the merges to make, one row per repo, and leaves a line in
 // the ledger saying so, so that the landing that follows is the session's own.
 // Nothing is merged and nothing is written to the store.
-func renderMerge(e env, stdout io.Writer, st *store.Store, jigHome, ticket string, v land.Verdict, notes []string) int {
+func renderMerge(e env, stdout io.Writer, st *store.Store, jigHome, ticket string, v land.Verdict, notes, order []string) int {
 	if jigHome != "" {
 		_ = ledger.Append(jigHome, journal.Line{TS: stamp(e), Ticket: ticket, Event: journal.EventLandNamed, Into: v.Into})
 	}
@@ -138,12 +150,21 @@ func renderMerge(e env, stdout io.Writer, st *store.Store, jigHome, ticket strin
 	help = append(help,
 		"jig does not merge: make each merge with its command, at the person's word, then run `"+land.Command(st, ticket, v.Into)+"` again to record it",
 	)
-	axi.Render(stdout,
-		axi.KV("land", [][2]string{{"ticket", ticket}, {"into", orDash(v.Into)}, {"merges", fmt.Sprint(len(v.Merge))}}),
+	blocks := append([]string{axi.KV("land", [][2]string{{"ticket", ticket}, {"into", orDash(v.Into)}, {"merges", fmt.Sprint(len(v.Merge))}})}, order...)
+	axi.Render(stdout, append(blocks,
 		axi.Table("merge", []string{"repo", "pr", "base", "method", "command"}, rows),
-		axi.Help(help...),
+		axi.Help(help...))...,
 	)
 	return 0
+}
+
+// landRows are the suggestions as the rows `jig next` shows.
+func landRows(rows []land.Suggestion) []nextAfterRow {
+	var out []nextAfterRow
+	for _, r := range rows {
+		out = append(out, nextAfterRow{Ticket: r.Ticket, Title: r.Title, State: r.State})
+	}
+	return out
 }
 
 // recordLanded writes the landed lines of a ticket whose pull requests are all
