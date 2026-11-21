@@ -42,6 +42,8 @@ A batch spanning areas takes a chart verdict; a standalone ticket takes `jig dep
 
 Read `jig skill intake chart-verdict` when the verdict is a chart, for either verdict's first step, or after a chart verdict ended the run.
 
+Read `jig skill intake needs` when the prompt states several needs or a need comes after an issue was made.
+
 Where a change is written: what the person needs, to the issue's `body` (its `ticket.yaml`); how the work is planned, to the chart (`tickets.yaml` entries, the map's decisions); a briefing, to its task's `brief.md`.
 
 ## Done when

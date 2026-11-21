@@ -225,3 +225,19 @@ func TestSkillSentencesChartNesting(t *testing.T) {
 		"nested builder", "in the background", "only its repo's slices, never gate or nest", "a hold saying to gate is yours", "wait for them before the gate", "the question, its id and default", "No Agent tool", "if you have the Agent tool", "A hand-back at green with no reviewer", "its tie replaced by running the `command` of its repo's `worktrees` row", "working in that row's `dir`",
 	)
 }
+
+func TestIntakeNeedsReference(t *testing.T) {
+	core := skillFile(t, "intake")
+	ref := skillFile(t, "intake", "needs")
+	wantAll(t, "skills/intake", core, "Read `jig skill intake needs` when the prompt states several needs or a need comes after an issue was made")
+	wantAll(t, "skills/intake/references/needs", ref,
+		"**as proposed**", "**one issue**", "could it land on main by itself", "a new need",
+		"never match phrases", "one confirmation, never one per need",
+	)
+	if len(core) > 6000 {
+		t.Errorf("intake core is %d bytes, budget is <=6000", len(core))
+	}
+	if len(ref) > 6000 || strings.Count(ref, "\n") > 100 {
+		t.Errorf("needs reference is %d bytes, %d lines, budget is <=6000 and 100", len(ref), strings.Count(ref, "\n"))
+	}
+}
