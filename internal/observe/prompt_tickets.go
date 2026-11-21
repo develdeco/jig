@@ -25,6 +25,7 @@ var phaseSkill = map[phase.Name]string{
 	phase.Build:   "build",
 	phase.Review:  "review",
 	phase.Publish: "publish",
+	phase.Land:    "land",
 }
 
 // namedTickets is the tickets of the store the event's prompt names, in the

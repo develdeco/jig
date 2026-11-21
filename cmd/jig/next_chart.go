@@ -160,7 +160,7 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 		}
 		if t := r.Ticket; t != nil && r.Kind == "" {
 			row.Phase, row.Ready, row.Code = string(t.Current), t.Ready, t.Code
-			for _, p := range t.Phases {
+			for _, p := range t.Work() {
 				row.Steps = append(row.Steps, p.State)
 			}
 		}
@@ -223,7 +223,7 @@ func (n *nextChart) setWorkspaceOverlaps(st *store.Store, cfg project.Config, mp
 			continue
 		}
 		pos[t.ID] = t.Pos
-		built[t.ID] = t.Phase == string(phase.Review) || t.Phase == string(phase.Publish)
+		built[t.ID] = t.Phase == string(phase.Review) || t.Phase == string(phase.Publish) || t.Phase == string(phase.Land)
 	}
 	slicesOf := map[string][]store.Slice{}
 	edges := map[string]map[string]bool{}

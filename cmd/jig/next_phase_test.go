@@ -131,49 +131,49 @@ func (r phaseRig) walk(t *testing.T, check func(s phaseStage)) {
 	prompt := func(verb string) string { return verb + " " + T }
 	const reviewed = "round: %d\nverdict: %s\nindependent: true\nreviewer:\n  session: s-rev\n  how: env\n"
 
-	check(phaseStage{name: "a drafted brief", phase: "brief", ready: true, prompt: prompt("Plan"), states: "cppp",
+	check(phaseStage{name: "a drafted brief", phase: "brief", ready: true, prompt: prompt("Plan"), states: "cpppp",
 		asked: []phaseAsk{{phase: "build", code: "PHASE_BRIEF_NOT_APPROVED", reason: "is not approved"}}})
 
 	approveBrief(t, r.st, T)
-	check(phaseStage{name: "an approved brief", phase: "build", ready: true, prompt: prompt("Build"), states: "dcpp",
+	check(phaseStage{name: "an approved brief", phase: "build", ready: true, prompt: prompt("Build"), states: "dcppp",
 		asked: []phaseAsk{{phase: "brief", ready: true, warnFrom: "brief is done (approved by ", warnTo: "; prompt: " + prompt("Build")}}})
 
 	r.line(t, journal.Line{Event: journal.EventClaim, Slice: "a", Session: "s-claim"})
 	if err := r.st.WriteSliceState(T, "a", store.SliceState{State: "building", Attempts: 1}); err != nil {
 		t.Fatal(err)
 	}
-	check(phaseStage{name: "a build under way", phase: "build", ready: true, prompt: prompt("Build"), states: "dcpp",
+	check(phaseStage{name: "a build under way", phase: "build", ready: true, prompt: prompt("Build"), states: "dcppp",
 		asked: []phaseAsk{{phase: "review", code: "PHASE_NOT_BUILT"}}})
 
 	r.green(t, "s-claim")
-	check(phaseStage{name: "a build done", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcp",
+	check(phaseStage{name: "a build done", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcpp",
 		asked: []phaseAsk{
 			{phase: "build", ready: true, warnFrom: "build is done (", warnTo: "; prompt: " + prompt("Review")},
 			{phase: "publish", code: "PHASE_NOT_REVIEWED"},
 		}})
 
 	r.openRound(t, 1)
-	check(phaseStage{name: "a round open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcp", reason: "round 1"})
+	check(phaseStage{name: "a round open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcpp", reason: "round 1"})
 
 	writeRound(t, r.root, T, 1, roundFiles{report: fmt.Sprintf(reviewed, 1, "findings")})
 	writeAsks(t, r.root, T, askSpec{id: "r1-f1"})
 	r.line(t, journal.Line{Event: journal.EventGateRound, Attempt: 1, Session: "s-rev"})
-	check(phaseStage{name: "a round with an ask to decide", phase: "review", code: "PHASE_ASKS_UNDECIDED", prompt: prompt("Review"), states: "ddcp", reason: "1 ask of "})
+	check(phaseStage{name: "a round with an ask to decide", phase: "review", code: "PHASE_ASKS_UNDECIDED", prompt: prompt("Review"), states: "ddcpp", reason: "1 ask of "})
 
 	// The decision is the line `jig triage` journals (the status_triage tests
 	// run the verb).
 	r.line(t, journal.Line{Event: journal.EventTriage, Ref: "r1-f1", Outcome: "dismiss", Provenance: "person"})
-	check(phaseStage{name: "an ask decided", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcp"})
+	check(phaseStage{name: "an ask decided", phase: "review", ready: true, prompt: prompt("Review"), states: "ddcpp"})
 
 	r.openRound(t, 2)
-	check(phaseStage{name: "round 2 open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcp", reason: "round 2"})
+	check(phaseStage{name: "round 2 open", phase: "review", code: "PHASE_ROUND_OPEN", prompt: prompt("Review"), states: "ddcpp", reason: "round 2"})
 
 	writeRound(t, r.root, T, 2, roundFiles{report: fmt.Sprintf(reviewed, 2, "clean")})
 	r.line(t, journal.Line{Event: journal.EventGateClean, Attempt: 2, Session: "s-rev"})
-	check(phaseStage{name: "a clean round", phase: "publish", ready: true, prompt: prompt("Publish"), states: "dddc"})
+	check(phaseStage{name: "a clean round", phase: "publish", ready: true, prompt: prompt("Publish"), states: "dddcp"})
 
 	r.line(t, journal.Line{Event: journal.EventPublishDone})
-	check(phaseStage{name: "a published ticket", phase: "publish", code: "PHASE_DONE", states: "dddd"})
+	check(phaseStage{name: "a published ticket", phase: "publish", code: "PHASE_DONE", states: "ddddd"})
 }
 
 // nextPhaseOut is `jig next <ticket> --json` as these tests read it: the phase
