@@ -97,6 +97,10 @@ type ChartEntry struct {
 	// ID is the ticket the entry minted, "" until `jig graduate`.
 	ID    string
 	Title string
+	// Kind is the ticket's kind when it is not a task ("issue" or
+	// "multi-task"): such a ticket is not briefed or built, so the standing keeps
+	// its row but never offers it in the briefs or the run.
+	Kind string
 	// Rank is the ticket's rank, nil when unranked or not graduated.
 	Rank *int
 	// Needs are every edge of the entry, met or not.
@@ -329,7 +333,7 @@ func DeriveChart(f ChartFacts) Chart {
 			c.Ends = append(c.Ends, d.retargetEnds(r)...)
 			continue
 		}
-		if r.Ticket != nil && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
+		if r.Ticket != nil && d.f.Entries[d.byPos[r.Pos]].Kind == "" && r.Ticket.Current == Brief && (r.Reach == ReachHere || r.Reach == ReachAfterMerge) {
 			c.Briefs = append(c.Briefs, r.ID)
 		}
 		if r.Reach != ReachAfterMerge {
@@ -546,7 +550,7 @@ func (d *chartDeriver) waveOf(i int) int {
 func (d *chartDeriver) runWaves(c *Chart) {
 	here := map[int]bool{}
 	for i, e := range d.f.Entries {
-		if e.ID != "" && d.reach[i] == ReachHere {
+		if e.ID != "" && e.Kind == "" && d.reach[i] == ReachHere {
 			here[i] = true
 		}
 	}

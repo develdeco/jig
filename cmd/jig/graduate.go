@@ -234,7 +234,9 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	}
 
 	helpLines := append([]string{}, advisories...)
-	helpLines = append(helpLines, "Write each ticket's brief.md and slices.yaml (the intake skill drafts both) and check them with `jig validate <id> --check`; run `jig validate <id>` once the person has confirmed the brief")
+	if tasks := createdTaskIDs(st, createdIDs); len(tasks) > 0 {
+		helpLines = append(helpLines, fmt.Sprintf("Write the brief.md and slices.yaml of each task (%s; the intake skill drafts both) and check them with `jig validate <id> --check`; run `jig validate <id>` once the person has confirmed the brief", strings.Join(tasks, ", ")))
+	}
 	blocks := []string{
 		axi.KV("graduate", [][2]string{{"chart", chart}, {"created", strconv.Itoa(len(createdIDs))}}),
 		axi.Table("entries", []string{"position", "id", "title", "status"}, rows),
@@ -242,6 +244,18 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 	}
 	axi.Render(stdout, blocks...)
 	return 0
+}
+
+// createdTaskIDs is the ids among ids that are tasks: an issue or a multi-task
+// has no brief or slices to write.
+func createdTaskIDs(st *store.Store, ids []string) []string {
+	var tasks []string
+	for _, id := range ids {
+		if rec, err := st.ReadTicket(id); err != nil || rec.KindOrDefault() == store.KindTask {
+			tasks = append(tasks, id)
+		}
+	}
+	return tasks
 }
 
 // writeChartAfterMintError marks the one error claimOneChartEntry's write

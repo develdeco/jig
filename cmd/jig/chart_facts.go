@@ -113,6 +113,9 @@ func chartFacts(st *store.Store, cfg project.Config, mp project.MachineProject, 
 			ce.Title = rec.Title
 		}
 		ce.Rank = rec.Rank
+		if k := rec.KindOrDefault(); k != store.KindTask {
+			ce.Kind = k
+		}
 		for _, b := range rec.BlockedBy {
 			blocker := b.Ticket
 			if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
