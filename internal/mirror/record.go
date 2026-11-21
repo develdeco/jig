@@ -60,6 +60,9 @@ type syncedFields struct {
 	// StoreID is the board item's Store ID text value the last sync wrote.
 	StoreID string      `yaml:"store_id,omitempty"`
 	Links   syncedLinks `yaml:"links,omitempty"`
+	// PlanSHA256 is the sha256 (hex) of the plan comment last posted on an
+	// issue ticket's issue, in the form bodies compare in.
+	PlanSHA256 string `yaml:"plan_sha256,omitempty"`
 }
 
 // syncedLinks is synced.links: the node ids of the parent and blocked-by

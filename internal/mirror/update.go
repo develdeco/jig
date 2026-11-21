@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/mirror/github"
@@ -107,6 +108,9 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		rec githubRecord
 		// lookup is this ticket's index in lookups; -1 for a chart.
 		lookup int
+		// issue is a ticket of kind issue: its Status comes from its
+		// chart's tickets, so it is handled after every other item.
+		issue bool
 	}
 	var todo []pending
 	var lookups []prLookup
@@ -121,6 +125,11 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		}
 		p := pending{it: it, rec: rec, lookup: -1}
 		if it.kind == "ticket" {
+			tk, terr := st.ReadTicket(it.id)
+			if terr != nil {
+				return nil, nil, nil, nil, terr
+			}
+			p.issue = tk.KindOrDefault() == store.KindIssue
 			branch, berr := st.TicketBranch(it.id, target)
 			if berr != nil {
 				return nil, nil, nil, nil, berr
@@ -136,6 +145,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		nodeIDs = append(nodeIDs, rec.NodeID)
 		todo = append(todo, p)
 	}
+	sort.SliceStable(todo, func(i, j int) bool { return !todo[i].issue && todo[j].issue })
 	found, ferr := findPullRequests(ctx, client, cfg, lookups)
 	if ferr != nil {
 		return nil, nil, nil, nil, fmt.Errorf("mirror: find the tickets' pull requests: %w", ferr)
@@ -150,6 +160,10 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		what := it.what()
 
 		var title, body, status string
+		// board is the Status the board shows: the ticket's own, but for an
+		// issue ticket its chart's. The issue's open or closed state follows
+		// status, the item's own.
+		var board string
 		if it.kind == "ticket" {
 			prs, gone := found[p.lookup].prs, found[p.lookup].gone
 			prsByTicket[it.id] = prs
@@ -160,6 +174,13 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			status, err = TicketStatus(st, it.id, prs)
 			if err != nil {
 				return nil, nil, nil, nil, err
+			}
+			board = status
+			if p.issue {
+				board, err = issueStatus(st, it.id, status, statusByTicket)
+				if err != nil {
+					return nil, nil, nil, nil, err
+				}
 			}
 			title, _, err = ResolveTicketTitleBody(st, it.id)
 			if err != nil {
@@ -186,7 +207,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		}
 
 		if it.kind == "ticket" {
-			statusByTicket[it.id] = status
+			statusByTicket[it.id] = board
 		}
 
 		if dryRun || public {
@@ -295,4 +316,43 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		}
 	}
 	return curByWhat, statusByTicket, prsByTicket, skip, nil
+}
+
+// issueStatus is an issue ticket's board Status: ChartStatus over the Statuses
+// of the tickets of its chart, mirrored or not (a ticket the sync did not
+// carry is read from the store alone, with no pull request known). own is the
+// ticket's Status on its own, kept when it was closed or has no chart yet.
+func issueStatus(st *store.Store, ticket, own string, statusByTicket map[string]string) (string, error) {
+	rec, err := st.ReadTicket(ticket)
+	if err != nil {
+		return "", err
+	}
+	if rec.Closed != nil {
+		return own, nil
+	}
+	chart, err := st.ChartOfIssue(ticket)
+	if err != nil {
+		return "", err
+	}
+	if chart == "" {
+		return own, nil
+	}
+	entries, err := st.ReadChart(chart)
+	if err != nil {
+		return "", err
+	}
+	var statuses []string
+	for _, e := range entries {
+		if e.ID == "" || e.ID == ticket {
+			continue
+		}
+		s, ok := statusByTicket[e.ID]
+		if !ok {
+			if s, err = TicketStatus(st, e.ID, nil); err != nil {
+				return "", err
+			}
+		}
+		statuses = append(statuses, s)
+	}
+	return ChartStatus(statuses), nil
 }

@@ -103,6 +103,18 @@ func renderSyncReport(w io.Writer, report mirror.SyncReport, dryRun bool) bool {
 		axi.Render(w, axi.Table("placed", []string{"item", "status"}, rows))
 	}
 
+	if len(report.PlanComments) > 0 {
+		label := "plan_commented"
+		if dryRun {
+			label = "would_plan_comment"
+		}
+		rows := make([][]string, len(report.PlanComments))
+		for i, c := range report.PlanComments {
+			rows[i] = []string{c.Ticket, fmt.Sprintf("%d", c.Tickets)}
+		}
+		axi.Render(w, axi.Table(label, []string{"issue_ticket", "tickets"}, rows))
+	}
+
 	if len(report.NotLinked) > 0 {
 		rows := make([][]string, len(report.NotLinked))
 		for i, n := range report.NotLinked {
