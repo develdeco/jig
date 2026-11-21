@@ -160,6 +160,9 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		what := it.what()
 
 		var title, body, status string
+		// openStatus is the Status the issue's open or closed state follows: the
+		// ticket's own, which an issue ticket's board Status (its chart's) is not.
+		var openStatus string
 		if it.kind == "ticket" {
 			prs, gone := found[p.lookup].prs, found[p.lookup].gone
 			prsByTicket[it.id] = prs
@@ -171,6 +174,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
+			openStatus = status
 			if p.issue {
 				status, err = issueStatus(st, it.id, status, statusByTicket)
 				if err != nil {
@@ -191,6 +195,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				return nil, nil, nil, nil, cerr
 			}
 			status = ChartStatus(statuses)
+			openStatus = status
 			title, err = chartTitle(st, it.id)
 			if err != nil {
 				return nil, nil, nil, nil, err
@@ -272,7 +277,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		synced.Title = title
 		synced.BodySHA256 = newHash
 
-		wantOpen := IsOpen(status)
+		wantOpen := IsOpen(openStatus)
 		curState := openState(cur.Open)
 		if cur.Open != wantOpen {
 			if synced.State != "" && curState != synced.State {
@@ -283,7 +288,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				switch {
 				case wantOpen:
 					operr = client.ReopenIssue(ctx, rec.NodeID)
-				case status == StatusNotPlanned:
+				case openStatus == StatusNotPlanned:
 					operr = client.CloseIssueNotPlanned(ctx, rec.NodeID)
 				default:
 					operr = client.CloseIssueCompleted(ctx, rec.NodeID)

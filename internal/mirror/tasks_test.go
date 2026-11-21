@@ -172,24 +172,68 @@ func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 	if got := statusOf("DEMO-1"); got != "Done" {
 		t.Fatalf("Status with every task done = %q, want Done", got)
 	}
-	if len(client.closed)+countClosed(client) == 0 {
-		t.Errorf("the issue was not closed")
+	// The need's issue follows its own ticket, not its chart: it stays open
+	// while DEMO-1 is open, and closes once DEMO-1 is closed.
+	needOpen := func() bool {
+		for _, is := range client.issues {
+			if is.Title == "The need" {
+				return is.Open
+			}
+		}
+		t.Fatal("no issue for the need")
+		return false
+	}
+	if !needOpen() {
+		t.Errorf("the need's issue was closed while its ticket is open")
+	}
+	if err := w.st.CloseTicket("DEMO-1", store.Closed{Reason: store.CloseCovered, By: "example/demo#2", At: "2026-01-02"}); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(false)
+	if needOpen() {
+		t.Errorf("the need's issue stayed open after its ticket was closed")
+	}
+}
+
+// TestMirrorTasksLeavesTheOtherTicketsAlone: with the setting off a ticket no
+// chart lists, a legacy chart's ticket that a chart with an issue also lists,
+// and an issue ticket with no chart are all mirrored; the chartless issue
+// ticket has its own Status and no plan comment.
+func TestMirrorTasksLeavesTheOtherTicketsAlone(t *testing.T) {
+	w := newTasksWorld(t)
+	for id, tk := range map[string]store.Ticket{
+		"DEMO-6": {Title: "Standalone"},
+		"DEMO-7": {Title: "A need with no plan", Kind: store.KindIssue},
+	} {
+		if err := w.st.CreateTicketRecord(id, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	both := "issue: DEMO-1\ntickets:\n  - id: DEMO-2\n    title: First task\n  - id: DEMO-3\n    title: Second task\n  - id: DEMO-4\n    title: Legacy ticket\n"
+	if err := os.WriteFile(w.st.ChartFile("plan"), []byte(both), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, client := w.sync(false)
+	if want := []string{"DEMO-1", "DEMO-4", "DEMO-6", "DEMO-7", "charts/old"}; !sameStrings(createdWhats(report), want) {
+		t.Fatalf("Created = %v, want %v", createdWhats(report), want)
+	}
+	if len(client.comments) != 1 {
+		t.Errorf("comments = %q, want only DEMO-1's plan", commentsOn(client))
+	}
+	var status string
+	for _, p := range client.placedItems {
+		if p.StoreID == "DEMO-7" {
+			status = p.Status
+		}
+	}
+	if status != "Backlog" {
+		t.Errorf("chartless issue ticket's Status = %q, want its own (Backlog)", status)
 	}
 }
 
 func (w *tasksWorld) record(what string) githubRecord {
 	w.t.Helper()
 	return readTestRecord(w.t, treeRecordPath(w.t, w.st, what))
-}
-
-func countClosed(c *fakeClient) int {
-	n := 0
-	for _, is := range c.issues {
-		if !is.Open {
-			n++
-		}
-	}
-	return n
 }
 
 // TestMirrorTasksOffStopsCarryingMirroredTasks: turning the setting off after
