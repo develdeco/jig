@@ -28,6 +28,12 @@ func (i *ChartIssue) acts() bool {
 // modelRows lays Lands, Publish and Issue on c from the rows, in row order, the
 // issue's own landing last.
 func (d *chartDeriver) modelRows(c *Chart) {
+	// An end of a model chart waits for a landing: its reason says so.
+	for i, e := range c.Ends {
+		if !e.Because.stacked() && e.Because.Code != CodeNeedNotNamed && e.Because.Ticket != "" {
+			c.Ends[i].Because.Why = d.waitsReason(e)
+		}
+	}
 	for _, r := range c.Rows {
 		if r.ID == "" {
 			continue

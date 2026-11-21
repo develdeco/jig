@@ -62,8 +62,10 @@ func TestKindChartMultiTaskRowOffersNothing(t *testing.T) {
 			t.Fatalf("close %s: exit %d\n%s", id, code, out)
 		}
 	}
-	if s := read(); s.Code != "CHART_DONE" {
-		t.Errorf("code = %q after every task closed, want CHART_DONE", s.Code)
+	// A model chart is done once its issue has landed, not once its tasks are:
+	// with every task closed the issue's own publish is the run's work.
+	if s := read(); s.Code == "CHART_DONE" || !s.Ready {
+		t.Errorf("code = %q ready %v after every task closed, want the issue's publish to be the run's work", s.Code, s.Ready)
 	}
 
 	// A record problem of a multi-task is reported: a parent on it is wrong.

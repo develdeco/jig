@@ -16,11 +16,19 @@ type containerNextOut struct {
 func (r chartRig) containerNext(t *testing.T, id string) containerNextOut {
 	t.Helper()
 	out, code := r.run(t, "next", id, "--json")
-	var n containerNextOut
+	var n struct {
+		containerNextOut
+		// An issue that has a chart answers its run: its own branch and stack
+		// are the issue block.
+		Issue *containerNextOut `json:"issue"`
+	}
 	if err := json.Unmarshal([]byte(out), &n); code != 0 || err != nil {
 		t.Fatalf("jig next %s --json: exit %d, %v\n%s", id, code, err, out)
 	}
-	return n
+	if n.Issue != nil {
+		return *n.Issue
+	}
+	return n.containerNextOut
 }
 
 // containerRig is a store of one repo and a chart of the issue TK-1: the tasks

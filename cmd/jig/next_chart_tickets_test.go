@@ -192,7 +192,7 @@ func TestChartHelpNamedRun(t *testing.T) {
 		t.Errorf("chain: help = %q, want %q", got, want)
 	}
 	mixed := phase.Chart{Name: "c", Code: phase.CodeChartWaitsMerge, Prompt: "Continue T-2, T-3 and T-4", Rows: rows, Ends: []phase.ChartEnd{onT1, onX9, onT2}}
-	want := []string{"Merge the work of X-9, then ask: Continue T-2, T-3 and T-4", "Name T-1 too, or take T-1 first"}
+	want := []string{"Land X-9 (or merge it on the host), then ask: Continue T-2, T-3 and T-4", "Name T-1 too, or take T-1 first"}
 	if got := chartHelp(mixed); !reflect.DeepEqual(got, want) {
 		t.Errorf("mixed: help = %q, want %q", got, want)
 	}

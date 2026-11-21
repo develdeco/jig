@@ -110,15 +110,21 @@ func (s *suitePublishRig) record(l journal.Line) {
 func (s *suitePublishRig) next() (state string, codes []string, text string) {
 	s.tt.Helper()
 	out, code := s.run(s.tt, "next", "TK-1", "--json")
-	var n struct {
+	type standing struct {
 		State string `json:"state"`
 		Unmet []struct {
 			Code string `json:"code"`
 		} `json:"unmet"`
 	}
-	if err := json.Unmarshal([]byte(out), &n); code != 0 || err != nil {
+	// The issue has a chart, so it answers its run: its own standing is the
+	// issue block.
+	var chart struct {
+		Issue standing `json:"issue"`
+	}
+	if err := json.Unmarshal([]byte(out), &chart); code != 0 || err != nil {
 		s.tt.Fatalf("jig next TK-1 --json: exit %d, %v\n%s", code, err, out)
 	}
+	n := chart.Issue
 	for _, u := range n.Unmet {
 		codes = append(codes, u.Code)
 	}

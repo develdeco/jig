@@ -39,9 +39,13 @@ type nextChart struct {
 	Run     [][]string        `json:"run"`
 	Tickets []nextChartTicket `json:"tickets"`
 	Ends    []nextChartEnd    `json:"ends"`
-	History []nextChartCommit `json:"history"`
-	Map     *nextChartMap     `json:"map,omitempty"`
-	Spend   *nextChartSpend   `json:"spend,omitempty"`
+	// Lands, Publish and Issue are a model chart's: left out for a legacy one.
+	Lands   []nextChartLand    `json:"lands,omitempty"`
+	Publish []nextChartPublish `json:"publish,omitempty"`
+	Issue   *nextChartIssue    `json:"issue,omitempty"`
+	History []nextChartCommit  `json:"history"`
+	Map     *nextChartMap      `json:"map,omitempty"`
+	Spend   *nextChartSpend    `json:"spend,omitempty"`
 	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
 	// of a repo, the pair in Plan order: the later one is to be stacked on the
 	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
@@ -174,6 +178,7 @@ func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
 	for _, e := range c.Ends {
 		out.Ends = append(out.Ends, nextChartEnd{Ticket: e.ID, Blocker: e.Because.Ticket, Kind: e.Because.Kind, Fact: e.Because.Why, PRs: chartPRs(e.Because.PRs)})
 	}
+	out.layModelRows(c)
 	if m.Exists {
 		out.Map = &nextChartMap{Destination: m.Destination, Decided: m.Decided, Fog: m.Fog, OutOfScope: m.OutOfScope}
 	}
@@ -370,6 +375,7 @@ func (n nextChart) blocks(label string) []string {
 	if len(worktrees) > 0 {
 		blocks = append(blocks, axi.Table("worktrees", []string{"ticket", "repo", "action", "dir", "base", "command"}, worktrees))
 	}
+	blocks = append(blocks, n.modelBlocks()...)
 	if len(n.Ends) > 0 {
 		var erows [][]string
 		for _, e := range n.Ends {
@@ -388,7 +394,7 @@ func (n nextChart) blocks(label string) []string {
 // help is the next step for the chart: the one chartHelp says, from the same
 // derivation, so `jig next` and `jig status` never name different steps.
 func (n nextChart) help() []string {
-	help := chartHelp(n.derived)
+	help := append(chartHelp(n.derived), n.issueHelp()...)
 	if len(n.WorkspaceOverlaps) > 0 {
 		help = append(help, "Stack the later ticket of each `workspace_overlap` pair on the earlier: add `blocked_by` with `kind: stacked` to its `ticket.yaml`, check it with `jig validate <T> --check`, then run `jig next <chart>` again")
 	}
@@ -411,8 +417,10 @@ func chartHelp(c phase.Chart) []string {
 			help = append(help, graduate)
 		}
 		return help
+	case c.Code == phase.CodeChartWaitsLand:
+		return landHelp(c)
 	case c.Code == phase.CodeChartWaitsMerge:
-		help := []string{fmt.Sprintf("Merge %s, then ask: %s", mergeTargets(c.RootEnds()), c.Prompt)}
+		help := []string{fmt.Sprintf("Land %s (or merge it on the host), then ask: %s", landTargets(c.RootEnds()), c.Prompt)}
 		if name := notNamedHelp(c.RootEnds()); name != "" {
 			help = append(help, name)
 		}
@@ -450,32 +458,24 @@ func notNamedHelp(ends []phase.ChartEnd) string {
 	return ""
 }
 
-// mergeTargets names what a run waits on to merge: the pull request URLs of its
-// ends, else the tickets whose work is to merge. A wait on a ticket the run does
-// not take is no merge.
-func mergeTargets(ends []phase.ChartEnd) string {
-	var urls, tickets []string
+// landTargets names what a legacy run waits on to land: the tickets whose work
+// is to merge, as `Land T` says them. A wait on a ticket the run does not take
+// is no landing; a blocker that is no ticket yet is the pull request it waits
+// on.
+func landTargets(ends []phase.ChartEnd) string {
+	var tickets []string
 	seen := map[string]bool{}
 	for _, e := range ends {
 		if e.Because.Code == phase.CodeNeedNotNamed {
 			continue
-		}
-		for _, p := range e.Because.PRs {
-			if !seen[p.URL] {
-				seen[p.URL] = true
-				urls = append(urls, p.URL)
-			}
 		}
 		if b := e.Because.Ticket; b != "" && !seen[b] {
 			seen[b] = true
 			tickets = append(tickets, b)
 		}
 	}
-	switch {
-	case len(urls) > 0:
-		return andList(urls)
-	case len(tickets) > 0:
-		return "the work of " + andList(tickets)
+	if len(tickets) > 0 {
+		return andList(tickets)
 	}
 	return "the pull request it waits on"
 }

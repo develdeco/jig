@@ -59,12 +59,14 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 	// A chart (a ticket of that name wins) prints where it stands: the tables
 	// `jig next <chart>` prints, from the same derivation.
 	if chart, ok := chartNamed(st, ticket); ok {
-		c, m, err := deriveChart(st, cfg, mp, chart, newMergeReader(e, st, cfg, mp, jigHome, 0))
+		merges := newMergeReader(e, st, cfg, mp, jigHome, 0)
+		c, m, err := deriveChart(st, cfg, mp, chart, merges)
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		n := chartOutput(c, m, chartSpend(st, c))
 		n.setWorkspaceOverlaps(st, cfg, mp)
+		n.setIssue(st, cfg, mp, merges)
 		axi.Render(stdout, n.blocks("status")...)
 		return 0
 	}

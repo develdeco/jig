@@ -105,9 +105,19 @@ tickets:
 	if group.Kind != store.KindMultiTask || group.Phase != nil || len(group.Children) != 2 {
 		t.Errorf("jig next %s = %+v, want a multi-task with 2 children and no phase", entries[0].ID, group)
 	}
-	root := nextJSON[kindNextOut](t, env, fx.RepoDir, issue)
-	if root.Kind != store.KindIssue || root.Chart != "plan" || root.Phase != nil || len(root.Children) != 4 {
-		t.Errorf("jig next %s = %+v, want an issue of chart plan with 4 children and no phase", issue, root)
+	// An issue that has a chart answers its run: the chart's standing, with the
+	// issue's own standing as a block of it.
+	root := nextJSON[struct {
+		Chart   string `json:"chart"`
+		Tickets []struct {
+			ID string `json:"id"`
+		} `json:"tickets"`
+		Issue *struct {
+			Ticket string `json:"ticket"`
+		} `json:"issue"`
+	}](t, env, fx.RepoDir, issue)
+	if root.Chart != "plan" || len(root.Tickets) != 4 || root.Issue == nil || root.Issue.Ticket != issue {
+		t.Errorf("jig next %s = %+v, want the standing of chart plan with 4 tickets and the issue's own block", issue, root)
 	}
 	text := runJig(t, env, fx.RepoDir, "next", entries[0].ID).Stdout
 	if strings.Contains(text, "prompt:") || !strings.Contains(text, "kind: multi-task") {

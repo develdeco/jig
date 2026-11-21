@@ -107,7 +107,14 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 
 	var out any
 	var blocks []string
-	if chart, ok := chartNamed(st, ticket); ok {
+	chart, ok := chartNamed(st, ticket)
+	if !ok && *forFlag == "" && !*topology {
+		// An issue that has a chart is asked for its run: the chart's standing,
+		// with the prompt in the issue's id.
+		chart = chartOfIssueWord(st, ticket)
+		ok = chart != ""
+	}
+	if ok {
 		if *forFlag != "" || *topology {
 			return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("--for and --topology ask about a ticket: %s is a chart", chart), Code: "VALIDATION_ERROR"})
 		}
@@ -127,6 +134,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		n := chartOutput(c, m, chartSpend(st, c))
 		n.Named = c.Named
 		n.setWorkspaceOverlaps(st, cfg, mp)
+		n.setIssue(st, cfg, mp, merges)
 		// The tickets of the run carry the worktrees jig advises for them; the
 		// same reader says what a stacked parent's merge is.
 		n.setWorktrees(newWorktreeSource(st, cfg, mp, merges))

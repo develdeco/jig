@@ -443,7 +443,7 @@ func TestChartWaitsOnThePullRequestTheMergeReaderNames(t *testing.T) {
 	}
 	// The text help names what to merge and what to ask afterwards.
 	help := chartHelp(c)
-	if len(help) != 1 || help[0] != "Merge "+pr+", then ask: Continue checkout" {
+	if len(help) != 1 || help[0] != "Land SHOP-1 (or merge it on the host), then ask: Continue checkout" {
 		t.Errorf("help = %v", help)
 	}
 	// The ticket's own phase carries the same pull request on its blocker.
@@ -533,7 +533,7 @@ func TestChartWaitsOnAStackedParentsOpenPullRequest(t *testing.T) {
 		"code: CHART_WAITS_MERGE",
 		"waits[1]{ticket,blocker,kind,pr,state,fact}:",
 		"SHOP-2,SHOP-1,stacked,\"" + parentPR + "\",OPEN,",
-		"Merge " + parentPR + ", then ask: Continue checkout",
+		"Land SHOP-1 (or merge it on the host), then ask: Continue checkout",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text lacks %q:\n%s", want, text)

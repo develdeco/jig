@@ -87,7 +87,7 @@ func TestSharedChartStanding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.Ready || b.Code != phase.CodeChartWaitsMerge || len(b.Ends) != 1 || b.Ends[0].ID != "SHOP-5" || b.Ends[0].Because.Ticket != "SHOP-3" || len(b.Ends[0].Because.PRs) != 1 || b.Ends[0].Because.PRs[0].URL != sharedPR2 {
+	if b.Ready || b.Code != phase.CodeChartWaitsLand || len(b.Ends) != 1 || b.Ends[0].ID != "SHOP-5" || b.Ends[0].Because.Ticket != "SHOP-3" || len(b.Ends[0].Because.PRs) != 1 || b.Ends[0].Because.PRs[0].URL != sharedPR2 {
 		t.Errorf("chart b: ready %v code %q ends %+v, want SHOP-5 waiting on the task's pull request into SHOP-2", b.Ready, b.Code, b.Ends)
 	}
 
