@@ -111,3 +111,70 @@ func TestContainerReadyValidateRefusesATaskBlockedByItsContainer(t *testing.T) {
 		t.Errorf("validate of a task blocked by a sibling = %v, want none", got)
 	}
 }
+
+func publishLines(t *testing.T, r chartRig, id string) []string {
+	t.Helper()
+	lines, err := journal.Read(r.st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, l := range lines {
+		if journal.IsPublishEvent(l.Event) {
+			out = append(out, l.Event)
+		}
+	}
+	return out
+}
+
+// TestContainerPublishVerb: `jig publish TK-4 --yes` of a multi-task refuses
+// PUBLISH_NOT_READY naming its task while it has not landed, writing nothing; it
+// takes none of the task forms; once the task has landed it records the
+// multi-task's pull request and publish-done, and `jig next` then says
+// published, with the prompt Land TK-4.
+func TestContainerPublishVerb(t *testing.T) {
+	r := landRig(t)
+	rec, err := r.st.ReadTicket("TK-4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := r.st.ResolveTicketBranch("TK-4", rec, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []journal.Line{
+		{Event: journal.EventPr, Into: "TK-4", URL: "https://github.example/owner/repo/pull/5"},
+		{Event: journal.EventPublishDone, Into: "TK-4"},
+	} {
+		if err := journal.Append(r.st, "TK-5", l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, fixture.GhPull{Number: 5, Base: base}))
+
+	out, code := r.run(t, "publish", "TK-4", "--yes")
+	if code == 0 || !strings.Contains(out, "PUBLISH_NOT_READY") || !strings.Contains(out, "TK-5 (published)") {
+		t.Fatalf("publish TK-4 before TK-5 landed: exit %d, want PUBLISH_NOT_READY naming TK-5\n%s", code, out)
+	}
+	if got := publishLines(t, r, "TK-4"); len(got) != 0 {
+		t.Fatalf("a refused publish wrote %v", got)
+	}
+	for _, flag := range []string{"--body", "--approve", "--repo=app"} {
+		if out, code := r.run(t, "publish", "TK-4", flag); code == 0 || !strings.Contains(out, "is a multi-task") {
+			t.Errorf("publish TK-4 %s: exit %d, want a refusal of the form\n%s", flag, code, out)
+		}
+	}
+
+	t.Setenv("GH_STUB_PULLS", fixture.GhPulls(t, fixture.GhPull{Number: 5, Base: base, State: "closed", Merged: true}))
+	out, code = r.run(t, "publish", "TK-4", "--yes")
+	if code != 0 {
+		t.Fatalf("publish TK-4 once TK-5 landed: exit %d\n%s", code, out)
+	}
+	got := publishLines(t, r, "TK-4")
+	if want := []string{journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone}; !reflect.DeepEqual(got, want) {
+		t.Errorf("TK-4's publish lines = %v, want %v", got, want)
+	}
+	if next := r.containerReady(t, "TK-4"); next.State != "published" || next.Prompt != "Land TK-4" {
+		t.Errorf("jig next TK-4 after publishing = %+v, want published, Land TK-4", next)
+	}
+}

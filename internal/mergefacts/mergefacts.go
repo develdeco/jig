@@ -200,13 +200,30 @@ func (r *Reader) builtIn(ticket string) ([]repoRef, error) {
 	case 1:
 		return all, nil
 	}
-	slices, err := r.Store.ReadSlices(ticket)
-	if err != nil {
-		return nil, err
-	}
+	repos := ready.ProjectRepos(r.Cfg, r.Clones)
 	used := map[string]bool{}
-	for _, name := range ready.BuiltIn(ready.ProjectRepos(r.Cfg, r.Clones), slices) {
-		used[name] = true
+	// A multi-task or an issue builds nothing itself: it is in the repos its
+	// tasks build in (every repo while it has none placed).
+	owners := []string{ticket}
+	if rec, err := r.Store.ReadTicket(ticket); err == nil && rec.KindOrDefault() != store.KindTask {
+		if owners, err = r.Store.TasksUnder(ticket, rec); err != nil {
+			return nil, err
+		}
+		if len(owners) == 0 {
+			return all, nil
+		}
+	}
+	for _, id := range owners {
+		slices, err := r.Store.ReadSlices(id)
+		if err != nil {
+			if id == ticket {
+				return nil, err
+			}
+			continue
+		}
+		for _, name := range ready.BuiltIn(repos, slices) {
+			used[name] = true
+		}
 	}
 	var out []repoRef
 	for _, repo := range all {

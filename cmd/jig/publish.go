@@ -11,6 +11,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -136,7 +137,20 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	if err := requireOpen(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
-	if err := requireWork(st, ticket); err != nil {
+	// A multi-task and an issue have no slices, round or head: their pull
+	// request opens once their children have landed (PublishContainer), with
+	// no other form.
+	container := false
+	if rec, err := st.ReadTicket(ticket); err == nil && rec.KindOrDefault() != store.KindTask {
+		container = true
+		if forms > 0 || *picks != "" || *what != "" || *issue != "" || *repo != "" {
+			return renderErr(stdout, &axi.Error{
+				Msg:  fmt.Sprintf("%s is a %s: it publishes with `jig publish %s --yes` alone", ticket, rec.KindOrDefault(), ticket),
+				Code: "VALIDATION_ERROR",
+				Help: []string{"It takes no --body, --pr, --approve, --repo, --issue, --picks or --what: its pull request opens when its children have landed"},
+			})
+		}
+	} else if err := requireWork(st, ticket); err != nil {
 		return renderErr(stdout, err)
 	}
 
@@ -213,8 +227,13 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return 0
 	}
 
-	printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)
-	report, err := verifydeliver.Publish(deps, opts)
+	var report verifydeliver.PublishReport
+	if container {
+		report, err = verifydeliver.PublishContainer(deps, opts)
+	} else {
+		printConflicts(stdout, st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome), ticket)
+		report, err = verifydeliver.Publish(deps, opts)
+	}
 	if err != nil {
 		return renderErr(stdout, err)
 	}
