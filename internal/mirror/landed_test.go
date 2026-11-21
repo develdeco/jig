@@ -115,6 +115,25 @@ func TestTicketStatusLandedReadsDoneWithNoPullRequestKnown(t *testing.T) {
 	})
 }
 
+// TestSyncLandedIssueReadsDoneWhateverItsTasksRead: an issue that landed is
+// Done though its tasks have not; before it lands the fold is as it was.
+func TestSyncLandedIssueReadsDoneWhateverItsTasksRead(t *testing.T) {
+	w := newTasksWorld(t)
+	_, client := w.sync(true)
+	if got := placedStatus(client, "DEMO-1"); got == "Done" {
+		t.Fatalf("issue Status = %q before it landed", got)
+	}
+	url := "https://github.com/example/demo/pull/1"
+	appendLines(t, w.st, "DEMO-1", prLine("demo", url, ""), landedLine("demo", url, ""))
+	w.sync(true)
+	if got := placedStatus(client, "DEMO-1"); got != "Done" {
+		t.Errorf("issue Status = %q, want Done", got)
+	}
+	if got := placedStatus(client, "DEMO-2"); got == "Done" {
+		t.Errorf("task Status = %q, want it unchanged by the issue landing", got)
+	}
+}
+
 // TestSyncLandedPlacesAnIssueAndItsTasksInDone: a sync of an issue with two
 // landed tasks, no pull request known to the host, places all three in Done and
 // closes the issue; a second sync places nothing.
