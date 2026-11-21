@@ -27,7 +27,7 @@ alias resolves to the ticket's current id wherever jig takes one. Has a kind, re
 _Avoid_: issue as a synonym, which is a kind of ticket and the word for a tracker's copy (see **Tracker item**)
 
 **Issue**:
-The kind of ticket that holds a need: its `body` is the need's text. It has no brief, slices or pull request of its own; its **Chart** is the plan for it, and its tasks are the tickets that chart lists. `jig ticket new --kind issue` mints one, and `jig next <T>` shows its chart and the tasks under it with no prompt. A task's issue is never recorded on the task: it is the issue of the chart that lists it, so a task two charts list has two issues ([ADR 0057](docs/adr/0057-a-ticket-has-a-kind-and-a-chart-is-one-issues-plan.md)).
+The kind of ticket that holds a need: its `body` is the need's text. It has no brief or slices; its **Chart** is the plan for it, and its tasks are the tickets that chart lists. Its own pull request opens, into the target, once its children have landed. `jig ticket new --kind issue` mints one, and `jig next <T>` shows its chart and the tasks under it, and says `waiting`, `ready` with the prompt `Publish <T>` or `published`. A task's issue is never recorded on the task: it is the issue of the chart that lists it, so a task two charts list has two issues ([ADR 0057](docs/adr/0057-a-ticket-has-a-kind-and-a-chart-is-one-issues-plan.md)).
 _Avoid_: epic, story
 
 **Task**:
@@ -35,7 +35,7 @@ The kind of ticket that is built: it has a brief, slices and a pull request, as 
 _Avoid_: story, sub-task
 
 **Multi-task**:
-The kind of ticket that groups tasks of one chart under one name: `kind: multi-task`, with `parent:` on each task under it. It holds tasks only (a multi-task under a multi-task is refused by `jig validate` and `jig graduate`) and is minted before them. Like an issue it has no brief, slices or pull request of its own at this stage; `jig next <T>` shows its issues and children with no prompt, and `jig next` never lists it as ready.
+The kind of ticket that groups tasks of one chart under one name: `kind: multi-task`, with `parent:` on each task under it. It holds tasks only (a multi-task under a multi-task is refused by `jig validate` and `jig graduate`) and is minted before them. Like an issue it has no brief or slices; its own pull request opens, into its issue's branch, once its tasks have landed. `jig next <T>` shows its issues and children and says `waiting`, `ready` with the prompt `Publish <T>` or `published`, and `jig next` never lists it as ready to build.
 _Avoid_: epic, parent ticket
 
 **Tracker item**:
