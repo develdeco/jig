@@ -139,6 +139,30 @@ func (s *Store) IssuesOf(ticket string) ([]string, error) {
 	return issues, nil
 }
 
+// ContainerOf is the ticket whose branch ticket's pull request goes into: a
+// task's parent (a multi-task) when its record names one, else the issue of
+// the one chart that lists it; a multi-task's is its chart's issue. An issue
+// has none, and neither has a ticket no chart lists, one only a legacy chart
+// (no issue) lists, or one two charts list: those read as they always did.
+// rec is ticket's record; the chart files are read only when it names no
+// parent and is not an issue.
+func (s *Store) ContainerOf(ticket string, rec Ticket) (id string, found bool, err error) {
+	if rec.KindOrDefault() == KindIssue {
+		return "", false, nil
+	}
+	if rec.Parent != "" {
+		return rec.Parent, true, nil
+	}
+	issues, err := s.IssuesOf(ticket)
+	if err != nil {
+		return "", false, err
+	}
+	if len(issues) != 1 {
+		return "", false, nil
+	}
+	return issues[0], true, nil
+}
+
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
 func (s *Store) ReadChart(name string) ([]ChartEntry, error) {
 	path := s.ChartFile(name)

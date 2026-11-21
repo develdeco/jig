@@ -57,8 +57,12 @@ type Repo struct {
 	// origin has it), else origin/<target>.
 	StartFrom string
 	// PRTarget is the branch the ticket's pull request goes into: the parent's
-	// branch, else Target.
+	// branch while it has not merged, else the container's branch, else
+	// Target.
 	PRTarget string
+	// Container is the ticket whose branch the pull request goes into, and
+	// ContainerBranch that branch; both "" for a ticket with no container.
+	Container, ContainerBranch string
 	// Parent is the ticket the branch is stacked on in this repo, "" when the
 	// repo is the ticket's alone. ParentBranch is its branch, ParentRef the ref
 	// its head was read from, and ParentHead that head, "" when the clone has
@@ -75,9 +79,18 @@ type Repo struct {
 	// so the ticket is to merge it in.
 	Behind bool
 	// Retarget says the parent merged while the ticket has a branch that does
-	// not hold the target's head: its pull request is to go into Target and
-	// the ticket is to merge Target.
+	// not hold the head of the base (the container's branch, else Target): its
+	// pull request is to go into the base and the ticket is to merge it.
 	Retarget bool
+}
+
+// Base is the branch the ticket's pull request goes into once no parent is
+// built on: the container's branch, else Target.
+func (r Repo) Base() string {
+	if r.ContainerBranch != "" {
+		return r.ContainerBranch
+	}
+	return r.Target
 }
 
 // Shared says the repo is one the ticket shares with a parent that has not
@@ -94,6 +107,16 @@ type Plan struct {
 	// ticket stacked on nothing has none: its branch starts from, and its pull
 	// request goes into, each repo's target.
 	Repos []Repo
+}
+
+// HasContainer says the ticket's pull request goes into a container's branch.
+func (p Plan) HasContainer() bool {
+	for _, r := range p.Repos {
+		if r.Container != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Stacked says some repo of the ticket is shared with a parent.
@@ -136,8 +159,19 @@ type Facts struct {
 	Parents []Parent
 	// Head is the ticket's branch tip in the clone, "" when it has none.
 	Head string
-	// TargetHeld says the ticket's branch holds the target's head on the
-	// origin (false when either is unknown).
+	// Container and ContainerBranch are the ticket whose branch the pull
+	// request goes into and that branch; "" for a ticket with no container.
+	Container, ContainerBranch string
+	// MergedDep says a ticket this one waits for, with the kind merged, builds
+	// in the repo: with a container, the ticket starts from its branch, where
+	// that work merged.
+	MergedDep bool
+	// FromContainer says the ticket starts from the container's branch
+	// whatever it depends on (a multi-task's own branch).
+	FromContainer bool
+	// TargetHeld says the ticket's branch holds the head of the base (the
+	// container's branch, else the target) on the origin (false when either
+	// is unknown).
 	TargetHeld bool
 	// Landed says the ticket's own work has merged in the repo: its branch
 	// asks nothing more of anyone, whatever the parent's branch or the target
@@ -153,8 +187,17 @@ type Facts struct {
 // first, merged. A repo with no parent is the target's. A ticket whose own work
 // landed in the repo is told to restack or retarget nothing.
 func Judge(f Facts) Repo {
-	r := Repo{Repo: f.Repo, Target: f.Target, StartFrom: "origin/" + f.Target, PRTarget: f.Target, Head: f.Head}
+	r := Repo{Repo: f.Repo, Target: f.Target, StartFrom: "origin/" + f.Target, PRTarget: f.Target, Head: f.Head,
+		Container: f.Container, ContainerBranch: f.ContainerBranch}
+	base := r.Base()
+	r.PRTarget = base
+	if f.FromContainer {
+		r.StartFrom = "origin/" + base
+	}
 	if len(f.Parents) == 0 {
+		if f.MergedDep {
+			r.StartFrom = "origin/" + base
+		}
 		return r
 	}
 	p := f.Parents[0]
@@ -166,6 +209,7 @@ func Judge(f Facts) Repo {
 	}
 	r.Parent, r.ParentBranch, r.ParentRef, r.ParentHead, r.Merged = p.Ticket, p.Branch, p.Ref, p.Head, p.Merged
 	if p.Merged {
+		r.StartFrom = "origin/" + base
 		r.Retarget = f.Head != "" && !f.TargetHeld && !f.Landed
 		return r
 	}
@@ -224,7 +268,19 @@ func Read(in Input, ticket string) (Plan, error) {
 		}
 		parents = append(parents, parent{id: id, rec: prec})
 	}
-	if len(parents) == 0 {
+	container, hasContainer, err := in.Store.ContainerOf(ticket, rec)
+	if err != nil {
+		return Plan{}, err
+	}
+	var crec store.Ticket
+	if hasContainer {
+		if crec, err = in.Store.ReadTicket(container); err != nil {
+			return Plan{}, err
+		}
+	}
+	kind := rec.KindOrDefault()
+	notTask := kind != store.KindTask
+	if len(parents) == 0 && !hasContainer && !notTask {
 		return plan, nil
 	}
 
@@ -236,14 +292,37 @@ func Read(in Input, ticket string) (Plan, error) {
 		}
 		return ready.BuiltIn(repos, slices), nil
 	}
-	mine, err := builtIn(ticket)
-	if err != nil {
+	var mine []string
+	if notTask {
+		if mine, err = tasksRepos(in, repos, ticket, kind, container, builtIn); err != nil {
+			return Plan{}, err
+		}
+	} else if mine, err = builtIn(ticket); err != nil {
 		return Plan{}, err
+	}
+	// The tickets this one waits for with the kind merged: with a container,
+	// their work merges into its branch, which is then where this one starts.
+	mergedDeps := map[string]bool{}
+	if hasContainer {
+		for _, b := range rec.BlockedBy {
+			if b.Kind == KindStacked {
+				continue
+			}
+			id := b.Ticket
+			if resolved, err := in.Store.ResolveTicket(id); err == nil {
+				id = resolved
+			}
+			if names, err := builtIn(id); err == nil {
+				for _, n := range names {
+					mergedDeps[n] = true
+				}
+			}
+		}
 	}
 	// Whether the ticket's own work has merged is asked once, of the same
 	// reader that says whether a parent's did.
 	var own *ready.Merge
-	if in.Merges != nil {
+	if in.Merges != nil && len(parents) > 0 && !notTask {
 		m, err := in.Merges.Of(ticket)
 		if err != nil {
 			return Plan{}, err
@@ -280,10 +359,19 @@ func Read(in Input, ticket string) (Plan, error) {
 		}
 		plan.Branch = branch
 		dir := clone(in.Clones[name])
-		f := Facts{Repo: name, Target: target, Landed: mergedIn(own, name)}
+		f := Facts{Repo: name, Target: target, Landed: mergedIn(own, name), MergedDep: mergedDeps[name]}
+		base := target
+		if hasContainer {
+			cb, err := in.Store.ResolveTicketBranch(container, crec, target)
+			if err != nil {
+				return Plan{}, err
+			}
+			f.Container, f.ContainerBranch, base = container, cb, cb
+			f.FromContainer = kind == store.KindMultiTask
+		}
 		_, f.Head = tip(dir, branch)
 		if f.Head != "" {
-			if t := commit(dir, "refs/remotes/origin/"+target); t != "" {
+			if t := commit(dir, "refs/remotes/origin/"+base); t != "" {
 				f.TargetHeld = ancestor(dir, t, f.Head)
 			}
 		}
@@ -376,6 +464,56 @@ func commit(dir, ref string) string {
 		return ""
 	}
 	return out
+}
+
+// tasksRepos is the repos an issue or a multi-task builds in: the union of the
+// repos its tasks build in, in the project's order. An issue's tasks are the
+// tasks of its chart; a multi-task's are those whose record names it as their
+// parent. With none yet it is every repo of the project.
+func tasksRepos(in Input, repos []ready.Repo, ticket, kind, container string, builtIn func(string) ([]string, error)) ([]string, error) {
+	issue := ticket
+	if kind == store.KindMultiTask {
+		issue = container
+	}
+	used := map[string]bool{}
+	if issue != "" {
+		chart, err := in.Store.ChartOfIssue(issue)
+		if err != nil {
+			return nil, err
+		}
+		var entries []store.ChartEntry
+		if chart != "" {
+			if entries, err = in.Store.ReadChart(chart); err != nil {
+				return nil, err
+			}
+		}
+		for _, e := range entries {
+			if e.ID == "" {
+				continue
+			}
+			erec, err := in.Store.ReadTicket(e.ID)
+			if err != nil || erec.KindOrDefault() != store.KindTask {
+				continue
+			}
+			if kind == store.KindMultiTask && erec.Parent != ticket {
+				continue
+			}
+			names, err := builtIn(e.ID)
+			if err != nil {
+				continue
+			}
+			for _, n := range names {
+				used[n] = true
+			}
+		}
+	}
+	var out []string
+	for _, r := range repos {
+		if len(used) == 0 || used[r.Name] {
+			out = append(out, r.Name)
+		}
+	}
+	return out, nil
 }
 
 // ancestor says a is in the history of b; false when git cannot tell.
