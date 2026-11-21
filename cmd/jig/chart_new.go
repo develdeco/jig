@@ -20,7 +20,7 @@ func init() {
 			{"title", "chart title (required)", false},
 			{"issue", "id of the issue ticket the chart plans", false},
 			{"need", "what the person needs: mints the chart's issue with this text as its body", false},
-			{"key", "key to mint the issue under with --need (required when the store declares more than one)", false},
+			{"key", "key to mint the issue under with --need", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},

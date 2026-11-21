@@ -75,8 +75,9 @@ func TestGraduateTiesTheMintingSessionToTheTask(t *testing.T) {
 // on stdout; the graduation still succeeds.
 func TestGraduateTiesTheMintingSessionWarningGoesToTheEnvStderr(t *testing.T) {
 	t.Parallel()
-	home := filepath.Join(t.TempDir(), "home-is-a-file")
-	if err := os.WriteFile(home, []byte("x"), 0o644); err != nil {
+	home := t.TempDir()
+	// The ledger lives in <home>/ledger: a file there cannot be read or written.
+	if err := os.WriteFile(filepath.Join(home, "ledger"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	e := envFrom(map[string]string{"JIG_HOME": home, "HOME": home, "USERPROFILE": home, locate.SessionEnv: "s-x"})
