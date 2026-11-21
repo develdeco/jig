@@ -177,6 +177,9 @@ func TestSuitePreconditionNoCopyOfTheBranchSaysFetch(t *testing.T) {
 	if len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun || !strings.Contains(r.Unmet[0].Why, "git fetch") {
 		t.Fatalf("readiness = %+v, want the suite not run, saying git fetch", r)
 	}
+	if p := r.Unmet[0].Prompt; !strings.Contains(p, "jig verify I-1 --final") || !strings.Contains(p, "worktree") {
+		t.Errorf("prompt = %q, want the run in a worktree", p)
+	}
 }
 
 // TestSuitePreconditionNoCloneIsUnrunNotMet: a repo with no clone on this
@@ -189,6 +192,9 @@ func TestSuitePreconditionNoCloneIsUnrunNotMet(t *testing.T) {
 	r := s.readiness("I-1")
 	if r.State != land.StateWaiting || len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun || !strings.Contains(r.Unmet[0].Why, "jig map app=") {
 		t.Fatalf("readiness = %+v, want the suite not run, naming the missing clone", r)
+	}
+	if p := r.Unmet[0].Prompt; !strings.Contains(p, "jig map app=") || !strings.Contains(p, "jig verify I-1 --final") || strings.Contains(p, "a worktree of") {
+		t.Errorf("prompt = %q, want the map first, not a worktree run", p)
 	}
 }
 
@@ -209,6 +215,21 @@ func TestSuitePreconditionAnUnreadWaiverStandsOnlyWhileUnread(t *testing.T) {
 	s.d.Clones = clones
 	if r := s.readiness("I-1"); r.State != land.StateWaiting || len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun {
 		t.Fatalf("readiness once read = %+v, want the suite asked again", r)
+	}
+
+	// The same for a clone with no copy of the branch: the waiver stands until
+	// the branch has a tip.
+	n := newSuiteWorld(t, "")
+	if _, err := gitx.Run(n.dir, "commit", "--allow-empty", "-m", "m"); err != nil {
+		t.Fatal(err)
+	}
+	n.journal(journal.Line{Event: journal.EventSuiteWaived, Summary: "no copy", Provenance: journal.ProvenancePerson})
+	if r := n.readiness("I-1"); r.State != land.StateReady || len(r.Unmet) != 0 || len(r.Waived) != 1 {
+		t.Fatalf("readiness with no copy = %+v, want ready with the waiver shown", r)
+	}
+	n.commit(suiteDeclared)
+	if r := n.readiness("I-1"); r.State != land.StateWaiting || len(r.Unmet) != 1 {
+		t.Fatalf("readiness once the branch has a tip = %+v, want the suite asked again", r)
 	}
 }
 
