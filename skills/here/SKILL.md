@@ -29,7 +29,7 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `slices` | every slice of the ticket with its state and, in `last_run`, whether its last run `covers` the slice's last commit; `blocked_by` shows what each waits for |
 | `questions`, `verification_states` | open questions to answer; commits with no recorded result, or a failed one |
 
-A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which decides brief or chart and makes the issue and its chart. `jig claim` on such a branch records it as that ticket's branch.
+A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue). `jig claim` on such a branch records it as that ticket's branch.
 
 ## What to build next
 

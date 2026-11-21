@@ -7,14 +7,14 @@ import (
 
 // TestAPromptOnNoTicketHearsHowWorkGetsOne: a session in a project whose branch
 // binds no ticket hears, with its first prompt, that a change asked for
-// without a ticket is planned first with the intake skill, which decides brief
-// or chart and makes the issue and its chart; it hears it once. A session on a ticket's branch does not.
+// without a ticket is planned first with the intake skill, which writes the need
+// first, makes an issue and its chart for each need, and decides brief or chart for each; it hears it once. A session on a ticket's branch does not.
 func TestAPromptOnNoTicketHearsHowWorkGetsOne(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	r.handle(r.ev(KindSessionStart))
 	res := r.handle(r.ev(KindPrompt))
-	for _, want := range []string{"works on no ticket", "planned first with the intake skill (`jig skill intake`), which decides brief or chart and makes the issue and its chart", "change no code before the brief is approved"} {
+	for _, want := range []string{"works on no ticket", "planned first with the intake skill (`jig skill intake`), which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue)", "change no code before the brief is approved"} {
 		if !strings.Contains(res.Context, want) {
 			t.Errorf("the first prompt's context lacks %q:\n%s", want, res.Context)
 		}

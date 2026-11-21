@@ -23,7 +23,7 @@ When the folder does not say which, look for `.git` directories under it and ask
 2. Run the `jig init` line above. Add `--key <KEY>` to choose the ticket id prefix, `--clone` to clone the urls you gave, `--yes` once the person has agreed to what it will create. It writes a `jig.yaml` marker in the folder and creates the ticket store; read what it prints.
 3. `jig here` again: it names the project, its store and the repo.
 4. `jig attach` - sets this machine up for the project (skills, hooks, git hooks). `jig-attach` explains it.
-5. When the person has work in mind, the `intake` skill decides brief or chart, makes the issue and its chart with `jig chart new <name> --title "..." --need "..."`, and drafts the brief of the task `jig graduate` mints.
+5. When the person has work in mind, the `intake` skill writes the need first, makes an issue and its chart for each need with `jig chart new <name> --title "..." --need "..."`, decides brief or chart for each (a need raised later is another issue), and drafts the brief of the task `jig graduate` mints.
 
 ## Keeping the project in step
 
