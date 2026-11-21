@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/mirror/github"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -20,6 +21,7 @@ type tasksWorld struct {
 func newTasksWorld(t *testing.T) *tasksWorld {
 	t.Helper()
 	st, work, _ := newTestRemoteStore(t)
+	addRepoToProjectYAML(t, work)
 	mk := func(id string, tk store.Ticket) {
 		if err := st.CreateTicketRecord(id, tk); err != nil {
 			t.Fatal(err)
@@ -141,8 +143,8 @@ func TestMirrorTasksOnCarriesEachTaskAsAFullIssue(t *testing.T) {
 }
 
 // TestMirrorTasksIssueStatusFollowsItsTasks: the issue ticket's board Status
-// is ChartStatus over the chart's tickets, mirrored or not, and it closes
-// when they all do.
+// is ChartStatus over the chart's tickets, mirrored or not; its issue stays
+// open until its own ticket closes, even when they are all Done.
 func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 	w := newTasksWorld(t)
 	_, client := w.sync(false)
@@ -192,6 +194,77 @@ func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 	w.sync(false)
 	if needOpen() {
 		t.Errorf("the need's issue stayed open after its ticket was closed")
+	}
+}
+
+func placedStatus(c *fakeClient, what string) string {
+	got := ""
+	for _, p := range c.placedItems {
+		if p.StoreID == what {
+			got = p.Status
+		}
+	}
+	return got
+}
+
+// TestMirrorTasksLegacyChartIssueClosesWithItsTickets: a legacy chart's issue
+// is opened and closed by its own Status, as before.
+func TestMirrorTasksLegacyChartIssueClosesWithItsTickets(t *testing.T) {
+	w := newTasksWorld(t)
+	_, client := w.sync(false)
+	chartOpen := func() bool {
+		for _, is := range client.issues {
+			if is.Title == "Chart: old" {
+				return is.Open
+			}
+		}
+		t.Fatal("no issue for the legacy chart")
+		return false
+	}
+	if !chartOpen() {
+		t.Fatal("the legacy chart's issue starts closed")
+	}
+	if err := w.st.CloseTicket("DEMO-4", store.Closed{Reason: store.CloseCovered, By: "example/demo#1", At: "2026-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(false)
+	if chartOpen() {
+		t.Error("the legacy chart's issue stayed open after its only ticket closed")
+	}
+}
+
+// TestMirrorTasksIssueStatusSeesACarriedTasksPullRequest: with tasks on, a
+// task's merged pull request counts toward the need's Status though the need
+// is made before the task.
+func TestMirrorTasksIssueStatusSeesACarriedTasksPullRequest(t *testing.T) {
+	w := newTasksWorld(t)
+	_, client := w.sync(true)
+	client.prs = map[string][]github.PullRequest{
+		"example/demo@2-first-task": {{Number: 5, NodeID: "PR_5", State: "MERGED"}},
+	}
+	if err := w.st.CloseTicket("DEMO-3", store.Closed{Reason: store.CloseCovered, By: "example/demo#1", At: "2026-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(true)
+	if got := placedStatus(client, "DEMO-2"); got != "Done" {
+		t.Fatalf("the task's Status = %q, want Done from its merged pull request", got)
+	}
+	if got := placedStatus(client, "DEMO-1"); got != "Done" {
+		t.Errorf("the need's Status = %q, want Done once both tasks are", got)
+	}
+}
+
+// TestMirrorTasksClosedIssueTicketShowsItsOwnStatus: a closed issue ticket
+// shows its own Status though its tasks are open.
+func TestMirrorTasksClosedIssueTicketShowsItsOwnStatus(t *testing.T) {
+	w := newTasksWorld(t)
+	w.sync(false)
+	if err := w.st.CloseTicket("DEMO-1", store.Closed{Reason: store.CloseCovered, By: "example/demo#1", At: "2026-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	_, client := w.sync(false)
+	if got := placedStatus(client, "DEMO-1"); got != "Done" {
+		t.Errorf("a closed need's Status = %q, want Done", got)
 	}
 }
 

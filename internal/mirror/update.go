@@ -160,9 +160,10 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		what := it.what()
 
 		var title, body, status string
-		// openStatus is the Status the issue's open or closed state follows: the
-		// ticket's own, which an issue ticket's board Status (its chart's) is not.
-		var openStatus string
+		// board is the Status the board shows: the ticket's own, but for an
+		// issue ticket its chart's. The issue's open or closed state follows
+		// status, the item's own.
+		var board string
 		if it.kind == "ticket" {
 			prs, gone := found[p.lookup].prs, found[p.lookup].gone
 			prsByTicket[it.id] = prs
@@ -174,9 +175,9 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
-			openStatus = status
+			board = status
 			if p.issue {
-				status, err = issueStatus(st, it.id, status, statusByTicket)
+				board, err = issueStatus(st, it.id, status, statusByTicket)
 				if err != nil {
 					return nil, nil, nil, nil, err
 				}
@@ -195,7 +196,6 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				return nil, nil, nil, nil, cerr
 			}
 			status = ChartStatus(statuses)
-			openStatus = status
 			title, err = chartTitle(st, it.id)
 			if err != nil {
 				return nil, nil, nil, nil, err
@@ -207,7 +207,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		}
 
 		if it.kind == "ticket" {
-			statusByTicket[it.id] = status
+			statusByTicket[it.id] = board
 		}
 
 		if dryRun || public {
@@ -277,7 +277,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		synced.Title = title
 		synced.BodySHA256 = newHash
 
-		wantOpen := IsOpen(openStatus)
+		wantOpen := IsOpen(status)
 		curState := openState(cur.Open)
 		if cur.Open != wantOpen {
 			if synced.State != "" && curState != synced.State {
@@ -288,7 +288,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				switch {
 				case wantOpen:
 					operr = client.ReopenIssue(ctx, rec.NodeID)
-				case openStatus == StatusNotPlanned:
+				case status == StatusNotPlanned:
 					operr = client.CloseIssueNotPlanned(ctx, rec.NodeID)
 				default:
 					operr = client.CloseIssueCompleted(ctx, rec.NodeID)
