@@ -63,6 +63,11 @@ const (
 	EventKeepQueued      = "keep-queued"
 	EventPrBody          = "pr-body"
 	EventPublishApproved = "publish-approved"
+	// EventLanded is the line a landing writes, one per repo of a ticket whose
+	// pull request merged: the repo, the pull request (URL), the branch it merged
+	// into (Base), the container it went into (Into), the merge commit (Commit)
+	// and who made it known (Provenance).
+	EventLanded = "landed"
 )
 
 // Events the machine ledger records and a ticket's journal does not.
@@ -75,4 +80,14 @@ const (
 	EventVerifySpawned = "verify-spawned"
 	EventNoteDelivered = "note-delivered"
 	EventHook          = "hook"
+)
+
+// The provenance of a landed line: who made the landing known. A session that
+// ran `jig land` at the person's word is ProvenanceAgent, a person at a
+// terminal ProvenancePerson, and a merge made on the host and found there is
+// ProvenanceHost.
+const (
+	ProvenanceAgent  = "agent"
+	ProvenancePerson = "person"
+	ProvenanceHost   = "host"
 )

@@ -75,6 +75,12 @@
 // it): MERGED for a row with a merge time, else CLOSED for a closed one, else
 // OPEN. A url the list does not hold fails as gh does for a pull request that
 // is not there.
+//
+// `pr view <url> --json state,mergeable,baseRefName,mergeCommit` (what a landing
+// asks) answers the same pull request's state, its "mergeable" (MERGEABLE when
+// the row has none), its base.ref and its "merge_commit_sha" as mergeCommit.
+// `repo view <repo> --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`
+// answers the methods $GH_STUB_MERGE_METHODS lists (all three when unset).
 package main
 
 import (
@@ -124,6 +130,10 @@ func main() {
 		printPRTitle()
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "state":
 		printPRState(args[2], os.Getenv("GH_STUB_PULLS"))
+	case len(args) >= 3 && args[0] == "pr" && args[1] == "view" && jsonFields(args) == "state,mergeable,baseRefName,mergeCommit":
+		printPRStatus(args[2], os.Getenv("GH_STUB_PULLS"))
+	case len(args) >= 3 && args[0] == "repo" && args[1] == "view" && jsonFields(args) == "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed":
+		printMergeMethods()
 	case len(args) >= 3 && args[0] == "repo" && args[1] == "create":
 		createRepo(args[2], args[3:])
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "view":
@@ -285,6 +295,75 @@ func printPRState(url, list string) {
 	}
 	fmt.Fprintf(os.Stderr, "GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n", number)
 	os.Exit(1)
+}
+
+// printPRStatus answers `gh pr view <url> --json
+// state,mergeable,baseRefName,mergeCommit` from the pull request of list found
+// as printPRState finds it: the state as there, baseRefName from base.ref,
+// mergeable from the row's "mergeable" (MERGEABLE when it has none) and
+// mergeCommit from its "merge_commit_sha" (null when it has none).
+func printPRStatus(url, list string) {
+	url = strings.TrimRight(url, "/")
+	number := url[strings.LastIndex(url, "/")+1:]
+	var rows []map[string]json.RawMessage
+	if list != "" {
+		_ = json.Unmarshal([]byte(list), &rows)
+	}
+	for _, row := range rows {
+		if link := rowString(row, "html_url", ""); link != "" {
+			if link != url {
+				continue
+			}
+		} else {
+			var num int
+			if err := json.Unmarshal(row["number"], &num); err != nil || strconv.Itoa(num) != number {
+				continue
+			}
+		}
+		state := "OPEN"
+		if _, merged := row["merged_at"]; merged {
+			state = "MERGED"
+		} else if strings.EqualFold(rowString(row, "state", "open"), "closed") {
+			state = "CLOSED"
+		}
+		out := map[string]any{
+			"state":       state,
+			"mergeable":   rowString(row, "mergeable", "MERGEABLE"),
+			"baseRefName": rowString(row, "base.ref", ""),
+			"mergeCommit": nil,
+		}
+		if sha := rowString(row, "merge_commit_sha", ""); sha != "" {
+			out["mergeCommit"] = map[string]string{"oid": sha}
+		}
+		data, _ := json.Marshal(out)
+		fmt.Println(string(data))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n", number)
+	os.Exit(1)
+}
+
+// printMergeMethods answers `gh repo view <repo> --json
+// squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`: the methods
+// $GH_STUB_MERGE_METHODS lists (comma separated: squash, merge, rebase), all
+// three when it is unset.
+func printMergeMethods() {
+	list := "squash,merge,rebase"
+	if v, ok := os.LookupEnv("GH_STUB_MERGE_METHODS"); ok {
+		list = v
+	}
+	has := func(m string) bool {
+		for _, f := range strings.Split(list, ",") {
+			if strings.TrimSpace(f) == m {
+				return true
+			}
+		}
+		return false
+	}
+	data, _ := json.Marshal(map[string]bool{
+		"squashMergeAllowed": has("squash"), "mergeCommitAllowed": has("merge"), "rebaseMergeAllowed": has("rebase"),
+	})
+	fmt.Println(string(data))
 }
 
 // imageRefRE matches a markdown image reference to file, "./<file>" exactly,
