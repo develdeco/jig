@@ -231,7 +231,7 @@ func TestIssueRunSkill(t *testing.T) {
 	if !strings.Contains(ref, "never both at once") {
 		t.Error("jig skill chart issue does not say several issues run one after another")
 	}
-	if strings.Contains(ref+core, "—") {
+	if strings.Contains(ref+core, string(rune(0x2014))) {
 		t.Error("the chart skill or its issue reference holds an em dash")
 	}
 	landSkill, _ := runMain(t, e, "", "skill", "land")
