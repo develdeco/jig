@@ -7,6 +7,8 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and its prompt; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
+Before the verdict write the need: what the person needs, never how it is planned, from the prompt or the conversation; it is the step's `--need`.
+
 Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. Either verdict starts with one step that makes the issue and its chart: `jig chart new <name> --title "<t>" --need "<the need>"`.
 
 ## Recall, then grill
@@ -41,6 +43,8 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 A batch spanning areas takes a chart verdict; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
 
 Read `jig skill intake chart-verdict` when the verdict is a chart, for either verdict's first step, or after a chart verdict ended the run.
+
+Read `jig skill intake needs` when the prompt states several needs or a need comes after an issue was made.
 
 Where a change is written: what the person needs, to the issue's `body` (its `ticket.yaml`); how the work is planned, to the chart (`tickets.yaml` entries, the map's decisions); a briefing, to its task's `brief.md`.
 
