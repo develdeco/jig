@@ -1,4 +1,8 @@
-Make a chart with `jig chart new <name> --title "<t>"`, not by hand. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, a re-run makes only new ones.
+Both verdicts begin with the one step, never by hand and never `jig ticket new` for the work: `jig chart new <name> --title "<t>" --need "<the need>"` mints the issue (the title, the need as its body) and the chart that records it, prints the issue id and the chart folder, and refuses an empty need or a bad name before minting. `--need` and `--issue <ID>` exclude each other; `--issue` charts an issue that exists. If the chart write fails, the issue stands: repair with `jig chart new <name> --title "<t>" --issue <ID>`; `jig validate <issue>` lists `issue has no chart` until then. The map's Destination holds one line naming the issue; the need is not copied there.
+
+A brief verdict: after the step write one entry in `charts/<name>/tickets.yaml` (a task: `title`, and a `body` scoped to the work) and run `jig graduate <name>`, which mints the task. Draft its `brief.md` and `slices.yaml` in the task's folder; the task is what the person approves and what `jig next` prompts. The chart validates. The name is the title's lowercase slug unless the person names one.
+
+A chart verdict: after the step write the entries and graduate them; the issue exists from the verdict, not only after graduation. Decision tickets: one per grilling session, entered as they resolve, each with a `key:` (its store key; omit if the store declares one). `jig validate <name>` lists every problem and mints nothing; `jig graduate <name>` creates the entries without ids and writes them back, a re-run makes only new ones.
 
 A batch spanning areas takes a chart verdict, ordering its tickets.
 

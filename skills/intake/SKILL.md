@@ -7,7 +7,7 @@ description: Grills fresh work or a rushed backlog ticket into a brief.md plus s
 
 With a ticket, run `jig next <T>` first. If its phase is not brief, tell the person what it needs and its prompt; stop. For fresh work or a ticket that does not exist, mint nothing before the verdict.
 
-Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. A brief mints the ticket, a chart none.
+Destinations: **brief** (fog fits one ticket) or **chart** (fog spans tickets). The verdict is intake's, not a caller's guess; it can surface mid-grilling. Either verdict starts with one step that makes the issue and its chart: `jig chart new <name> --title "<t>" --need "<the need>"`.
 
 ## Recall, then grill
 
@@ -31,7 +31,7 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 ## Brief output (single ticket)
 
-- Mint it with `jig ticket new --title "<title>"`; use the id and folder it prints, never your own.
+- The task is minted by `jig graduate` from one `tickets.yaml` entry (title, body scoped to the work), never by `jig ticket new`; use the id and folder it prints, never your own. The chart name is the title's lowercase slug unless named. Steps: `jig skill intake chart-verdict`.
 - `brief.md`: `## `-sectioned behavioral spec.
 - `slices.yaml`: one entry per slice, strings or string lists: `id`, `workspace`, `goal`, `oracle`, `env` (env class; optional), `blocked_by`, `from_brief`. Slices are tracer bullets: narrow, COMPLETE, demoable. A cohesive change is one slice: split only where a part builds, verifies and demos alone; GUARDRAIL and prefactoring slices (first) stay separate. A slice's oracle is a literal command naming what it adds or keeps, or a manifest oracle's name when that is the proof; nothing names a whole suite so a gate can reuse it. An oracle is sh on every OS. Every slice lists `Seams` in `from_brief`.
 - `from_brief` hashes: write `slices.yaml`, run `jig validate <T> --check` (it prints the section hashes, even when it fails; no approval), paste them, re-run until `valid: yes`. Later slices: `jig slice add`. A stamp a brief edit left stale: do what its line says.
@@ -40,7 +40,9 @@ Every brief has a `## Seams` section: **public interfaces** (a CLI command and i
 
 A batch spanning areas takes a chart verdict; a standalone ticket takes `jig depend <T> --on <P> [--kind stacked]` when a later one needs order.
 
-Read `jig skill intake chart-verdict` when the verdict is a chart, or after a chart verdict ended the run.
+Read `jig skill intake chart-verdict` when the verdict is a chart, for either verdict's first step, or after a chart verdict ended the run.
+
+Where a change is written: what the person needs, to the issue's `body` (its `ticket.yaml`); how the work is planned, to the chart (`tickets.yaml` entries, the map's decisions); a briefing, to its task's `brief.md`.
 
 ## Done when
 
