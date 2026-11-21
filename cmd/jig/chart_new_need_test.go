@@ -114,10 +114,26 @@ func TestChartNewNeedRefusalsMintNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A well-shaped name a ticket holds is one of its aliases.
+	if err := st.CreateTicketRecord("DEMO-30", store.Ticket{Title: "Renamed", Aliases: []string{"oldname"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(clone, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(clone, "-c", "user.name=tester", "-c", "user.email=tester@example.invalid", "commit", "-m", "DEMO-30: new ticket"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(clone, "push", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := st.Tickets()
-	for _, name := range []string{"taken", "DEMO-1"} {
-		if code, out := needRun(t, e, clone, name, "--title", "T", "--need", "n"); code == 0 {
-			t.Errorf("name %q: exit 0, want a refusal\n%s", name, out)
+	for name, want := range map[string]string{
+		"taken":   `chart "taken" already exists in the store at `,
+		"oldname": `"oldname" is a ticket of the store`,
+	} {
+		if code, out := needRun(t, e, clone, name, "--title", "T", "--need", "n"); code == 0 || !strings.Contains(out, want) {
+			t.Errorf("name %q: exit %d, want a refusal with %q\n%s", name, code, want, out)
 		}
 	}
 	if after, _ := st.Tickets(); len(after) != len(before) {
