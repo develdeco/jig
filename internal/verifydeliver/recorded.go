@@ -135,8 +135,9 @@ type Prepared struct {
 	Opened       time.Time
 	// Reviewer is what the reviewer told jig of itself, if it did.
 	Reviewer Provenance
-	// Carried is set when no round was left open: the head only merged the
-	// target into the head a reviewer read, so the gate recorded a clean round
+	// Carried is set when no round was left open: the head added nothing to
+	// read past the head a reviewer read (that head itself, or a clean merge of
+	// the target past it), so the gate recorded a clean round
 	// that carries that verdict over, and this is its report. The
 	// other fields hold only the ticket, the round and the branch.
 	Carried *GateReport
@@ -327,8 +328,8 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		return Prepared{}, err
 	}
 	if prep.Empty {
-		// Nothing to read: the head only merged the target into the head a
-		// reviewer read. The oracles have run; the verdict carries.
+		// Nothing to read: the head is the one a reviewer read, or only
+		// merged the target into it. The oracles have run; the verdict carries.
 		report, carried, err := run.carryOver(prep)
 		if err != nil {
 			return Prepared{}, err

@@ -242,8 +242,9 @@ type reportYAML struct {
 	// is not clean (ADR 0046).
 	Independent Independence `yaml:"independent,omitempty"`
 	// CarriedFrom is the number of the round whose verdict this clean round
-	// carries over: its head only merged the target into the head
-	// that round reviewed. It names the round that was really reviewed. 0 for
+	// carries over: its head added nothing to read past the head
+	// that round reviewed (that head itself, or a clean merge of the target past
+	// it). It names the round that was really reviewed. 0 for
 	// every round a reviewer read.
 	CarriedFrom int `yaml:"carried_from,omitempty"`
 	// StoreRefs are the added lines that name something only the store holds,

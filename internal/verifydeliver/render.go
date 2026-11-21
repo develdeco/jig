@@ -950,9 +950,9 @@ func reviewerLines(rounds []RoundRecord) []string {
 		}
 		label := fmt.Sprintf("Round %d", r.Round)
 		if r.CarriedFrom > 0 {
-			// No reviewer read this round: its head only merged the target
-			// into the head a reviewer read.
-			out = append(out, fmt.Sprintf("- %s: carried over from round %d (the head only merges the target into the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
+			// No reviewer read this round: its head added nothing to read past
+			// the head a reviewer read.
+			out = append(out, fmt.Sprintf("- %s: carried over from round %d (nothing to read past the head that round reviewed; no reviewer read it).", label, r.CarriedFrom))
 			continue
 		}
 		if len(what) > 0 {

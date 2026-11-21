@@ -194,3 +194,62 @@ func TestGateOpensADeltaRoundForAHandResolvedMerge(t *testing.T) {
 		t.Errorf("origin's %s = %s, want the merge commit %s", fx.Branch, got, merge)
 	}
 }
+
+// TestGateCarriesTheHeadACleanRoundReviewed: after a clean round, a second
+// `jig gate` at the same head records a carried round with no reviewer: clean,
+// carried from round 1, no round left open for `jig review`, and publish takes
+// the head.
+func TestGateCarriesTheHeadACleanRoundReviewed(t *testing.T) {
+	t.Parallel()
+	jigHome := t.TempDir()
+	e := testEnv(jigHome)
+	fx := fixture.Generate(t, fixture.Opts{Home: jigHome})
+	buildFixtureTicket(t, fx)
+	gateCleanThroughMain(t, e, fx)
+	reviewed := gitIn(t, fx.RepoDir, "rev-parse", "HEAD")
+
+	out, code := runMain(t, cloneEnv(fx), "", "verify", fx.Ticket, "--store", fx.StoreDir, "--", "true")
+	if code != 0 {
+		t.Fatalf("verify -- true: exit = %d, want 0\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", "gate", fx.Ticket, "--store", fx.StoreDir)
+	if code != 0 || !strings.Contains(out, "verdict: clean (carried over from round 1)") || !strings.Contains(out, "none ran") {
+		t.Fatalf("gate at the reviewed head: exit = %d, want a clean round carried over from round 1\n%s", code, out)
+	}
+	if strings.Contains(out, "jig review done") {
+		t.Errorf("gate asked for a reviewer at the reviewed head:\n%s", out)
+	}
+	if out, code = runMain(t, e, "", "review", "done", fx.Ticket, "--store", fx.StoreDir); code == 0 {
+		t.Errorf("review done found a round open after a carried one:\n%s", out)
+	}
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := journal.Read(st, fx.Ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carried := 0
+	for _, l := range lines {
+		if l.Event == journal.EventGateClean && l.Carried == 1 && l.Attempt == 2 {
+			carried++
+		}
+	}
+	if carried != 1 {
+		t.Errorf("%d carried gate-clean line(s) for round 2, want 1", carried)
+	}
+	if out, code = runMain(t, e, "", "next", fx.Ticket, "--store", fx.StoreDir); code != 0 || !strings.Contains(out, "publish") {
+		t.Errorf("next after a carried round: exit = %d, want it to name publish\n%s", code, out)
+	}
+	out, code = runMain(t, e, "", "review", "context", fx.Ticket, "--store", fx.StoreDir)
+	if code == 0 || !strings.Contains(out, "REVIEW_NOT_OPEN") || !strings.Contains(out, " of "+fx.Ticket+" needs no reviewer: the head adds nothing to read past the head round 1 reviewed, so the gate recorded it as carried over") {
+		t.Errorf("review context on a carried round: exit = %d, want REVIEW_NOT_OPEN with the carried text\n%s", code, out)
+	}
+	if out, code = runMain(t, e, "", "publish", fx.Ticket, "--yes", "--store", fx.StoreDir); code != 0 {
+		t.Fatalf("publish of a carried round: exit = %d, want 0\n%s", code, out)
+	}
+	if got := gitIn(t, fx.RepoRemote, "rev-parse", "refs/heads/"+fx.Branch); got != reviewed {
+		t.Errorf("origin's %s = %s, want the reviewed head %s", fx.Branch, got, reviewed)
+	}
+}
