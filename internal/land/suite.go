@@ -71,18 +71,14 @@ func SuiteOf(d Deps, c Container) ([]RepoSuite, error) {
 		if dir == "" {
 			// A repo jig cannot read is not a repo whose suite is met: it says
 			// what is missing, and has no tip to waive.
-			rs.Standing = SuiteUnrun
 			rs.Why = fmt.Sprintf("%s has no clone on this machine, so its suite cannot be read: `jig map %s=<path>` to it", repo, repo)
-			rs.Unmet = &Unmet{Code: SuiteNotRun, Why: rs.Why, Prompt: suitePrompt(c, repo)}
-			out = append(out, rs)
+			out = append(out, unread(rs, lines, JournalRepo(d, repo), fmt.Sprintf("Map a clone of %s with `jig map %s=<path>`, then run `jig verify %s --final` in it", repo, repo, c.ID)))
 			continue
 		}
 		tip, terr := gitx.RevParse(dir, "origin/"+c.Branch)
 		if terr != nil || tip == "" {
-			rs.Standing = SuiteUnrun
 			rs.Why = fmt.Sprintf("%s holds no copy of origin/%s: `git fetch` it, then run the suite at its tip", repo, c.Branch)
-			rs.Unmet = &Unmet{Code: SuiteNotRun, Why: rs.Why, Prompt: suitePrompt(c, repo)}
-			out = append(out, rs)
+			out = append(out, unread(rs, lines, JournalRepo(d, repo), suitePrompt(c, repo)))
 			continue
 		}
 		rs.Tip = tip
@@ -116,6 +112,20 @@ func SuiteOf(d Deps, c Container) ([]RepoSuite, error) {
 		out = append(out, rs)
 	}
 	return out, nil
+}
+
+// unread is the row of a repo whose tip jig cannot read: unmet, unless a
+// person waived it with the head unread (a waiver line with no commit). Such a
+// waiver stands only while the tip stays unreadable: once it reads, the row is
+// the tip's own and the suite is asked again.
+func unread(rs RepoSuite, lines []journal.Line, jr, prompt string) RepoSuite {
+	if w, ok := journal.SuiteWaivedUnread(lines, jr); ok {
+		rs.Standing, rs.Waiver = SuiteWaived, w
+		return rs
+	}
+	rs.Standing = SuiteUnrun
+	rs.Unmet = &Unmet{Code: SuiteNotRun, Why: rs.Why, Prompt: prompt}
+	return rs
 }
 
 // suitePrompt is what a session does to run the suite of repo: `jig verify
@@ -167,7 +177,11 @@ func suiteWaived(suites []RepoSuite) []string {
 	var out []string
 	for _, s := range suites {
 		if s.Standing == SuiteWaived {
-			out = append(out, fmt.Sprintf("suite of %s waived at %s by %s: %s", s.Repo, short(s.Tip), s.Waiver.Provenance, s.Waiver.Summary))
+			at := short(s.Tip)
+			if s.Tip == "" {
+				at = "an unread head"
+			}
+			out = append(out, fmt.Sprintf("suite of %s waived at %s by %s: %s", s.Repo, at, s.Waiver.Provenance, s.Waiver.Summary))
 		}
 	}
 	return out
@@ -189,6 +203,9 @@ func VerificationLines(suites []RepoSuite) []string {
 			line = fmt.Sprintf("Suite at the issue's head %s failed", short(s.Tip))
 		case SuiteWaived:
 			line = fmt.Sprintf("Suite waived at %s: %s", short(s.Tip), s.Waiver.Summary)
+			if s.Tip == "" {
+				line = "Suite waived with the issue's head unread: " + s.Waiver.Summary
+			}
 		case SuiteUndeclared:
 			line = "No suite declared in " + s.Repo
 		default:

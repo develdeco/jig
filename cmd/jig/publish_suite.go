@@ -39,8 +39,9 @@ func suiteWaiverAllowed(st *store.Store, ticket, reason string, otherForm, yes b
 // repo whose suite is unmet at the tip of its branch, with the reason and who
 // said it, then leaves publish to ask land.Check as it always does: a waiver at
 // the tip meets the suite, and a head that moves later asks again. Nothing is
-// written while a child has not landed (publish refuses for that) or for a repo
-// with no copy of the branch (no tip to waive); a met suite needs no waiver.
+// written while a child has not landed (publish refuses for that). A repo
+// whose tip cannot be read is waived with no commit, standing while it stays
+// unread; a met suite needs no waiver.
 func waiveSuites(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, ticket, reason, provenance string) error {
 	r, err := containerReadiness(st, cfg, mp, merges, ticket)
 	if err != nil {
@@ -59,7 +60,7 @@ func waiveSuites(st *store.Store, cfg project.Config, mp project.MachineProject,
 		return err
 	}
 	for _, s := range suites {
-		if s.Unmet == nil || s.Tip == "" {
+		if s.Unmet == nil {
 			continue
 		}
 		line := journal.Line{

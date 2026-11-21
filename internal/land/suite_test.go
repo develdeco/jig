@@ -192,6 +192,26 @@ func TestSuitePreconditionNoCloneIsUnrunNotMet(t *testing.T) {
 	}
 }
 
+// TestSuitePreconditionAnUnreadWaiverStandsOnlyWhileUnread: a waiver with no
+// commit meets a repo with no clone and is shown as waived with an unread head;
+// once the clone is mapped it stands for nothing and the suite is asked again.
+func TestSuitePreconditionAnUnreadWaiverStandsOnlyWhileUnread(t *testing.T) {
+	t.Parallel()
+	s := newSuiteWorld(t, suiteDeclared)
+	clones := s.d.Clones
+	s.d.Clones = map[string]string{}
+	s.journal(journal.Line{Event: journal.EventSuiteWaived, Summary: "no clone", Provenance: journal.ProvenancePerson})
+
+	r := s.readiness("I-1")
+	if r.State != land.StateReady || len(r.Unmet) != 0 || len(r.Waived) != 1 || !strings.Contains(r.Waived[0], "unread head") {
+		t.Fatalf("readiness unread = %+v, want ready with the unread waiver shown", r)
+	}
+	s.d.Clones = clones
+	if r := s.readiness("I-1"); r.State != land.StateWaiting || len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun {
+		t.Fatalf("readiness once read = %+v, want the suite asked again", r)
+	}
+}
+
 // TestSuitePreconditionAWaiverAtTheTipMeetsIt: a suite-waived line at the tip
 // meets the entry and is shown with its reason and who said it; a waiver at an
 // earlier tip asks again.

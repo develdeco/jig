@@ -243,6 +243,56 @@ func TestSuitePublishWaivedIsRecordedAndShown(t *testing.T) {
 	}
 }
 
+// TestSuitePublishWaivedWritesNothingBeforeTheChildrenLanded: with a second
+// child not landed, --without-suite is refused for the children and no
+// suite-waived line is left behind.
+func TestSuitePublishWaivedWritesNothingBeforeTheChildrenLanded(t *testing.T) {
+	s := newSuitePublishRig(t, suiteManifestYAML)
+	s.ticket(t, "TK-3", "", false)
+	s.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-3\n    title: Three\n", "")
+
+	out, code := s.publish("--without-suite", "x")
+	if code == 0 || !strings.Contains(out, "PUBLISH_NOT_READY") {
+		t.Fatalf("publish with TK-3 not landed: exit %d, want PUBLISH_NOT_READY\n%s", code, out)
+	}
+	lines, err := journal.Read(s.st, "TK-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventSuiteWaived {
+			t.Errorf("a waiver was written before the children landed: %+v", l)
+		}
+	}
+}
+
+// TestSuitePublishWaivedCoversAnUnreadTip: a repo with no clone here is waived
+// with no commit, and the pull request opens and says the head was unread.
+func TestSuitePublishWaivedCoversAnUnreadTip(t *testing.T) {
+	s := newSuitePublishRig(t, suiteManifestYAML)
+	clone := s.clone
+	save := func(clones map[string]string) {
+		if err := projecttest.SaveMachine(s.home, map[string]project.MachineProject{"demo": {Store: s.root, Clones: clones, Root: clone}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(map[string]string{})
+
+	if _, codes, text := s.next(); len(codes) != 1 || !strings.Contains(text, "jig map app=") {
+		t.Fatalf("jig next without the clone = %v, want the unread suite naming jig map\n%s", codes, text)
+	}
+	if out, code := s.publish("--without-suite", "no clone here"); code != 0 {
+		t.Fatalf("publish --without-suite: exit %d\n%s", code, out)
+	}
+	if want := "Suite waived with the issue's head unread: no clone here"; !strings.Contains(s.body(), want) {
+		t.Errorf("the body lacks %q:\n%s", want, s.body())
+	}
+	lines, _ := journal.Read(s.st, "TK-1")
+	if w, ok := journal.SuiteWaivedUnread(lines, ""); !ok || w.Commit != "" {
+		t.Errorf("waiver = %+v, %v, want one with no commit", w, ok)
+	}
+}
+
 // TestSuitePublishNoSuiteDeclaredIsReady: a repo with no suite holds nothing,
 // and the body says so.
 func TestSuitePublishNoSuiteDeclaredIsReady(t *testing.T) {
