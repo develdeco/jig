@@ -327,8 +327,8 @@ func GatePrepare(d Deps, o GateOpts) (p Prepared, err error) {
 		return Prepared{}, err
 	}
 	if prep.Empty {
-		// Nothing to read: the head only merged the target into the head a
-		// reviewer read. The oracles have run; the verdict carries.
+		// Nothing to read: the head is the one a reviewer read, or only
+		// merged the target into it. The oracles have run; the verdict carries.
 		report, carried, err := run.carryOver(prep)
 		if err != nil {
 			return Prepared{}, err

@@ -1,8 +1,10 @@
 package verifydeliver
 
-// A carried round: a head that only merges the target into the head
-// a reviewer read has nothing new to read, so the gate, which runs no command, records the round itself with the verdict of the round that
-// was really reviewed. No reviewer is opened and no file is left to close.
+// A carried round: a head that adds nothing to read past the head a reviewer
+// read (a clean merge of the target, or no commit past it) has nothing new to
+// read, so the gate records the round itself with the verdict of the round that
+// was really reviewed. No reviewer is opened and no file is left to close, and
+// nothing is reasoned from the gate having run the oracle.
 
 import (
 	"fmt"
@@ -17,8 +19,8 @@ import (
 // carryOver records the round r opened as a clean round carrying over the
 // verdict of the round that reviewed the branch before, when prep says the
 // head adds nothing to read (prep.Empty) in every repo and each repo's head is
-// that round's own or only merges of the target past it (classifyLine, with
-// the target ref the gate uses). It reports false, recording nothing, for any
+// that round's own or only clean merges of the target past it (classifyLine,
+// with the target ref the gate uses). It reports false, recording nothing, for any
 // other round: a hand-resolved merge, an ordinary commit, a first round, a
 // round a scripted gate recorded, or an earlier verdict that left work open.
 func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
@@ -91,8 +93,8 @@ func (r *gateRun) carryOver(prep ReviewPrep) (GateReport, bool, error) {
 }
 
 // carriedFrom is the round whose verdict round n carries over, with its report,
-// when every repo's head is that round's own or only merges of the target past
-// it (prep's Line) and a reviewer read that round: false for a first round, a
+// when every repo's head is that round's own or only clean merges of the target
+// past it (prep's Line) and a reviewer read that round: false for a first round, a
 // round a scripted gate recorded, a hand-resolved merge and anything else. A
 // carried round names the round that was really reviewed, so a chain of them
 // all name the one.
@@ -100,17 +102,10 @@ func carriedFrom(st *store.Store, ticket string, n int, prep ReviewPrep, intentS
 	if n < 2 || len(prep.Repos) == 0 {
 		return 0, reportYAML{}, false, nil
 	}
-	merged := false
 	for _, rp := range prep.Repos {
 		if rp.Prior == "" || (rp.Line != lineSame && rp.Line != lineClean) {
 			return 0, reportYAML{}, false, nil
 		}
-		merged = merged || rp.Line == lineClean
-	}
-	if !merged {
-		// The gate run again on the head a reviewer read opens a round, as it
-		// always has: only a merge brings in something to carry over.
-		return 0, reportYAML{}, false, nil
 	}
 	// A decision a person made since the last round is applied by the next
 	// round that closes, and a carried round applies nothing: it waits for a

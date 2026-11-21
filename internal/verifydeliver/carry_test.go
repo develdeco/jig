@@ -492,3 +492,137 @@ func TestRoundsRecordTheMergeADeltaCarriedInEachShape(t *testing.T) {
 		}
 	})
 }
+
+// TestGatePrepareCarriesTheHeadACleanRoundReviewed: the gate at the head a clean
+// round reviewed has nothing to read, so it records the round carried over from
+// it - clean, no reviewer, no open round - and a second gate names the round
+// that was really reviewed.
+func TestGatePrepareCarriesTheHeadACleanRoundReviewed(t *testing.T) {
+	t.Parallel()
+	fx, d, reviewed := reviewedInTheClone(t)
+	first := readReport(t, d, fx.Ticket, 1)
+
+	p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil {
+		t.Fatalf("GatePrepare: %v", err)
+	}
+	if p.Carried == nil || p.Carried.CarriedFrom != 1 || p.Carried.Verdict != "clean" || p.Round != 2 {
+		t.Fatalf("Prepared = %+v, want round 2 recorded clean, carried over from round 1", p)
+	}
+	rep := readReport(t, d, fx.Ticket, 2)
+	if rep.Verdict != "clean" || rep.CarriedFrom != 1 || rep.ReviewedSHA["fixture-repo"] != reviewed || rep.ReviewedBase["fixture-repo"] != reviewed {
+		t.Errorf("report.yaml = %+v, want clean, carried_from 1, reviewed_sha and reviewed_base the unchanged head %s", rep, reviewed)
+	}
+	if rep.Independent != first.Independent || rep.Reviewer == nil || first.Reviewer == nil || *rep.Reviewer != *first.Reviewer {
+		t.Errorf("round 2 independence/reviewer = %q %+v, want round 1's %q %+v", rep.Independent, rep.Reviewer, first.Independent, first.Reviewer)
+	}
+	md, err := os.ReadFile(filepath.Join(gateRoundDir(d.Store, fx.Ticket, 2), "findings.md"))
+	want := "Carried over from round 1: head " + reviewed + " is unchanged since round 1; the oracle ran and passed."
+	if err != nil || !strings.Contains(string(md), want) {
+		t.Errorf("findings.md = %q (%v), want it to contain %q", md, err, want)
+	}
+	if _, ok, _ := readOpenFile(d.Store, fx.Ticket, 2); ok {
+		t.Error("a carried round left an open record")
+	}
+	if cur, open, err := CurrentRound(d, fx.Ticket); err != nil || open {
+		t.Errorf("CurrentRound = %+v, %v, %v, want none open", cur, open, err)
+	}
+	lines, _ := journal.Read(d.Store, fx.Ticket)
+	carried := 0
+	for _, l := range lines {
+		if l.Event == journal.EventGateClean && l.Attempt == 2 && l.Carried == 1 {
+			carried++
+		}
+	}
+	if carried != 1 {
+		t.Errorf("%d gate-clean line(s) carrying round 1 for round 2, want 1", carried)
+	}
+
+	p, err = GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+	if err != nil || p.Carried == nil || p.Carried.CarriedFrom != 1 || p.Round != 3 {
+		t.Fatalf("second GatePrepare = %+v, %v, want round 3 carried over from round 1, the round really reviewed", p, err)
+	}
+}
+
+// TestGatePrepareOpensARoundAtTheReviewedHeadWhenAnythingStopsTheCarry: each
+// stop a carry has holds at an unchanged head too, and a commit past the
+// reviewed head is read.
+func TestGatePrepareOpensARoundAtTheReviewedHeadWhenAnythingStopsTheCarry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, fx *fixture.Fixture, d Deps)
+	}{
+		{"a pending keep", func(t *testing.T, fx *fixture.Fixture, d Deps) {
+			if err := journal.Append(d.Store, fx.Ticket, journal.Line{Event: journal.EventTriage, Ref: "r1-f1", Outcome: TriageKeep, Provenance: "person"}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"an edited brief", func(t *testing.T, fx *fixture.Fixture, d Deps) {
+			briefPath := filepath.Join(d.Store.TicketDir(fx.Ticket), "brief.md")
+			original, err := os.ReadFile(briefPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(briefPath, append(original, []byte("\nEdited after the clean round.\n")...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Store.Push(fx.Ticket + ": edit brief.md after the clean round"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a commit past the reviewed head", func(t *testing.T, fx *fixture.Fixture, d Deps) {
+			writeAndCommit(t, fx.RepoDir, "past.txt", "one more line", "a commit past the reviewed head")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fx, d, _ := reviewedInTheClone(t)
+			tc.setup(t, fx, d)
+			p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+			if err != nil {
+				t.Fatalf("GatePrepare: %v", err)
+			}
+			if p.Carried != nil || p.Round != 2 {
+				t.Fatalf("Prepared = %+v, want an open round 2: %s stops the carry", p, tc.name)
+			}
+		})
+	}
+
+	t.Run("a last round that left a finding asked", func(t *testing.T) {
+		t.Parallel()
+		fx, d, _ := cloneBuilt(t)
+		p, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare round 1: %v", err)
+		}
+		res := cleanReport(p)
+		res.Findings = []ResultFinding{{File: p.Request.MustReview[0], Title: "fix me", Detail: "d", Action: ActionAsk, Risk: RiskMedium, RiskRationale: "r"}}
+		if _, err := GateFinish(d, p, res, Provenance{Session: "s-reviewer", How: ReviewerByFlag}); err != nil {
+			t.Fatalf("GateFinish round 1: %v", err)
+		}
+		p, err = GatePrepare(d, GateOpts{Ticket: fx.Ticket})
+		if err != nil {
+			t.Fatalf("GatePrepare round 2: %v", err)
+		}
+		if p.Carried != nil {
+			t.Fatalf("Prepared = %+v, want no carry: round 1 left a finding asked", p)
+		}
+	})
+}
+
+// TestReviewerLinesSayACarriedRoundHadNothingToRead: the review notes word a
+// carried round as having nothing to read past the head the reviewed round read,
+// not as a merge of the target.
+func TestReviewerLinesSayACarriedRoundHadNothingToRead(t *testing.T) {
+	t.Parallel()
+	who := Provenance{Session: "s-rev"}
+	lines := reviewerLines([]RoundRecord{
+		{Round: 1, Scope: "full", Base: "aaaaaaa1", Head: "bbbbbbb2", Reviewer: who, Independent: IndependentYes},
+		{Round: 2, Scope: "delta", Base: "bbbbbbb2", Head: "bbbbbbb2", Reviewer: who, Independent: IndependentYes, CarriedFrom: 1},
+	})
+	want := "carried over from round 1 (nothing to read past the head that round reviewed; no reviewer read it)"
+	if len(lines) != 2 || !strings.Contains(lines[1], want) || strings.Contains(lines[1], "merges") {
+		t.Errorf("lines = %q, want round 2 to say %q", lines, want)
+	}
+}
