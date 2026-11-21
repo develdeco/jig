@@ -153,14 +153,28 @@ type publishTarget struct {
 	stack stack.Repo
 }
 
-// base is the branch the repo's pull request goes into: the branch of the
-// parent the ticket is stacked on while that has not merged in the repo, else
-// the repo's target.
+// base is the branch the repo's pull request goes into: the plan's PRTarget
+// where the ticket is stacked on a parent that has not merged in the repo or
+// has a container (the container's branch), else the repo's target.
 func (t *publishTarget) base() string {
-	if t.stack.Shared() && t.stack.PRTarget != "" {
+	if (t.stack.Shared() || t.stack.Container != "") && t.stack.PRTarget != "" {
 		return t.stack.PRTarget
 	}
 	return t.target
+}
+
+// gitBase is base for what git reads in dir: a container's branch that the
+// clone holds no copy of (the host, not jig, refuses a base that is absent)
+// reads as the target, so a diff or a review check still has a ref to go on.
+func (t *publishTarget) gitBase(dir string) string {
+	base := t.base()
+	if base == t.target || dir == "" {
+		return base
+	}
+	if _, err := gitx.RevParse(dir, "refs/remotes/origin/"+base); err != nil {
+		return t.target
+	}
+	return base
 }
 
 // reviewedHead is the head the last clean gate round reviewed for the repo:
@@ -526,7 +540,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	}
 	// A pull request into the branch of the parent the ticket is stacked on
 	// needs that branch on the origin: jig pushes no branch but the ticket's.
-	if base := pt.base(); base != target {
+	if base := pt.base(); base != target && pt.stack.Shared() {
 		if _, err := gitx.RevParse(rc.Dir, "refs/remotes/origin/"+base); err != nil {
 			return nil, &axi.Error{
 				Msg:  fmt.Sprintf("%s is stacked on %s, whose branch %s is not on the origin of %s, so no pull request can go into it", ticket, pt.stack.Parent, base, repoName),
@@ -542,7 +556,7 @@ func prepareShipment(d Deps, fn publishFuncs, pt *publishTarget, built []string)
 	// never saw it. Checked ahead of everything that writes, so a refusal
 	// leaves the store untouched.
 	shipHead := rc.Head
-	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, rc.Dir, "origin/"+pt.base()); err != nil {
+	if err := checkReviewedHead(pt.gateRep, repoName, shipHead, ticket, rc.Dir, "origin/"+pt.gitBase(rc.Dir)); err != nil {
 		return nil, err
 	}
 	// Publish never rewrites what is on origin and never forces: a branch that
@@ -854,7 +868,7 @@ func Publish(d Deps, o PublishOpts) (report PublishReport, err error) {
 		var spanErr error
 		if len(ships) == len(targets[0].covered) {
 			for _, sh := range ships {
-				spans = append(spans, repoSpan{dir: sh.dir, base: sh.pt.base(), head: sh.head})
+				spans = append(spans, repoSpan{dir: sh.dir, base: sh.pt.gitBase(sh.dir), head: sh.head})
 			}
 		} else {
 			// A publish of some of the repos finishes a ticket whose other
@@ -1604,7 +1618,7 @@ func checkBodyHead(d Deps, t *publishTarget, dir string) error {
 		return checkReviewedHead(t.gateRep, t.repoName, "", t.ticket, "", "")
 	}
 	for _, tip := range branchTips(d, t, dir) {
-		covered, err := headReviewed(tip.dir, reviewed, tip.sha, "origin/"+t.base())
+		covered, err := headReviewed(tip.dir, reviewed, tip.sha, "origin/"+t.gitBase(tip.dir))
 		if err != nil {
 			return err
 		}
@@ -1964,7 +1978,7 @@ func prHeadReviewed(d Deps, pt *publishTarget, reviewed, head string) (bool, err
 		dirs = append(dirs, dir)
 	}
 	for _, dir := range dirs {
-		covered, err := headReviewed(dir, reviewed, head, "origin/"+pt.base())
+		covered, err := headReviewed(dir, reviewed, head, "origin/"+pt.gitBase(dir))
 		if err != nil {
 			return false, err
 		}

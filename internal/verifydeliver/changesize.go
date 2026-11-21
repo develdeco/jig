@@ -88,7 +88,7 @@ func readSpans(d Deps, targets []*publishTarget) ([]repoSpan, error) {
 		if err != nil {
 			return nil, err
 		}
-		spans = append(spans, repoSpan{dir: dir, base: pt.base(), head: pt.readRev()})
+		spans = append(spans, repoSpan{dir: dir, base: pt.gitBase(dir), head: pt.readRev()})
 	}
 	return spans, nil
 }

@@ -260,6 +260,23 @@ func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
 	return n
 }
 
+// ownBranchFacts adds to n, the `jig next` of an issue or a multi-task, its own
+// branch and, in each repo its tasks build in, where it starts and where its
+// pull request would go: facts only, since nothing here publishes either.
+func ownBranchFacts(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, rec store.Ticket, n nextTicket) (nextTicket, error) {
+	branch, err := ticketBranch(st, cfg, n.Ticket, rec)
+	if err != nil {
+		return nextTicket{}, err
+	}
+	plan, err := stack.Read(stackInput(st, cfg, mp, merges), n.Ticket)
+	if err != nil {
+		return nextTicket{}, err
+	}
+	n.Branch = branch
+	n.Stack = stackRows(plan, false)
+	return n, nil
+}
+
 // notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
 // multi-task: no phase, no ready table and no prompt. `jig status <ticket>`
 // prints the same under its own shape: top-level ticket: and state: lines, which
@@ -283,6 +300,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		if n.Parent != "" {
 			pairs = append(pairs, [2]string{"parent", n.Parent})
 		}
+		if n.Branch != "" {
+			pairs = append(pairs, [2]string{"branch", n.Branch})
+		}
 		if n.Chart != "" {
 			pairs = append(pairs, [2]string{"chart", n.Chart})
 		}
@@ -290,6 +310,7 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 			pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
 		}
 		blocks = []string{axi.KV("next", pairs)}
+		blocks = append(blocks, stackBlocks(n.Ticket, n.Stack)...)
 	}
 	if len(n.Children) > 0 {
 		var rows [][]string
@@ -530,7 +551,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		return nextTicket{}, err
 	}
 	if k := data.rec.KindOrDefault(); k != store.KindTask {
-		return nextNotATask(st, data, k), nil
+		return ownBranchFacts(st, cfg, mp, merges, data.rec, nextNotATask(st, data, k))
 	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
 	branch, err := ticketBranch(st, cfg, id, data.rec)

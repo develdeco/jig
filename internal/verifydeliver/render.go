@@ -730,14 +730,14 @@ func renderPartOfSection(ticket string, links []prLink) string {
 
 // renderStackedSection renders the ## Stacked on <parent> section a pull
 // request has while it goes into the branch of the parent its ticket is
-// stacked on: which branch that is, and that it goes into the target once the
+// stacked on: which branch that is, and that it goes into the container's branch, else the target, once the
 // parent merges. A pull request into its repo's target has none.
 func renderStackedSection(ticket string, r stack.Repo) string {
 	if !r.Shared() || r.PRTarget == "" {
 		return ""
 	}
 	return fmt.Sprintf("## Stacked on %s\n\n%s builds on %s: this pull request goes into `%s`, the branch of %s. Once %s merges, retarget it to `%s`.\n\n",
-		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Target)
+		r.Parent, ticket, r.Parent, r.PRTarget, r.Parent, r.Parent, r.Base())
 }
 
 // findingOutcome pairs one finding with how it ended. status is the bucket

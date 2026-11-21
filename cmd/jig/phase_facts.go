@@ -69,11 +69,21 @@ func derivePhasePlanned(st *store.Store, cfg project.Config, mp project.MachineP
 }
 
 // mayBeBehind says the ticket's stack plan can matter to where it stands: it
-// names a stacked blocker, published and is not closed. Any other ticket is
-// never owed a merge, so no plan is read for it.
+// names a stacked blocker or has a container, published and is not closed. Any
+// other ticket is never owed a merge, so no plan is read for it.
 func mayBeBehind(st *store.Store, id string, rec store.Ticket) bool {
-	if !stack.StackedOnAny(rec) || rec.Closed != nil {
+	if rec.Closed != nil || rec.KindOrDefault() != store.KindTask {
 		return false
+	}
+	// A record naming a stacked blocker or a parent is checked first; a ticket
+	// of neither is looked up in the charts only once it has published.
+	if !stack.StackedOnAny(rec) && rec.Parent == "" {
+		published, err := isPublished(st, id)
+		if err != nil || !published {
+			return false
+		}
+		_, ok, err := st.ContainerOf(id, rec)
+		return err == nil && ok
 	}
 	published, err := isPublished(st, id)
 	return err == nil && published
