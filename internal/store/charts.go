@@ -630,9 +630,13 @@ func (s *Store) ChartFolderTaken(name string) (bool, error) {
 // heading and the five sections of the chart template, each empty. It holds
 // no placeholder prose, because a paragraph under a heading is an item to
 // recall and to the GitHub mirror.
-func chartMapSkeleton(title string) string {
+func chartMapSkeleton(title, issue string) string {
+	dest := "## Destination\n\n"
+	if issue != "" {
+		dest += "Plans issue " + issue + ".\n\n"
+	}
 	return "# " + title + "\n\n" +
-		"## Destination\n\n" +
+		dest +
 		"## Notes\n\n" +
 		"## Decisions so far\n\n" +
 		"## Not yet specified (fog)\n\n" +
@@ -679,7 +683,7 @@ func (s *Store) CreateChartWithIssue(name, title, issue string) error {
 	}
 	dir := filepath.Join(s.Root, chartsDirName, name)
 	// tickets.yaml goes last: a folder is a chart once it has one.
-	if err := AtomicWrite(s.ChartMapFile(name), []byte(chartMapSkeleton(title))); err != nil {
+	if err := AtomicWrite(s.ChartMapFile(name), []byte(chartMapSkeleton(title, issue))); err != nil {
 		_ = os.RemoveAll(dir)
 		return err
 	}
