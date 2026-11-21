@@ -10,6 +10,18 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
+// issueStanding is the part of `jig next <issue> --json` that says which chart
+// answered and which tickets and issue block it carries.
+type issueStanding struct {
+	Chart   string `json:"chart"`
+	Tickets []struct {
+		ID string `json:"id"`
+	} `json:"tickets"`
+	Issue *struct {
+		Ticket string `json:"ticket"`
+	} `json:"issue"`
+}
+
 // issueRunOut is the part of `jig next <issue> --json` the run of an issue
 // reads.
 type issueRunOut struct {

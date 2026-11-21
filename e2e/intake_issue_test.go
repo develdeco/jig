@@ -78,17 +78,18 @@ func TestIntakeIssueFlow(t *testing.T) {
 	if task.Ticket != entries[0].ID || task.Phase == nil {
 		t.Errorf("jig next %s = %+v, want a task in its brief phase", entries[0].ID, task)
 	}
-	root := nextJSON[kindNextOut](t, env, fx.RepoDir, issue)
-	if root.Kind != store.KindIssue || root.Chart != "fix-login" || len(root.Children) != 1 {
-		t.Errorf("jig next %s = %+v, want an issue of chart fix-login with 1 task", issue, root)
+	// An issue that has a chart answers its run: the chart's standing.
+	root := nextJSON[issueStanding](t, env, fx.RepoDir, issue)
+	if root.Chart != "fix-login" || len(root.Tickets) != 1 || root.Issue == nil || root.Issue.Ticket != issue {
+		t.Errorf("jig next %s = %+v, want the run of chart fix-login with 1 task", issue, root)
 	}
 
 	// A chart verdict: several entries, graduated under the issue.
 	issue2 := step("checkout", "Checkout rework", "Checkout is slow and confusing.")
 	write("checkout", issue2, "  - title: Speed up totals\n  - title: Clearer steps\n  - title: Tidy the receipt\n    blocked_by:\n      - ref: \"#2\"\n")
-	root2 := nextJSON[kindNextOut](t, env, fx.RepoDir, issue2)
-	if root2.Kind != store.KindIssue || root2.Chart != "checkout" || len(root2.Children) != 3 {
-		t.Errorf("jig next %s = %+v, want an issue of chart checkout with 3 tasks", issue2, root2)
+	root2 := nextJSON[issueStanding](t, env, fx.RepoDir, issue2)
+	if root2.Chart != "checkout" || len(root2.Tickets) != 3 || root2.Issue == nil || root2.Issue.Ticket != issue2 {
+		t.Errorf("jig next %s = %+v, want the run of chart checkout with 3 tasks", issue2, root2)
 	}
 }
 
