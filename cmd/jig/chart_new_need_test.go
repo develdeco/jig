@@ -173,8 +173,8 @@ func TestChartNewNeedChartFailureNamesTheRepair(t *testing.T) {
 }
 
 // TestChartNewNeedRunsTheCheckpointOnce: the issue and the chart are mirrored
-// by one checkpoint, so the mirror opens one issue for the issue ticket and one
-// for the chart, not a second pass.
+// by one checkpoint, and the chart has no issue of its own, so the mirror opens
+// one issue, the issue ticket's, not a second pass.
 func TestChartNewNeedRunsTheCheckpointOnce(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())
@@ -187,7 +187,7 @@ func TestChartNewNeedRunsTheCheckpointOnce(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if stub.created != 2 {
-		t.Errorf("the mirror opened %d issues, want 2 (the issue ticket and the chart) from one checkpoint", stub.created)
+	if stub.created != 1 {
+		t.Errorf("the mirror opened %d issues, want 1 (the issue ticket; its chart has no issue) from one checkpoint", stub.created)
 	}
 }
