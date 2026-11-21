@@ -215,6 +215,9 @@ func TestLandJudgeMethodAndConflict(t *testing.T) {
 		if len(v.Merge) != 1 || v.Merge[0].Method != tc.want || !strings.HasSuffix(v.Merge[0].Command, " --"+tc.want) {
 			t.Errorf("methods %+v, asked %q: %+v, want %s", tc.m, tc.method, v.Merge, tc.want)
 		}
+		if wantNote := tc.method != "" && !tc.m.Allows(tc.method); wantNote != (len(v.Notes) == 1) {
+			t.Errorf("methods %+v, asked %q: notes %v, want a note exactly when the repo does not allow it", tc.m, tc.method, v.Notes)
+		}
 	}
 	s := w.h.status[prURL("1")]
 	s.Mergeable = repohost.MergeableConflict

@@ -96,14 +96,14 @@ func cmdLand(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	case len(v.Merge) > 0:
 		return renderMerge(e, stdout, jigHome, ticket, v, notes)
 	case len(v.Record) > 0:
-		return recordLanded(e, stdin, stdout, st, jigHome, ticket, v, notes)
+		return recordLanded(e, stdin, stdout, deps, jigHome, ticket, v, notes)
 	}
 	// Every repo has its line: already landed, and what is next.
 	rows := landedRows(v.Landed)
 	axi.Render(stdout,
 		axi.KV("already_landed", [][2]string{{"ticket", ticket}}),
 		axi.Table("landed", []string{"repo", "pr", "base", "into", "commit", "provenance"}, rows),
-		axi.Help(append(notes, nextLanding(st, ticket))...),
+		axi.Help(append(notes, nextLanding(deps, ticket))...),
 	)
 	return 0
 }
@@ -149,7 +149,7 @@ func renderMerge(e env, stdout io.Writer, jigHome, ticket string, v land.Verdict
 // recordLanded writes the landed lines of a ticket whose pull requests are all
 // merged on the host. Their provenance is the host's unless this machine named
 // the merge first (then it is the agent's, or a person's at a terminal).
-func recordLanded(e env, stdin io.Reader, stdout io.Writer, st *store.Store, jigHome, ticket string, v land.Verdict, notes []string) int {
+func recordLanded(e env, stdin io.Reader, stdout io.Writer, deps land.Deps, jigHome, ticket string, v land.Verdict, notes []string) int {
 	provenance := journal.ProvenanceHost
 	if named(jigHome, ticket) {
 		provenance = journal.ProvenanceAgent
@@ -157,7 +157,7 @@ func recordLanded(e env, stdin io.Reader, stdout io.Writer, st *store.Store, jig
 			provenance = journal.ProvenancePerson
 		}
 	}
-	if err := st.Sync(); err != nil {
+	if err := deps.Store.Sync(); err != nil {
 		return renderErr(stdout, err)
 	}
 	rows := make([]land.Landing, len(v.Record))
@@ -166,17 +166,17 @@ func recordLanded(e env, stdin io.Reader, stdout io.Writer, st *store.Store, jig
 		rows[i] = l
 		line := l.Line(ticket)
 		line.TS = stamp(e)
-		if err := journal.Append(st, ticket, line); err != nil {
+		if err := journal.Append(deps.Store, ticket, line); err != nil {
 			return renderErr(stdout, err)
 		}
 	}
-	if err := st.Push(fmt.Sprintf("%s: landed", ticket)); err != nil {
+	if err := deps.Store.Push(fmt.Sprintf("%s: landed", ticket)); err != nil {
 		return renderErr(stdout, err)
 	}
 	axi.Render(stdout,
 		axi.KV("landed", [][2]string{{"ticket", ticket}, {"provenance", provenance}}),
 		axi.Table("landed", []string{"repo", "pr", "base", "into", "commit", "provenance"}, landedRows(rows)),
-		axi.Help(append(notes, nextLanding(st, ticket))...),
+		axi.Help(append(notes, nextLanding(deps, ticket))...),
 	)
 	return 0
 }
@@ -211,34 +211,6 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
-}
-
-// nextLanding is what the next landing is: a published ticket that waits for
-// this one, else the container this one lands into, else that nothing waits.
-func nextLanding(st *store.Store, ticket string) string {
-	all, err := st.Tickets()
-	if err != nil {
-		return "Nothing waits on a landing here"
-	}
-	for _, id := range all {
-		rec, err := st.ReadTicket(id)
-		if err != nil || rec.Closed != nil {
-			continue
-		}
-		for _, b := range rec.BlockedBy {
-			if resolved, err := st.ResolveTicket(b.Ticket); err == nil && resolved == ticket {
-				if got, _ := land.Landed(st, id, ""); len(got) == 0 && published(st, id) {
-					return fmt.Sprintf("The next landing is `jig land %s`, which waited for it", id)
-				}
-			}
-		}
-	}
-	if rec, err := st.ReadTicket(ticket); err == nil {
-		if cs, err := st.ContainersOf(ticket, rec); err == nil && len(cs) == 1 && published(st, cs[0]) {
-			return fmt.Sprintf("When its other tasks have landed, the next landing is `jig land %s`", cs[0])
-		}
-	}
-	return "Nothing waits on a landing here"
 }
 
 // published says ticket has a publish-done line.

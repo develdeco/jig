@@ -69,9 +69,6 @@ type Refusal struct {
 	Help  []string
 }
 
-// Error implements error.
-func (r *Refusal) Error() string { return r.Msg }
-
 // AxiError is the refusal as the command line shows it.
 func (r *Refusal) AxiError() *axi.Error {
 	return &axi.Error{Msg: r.Msg, Code: r.Code, Help: r.Help}

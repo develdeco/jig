@@ -122,6 +122,11 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 					fmt.Sprintf("Run `jig publish %s`: it points the pull request at %s.", ticket, base)), nil
 			}
 			row := mergeRow(d, rm, st, known, base, ticket, opts.Method)
+			if opts.Method != "" && d.Methods != nil {
+				if m, ok := d.Methods(rm.PR); ok && !m.Allows(opts.Method) {
+					v.Notes = append(v.Notes, "the repo does not allow merging by "+opts.Method+": the host will refuse the command")
+				}
+			}
 			v.Merge = append(v.Merge, row)
 		}
 	}
