@@ -357,6 +357,21 @@ func (s *Store) WriteTicketBranch(ticket string, branch string) error {
 	})
 }
 
+// SetTicketKind gives a ticket whose record has no kind the kind and, when it
+// has none, the parent: jig graduate's record of an existing entry. A kind
+// already recorded is never changed, nor is a parent already recorded. A kind
+// of task writes none, since an absent kind is a task.
+func (s *Store) SetTicketKind(ticket, kind, parent string) error {
+	return s.mutateTicket(ticket, func(t *Ticket) {
+		if t.Kind == "" && kind != KindTask {
+			t.Kind = kind
+		}
+		if t.Parent == "" {
+			t.Parent = parent
+		}
+	})
+}
+
 // TicketFileRelPath returns <ticket>/ticket.yaml relative to the store root:
 // the path a Claim that edits the record stages and commits.
 func (s *Store) TicketFileRelPath(ticket string) string {

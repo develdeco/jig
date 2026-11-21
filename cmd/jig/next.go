@@ -176,13 +176,21 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 // closed (`jig close`), such as "covered by develdeco/jig#82" or "not planned",
 // when it was.
 type nextTicket struct {
-	Ticket       string        `json:"ticket"`
-	Title        string        `json:"title,omitempty"`
-	State        string        `json:"state"`
-	Closed       string        `json:"closed,omitempty"`
-	Branch       string        `json:"branch"`
-	Distribution string        `json:"distribution,omitempty"`
-	BlockedBy    []nextBlocker `json:"blocked_by,omitempty"`
+	Ticket       string `json:"ticket"`
+	Title        string `json:"title,omitempty"`
+	State        string `json:"state"`
+	Closed       string `json:"closed,omitempty"`
+	Branch       string `json:"branch"`
+	Distribution string `json:"distribution,omitempty"`
+	// Kind is named for a ticket that is not a task (an issue or a multi-task),
+	// which is not briefed or built: Chart (an issue's), Issues (a multi-task's)
+	// and Children say where it stands. Parent is a task's multi-task.
+	Kind      string        `json:"kind,omitempty"`
+	Parent    string        `json:"parent,omitempty"`
+	Chart     string        `json:"chart,omitempty"`
+	Issues    []string      `json:"issues,omitempty"`
+	Children  []nextChild   `json:"children,omitempty"`
+	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -214,6 +222,79 @@ type nextTicket struct {
 
 	// derived is the same derivation, for the help.
 	derived *phase.Ticket
+}
+
+// nextChild is one ticket under an issue (an entry of its chart, whose ID is
+// empty until it graduates) or under a multi-task.
+type nextChild struct {
+	ID    string `json:"id,omitempty"`
+	Title string `json:"title"`
+	Kind  string `json:"kind,omitempty"`
+}
+
+// nextNotATask is `jig next <ticket>` for an issue or a multi-task: its kind,
+// where it stands in the model and its children, and no phase and no prompt,
+// since it has no brief, slices or pull request of its own.
+func nextNotATask(st *store.Store, data ticketData, kind string) nextTicket {
+	id := data.in.ID
+	n := nextTicket{Ticket: id, Title: data.title, State: kind, Kind: kind, Ready: []nextBatch{}}
+	switch kind {
+	case store.KindIssue:
+		if chart, _ := st.ChartOfIssue(id); chart != "" {
+			n.Chart = chart
+			if entries, err := st.ReadChart(chart); err == nil {
+				for _, e := range entries {
+					n.Children = append(n.Children, nextChild{ID: e.ID, Title: e.Title, Kind: e.Kind})
+				}
+			}
+		}
+	case store.KindMultiTask:
+		n.Issues, _ = st.IssuesOf(id)
+		ids, _ := st.Tickets()
+		for _, other := range ids {
+			if rec, err := st.ReadTicket(other); err == nil && rec.Parent == id {
+				n.Children = append(n.Children, nextChild{ID: other, Title: rec.Title})
+			}
+		}
+	}
+	return n
+}
+
+// notATaskBlocks are the blocks `jig next <ticket>` prints for an issue or a
+// multi-task: no phase, no ready table and no prompt.
+func (n nextTicket) notATaskBlocks() []string {
+	pairs := [][2]string{{"ticket", n.Ticket}}
+	if n.Title != "" {
+		pairs = append(pairs, [2]string{"title", n.Title})
+	}
+	pairs = append(pairs, [2]string{"state", n.State}, [2]string{"kind", n.Kind})
+	if n.Parent != "" {
+		pairs = append(pairs, [2]string{"parent", n.Parent})
+	}
+	if n.Chart != "" {
+		pairs = append(pairs, [2]string{"chart", n.Chart})
+	}
+	if len(n.Issues) > 0 {
+		pairs = append(pairs, [2]string{"issue", strings.Join(n.Issues, ", ")})
+	}
+	blocks := []string{axi.KV("next", pairs)}
+	if len(n.Children) > 0 {
+		var rows [][]string
+		for _, c := range n.Children {
+			id, kind := c.ID, c.Kind
+			if id == "" {
+				id = "-"
+			}
+			if kind == "" {
+				kind = store.KindTask
+			}
+			rows = append(rows, []string{id, kind, c.Title})
+		}
+		blocks = append(blocks, axi.Table("children", []string{"ticket", "kind", "title"}, rows))
+	} else {
+		blocks = append(blocks, "children: none")
+	}
+	return append(blocks, axi.Help(fmt.Sprintf("A %s is not briefed or built: run `jig next <ticket>` on one of its tasks", n.Kind)))
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
@@ -435,6 +516,9 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	if err != nil {
 		return nextTicket{}, err
 	}
+	if k := data.rec.KindOrDefault(); k != store.KindTask {
+		return nextNotATask(st, data, k), nil
+	}
 	place := ready.Place(ready.ProjectRepos(cfg, mp.Clones), data.in.Slices)
 	branch, err := ticketBranch(st, cfg, id, data.rec)
 	if err != nil {
@@ -462,7 +546,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
-		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous,
+		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: data.rec.Parent,
 	}
 	if data.rec.Closed != nil {
 		n.Closed = data.rec.Closed.Phrase()
@@ -565,6 +649,9 @@ func distributionAdvice(all []nextBatch) []string {
 }
 
 func (n nextTicket) blocks(topology bool) []string {
+	if n.Kind != "" {
+		return n.notATaskBlocks()
+	}
 	pairs := [][2]string{{"ticket", n.Ticket}}
 	if n.Title != "" {
 		pairs = append(pairs, [2]string{"title", n.Title})
@@ -572,6 +659,9 @@ func (n nextTicket) blocks(topology bool) []string {
 	pairs = append(pairs, [2]string{"state", n.State})
 	if n.Closed != "" {
 		pairs = append(pairs, [2]string{"closed", n.Closed})
+	}
+	if n.Parent != "" {
+		pairs = append(pairs, [2]string{"parent", n.Parent})
 	}
 	pairs = append(pairs, [2]string{"branch", n.Branch})
 	if n.Distribution != "" {
@@ -780,6 +870,9 @@ type nextRow struct {
 	Title  string `json:"title,omitempty"`
 	State  string `json:"state"`
 	Closed string `json:"closed,omitempty"`
+	// Kind is named for an issue or a multi-task, which is never ready to
+	// brief or build and never in the order to start.
+	Kind string `json:"kind,omitempty"`
 	// Rank is the ticket's rank (ticket.yaml), absent when it has none.
 	Rank      *int          `json:"rank,omitempty"`
 	BlockedBy []nextBlocker `json:"blocked_by,omitempty"`
@@ -874,6 +967,11 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		}
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
+			out.Tickets = append(out.Tickets, row)
+			continue
+		}
+		if k := datas[i].rec.KindOrDefault(); k != store.KindTask {
+			row.State, row.Kind, row.Ready = k, k, []string{}
 			out.Tickets = append(out.Tickets, row)
 			continue
 		}

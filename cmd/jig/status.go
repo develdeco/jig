@@ -76,6 +76,18 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, orChartHint(st, ticket, err))
 	}
 
+	// An issue or a multi-task has no slices to count: it prints as `jig next` does.
+	if rec, err := st.ReadTicket(ticket); err == nil {
+		if k := rec.KindOrDefault(); k != store.KindTask {
+			data, err := readTicketData(st, ticket)
+			if err != nil {
+				return renderErr(stdout, err)
+			}
+			axi.Render(stdout, nextNotATask(st, data, k).notATaskBlocks()...)
+			return 0
+		}
+	}
+
 	// The advice it ends with reads where the ticket stands as `jig next` does,
 	// its stack plan laid on it: a published ticket owed a merge is not done. The
 	// screens of the TUI run this command every few seconds on a quiet ticket, so

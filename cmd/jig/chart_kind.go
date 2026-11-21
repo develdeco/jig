@@ -54,6 +54,14 @@ func chartKindProblems(st *store.Store, chart string, entries []store.ChartEntry
 	// holds[j] is whether a task entry sits under entry j.
 	holds := map[int]bool{}
 	for i, e := range entries {
+		if issue != "" && e.ID != "" {
+			if rec, err := st.ReadTicket(e.ID); err == nil && rec.Kind != "" {
+				if k := entryKind(e); k != rec.Kind {
+					entryProblem(i, fmt.Sprintf("has kind %q but its ticket %s is a %s", k, e.ID, rec.Kind))
+					continue
+				}
+			}
+		}
 		if e.Kind == "" && e.Under == "" {
 			continue
 		}
@@ -79,6 +87,8 @@ func chartKindProblems(st *store.Store, chart string, entries []store.ChartEntry
 			entryProblem(i, fmt.Sprintf("is a multi-task under entry %d; a multi-task holds tasks only", j+1))
 		case entries[j].Kind != store.KindMultiTask:
 			entryProblem(i, fmt.Sprintf("is under entry %d, which is not a multi-task", j+1))
+		case e.ID == "" && entries[j].ID == "" && j >= i:
+			entryProblem(i, fmt.Sprintf("is under entry %d, which must come before it: the multi-task is minted first", j+1))
 		}
 	}
 	for j, e := range entries {
@@ -87,6 +97,62 @@ func chartKindProblems(st *store.Store, chart string, entries []store.ChartEntry
 		}
 	}
 	return out
+}
+
+// entryKind is the kind an entry mints: a task unless it says otherwise.
+func entryKind(e store.ChartEntry) string {
+	if e.Kind == "" {
+		return store.KindTask
+	}
+	return e.Kind
+}
+
+// recordExistingKinds gives each entry that already had a ticket (not one this
+// run minted) the kind and parent its entry names, when its ticket records
+// none: an existing ticket keeps the kind it has. A chart with no issue is a
+// legacy chart and changes nothing. The writes land as one commit.
+func recordExistingKinds(st *store.Store, chart string, entries []store.ChartEntry, created map[int]bool) error {
+	if issue, _ := st.ChartIssue(chart); issue == "" {
+		return nil
+	}
+	type update struct{ id, kind, parent string }
+	var todo []update
+	for i, e := range entries {
+		if e.ID == "" || created[i] {
+			continue
+		}
+		rec, err := st.ReadTicket(e.ID)
+		if err != nil {
+			continue
+		}
+		u := update{id: e.ID}
+		if rec.Kind == "" && e.Kind == store.KindMultiTask {
+			u.kind = e.Kind
+		}
+		if j := underIndex(entries, e.Under); j >= 0 && rec.Parent == "" && entries[j].ID != "" {
+			u.parent = entries[j].ID
+		}
+		if u.kind != "" || u.parent != "" {
+			todo = append(todo, u)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	_, err := st.Claim(
+		func() (string, []string, error) {
+			var paths []string
+			for _, u := range todo {
+				if err := st.SetTicketKind(u.id, u.kind, u.parent); err != nil {
+					return "", nil, err
+				}
+				paths = append(paths, st.TicketFileRelPath(u.id))
+			}
+			return chart, paths, nil
+		},
+		func(string) string { return fmt.Sprintf("chart %s: record kinds", chart) },
+	)
+	return err
 }
 
 // underIndex is the 0-based position of the entry an `under` names: "#k" is the

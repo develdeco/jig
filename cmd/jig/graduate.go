@@ -156,6 +156,9 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 			},
 		})
 	}
+	if err := recordExistingKinds(st, chart, entries, created); err != nil {
+		return renderErr(stdout, graduateFailure(chart, createdIDs, err))
+	}
 	refs, err := resolveChartEntryRefs(st, chart, entries)
 	if err != nil {
 		return renderErr(stdout, err)
@@ -300,7 +303,10 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		if kerr != nil {
 			return "", nil, kerr
 		}
-		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, Slug: store.Slug(entries[i].Title), BlockedBy: toBlockedBy(refs[i])}
+		rec := store.Ticket{Title: entries[i].Title, Body: entries[i].Body, Slug: store.Slug(entries[i].Title), BlockedBy: toBlockedBy(refs[i]), Kind: entries[i].Kind}
+		if j := underIndex(entries, entries[i].Under); j >= 0 {
+			rec.Parent = entries[j].ID
+		}
 		newID, merr := st.Mint(key, rec)
 		if merr != nil {
 			return "", nil, merr
