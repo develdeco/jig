@@ -44,6 +44,11 @@ type FinalSlice struct {
 	Env string
 }
 
+// SuiteOracle is the name of the manifest oracle an issue's final run runs:
+// the repo's one full suite. It is read for an issue only; no slice, task or
+// multi-task run resolves it.
+const SuiteOracle = "suite"
+
 // FinalResult is what a final run found: Result, with Slice empty and Command
 // the composed command, and the slices the command is the union of.
 type FinalResult struct {
@@ -54,6 +59,9 @@ type FinalResult struct {
 	Slices []FinalSlice
 	// Classes are the env classes the union brings up, sorted.
 	Classes []string
+	// Suite is set when the ticket is an issue: the run is the repo's suite
+	// oracle, Slices is empty, and Command is the suite command.
+	Suite bool
 }
 
 // finalRun is a final run in flight: the run's shared state plus the union.
@@ -61,6 +69,7 @@ type finalRun struct {
 	*run
 	slices  []FinalSlice
 	classes []string
+	suite   bool
 }
 
 // prepareFinal checks the request against the store and the worktree and
@@ -112,6 +121,11 @@ func (d Deps) mine(all []store.Slice) []store.Slice {
 // cannot be reached, "" when it can.
 func (f *finalRun) compose(m manifest.Manifest) (composed, why string) {
 	x := f.run
+	if rec, err := x.d.Store.ReadTicket(x.r.Ticket); err != nil {
+		return "", fmt.Sprintf("read the ticket %s: %v", x.r.Ticket, err)
+	} else if rec.KindOrDefault() == store.KindIssue {
+		return f.composeSuite(m)
+	}
 	all, err := x.d.Store.ReadSlices(x.r.Ticket)
 	if err != nil {
 		return "", fmt.Sprintf("read the slices of %s: %v", x.r.Ticket, err)
@@ -157,9 +171,30 @@ func (f *finalRun) compose(m manifest.Manifest) (composed, why string) {
 	return strings.Join(parts, " && "), ""
 }
 
+// composeSuite is the final run of an issue: the repo's declared oracle named
+// suite, its {path} resolved against the root workspace. An issue has no slice,
+// so the run lists none and brings up no env class. A repo that declares no
+// suite has nothing to run, and the reason says so.
+func (f *finalRun) composeSuite(m manifest.Manifest) (composed, why string) {
+	x := f.run
+	f.suite, f.slices, f.classes = true, nil, nil
+	if strings.TrimSpace(m.Oracles[SuiteOracle]) == "" {
+		repo := x.d.Repo
+		if repo == "" {
+			repo = "this repo"
+		}
+		return "", "no suite declared in " + repo + ": add `oracles: suite: <command>` to its .claude/jig.yaml to have the issue proven"
+	}
+	ws, ok := m.Workspace("root")
+	if !ok {
+		ws = manifest.Workspace{ID: "root", Path: "."}
+	}
+	return strings.TrimSpace(m.OracleCmd(SuiteOracle, ws)), ""
+}
+
 // result is the FinalResult of what the run knows now.
 func (f *finalRun) result() FinalResult {
-	return FinalResult{Result: f.res, Slices: f.slices, Classes: f.classes}
+	return FinalResult{Result: f.res, Slices: f.slices, Classes: f.classes, Suite: f.suite}
 }
 
 // PlanFinal says what RunFinal would do for r, and runs and writes nothing:
