@@ -631,7 +631,7 @@ func (x *run) startSHA() string {
 
 // changedFiles lists the files the commit changed against the base the gate's
 // full scope uses (merge-base of origin/<target> and the commit, the start sha
-// only when that fails: scopebase.Resolve), as the scope diff reads
+// only when that fails: scopebase.ResolveOn), as the scope diff reads
 // them (added, modified or type-changed). The start sha alone would list, after
 // an integration merge, every file the target changed since it too. nil when the
 // base is unknown or the diff fails, which ranks every recording alike.

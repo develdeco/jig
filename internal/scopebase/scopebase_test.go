@@ -1,15 +1,15 @@
 package scopebase
 
 import (
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/develdeco/jig/internal/gitx"
 )
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=f@example.invalid", "-c", "user.name=f"}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := gitx.Run(dir, args...); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
@@ -23,6 +23,8 @@ func TestBranchForTakesTheBaseOnlyWhenTheCloneHoldsIt(t *testing.T) {
 	origin, clone := filepath.Join(root, "o.git"), filepath.Join(root, "c")
 	git(t, root, "init", "--bare", "-b", "main", origin)
 	git(t, root, "init", "-b", "main", clone)
+	git(t, clone, "config", "user.email", "fixture@example.invalid")
+	git(t, clone, "config", "user.name", "fixture")
 	git(t, clone, "remote", "add", "origin", origin)
 	git(t, clone, "commit", "--allow-empty", "-m", "base")
 	git(t, clone, "push", "origin", "main", "main:refs/heads/I-1-issue")
