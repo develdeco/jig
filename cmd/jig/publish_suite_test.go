@@ -217,6 +217,11 @@ func TestSuitePublishWaivedIsRecordedAndShown(t *testing.T) {
 	if out, code := s.run(t, "publish", "TK-2", "--yes", "--without-suite", "x"); code == 0 || !strings.Contains(out, "only an issue runs a suite") {
 		t.Errorf("a task: exit %d\n%s", code, out)
 	}
+	// Without --yes the waiver would be written before the confirmation and
+	// outlive a declined publish: it is refused.
+	if out, code := s.run(t, "publish", "TK-1", "--without-suite", "ci runs it"); code == 0 || !strings.Contains(out, "Add --yes") {
+		t.Errorf("no --yes: exit %d\n%s", code, out)
+	}
 	if lines, _ := journal.Read(s.st, "TK-1"); len(lines) != 0 {
 		t.Fatalf("a refused waiver wrote %+v", lines)
 	}

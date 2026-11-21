@@ -34,16 +34,21 @@ func newSuiteWorld(t *testing.T, manifest string) *suiteWorld {
 	w.merged(prURL("1"), base)
 
 	sw := &suiteWorld{world: w, dir: t.TempDir(), branch: base}
-	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.email", "fixture@example.invalid"}, {"config", "user.name", "fixture"}} {
-		if _, err := gitx.Run(sw.dir, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sw.initClone()
 	w.d.Clones = map[string]string{"app": sw.dir}
 	if manifest != "" {
 		sw.commit(manifest)
 	}
 	return sw
+}
+
+func (s *suiteWorld) initClone() {
+	s.t.Helper()
+	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.email", "fixture@example.invalid"}, {"config", "user.name", "fixture"}} {
+		if _, err := gitx.Run(s.dir, args...); err != nil {
+			s.t.Fatal(err)
+		}
+	}
 }
 
 // commit commits a manifest and points origin/<branch> at it, returning the tip.
@@ -171,6 +176,19 @@ func TestSuitePreconditionNoCopyOfTheBranchSaysFetch(t *testing.T) {
 	r := s.readiness("I-1")
 	if len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun || !strings.Contains(r.Unmet[0].Why, "git fetch") {
 		t.Fatalf("readiness = %+v, want the suite not run, saying git fetch", r)
+	}
+}
+
+// TestSuitePreconditionNoCloneIsUnrunNotMet: a repo with no clone on this
+// machine cannot be read, so its suite is unmet and says what to map, with no
+// tip to waive, rather than counting as met.
+func TestSuitePreconditionNoCloneIsUnrunNotMet(t *testing.T) {
+	t.Parallel()
+	s := newSuiteWorld(t, suiteDeclared)
+	s.d.Clones = map[string]string{}
+	r := s.readiness("I-1")
+	if r.State != land.StateWaiting || len(r.Unmet) != 1 || r.Unmet[0].Code != land.SuiteNotRun || !strings.Contains(r.Unmet[0].Why, "jig map app=") {
+		t.Fatalf("readiness = %+v, want the suite not run, naming the missing clone", r)
 	}
 }
 

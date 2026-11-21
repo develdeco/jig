@@ -14,7 +14,7 @@ import (
 // suiteWaiverAllowed says whether `jig publish --without-suite <reason>` can be
 // asked of ticket: an issue only, with a reason, and no other form. jig records
 // the waiver and never judges who may say it.
-func suiteWaiverAllowed(st *store.Store, ticket, reason string, otherForm bool) error {
+func suiteWaiverAllowed(st *store.Store, ticket, reason string, otherForm, yes bool) error {
 	invalid := func(msg, help string) error {
 		return &axi.Error{Msg: msg, Code: "VALIDATION_ERROR", Help: []string{help}}
 	}
@@ -25,6 +25,10 @@ func suiteWaiverAllowed(st *store.Store, ticket, reason string, otherForm bool) 
 		return invalid(fmt.Sprintf("--without-suite is for an issue: %s is a %s, and only an issue runs a suite", ticket, rec.KindOrDefault()), "Publish it without the flag")
 	case strings.TrimSpace(reason) == "":
 		return invalid("--without-suite needs a reason, which jig records and the pull request shows", "Give it: --without-suite \"<why the suite is skipped>\"")
+	case !yes:
+		// The waiver is written before the confirmation, so a declined publish
+		// would leave it standing: the word to publish is given with the flag.
+		return invalid("--without-suite goes with `jig publish "+ticket+" --yes`: the waiver is recorded as the publish is asked", "Add --yes")
 	case otherForm:
 		return invalid("--without-suite goes with the bare `jig publish "+ticket+" --yes`, not with --body, --pr or --approve", "Drop the other form")
 	}

@@ -161,7 +161,7 @@ func cmdPublish(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	waiveGiven := false
 	fs.Visit(func(f *flag.Flag) { waiveGiven = waiveGiven || f.Name == "without-suite" })
 	if waiveGiven {
-		if err := suiteWaiverAllowed(st, ticket, *withoutSuite, forms > 0); err != nil {
+		if err := suiteWaiverAllowed(st, ticket, *withoutSuite, forms > 0, *yes); err != nil {
 			return renderErr(stdout, err)
 		}
 	}

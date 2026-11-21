@@ -178,6 +178,10 @@ func verifyFinalFooter(res verify.FinalResult, req verify.Request, code int) []s
 	switch {
 	case !res.Covered:
 		help = "This run covers no commit: commit or discard the changes, then run `jig verify --final` again"
+	case outcome == "fail" && res.Suite:
+		help = fmt.Sprintf("The suite failed: add a fix task to the chart of %s (`jig next %s` says how); it lands into the issue's branch, which moves the tip, and the suite is run again there", res.Ticket, res.Ticket)
+	case res.Suite:
+		help = fmt.Sprintf("`jig next %s` reads this run at the tip of the issue's branch", res.Ticket)
 	case outcome == "fail":
 		help = "The union failed: fix what it reports, commit, and run `jig verify --final` again at the new head"
 	}

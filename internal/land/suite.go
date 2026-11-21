@@ -55,7 +55,7 @@ func JournalRepo(d Deps, repo string) string {
 // SuiteOf says where the suite of issue c stands in each repo it builds in. It
 // reads the manifest at the tip of origin/<branch> and the issue's journal at
 // exactly that tip: a run or a waiver at an earlier tip stands for nothing. A
-// repo with no clone on this machine is not read, and has no standing row.
+// repo with no clone on this machine is unrun: its suite cannot be read.
 func SuiteOf(d Deps, c Container) ([]RepoSuite, error) {
 	if c.Kind != store.KindIssue || d.Store == nil {
 		return nil, nil
@@ -67,10 +67,16 @@ func SuiteOf(d Deps, c Container) ([]RepoSuite, error) {
 	var out []RepoSuite
 	for _, repo := range c.Repos {
 		dir := d.Clones[repo]
+		rs := RepoSuite{Repo: repo}
 		if dir == "" {
+			// A repo jig cannot read is not a repo whose suite is met: it says
+			// what is missing, and has no tip to waive.
+			rs.Standing = SuiteUnrun
+			rs.Why = fmt.Sprintf("%s has no clone on this machine, so its suite cannot be read: `jig map %s=<path>` to it", repo, repo)
+			rs.Unmet = &Unmet{Code: SuiteNotRun, Why: rs.Why, Prompt: suitePrompt(c, repo)}
+			out = append(out, rs)
 			continue
 		}
-		rs := RepoSuite{Repo: repo}
 		tip, terr := gitx.RevParse(dir, "origin/"+c.Branch)
 		if terr != nil || tip == "" {
 			rs.Standing = SuiteUnrun
@@ -187,6 +193,9 @@ func VerificationLines(suites []RepoSuite) []string {
 			line = "No suite declared in " + s.Repo
 		default:
 			line = fmt.Sprintf("No suite run at the issue's head %s", short(s.Tip))
+			if s.Tip == "" {
+				line = "No suite run: the issue's head could not be read in " + s.Repo
+			}
 		}
 		if len(suites) > 1 {
 			line = s.Repo + ": " + line

@@ -35,6 +35,8 @@ type world struct {
 	st *store.Store
 	h  *host
 	d  land.Deps
+	// noSuite is the clone readiness gives a world that mapped none.
+	noSuite *suiteWorld
 }
 
 func newWorld(t *testing.T) *world {
