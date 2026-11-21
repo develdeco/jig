@@ -28,6 +28,9 @@ type Container struct {
 	Branch   string   // its branch, one name in every repo
 	Children []string // its children, as Children reads them
 	Repos    []string // the repos it builds in
+	// Deps is what ContainerOf read it with: the store and the clones a
+	// precondition reads the container's journal and branch tips from.
+	Deps Deps
 }
 
 // Unmet is one thing a container's publish still waits for.
@@ -41,9 +44,10 @@ type Unmet struct {
 type Precondition func(c Container) ([]Unmet, error)
 
 // Preconditions is the registry of what a container's publish waits for besides
-// its children: empty here for a multi-task and an issue. A later ticket adds
-// an entry; `jig next` and `jig publish` read this list and nothing else.
-var Preconditions = []Precondition{}
+// its children. Its one entry is an issue's suite (suitePrecondition); a
+// multi-task has none. `jig next` and `jig publish` read this list and nothing
+// else.
+var Preconditions = []Precondition{suitePrecondition}
 
 // Check runs every precondition in order and returns all that is unmet.
 func Check(c Container) ([]Unmet, error) {
@@ -160,7 +164,7 @@ func ContainerOf(d Deps, container string) (Container, error) {
 	if err != nil {
 		return Container{}, err
 	}
-	c := Container{ID: container, Kind: rec.KindOrDefault(), Children: Children(d.Store, container, rec)}
+	c := Container{ID: container, Kind: rec.KindOrDefault(), Children: Children(d.Store, container, rec), Deps: d}
 	targets := projectTargets(d.Cfg)
 	if c.Branch, err = d.Store.ResolveTicketBranch(container, rec, targets[0]); err != nil {
 		return Container{}, err
@@ -212,6 +216,8 @@ type Readiness struct {
 	// Waits are the children not landed, Unmet the preconditions not met.
 	Waits []Wait
 	Unmet []Unmet
+	// Waived are the suite waivers standing at the issue's tips, in words.
+	Waived []string
 	// Prompt is what to ask next: Publish T when ready, Land T when published,
 	// and "" when waiting.
 	Prompt string
@@ -247,6 +253,9 @@ func ReadinessOf(d Deps, container string) (Readiness, error) {
 		return r, nil
 	}
 	if r.Unmet, err = Check(c); err != nil {
+		return Readiness{}, err
+	}
+	if r.Waived, err = SuiteWaivers(d, c); err != nil {
 		return Readiness{}, err
 	}
 	if len(r.Unmet) > 0 {
