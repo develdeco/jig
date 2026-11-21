@@ -481,6 +481,7 @@ func validateTicketRecord(st *store.Store, cfg project.Config, ticket string) ([
 		return nil, err
 	}
 	problems = append(problems, validateTicketDeps(st, ticket)...)
+	problems = append(problems, validateTicketAfter(st, ticket)...)
 	problems = append(problems, validateTicketParent(st, ticket)...)
 	problems = append(problems, validateTicketClosed(st, ticket)...)
 	problems = append(problems, validateUpstreamEdges(st, ticket)...)
