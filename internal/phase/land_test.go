@@ -85,7 +85,10 @@ func TestLandPhaseIsCurrentAfterPublishUntilLanded(t *testing.T) {
 func TestLandPhaseCoversEveryRepoAndIssue(t *testing.T) {
 	t.Parallel()
 	pr := func(repo, into string) journal.Line {
-		return ln(journal.EventPr, func(l *journal.Line) { l.URL = "https://github.com/acme/" + repo + "/pull/1"; l.Repo, l.Into = repo, into })
+		return ln(journal.EventPr, func(l *journal.Line) {
+			l.URL = "https://github.com/acme/" + repo + "/pull/1"
+			l.Repo, l.Into = repo, into
+		})
 	}
 	landed := func(repo, into string) journal.Line {
 		return ln(journal.EventLanded, func(l *journal.Line) { l.Repo, l.Into = repo, into })

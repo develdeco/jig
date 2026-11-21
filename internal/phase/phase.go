@@ -1,5 +1,5 @@
-// Package phase derives where a ticket stands: which of its four phases
-// (brief, build, review and publish) is current, whether that phase can start
+// Package phase derives where a ticket stands: which of its phases
+// (brief, build, review, publish and land) is current, whether that phase can start
 // now, why not, the prompt that starts it, and the sub-steps of each phase.
 // Every command that advises the next step reads this one derivation, so a
 // session, a person and the TUI get the same answer.

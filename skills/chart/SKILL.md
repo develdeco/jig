@@ -50,4 +50,4 @@ After each wave re-read `jig next <chart>` (same `--tickets`) and start the next
 ## Never
 
 - Do not start a ticket `run` does not list, or build in this clone while subagents build.
-- Do not merge a pull request, or answer for the person unless told to go with your recommendations.
+- Merge a pull request only at the person's word (`jig skill land`); answer for the person only when told to go with your recommendations.
