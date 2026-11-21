@@ -174,6 +174,14 @@ func childOf(d Deps, id, container, repo string, qualified bool) (childRow, erro
 		return childRow{}, err
 	}
 	row := childRow{ID: id, Title: d.Store.TicketName(id, rec)}
+	// A mirrored child is named by its issue, which the host links.
+	ids, err := d.Store.TrackerIDs(id)
+	if err != nil {
+		return childRow{}, err
+	}
+	if ids.GitHub != nil {
+		row.ID = fmt.Sprintf("%s#%d", ids.GitHub.Repo, ids.GitHub.Number)
+	}
 	lines, err := journal.ReadFor(d.Store, id, container)
 	if err != nil {
 		return childRow{}, err

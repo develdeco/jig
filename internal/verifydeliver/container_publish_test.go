@@ -157,6 +157,14 @@ func TestContainerPublishOpensAnIssuesPullRequest(t *testing.T) {
 		}
 	}
 	logFile, _ := useGithubHost(t, d, "", "")
+	// T-3 is mirrored to an issue: its line names the issue, keeps its pull request.
+	record := filepath.Join(d.Store.TicketDir("T-3"), "tracker", "github.yaml")
+	if err := os.MkdirAll(filepath.Dir(record), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(record, []byte("repo: acme/tracking\nissue: 12\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	report, err := PublishContainer(*d, PublishOpts{Ticket: "I-1", Yes: true})
 	if err != nil {
@@ -174,7 +182,7 @@ func TestContainerPublishOpensAnIssuesPullRequest(t *testing.T) {
 		"- The multi-task (M-1): https://github.com/owner/fixture-repo/pull/9\n" +
 		"  - First task (T-1): https://github.com/owner/fixture-repo/pull/1\n" +
 		"  - Second task (T-2): https://github.com/owner/fixture-repo/pull/2\n" +
-		"- Third task (T-3): https://github.com/owner/fixture-repo/pull/3\n" +
+		"- Third task (acme/tracking#12): https://github.com/owner/fixture-repo/pull/3\n" +
 		"\nOpened by an agent\n"
 	if string(body) != want {
 		t.Errorf("body:\n%s\nwant:\n%s", body, want)
