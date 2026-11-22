@@ -1447,11 +1447,11 @@ func chartRewritingWrite(st *Store, work, rel, rewritten string, minted *string)
 	}
 }
 
-// TestClaimFailedCommitRestoresAChartWithUncommittedEntries covers a chart
+// TestClaimUndoesAFailedCommitKeepingUncommittedEdits covers a chart
 // whose hand-written entries no commit holds, on a store with no origin (Sync
 // returns before committing there): the write rewrites it and the commit
 // fails, and the chart holds the entries byte for byte, the minted folder gone.
-func TestClaimFailedCommitRestoresAChartWithUncommittedEntries(t *testing.T) {
+func TestClaimUndoesAFailedCommitKeepingUncommittedEdits(t *testing.T) {
 	st, work := newTestStandaloneStore(t)
 	const chart = "charts/c/tickets.yaml"
 	if err := os.MkdirAll(filepath.Join(work, "charts", "c"), 0o755); err != nil {
