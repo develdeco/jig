@@ -17,6 +17,7 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/land"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -86,17 +87,40 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			ticketsSet = true
 		}
 	})
-	if ticketsSet && (ticket == "" || *forFlag != "" || *topology) {
-		return renderErr(stdout, notAChartTickets(ticket))
+	// The flags are checked against the ticket asked about; a ref is resolved
+	// to its owner first, so they are checked against that owner then.
+	checkAsked := func() (phase.Name, error) {
+		if ticketsSet && (ticket == "" || *forFlag != "" || *topology) {
+			return "", notAChartTickets(ticket)
+		}
+		return parseAskedPhase(*forFlag, ticket)
 	}
-	asked, err := parseAskedPhase(*forFlag, ticket)
-	if err != nil {
-		return renderErr(stdout, err)
+	isRef := locate.RefShaped(ticket)
+	var asked phase.Name
+	if !isRef {
+		if asked, err = checkAsked(); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 
 	st, cfg, mp, jigHome, err := resolveStoreForProject(e, *projectFlag, *storeFlag, stdout)
 	if err != nil {
 		return renderErr(stdout, err)
+	}
+	// A ref goes before a chart, a ticket id or an alias: a bound one is its
+	// owner's answer, which the path below gives unchanged.
+	var item *locate.Item
+	if isRef {
+		if item, err = locate.ResolveItem(st, cfg, ticket); err != nil {
+			return renderErr(stdout, err)
+		}
+		if !item.Bound {
+			return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("tracker item %s is bound to no ticket", item.Ref), Code: "VALIDATION_ERROR"})
+		}
+		ticket = item.Ticket
+		if asked, err = checkAsked(); err != nil {
+			return renderErr(stdout, err)
+		}
 	}
 	distribution := ""
 	if cwd, err := e.getwd(); err == nil {
@@ -171,13 +195,16 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	}
 	if *jsonOut {
 		data, err := json.Marshal(out)
+		if err == nil {
+			data, err = withItemJSON(data, item)
+		}
 		if err != nil {
 			return renderErr(stdout, err)
 		}
 		fmt.Fprintf(stdout, "%s\n", data)
 		return 0
 	}
-	axi.Render(stdout, blocks...)
+	axi.Render(stdout, withItemBlocks(blocks, item)...)
 	return 0
 }
 
