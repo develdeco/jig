@@ -90,7 +90,7 @@ func cmdHere(e env, args []string, stdout io.Writer) int {
 	if hc.Store, _, err = openLocatedStore(e.memo, where); err != nil {
 		return renderErr(stdout, err)
 	}
-	if hc.Store != nil && (where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias) {
+	if hc.Store != nil && (where.TicketHow == locate.HowArg || where.TicketHow == locate.HowArgAlias || where.TicketHow == locate.HowArgItem) {
 		if err := requireTicket(hc.Store, where.Ticket); err != nil {
 			return renderErr(stdout, err)
 		}
@@ -350,6 +350,13 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 		add("mapped", "yes")
 	}
 	blocks := []string{axi.KV("here", pairs)}
+	if w.Item != nil {
+		// A block of its own: the here block's repo is the repo the work is in.
+		blocks = append(blocks, axi.KV("item", itemPairs(w.Item)))
+		if b := shadowBlock(w.Item); b != "" {
+			blocks = append(blocks, b)
+		}
+	}
 	if len(w.Nested) > 0 {
 		blocks = append(blocks, axi.Table("nested", []string{"dir"}, idRows(w.Nested)))
 	}
@@ -414,6 +421,8 @@ func (v hereView) help(hc hereCtx) []string {
 			w.StoreRemote, filepath.Join(filepath.Dir(w.Root), w.Project+"-tickets"))}
 	case w.StorePath == "":
 		return []string{"The store of this project is not on this machine; pass --store, or `jig map <repo>=<path>` once it is"}
+	case w.Item != nil && !w.Item.Bound:
+		return []string{fmt.Sprintf("Run `jig next %s` to read it; `jig here` reads no tracker", itemAsk(w.Item))}
 	case w.Ticket != "":
 		a, _ := hereConflicts(hc)
 		return append(conflictHelp(w.Ticket, a.Conflicts), fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt)))
@@ -427,22 +436,26 @@ func (v hereView) help(hc hereCtx) []string {
 // hereJSON is `jig here --json`: one object, every located part carrying the
 // how it was found.
 type hereJSON struct {
-	How      string         `json:"how"`
-	JigHome  string         `json:"jig_home"`
-	Cwd      string         `json:"cwd"`
-	Project  string         `json:"project,omitempty"`
-	Kind     string         `json:"kind,omitempty"`
-	Root     string         `json:"root,omitempty"`
-	Store    *hereStoreJSON `json:"store,omitempty"`
-	Repo     *hereRepoJSON  `json:"repo,omitempty"`
-	Ticket   *hereRefJSON   `json:"ticket,omitempty"`
-	Slice    *hereRefJSON   `json:"slice,omitempty"`
-	Session  *hereRefJSON   `json:"session,omitempty"`
-	Nested   []string       `json:"nested,omitempty"`
-	Mapped   bool           `json:"mapped,omitempty"`
-	State    *hereStateJSON `json:"state,omitempty"`
-	Sections map[string]any `json:"sections,omitempty"`
-	Explain  []string       `json:"explain,omitempty"`
+	How     string         `json:"how"`
+	JigHome string         `json:"jig_home"`
+	Cwd     string         `json:"cwd"`
+	Project string         `json:"project,omitempty"`
+	Kind    string         `json:"kind,omitempty"`
+	Root    string         `json:"root,omitempty"`
+	Store   *hereStoreJSON `json:"store,omitempty"`
+	Repo    *hereRepoJSON  `json:"repo,omitempty"`
+	Ticket  *hereRefJSON   `json:"ticket,omitempty"`
+	// Item is the tracker item the argument named, with what it is bound to.
+	Item *itemRefJSON `json:"item,omitempty"`
+	// Advisories is what a bare number hides (a chart or an earlier ticket id).
+	Advisories []string       `json:"advisories,omitempty"`
+	Slice      *hereRefJSON   `json:"slice,omitempty"`
+	Session    *hereRefJSON   `json:"session,omitempty"`
+	Nested     []string       `json:"nested,omitempty"`
+	Mapped     bool           `json:"mapped,omitempty"`
+	State      *hereStateJSON `json:"state,omitempty"`
+	Sections   map[string]any `json:"sections,omitempty"`
+	Explain    []string       `json:"explain,omitempty"`
 	// Conflicts are the files the ticket's branch cannot merge with another
 	// open ticket's (conflict.go).
 	Conflicts []ticketConflict `json:"conflicts,omitempty"`
@@ -489,6 +502,12 @@ func (v hereView) json(hc hereCtx, sections []hereSection) (hereJSON, error) {
 	}
 	if w.Ticket != "" {
 		out.Ticket = &hereRefJSON{ID: w.Ticket, How: w.TicketHow, Title: v.title}
+	}
+	if w.Item != nil {
+		out.Item = itemRefOf(w.Item)
+		if w.Item.Shadow != "" {
+			out.Advisories = []string{w.Item.Shadow}
+		}
 	}
 	if w.Slice != "" {
 		out.Slice = &hereRefJSON{ID: w.Slice, How: w.SliceHow}

@@ -237,6 +237,9 @@ func checkNewChartName(name string) error {
 	if validateChartName(name) != nil || len(name) > maxChartNameLen || !chartNameRule.MatchString(name) {
 		return invalid(rule)
 	}
+	if strings.Trim(name, "0123456789") == "" {
+		return invalid("a name made of digits only is a tracker item's number: `jig next 48` reads the item, so it could never reach the chart")
+	}
 	return nil
 }
 
