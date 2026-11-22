@@ -440,8 +440,9 @@ func (s *Store) undoFailedWrite(err error, pre string, havePre bool, paths []str
 
 // undoFailedCommit is Claim's answer to a commit that failed: the commit's
 // error comes back as it was, after what write touched is undone (HEAD is
-// still pre, so the reset is a no-op; an unborn branch only cleans). An undo
-// that does not finish is reported as undoFailedWrite reports it.
+// still pre, so the reset is a no-op; on an unborn branch each path is
+// unstaged and cleaned, since the commit's own add staged it). An undo that
+// does not finish is reported as undoFailedWrite reports it.
 func (s *Store) undoFailedCommit(err error, pre string, havePre bool, paths []string) error {
 	var uerr error
 	if havePre {
