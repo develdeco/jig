@@ -115,7 +115,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			return renderErr(stdout, err)
 		}
 		if !item.Bound {
-			return renderErr(stdout, &axi.Error{Msg: fmt.Sprintf("tracker item %s is bound to no ticket", item.Ref), Code: "VALIDATION_ERROR"})
+			return nextUnboundItem(e, stdout, cfg, item, ticketsSet || *forFlag != "" || *topology, *jsonOut)
 		}
 		ticket = item.Ticket
 		if asked, err = checkAsked(); err != nil {
