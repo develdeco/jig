@@ -284,3 +284,46 @@ func TestIntakeChartFold(t *testing.T) {
 	)
 	wantNone(t, "skills/intake/references/chart-verdict", ref, "—", "Fold it before the entries are written")
 }
+
+// TestIntakeTrackerItem pins the tracker-item clauses across the three
+// intake files and the here skill: one need, one issue, read with jig next,
+// made by the verdict's step with --item.
+func TestIntakeTrackerItem(t *testing.T) {
+	core := skillFile(t, "intake")
+	needs := skillFile(t, "intake", "needs")
+	verdict := skillFile(t, "intake", "chart-verdict")
+	here := skillFile(t, "here")
+	wantAll(t, "skills/intake", core,
+		"or a tracker item by its bare number (`jig next 48`; `#` starts a comment), run `jig next <T>` first",
+		"For fresh work, an unbound item or a ticket that does not exist, mint nothing before the verdict",
+		"(`--item <n>` for an item)",
+		"after an issue was made, or names a tracker item",
+	)
+	wantAll(t, "skills/intake/references/needs", needs,
+		"or the prompt names a tracker item",
+		"## A tracker item",
+		"An item is one need, so one issue, never split whatever the fog and never a row of the table below; what grilling finds for it goes in its chart",
+		"jig reads the item, never `gh`: run `jig next 48`, relay its advisories and refuse nothing",
+		"the verdict's step takes `--item <n>` and no `--need`",
+		"A later edit of the item is drift, never a change of need",
+		"A bound item is its issue: work in that issue's chart and make nothing",
+		"A second session on one item is refused naming the issue",
+		"## Where a change is written",
+	)
+	wantAll(t, "skills/intake/references/chart-verdict", verdict,
+		"either verdict takes `jig chart new <name> --item <n>` instead (`--title` then names the chart only)",
+		"`--need`, `--issue <ID>` and `--item` exclude one another",
+	)
+	wantAll(t, "skills/here", here,
+		"jig here 48", "`arg-item`",
+		"or a tracker item to take (`jig next 48` reads it), is fresh work",
+		"an item is one need, one issue",
+	)
+	// The old question about what the item is to the chart, written as two
+	// joined strings so no file holds it, and an item's --issue clause.
+	oldQuestion := "what the item is " + "to the chart"
+	wantNone(t, "the intake and here skills", core+needs+verdict+here, oldQuestion, "jig ticket new --issue", "gh issue", "gh api")
+	if strings.Contains(core, "Where a change is written") {
+		t.Error("skills/intake core still holds the paragraph that moved to the needs reference")
+	}
+}

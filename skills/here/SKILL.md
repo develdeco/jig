@@ -12,6 +12,7 @@ description: Names where the work is from the working directory alone - project,
 ```
 jig here            # blocks: project, store, repo, branch, ticket, slices, questions
 jig here JIG-4      # name the ticket yourself
+jig here 48         # a tracker item, by its bare number
 jig here --json     # one object; every part carries how it was found
 jig here --explain  # the steps the lookup took, in order
 ```
@@ -25,11 +26,11 @@ Run it from the repo, a directory in it, or a linked worktree of it: all read as
 | `project`, `how` | the project, and how it was found: `marker` (a committed `jig.yaml`), `map-path` or `map-remote` (this machine's map), `store`, `flag` |
 | `store` | the store's directory; `store_remote` alone means it is not cloned here - run the `git clone` the help line gives, then `jig here` again |
 | `repo`, `repo_dir`, `branch` | which repo of the project this is, its clone, the branch checked out |
-| `ticket`, `ticket_how` | the ticket the branch name leads with (`branch`: its id, an id it had before, or the number of its GitHub issue), or the one you named (`arg`) |
+| `ticket`, `ticket_how` | the ticket the branch name leads with (`branch`: its id, an id it had before, or the number of its GitHub issue), or the one you named (`arg`, or `arg-item` for a tracker item) |
 | `slices` | every slice of the ticket with its state and, in `last_run`, whether its last run `covers` the slice's last commit; `blocked_by` shows what each waits for |
 | `questions`, `verification_states` | open questions to answer; commits with no recorded result, or a failed one |
 
-A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket is fresh work: plan it with the intake skill, which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue). `jig claim` on such a branch records it as that ticket's branch.
+A branch that leads with no ticket (`main`, a feature branch) binds no ticket: name one, or run `jig next`. Work the person asks for with no ticket, or a tracker item to take (`jig next 48` reads it), is fresh work: plan it with the intake skill, which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue; an item is one need, one issue). `jig claim` on such a branch records it as that ticket's branch.
 
 ## What to build next
 
