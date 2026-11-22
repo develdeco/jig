@@ -129,13 +129,24 @@ func chartRoster(charts ...map[string]any) string {
 			{"id": "JIG-4", "title": "Coupon model", "state": "done"},
 			{"id": "JIG-5", "title": "Apply a coupon code", "state": "active"},
 			{"id": "JIG-6", "title": "Remove a coupon", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-5", "kind": "stacked", "fact": "its gate has no clean round"}), "digest": draftedDigest()},
-			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open"}), "digest": draftedDigest()},
+			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open", "prs": []map[string]any{pull("7", "OPEN")}}), "digest": draftedDigest()},
 			{"id": "JIG-8", "title": "Show the discount", "state": "ready", "digest": draftedDigest()},
 		},
 	}
 	if len(charts) > 0 {
 		v["charts"] = charts
 	}
+	return jsonLine(v)
+}
+
+// mergedRoster is chartRoster once JIG-4 has merged: JIG-7 waits for nothing.
+func mergedRoster() string {
+	var v struct {
+		Tickets []map[string]any `json:"tickets"`
+		Charts  []any            `json:"charts"`
+	}
+	_ = json.Unmarshal([]byte(chartRoster(checkoutListing())), &v)
+	delete(v.Tickets[3], "blocked_by")
 	return jsonLine(v)
 }
 

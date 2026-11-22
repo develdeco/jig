@@ -129,7 +129,7 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StateOK
 	case len(t.stepLines(stepBuild)) == 0:
 		s.State = StateReady
-		if p.State == phase.StatePending {
+		if p.State == phase.StatePending || cannotStart(d, p) {
 			s.State = StateQueued
 		}
 	default:
@@ -154,7 +154,7 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Review)
 	s := rowOf(stepReview, rowReview, p)
 	rounds := t.rounds(m.zone)
-	pending := p.State == phase.StatePending
+	pending := p.State == phase.StatePending || cannotStart(d, p)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -195,12 +195,23 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StatePublished
 	case p.State == phase.StatePending:
 		s.State = StateQueued
+	case t.rosterState == stateBehind:
+		// Published, and owed a merge before the publish that follows it.
+		s.State = StateReady
 	case hasSub(p, phase.SubDone):
 		s.State = StatePublishing
+	case cannotStart(d, p):
+		s.State = StateQueued
 	default:
 		s.State = StateReady
 	}
 	return s
+}
+
+// cannotStart says p is the phase the ticket stands at and the digest says it
+// cannot start now: it waits for a blocker, not for the person.
+func cannotStart(d phase.Ticket, p phase.Phase) bool {
+	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
 // stepTimes are how long each step has taken: the gaps between consecutive

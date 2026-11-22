@@ -219,9 +219,10 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			Title     string `json:"title"`
 			State     string `json:"state"`
 			BlockedBy []struct {
-				Ticket string `json:"ticket"`
-				Kind   string `json:"kind"`
-				Fact   string `json:"fact"`
+				Ticket string    `json:"ticket"`
+				Kind   string    `json:"kind"`
+				Fact   string    `json:"fact"`
+				PRs    []chartPR `json:"prs"`
 			} `json:"blocked_by"`
 			Digest *struct {
 				Kind         string `json:"kind"`
@@ -268,7 +269,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	for _, t := range next.Tickets {
 		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
 		for _, b := range t.BlockedBy {
-			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact})
+			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}
 		if g := t.Digest; g != nil {
 			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed}

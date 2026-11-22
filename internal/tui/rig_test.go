@@ -367,8 +367,24 @@ type rig struct {
 	r       *fakeRunner
 	started bool
 	// synced is, for each ticket whose digest the rig made, what it was made
-	// from.
+	// from; pinned are the digests (and roster states) a test fixed, which the
+	// rig keeps as they are.
 	synced map[string]syncedFrom
+	pinned map[string]pin
+}
+
+// pin is a digest and the roster state a test gave a ticket.
+type pin struct {
+	digest *digestInfo
+	state  string
+}
+
+// pin fixes what the roster says of ticket id, whatever its lines show.
+func (g *rig) pin(id string, d *digestInfo, state string) {
+	if g.pinned == nil {
+		g.pinned = map[string]pin{}
+	}
+	g.pinned[id] = pin{d, state}
 }
 
 // syncedFrom is what a ticket's digest was derived from: how many lines it had
@@ -388,6 +404,10 @@ func (g *rig) syncDigests() {
 		g.synced = map[string]syncedFrom{}
 	}
 	for id, t := range g.m.w.tickets {
+		if p, ok := g.pinned[id]; ok {
+			t.digest, t.rosterState = p.digest, p.state
+			continue
+		}
 		if len(t.lines) == 0 && t.status == nil {
 			continue
 		}

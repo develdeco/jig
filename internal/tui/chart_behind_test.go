@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -22,31 +21,39 @@ func behindJSON() string {
 	})
 }
 
-// behindChartRig is the chart screen of the fixtures whose verb lists JIG-4 as
-// behind, on a terminal of 100 by 36. The screens' own derivation of JIG-4 is
-// published: its journal says so and no stack plan is read.
+// behindDigest is the digest of the published JIG-4 once its parent merged: its
+// publish is current again, ready, and the roster says it is behind.
+func behindDigest() *digestInfo {
+	return task("publish", true, "done|approved", "done|3 of 3 green", "done|round 2 clean",
+		"current|"+behindText, "pending|after the publish")
+}
+
+// behindChartRig is the chart screen of the fixtures whose JIG-4 is behind, on a
+// terminal of 100 by 36. The journal of JIG-4 says it published; its digest, which
+// reads its stack plan, says it owes a merge and a publish.
 func behindChartRig(t *testing.T) *rig {
 	t.Helper()
 	g := newRig(t, "")
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", behindJSON(), status)
+	g.pin("JIG-4", behindDigest(), stateBehind)
 	g.feed(lines...)
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 36})
 	return onChart(g)
 }
 
-// TestAChartRowFollowsTheVerbForATicketThatIsBehind: the verb is stack-aware and
-// the screens' derivation is not, so a published ticket whose parent merged is
-// done to the screens and at its publish again to the verb. The chart's row
-// takes the verb's word: it is not done, its publish is the step it stands at,
-// the cursor starts on it, and the Detail panel says what it owes and not that
-// it is published.
-func TestAChartRowFollowsTheVerbForATicketThatIsBehind(t *testing.T) {
+// TestAChartRowFollowsTheDigestForATicketThatIsBehind: the digest is
+// stack-aware, so a published ticket whose parent merged is at its publish
+// again though its journal says it published. The chart's row takes the
+// digest's word: it is not done, its publish is the step it stands at, the
+// cursor starts on it, and the Detail panel says what it owes and not that it
+// is published.
+func TestAChartRowFollowsTheDigestForATicketThatIsBehind(t *testing.T) {
 	t.Parallel()
 	g := behindChartRig(t)
 	c := g.m.w.charts["checkout"]
-	if own := g.m.phaseOf(g.m.w.tickets["JIG-4"]).Of(phase.Publish).State; own != phase.StateDone {
-		t.Fatalf("the screens' own derivation of JIG-4 has its publish %s, want done: the fixture does not reproduce the gap", own)
+	if own := fakeDigest(g.m, g.m.w.tickets["JIG-4"]).Phases[stepPublish].State; own != phase.StateDone {
+		t.Fatalf("the journal's own reading of JIG-4 has its publish %s, want done: the fixture does not reproduce the gap", own)
 	}
 	row := g.m.chartRows(c)[0]
 	if row.id != "JIG-4" || row.done || !row.behind || row.steps[stepPublish].Done || row.state() != StateReady {
@@ -54,7 +61,7 @@ func TestAChartRowFollowsTheVerbForATicketThatIsBehind(t *testing.T) {
 	}
 	for i := stepBrief; i < stepPublish; i++ {
 		if !row.steps[i].Done {
-			t.Errorf("step %s of the behind ticket is not done: the verb says it is", stepNames[i])
+			t.Errorf("step %s of the behind ticket is not done: the digest says it is", stepNames[i])
 		}
 	}
 	if got := g.m.chartFirstOpen(c); got != 0 {
@@ -85,9 +92,8 @@ func cursorLine(view string) string {
 	return ""
 }
 
-// TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords: a verb that agrees with
-// the screens' derivation changes nothing about a row: JIG-4 stays published and
-// the cursor starts on JIG-5, as it does with no word from the verb on a stack.
+// TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords: a ticket the digest
+// has published stays published and the cursor starts on JIG-5.
 func TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
@@ -102,93 +108,5 @@ func TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords(t *testing.T) {
 	g.press("up")
 	if panel := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(panel, "state    published") || strings.Contains(panel, "behind") {
 		t.Errorf("the Detail panel of a published ticket does not say so:\n%s", panel)
-	}
-}
-
-// TestFollowVerbTakesEachStepsDoneFromTheVerb: each step is done as the verb
-// says, whichever way it differs from the screens' rows, and a step the two
-// agree on keeps its row whole.
-func TestFollowVerbTakesEachStepsDoneFromTheVerb(t *testing.T) {
-	t.Parallel()
-	done := func(step int, state, text string) stepRow {
-		return stepRow{Step: step, State: state, Text: text, Done: true}
-	}
-	open := func(step int, state, text string) stepRow {
-		return stepRow{Step: step, State: state, Text: text}
-	}
-	own := func() []stepRow {
-		return []stepRow{
-			done(stepBrief, StateOK, "approved"),
-			open(stepBuild, StateBuilding, "1 of 3 green"),
-			open(stepReview, StateQueued, "after a clean build"),
-			open(stepPublish, StateQueued, "after a clean review"),
-		}
-	}
-	published := []stepRow{
-		done(stepBrief, StateOK, "approved"), done(stepBuild, StateOK, "3 of 3 green"),
-		done(stepReview, StateOK, "clean"), done(stepPublish, StatePublished, "pull request opened"),
-	}
-	for _, tc := range []struct {
-		name   string
-		rows   []stepRow
-		verb   chartTicket
-		want   []stepRow
-		behind bool
-	}{
-		{
-			name: "the verb agrees",
-			rows: own(),
-			verb: chartTicket{Steps: []string{"done", "current", "pending", "pending"}},
-			want: own(),
-		},
-		{
-			name: "the verb is ahead of the screens",
-			rows: own(),
-			verb: chartTicket{Steps: []string{"done", "done", "current", "pending"}, Ready: true},
-			want: []stepRow{
-				done(stepBrief, StateOK, "approved"),
-				done(stepBuild, StateOK, ""),
-				open(stepReview, StateQueued, "after a clean build"),
-				open(stepPublish, StateQueued, "after a clean review"),
-			},
-		},
-		{
-			name: "the verb has a published ticket at its publish again",
-			rows: published,
-			verb: chartTicket{Steps: []string{"done", "done", "done", "current"}, Ready: true},
-			want: []stepRow{
-				published[0], published[1], published[2],
-				open(stepPublish, StateReady, behindText),
-			},
-			behind: true,
-		},
-		{
-			name: "the verb has a published ticket back at its build, not ready",
-			rows: published,
-			verb: chartTicket{Steps: []string{"done", "current", "pending", "pending"}},
-			want: []stepRow{
-				published[0],
-				open(stepBuild, StateQueued, "waiting to build"),
-				open(stepReview, StateQueued, "waiting to review"),
-				open(stepPublish, StateQueued, "waiting to publish"),
-			},
-		},
-		{
-			name: "the verb says nothing of the steps",
-			rows: own(),
-			verb: chartTicket{},
-			want: own(),
-		},
-		{
-			name: "the verb says fewer steps than there are",
-			rows: published,
-			verb: chartTicket{Steps: []string{"done", "done"}},
-			want: published,
-		},
-	} {
-		got, behind := followVerb(tc.rows, tc.verb)
-		if !reflect.DeepEqual(got, tc.want) || behind != tc.behind {
-			t.Errorf("%s:\n got %+v behind %v\nwant %+v behind %v", tc.name, got, behind, tc.want, tc.behind)
-		}
 	}
 }

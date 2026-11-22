@@ -176,6 +176,10 @@ func TestRosterDigestEqualsNextTicket(t *testing.T) {
 	if want := []nextDigestPR{{Repo: "app", Number: 16, URL: digestPR6, State: "open", Target: "main"}}; !reflect.DeepEqual(byID["TK-6"].PRs, want) {
 		t.Errorf("TK-6's pull requests = %+v, want %+v", byID["TK-6"].PRs, want)
 	}
+	// What a ticket waits for names the pull request the wait rests on.
+	if b := byID["TK-3"].BlockedBy; len(b) != 1 || b[0].Ticket != "TK-2" || len(b[0].PRs) != 1 || b[0].PRs[0].URL != digestPR2 || b[0].PRs[0].State != ready.PROpen {
+		t.Errorf("TK-3's blockers = %+v, want TK-2 with its open pull request", b)
+	}
 	if got := byID["TK-11"].PRs; len(got) != 1 || got[0].State != "merged" {
 		t.Errorf("TK-11's pull requests = %+v, want merged", got)
 	}

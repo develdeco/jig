@@ -99,6 +99,11 @@ func blockerFact(b ready.Blocker, why string, inputs []ready.Ticket) nextBlocker
 			if at := in.Merge.AsOf(); !at.IsZero() {
 				nb.AsOf = at.UTC().Format(time.RFC3339)
 			}
+			for _, r := range in.Merge.Repos {
+				if r.PR != "" {
+					nb.PRs = append(nb.PRs, nextBlockerPR{Repo: r.Repo, URL: r.PR, State: r.State})
+				}
+			}
 		}
 	}
 	return nb

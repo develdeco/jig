@@ -554,6 +554,17 @@ type nextBlocker struct {
 	Kind   string `json:"kind,omitempty"`
 	Fact   string `json:"fact,omitempty"`
 	AsOf   string `json:"as_of,omitempty"`
+	// PRs are the pull requests the blocker's merge rests on, with the state the
+	// host gave them (OPEN, CLOSED or MERGED), so a screen can say a wait is for
+	// a pull request that is open.
+	PRs []nextBlockerPR `json:"prs,omitempty"`
+}
+
+// nextBlockerPR is a pull request a blocker's merge fact rests on.
+type nextBlockerPR struct {
+	Repo  string `json:"repo,omitempty"`
+	URL   string `json:"url"`
+	State string `json:"state,omitempty"`
 }
 
 // nextBatch is one repo's ready slices, in the order they build, and where the
