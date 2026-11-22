@@ -129,6 +129,10 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 	for attempt := 1; attempt <= maxClaimAttempts; attempt++ {
 		pre, havePre := s.headSHA()
 
+		snap, err := s.snapshotDirty()
+		if err != nil {
+			return "", err
+		}
 		directDone := s.DirectTrackerWrites()
 		id, paths, err := write()
 		directDone()
@@ -137,7 +141,7 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 		}
 		claimSHA, err := s.stageAndCommitPaths(paths, msg(id))
 		if err != nil {
-			return "", s.undoFailedCommit(err, pre, havePre, paths)
+			return "", s.undoFailedCommit(err, pre, havePre, paths, snap)
 		}
 		if !hasRemote {
 			return id, nil
@@ -442,16 +446,18 @@ func (s *Store) undoFailedWrite(err error, pre string, havePre bool, paths []str
 // undoFailedCommit is Claim's answer to a commit that failed: the commit's
 // error comes back as it was, after what write touched is undone (HEAD is
 // still pre, so the reset is a no-op; on an unborn branch each path is
-// unstaged and cleaned, since the commit's own add staged it). An undo that
-// does not finish is reported as undoFailedWrite reports it.
-func (s *Store) undoFailedCommit(err error, pre string, havePre bool, paths []string) error {
+// unstaged and cleaned, since the commit's own add staged it), then each
+// reported path that held uncommitted work before the write is put back as
+// snap recorded it: the undo to the commit alone would discard that work. An
+// undo that does not finish is reported as undoFailedWrite reports it.
+func (s *Store) undoFailedCommit(err error, pre string, havePre bool, paths []string, snap snapshot) error {
 	var uerr error
 	if havePre {
 		_, uerr = s.undoClaim(pre, paths)
 	} else {
 		uerr = s.undoPaths("", paths)
 	}
-	return s.incompleteUndo(err, uerr)
+	return s.incompleteUndo(err, joinUndoErrors(uerr, s.restoreSnapshot(snap, paths)))
 }
 
 // incompleteUndo returns err when uerr is nil, otherwise err's report that the
@@ -637,4 +643,118 @@ func pullAfterUndoError(root string, cause error) error {
 		Code: idNotClaimedCode,
 		Help: []string{"Retry once the cause above is resolved."},
 	}
+}
+
+// snapshotFile is what one store path held on disk just before a claim's
+// write: its bytes and permissions, or absent for a path a person had
+// deleted without committing.
+type snapshotFile struct {
+	data   []byte
+	perm   os.FileMode
+	absent bool
+}
+
+// snapshot is every store file that differed from the pre-claim commit just
+// before the write, by slash-separated path. Empty when the store was clean.
+type snapshot map[string]snapshotFile
+
+// snapshotDirty records what each path that differs from HEAD holds right now
+// (one `git status`; nothing more runs, and nothing is written, when the store
+// is clean). A claim's write may rewrite such a path and report it, and a
+// commit that then fails must give back what the person had, not the
+// commit's older content: Sync commits leftovers only on a store with an
+// origin, so on any other store this is work no commit holds.
+func (s *Store) snapshotDirty() (snapshot, error) {
+	out, err := gitx.RunRaw(s.Root, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	snap := snapshot{}
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		f := fields[i]
+		if len(f) < 4 {
+			continue
+		}
+		rel := f[3:]
+		abs := filepath.Join(s.Root, filepath.FromSlash(rel))
+		info, serr := os.Lstat(abs)
+		switch {
+		case errors.Is(serr, os.ErrNotExist):
+			snap[rel] = snapshotFile{absent: true}
+		case serr != nil || !info.Mode().IsRegular():
+			// Not a plain file (a symlink, a folder): left to the undo as it is.
+		default:
+			data, rerr := os.ReadFile(abs)
+			if rerr != nil {
+				return nil, fmt.Errorf("record %s before the write: %w", rel, rerr)
+			}
+			snap[rel] = snapshotFile{data: data, perm: info.Mode().Perm()}
+		}
+	}
+	return snap, nil
+}
+
+// restoreSnapshot puts back, under each of paths, what snap recorded: a file
+// is rewritten with its recorded bytes and a recorded deletion is repeated.
+// It runs after the undo to the commit, which clears everything the write
+// made, so what comes back is only what existed before the write. Best
+// effort, as undoPaths is: every file is tried, and the failures come back
+// as an *undoPathsError naming them.
+func (s *Store) restoreSnapshot(snap snapshot, paths []string) error {
+	if len(snap) == 0 || len(paths) == 0 {
+		return nil
+	}
+	defer s.invalidateTrackerIndex()
+	var errs []error
+	var leftovers []string
+	for rel, f := range snap {
+		if !reaches(paths, rel) {
+			continue
+		}
+		abs := filepath.Join(s.Root, filepath.FromSlash(rel))
+		var err error
+		if f.absent {
+			if err = os.Remove(abs); errors.Is(err, os.ErrNotExist) {
+				err = nil
+			}
+		} else if err = os.MkdirAll(filepath.Dir(abs), 0o755); err == nil {
+			err = os.WriteFile(abs, f.data, f.perm)
+		}
+		if err != nil {
+			errs = append(errs, err)
+			leftovers = append(leftovers, filepath.FromSlash(rel))
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return &undoPathsError{err: errors.Join(errs...), leftovers: leftovers}
+}
+
+// reaches reports whether rel is one of paths or inside one that is a folder.
+func reaches(paths []string, rel string) bool {
+	for _, p := range paths {
+		p = filepath.ToSlash(filepath.Clean(p))
+		if rel == p || strings.HasPrefix(rel, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// joinUndoErrors is the one undo error of two steps, keeping each step's
+// leftovers so the report still names every path left behind.
+func joinUndoErrors(a, b error) error {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	var ua, ub *undoPathsError
+	if errors.As(a, &ua) && errors.As(b, &ub) {
+		return &undoPathsError{err: errors.Join(ua.err, ub.err), leftovers: append(slices.Clone(ua.leftovers), ub.leftovers...)}
+	}
+	return errors.Join(a, b)
 }

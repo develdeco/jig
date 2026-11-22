@@ -1561,3 +1561,48 @@ func TestClaimSnapshotCostsOneGitProcessOnACleanStore(t *testing.T) {
 		t.Fatalf("status ran %d times, want once", statuses)
 	}
 }
+
+// TestClaimFailedCommitRestoresUncommittedFilesInAReportedFolder covers a
+// reported folder: a file in it that held uncommitted work comes back as it was
+// before the write, a file the write added to it is gone, and the mode of the
+// restored file is kept.
+func TestClaimFailedCommitRestoresUncommittedFilesInAReportedFolder(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	folder := filepath.Join(work, "notes")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "a.txt"), []byte("typed by hand\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	_, err := st.Claim(
+		func() (string, []string, error) {
+			if err := os.WriteFile(filepath.Join(folder, "a.txt"), []byte("rewritten\n"), 0o644); err != nil {
+				return "", nil, err
+			}
+			if err := os.WriteFile(filepath.Join(folder, "b.txt"), []byte("new\n"), 0o644); err != nil {
+				return "", nil, err
+			}
+			return "X-1", []string{"notes"}, nil
+		},
+		func(id string) string { return id },
+	)
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(folder, "a.txt")); rerr != nil || string(data) != "typed by hand\n" {
+		t.Fatalf("a.txt = %q, %v, want what it held before the write", data, rerr)
+	}
+	if _, serr := os.Stat(filepath.Join(folder, "b.txt")); !os.IsNotExist(serr) {
+		t.Fatalf("b.txt, which the write added, survived (stat err %v)", serr)
+	}
+	if runtime.GOOS != "windows" {
+		if info, serr := os.Stat(filepath.Join(folder, "a.txt")); serr != nil || info.Mode().Perm() != 0o755 {
+			t.Fatalf("a.txt mode = %v, %v, want 0755", info, serr)
+		}
+	}
+}
