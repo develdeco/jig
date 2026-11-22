@@ -1874,3 +1874,53 @@ func TestGraduateRefusesAnUndeclaredKeyBeforeMintingAnything(t *testing.T) {
 		t.Fatalf("TicketIDs = %v, want none: Slice A must not be minted either, since every entry's key is checked before any of them is", ids)
 	}
 }
+
+// failStoreCommits makes every commit in the store at storeRoot fail, as a
+// pre-commit hook or a signer that is down would.
+func failStoreCommits(t *testing.T, storeRoot string) {
+	t.Helper()
+	hooks := filepath.Join(storeRoot, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestGraduateFailedClaimKeepsHandWrittenEntries: on a store with no origin,
+// where nothing commits a chart's hand-written entries before the claim, a
+// commit that fails leaves the chart as it was before graduate's write, byte
+// for byte, whether the chart was ever committed or not, and the minted folder
+// gone.
+func TestGraduateFailedClaimKeepsHandWrittenEntries(t *testing.T) {
+	const committed = "tickets:\n  - title: \"Slice A\"\n"
+	const handWritten = committed + "  - title: \"Hand written B\"\n    body: |\n      kept\n"
+	for _, tc := range []struct {
+		name      string
+		neverDone bool
+	}{{"committed chart", false}, {"chart never committed", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			jig, storeRoot := setupGraduateStore(t)
+			if tc.neverDone {
+				writeChart(t, storeRoot, "mychart", handWritten)
+			} else {
+				writeChart(t, storeRoot, "mychart", committed)
+				gitIn(t, storeRoot, "add", "--", "charts")
+				gitIn(t, storeRoot, "commit", "-m", "chart")
+				writeChart(t, storeRoot, "mychart", handWritten)
+			}
+			failStoreCommits(t, storeRoot)
+			if code, out := jig("graduate", "mychart"); code == 0 {
+				t.Fatalf("jig graduate mychart: exit 0, want the failing commit refused:\n%s", out)
+			}
+			data, err := os.ReadFile(filepath.Join(storeRoot, "charts", "mychart", "tickets.yaml"))
+			if err != nil || string(data) != handWritten {
+				t.Fatalf("chart file = %q, %v, want the hand-written entries byte for byte", data, err)
+			}
+			if _, err := os.Stat(filepath.Join(storeRoot, "tickets", "DEMO-1")); !os.IsNotExist(err) {
+				t.Fatalf("the minted folder survived (stat err %v)", err)
+			}
+		})
+	}
+}

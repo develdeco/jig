@@ -25,7 +25,7 @@ var processCeilings = map[string]struct {
 	why string
 }{
 	"status": {2, "status reads the store and the branch from the files, and starts no git process"},
-	"claim":  {9, "the identity, the config read for the writer, the claim line's add, check and commit, and the two ancestry questions of the claim check"},
+	"claim":  {10, "the identity, the config read for the writer, the status that records uncommitted files before the write, the claim line's add, check and commit, and the two ancestry questions of the claim check"},
 	"verify": {9, "the identity, a worktree add and its checkout, a status, the two ancestry questions about the commit, and the one prune that takes the worktree away"},
 	"gate":   {20, "the first lease's clone and checkout, the fetch of the branch (with the processes git starts for it), the restore at the copy and the one before the review, the scope diff and the hunks of the round, and the identity"},
 	"setup":  {5, "the global and the system read of core.hooksPath, and the write of it"},
