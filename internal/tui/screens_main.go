@@ -69,6 +69,10 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 	if n := len(t.openQuestions(m.zone, "")); n > 0 {
 		return m.st.state(StateNeedsInput, strconv.Itoa(n)+" open "+plural(n, "question", "questions"))
 	}
+	if d := t.digest; d != nil && len(d.Phases) == 0 {
+		// An issue or a multi-task has no phases: its own words say what it is.
+		return m.st.state(steps[currentStep(steps)].State, steps[currentStep(steps)].Text)
+	}
 	kind := ""
 	if k := t.digest.kindWords(); k != "" {
 		kind = m.st.dim(k + " · ")
