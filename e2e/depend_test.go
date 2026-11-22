@@ -70,6 +70,7 @@ func TestDependOnATicketWithABranchIsAdvice(t *testing.T) {
 	dependParent(t, fx, h)
 	h.Push(parentBranch)
 	for _, id := range []string{"JIG-2", fx.Ticket} {
+		greenSlices(t, st, id)
 		if err := journal.Append(st, id, journal.Line{Event: journal.EventPublishDone}); err != nil {
 			t.Fatal(err)
 		}
