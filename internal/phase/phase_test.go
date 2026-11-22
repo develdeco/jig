@@ -1065,3 +1065,59 @@ func TestAPendingLineMakesNoSliceVerifying(t *testing.T) {
 		t.Errorf("an old pending line no longer shows a slice was taken up")
 	}
 }
+
+// TestDerivePublishedWithAQueuedSliceIsAtBuild: a published ticket that has not
+// landed and is not closed, with a slice that is not green, is at the build,
+// ready, with the build prompt; green again it is at the review, a clean round
+// at the new head puts it at the publish, and that publish puts it at the land.
+// A landed or closed ticket stays done whatever its slices.
+func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
+	t.Parallel()
+	prURL := func(l *journal.Line) { l.URL = "https://example.test/pull/7" }
+	published := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1), by("s-rev")),
+		ln(journal.EventPr, outcome("opened"), prURL), ln(journal.EventPublishDone))
+
+	queued := allGreen()
+	queued.Published = true
+	queued.Slices = append(queued.Slices, Slice{ID: "d", State: "queued"})
+	got := Derive(queued, published)
+	if got.Current != Build || !got.Ready || got.Code != "" || got.Prompt != "Build SHOP-1" {
+		t.Fatalf("queued slice: current %s ready %v code %q prompt %q, want a ready build", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+
+	// Built green again, nothing reviewed since: the review.
+	rebuilt := queued
+	rebuilt.Slices = append([]Slice(nil), queued.Slices...)
+	rebuilt.Slices[3].State = "green"
+	lines := append(append([]journal.Line(nil), published...),
+		ln(journal.EventClaim, onSlice("d"), by("s-build")), ln(journal.EventVerified, onSlice("d"), commit("abcdef4567")))
+	got = Derive(rebuilt, lines)
+	if got.Current != Review || !got.Ready || got.Prompt != "Review SHOP-1" {
+		t.Fatalf("fix built: current %s ready %v prompt %q, want a ready review", got.Current, got.Ready, got.Prompt)
+	}
+
+	// A clean round at the new head: the publish.
+	lines = append(lines, ln(journal.EventGateOpen, attempt(2)), ln(journal.EventGateClean, attempt(2), by("s-rev")))
+	got = Derive(rebuilt, lines)
+	if got.Current != Publish || !got.Ready || got.Prompt != "Publish SHOP-1" {
+		t.Fatalf("fix reviewed: current %s ready %v prompt %q, want a ready publish", got.Current, got.Ready, got.Prompt)
+	}
+
+	// Published again: the land.
+	lines = append(lines, ln(journal.EventPr, outcome("updated"), prURL), ln(journal.EventPublishDone))
+	got = Derive(rebuilt, lines)
+	if got.Current != Land || got.Ready || got.Code != CodeDone || got.Prompt != "Land SHOP-1" {
+		t.Fatalf("fix published: current %s ready %v code %q prompt %q, want the land", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+
+	// Landed, or closed: done whatever the slices.
+	landed := append(append([]journal.Line(nil), published...), ln(journal.EventLanded))
+	if got := Derive(queued, landed); got.Current != Publish || got.Ready || got.Code != CodeDone || got.Prompt != "" {
+		t.Errorf("landed with a queued slice: current %s ready %v code %q prompt %q, want done", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+	closed := queued
+	closed.Closed = "not planned"
+	if got := Derive(closed, published); got.Code != CodeClosed || got.Ready || got.Prompt != "" {
+		t.Errorf("closed with a queued slice: code %q ready %v prompt %q, want closed", got.Code, got.Ready, got.Prompt)
+	}
+}
