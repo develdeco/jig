@@ -78,8 +78,18 @@ func (r chartRig) chart(t *testing.T, name, tickets, mapMD string) {
 	}
 }
 
+// green marks the one slice of ticket id green, as a ticket that published has
+// it: a published ticket with a slice that is not green is built again.
+func (r chartRig) green(t *testing.T, id string) {
+	t.Helper()
+	if err := r.st.WriteSliceState(id, "a", store.SliceState{State: "green", Attempts: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (r chartRig) publish(t *testing.T, id string) {
 	t.Helper()
+	r.green(t, id)
 	if err := journal.Append(r.st, id, journal.Line{Event: journal.EventPublishDone}); err != nil {
 		t.Fatal(err)
 	}
