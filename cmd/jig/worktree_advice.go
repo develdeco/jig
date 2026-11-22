@@ -126,7 +126,7 @@ func (s *worktreeSource) factsOf(id string) (worktreeFacts, error) {
 	}
 	return worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
-		Closed: data.rec.Closed != nil, Published: data.in.Published,
+		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Reopened(),
 	}, nil
 }
 

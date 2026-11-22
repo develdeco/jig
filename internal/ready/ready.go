@@ -149,6 +149,10 @@ type Ticket struct {
 	Blockers []Blocker
 	// Published is whether the ticket's journal has a publish-done line.
 	Published bool
+	// Landed is whether every pull request the ticket published has a landed
+	// line. A published ticket that has not landed and has a slice that is not
+	// green is built again; a landed one is done whatever its slices.
+	Landed bool
 	// Closed is the ticket's closure, nil while it is open. A closed ticket is
 	// done without a merge: the tickets that wait for it are released when it
 	// is covered or superseded, and held when it is not planned.
@@ -202,9 +206,10 @@ func Tickets(tickets []Ticket) []Status {
 				st.Why[b.Ticket] = why
 			}
 		}
-		// A closed or published ticket has nothing left to build and a blocked
-		// one cannot start, so none of them offers slices.
-		if t.Closed == nil && !t.Published && len(st.Blocked) == 0 {
+		// A closed or published ticket has nothing left to build (but a slice
+		// queued after its publish, before it lands) and a blocked one cannot
+		// start, so none of them offers slices.
+		if t.Closed == nil && (!t.Published || t.Reopened()) && len(st.Blocked) == 0 {
 			for _, s := range ComputeReady(t.Slices, t.States) {
 				st.Ready = append(st.Ready, s.ID)
 			}
@@ -212,7 +217,7 @@ func Tickets(tickets []Ticket) []Status {
 		switch {
 		case t.Closed != nil:
 			st.State = StateClosed
-		case t.Published:
+		case t.Published && !t.Reopened():
 			st.State = StateDone
 		case len(st.Blocked) > 0:
 			st.State = StateBlocked
@@ -246,6 +251,13 @@ func unmet(b Blocker, byID map[string]Ticket) string {
 		return NotPublished
 	}
 	return ""
+}
+
+// Reopened says a published ticket is built again: it is open, has not landed
+// and has a slice that is not green, a fix queued after its publish. What a
+// dependent waits for is unchanged: it still counts as published.
+func (t Ticket) Reopened() bool {
+	return t.Published && t.Closed == nil && !t.Landed && len(t.Slices) > 0 && !allGreen(t.Slices, t.States)
 }
 
 func allGreen(slices []store.Slice, states map[string]store.SliceState) bool {

@@ -379,6 +379,11 @@ func (t Ticket) Of(n Name) Phase {
 // ticket is never behind.
 func (t Ticket) Behind() bool { return t.d != nil && t.d.owed() }
 
+// Reopened says the ticket published and has work after that publish that has
+// not been published: it stands at the build, the review or the publish again,
+// until that publish is done or the ticket lands or closes.
+func (t Ticket) Reopened() bool { return t.d != nil && t.d.reopened }
+
 // Restacks are the merges a ticket that is behind is owed, one for each repo;
 // nil for a ticket that is not.
 func (t Ticket) Restacks() []Restack {
@@ -540,6 +545,9 @@ type digest struct {
 	// landed and hasPR are what land read of the lines: every pull request has
 	// a landed line, and some repo has a pull request.
 	landed, hasPR bool
+	// reopened: the ticket published and has work after that publish, so it
+	// is read as one that has not published (Derive).
+	reopened bool
 }
 
 // OpenRoundIn is the round the journal says is open: the latest gate-open line
@@ -602,9 +610,18 @@ func EverClaimed(lines []journal.Line) bool {
 // it says of the earlier phases, and so is a closed one, with no prompt. The one
 // exception is a published ticket whose stack plan owes its branch a merge
 // (Facts.Restacks): its publish is not done, so it is at the publish again,
-// ready, with the prompt that asks for it.
+// ready, with the prompt that asks for it. The other is a published ticket that
+// has not landed and has work after its publish (a slice that is not green, or
+// a build line since): it is read as a ticket that has not published, from the
+// journal after that publish, so it is at the build, then the review, then the
+// publish again, and at the land once that publish is done.
 func Derive(f Facts, lines []journal.Line) Ticket {
+	again := reopened(f, lines)
+	if again {
+		f.Published, f.Restacks = false, nil
+	}
 	d := newDigest(f, lines)
+	d.reopened = again
 	pub := f.Published || f.Closed != ""
 
 	briefP, own := d.brief()
@@ -643,6 +660,44 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 		t.stand()
 	}
 	return t
+}
+
+// reopenEvents are the journal lines that show work went on after a publish:
+// a slice taken up, verified or added. A question, an answer or a note is not
+// work on the code.
+var reopenEvents = map[string]bool{
+	journal.EventClaim: true, journal.EventVerified: true, journal.EventFixSlice: true, journal.EventSliceAdd: true,
+}
+
+// reopened says a published ticket has work the publish does not carry: it is
+// open and has not landed, and a slice is not green or the journal has a build
+// line after its last publish-done. Landing or closing ends it, since work
+// after a merge is a new need; a ticket whose pull request the host reports
+// merged is read as landed for the same reason.
+func reopened(f Facts, lines []journal.Line) bool {
+	if !f.Published || f.Closed != "" || f.Landed || f.MergedOnHost {
+		return false
+	}
+	if landed, _ := LandedIn(lines); landed {
+		return false
+	}
+	for _, s := range f.Slices {
+		if s.State != sliceGreen {
+			return true
+		}
+	}
+	last := -1
+	for i, l := range lines {
+		if l.Event == journal.EventPublishDone {
+			last = i
+		}
+	}
+	for i := last + 1; last >= 0 && i < len(lines); i++ {
+		if reopenEvents[lines[i].Event] {
+			return true
+		}
+	}
+	return false
 }
 
 // owed says the ticket published and its stack plan owes its branch a merge. A

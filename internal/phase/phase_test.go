@@ -753,10 +753,11 @@ func TestAnEarlierPhaseChangedTakesTheLaterOnesBack(t *testing.T) {
 }
 
 // TestPublishedIsDoneWhateverTheRest: a published ticket has four done phases
-// and nothing to ask.
+// and nothing to ask, once its slices are green; with one that is not, it is at
+// the build again (TestDerivePublishedWithAQueuedSliceIsAtBuild).
 func TestPublishedIsDoneWhateverTheRest(t *testing.T) {
 	t.Parallel()
-	f := approved()
+	f := allGreen()
 	f.Published = true
 	got := Derive(f, []journal.Line{ln(journal.EventPublishDone)})
 	for _, p := range got.Phases {
@@ -1084,6 +1085,9 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	if got.Current != Build || !got.Ready || got.Code != "" || got.Prompt != "Build SHOP-1" {
 		t.Fatalf("queued slice: current %s ready %v code %q prompt %q, want a ready build", got.Current, got.Ready, got.Code, got.Prompt)
 	}
+	if !got.Reopened() {
+		t.Errorf("queued slice: Reopened() = false, want true")
+	}
 
 	// Built green again, nothing reviewed since: the review.
 	rebuilt := queued
@@ -1109,6 +1113,9 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	if got.Current != Land || got.Ready || got.Code != CodeDone || got.Prompt != "Land SHOP-1" {
 		t.Fatalf("fix published: current %s ready %v code %q prompt %q, want the land", got.Current, got.Ready, got.Code, got.Prompt)
 	}
+	if got.Reopened() {
+		t.Errorf("fix published: Reopened() = true, want false")
+	}
 
 	// Landed, or closed: done whatever the slices.
 	landed := append(append([]journal.Line(nil), published...), ln(journal.EventLanded))
@@ -1119,5 +1126,37 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	closed.Closed = "not planned"
 	if got := Derive(closed, published); got.Code != CodeClosed || got.Ready || got.Prompt != "" {
 		t.Errorf("closed with a queued slice: code %q ready %v prompt %q, want closed", got.Code, got.Ready, got.Prompt)
+	}
+	// Landed as the caller read it, or merged on the host: a new need, not a rebuild.
+	for name, f := range map[string]Facts{"landed": queued, "merged on the host": queued} {
+		if name == "landed" {
+			f.Landed = true
+		} else {
+			f.MergedOnHost = true
+		}
+		if got := Derive(f, published); got.Reopened() || got.Current == Build || got.Ready || got.Code != CodeDone {
+			t.Errorf("%s with a queued slice: current %s ready %v code %q, want it left done", name, got.Current, got.Ready, got.Code)
+		}
+	}
+
+	// Green slices and no build line after the publish: published, whatever was
+	// asked and answered since; a build line after it reopens the ticket.
+	green := allGreen()
+	green.Published = true
+	talked := append(append([]journal.Line(nil), published...), ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")))
+	if got := Derive(green, talked); got.Reopened() || got.Current != Land {
+		t.Errorf("a question after the publish: reopened %v current %s, want published at the land", got.Reopened(), got.Current)
+	}
+	if got := Derive(green, append(talked, ln(journal.EventSliceAdd, onSlice("d")))); !got.Reopened() || got.Current != Review {
+		t.Errorf("a slice added after the publish: reopened %v current %s, want it at the review", got.Reopened(), got.Current)
+	}
+	// A caller's word that it published, with no publish-done line to count from,
+	// is taken as it is.
+	if got := Derive(green, built()); got.Reopened() {
+		t.Errorf("published with no publish line: reopened, want it left alone")
+	}
+	// An unpublished ticket is never reopened.
+	if got := Derive(allGreen(), built()); got.Reopened() {
+		t.Errorf("an unpublished ticket is reopened")
 	}
 }

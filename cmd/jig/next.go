@@ -521,6 +521,11 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 	if t.Behind() && n.State == ready.StateDone {
 		n.State = stateBehind
 	}
+	// Work after the publish that is built and not yet reviewed or published
+	// again: every slice is green, and the ticket is not done.
+	if t.Reopened() && n.State == ready.StateDone {
+		n.State = ready.StateGreen
+	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
 	for _, ph := range t.Phases {
@@ -645,6 +650,13 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 		return ticketData{}, err
 	}
 	in := ready.Ticket{ID: id, Published: published, Closed: rec.Closed, Slices: slices, States: states, Blockers: ticketBlockers(st, rec)}
+	if published {
+		lines, err := journal.Read(st, id)
+		if err != nil {
+			return ticketData{}, err
+		}
+		in.Landed, _ = phase.LandedIn(lines)
+	}
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
 }
 
@@ -768,7 +780,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	n.setPhase(st, id, asked, merges, plan)
 	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
-		Closed: data.rec.Closed != nil, Published: data.in.Published, Wanted: n.worktreeWanted(),
+		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Reopened() && (n.derived == nil || !n.derived.Reopened()), Wanted: n.worktreeWanted(),
 	})
 	if topology {
 		waves := ready.Waves(data.in.Slices)

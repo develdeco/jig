@@ -243,6 +243,46 @@ func TestTickets(t *testing.T) {
 	}
 }
 
+// TestTicketsPublishedWithAQueuedSlice: a published ticket that has not landed
+// and has a slice that is not green offers the slice like any queued one, when
+// its blockers are met; a landed or closed ticket stays done, an all-green
+// published one is done, and what a dependent waits for is unchanged.
+func TestTicketsPublishedWithAQueuedSlice(t *testing.T) {
+	t.Parallel()
+	slices := []store.Slice{{ID: "a"}, {ID: "fix", BlockedBy: []string{"a"}}, {ID: "late"}}
+	queued := states("a", "green", "fix", "queued", "late", "queued")
+	got := Tickets([]Ticket{
+		{ID: "T-1", Published: true, Slices: slices, States: queued},
+		{ID: "T-2", Published: true, Landed: true, Slices: slices, States: queued},
+		{ID: "T-3", Published: true, Closed: &store.Closed{Reason: "covered"}, Slices: slices, States: queued},
+		{ID: "T-4", Published: true, Slices: slices, States: states("a", "green", "fix", "green", "late", "green")},
+		{ID: "T-5", Published: true, Blockers: []Blocker{{"T-6", "merged"}}, Slices: slices, States: queued},
+		{ID: "T-6"},
+		{ID: "T-7", Blockers: []Blocker{{"T-1", "stacked"}}, Slices: slices, States: queued},
+	})
+	byID := map[string]Status{}
+	for _, s := range got {
+		byID[s.ID] = s
+	}
+	if s := byID["T-1"]; s.State != StateReady || !reflect.DeepEqual(s.Ready, []string{"fix", "late"}) {
+		t.Errorf("published with queued slices: state %q ready %v, want ready with [fix late]", s.State, s.Ready)
+	}
+	for _, id := range []string{"T-2", "T-3", "T-4"} {
+		if s := byID[id]; len(s.Ready) != 0 || s.State == StateReady {
+			t.Errorf("%s: state %q ready %v, want no slice offered", id, s.State, s.Ready)
+		}
+	}
+	if s := byID["T-2"]; s.State != StateDone {
+		t.Errorf("landed: state %q, want done", s.State)
+	}
+	if s := byID["T-5"]; s.State != StateBlocked || len(s.Ready) != 0 {
+		t.Errorf("published, queued and blocked: state %q ready %v, want blocked with none", s.State, s.Ready)
+	}
+	if s := byID["T-7"]; len(s.Blocked) != 0 {
+		t.Errorf("a stacked dependent of a reopened ticket is blocked by %v, want none: it still counts as published", s.Blocked)
+	}
+}
+
 func TestJoinBlockers(t *testing.T) {
 	t.Parallel()
 	if got := JoinBlockers(nil); got != "-" {
