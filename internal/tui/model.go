@@ -65,6 +65,13 @@ type Config struct {
 	// IdleTick is how often the model looks at the clock for that; zero is 1s,
 	// and a negative value never looks (a test that drives the clock itself).
 	IdleTick time.Duration
+	// StoreHead reads the store's HEAD commit, cheaply and in process. Each
+	// idle tick compares it with the last head read; a head that moved marks the
+	// ticket list stale, and the next idle tick reads the list (and the open
+	// chart) again. A graduation, a chart made or a brief committed by another
+	// process adds no line the stream shows, so the head is what says the store
+	// moved. Nil never compares.
+	StoreHead func() (string, error)
 	// MergeEvery is how often a screen that waits on a merge is read again: a
 	// merge on the host writes no line to any journal, so the screen sees it
 	// only when its verb is read. Zero is 2m, and a negative value never reads
@@ -204,6 +211,13 @@ type Model struct {
 	// home matches the home folder in any of its spellings (homePattern).
 	home                *regexp.Regexp
 	lastEvent, lastRead time.Time
+	// The store's head as the idle tick last read it, and whether the ticket
+	// list is out of date: the head moved, or a journal line touched a ticket
+	// since the list was read, at lastRoster.
+	head        string
+	headKnown   bool
+	rosterStale bool
+	lastRoster  time.Time
 	// followNew is set while screens opened on no ticket wait to open the
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
@@ -369,6 +383,38 @@ func (m *Model) onMerge() tea.Cmd {
 // only place the screens can see them; the read is made for the watched ticket
 // alone, so the cost of a quiet screen is one status every few seconds.
 func (m *Model) onIdle() tea.Cmd {
+	return tea.Batch(m.onStoreIdle(), m.onWatchedIdle())
+}
+
+// onStoreIdle compares the store's head with the last one read, on every
+// screen, and reads the ticket list again, and the chart on the screen, when
+// the list is stale. The first head is the baseline and a head that could not
+// be read marks nothing and keeps the baseline. A list read is made no sooner
+// than idleAfter after the last one and never doubled, so a store that does not
+// move costs one head read a tick and no verb. A brief written to its files
+// without a commit may leave the head where it is; the ticket's own screen
+// still sees it through its idle status read.
+func (m *Model) onStoreIdle() tea.Cmd {
+	if m.cfg.StoreHead != nil {
+		if head, err := m.cfg.StoreHead(); err == nil {
+			if m.headKnown && head != m.head {
+				m.rosterStale = true
+			}
+			m.head, m.headKnown = head, true
+		}
+	}
+	if !m.rosterStale || m.now().Sub(m.lastRoster) < m.idleAfter {
+		return nil
+	}
+	cmds := []tea.Cmd{m.loadRoster()}
+	if e := m.top(); e.screen == screenChart {
+		cmds = append(cmds, m.loadChart(e.chart))
+	}
+	return tea.Batch(cmds...)
+}
+
+// onWatchedIdle is the idle read of the screen's own ticket or chart.
+func (m *Model) onWatchedIdle() tea.Cmd {
 	if e := m.top(); e.screen == screenChart {
 		return m.onChartIdle(e.chart)
 	}
@@ -527,6 +573,13 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	for _, e := range envs {
 		if t := m.w.tickets[e.Ticket]; t != nil && e.Src == events.SrcJournal && stepOfLine(e) == stepBrief {
 			t.briefStale = true
+		}
+	}
+	// A line of a ticket may be one no commit carries (a landing written by
+	// another session), so it says the list may be out of date as well.
+	for _, e := range envs {
+		if e.Src == events.SrcJournal && e.Ticket != "" {
+			m.rosterStale = true
 		}
 	}
 	var cmds []tea.Cmd

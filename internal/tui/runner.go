@@ -117,7 +117,7 @@ func (m *Model) loadRoster() tea.Cmd {
 	if m.rosterBusy || m.run == nil {
 		return nil
 	}
-	m.rosterBusy = true
+	m.rosterBusy, m.rosterStale, m.lastRoster = true, false, m.now()
 	args := m.verbArgs("next", "--json")
 	run := m.run
 	return func() tea.Msg {
