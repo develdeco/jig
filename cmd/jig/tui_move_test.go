@@ -18,9 +18,6 @@ func TestTUIReadsAStoreThatMoves(t *testing.T) {
 	fx, st, e := workFixture(t)
 	keys, out, wait := startTUI(t, e)
 	out.until(t, fx.Ticket)
-	// The first head the idle tick reads is the baseline, which re-reads
-	// nothing: let one tick pass before the store moves.
-	time.Sleep(2500 * time.Millisecond)
 
 	// A chart made by another process commits the store, which moves its head.
 	if got, code := runMain(t, e, "", "chart", "new", "intake", "--title", "Intake chart"); code != 0 {

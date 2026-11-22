@@ -294,6 +294,7 @@ func (m *Model) Init() tea.Cmd {
 		parent = context.Background()
 	}
 	m.ctx, m.cancel = context.WithCancel(parent)
+	m.readHead()
 	cmds := []tea.Cmd{m.startStream(), m.loadRoster()}
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
@@ -395,15 +396,8 @@ func (m *Model) onIdle() tea.Cmd {
 // without a commit may leave the head where it is; the ticket's own screen
 // still sees it through its idle status read.
 func (m *Model) onStoreIdle() tea.Cmd {
-	if m.cfg.StoreHead != nil {
-		if head, err := m.cfg.StoreHead(); err == nil {
-			if m.headKnown && head != m.head {
-				m.rosterStale = true
-			}
-			m.head, m.headKnown = head, true
-		}
-	}
-	if !m.rosterStale || m.now().Sub(m.lastRoster) < m.idleAfter {
+	m.readHead()
+	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.lastRoster) < m.idleAfter {
 		return nil
 	}
 	cmds := []tea.Cmd{m.loadRoster()}
@@ -411,6 +405,21 @@ func (m *Model) onStoreIdle() tea.Cmd {
 		cmds = append(cmds, m.loadChart(e.chart))
 	}
 	return tea.Batch(cmds...)
+}
+
+// readHead reads the store's head and marks the list stale when it moved since
+// the last one read. The first read is the baseline: Init makes it next to the
+// first list read, so a commit that lands in the first second is a move.
+func (m *Model) readHead() {
+	if m.cfg.StoreHead == nil {
+		return
+	}
+	if head, err := m.cfg.StoreHead(); err == nil {
+		if m.headKnown && head != m.head {
+			m.rosterStale = true
+		}
+		m.head, m.headKnown = head, true
+	}
 }
 
 // onWatchedIdle is the idle read of the screen's own ticket or chart.
@@ -578,7 +587,13 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	// A line of a ticket may be one no commit carries (a landing written by
 	// another session), so it says the list may be out of date as well.
 	for _, e := range envs {
-		if e.Src == events.SrcJournal && e.Ticket != "" {
+		if e.Src != events.SrcJournal || e.Ticket == "" {
+			continue
+		}
+		// The replay of what the store held at start is older than the list
+		// read made then; a line from another machine merges in with a store
+		// commit, which the head comparison sees.
+		if at, ok := e.At(); !ok || !at.Before(m.lastRoster) {
 			m.rosterStale = true
 		}
 	}

@@ -177,6 +177,57 @@ func TestStoreMoveReadsOnceAtATime(t *testing.T) {
 	}
 }
 
+// TestStoreMoveHistoryReplayReadsNothing: the lines the store already held when
+// the screens opened come through the stream after the first list read, and
+// stamp earlier than it: they mark nothing stale.
+func TestStoreMoveHistoryReplayReadsNothing(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	s := newStoreRig(t, g)
+	g.feed(jl(at(1, 0), "JIG-1", "a", journal.EventClaim), jl(at(2, 0), "JIG-1", "a", journal.EventVerified))
+	base := s.r.total()
+	s.tick(5 * time.Second)
+	s.tick(5 * time.Second)
+	if got := s.r.total() - base; got != 0 {
+		t.Errorf("the replay of history started %d verbs, want none", got)
+	}
+}
+
+// TestStoreMoveBaselineIsReadAtStart: the head is read when the screens open,
+// so a commit in the first second is a move, not the baseline.
+func TestStoreMoveBaselineIsReadAtStart(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	s := newStoreRig(t, g)
+	g.feed()
+	s.r.answer(moveRosterVerb, movedRoster(), 0)
+	s.head = "h2"
+	s.tick(5 * time.Second)
+	if v := s.view(); !strings.Contains(v, "Late arrival") {
+		t.Errorf("a commit before the first tick was taken as the baseline:\n%s", v)
+	}
+}
+
+// TestStoreMoveChartWaitsForTheRosterRead: while a list read is out, the chart
+// on the screen is not read for the move; the next tick reads both.
+func TestStoreMoveChartWaitsForTheRosterRead(t *testing.T) {
+	t.Parallel()
+	s := newStoreRig(t, chartScreenRig(t))
+	s.tick(5 * time.Second) // the baseline
+	s.head = "h2"
+	s.m.rosterBusy = true
+	chart := s.r.ran(mergeChartVerb)
+	s.tick(5 * time.Second)
+	if got := s.r.ran(mergeChartVerb) - chart; got != 0 {
+		t.Fatalf("the chart was read %d times with a list read out, want 0", got)
+	}
+	s.m.rosterBusy = false
+	s.tick(5 * time.Second)
+	if got := s.r.ran(mergeChartVerb) - chart; got != 1 {
+		t.Errorf("the chart was read %d times once the list read ended, want 1", got)
+	}
+}
+
 // TestStoreMoveIgnoresLedgerLines: a session's tool calls reach the stream as
 // ledger lines of the ticket and change nothing the list shows.
 func TestStoreMoveIgnoresLedgerLines(t *testing.T) {
