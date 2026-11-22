@@ -3,13 +3,13 @@ package verifydeliver
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/fixture"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -75,9 +75,9 @@ func TestGateRefusalJournaled(t *testing.T) {
 	step(t, "a slice not green is GATE_NOT_GREEN", func(t *testing.T) {
 		wantRefusal(t, GateOpts{Branch: branch}, "GATE_NOT_GREEN", 1)
 		// The line is pushed at once, named by the code only.
-		out, err := exec.Command("git", "-C", d.Store.Root, "log", "-1", "--format=%s").Output()
-		if want := fx.Ticket + ": gate refused: GATE_NOT_GREEN"; err != nil || strings.TrimSpace(string(out)) != want {
-			t.Fatalf("store head subject = %q (err %v), want %q", out, err, want)
+		subject, err := gitx.Run(d.Store.Root, "log", "-1", "--format=%s")
+		if want := fx.Ticket + ": gate refused: GATE_NOT_GREEN"; err != nil || subject != want {
+			t.Fatalf("store head subject = %q (err %v), want %q", subject, err, want)
 		}
 	})
 	step(t, "a branch nobody has is BRANCH_NOT_FOUND", func(t *testing.T) {

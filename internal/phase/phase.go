@@ -551,13 +551,13 @@ type digest struct {
 	builtSince bool
 	// refusal is the gate-refused line the review still reads as its word: the
 	// latest one, when no line after it supersedes it (refusalSupersededBy).
-	refusal *journal.Line
-	closedAt   map[int]int
-	approval   int
-	asks       []Ask
-	notes      []Ask
-	slices     []sliceView
-	pub        publishView
+	refusal  *journal.Line
+	closedAt map[int]int
+	approval int
+	asks     []Ask
+	notes    []Ask
+	slices   []sliceView
+	pub      publishView
 	// landed and hasPR are what land read of the lines: every pull request has
 	// a landed line, and some repo has a pull request.
 	landed, hasPR bool
