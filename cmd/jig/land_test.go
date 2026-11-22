@@ -23,6 +23,7 @@ func landRig(t *testing.T) chartRig {
 	}
 	t.Setenv("PATH", fixture.GhStub(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for id, url := range map[string]string{"TK-2": "https://github.example/owner/repo/pull/2", "TK-3": "https://github.example/owner/repo/pull/3"} {
+		r.green(t, id)
 		for _, l := range []journal.Line{
 			{Event: journal.EventPr, Into: "TK-1", URL: url},
 			{Event: journal.EventPublishDone, Into: "TK-1"},

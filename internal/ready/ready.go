@@ -149,6 +149,12 @@ type Ticket struct {
 	Blockers []Blocker
 	// Published is whether the ticket's journal has a publish-done line.
 	Published bool
+	// Rebuilding is whether the published ticket has work its publish does not
+	// carry (a slice that is not green, a build line after the publish) and
+	// has not landed or merged: the caller reads it with the one rule phase
+	// derives a ticket by (phase.Rebuilds). Such a ticket is built again, and
+	// still counts as published for a dependent that waits for it.
+	Rebuilding bool
 	// Closed is the ticket's closure, nil while it is open. A closed ticket is
 	// done without a merge: the tickets that wait for it are released when it
 	// is covered or superseded, and held when it is not planned.
@@ -202,9 +208,10 @@ func Tickets(tickets []Ticket) []Status {
 				st.Why[b.Ticket] = why
 			}
 		}
-		// A closed or published ticket has nothing left to build and a blocked
-		// one cannot start, so none of them offers slices.
-		if t.Closed == nil && !t.Published && len(st.Blocked) == 0 {
+		// A closed or published ticket has nothing left to build (but a slice
+		// queued after its publish, before it lands) and a blocked one cannot
+		// start, so none of them offers slices.
+		if t.Closed == nil && (!t.Published || t.Rebuilding) && len(st.Blocked) == 0 {
 			for _, s := range ComputeReady(t.Slices, t.States) {
 				st.Ready = append(st.Ready, s.ID)
 			}
@@ -212,7 +219,7 @@ func Tickets(tickets []Ticket) []Status {
 		switch {
 		case t.Closed != nil:
 			st.State = StateClosed
-		case t.Published:
+		case t.Published && !t.Rebuilding:
 			st.State = StateDone
 		case len(st.Blocked) > 0:
 			st.State = StateBlocked

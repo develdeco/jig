@@ -10,7 +10,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -25,6 +27,41 @@ import (
 // same phase and the same prompt.
 func derivePhase(st *store.Store, ticket string) (phase.Ticket, error) {
 	return derivePhaseWith(st, ticket, nil)
+}
+
+// derivePhaseSettled is derivePhase for a reader that has no merge source of
+// its own (`jig here`, the hooks, a refusal's prompt): a ticket the rule reads
+// as built again (Ticket.Rebuilding) is settled against the host, since a ticket
+// whose pull request merged is done whatever its slices. The host is asked only
+// of such a ticket, through merges, which is built on that need and not before.
+func derivePhaseSettled(st *store.Store, ticket string, merges func() mergeSource) (phase.Ticket, error) {
+	t, err := derivePhase(st, ticket)
+	if err != nil || !t.Rebuilding() || merges == nil {
+		return t, err
+	}
+	ms := merges()
+	if ms == nil {
+		return t, nil
+	}
+	if settled, err := derivePhaseWith(st, ticket, ms); err == nil {
+		return settled, nil
+	}
+	return t, nil
+}
+
+// settlingMerges is the merge source derivePhaseSettled asks, built on first
+// use: the project's config is read from where it was located, and a pull
+// request state the host gave within the listing's max age stands, as in `jig
+// status`. A config that cannot be read leaves the ticket as the journal and
+// slices say.
+func settlingMerges(e env, where locate.Where, st *store.Store) func() mergeSource {
+	return func() mergeSource {
+		cfg, err := project.LoadConfigWith(gitx.NewMemo(), where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+		if err != nil {
+			return nil
+		}
+		return newMergeReader(e, st, cfg, project.MachineProject{}, where.JigHome, listingMergeAge)
+	}
 }
 
 // derivePhaseWith is derivePhase with the merge facts of the blockers read from
@@ -353,13 +390,9 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 	switch {
 	case t.Code == phase.CodeClosed:
 		return t.Reason
-	case t.Behind():
-		asks := make([]string, 0, len(t.Restacks()))
-		for _, r := range t.Restacks() {
-			asks = append(asks, fmt.Sprintf("`git merge %s` in %s", r.Ref, r.Repo))
-		}
+	case t.Behind() && !t.Rebuilding():
 		return fmt.Sprintf("%s is published but behind: run %s, then `jig publish %s`, which pushes the merge and points the open PR at its base%s",
-			ticket, strings.Join(asks, " and "), ticket, prompt)
+			ticket, mergeAsks(t), ticket, prompt)
 	case t.Code == phase.CodeDone && t.Current == phase.Land:
 		return landAdvice(t, ticket, nil)
 	case t.Code == phase.CodeDone:
@@ -381,7 +414,21 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 	case t.Current == phase.Review:
 		return fmt.Sprintf("Run `jig gate %s` to open the next gate round%s", ticket, prompt)
 	}
+	if t.Behind() {
+		// Built again and owed a merge: the merge comes before the publish that
+		// pushes it.
+		return fmt.Sprintf("Run %s, then `jig publish %s` to update the PR and point it at its base%s", mergeAsks(t), ticket, prompt)
+	}
 	return fmt.Sprintf("Run `jig publish %s` to open or update the PR%s", ticket, prompt)
+}
+
+// mergeAsks words the merges a ticket that is behind is owed.
+func mergeAsks(t phase.Ticket) string {
+	asks := make([]string, 0, len(t.Restacks()))
+	for _, r := range t.Restacks() {
+		asks = append(asks, fmt.Sprintf("`git merge %s` in %s", r.Ref, r.Repo))
+	}
+	return strings.Join(asks, " and ")
 }
 
 // awaitsApproval reports whether the brief of t is drafted and waits for the

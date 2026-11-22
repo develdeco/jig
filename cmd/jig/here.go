@@ -297,7 +297,7 @@ func buildHereView(hc hereCtx) (hereView, error) {
 	}
 	// The phase is best-effort here: `jig here` runs on every session start,
 	// and a ticket it cannot derive still has its state to show.
-	if t, err := derivePhase(st, ticket); err == nil {
+	if t, err := derivePhaseSettled(st, ticket, settlingMerges(hc.e, hc.Where, st)); err == nil {
 		v.prompt = t.Prompt
 	}
 	return v, nil

@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/ready"
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // Judge says whether ticket may land, and what the landing is. It reads, and
@@ -128,7 +130,35 @@ func Judge(d Deps, ticket string, opts Options) (Verdict, error) {
 	if len(v.Merge) == 0 && len(v.Record) == 0 {
 		v.Done = true
 	}
+	// A merge still to make of a ticket built again lands the pull request as
+	// published, without the work after it: said, never refused (the person may
+	// take the fix as a follow-up).
+	if len(v.Merge) > 0 {
+		if again, err := rebuildingTicket(d.Store, ticket, lines); err == nil && again {
+			v.Rebuilding = true
+			v.Notes = append(v.Notes, fmt.Sprintf("%s has work after its publish: this merge lands the pull request without it, and `jig next %s` says build", ticket, ticket))
+		}
+	}
 	return v, nil
+}
+
+// rebuildingTicket says the published ticket has work its publish does not
+// carry (phase.Rebuilds), read from its slice states and journal lines. The
+// host's word on a merge is the caller's: a ticket that merged has no merge row.
+func rebuildingTicket(st *store.Store, ticket string, lines []journal.Line) (bool, error) {
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		return false, err
+	}
+	f := phase.Facts{Ticket: ticket, Published: true}
+	for _, s := range slices {
+		ss, err := st.ReadSliceState(ticket, s.ID)
+		if err != nil {
+			return false, err
+		}
+		f.Slices = append(f.Slices, phase.Slice{ID: s.ID, State: ss.State})
+	}
+	return phase.Rebuilds(f, lines), nil
 }
 
 // landedAll says every repo of own has a landed line.

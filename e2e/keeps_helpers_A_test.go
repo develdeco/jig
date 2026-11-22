@@ -70,10 +70,26 @@ func pullURLIn(repo string, n int) string {
 	return "https://github.example/owner/" + repo + "/pull/" + strconv.Itoa(n)
 }
 
+// greenSlices leaves every slice of ticket green, as a ticket that published has
+// them: a published ticket with a slice that is not green is built again.
+func greenSlices(t *testing.T, st *store.Store, ticket string) {
+	t.Helper()
+	slices, err := st.ReadSlices(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range slices {
+		if err := st.WriteSliceState(ticket, s.ID, store.SliceState{State: "green", Attempts: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // publishedWith appends the lines of a ticket that published: a pr line for each
-// of urls, then publish-done.
+// of urls, then publish-done, with its slices green.
 func publishedWith(t *testing.T, st *store.Store, ticket string, urls ...string) {
 	t.Helper()
+	greenSlices(t, st, ticket)
 	for _, u := range urls {
 		if err := journal.Append(st, ticket, journal.Line{Event: journal.EventPr, Outcome: "recorded", URL: u}); err != nil {
 			t.Fatal(err)

@@ -129,8 +129,13 @@ type Verdict struct {
 	Landed []Landing
 	// Done says every repo of the ticket has a line.
 	Done bool
-	// Notes say what could not be read, never a refusal.
+	// Notes say what could not be read, or that the ticket has work after its
+	// publish: never a refusal.
 	Notes []string
+	// Rebuilding says the ticket has work after its publish that the merge
+	// would land without (phase.Rebuilds): `jig next` says build, so it is not
+	// named as the next landing.
+	Rebuilding bool
 }
 
 // Options are what a landing is asked with.

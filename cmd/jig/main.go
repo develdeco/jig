@@ -317,7 +317,7 @@ func verifydeliverDeps(e env, st *store.Store, cfg project.Config, mp project.Ma
 		// prompt `jig next`, `jig status` and `jig here` name: all of them read
 		// the phase the same way (derivePhase).
 		d.Prompt = func(ticket string) string {
-			t, err := derivePhase(st, ticket)
+			t, err := derivePhaseSettled(st, ticket, func() mergeSource { return newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge) })
 			if err != nil {
 				return ""
 			}

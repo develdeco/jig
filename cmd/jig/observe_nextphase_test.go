@@ -77,6 +77,21 @@ func TestPublishSourceHoldsBackAnApprovedTicketThatIsNotPublished(t *testing.T) 
 	}
 }
 
+// TestPublishSourceHoldsBackARepublish: a ticket that published, was built
+// again and reviewed clean at a new head is owed a publish again, so the note
+// speaks; a publish after that round silences it.
+func TestPublishSourceHoldsBackARepublish(t *testing.T) {
+	t.Parallel()
+	older := []journal.Line{{Event: journal.EventPublishDone, Commit: "0000000000000000000000000000000000000001"}, {Event: journal.EventGateClean, Attempt: 2}, approval(publishHead, "person")}
+	if notes, err := publishNotes(publishCtx(t, "clean", older...)); err != nil || len(notes) != 1 {
+		t.Errorf("a publish before the last clean round: %+v, %v, want the note", notes, err)
+	}
+	again := append(append([]journal.Line(nil), older...), journal.Line{Event: journal.EventPublishDone, Commit: publishHead})
+	if notes, err := publishNotes(publishCtx(t, "clean", again...)); err != nil || len(notes) != 0 {
+		t.Errorf("a publish after the last clean round: %+v, %v, want nothing", notes, err)
+	}
+}
+
 // TestPublishSourceStaysSilentUnlessEverythingIsInPlace: each condition of the
 // note on its own - a clean round, a person's approval, of the head the round
 // reviewed, not published yet, at a Stop - is needed to hold a session back.
