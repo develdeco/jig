@@ -1,0 +1,2 @@
+- `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
+- `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.

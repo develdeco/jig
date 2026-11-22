@@ -25,7 +25,7 @@ It names the branch, whose copy (`copy`), the `head`, its `base` and `scope` (fu
 Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, you filed a note below the floor, or it lists open, answered or dismissed findings (`--prior`).
 
 - **Make your worktree at the head** as the `worktree` advice says (`jig skill review worktree` for the variants and the removal), and read the code there as the context's `read` line says, in either scope. Never in the clone.
-- **Never edit the person's clone**: you only read it. Run no oracle and no suite: each in `oracles_passed` was run by its builder; `at_head` says if on this head. A test runs only to probe.
+- **Never edit the person's clone**: you only read it. Run no oracle and no suite: each in `oracles_passed` was run by its builder; `at_head` says if on this head. A test runs only to probe or to run a reached path.
 - Read `jig skill review evidence` when `recordings` lists any, or the `intent` is `none`.
 - The `intent` is the human's own statement (`brief` or `explicit`, at `intent_path`).
 
@@ -45,8 +45,7 @@ Read each against the new behavior; when in doubt run the path in your worktree 
 Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current` and `caught`:
 
 - Mutate it in your worktree, run the narrowest test that covers it (by `seconds`), put the file back: one script per function, one mutate-run-restore loop with a command per mutant, not a call per term. Failing or timing out is `caught`, passing `survived`.
-- `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
-- `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.
+- Read `jig skill review probes` to record a probe or set an `unprobed` hunk aside.
 - A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none.
 
 ## Report
@@ -79,4 +78,4 @@ Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's pro
 ## Never
 
 - Do not review a change you built, or call `jig review done` for a round you did not read.
-- Do not edit the clone, commit, push, or write the store by hand. Edit your worktree only to probe, and put it back.
+- Do not edit the clone, commit, push, or write the store by hand. Edit your worktree only to probe or to run a reached path, and put it back.
