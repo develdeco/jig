@@ -18,6 +18,7 @@ func TestLandVerbSharedTaskNamesOnlyTheNextLandingItReleased(t *testing.T) {
 	r := sharedLandRig(t)
 	// TK-8 is a task of TK-1 that waits for nothing.
 	r.ticket(t, "TK-8", "", false)
+	r.green(t, "TK-8")
 	r.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-3\n    title: Three\n  - id: TK-8\n    title: Eight\n", "")
 	for _, l := range []journal.Line{
 		{Event: journal.EventPr, Into: "TK-1", URL: "https://github.example/owner/repo/pull/8"},
