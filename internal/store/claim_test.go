@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/gitx"
 )
 
@@ -1427,5 +1428,136 @@ func TestUndoPathsNamesAFolderOnceWhenTwoOfItsStepsFail(t *testing.T) {
 	}
 	if len(upe.leftovers) != 1 || upe.leftovers[0] != filepath.Join("tickets", "JIG-1") {
 		t.Fatalf("leftovers = %v, want the folder once", upe.leftovers)
+	}
+}
+
+// chartRewritingWrite is a graduate-shaped write: it mints a folder and
+// rewrites a tracked or untracked file in place, reporting both.
+func chartRewritingWrite(st *Store, work, rel, rewritten string, minted *string) func() (string, []string, error) {
+	mint := mintingWrite(st, minted)
+	return func() (string, []string, error) {
+		id, paths, err := mint()
+		if err != nil {
+			return "", nil, err
+		}
+		if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(rel)), []byte(rewritten), 0o644); err != nil {
+			return "", nil, err
+		}
+		return id, append(paths, rel), nil
+	}
+}
+
+// TestClaimFailedCommitRestoresAChartWithUncommittedEntries covers a chart
+// whose hand-written entries no commit holds, on a store with no origin (Sync
+// returns before committing there): the write rewrites it and the commit
+// fails, and the chart holds the entries byte for byte, the minted folder gone.
+func TestClaimFailedCommitRestoresAChartWithUncommittedEntries(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	const chart = "charts/c/tickets.yaml"
+	if err := os.MkdirAll(filepath.Join(work, "charts", "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	committed := "entries:\n- title: one\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(chart)), []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "--", chart)
+	runGit(t, work, "commit", "-m", "chart")
+	handWritten := committed + "- title: two, typed by hand\n- title: three\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(chart)), []byte(handWritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, chart, committed+"- title: one, id added\n", &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, filepath.FromSlash(chart))); rerr != nil || string(data) != handWritten {
+		t.Fatalf("chart = %q, %v, want the hand-written entries byte for byte", data, rerr)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived a failed commit (stat err %v)", err)
+	}
+}
+
+// TestClaimFailedCommitKeepsAChartNeverCommitted covers the same failure for a
+// chart no commit holds at all: it is not deleted, it holds what it did
+// before the write.
+func TestClaimFailedCommitKeepsAChartNeverCommitted(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	const chart = "charts/c/tickets.yaml"
+	if err := os.MkdirAll(filepath.Join(work, "charts", "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	handWritten := "entries:\n- title: one\n- title: two\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(chart)), []byte(handWritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, chart, "entries:\n- title: one\n  id: X-1\n", &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, filepath.FromSlash(chart))); rerr != nil || string(data) != handWritten {
+		t.Fatalf("chart = %q, %v, want what it held before the write", data, rerr)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived a failed commit (stat err %v)", err)
+	}
+	if status := runGit(t, work, "status", "--porcelain", "--", "tickets"); strings.TrimSpace(status) != "" {
+		t.Fatalf("git status lists %q under tickets/, want nothing", status)
+	}
+}
+
+// TestClaimFailedCommitLeavesAFileDeletedBeforeTheWrite covers a reported file
+// a person had deleted without committing: the write recreates it, and the
+// undo leaves it deleted, as it was just before the write.
+func TestClaimFailedCommitLeavesAFileDeletedBeforeTheWrite(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	if err := os.Remove(filepath.Join(work, "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, "project.yaml", "schema_version: 1\nextra: x\n", &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if _, serr := os.Stat(filepath.Join(work, "project.yaml")); !os.IsNotExist(serr) {
+		t.Fatalf("project.yaml survived (stat err %v), want it still deleted", serr)
+	}
+}
+
+// TestClaimSnapshotCostsOneGitProcessOnACleanStore pins what the pre-write
+// record adds to a claim's git processes: one status, and no blob written
+// when nothing differs from the pre-claim commit.
+func TestClaimSnapshotCostsOneGitProcessOnACleanStore(t *testing.T) {
+	st, _ := newTestStandaloneStore(t)
+	var minted string
+	argv := gittest.GitArgv(t, func() {
+		if _, err := st.Claim(mintingWrite(st, &minted), func(id string) string { return id }); err != nil {
+			t.Fatal(err)
+		}
+	})
+	statuses := 0
+	for _, a := range argv {
+		t.Log(strings.Join(a, " "))
+		if slices.Contains(a, "status") {
+			statuses++
+		}
+		if slices.Contains(a, "hash-object") {
+			t.Fatalf("a clean store wrote a blob: %v", a)
+		}
+	}
+	if statuses != 1 {
+		t.Fatalf("status ran %d times, want once", statuses)
 	}
 }
