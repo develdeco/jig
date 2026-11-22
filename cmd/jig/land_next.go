@@ -44,7 +44,7 @@ func nextLanding(d land.Deps, ticket, into string) string {
 				}
 			}
 			for _, issue := range issues {
-				if v, err := land.Judge(d, id, land.Options{Issue: issue}); err == nil && v.Refusal == nil && !v.Done {
+				if v, err := land.Judge(d, id, land.Options{Issue: issue}); err == nil && v.Refusal == nil && !v.Done && !v.Rebuilding {
 					return fmt.Sprintf("The next landing is `%s`, which waited for it", land.Command(st, id, issue))
 				}
 			}

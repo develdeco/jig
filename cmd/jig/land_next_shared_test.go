@@ -18,6 +18,7 @@ func TestLandVerbSharedTaskDependentIsNamedWithItsIssue(t *testing.T) {
 	r.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-8\n    title: Eight\n  - id: TK-9\n    title: Nine\n", "")
 	r.chart(t, "second", "issue: TK-7\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-9\n    title: Nine\n", "")
 	publish := func(id, into, url string) {
+		r.green(t, id)
 		t.Helper()
 		for _, l := range []journal.Line{{Event: journal.EventPr, Into: into, URL: url}, {Event: journal.EventPublishDone, Into: into}} {
 			if err := journal.Append(r.st, id, l); err != nil {
@@ -81,6 +82,7 @@ func TestLandVerbSharedTaskDependentIsJudgedForTheLandingsIssue(t *testing.T) {
 	r.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-9\n    title: Nine\n", "")
 	r.chart(t, "second", "issue: TK-7\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-9\n    title: Nine\n  - id: TK-10\n    title: Ten\n", "")
 	publish := func(id, into, url string) {
+		r.green(t, id)
 		t.Helper()
 		for _, l := range []journal.Line{{Event: journal.EventPr, Into: into, URL: url}, {Event: journal.EventPublishDone, Into: into}} {
 			if err := journal.Append(r.st, id, l); err != nil {

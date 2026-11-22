@@ -37,6 +37,7 @@ func issueRunRig(t *testing.T) chartRig {
 // publish, as `jig publish` does.
 func (r chartRig) publishInto(t *testing.T, ticket, container string, n string) {
 	t.Helper()
+	r.green(t, ticket)
 	for _, l := range []journal.Line{
 		{Event: journal.EventPr, Into: container, URL: "https://github.example/owner/repo/pull/" + n},
 		{Event: journal.EventPublishDone, Into: container},

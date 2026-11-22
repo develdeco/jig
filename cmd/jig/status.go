@@ -597,7 +597,7 @@ func plannedStanding(cfg project.Config, mp project.MachineProject, merges merge
 				return t, nil
 			}
 		}
-		return derivePhase(st, ticket)
+		return derivePhaseSettled(st, ticket, func() mergeSource { return merges })
 	}
 }
 

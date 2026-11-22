@@ -753,10 +753,11 @@ func TestAnEarlierPhaseChangedTakesTheLaterOnesBack(t *testing.T) {
 }
 
 // TestPublishedIsDoneWhateverTheRest: a published ticket has four done phases
-// and nothing to ask.
+// and nothing to ask, once its slices are green; with one that is not, it is at
+// the build again (TestDerivePublishedWithAQueuedSliceIsAtBuild).
 func TestPublishedIsDoneWhateverTheRest(t *testing.T) {
 	t.Parallel()
-	f := approved()
+	f := allGreen()
 	f.Published = true
 	got := Derive(f, []journal.Line{ln(journal.EventPublishDone)})
 	for _, p := range got.Phases {
@@ -1063,5 +1064,120 @@ func TestAPendingLineMakesNoSliceVerifying(t *testing.T) {
 	// A slice with only a pending line was still taken up.
 	if !EverClaimed([]journal.Line{ln(journal.EventVerifyPending, onSlice("a"), commit("0badf00d11"))}) {
 		t.Errorf("an old pending line no longer shows a slice was taken up")
+	}
+}
+
+// TestDerivePublishedWithAQueuedSliceIsAtBuild: a published ticket that has not
+// landed and is not closed, with a slice that is not green, is at the build,
+// ready, with the build prompt; green again it is at the review, a clean round
+// at the new head puts it at the publish, and that publish puts it at the land.
+// A landed or closed ticket stays done whatever its slices.
+func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
+	t.Parallel()
+	prURL := func(l *journal.Line) { l.URL = "https://example.test/pull/7" }
+	published := append(built(), ln(journal.EventGateOpen, attempt(1)), ln(journal.EventGateClean, attempt(1), by("s-rev")),
+		ln(journal.EventPr, outcome("opened"), prURL), ln(journal.EventPublishDone))
+
+	queued := allGreen()
+	queued.Published = true
+	queued.Slices = append(queued.Slices, Slice{ID: "d", State: "queued"})
+	got := Derive(queued, published)
+	if got.Current != Build || !got.Ready || got.Code != "" || got.Prompt != "Build SHOP-1" {
+		t.Fatalf("queued slice: current %s ready %v code %q prompt %q, want a ready build", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+	if !got.Rebuilding() {
+		t.Errorf("queued slice: Rebuilding() = false, want true")
+	}
+
+	// Built green again, nothing reviewed since: the review.
+	rebuilt := queued
+	rebuilt.Slices = append([]Slice(nil), queued.Slices...)
+	rebuilt.Slices[3].State = "green"
+	lines := append(append([]journal.Line(nil), published...),
+		ln(journal.EventClaim, onSlice("d"), by("s-build")), ln(journal.EventVerified, onSlice("d"), commit("abcdef4567")))
+	got = Derive(rebuilt, lines)
+	if got.Current != Review || !got.Ready || got.Prompt != "Review SHOP-1" {
+		t.Fatalf("fix built: current %s ready %v prompt %q, want a ready review", got.Current, got.Ready, got.Prompt)
+	}
+
+	// A clean round at the new head: the publish.
+	lines = append(lines, ln(journal.EventGateOpen, attempt(2)), ln(journal.EventGateClean, attempt(2), by("s-rev")))
+	got = Derive(rebuilt, lines)
+	if got.Current != Publish || !got.Ready || got.Prompt != "Publish SHOP-1" {
+		t.Fatalf("fix reviewed: current %s ready %v prompt %q, want a ready publish", got.Current, got.Ready, got.Prompt)
+	}
+
+	// Published again: the land.
+	lines = append(lines, ln(journal.EventPr, outcome("updated"), prURL), ln(journal.EventPublishDone))
+	got = Derive(rebuilt, lines)
+	if got.Current != Land || got.Ready || got.Code != CodeDone || got.Prompt != "Land SHOP-1" {
+		t.Fatalf("fix published: current %s ready %v code %q prompt %q, want the land", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+	if got.Rebuilding() {
+		t.Errorf("fix published: Rebuilding() = true, want false")
+	}
+
+	// Landed, or closed: done whatever the slices.
+	landed := append(append([]journal.Line(nil), published...), ln(journal.EventLanded))
+	if got := Derive(queued, landed); got.Current != Publish || got.Ready || got.Code != CodeDone || got.Prompt != "" {
+		t.Errorf("landed with a queued slice: current %s ready %v code %q prompt %q, want done", got.Current, got.Ready, got.Code, got.Prompt)
+	}
+	closed := queued
+	closed.Closed = "not planned"
+	if got := Derive(closed, published); got.Code != CodeClosed || got.Ready || got.Prompt != "" {
+		t.Errorf("closed with a queued slice: code %q ready %v prompt %q, want closed", got.Code, got.Ready, got.Prompt)
+	}
+	// Landed as the caller read it, or merged on the host: a new need, not a rebuild.
+	for name, f := range map[string]Facts{"landed": queued, "merged on the host": queued} {
+		if name == "landed" {
+			f.Landed = true
+		} else {
+			f.MergedOnHost = true
+		}
+		if got := Derive(f, published); got.Rebuilding() || got.Current == Build || got.Ready || got.Code != CodeDone {
+			t.Errorf("%s with a queued slice: current %s ready %v code %q, want it left done", name, got.Current, got.Ready, got.Code)
+		}
+	}
+
+	// Green slices and no build line after the publish: published, whatever was
+	// asked and answered since; a build line after it reopens the ticket.
+	green := allGreen()
+	green.Published = true
+	talked := append(append([]journal.Line(nil), published...), ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")))
+	if got := Derive(green, talked); got.Rebuilding() || got.Current != Land {
+		t.Errorf("a question after the publish: rebuilding %v current %s, want published at the land", got.Rebuilding(), got.Current)
+	}
+	if got := Derive(green, append(talked, ln(journal.EventVerified, onSlice("a"), commit("beef000001")))); !got.Rebuilding() || got.Current != Review {
+		t.Errorf("a slice verified at a new commit after the publish: rebuilding %v current %s, want it at the review", got.Rebuilding(), got.Current)
+	}
+	// An added slice that left only its line (taken out again) is no work, and
+	// neither is a re-verify of the head the pull request carries.
+	if got := Derive(green, append(talked, ln(journal.EventSliceAdd, onSlice("d")))); got.Rebuilding() {
+		t.Errorf("a slice-add line alone rebuilds the ticket")
+	}
+	atHead := append(append([]journal.Line(nil), built()...), ln(journal.EventPr, outcome("opened"), prURL, commit("abcdef4567")), ln(journal.EventPublishDone))
+	if got := Derive(green, append(atHead, ln(journal.EventVerified, onSlice("a"), commit("abcdef4567")))); got.Rebuilding() {
+		t.Errorf("a re-verify of the published head rebuilds the ticket")
+	}
+	if got := Derive(green, append(atHead, ln(journal.EventVerified, onSlice("a"), commit("beef000002")))); !got.Rebuilding() {
+		t.Errorf("a verify of another commit does not rebuild the ticket")
+	}
+
+	// A stacked ticket owed a merge is behind while it is built again, owing
+	// the merge.
+	owed := []Restack{{Repo: "app", Kind: RestackTarget, Ref: "origin/main"}}
+	stacked := queued
+	stacked.Restacks = owed
+	if got := Derive(stacked, published); !got.Rebuilding() || !got.Behind() || got.Current != Build || !reflect.DeepEqual(got.Restacks(), owed) {
+		t.Errorf("rebuilding with restacks: rebuilding %v behind %v current %s restacks %v, want built again, behind, owing %v", got.Rebuilding(), got.Behind(), got.Current, got.Restacks(), owed)
+	}
+	// A caller's word that it published, with no publish-done line to count from,
+	// is taken as it is.
+	if got := Derive(green, built()); got.Rebuilding() {
+		t.Errorf("published with no publish line: rebuilding, want it left alone")
+	}
+	// An unpublished ticket is never rebuilding.
+	if got := Derive(allGreen(), built()); got.Rebuilding() {
+		t.Errorf("an unpublished ticket is rebuilding")
 	}
 }

@@ -54,6 +54,7 @@ func sharedRig(t *testing.T) chartRig {
 // published records the pull request and the publish of SHOP-3 into issue.
 func (r chartRig) publishedInto(t *testing.T, issue, url, head string) {
 	t.Helper()
+	r.green(t, "SHOP-3")
 	for _, l := range []journal.Line{
 		{Event: journal.EventPr, Into: issue, URL: url, Commit: head},
 		{Event: journal.EventPublishDone, Into: issue},
