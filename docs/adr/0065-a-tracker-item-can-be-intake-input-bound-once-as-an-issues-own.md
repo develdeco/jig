@@ -12,6 +12,8 @@
 
 **jig still mints every id.** The issue's id is minted by jig as any other; only the issue is minted bound to an item someone else numbered. When the project's branches are led by GitHub, the branch of the issue is `<n>-<slug>`, from the item's number; otherwise it is named by the store id as any ticket's is.
 
+**An item is asked for by its ref.** `jig next <ref>` and `jig here <ref>` try a ref before a chart, a ticket id or an alias: a bound item answers as its issue does, from the store alone, and an unbound one is read once by `jig next`.
+
 **Advisories, never refusals.** A closed item is bound, and the output says the first sync reopens it; an item with linked pull requests is bound, and the output says the issue does not take them over.
 
 ## Consequences
