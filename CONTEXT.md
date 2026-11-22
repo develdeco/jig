@@ -59,12 +59,16 @@ _Avoid_: branch name (a recorded `branch:` can be any name)
 
 **Mirror**:
 A tracker's copy of the store, written by jig at every checkpoint (its records
-committed and pushed with it) and never read back. Today's one mirror projects every ticket and chart onto a GitHub
+committed and pushed with it). A tracker item is read as intake input, at intake and at the bind of a Bound issue, and nowhere else; the mirror itself is one-way. Today's one mirror projects every ticket and chart onto a GitHub
 issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,
 reported and overwritten with the store's value at the next sync. A chart with an `issue:` has no issue of its own: its issue ticket is mirrored always, the tasks it lists only when the project's `trackers: github: tasks:` is true (each a full issue opening with a `Part of #n` line), and the plan is a comment posted on the issue whenever what it shows changes, never an edit.
 _Avoid_: tracker as the source of tickets
+
+**Bound issue**:
+An issue ticket minted from a tracker item someone made outside jig (`jig chart new --item`), its record written in the mint's own claim: the issue carries the item's title and text, the item's number is its tracker entry, and the first sync updates the item in place instead of opening another. After the bind the store owns the text and a later edit on the tracker is drift. One item is bound to one issue.
+_Avoid_: adopted issue, origin issue
 
 **Tracker tree**:
 The folder `trackers/<provider>/<scope>/<remote id>/` of a store, its entry: one folder for each remote item a tracker holds of the store's tickets and charts, holding the item's record and a link to its ticket or chart named by the store id. GitHub's scope is the lower-case `<owner>/<repo>` and its remote id the bare issue number.

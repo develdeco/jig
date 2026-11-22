@@ -64,6 +64,42 @@ type ItemFields struct {
 	Status, StoreID string
 }
 
+// ItemDetail is one tracker item as ItemByNumber reads it: what a bind needs
+// to mint an issue from it, and what it shows the person before.
+type ItemDetail struct {
+	Number int
+	NodeID string
+	Title  string
+	Body   string
+	URL    string
+	// Open is false when the item is closed, whatever its close reason.
+	Open bool
+	// StateReason is GitHub's own spelling for why a closed item was closed
+	// ("COMPLETED", "NOT_PLANNED"), "" for an item never closed; GitHub
+	// answers "REOPENED" for an open item that was closed once.
+	StateReason string
+	Author      string
+	Labels      []string
+	// SubItems is how many sub-issues the item has.
+	SubItems int
+	// BlockedBy is the issues that block the item on the tracker.
+	BlockedBy []BlockerRef
+	// Blocking is the issues the item blocks on the tracker.
+	Blocking []BlockerRef
+	// Repo is the owner/repo the item lives in now, which is not the repo it
+	// was asked of when it was transferred.
+	Repo string
+	// LinkedPullRequests is how many pull requests the item lists as
+	// closing it (its closedByPullRequestsReferences, in any state).
+	LinkedPullRequests int
+}
+
+// BlockerRef is one issue that blocks an item: its number and node id.
+type BlockerRef struct {
+	Number int
+	NodeID string
+}
+
 // maxNodesPerQuery is how many ids one batched read sends in a single
 // query: GitHub's own limit for nodes(ids:), and the most pullRequests
 // fields PullRequestsByHeads aliases into one repository query. A sync's
@@ -190,6 +226,10 @@ type Client interface {
 	// project, which cannot call EnsureProject without risking the field or
 	// link mutation that a plain preview must withhold.
 	LookupProject(ctx context.Context, ownerLogin string, isOrg bool, number int) (bool, error)
+	// ItemByNumber reads the issue owner/repo#number by its number. A number
+	// GitHub does not have, a pull request's number and a repository the
+	// token cannot see are ITEM_NOT_FOUND.
+	ItemByNumber(ctx context.Context, owner, repo string, number int) (ItemDetail, error)
 }
 
 // defaultMutationInterval and defaultBackoffBase are the client's own defaults
@@ -299,6 +339,12 @@ func allGoneNodeErrors(errs []graphQLError) bool {
 	}
 	return true
 }
+
+// notFoundError is a response whose every "errors" entry is a NOT_FOUND: a
+// number, repository or node GitHub does not resolve for this token.
+type notFoundError struct{ msg string }
+
+func (e *notFoundError) Error() string { return e.msg }
 
 // graphQLRequest is the JSON body every GraphQL call sends.
 type graphQLRequest struct {
@@ -435,11 +481,18 @@ func (c *GraphQLClient) doOnce(ctx context.Context, query string, variables map[
 	if len(envelope.Errors) > 0 && !(settings.tolerateGoneNodes && allGoneNodeErrors(envelope.Errors)) {
 		msgs := make([]string, len(envelope.Errors))
 		retryable := false
+		allNotFound := true
 		for i, e := range envelope.Errors {
 			msgs[i] = e.Message
 			if strings.EqualFold(e.Type, "RATE_LIMITED") {
 				retryable = true
 			}
+			if !strings.EqualFold(e.Type, "NOT_FOUND") {
+				allNotFound = false
+			}
+		}
+		if allNotFound {
+			return false, &notFoundError{msg: "github: " + strings.Join(msgs, "; ")}
 		}
 		return retryable, fmt.Errorf("github: %s", strings.Join(msgs, "; "))
 	}

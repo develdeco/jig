@@ -131,6 +131,21 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 		}
 	}
 
+	// held is the node id of every issue the tracker tree holds a record for: the
+	// only issues a blocked-by edge of the store's own can name, so an edge
+	// to any other issue is not the store's to remove.
+	owners, err := nodeOwners(st)
+	if err != nil {
+		return err
+	}
+	held := map[string]bool{}
+	nodeOf := map[string]string{}
+	for nodeID, o := range owners {
+		held[nodeID] = true
+		if o.Ticket != "" {
+			nodeOf[o.Ticket] = nodeID
+		}
+	}
 	for _, it := range items {
 		if it.kind != "ticket" {
 			continue
@@ -144,7 +159,7 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 			return err
 		}
 		cur, haveCur := curByWhat[it.id]
-		if err := linkBlockedBy(ctx, st, client, lt, ticket.BlockedBy, tickets, cur, haveCur, report, dryRun); err != nil {
+		if err := linkBlockedBy(ctx, st, client, lt, ticket.BlockedBy, tickets, held, nodeOf, cur, haveCur, report, dryRun); err != nil {
 			return err
 		}
 	}
@@ -207,11 +222,13 @@ func linkParent(ctx context.Context, st *store.Store, client github.Client, lt *
 // LinkedBlockedBy otherwise); a blocker with no recorded issue is skipped
 // and reported in NotLinked; and, when haveCur, any blocked-by edge GitHub
 // shows that blockedBy does not - added by hand, or a blocker the store no
-// longer lists - is removed with RemoveBlockedBy and reported as drift,
-// the same ownership rule links.go already applies to a chart's extra
-// sub-issue. dryRun previews every report line without calling AddBlockedBy,
+// longer lists - is removed with RemoveBlockedBy and reported as drift, the
+// same ownership rule links.go already applies to a chart's extra
+// sub-issue, but only when the blocker is an issue the store holds (held):
+// an edge to an issue the store has no record of cannot be named by any
+// blocked_by, so it is left alone and reported nowhere. dryRun previews every report line without calling AddBlockedBy,
 // RemoveBlockedBy or writing the record.
-func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
+func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, held map[string]bool, nodeOf map[string]string, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
 	priorLinks := currentLinks(lt.rec)
 	prevSynced := map[string]bool{}
 	for _, nodeID := range priorLinks.BlockedBy {
@@ -234,6 +251,12 @@ func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, l
 		}
 		blocker, ok := tickets[blockerID]
 		if !ok || !blocker.has {
+			// A blocker the sync does not carry but the tree holds (a task
+			// once tasks are off) is still the ticket's own listed blocker:
+			// its edge is kept, only never added here.
+			if nodeID, held := nodeOf[blockerID]; held {
+				wanted[nodeID] = true
+			}
 			report.NotLinked = append(report.NotLinked, NotLinked{Ticket: lt.id, Blocker: blockerID})
 			continue
 		}
@@ -260,7 +283,7 @@ func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, l
 
 	if haveCur {
 		for _, nodeID := range cur.BlockedByIDs {
-			if wanted[nodeID] {
+			if wanted[nodeID] || !held[nodeID] {
 				continue
 			}
 			if !dryRun {

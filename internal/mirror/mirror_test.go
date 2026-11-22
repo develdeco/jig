@@ -143,6 +143,8 @@ type fakeClient struct {
 	// reads counts each read call by method name, so a test can pin how
 	// many round trips a sync makes.
 	reads map[string]int
+	// items simulates the tracker items ItemByNumber reads, by number.
+	items map[int]github.ItemDetail
 }
 
 // read counts one call of the read method name.

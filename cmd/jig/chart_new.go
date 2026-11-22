@@ -20,7 +20,9 @@ func init() {
 			{"title", "chart title (required)", false},
 			{"issue", "id of the issue ticket the chart plans", false},
 			{"need", "what the person needs: mints the chart's issue with this text as its body", false},
-			{"key", "key to mint the issue under with --need", false},
+			{"key", "key to mint the issue under with --need or --item", false},
+			{"item", "a tracker item that exists (48, #48, owner/repo#48 or its URL): makes its issue and chart and binds the two", false},
+			{"json", "with --item: print one JSON object instead of blocks", false},
 			{"store", "explicit store path", false},
 			{"project", "project name, resolved via the machine mapping", false},
 		}, false},
@@ -66,8 +68,10 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 	title := fs.String("title", "", "chart title (required)")
 	issueFlag := fs.String("issue", "", "id of the issue ticket the chart plans")
 	needFlag := fs.String("need", "", "what the person needs: mints the chart's issue with this text as its body")
-	keyFlag := fs.String("key", "", "key to mint the issue under with --need")
+	keyFlag := fs.String("key", "", "key to mint the issue under with --need or --item")
 	storeFlag := fs.String("store", "", "explicit store path")
+	itemFlag := fs.String("item", "", "a tracker item that exists (48, #48, owner/repo#48 or its URL): makes its issue and chart and binds the two")
+	jsonOut := fs.Bool("json", false, "with --item: print one JSON object instead of blocks")
 	projectFlag := fs.String("project", "", "project name, resolved via the machine mapping")
 	positionals, handled, err := parseWithPositionals(stdout, fs, rest)
 	if handled {
@@ -80,6 +84,17 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 	if err != nil {
 		return renderErr(stdout, withHelp(err, chartNewUsage))
 	}
+	itemSet, needSet := false, false
+	fs.Visit(func(f *flag.Flag) {
+		itemSet = itemSet || f.Name == "item"
+		needSet = needSet || f.Name == "need"
+	})
+	if *jsonOut && !itemSet {
+		return renderErr(stdout, &axi.Error{Msg: "--json is for --item: the bind it prints", Code: "VALIDATION_ERROR", Help: []string{chartNewUsage}})
+	}
+	if itemSet {
+		return chartNewItem(e, stdout, name, *itemFlag, *title, *keyFlag, needSet, *issueFlag, *jsonOut, *projectFlag, *storeFlag)
+	}
 	heading := strings.TrimSpace(*title)
 	if heading == "" {
 		return renderErr(stdout, &axi.Error{Msg: "jig chart new requires --title", Code: "VALIDATION_ERROR", Help: []string{chartNewUsage}})
@@ -91,8 +106,6 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 		return renderErr(stdout, err)
 	}
 
-	needSet := false
-	fs.Visit(func(f *flag.Flag) { needSet = needSet || f.Name == "need" })
 	if needSet && strings.TrimSpace(*needFlag) == "" {
 		return renderErr(stdout, &axi.Error{Msg: "--need must not be empty: it is the issue's body", Code: "VALIDATION_ERROR", Help: []string{chartNewUsage}})
 	}
@@ -195,7 +208,7 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 }
 
 // chartNewUsage is the help line of a refusal for a missing name or title.
-const chartNewUsage = "Run `jig chart new <name> --title \"<title>\" [--need \"<what is needed>\" | --issue <ID>]`"
+const chartNewUsage = "Run `jig chart new <name> --title \"<title>\" [--need \"<what is needed>\" | --issue <ID>]`, or `jig chart new <name> --item <ref> [--title \"<title>\"]`"
 
 // withHelp is err with line as its Help when it is a *axi.Error with none.
 func withHelp(err error, line string) error {

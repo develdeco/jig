@@ -55,6 +55,12 @@ const (
 	ClaimDriver = "driver"
 	// ClaimRelease ends the driver line of the same writer for the ticket.
 	ClaimRelease = "release"
+	// ClaimEntry reserves a tracker entry for the ticket minted from it: no
+	// other writer binds the same remote item. Entry names the item.
+	ClaimEntry = "entry"
+	// ClaimEntryRelease ends the entry line of the same ticket and writer: a
+	// bind that failed after reserving its item gives it back.
+	ClaimEntryRelease = "entry-release"
 )
 
 // ClaimLine is one line of the claims log. Wire keys are exact; every key but
@@ -62,11 +68,15 @@ const (
 type ClaimLine struct {
 	// TS is when the line was written: UTC, RFC 3339 with nanoseconds.
 	TS string `json:"ts"`
-	// Kind is ClaimID, ClaimDriver or ClaimRelease.
+	// Kind is ClaimID, ClaimDriver, ClaimRelease, ClaimEntry or
+	// ClaimEntryRelease.
 	Kind string `json:"kind"`
 	// Ticket is the id the line is about: the id reserved, or the ticket
 	// driven or released.
 	Ticket string `json:"ticket"`
+	// Entry is the tracker entry (github/<owner>/<repo>/<n>) a ClaimEntry
+	// or ClaimEntryRelease line is about, for Ticket.
+	Entry string `json:"entry,omitempty"`
 	// Slice is the slice the claim was made for, when it was made for one.
 	Slice string `json:"slice,omitempty"`
 	// Writer is the writer name (git config jig.writer, else the host name) of
