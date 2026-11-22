@@ -139,8 +139,12 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 		return err
 	}
 	held := map[string]bool{}
-	for nodeID := range owners {
+	nodeOf := map[string]string{}
+	for nodeID, o := range owners {
 		held[nodeID] = true
+		if o.Ticket != "" {
+			nodeOf[o.Ticket] = nodeID
+		}
 	}
 	for _, it := range items {
 		if it.kind != "ticket" {
@@ -155,7 +159,7 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 			return err
 		}
 		cur, haveCur := curByWhat[it.id]
-		if err := linkBlockedBy(ctx, st, client, lt, ticket.BlockedBy, tickets, held, cur, haveCur, report, dryRun); err != nil {
+		if err := linkBlockedBy(ctx, st, client, lt, ticket.BlockedBy, tickets, held, nodeOf, cur, haveCur, report, dryRun); err != nil {
 			return err
 		}
 	}
@@ -224,7 +228,7 @@ func linkParent(ctx context.Context, st *store.Store, client github.Client, lt *
 // an edge to an issue the store has no record of cannot be named by any
 // blocked_by, so it is left alone and reported nowhere. dryRun previews every report line without calling AddBlockedBy,
 // RemoveBlockedBy or writing the record.
-func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, held map[string]bool, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
+func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, lt *linkTicket, blockedBy []store.TicketBlockedBy, tickets map[string]*linkTicket, held map[string]bool, nodeOf map[string]string, cur github.IssueState, haveCur bool, report *SyncReport, dryRun bool) error {
 	priorLinks := currentLinks(lt.rec)
 	prevSynced := map[string]bool{}
 	for _, nodeID := range priorLinks.BlockedBy {
@@ -247,6 +251,12 @@ func linkBlockedBy(ctx context.Context, st *store.Store, client github.Client, l
 		}
 		blocker, ok := tickets[blockerID]
 		if !ok || !blocker.has {
+			// A blocker the sync does not carry but the tree holds (a task
+			// once tasks are off) is still the ticket's own listed blocker:
+			// its edge is kept, only never added here.
+			if nodeID, held := nodeOf[blockerID]; held {
+				wanted[nodeID] = true
+			}
 			report.NotLinked = append(report.NotLinked, NotLinked{Ticket: lt.id, Blocker: blockerID})
 			continue
 		}
