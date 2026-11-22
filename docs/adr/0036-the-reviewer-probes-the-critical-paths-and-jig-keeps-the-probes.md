@@ -1,5 +1,7 @@
 # The reviewer probes the critical paths, and jig keeps the probes across rounds
 
+**Amended 2026-11-22:** the reviewer also reads what the change reaches, every round before probing: the callers of a changed function, the commands sharing a changed helper, the record shapes and states main or an older writer still produces, and the doc and ADR sentences about the changed behavior. Probing covers the change's own terms, so a break in code the change only reaches went unseen: develdeco/jig#506, #516, #517 and #518 each passed clean rounds and had such a break found later. Reached code is read (run in the worktree when in doubt), not mutated; a break is a finding at its own file and line. This widens "A reviewer runs a test only to probe" (below, and ADR 0053's restatement): a test may also run, and the worktree be edited and put back, to run a reached path. jig records nothing new: the files read are in `--reviewed`.
+
 **Amended 2026-11-18:** a probe's `command` can be the finding's own `--oracle`: the narrowest command that covers the mutated term is the narrowest that proves its fix.
 
 A gate round after the first reviews the delta since the last reviewed head (`scope: delta`), and `must_review` and `reviewed_paths` prove it read every file the delta changed. Nothing records which behavior a round tested. In jig-demo-shop's PRs #24 and #26 the same fix to `cart.Total` passed every oracle with a test suite that pinned no line total's quantity factor: dropping the factor changed no test result.

@@ -1,0 +1,1 @@
+When the person's prompt named later phases (a start-to-finish run), go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. Asks the round left are the person's: put each to them and record their answer with `jig triage`, or, when the prompt told you to go with your recommendations, decide them yourself.
