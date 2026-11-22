@@ -103,7 +103,7 @@ var refusalCodes = map[string]bool{"GATE_NOT_GREEN": true, "BRANCH_NOT_FOUND": t
 // journal error must not replace it.
 func (r *gateRun) journalRefusal(err error) {
 	var ae *axi.Error
-	if r.journaled || !errors.As(err, &ae) || !refusalCodes[ae.Code] {
+	if !errors.As(err, &ae) || !refusalCodes[ae.Code] {
 		return
 	}
 	line := journal.Line{Event: journal.EventGateRefused, Code: ae.Code, Summary: refusalSummary(ae.Msg)}
