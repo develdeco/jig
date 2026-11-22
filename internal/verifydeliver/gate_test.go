@@ -324,27 +324,39 @@ func removeBrief(t *testing.T, d Deps, ticket string) {
 }
 
 // gateRefused runs Gate and returns its error, requiring the call to leave
-// the journal exactly as it found it: a refusal that is documented as
-// leaving no trace (a bad intent flag, a bad intent.md, an unmet
-// precondition) must fail the round before its gate-open journal line is
-// appended, not after, or a plain rerun is no longer the whole recovery.
-// Journal lines are compared, not the store's HEAD: a round's own deferred
-// push and Sync's own "record uncommitted store state" commit both move
-// HEAD legitimately.
+// the journal as it found it but for one gate-refused line: a refusal of a
+// precondition (a bad intent flag, a bad intent.md, an unmet precondition)
+// must fail the round before its gate-open journal line is appended, not
+// after, or a plain rerun is no longer the whole recovery. The three refusals
+// the gate journals (refusalCodes) add that one line, and no other refusal
+// adds any. Journal lines are compared, not the store's HEAD: a round's own
+// deferred push and Sync's own "record uncommitted store state" commit both
+// move HEAD legitimately.
 func gateRefused(t *testing.T, d Deps, src GateSource, o GateOpts) error {
 	t.Helper()
-	count := func() int {
+	read := func() []journal.Line {
 		t.Helper()
 		lines, err := journal.Read(d.Store, o.Ticket)
 		if err != nil {
 			t.Fatalf("journal.Read: %v", err)
 		}
-		return len(lines)
+		return lines
 	}
-	before := count()
+	before := len(read())
 	_, err := Gate(d, src, o)
-	if after := count(); after != before {
-		t.Errorf("journal has %d lines after the refused Gate (err = %v), want the %d it had before: a refusal must leave no journal line", after, err, before)
+	after := read()
+	var ae *axi.Error
+	want := 0
+	if errors.As(err, &ae) && refusalCodes[ae.Code] {
+		want = 1
+	}
+	if len(after) != before+want {
+		t.Errorf("journal has %d lines after the refused Gate (err = %v), want the %d it had before plus %d gate-refused line", len(after), err, before, want)
+	}
+	if want == 1 && len(after) > 0 {
+		if last := after[len(after)-1]; last.Event != journal.EventGateRefused || last.Code != ae.Code {
+			t.Errorf("last journal line = %s %s, want %s %s", last.Event, last.Code, journal.EventGateRefused, ae.Code)
+		}
 	}
 	return err
 }
@@ -393,7 +405,7 @@ func reportYAMLAt(t *testing.T, d Deps, ticket string, round int) reportYAML {
 }
 
 // TestGateRefusalsLeaveNoTrace is the chain of the refusals that are documented
-// as leaving no trace: no journal line (gateRefused), no recorded intent.md, no
+// as opening no round: no journal line but gate-refused (gateRefused), no recorded intent.md, no
 // adopted branch and no start sha, so a plain rerun is the whole recovery. They
 // are decided before the round writes anything, so one ticket and one pushed
 // branch serve them all, each step standing on a ticket the ones before it left
