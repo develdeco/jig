@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/observe"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -53,7 +54,7 @@ func nextPhaseNotes(c observe.NoteCtx) ([]observe.Note, error) {
 // and then a subagent reviews. The Ref names the round to come, so a note is
 // given once for each round.
 func reviewNotes(c observe.NoteCtx) ([]observe.Note, error) {
-	t, err := derivePhase(c.Store, c.Where.Ticket)
+	t, err := derivePhaseSettled(c.Store, c.Where.Ticket, settlingMerges(processEnv(), c.Where, c.Store))
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +88,14 @@ func publishNotes(c observe.NoteCtx) ([]observe.Note, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Published is any publish ever; the note is for the publish the last clean
+	// round is owed, so one before that round (a ticket built again after it
+	// published) does not count.
+	if c.Journal != nil {
+		if lines, err := c.Journal(); err == nil {
+			s.Published = publishedSinceLastRound(lines)
+		}
+	}
 	head, ok := approvedReviewedHead(s)
 	if !ok {
 		return nil, nil
@@ -101,6 +110,20 @@ func publishNotes(c observe.NoteCtx) ([]observe.Note, error) {
 			c.Where.Ticket, short, c.Where.Ticket),
 		Enforce: true,
 	}}, nil
+}
+
+// publishedSinceLastRound says a publish-done line comes after the last gate
+// round that closed (a verdict line), or the ticket has no round at all.
+func publishedSinceLastRound(lines []journal.Line) bool {
+	for i := len(lines) - 1; i >= 0; i-- {
+		switch lines[i].Event {
+		case journal.EventPublishDone:
+			return true
+		case journal.EventGateRound, journal.EventGateClean:
+			return false
+		}
+	}
+	return false
 }
 
 // approvedReviewedHead is the head a person approved to publish when it is

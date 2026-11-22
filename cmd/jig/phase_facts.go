@@ -10,7 +10,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
@@ -25,6 +27,41 @@ import (
 // same phase and the same prompt.
 func derivePhase(st *store.Store, ticket string) (phase.Ticket, error) {
 	return derivePhaseWith(st, ticket, nil)
+}
+
+// derivePhaseSettled is derivePhase for a reader that has no merge source of
+// its own (`jig here`, the hooks, a refusal's prompt): a ticket the rule reads
+// as built again (Ticket.Rebuilding) is settled against the host, since a ticket
+// whose pull request merged is done whatever its slices. The host is asked only
+// of such a ticket, through merges, which is built on that need and not before.
+func derivePhaseSettled(st *store.Store, ticket string, merges func() mergeSource) (phase.Ticket, error) {
+	t, err := derivePhase(st, ticket)
+	if err != nil || !t.Rebuilding() || merges == nil {
+		return t, err
+	}
+	ms := merges()
+	if ms == nil {
+		return t, nil
+	}
+	if settled, err := derivePhaseWith(st, ticket, ms); err == nil {
+		return settled, nil
+	}
+	return t, nil
+}
+
+// settlingMerges is the merge source derivePhaseSettled asks, built on first
+// use: the project's config is read from where it was located, and a pull
+// request state the host gave within the listing's max age stands, as in `jig
+// status`. A config that cannot be read leaves the ticket as the journal and
+// slices say.
+func settlingMerges(e env, where locate.Where, st *store.Store) func() mergeSource {
+	return func() mergeSource {
+		cfg, err := project.LoadConfigWith(gitx.NewMemo(), where.JigHome, where.StorePath, where.Project, where.Root, where.RepoDir)
+		if err != nil {
+			return nil
+		}
+		return newMergeReader(e, st, cfg, project.MachineProject{}, where.JigHome, listingMergeAge)
+	}
 }
 
 // derivePhaseWith is derivePhase with the merge facts of the blockers read from

@@ -69,8 +69,16 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 	// No status yet: the slices the journal names, in the states it shows, and
 	// an approval line as the brief's.
 	for _, id := range t.sliceIDsFromLines() {
+		state := t.guessSliceState(id)
+		if f.Published && !t.touchedSincePublish(id) {
+			// A guess from lines is not the store's word: it never builds a
+			// published ticket again (a journal from before the claim and
+			// verified lines would guess every slice as building). A slice
+			// worked after the publish keeps its guess, and so does a status.
+			state = "green"
+		}
 		f.Slices = append(f.Slices, phase.Slice{
-			ID: id, State: t.guessSliceState(id), FromGate: fixes[id],
+			ID: id, State: state, FromGate: fixes[id],
 			OpenQuestion: len(t.openQuestions(m.zone, id)) > 0,
 		})
 	}
@@ -83,6 +91,22 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 		f.Adopted = true
 	}
 	return f, lines
+}
+
+// touchedSincePublish says a line of slice id comes after the last publish-done.
+func (t *ticket) touchedSincePublish(id string) bool {
+	last := -1
+	for i, l := range t.lines {
+		if l.Event == journal.EventPublishDone {
+			last = i
+		}
+	}
+	for _, l := range t.lines[last+1:] {
+		if l.Slice == id {
+			return true
+		}
+	}
+	return false
 }
 
 // splitPlus is a status cell of ids joined by "+".
