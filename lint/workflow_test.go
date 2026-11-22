@@ -117,8 +117,9 @@ func dependsOn(jobs map[string]interface{}, from, target string) bool {
 }
 
 // TestCIWorkflowTriggers asserts ci.yml runs on every push to main and on
-// every pull request, and exposes workflow_call so release.yml can reuse it
-// as a gate before publishing.
+// every pull request into main, and on no pull request into another
+// branch, and exposes workflow_call so release.yml can reuse it as a gate
+// before publishing.
 func TestCIWorkflowTriggers(t *testing.T) {
 	root := repoRoot(t)
 	doc := loadWorkflow(t, root, "ci.yml")
@@ -143,8 +144,21 @@ func TestCIWorkflowTriggers(t *testing.T) {
 		t.Errorf("ci.yml: push trigger does not list branch \"main\", so a push to main would not run ci")
 	}
 
-	if _, ok := on["pull_request"]; !ok {
-		t.Errorf("ci.yml: no pull_request trigger, so a PR could merge without ci running")
+	pr, ok := yamlMap(on["pull_request"])
+	if !ok {
+		t.Errorf("ci.yml: no pull_request trigger mapping, so a PR into main could merge without ci running")
+	} else {
+		prBranches, _ := yamlSlice(pr["branches"])
+		if len(prBranches) != 1 {
+			t.Errorf("ci.yml: pull_request branches is %v, want exactly [main]: a pull request into another branch must not run ci", prBranches)
+		} else if s, ok := yamlString(prBranches[0]); !ok || s != "main" {
+			t.Errorf("ci.yml: pull_request branches is %v, want exactly [main]: a pull request into another branch must not run ci", prBranches)
+		}
+		for k := range pr {
+			if k != "branches" {
+				t.Errorf("ci.yml: pull_request has %s, want only branches: [main], so main is the one branch ci protects", k)
+			}
+		}
 	}
 
 	if _, ok := on["workflow_call"]; !ok {
@@ -154,7 +168,7 @@ func TestCIWorkflowTriggers(t *testing.T) {
 
 // TestCIWorkflowTestJob asserts the "test" job's legs are the ones the plan
 // job names (TestCIWorkflowPlan: all three platforms on every push to main,
-// Linux and macOS on every pull request; a macOS-only regression has
+// Linux and macOS on every pull request into main; a macOS-only regression has
 // shipped before, commit d920a72), that its legs report the check names
 // main's ruleset requires, and that it actually enforces formatting, vet,
 // and tests rather than just building.
@@ -182,7 +196,7 @@ func TestCIWorkflowTestJob(t *testing.T) {
 	}
 
 	// Main's ruleset requires test (ubuntu-latest) and test (macos-latest) by
-	// name, and every pull request reports both (TestCIWorkflowPlan), so the
+	// name, and every pull request into main reports both (TestCIWorkflowPlan), so the
 	// name is pinned, not just the platforms: another name would never
 	// report a required check.
 	if name, _ := yamlString(job["name"]); name != "test (${{ matrix.os }})" {
@@ -284,7 +298,7 @@ func runPlan(t *testing.T, jobs map[string]interface{}, event string, changed []
 }
 
 // allLegs and pullRequestLegs are the test job's legs on every run of
-// ci.yml but a pull request's, and on a pull request that changes nothing
+// ci.yml but a pull request into main's, and on one that changes nothing
 // Windows builds or runs differently: test (ubuntu-latest) and
 // test (macos-latest) are the checks main's ruleset requires.
 var (
