@@ -376,13 +376,16 @@ func (t Ticket) Of(n Name) Phase {
 // Behind says the ticket published and its stack plan owes its branch a merge
 // (Facts.Restacks): the merge is the session's to make, and the publish that
 // follows pushes it and points the open pull request at its base. A closed
-// ticket is never behind.
-func (t Ticket) Behind() bool { return t.d != nil && t.d.owed() }
+// ticket is never behind. A ticket that is built again (Rebuilding) and owed a
+// merge is behind too: it stands at its own phase, and the merge is advice.
+func (t Ticket) Behind() bool {
+	return t.d != nil && (t.d.owed() || t.d.rebuilding && t.d.f.Closed == "" && len(t.d.f.Restacks) > 0)
+}
 
-// Reopened says the ticket published and has work after that publish that has
+// Rebuilding says the ticket published and has work after that publish that has
 // not been published: it stands at the build, the review or the publish again,
 // until that publish is done or the ticket lands or closes.
-func (t Ticket) Reopened() bool { return t.d != nil && t.d.reopened }
+func (t Ticket) Rebuilding() bool { return t.d != nil && t.d.rebuilding }
 
 // Restacks are the merges a ticket that is behind is owed, one for each repo;
 // nil for a ticket that is not.
@@ -545,9 +548,9 @@ type digest struct {
 	// landed and hasPR are what land read of the lines: every pull request has
 	// a landed line, and some repo has a pull request.
 	landed, hasPR bool
-	// reopened: the ticket published and has work after that publish, so it
+	// rebuilding: the ticket published and has work after that publish, so it
 	// is read as one that has not published (Derive).
-	reopened bool
+	rebuilding bool
 }
 
 // OpenRoundIn is the round the journal says is open: the latest gate-open line
@@ -616,12 +619,14 @@ func EverClaimed(lines []journal.Line) bool {
 // journal after that publish, so it is at the build, then the review, then the
 // publish again, and at the land once that publish is done.
 func Derive(f Facts, lines []journal.Line) Ticket {
-	again := Reopens(f, lines)
+	again := Rebuilds(f, lines)
 	if again {
-		f.Published, f.Restacks = false, nil
+		// The restacks stay: a stacked ticket that is behind is still owed
+		// its merge, and Behind says so while it is built again.
+		f.Published = false
 	}
 	d := newDigest(f, lines)
-	d.reopened = again
+	d.rebuilding = again
 	pub := f.Published || f.Closed != ""
 
 	briefP, own := d.brief()
@@ -662,19 +667,21 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	return t
 }
 
-// reopenEvents are the journal lines that show work went on after a publish:
-// a slice taken up, verified or added. A question, an answer or a note is not
-// work on the code.
-var reopenEvents = map[string]bool{
-	journal.EventClaim: true, journal.EventVerified: true, journal.EventFixSlice: true, journal.EventSliceAdd: true,
+// rebuildEvents are the journal lines that show work went on after a publish:
+// a slice taken up, verified or fixed. A question, an answer or a note is not
+// work on the code, and an added slice is queued in the store, so its slice
+// state carries it: the line alone, left behind by a slice taken out again,
+// reopens nothing.
+var rebuildEvents = map[string]bool{
+	journal.EventClaim: true, journal.EventVerified: true, journal.EventFixSlice: true,
 }
 
-// Reopens says a published ticket has work the publish does not carry: it is
+// Rebuilds says a published ticket has work the publish does not carry: it is
 // open and has not landed, and a slice is not green or the journal has a build
 // line after its last publish-done. Landing or closing ends it, since work
 // after a merge is a new need; a ticket whose pull request the host reports
 // merged is read as landed for the same reason.
-func Reopens(f Facts, lines []journal.Line) bool {
+func Rebuilds(f Facts, lines []journal.Line) bool {
 	if !f.Published || f.Closed != "" || f.Landed || f.MergedOnHost {
 		return false
 	}
@@ -686,14 +693,24 @@ func Reopens(f Facts, lines []journal.Line) bool {
 			return true
 		}
 	}
-	last := -1
+	last, head := -1, ""
 	for i, l := range lines {
-		if l.Event == journal.EventPublishDone {
+		switch l.Event {
+		case journal.EventPublishDone:
 			last = i
+		case journal.EventPr:
+			if l.Commit != "" {
+				head = l.Commit
+			}
 		}
 	}
 	for i := last + 1; last >= 0 && i < len(lines); i++ {
-		if reopenEvents[lines[i].Event] {
+		l := lines[i]
+		// A re-verify of the head the pull request already carries is no new work.
+		if l.Event == journal.EventVerified && head != "" && l.Commit == head {
+			continue
+		}
+		if rebuildEvents[l.Event] {
 			return true
 		}
 	}

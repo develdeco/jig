@@ -244,7 +244,7 @@ func TestTickets(t *testing.T) {
 }
 
 // TestTicketsPublishedWithAQueuedSlice: a published ticket the caller reads as
-// reopened offers its slices like any queued one, when its blockers are met, and
+// rebuilding offers its slices like any queued one, when its blockers are met, and
 // reads green once they are built; a published one that is not (landed, closed,
 // or all green with nothing since) is done, and what a dependent waits for is
 // unchanged.
@@ -253,14 +253,14 @@ func TestTicketsPublishedWithAQueuedSlice(t *testing.T) {
 	slices := []store.Slice{{ID: "a"}, {ID: "fix", BlockedBy: []string{"a"}}, {ID: "late"}}
 	queued := states("a", "green", "fix", "queued", "late", "queued")
 	got := Tickets([]Ticket{
-		{ID: "T-1", Published: true, Reopened: true, Slices: slices, States: queued},
+		{ID: "T-1", Published: true, Rebuilding: true, Slices: slices, States: queued},
 		{ID: "T-2", Published: true, Slices: slices, States: queued},
 		{ID: "T-3", Published: true, Closed: &store.Closed{Reason: "covered"}, Slices: slices, States: queued},
 		{ID: "T-4", Published: true, Slices: slices, States: states("a", "green", "fix", "green", "late", "green")},
-		{ID: "T-5", Published: true, Reopened: true, Blockers: []Blocker{{"T-6", "merged"}}, Slices: slices, States: queued},
+		{ID: "T-5", Published: true, Rebuilding: true, Blockers: []Blocker{{"T-6", "merged"}}, Slices: slices, States: queued},
 		{ID: "T-6"},
 		{ID: "T-7", Blockers: []Blocker{{"T-1", "stacked"}}, Slices: slices, States: queued},
-		{ID: "T-8", Published: true, Reopened: true, Slices: slices, States: states("a", "green", "fix", "green", "late", "green")},
+		{ID: "T-8", Published: true, Rebuilding: true, Slices: slices, States: states("a", "green", "fix", "green", "late", "green")},
 	})
 	byID := map[string]Status{}
 	for _, s := range got {
@@ -275,7 +275,7 @@ func TestTicketsPublishedWithAQueuedSlice(t *testing.T) {
 		}
 	}
 	if s := byID["T-8"]; s.State != StateGreen || len(s.Ready) != 0 {
-		t.Errorf("reopened and built again: state %q ready %v, want green with none", s.State, s.Ready)
+		t.Errorf("rebuilding and built again: state %q ready %v, want green with none", s.State, s.Ready)
 	}
 	if s := byID["T-2"]; s.State != StateDone {
 		t.Errorf("landed: state %q, want done", s.State)
@@ -284,7 +284,7 @@ func TestTicketsPublishedWithAQueuedSlice(t *testing.T) {
 		t.Errorf("published, queued and blocked: state %q ready %v, want blocked with none", s.State, s.Ready)
 	}
 	if s := byID["T-7"]; len(s.Blocked) != 0 {
-		t.Errorf("a stacked dependent of a reopened ticket is blocked by %v, want none: it still counts as published", s.Blocked)
+		t.Errorf("a stacked dependent of a rebuilding ticket is blocked by %v, want none: it still counts as published", s.Blocked)
 	}
 }
 

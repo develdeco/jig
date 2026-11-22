@@ -1085,8 +1085,8 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	if got.Current != Build || !got.Ready || got.Code != "" || got.Prompt != "Build SHOP-1" {
 		t.Fatalf("queued slice: current %s ready %v code %q prompt %q, want a ready build", got.Current, got.Ready, got.Code, got.Prompt)
 	}
-	if !got.Reopened() {
-		t.Errorf("queued slice: Reopened() = false, want true")
+	if !got.Rebuilding() {
+		t.Errorf("queued slice: Rebuilding() = false, want true")
 	}
 
 	// Built green again, nothing reviewed since: the review.
@@ -1113,8 +1113,8 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	if got.Current != Land || got.Ready || got.Code != CodeDone || got.Prompt != "Land SHOP-1" {
 		t.Fatalf("fix published: current %s ready %v code %q prompt %q, want the land", got.Current, got.Ready, got.Code, got.Prompt)
 	}
-	if got.Reopened() {
-		t.Errorf("fix published: Reopened() = true, want false")
+	if got.Rebuilding() {
+		t.Errorf("fix published: Rebuilding() = true, want false")
 	}
 
 	// Landed, or closed: done whatever the slices.
@@ -1134,7 +1134,7 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 		} else {
 			f.MergedOnHost = true
 		}
-		if got := Derive(f, published); got.Reopened() || got.Current == Build || got.Ready || got.Code != CodeDone {
+		if got := Derive(f, published); got.Rebuilding() || got.Current == Build || got.Ready || got.Code != CodeDone {
 			t.Errorf("%s with a queued slice: current %s ready %v code %q, want it left done", name, got.Current, got.Ready, got.Code)
 		}
 	}
@@ -1144,19 +1144,40 @@ func TestDerivePublishedWithAQueuedSliceIsAtBuild(t *testing.T) {
 	green := allGreen()
 	green.Published = true
 	talked := append(append([]journal.Line(nil), published...), ln(journal.EventQuestion, onSlice("a")), ln(journal.EventAnswer, onSlice("a")))
-	if got := Derive(green, talked); got.Reopened() || got.Current != Land {
-		t.Errorf("a question after the publish: reopened %v current %s, want published at the land", got.Reopened(), got.Current)
+	if got := Derive(green, talked); got.Rebuilding() || got.Current != Land {
+		t.Errorf("a question after the publish: rebuilding %v current %s, want published at the land", got.Rebuilding(), got.Current)
 	}
-	if got := Derive(green, append(talked, ln(journal.EventSliceAdd, onSlice("d")))); !got.Reopened() || got.Current != Review {
-		t.Errorf("a slice added after the publish: reopened %v current %s, want it at the review", got.Reopened(), got.Current)
+	if got := Derive(green, append(talked, ln(journal.EventVerified, onSlice("a"), commit("beef000001")))); !got.Rebuilding() || got.Current != Review {
+		t.Errorf("a slice verified at a new commit after the publish: rebuilding %v current %s, want it at the review", got.Rebuilding(), got.Current)
+	}
+	// An added slice that left only its line (taken out again) is no work, and
+	// neither is a re-verify of the head the pull request carries.
+	if got := Derive(green, append(talked, ln(journal.EventSliceAdd, onSlice("d")))); got.Rebuilding() {
+		t.Errorf("a slice-add line alone rebuilds the ticket")
+	}
+	atHead := append(append([]journal.Line(nil), built()...), ln(journal.EventPr, outcome("opened"), prURL, commit("abcdef4567")), ln(journal.EventPublishDone))
+	if got := Derive(green, append(atHead, ln(journal.EventVerified, onSlice("a"), commit("abcdef4567")))); got.Rebuilding() {
+		t.Errorf("a re-verify of the published head rebuilds the ticket")
+	}
+	if got := Derive(green, append(atHead, ln(journal.EventVerified, onSlice("a"), commit("beef000002")))); !got.Rebuilding() {
+		t.Errorf("a verify of another commit does not rebuild the ticket")
+	}
+
+	// A stacked ticket owed a merge is behind while it is built again, owing
+	// the merge.
+	owed := []Restack{{Repo: "app", Kind: RestackTarget, Ref: "origin/main"}}
+	stacked := queued
+	stacked.Restacks = owed
+	if got := Derive(stacked, published); !got.Rebuilding() || !got.Behind() || got.Current != Build || !reflect.DeepEqual(got.Restacks(), owed) {
+		t.Errorf("rebuilding with restacks: rebuilding %v behind %v current %s restacks %v, want built again, behind, owing %v", got.Rebuilding(), got.Behind(), got.Current, got.Restacks(), owed)
 	}
 	// A caller's word that it published, with no publish-done line to count from,
 	// is taken as it is.
-	if got := Derive(green, built()); got.Reopened() {
-		t.Errorf("published with no publish line: reopened, want it left alone")
+	if got := Derive(green, built()); got.Rebuilding() {
+		t.Errorf("published with no publish line: rebuilding, want it left alone")
 	}
-	// An unpublished ticket is never reopened.
-	if got := Derive(allGreen(), built()); got.Reopened() {
-		t.Errorf("an unpublished ticket is reopened")
+	// An unpublished ticket is never rebuilding.
+	if got := Derive(allGreen(), built()); got.Rebuilding() {
+		t.Errorf("an unpublished ticket is rebuilding")
 	}
 }

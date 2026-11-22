@@ -353,13 +353,9 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 	switch {
 	case t.Code == phase.CodeClosed:
 		return t.Reason
-	case t.Behind():
-		asks := make([]string, 0, len(t.Restacks()))
-		for _, r := range t.Restacks() {
-			asks = append(asks, fmt.Sprintf("`git merge %s` in %s", r.Ref, r.Repo))
-		}
+	case t.Behind() && !t.Rebuilding():
 		return fmt.Sprintf("%s is published but behind: run %s, then `jig publish %s`, which pushes the merge and points the open PR at its base%s",
-			ticket, strings.Join(asks, " and "), ticket, prompt)
+			ticket, mergeAsks(t), ticket, prompt)
 	case t.Code == phase.CodeDone && t.Current == phase.Land:
 		return landAdvice(t, ticket, nil)
 	case t.Code == phase.CodeDone:
@@ -381,7 +377,21 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 	case t.Current == phase.Review:
 		return fmt.Sprintf("Run `jig gate %s` to open the next gate round%s", ticket, prompt)
 	}
+	if t.Behind() {
+		// Built again and owed a merge: the merge comes before the publish that
+		// pushes it.
+		return fmt.Sprintf("Run %s, then `jig publish %s` to update the PR and point it at its base%s", mergeAsks(t), ticket, prompt)
+	}
 	return fmt.Sprintf("Run `jig publish %s` to open or update the PR%s", ticket, prompt)
+}
+
+// mergeAsks words the merges a ticket that is behind is owed.
+func mergeAsks(t phase.Ticket) string {
+	asks := make([]string, 0, len(t.Restacks()))
+	for _, r := range t.Restacks() {
+		asks = append(asks, fmt.Sprintf("`git merge %s` in %s", r.Ref, r.Repo))
+	}
+	return strings.Join(asks, " and ")
 }
 
 // awaitsApproval reports whether the brief of t is drafted and waits for the

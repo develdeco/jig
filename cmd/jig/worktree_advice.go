@@ -116,7 +116,7 @@ func (s *worktreeSource) factsOf(id string) (worktreeFacts, error) {
 	if err != nil {
 		return worktreeFacts{}, err
 	}
-	settleReopened(s.st, s.merges, &data.in)
+	settleRebuilding(s.st, s.merges, &data.in)
 	branch, err := ticketBranch(s.st, s.cfg, id, data.rec)
 	if err != nil {
 		return worktreeFacts{}, err
@@ -127,7 +127,7 @@ func (s *worktreeSource) factsOf(id string) (worktreeFacts, error) {
 	}
 	return worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
-		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Reopened,
+		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Rebuilding,
 	}, nil
 }
 

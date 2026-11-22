@@ -13,9 +13,9 @@ import (
 	"github.com/develdeco/jig/internal/store"
 )
 
-// reopenedFleet is `jig next --json`: the rows of the tickets and the ready
+// rebuildingFleet is `jig next --json`: the rows of the tickets and the ready
 // ones, as these tests read them.
-type reopenedFleet struct {
+type rebuildingFleet struct {
 	Tickets []struct {
 		ID    string   `json:"id"`
 		State string   `json:"state"`
@@ -103,7 +103,7 @@ func TestNextNamesTheBuildOfAPublishedTicketsQueuedSlice(t *testing.T) {
 	if !strings.Contains(text, "phase: build\n") || !strings.Contains(text, "prompt: Build JIG-1\n") {
 		t.Errorf("jig next does not name the build:\n%s", text)
 	}
-	var fleet reopenedFleet
+	var fleet rebuildingFleet
 	asJSON, code := runMain(t, e, "", "next", "--store", r.root, "--json")
 	if err := json.Unmarshal([]byte(asJSON), &fleet); code != 0 || err != nil {
 		t.Fatalf("jig next --json: exit %d, %v\n%s", code, err, asJSON)
@@ -156,7 +156,7 @@ func TestNextNamesTheBuildOfAPublishedTicketsQueuedSlice(t *testing.T) {
 		t.Errorf("landed: the worktree advice reads the ticket as not published")
 	}
 	asJSON, code = runMain(t, e, "", "next", "--store", r.root, "--json")
-	fleet = reopenedFleet{}
+	fleet = rebuildingFleet{}
 	if err := json.Unmarshal([]byte(asJSON), &fleet); code != 0 || err != nil || fleet.Tickets[0].State != "done" || len(fleet.Tickets[0].Ready) != 0 || len(fleet.Next) != 0 {
 		t.Errorf("landed: the frontier = %+v (%v), want JIG-1 done and not next", fleet, err)
 	}
