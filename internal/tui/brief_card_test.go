@@ -25,8 +25,8 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 		ll(at(20, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-p", "claude", "claude-sonnet-5" }),
 		tool(at(20, 30), "s-p", "go test ./...", said("Run the tests to see the bug")),
 		ll(at(21, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-p" }),
-		tool(at(21, 1), "s-p", `jig ticket new --title "Cart totals"`, said("Mint a ticket for the bug")),
-		tool(at(22, 0), "s-p", "jig skill intake", said("Read the intake skill")),
+		toolOn("SHOP-1", at(21, 1), "s-p", `jig ticket new --title "Cart totals"`, said("Mint a ticket for the bug")),
+		toolOn("SHOP-1", at(22, 0), "s-p", "jig skill intake", said("Read the intake skill")),
 	)
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Brief ─"), "\n")
@@ -55,7 +55,7 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 	g.r.answer("status SHOP-1 --store /s", draftStatus(sections(3)), 0)
 	advance(4 * time.Second)
 	g.send(idleMsg{})
-	g.feed(tool(at(30, 10), "s-p", "jig validate SHOP-1 --check", said("Check the brief")))
+	g.feed(toolOn("SHOP-1", at(30, 10), "s-p", "jig validate SHOP-1 --check", said("Check the brief")))
 	advance(20 * time.Second)
 	block = strings.Join(panelLines(strings.Split(g.view(), "\n"), "Brief ─"), "\n")
 	for _, want := range []string{

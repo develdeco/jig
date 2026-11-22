@@ -137,17 +137,18 @@ func TestALedgerLineOfASessionBelongsToItsTicket(t *testing.T) {
 	w := newWorld()
 	touched, fresh := w.apply([]events.Envelope{
 		ll(at(0, 1), "T", journal.EventVerifySpawned, func(l *journal.Line) { l.Session = "s-1" }),
-		ll(at(0, 2), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
-		ll(at(0, 3), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-other", "Bash" }),
+		ll(at(0, 2), "T", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
+		ll(at(0, 3), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
+		ll(at(0, 4), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-other", "Bash" }),
 	})
 	if !fresh || !touched["T"] || len(touched) != 1 {
 		t.Errorf("touched = %v fresh = %v", touched, fresh)
 	}
 	if got := len(w.tickets["T"].ledger); got != 2 {
-		t.Errorf("ticket T has %d ledger lines, want its spawn line and its session's tool line", got)
+		t.Errorf("ticket T has %d ledger lines, want its spawn line and the tool line that names it, not the session's later call that names none", got)
 	}
-	if got := len(w.feed); got != 3 {
-		t.Errorf("the feed holds %d lines, want all 3", got)
+	if got := len(w.feed); got != 4 {
+		t.Errorf("the feed holds %d lines, want all 4", got)
 	}
 }
 

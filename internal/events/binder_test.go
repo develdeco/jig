@@ -100,6 +100,9 @@ func TestReaderBindsLinesByAgent(t *testing.T) {
 	r.ledgerAppend(tool(6, "a-2", "T-2", "jig claim")) // first bound line of a-2
 	r.ledgerAppend(tool(7, "a-2", "T-2", "go build"))  // its own
 	r.ledgerAppend(journal.Line{TS: at(8), Event: "hook", Session: "s1", Agent: "a-1", Outcome: "stop"})
+	// A line that is no call is not an early call: it joins nothing.
+	r.ledgerAppend(journal.Line{TS: at(9), Event: "hook", Session: "s1", Agent: "a-5", Outcome: "prompt"})
+	r.ledgerAppend(tool(9, "a-5", "T-1", "jig claim"))
 
 	rd := NewReader(r.scope(false, "T-1", "T-2"), time.Time{})
 	envs, err := rd.Poll()
@@ -108,7 +111,7 @@ func TestReaderBindsLinesByAgent(t *testing.T) {
 	}
 	want := []string{
 		"tool/a-1/jig here/T-1", "tool/a-2/jig here/T-2", "tool/a-1/jig claim/T-1",
-		"tool/a-2/jig claim/T-2", "tool/a-2/go build/T-2",
+		"tool/a-2/jig claim/T-2", "tool/a-2/go build/T-2", "tool/a-5/jig claim/T-1",
 	}
 	if got := ledgerView(envs); !reflect.DeepEqual(got, want) {
 		t.Fatalf("lines = %v\nwant    %v", got, want)
@@ -127,6 +130,52 @@ func TestReaderBindsLinesByAgent(t *testing.T) {
 	}
 	if envs, err = rd.Poll(); err != nil || len(envs) != 0 {
 		t.Errorf("Poll again = %v, %v, want nothing: the held call is handed back once", ledgerView(envs), err)
+	}
+}
+
+// TestBinderHoldsAFixedAmount: an agent that never binds holds a bounded
+// number of early calls (the newest), the agents followed are bounded, so is
+// the memory of calls for the fold; a stream with no ticket to place lines on
+// holds nothing.
+func TestBinderHoldsAFixedAmount(t *testing.T) {
+	t.Parallel()
+	call := func(agent string, n int) journal.Line {
+		return journal.Line{TS: fmt.Sprintf("2026-10-23T09:00:00.%09dZ", n), Event: "tool", Session: "s1", Agent: agent, Tool: "Bash", Command: fmt.Sprint("c", n)}
+	}
+	b := NewBinder(true)
+	for n := 0; n < maxHeld+10; n++ {
+		if got := b.Bind(call("a-1", n)); len(got) != 0 {
+			t.Fatalf("an early call was placed: %+v", got)
+		}
+	}
+	bound := call("a-1", 1000)
+	bound.Ticket = "T-1"
+	got := b.Bind(bound)
+	if len(got) != maxHeld+1 || got[0].Command != "c10" || got[len(got)-1].Command != "c1000" {
+		t.Errorf("the first bound line placed %d lines from %q, want the newest %d early calls and itself", len(got), got[0].Command, maxHeld)
+	}
+	for _, l := range got {
+		if l.Ticket != "T-1" {
+			t.Fatalf("a placed line is on %q, want T-1", l.Ticket)
+		}
+	}
+
+	for n := 0; n < maxSeats+50; n++ {
+		b.Bind(call(fmt.Sprint("agent-", n), n))
+	}
+	if len(b.seats) > maxSeats {
+		t.Errorf("%d agents followed, want at most %d", len(b.seats), maxSeats)
+	}
+	for n := 0; n < maxFold+50; n++ {
+		b.Bind(call("a-1", 5000+n))
+	}
+	if len(b.seen) > maxFold || len(b.ring) > maxFold {
+		t.Errorf("%d calls remembered, want at most %d", len(b.seen), maxFold)
+	}
+
+	free := NewBinder(false)
+	if got := free.Bind(call("a-1", 1)); len(got) != 1 || got[0].Ticket != "" {
+		t.Errorf("a Binder that holds nothing placed %+v, want the line as it is", got)
 	}
 }
 
