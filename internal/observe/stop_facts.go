@@ -84,11 +84,15 @@ func (h *handler) claimedUnattended() bool {
 // moment, and their lines must not blur this one's. A harness without hooks
 // leaves none, and then nobody can say.
 func (h *handler) claimHolder(claim *journal.Line) (agent string, known bool) {
+	return h.claimHolderOn(h.w.Ticket, claim)
+}
+
+// claimHolderOn is claimHolder for a claim on ticket.
+func (h *handler) claimHolderOn(ticket string, claim *journal.Line) (agent string, known bool) {
 	at, err := time.Parse(time.RFC3339Nano, claim.TS)
 	if err != nil {
 		return "", false
 	}
-	ticket := h.w.Ticket
 	agent, known, err = ledger.AgentOf(h.d.JigHome, memoryWindow, h.session(), at, func(l journal.Line) bool {
 		return ledger.RunsJig(l.Command, "", "claim") && !strings.Contains(l.Command, "--release") &&
 			(l.Ticket == ticket || ledger.RunsJig(l.Command, ticket, "claim")) &&

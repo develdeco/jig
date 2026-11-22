@@ -1,0 +1,292 @@
+package observe
+
+import (
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/ledger"
+)
+
+// A tool call is written on the ticket it belongs to, by the first of:
+//
+//  1. the ticket whose slice the call's own agent holds. A harness reports
+//     the session's directory for a subagent that works in a worktree of its
+//     own, so the directory says nothing of what the agent is on; its claim
+//     does.
+//  2. the ticket of the worktree the command ran in: the directory a leading
+//     `cd <dir> &&` names, else the event's directory, through the branch
+//     checked out there.
+//  3. none.
+//
+// Nothing carries a ticket forward from one call to the next: a claim binds
+// only while it is held.
+
+// claimCall is a `jig claim` call of the event's agent, read back from the
+// ledger: what the claim names, and whether the agent has stopped since.
+type claimCall struct {
+	// word is the ticket the command names, ticket the one the line was
+	// written on, slice the slice the command names; each may be empty.
+	word, ticket, slice string
+	// ended is true when the agent stopped after the call.
+	ended bool
+}
+
+// claimCallOf reads a tool line as the claim of a slice, false for any other
+// line, and for a release.
+func claimCallOf(l journal.Line) (claimCall, bool) {
+	if l.Event != journal.EventTool || !madeClaim(l.Command) {
+		return claimCall{}, false
+	}
+	return claimCall{word: claimWord(l.Command), ticket: l.Ticket, slice: claimSlice(l.Command)}, true
+}
+
+// madeClaim reports whether the shell command line claims a slice: a
+// `jig claim` that does not release.
+func madeClaim(cmd string) bool {
+	return ledger.RunsJig(cmd, "", "claim") && !strings.Contains(cmd, "--release")
+}
+
+// claimWord is the ticket word of a `jig claim` command line, "" when it
+// names none (the claim then takes the ticket from the branch it runs on).
+func claimWord(cmd string) string {
+	words := strings.Fields(cmd)
+	for i, w := range words {
+		if !isJig(w) || i+1 >= len(words) || words[i+1] != "claim" {
+			continue
+		}
+		for j := i + 2; j < len(words); j++ {
+			a := words[j]
+			switch a {
+			case "&&", "||", ";", "|":
+				return ""
+			}
+			if strings.HasPrefix(a, "-") {
+				// A flag that takes its value as the next word.
+				if !strings.Contains(a, "=") && flagTakesValue(a) {
+					j++
+				}
+				continue
+			}
+			return strings.Trim(a, `"'`)
+		}
+	}
+	return ""
+}
+
+// flagTakesValue reports whether the claim flag a is followed by a value.
+func flagTakesValue(a string) bool {
+	switch strings.TrimLeft(a, "-") {
+	case "slice", "session", "store", "project":
+		return true
+	}
+	return false
+}
+
+// claimSlice is the slice a `jig claim` command line names, "" when none.
+func claimSlice(cmd string) string {
+	words := strings.Fields(cmd)
+	for i := 0; i < len(words); i++ {
+		flag, value, hasValue := strings.Cut(words[i], "=")
+		if flag != "--slice" && flag != "-slice" {
+			continue
+		}
+		if !hasValue && i+1 < len(words) {
+			value = words[i+1]
+		}
+		return strings.Trim(value, `"'`)
+	}
+	return ""
+}
+
+func isJig(word string) bool {
+	base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.Trim(word, `"'`), `\`, "/")))
+	return base == "jig" || base == "jig.exe"
+}
+
+// bindTool is the ticket and slice a tool call of the event's agent is
+// written on.
+func (h *handler) bindTool() (ticket, slice string) {
+	ticket, slice = h.bindTicket()
+	if ticket != "" && ticket == h.w.Ticket {
+		// The slice the located place says, as the session's lines have always
+		// carried it.
+		return ticket, h.w.Slice
+	}
+	return ticket, slice
+}
+
+func (h *handler) bindTicket() (ticket, slice string) {
+	if ledger.RunsJig(h.ev.Command, "", "claim") {
+		// The claim's own line is not in the ledger yet when the hook asks,
+		// nor is a release's: the call binds by what it names.
+		if t := h.ticketNamed(claimWord(h.ev.Command)); t != "" {
+			return t, claimSlice(h.ev.Command)
+		}
+	}
+	if t, s := h.claimBinding(false); t != "" {
+		return t, s
+	}
+	return h.worktreeTicket(), ""
+}
+
+// ticketNamed is the ticket a word of a command names (its id, or an id it
+// carried before), "" when the store knows none.
+func (h *handler) ticketNamed(word string) string {
+	if word == "" || h.st == nil {
+		return ""
+	}
+	id, err := h.st.ResolveTicket(word)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+// claimBinding is the ticket and slice the event's agent holds: the newest
+// claim it made that its ticket's journal still holds for the session. A
+// subagent's stop ends its claims for the calls after it, and not for the
+// stops themselves (afterStop), which place the agent. One read of a
+// ticket's journal for each ticket the agent claimed, and none for an agent
+// that made no claim.
+func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
+	session := h.session()
+	if session == "" || h.st == nil {
+		return "", ""
+	}
+	mem := h.memory()
+	read := map[string]bool{}
+	for _, c := range mem.claims {
+		if c.ended && !afterStop {
+			return "", ""
+		}
+		t := h.ticketNamed(c.word)
+		if t == "" {
+			t = c.ticket
+		}
+		if t == "" || read[t+"\x00"+c.slice] {
+			continue
+		}
+		read[t+"\x00"+c.slice] = true
+		if s, held := h.holds(t, c.slice); held {
+			return t, s
+		}
+	}
+	return "", ""
+}
+
+// holds reports whether the session holds a claim on ticket that the event's
+// agent made: the slice it names, or when it names none, any claim the ledger
+// says the agent made. It returns the slice held.
+func (h *handler) holds(ticket, slice string) (string, bool) {
+	lines, err := journal.Read(h.st, ticket)
+	if err != nil {
+		h.fail(err)
+		return "", false
+	}
+	session := h.session()
+	var held []*journal.Line // the session's claims not released since, oldest first
+	for i, l := range lines {
+		if l.Session != session {
+			continue
+		}
+		switch l.Event {
+		case journal.EventClaim:
+			held = append(held, &lines[i])
+		case journal.EventRelease:
+			held = deleteSlice(held, l.Slice)
+		}
+	}
+	for i := len(held) - 1; i >= 0; i-- {
+		if slice != "" && held[i].Slice == slice {
+			return slice, true
+		}
+		if slice == "" {
+			if holder, known := h.claimHolderOn(ticket, held[i]); known && holder == h.ev.Agent {
+				return held[i].Slice, true
+			}
+		}
+	}
+	return "", false
+}
+
+func deleteSlice(held []*journal.Line, slice string) []*journal.Line {
+	out := held[:0]
+	for _, c := range held {
+		if c.Slice != slice {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// worktreeTicket is the ticket of the worktree the command ran in: the
+// directory a leading cd names, else the event's directory (the located
+// place). A cd that cannot be read, or that is to a directory on no ticket,
+// binds none.
+func (h *handler) worktreeTicket() string {
+	dir, cd := leadingCd(h.ev.Command)
+	if !cd {
+		return h.w.Ticket
+	}
+	if dir == "" || h.st == nil {
+		return ""
+	}
+	from := h.ev.Cwd
+	if from == "" {
+		from = h.d.Cwd
+	}
+	dir = normalDir(dir)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(from, dir)
+	}
+	branch, ok := gitx.HeadBranch(dir)
+	if !ok || branch == "" {
+		return ""
+	}
+	id, _, err := h.st.TicketForBranch(branch)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+// leadingCd is the directory a command line that starts with `cd <dir> &&`
+// moves to, and whether it does. A directory that is not one plain path (a
+// variable, a substitution, a subshell) is "": shown on no ticket, never
+// guessed.
+func leadingCd(cmd string) (dir string, cd bool) {
+	s := strings.TrimSpace(cmd)
+	rest, ok := strings.CutPrefix(s, "cd ")
+	if !ok {
+		return "", false
+	}
+	i := strings.Index(rest, "&&")
+	if i < 0 {
+		return "", false
+	}
+	dir = strings.TrimSpace(rest[:i])
+	if len(dir) >= 2 && (dir[0] == '"' || dir[0] == '\'') && dir[len(dir)-1] == dir[0] {
+		dir = dir[1 : len(dir)-1]
+	}
+	if dir == "" || strings.ContainsAny(dir, "$`;|()<>*?\"'~") {
+		return "", true
+	}
+	return dir, true
+}
+
+// normalDir reads a path the way a git bash shell on Windows spells it
+// (/c/work) as the drive path it names.
+func normalDir(dir string) string {
+	if runtime.GOOS != "windows" {
+		return dir
+	}
+	if len(dir) >= 3 && dir[0] == '/' && dir[2] == '/' && isLetter(dir[1]) {
+		return strings.ToUpper(dir[1:2]) + ":" + dir[2:]
+	}
+	return dir
+}
+
+func isLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }

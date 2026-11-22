@@ -37,6 +37,9 @@ type sessionMemory struct {
 	// for a hook payload that names the session's directory instead. Empty
 	// for the session's own agent.
 	agentTicket, agentCwd string
+	// claims are the `jig claim` calls of the event's agent, newest first, as
+	// the tool lines say (bindTool reads them).
+	claims []claimCall
 	// delivered holds the Refs of the notes already given to the agent (as
 	// context or in a refusal to stop), blocked the Refs it was refused a
 	// Stop for. A subagent shares its session's id and hears its notes on its
@@ -54,9 +57,21 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 	if session == "" {
 		return m, nil
 	}
+	stopped := false // the walk has passed the agent's own stop
 	err := ledger.ReadBackward(root, memoryWindow, func(l journal.Line) bool {
 		if l.Session != session {
 			return true
+		}
+		if l.Agent == agent {
+			// A subagent's stop ends the claims it made before it. The
+			// session's own agent stops at every turn and keeps its claim.
+			if agent != "" && l.Event == journal.EventHook && l.Outcome == KindStop {
+				stopped = true
+			}
+			if c, ok := claimCallOf(l); ok {
+				c.ended = stopped
+				m.claims = append(m.claims, c)
+			}
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
 			m.started = at // the walk goes back in time: the last one set is the earliest
