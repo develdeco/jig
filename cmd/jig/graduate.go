@@ -320,16 +320,19 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		if e.writeChart != nil {
 			writeChart = func(name string, entries []store.ChartEntry) error { return e.writeChart(st, name, entries) }
 		}
-		touched := []string{st.TicketRelDir(newID), "charts/" + chart + "/tickets.yaml"}
+		// A failed chart write leaves the chart file as it was (WriteChart
+		// replaces it atomically), so only the minted folder is reported: the
+		// file may hold edits no commit has, which Claim's undo would discard.
+		folder := []string{st.TicketRelDir(newID)}
 		if werr := writeChart(chart, entries); werr != nil {
-			// Claim undoes touched, so nothing of this attempt stays behind.
-			return "", touched, &chartWriteError{ae: &axi.Error{
+			// Claim undoes the folder, so nothing of this attempt stays behind.
+			return "", folder, &chartWriteError{ae: &axi.Error{
 				Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", newID, i+1, chart, werr),
 				Code: "VALIDATION_ERROR",
 			}}
 		}
 		pos = i
-		return newID, touched, nil
+		return newID, append(folder, "charts/"+chart+"/tickets.yaml"), nil
 	}
 	msgFn := func(claimedID string) string { return fmt.Sprintf("chart %s: graduate %s", chart, claimedID) }
 

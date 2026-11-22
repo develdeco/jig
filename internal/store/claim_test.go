@@ -1285,3 +1285,29 @@ func TestOutermostDropsPathsInsideAnother(t *testing.T) {
 		t.Fatalf("outermost = %v, want %v", got, want)
 	}
 }
+
+// TestUndoPathsTakesStagedPathsOutOnAnUnbornBranch covers a claim's own add
+// on a store with nothing committed: clean skips what the index holds, so the
+// undo must unstage each path too.
+func TestUndoPathsTakesStagedPathsOutOnAnUnbornBranch(t *testing.T) {
+	work := t.TempDir()
+	runGit(t, "", "init", "-b", "main", work)
+	st := &Store{Root: work}
+	folder := filepath.Join(work, "tickets", "JIG-1")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "ticket.yaml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "--", filepath.Join("tickets", "JIG-1"))
+	if err := st.undoPaths("", []string{filepath.Join("tickets", "JIG-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if status := strings.TrimSpace(runGit(t, work, "status", "--porcelain")); status != "" {
+		t.Fatalf("git status = %q, want clean", status)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("the folder survived (stat err %v)", err)
+	}
+}

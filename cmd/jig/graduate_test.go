@@ -1381,8 +1381,39 @@ func TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs(t *testing.T) {
 	}
 }
 
+// TestGraduateFailedChartWriteKeepsUncommittedChartEntries: a chart whose
+// hand-written entries no commit holds survives a failed chart write byte for
+// byte, since the failed write never changed it and the undo has no claim on it.
+func TestGraduateFailedChartWriteKeepsUncommittedChartEntries(t *testing.T) {
+	t.Parallel()
+	_, storeRoot := setupGraduateStore(t)
+	const chart = `tickets:
+  - title: "Slice A"
+  - title: "Hand written B"
+    body: |
+      kept
+`
+	writeChart(t, storeRoot, "mychart", chart)
+	e := testEnv(t.TempDir())
+	e.writeChart = func(*store.Store, string, []store.ChartEntry) error {
+		return errors.New("forced chart write failure")
+	}
+	var buf bytes.Buffer
+	if code := run(e, []string{"graduate", "mychart", "--store", storeRoot}, &buf, strings.NewReader("")); code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a refusal:\n%s", buf.String())
+	}
+	data, err := os.ReadFile(filepath.Join(storeRoot, "charts", "mychart", "tickets.yaml"))
+	if err != nil || string(data) != chart {
+		t.Fatalf("chart file = %q, %v, want it untouched", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(storeRoot, "tickets", "DEMO-1")); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived (stat err %v)", err)
+	}
+}
+
 // TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete covers the
-// remaining case: the chart file is locked, so Claim's undo of entry B's
+// remaining case: a file in entry B's minted ticket folder is held open, so
+// Claim's undo of entry B's
 // failed write cannot restore it. The error is IsUndoIncomplete, and the sync
 // is skipped rather than opening an issue for what was left behind.
 func TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete(t *testing.T) {
@@ -1403,14 +1434,11 @@ func TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete(t *testing.T) {
 	writeCalls := 0
 	e.writeChart = func(st *store.Store, chart string, entries []store.ChartEntry) error {
 		writeCalls++
-		if err := st.WriteChart(chart, entries); err != nil {
-			return err
-		}
 		if writeCalls == 2 {
-			lockFileShared(t, filepath.Join(clone, "charts", chart, "tickets.yaml"))
+			lockFileShared(t, filepath.Join(clone, "tickets", "DEMO-2", "ticket.yaml"))
 			return errors.New("forced failure on entry B's chart write")
 		}
-		return nil
+		return st.WriteChart(chart, entries)
 	}
 	e.mirrorClient = &stubGitHub{}
 
@@ -1419,8 +1447,8 @@ func TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("jig graduate mychart: exit 0, want a refusal:\n%s", buf.String())
 	}
-	if !strings.Contains(buf.String(), "tickets.yaml") {
-		t.Fatalf("output does not name the leftover chart file:\n%s", buf.String())
+	if want := "(left in the store: " + filepath.Join("tickets", "DEMO-2") + ")"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("output lacks the exact leftover list %q:\n%s", want, buf.String())
 	}
 	if strings.Contains(buf.String(), "Nothing was kept") {
 		t.Fatalf("output claims nothing was kept after an undo that did not finish:\n%s", buf.String())

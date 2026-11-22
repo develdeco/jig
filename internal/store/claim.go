@@ -286,7 +286,7 @@ func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error)
 // is taken out of the index (`rm -r --cached --ignore-unmatch`, so a path
 // nothing staged is no error) and then cleaned off the disk with its ignored
 // files (-x), such as a ticket folder's .lock sidecar. On an unborn branch (sha
-// is "") only the clean runs. It is best effort: every step for every path and
+// is "") nothing is restored, but each path is still taken out of the index. It is best effort: every step for every path and
 // the final clean are tried even after one fails, and the errors come back
 // joined, as an *undoPathsError naming the paths whose own step failed.
 // Called with no paths it does nothing - `clean -fdx --` with no pathspec would
@@ -305,26 +305,27 @@ func (s *Store) undoPaths(sha string, paths []string) error {
 		leftovers = append(leftovers, p)
 	}
 	// created are the paths that did not exist at sha: the clean's to take.
+	// On an unborn branch (sha is "") none existed, but the claim's own add may
+	// have staged them, and clean skips what the index holds.
 	var created []string
-	if sha == "" {
-		created = paths
-	} else {
-		for _, p := range paths {
-			existed, err := gitx.PathExistsAtRev(s.Root, sha, p)
-			if err != nil {
+	for _, p := range paths {
+		existed := false
+		if sha != "" {
+			var err error
+			if existed, err = gitx.PathExistsAtRev(s.Root, sha, p); err != nil {
 				fail(p, err)
 				continue
 			}
-			if !existed {
-				created = append(created, p)
-			}
-			if existed {
-				if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
-					fail(p, err)
-				}
-			} else if _, err := gitx.Run(s.Root, "rm", "-r", "--cached", "--ignore-unmatch", "--", p); err != nil {
+		}
+		if existed {
+			if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
 				fail(p, err)
 			}
+			continue
+		}
+		created = append(created, p)
+		if _, err := gitx.Run(s.Root, "rm", "-r", "--cached", "--ignore-unmatch", "--", p); err != nil {
+			fail(p, err)
 		}
 	}
 	// Only the outermost paths are cleaned: git clean leaves the emptied
