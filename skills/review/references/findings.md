@@ -1,0 +1,2 @@
+- `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
+- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix everywhere its rule applies (the test the fix adds or extends, by name, or a search that must come back empty, such as `! git grep -n '<pattern>'`), required for a fix.

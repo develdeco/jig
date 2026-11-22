@@ -29,6 +29,17 @@ Read `jig skill review rounds` when the report is refused or stale, the round ha
 - Read `jig skill review evidence` when `recordings` lists any, or the `intent` is `none`.
 - The `intent` is the human's own statement (`brief` or `explicit`, at `intent_path`).
 
+## Reach
+
+Every round, over the round's changes (a delta round: its delta's), before probing, list with `git grep` what the change reaches past the code it alters:
+
+- the callers of each function whose behavior changed;
+- the sibling commands or verbs that share a changed helper;
+- the record or file shapes and states main, or an older writer, still produces that the changed code reads;
+- the doc and ADR sentences about the changed behavior, the change's own too, against the code they describe.
+
+Read each against the new behavior; when in doubt run the path in your worktree and put it back. One the change breaks is a finding at its own file and line. Reached code is read, not probed, and goes in `--reviewed`.
+
 ## Probe
 
 Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current` and `caught`:
@@ -47,8 +58,7 @@ jig finding T-1 --file alpha/alpha.go --line 12 --title "..." --detail "..." \
   --action fix --risk medium --risk-rationale "..." --oracle "go test ./alpha -run 'TestAlpha'"
 ```
 
-- `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
-- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix everywhere its rule applies (the test the fix adds or extends, by name, or a search that must come back empty, such as `! git grep -n '<pattern>'`), required for a fix.
+- Read `jig skill review findings` for what `--action`, `--risk` and `--oracle` mean; `--oracle` is required for a fix.
 - A finding names the rule broken. Before filing, search the change for the same rule's other instances: the `--detail` lists them, and `--oracle` proves the rule across them. An `--action ask` about a rule lays out every case it must decide, with one recommended answer.
 - Never raise again what a person dismissed.
 - A missing test is a problem only at a seam the intent names, or as proof of a defect you report. A finding about a missing or weak test names the mutant its test must catch and the assertion that catches it.

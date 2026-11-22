@@ -69,6 +69,16 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 		"A finding names the rule broken. Before filing, search the change for the same rule's other instances",
 		"`--oracle` proves the rule across them",
 		"An `--action ask` about a rule lays out every case it must decide, with one recommended answer.",
+		"Read `jig skill review findings` for what `--action`, `--risk` and `--oracle` mean",
+		"list with `git grep` what the change reaches past the code it alters:",
+		"the callers of each function whose behavior changed;",
+		"the sibling commands or verbs that share a changed helper;",
+		"the record or file shapes and states main, or an older writer, still produces that the changed code reads;",
+		"the doc and ADR sentences about the changed behavior, the change's own too, against the code they describe.",
+		"One the change breaks is a finding at its own file and line.",
+		"Reached code is read, not probed",
+	)
+	wantAll(t, "skills/review findings", skillFile(t, "review", "findings"),
 		"a search that must come back empty, such as `! git grep -n '<pattern>'`",
 	)
 	wantAll(t, "skills/review rounds", skillFile(t, "review", "rounds"),
