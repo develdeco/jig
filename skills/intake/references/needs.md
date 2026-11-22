@@ -6,7 +6,7 @@ Before the verdict, write the need as a short statement of what the person needs
 
 ## A tracker item
 
-An item is one need, so one issue, never split whatever the fog and never a row of the table below; what grilling finds for it goes in its chart. jig reads the item, never `gh`: run `jig next 48`, relay its advisories and refuse nothing. The item's title and text are the need, so the verdict's step takes `--item <n>` and no `--need`. A later edit of the item is drift, never a change of need; a change of need goes to the issue's `body`. A bound item is its issue: work in that issue's chart and make nothing. A second session on one item is refused naming the issue: extend that chart.
+An item is one need, so one issue, never split whatever the fog and never a row of the table below; what grilling finds for it goes in its chart. jig reads the item, never `gh`: run `jig next 48`, relay its advisories and refuse nothing. The item's title and text are the need, so the verdict's step takes `--item <n>` and no `--need`. A later edit of the item is drift, never a change of need; a change of need goes to the issue's `body`. An item jig says it cannot bind (another repo's, or one GitHub moved) is input only: its title and text are the step's `--need`, never `--item`. A bound item is its issue: work in that issue's chart and make nothing. A second session on one item is refused naming the issue: extend that chart.
 
 ## Several needs at once
 

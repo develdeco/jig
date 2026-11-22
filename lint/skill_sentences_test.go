@@ -308,10 +308,11 @@ func TestIntakeTrackerItem(t *testing.T) {
 		"A later edit of the item is drift, never a change of need",
 		"A bound item is its issue: work in that issue's chart and make nothing",
 		"A second session on one item is refused naming the issue",
+		"An item jig says it cannot bind (another repo's, or one GitHub moved) is input only: its title and text are the step's `--need`, never `--item`",
 		"## Where a change is written",
 	)
 	wantAll(t, "skills/intake/references/chart-verdict", verdict,
-		"either verdict takes `jig chart new <name> --item <n>` instead (`--title` then names the chart only)",
+		"For a tracker item jig can bind, either verdict takes `jig chart new <name> --item <n>` instead (`--title` then names the chart only)",
 		"`--need`, `--issue <ID>` and `--item` exclude one another",
 	)
 	wantAll(t, "skills/here", here,
