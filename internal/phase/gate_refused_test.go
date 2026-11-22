@@ -66,6 +66,29 @@ func TestReviewGateRefused(t *testing.T) {
 			}
 		}
 	})
+	t.Run("the close of a round it was refused beside supersedes it, and the round reads as its own", func(t *testing.T) {
+		// A refusal journaled while a round was open (a gate run with --intent
+		// over a brief) sits after that round's gate-open; the round then closes.
+		beside := append(built(), ln(journal.EventGateOpen, attempt(1)), refusedLine("INTENT_CONFLICT", "x"))
+		f := allGreen()
+		f.Asks = []Ask{{ID: "r1-f1"}}
+		got := review(f, append(append([]journal.Line{}, beside...), ln(journal.EventGateRound, attempt(1))))
+		if got.Text != "round 1 left 1 ask · 1 wait for your decision" {
+			t.Errorf("after a round with findings: text = %q", got.Text)
+		}
+		if s := sub(t, got, "round:2"); s.State != SubPending || s.Detail == "INTENT_CONFLICT" {
+			t.Errorf("round 2 = %+v, want pending, not the refusal's code", s)
+		}
+		f = allGreen()
+		f.Notes = []Ask{{ID: "r1-f2", Decision: "keep"}}
+		got = review(f, append(append([]journal.Line{}, beside...), ln(journal.EventGateClean, attempt(1))))
+		if got.Text != "round 1 was clean · 1 note decided, round 2 applies them" {
+			t.Errorf("after a clean round with a decided note: text = %q", got.Text)
+		}
+		if a := Derive(f, append(append([]journal.Line{}, beside...), ln(journal.EventGateRound, attempt(1)))).For(Publish); strings.HasPrefix(a.Reason, "gate refused") {
+			t.Errorf("publish waits on a stale refusal: %q", a.Reason)
+		}
+	})
 	t.Run("a note, an ask or a question does not", func(t *testing.T) {
 		for _, ev := range []string{journal.EventNote, journal.EventQuestion, journal.EventAnswer, journal.EventTriage} {
 			got := review(allGreen(), append(append([]journal.Line{}, refused...), ln(ev)))

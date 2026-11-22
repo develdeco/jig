@@ -126,7 +126,14 @@ func TestGateRefusalSummaryHoldsNoHostPath(t *testing.T) {
 		{"forward slash drive path", "cannot read d:/work/x", "cannot read"},
 		{"unc path", `cannot read \\host\share\x`, "cannot read"},
 		{"colon before the path", "clone at: /srv/repo", "clone at"},
-		{"a relative branch is kept", "branch \"feature/x\" is neither in your clone nor on origin", "branch \"feature/x\" is neither in your clone nor on origin"},
+		{"a drive-like word is kept", "slice c: is queued, a:b and C: stay", "slice c: is queued, a:b and C: stay"},
+		{"a slash inside a word is kept", "and/or the ./rel path stay", "and/or the ./rel path stay"},
+		{"exactly the cap is kept", strings.Repeat("a", refusalSummaryCap), strings.Repeat("a", refusalSummaryCap)},
+		{"one over the cap is cut to it", strings.Repeat("a", refusalSummaryCap+1), strings.Repeat("a", refusalSummaryCap)},
+		{"a rune across the cap is dropped whole", strings.Repeat("a", refusalSummaryCap-1) + "é", strings.Repeat("a", refusalSummaryCap-1)},
+		{"a rune that ends at the cap is kept", strings.Repeat("a", refusalSummaryCap-2) + "é", strings.Repeat("a", refusalSummaryCap-2) + "é"},
+		{"the path is cut before the cap applies", strings.Repeat("a ", 20) + "/home/x " + strings.Repeat("b", 700), strings.TrimRight(strings.Repeat("a ", 20), " ")},
+		{"a relative branch is kept","branch \"feature/x\" is neither in your clone nor on origin", "branch \"feature/x\" is neither in your clone nor on origin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := refusalSummary(tc.msg); got != tc.want {

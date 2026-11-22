@@ -459,11 +459,11 @@ type round struct {
 }
 
 // refusalSupersededBy are the lines after which a gate-refused line is no
-// longer the word on the review: the gate ran again (an open or a new
-// refusal), or the build moved on (a claim, an oracle, a verification, a fix
+// longer the word on the review: the gate ran again (an open, a new refusal,
+// or the close of a round it was refused beside), or the build moved on (a claim, an oracle, a verification, a fix
 // slice, a requeue or a restamp). Notes, asks and questions do not.
 var refusalSupersededBy = map[string]bool{
-	journal.EventGateOpen: true, journal.EventGateRefused: true, journal.EventClaim: true,
+	journal.EventGateOpen: true, journal.EventGateRound: true, journal.EventGateClean: true, journal.EventGateRefused: true, journal.EventClaim: true,
 	journal.EventOracle: true, journal.EventVerified: true, journal.EventVerifyError: true,
 	journal.EventFixSlice: true, journal.EventRequeue: true, journal.EventRestamp: true,
 }
