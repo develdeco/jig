@@ -80,6 +80,20 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 		return BindResult{}, err
 	}
 
+	if detail.Number != o.Ref.Number {
+		// GitHub answers a transferred issue by the number it has now: the
+		// entry reserved and the record written would name another item.
+		return BindResult{}, &axi.Error{
+			Msg:  fmt.Sprintf("%s#%d answered as #%d: the item was moved", repo, o.Ref.Number, detail.Number),
+			Code: "ITEM_NOT_FOUND",
+			Help: []string{fmt.Sprintf("Bind it by its current number: jig chart new %s --item %d", o.Chart, detail.Number)},
+		}
+	}
+	held, err := nodeOwners(st)
+	if err != nil {
+		return BindResult{}, err
+	}
+
 	heading := strings.TrimSpace(o.Heading)
 	if heading == "" {
 		heading = oneLine(detail.Title)
@@ -87,8 +101,10 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 	res := BindResult{Chart: o.Chart, Heading: heading, Item: detail}
 	rec := githubRecord{Repo: repo, Issue: detail.Number, NodeID: detail.NodeID}
 
+	reserved := ""
 	_, err = st.Claim(
 		func() (string, []string, error) {
+			reserved = ""
 			// The tree as it is now: the pull after a rejected push can bring
 			// in another clone's bind of the same item.
 			st.ReloadTrackerTree()
@@ -109,6 +125,7 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 			if err := st.ReserveEntry(entry, id); err != nil {
 				return "", paths, err
 			}
+			reserved = id
 			if err := st.CreateChartWithIssue(o.Chart, heading, id); err != nil {
 				// A refused or failed chart write removes what it made itself, and
 				// a folder that was there before is not this claim's to undo.
@@ -132,9 +149,21 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 		},
 	)
 	if err != nil {
+		if reserved != "" {
+			// The claim failed after the entry was reserved: give it back, so
+			// no other writer is refused for a ticket that exists nowhere.
+			if rerr := st.ReleaseEntry(entry, reserved); rerr != nil {
+				err = fmt.Errorf("%w; the reservation of %s for %s could not be released (%v): this writer running the same bind again takes it over", err, entry, reserved, rerr)
+			}
+		}
 		return BindResult{}, err
 	}
 
+	for _, b := range detail.BlockedBy {
+		if who, ok := held[b.NodeID]; ok {
+			res.Advisories = append(res.Advisories, fmt.Sprintf("%d is blocked on the tracker by #%d, which is %s; the first sync removes the link unless %s is in the issue's blocked_by", detail.Number, b.Number, who, who))
+		}
+	}
 	if !detail.Open {
 		res.Advisories = append(res.Advisories, fmt.Sprintf("%d is closed; the first sync reopens it", detail.Number))
 	}

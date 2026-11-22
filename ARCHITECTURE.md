@@ -416,11 +416,8 @@ In writers mode:
 
 The claims log holds the facts that only one writer may hold. It is one file,
 `claims.ndjson`, with lines `{ts, kind, ticket, slice?, writer, session?, author}`, where
-`kind` is `id` (an id or alias is reserved), `driver` (the writer drives the ticket),
-`release`, or `entry` (a tracker entry, `github/<owner>/<repo>/<n>` in an `entry` key, is
-reserved for the issue in `ticket`: `Store.ReserveEntry`, which refuses
-`TRACKER_ENTRY_TAKEN` naming another ticket's line and appends nothing in single-main
-mode, where the tracker tree's own record check is the guard). In writers mode it is alone on the orphan branch `claims`, which nobody checks
+`kind` is `id` (an id or alias is reserved), `driver` (the writer drives the ticket) or
+`release`. In writers mode it is alone on the orphan branch `claims`, which nobody checks
 out: an append reads the tip, builds the blob, tree and commit with plumbing
 (`gitx.RunInput`), moves `refs/heads/claims` with a compare-and-swap `update-ref`, and
 pushes; a rejected push fetches, decides again on the log as the origin has it, and
@@ -435,6 +432,18 @@ is `DRIVER_HELD` (`--take` is the way past), `jig claim --release` lets go once 
 claimed since is still held, and `jig status` names the driver. It lives in this log and
 not in the machine ledger, because the ledger is machine-local and a driver is only useful
 if another writer's machine can see it.
+
+An `entry` line reserves a tracker entry (`github/<owner>/<repo>/<n>`, in an
+`entry` key) for the issue in `ticket`, and an `entry-release` line gives it
+back; the latest line for an entry decides. `Store.ReserveEntry` refuses
+`TRACKER_ENTRY_TAKEN` naming the holder's ticket and writer, except that a line
+of this writer's own for a ticket its store does not hold is an undone bind
+(only this writer pushes its branch, so a ticket of its own that the tree
+lacks was rolled back) and a line for the new ticket takes it over. A bind
+whose claim fails after reserving appends the release (`Store.ReleaseEntry`),
+best effort: when that cannot be pushed the error says so, and this writer's
+re-run of the bind takes the line over. In single-main mode nothing is
+appended, since the tracker tree's own record check is the guard.
 
 ## Project configuration
 
@@ -866,7 +875,7 @@ Routing (`route.go`) then applies triage to this round's `fix` batch and `ask` f
 
 ## A ticket's branch
 
-An issue minted bound to an item has the item's number as its remote id from the mint, so its derived branch is `<n>-<slug>` at once. A ticket's working branch is the `branch:` recorded in its `ticket.yaml` when there is one, else a name derived from its id ([ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md), amended by ADR 0032). `store.ResolveTicketBranch` is the one resolver, and every command that names the branch resolves it there, once:
+An issue minted bound to an item has the item's number as its remote id from the mint, so when the project's branches are led by GitHub its derived branch is `<n>-<slug>` at once. A ticket's working branch is the `branch:` recorded in its `ticket.yaml` when there is one, else a name derived from its id ([ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md), amended by ADR 0032). `store.ResolveTicketBranch` is the one resolver, and every command that names the branch resolves it there, once:
 
 1. a recorded `branch:` wins, validated (the target branch and names git rejects are `TICKET_BRANCH_INVALID`);
 2. otherwise `<id>-<slug>`. The slug is `ticket.yaml`'s `slug:`: the lowercase ASCII words of the title joined by `-`, cut at a word boundary to at most 40 characters, fixed when `jig ticket new` or `jig graduate` mints the ticket so that editing the title never renames the branch (an older ticket derives it on read, and recording a branch writes it). The id is the GitHub issue number from the ticket's record in the tracker tree (`store.TrackerIDs`; a ticket with none there falls back to the record in its own folder) once the ticket is mirrored and the project's branches are led by GitHub (the marker's `branches: from:` is empty or `github`), else the store id;

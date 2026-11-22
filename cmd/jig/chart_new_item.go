@@ -52,6 +52,9 @@ func chartNewItem(e env, stdout io.Writer, name, itemRef, title, key string, nee
 	if err := st.Sync(); err != nil {
 		return renderErr(stdout, err)
 	}
+	if err := mirror.CheckItemUnbound(st, cfg, ref); err != nil {
+		return renderErr(stdout, err)
+	}
 	if err := chartNameTaken(st, name); err != nil {
 		return renderErr(stdout, err)
 	}

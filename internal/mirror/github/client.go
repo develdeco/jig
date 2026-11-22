@@ -75,15 +75,24 @@ type ItemDetail struct {
 	// Open is false when the item is closed, whatever its close reason.
 	Open bool
 	// StateReason is GitHub's own spelling for why a closed item was closed
-	// ("COMPLETED", "NOT_PLANNED"), "" while it is open.
+	// ("COMPLETED", "NOT_PLANNED"), "" for an item never closed; GitHub
+	// answers "REOPENED" for an open item that was closed once.
 	StateReason string
 	Author      string
 	Labels      []string
 	// SubItems is how many sub-issues the item has.
 	SubItems int
+	// BlockedBy is the issues that block the item on the tracker.
+	BlockedBy []BlockerRef
 	// LinkedPullRequests is how many pull requests the item lists as
 	// closing it (its closedByPullRequestsReferences, in any state).
 	LinkedPullRequests int
+}
+
+// BlockerRef is one issue that blocks an item: its number and node id.
+type BlockerRef struct {
+	Number int
+	NodeID string
 }
 
 // maxNodesPerQuery is how many ids one batched read sends in a single

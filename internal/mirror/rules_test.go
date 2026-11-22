@@ -268,14 +268,14 @@ func TestRuleAtLinkDrift(t *testing.T) {
 			},
 		},
 		{
-			name: "a hand-added blocked-by link is removed",
-			edit: func(c *fakeClient) { c.blockedByOf["NODE_DEMO-1"] = []string{"NODE_HAND_ADDED"} },
+			name: "a hand-added blocked-by link to a store item is removed",
+			edit: func(c *fakeClient) { c.blockedByOf["NODE_DEMO-1"] = []string{"NODE_DEMO-2"} },
 			what: "DEMO-1", field: "blocked_by",
 			check: func(t *testing.T, c *fakeClient) {
-				if want := []fakeBlockedBy{{IssueID: "NODE_DEMO-1", BlockingID: "NODE_HAND_ADDED"}}; !reflect.DeepEqual(c.removedBlockedBys, want) {
+				if want := []fakeBlockedBy{{IssueID: "NODE_DEMO-1", BlockingID: "NODE_DEMO-2"}}; !reflect.DeepEqual(c.removedBlockedBys, want) {
 					t.Fatalf("removedBlockedBys = %+v, want %+v", c.removedBlockedBys, want)
 				}
-				if containsString(c.blockedByOf["NODE_DEMO-1"], "NODE_HAND_ADDED") {
+				if containsString(c.blockedByOf["NODE_DEMO-1"], "NODE_DEMO-2") {
 					t.Fatalf("blockedByOf = %v, want the hand-added blocker gone", c.blockedByOf["NODE_DEMO-1"])
 				}
 			},
@@ -294,6 +294,21 @@ func TestRuleAtLinkDrift(t *testing.T) {
 			}
 			tc.check(t, w.client)
 		})
+	}
+}
+
+// TestRuleAtBlockedByEdgeToAnOutsideIssueIsKept: a blocked-by edge to an issue
+// the store holds no record for is no drift, and is left alone.
+func TestRuleAtBlockedByEdgeToAnOutsideIssueIsKept(t *testing.T) {
+	w := linkWorld(t)
+	w.plan(planOpts{})
+	w.client.blockedByOf["NODE_DEMO-1"] = []string{"NODE_OUTSIDE_40"}
+	report := w.plan(planOpts{})
+	if driftHas(report.Drift, "DEMO-1", "blocked_by") {
+		t.Fatalf("Drift = %+v, want none for an edge to an outside issue", report.Drift)
+	}
+	if len(w.client.removedBlockedBys) != 0 || !containsString(w.client.blockedByOf["NODE_DEMO-1"], "NODE_OUTSIDE_40") {
+		t.Fatalf("removed %+v, blockedByOf = %v, want the outside edge kept", w.client.removedBlockedBys, w.client.blockedByOf["NODE_DEMO-1"])
 	}
 }
 
@@ -371,7 +386,7 @@ func TestRuleAtDryRunPreviewsLinksAndWritesNone(t *testing.T) {
 	w := linkWorld(t)
 	w.client.subIssuesOf = map[string][]string{"NODE_charts/demo": {"NODE_HAND_ADDED"}}
 	w.client.parentOf = map[string]string{"NODE_HAND_ADDED": "NODE_charts/demo"}
-	w.client.blockedByOf = map[string][]string{"NODE_DEMO-2": {"NODE_HAND_ADDED_BLOCKER"}}
+	w.client.blockedByOf = map[string][]string{"NODE_DEMO-2": {"NODE_charts/demo"}}
 
 	report := w.plan(planOpts{dryRun: true})
 	if want := []LinkedParent{{Ticket: "DEMO-2", Chart: "demo"}}; !reflect.DeepEqual(report.LinkedParents, want) {

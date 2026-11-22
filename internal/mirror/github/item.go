@@ -18,6 +18,7 @@ const itemByNumberQuery = `query($owner: String!, $name: String!, $number: Int!)
       author { login }
       labels(first: 100) { nodes { name } }
       subIssues { totalCount }
+      blockedBy(first: 50) { nodes { id number } }
       closedByPullRequestsReferences(first: 1, includeClosedPrs: true) { totalCount }
     }
   }
@@ -45,6 +46,12 @@ func (c *GraphQLClient) ItemByNumber(ctx context.Context, owner, repo string, nu
 						Name string `json:"name"`
 					} `json:"nodes"`
 				} `json:"labels"`
+				BlockedBy struct {
+					Nodes []struct {
+						ID     string `json:"id"`
+						Number int    `json:"number"`
+					} `json:"nodes"`
+				} `json:"blockedBy"`
 				SubIssues struct {
 					TotalCount int `json:"totalCount"`
 				} `json:"subIssues"`
@@ -75,6 +82,9 @@ func (c *GraphQLClient) ItemByNumber(ctx context.Context, owner, repo string, nu
 	}
 	if it.Author != nil {
 		d.Author = it.Author.Login
+	}
+	for _, b := range it.BlockedBy.Nodes {
+		d.BlockedBy = append(d.BlockedBy, BlockerRef{Number: b.Number, NodeID: b.ID})
 	}
 	for _, l := range it.Labels.Nodes {
 		d.Labels = append(d.Labels, l.Name)

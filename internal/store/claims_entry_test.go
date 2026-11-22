@@ -86,6 +86,41 @@ func TestReserveEntryTakesOverThisWritersUndoneLine(t *testing.T) {
 	}
 }
 
+// TestReleaseEntryFreesTheEntryForAnotherWriter: a released entry is
+// reservable by another writer at once, a release by a ticket that does not
+// hold it appends nothing, and the refusal names the holder's writer.
+func TestReleaseEntryFreesTheEntryForAnotherWriter(t *testing.T) {
+	t.Parallel()
+	alice, _, remote := newWritersStore(t)
+	bob, _ := newWriter(t, remote, "bob")
+	if err := bob.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	e := TrackerEntry{Provider: ProviderGitHub, Scope: "o/r", ID: "48"}
+	if err := alice.ReserveEntry(e, "JIG-5"); err != nil {
+		t.Fatal(err)
+	}
+	err := bob.ReserveEntry(e, "JIG-6")
+	if axiCode(err) != "TRACKER_ENTRY_TAKEN" || !strings.Contains(err.Error(), "alice") {
+		t.Fatalf("bob ReserveEntry = %v, want TRACKER_ENTRY_TAKEN naming writer alice", err)
+	}
+	if err := alice.ReleaseEntry(e, "JIG-9"); err != nil {
+		t.Fatal(err)
+	}
+	if lines, _ := alice.Claims(); lines[len(lines)-1].Kind != ClaimEntry {
+		t.Fatalf("a release by another ticket appended %+v", lines[len(lines)-1])
+	}
+	if err := alice.ReleaseEntry(e, "JIG-5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.ReserveEntry(e, "JIG-6"); err != nil {
+		t.Fatalf("bob after the release: %v", err)
+	}
+	if err := alice.ReserveEntry(e, "JIG-7"); axiCode(err) != "TRACKER_ENTRY_TAKEN" || !strings.Contains(err.Error(), "JIG-6") {
+		t.Errorf("alice over bob's later line = %v, want TRACKER_ENTRY_TAKEN naming JIG-6", err)
+	}
+}
+
 // TestClaimEntryAppendsNothingInSingleMainMode: with no claims branch the
 // tracker tree is the guard, and no claims file appears.
 func TestClaimEntryAppendsNothingInSingleMainMode(t *testing.T) {

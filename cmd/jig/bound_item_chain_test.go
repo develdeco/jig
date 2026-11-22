@@ -48,6 +48,9 @@ func TestBoundItemChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if out, code := runMain(t, e, "", "chart", "new", "shop", "--item", "48", "--store", clone); code == 0 || !strings.Contains(out, "TRACKER_ENTRY_TAKEN") {
+		t.Errorf("rebind under the bound chart's own name: exit %d, want TRACKER_ENTRY_TAKEN, not a name refusal\n%s", code, out)
+	}
 	out, code = runMain(t, e, "", "chart", "new", "again", "--item", "#48", "--store", clone)
 	if code == 0 || !strings.Contains(out, "TRACKER_ENTRY_TAKEN") || !strings.Contains(out, "DEMO-1 (chart shop)") {
 		t.Errorf("second bind: exit %d, want TRACKER_ENTRY_TAKEN naming DEMO-1 and its chart\n%s", code, out)
