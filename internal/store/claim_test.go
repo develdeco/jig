@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -827,5 +828,604 @@ func TestClaimWrapsPullFailureAfterUndoAsIDNotClaimed(t *testing.T) {
 	}
 	if _, statErr := os.Stat(st.TicketDir("JIG-1")); statErr == nil {
 		t.Fatal("ticket folder JIG-1 was left behind after a failed claim")
+	}
+}
+
+// failedMintWrite returns a Claim write that mints, reports the ticket folder
+// it created, and then fails with sentinel: the shape of a graduate whose
+// chart write fails after Mint.
+func failedMintWrite(st *Store, sentinel error, minted *string) func() (string, []string, error) {
+	return func() (string, []string, error) {
+		id, err := st.Mint("JIG", Ticket{Title: "x"})
+		if err != nil {
+			return "", nil, err
+		}
+		if minted != nil {
+			*minted = id
+		}
+		return "", []string{st.TicketRelDir(id)}, sentinel
+	}
+}
+
+// TestClaimUndoesAFailedWrite covers the contract: a write that mints and
+// then fails reports what it touched, and Claim removes it - the ticket
+// folder and its .lock sidecar are gone, the store is clean, HEAD is
+// unchanged, nothing was committed, the error is the write's own and the next
+// Mint takes the same id - with and without an origin.
+func TestClaimUndoesAFailedWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mk   func(t *testing.T) (*Store, string)
+	}{
+		{"NoOrigin", func(t *testing.T) (*Store, string) {
+			st, work := newTestStandaloneStore(t)
+			// As project.Init's stores have: the lock sidecars stay out of `git status`.
+			if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, work, "add", "-A")
+			runGit(t, work, "commit", "-m", "ignore locks")
+			return st, work
+		}},
+		{"WithOrigin", func(t *testing.T) (*Store, string) {
+			st, work, _ := newTestRemoteStore(t)
+			return st, work
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, work := tc.mk(t)
+			headBefore := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+			sentinel := errors.New("the write failed")
+
+			var minted string
+			_, err := st.Claim(failedMintWrite(st, sentinel, &minted), func(id string) string { return id + ": new ticket" })
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("err = %v, want the write's own error", err)
+			}
+			if IsUndoIncomplete(err) {
+				t.Fatalf("err = %v, want a complete undo", err)
+			}
+			if minted == "" {
+				t.Fatal("the write never minted")
+			}
+			dir := filepath.Join(work, "tickets", minted)
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("ticket folder %s survived a failed claim (stat err %v)", dir, err)
+			}
+			if status := strings.TrimSpace(runGit(t, work, "status", "--porcelain")); status != "" {
+				t.Fatalf("git status = %q, want clean", status)
+			}
+			if head := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")); head != headBefore {
+				t.Fatalf("HEAD moved from %s to %s", headBefore, head)
+			}
+			next, err := st.Mint("JIG", Ticket{Title: "again"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if next != minted {
+				t.Fatalf("next Mint = %s, want the failed attempt's id %s back", next, minted)
+			}
+		})
+	}
+}
+
+// TestClaimUndoesAFailedWriteEditOfATrackedFile covers a write that edits a
+// tracked file and then fails: the pre-claim content comes back.
+func TestClaimUndoesAFailedWriteEditOfATrackedFile(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	sentinel := errors.New("the write failed")
+	path := filepath.Join(work, "project.yaml")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.Claim(
+		func() (string, []string, error) {
+			if err := os.WriteFile(path, []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+				return "", nil, err
+			}
+			return "", []string{"project.yaml"}, sentinel
+		},
+		func(id string) string { return id },
+	)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the write's own error", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("project.yaml = %q, want %q restored", after, before)
+	}
+	if status := strings.TrimSpace(runGit(t, work, "status", "--porcelain")); status != "" {
+		t.Fatalf("git status = %q, want clean", status)
+	}
+}
+
+// dirtyStore leaves an unrelated untracked file and a dirty tracked file in
+// the store and returns a func that checks both survived.
+func dirtyStore(t *testing.T, work string) func() {
+	t.Helper()
+	stray := filepath.Join(work, "unrelated.txt")
+	if err := os.WriteFile(stray, []byte("stray\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(work, "project.yaml")
+	const dirty = "schema_version: 1\nmine: edited\n"
+	if err := os.WriteFile(tracked, []byte(dirty), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if data, err := os.ReadFile(stray); err != nil || string(data) != "stray\n" {
+			t.Fatalf("unrelated.txt = %q, %v, want it untouched", data, err)
+		}
+		if data, err := os.ReadFile(tracked); err != nil || string(data) != dirty {
+			t.Fatalf("project.yaml = %q, %v, want the person's edit untouched", data, err)
+		}
+	}
+}
+
+// TestClaimFailedWriteWithNoPathsTouchesNothing covers a write that fails
+// before touching anything: no paths, so no git step runs and nothing else in
+// the store is disturbed.
+func TestClaimFailedWriteWithNoPathsTouchesNothing(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	check := dirtyStore(t, work)
+	sentinel := errors.New("the write failed")
+	_, err := st.Claim(
+		func() (string, []string, error) { return "", nil, sentinel },
+		func(id string) string { return id },
+	)
+	if err != sentinel {
+		t.Fatalf("err = %v, want the write's own error unchanged", err)
+	}
+	check()
+}
+
+// TestClaimFailedWriteLeavesUnreportedDirtAlone covers a write that reports
+// only its own folder: whatever else is dirty in the store survives the undo.
+func TestClaimFailedWriteLeavesUnreportedDirtAlone(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	check := dirtyStore(t, work)
+	sentinel := errors.New("the write failed")
+	var minted string
+	_, err := st.Claim(failedMintWrite(st, sentinel, &minted), func(id string) string { return id })
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want the write's own error", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the write's own folder survived (stat err %v)", err)
+	}
+	check()
+}
+
+// TestUndoPathsContinuesPastAFailingStep covers best-effort undo: a locked
+// tracked file listed before a minted folder fails its own restore, yet the
+// folder is still cleaned, and the error names the locked path.
+func TestUndoPathsContinuesPastAFailingStep(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileExclusive has no portable non-Windows equivalent")
+	}
+	st, work := newTestStandaloneStore(t)
+	sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	locked := filepath.Join(work, "project.yaml")
+	if err := os.WriteFile(locked, []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(work, "tickets", "JIG-1")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "ticket.yaml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock := lockFileExclusive(t, locked)
+	defer unlock()
+
+	err := st.undoPaths(sha, []string{"project.yaml", filepath.Join("tickets", "JIG-1")})
+	if err == nil {
+		t.Fatal("undoPaths: want an error for the locked file")
+	}
+	var upe *undoPathsError
+	if !errors.As(err, &upe) || len(upe.leftovers) != 1 || upe.leftovers[0] != "project.yaml" {
+		t.Fatalf("err = %v, leftovers = %v, want exactly project.yaml named", err, upe)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived the locked file before it (stat err %v)", err)
+	}
+}
+
+// TestClaimReportsLeftoverPathsWhenUndoFails covers both shapes of an undo
+// that does not finish: the write error and the push error each report
+// IsUndoIncomplete and name the leftover path; the write's error still
+// unwraps.
+func TestClaimReportsLeftoverPathsWhenUndoFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileExclusive has no portable non-Windows equivalent")
+	}
+	t.Run("WriteError", func(t *testing.T) {
+		st, work := newTestStandaloneStore(t)
+		sentinel := &axi.Error{Msg: "the write failed", Code: "SOME_CODE", Help: []string{"h"}}
+		projectYAML := filepath.Join(work, "project.yaml")
+		_, err := st.Claim(
+			func() (string, []string, error) {
+				if err := os.WriteFile(projectYAML, []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+					return "", nil, err
+				}
+				unlock := lockFileExclusive(t, projectYAML)
+				t.Cleanup(unlock)
+				return "", []string{"project.yaml"}, sentinel
+			},
+			func(id string) string { return id },
+		)
+		if !IsUndoIncomplete(err) {
+			t.Fatalf("err = %v, want IsUndoIncomplete", err)
+		}
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("err = %v, want it to unwrap to the write's own error", err)
+		}
+		var ae *axi.Error
+		if !errors.As(err, &ae) {
+			t.Fatalf("err = %v, want an *axi.Error", err)
+		}
+		if ae.Code != "SOME_CODE" {
+			t.Fatalf("code = %q, want the write's own code kept", ae.Code)
+		}
+		assertLeftoverReport(t, ae, "h")
+	})
+	t.Run("PushError", func(t *testing.T) {
+		st, work, remote := newTestRemoteStore(t)
+		other := t.TempDir()
+		runGit(t, "", "clone", remote, other)
+		runGit(t, other, "config", "user.name", "other")
+		runGit(t, other, "config", "user.email", "other@example.invalid")
+		if err := os.WriteFile(filepath.Join(other, "from-other.txt"), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, other, "add", "-A")
+		runGit(t, other, "commit", "-m", "from other")
+		runGit(t, other, "push", "origin", "main")
+
+		projectYAML := filepath.Join(work, "project.yaml")
+		if err := os.WriteFile(projectYAML, []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		unlock := lockFileExclusive(t, projectYAML)
+		defer unlock()
+		_, err := st.Claim(
+			func() (string, []string, error) { return "JIG-1", []string{"project.yaml"}, nil },
+			func(id string) string { return id + ": new ticket" },
+		)
+		if !IsUndoIncomplete(err) {
+			t.Fatalf("err = %v, want IsUndoIncomplete", err)
+		}
+		var ae *axi.Error
+		if !errors.As(err, &ae) || ae.Code != idNotClaimedCode {
+			t.Fatalf("err = %v, want ID_NOT_CLAIMED kept", err)
+		}
+		assertLeftoverReport(t, ae)
+	})
+}
+
+// assertLeftoverReport pins what a person reads when an undo did not finish:
+// the leftover list in the message, a help line that names it and the command
+// that finishes it, and the help lines the error already carried (keep).
+func assertLeftoverReport(t *testing.T, ae *axi.Error, keep ...string) {
+	t.Helper()
+	if !strings.Contains(ae.Msg, "(left in the store: project.yaml)") {
+		t.Fatalf("msg = %q, want the leftover list '(left in the store: project.yaml)'", ae.Msg)
+	}
+	finish := false
+	for _, h := range ae.Help {
+		if strings.Contains(h, "project.yaml") && strings.Contains(h, "git restore --source=HEAD") {
+			finish = true
+		}
+	}
+	if !finish {
+		t.Fatalf("help = %q, want a line naming project.yaml and `git restore --source=HEAD`", ae.Help)
+	}
+	for _, k := range keep {
+		if !slices.Contains(ae.Help, k) {
+			t.Fatalf("help = %q, want %q kept", ae.Help, k)
+		}
+	}
+}
+
+// TestUndoClaimWithNoPathsLeavesTheStoreAlone covers the path a push undo
+// takes for a write that reported no paths (claimIssue's adopt branch):
+// `clean -fdx --` with no pathspec would take every untracked and ignored
+// file of the store, so nothing may run.
+func TestUndoClaimWithNoPathsLeavesTheStoreAlone(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "ignore locks")
+	sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	stray := filepath.Join(work, "unrelated.txt")
+	ignored := filepath.Join(work, "x.lock")
+	for _, f := range []string{stray, ignored} {
+		if err := os.WriteFile(f, []byte("keep\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.undoClaim(sha, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{stray, ignored} {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatalf("%s: %v, want it left alone by an undo of no paths", f, err)
+		}
+	}
+}
+
+// TestClaimUndoesAFailedCommit covers the commit that fails after write
+// touched paths (here the store's own failing pre-commit hook): the folder is
+// undone and HEAD stays.
+func TestClaimUndoesAFailedCommit(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	// As project.Init's stores have: the lock sidecars stay out of `git status`.
+	if err := os.WriteFile(filepath.Join(work, ".gitignore"), []byte("*.lock\n.*.tmp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-m", "ignore locks")
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	headBefore := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	var minted string
+	_, err := st.Claim(mintingWrite(st, &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived a failed commit (stat err %v)", err)
+	}
+	if status := strings.TrimSpace(runGit(t, work, "status", "--porcelain")); status != "" {
+		t.Fatalf("git status = %q, want clean", status)
+	}
+	if head := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD")); head != headBefore {
+		t.Fatalf("HEAD moved from %s to %s", headBefore, head)
+	}
+}
+
+// mintingWrite is a write that mints and succeeds, for a claim whose commit
+// then fails.
+func mintingWrite(st *Store, minted *string) func() (string, []string, error) {
+	return func() (string, []string, error) {
+		id, err := st.Mint("JIG", Ticket{Title: "x"})
+		if err != nil {
+			return "", nil, err
+		}
+		*minted = id
+		return id, []string{st.TicketRelDir(id)}, nil
+	}
+}
+
+// TestClaimReportsAnIncompleteUndoOfAFailedCommit covers the same failure when
+// the undo cannot finish (a file in the minted folder is held open): the error
+// is an undo-incomplete one and names the folder.
+func TestClaimReportsAnIncompleteUndoOfAFailedCommit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileExclusive has no portable non-Windows equivalent")
+	}
+	st, work := newTestStandaloneStore(t)
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	mint := mintingWrite(st, &minted)
+	_, err := st.Claim(
+		func() (string, []string, error) {
+			id, paths, werr := mint()
+			if werr != nil {
+				return "", nil, werr
+			}
+			unlock := lockFileExclusive(t, filepath.Join(work, "tickets", id, "ticket.yaml"))
+			t.Cleanup(unlock)
+			return id, paths, nil
+		},
+		func(id string) string { return id },
+	)
+	if !IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want IsUndoIncomplete", err)
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) || !strings.Contains(ae.Msg, "(left in the store: "+st.TicketRelDir(minted)+")") {
+		t.Fatalf("err = %v, want the minted folder named as left over", err)
+	}
+}
+
+// TestUndoPathsNamesOnlyTheFolderACleanLeft covers a clean that fails (a file
+// inside the minted folder is held open) after a tracked edited file was
+// restored fine: only the folder is left over.
+func TestUndoPathsNamesOnlyTheFolderACleanLeft(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileExclusive has no portable non-Windows equivalent")
+	}
+	st, work := newTestStandaloneStore(t)
+	sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(work, "tickets", "JIG-1")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	held := filepath.Join(folder, "ticket.yaml")
+	if err := os.WriteFile(held, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock := lockFileExclusive(t, held)
+	defer unlock()
+
+	// A second minted folder with nothing held in it: the clean still takes it
+	// after failing on the first, so it is not left over.
+	free := filepath.Join(work, "tickets", "JIG-2")
+	if err := os.MkdirAll(free, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(free, "ticket.yaml"), []byte("y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := st.undoPaths(sha, []string{"project.yaml", filepath.Join("tickets", "JIG-1"), filepath.Join("tickets", "JIG-2")})
+	var upe *undoPathsError
+	if !errors.As(err, &upe) {
+		t.Fatalf("err = %v, want an *undoPathsError", err)
+	}
+	if _, err := os.Stat(free); !os.IsNotExist(err) {
+		t.Fatalf("the free folder survived the clean (stat err %v)", err)
+	}
+	if len(upe.leftovers) != 1 || upe.leftovers[0] != filepath.Join("tickets", "JIG-1") {
+		t.Fatalf("leftovers = %v, want the minted folder alone", upe.leftovers)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, "project.yaml")); rerr != nil || strings.Contains(string(data), "edited") {
+		t.Fatalf("project.yaml = %q, %v, want the tracked file restored", data, rerr)
+	}
+}
+
+// TestOutermostDropsPathsInsideAnother pins the clean's pathspec: a file
+// listed with the folder that holds it is cleaned through the folder, since git
+// leaves the emptied folder behind when the file comes first.
+func TestOutermostDropsPathsInsideAnother(t *testing.T) {
+	got := outermost([]string{"a/b/7/record.yaml", "a/b/7", "c", "c", "ab"})
+	want := []string{"a/b/7", "c", "ab"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("outermost = %v, want %v", got, want)
+	}
+}
+
+// TestUndoPathsTakesStagedPathsOutOnAnUnbornBranch covers a claim's own add
+// on a store with nothing committed: clean skips what the index holds, so the
+// undo must unstage each path too.
+func TestUndoPathsTakesStagedPathsOutOnAnUnbornBranch(t *testing.T) {
+	work := t.TempDir()
+	runGit(t, "", "init", "-b", "main", work)
+	st := &Store{Root: work}
+	folder := filepath.Join(work, "tickets", "JIG-1")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "ticket.yaml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "--", filepath.Join("tickets", "JIG-1"))
+	if err := st.undoPaths("", []string{filepath.Join("tickets", "JIG-1")}); err != nil {
+		t.Fatal(err)
+	}
+	if status := strings.TrimSpace(runGit(t, work, "status", "--porcelain")); status != "" {
+		t.Fatalf("git status = %q, want clean", status)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("the folder survived (stat err %v)", err)
+	}
+}
+
+// TestClaimUndoesAFailedCommitOnAnUnbornStore covers a first claim on a store
+// with nothing committed, whose commit fails (the store's own failing
+// pre-commit hook): the claim's own add staged the mint, so the undo must
+// unstage it, and a complete undo is reported as one.
+func TestClaimUndoesAFailedCommitOnAnUnbornStore(t *testing.T) {
+	work := t.TempDir()
+	runGit(t, "", "init", "-b", "main", work)
+	runGit(t, work, "config", "user.name", "tester")
+	runGit(t, work, "config", "user.email", "tester@example.invalid")
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte(gitx.StoreAttributes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err = st.Claim(mintingWrite(st, &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if status := runGit(t, work, "status", "--porcelain", "--", "tickets"); strings.TrimSpace(status) != "" {
+		t.Fatalf("git status lists %q under tickets/, want nothing", status)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived a failed commit (stat err %v)", err)
+	}
+}
+
+// TestClaimUndoesAFailedCommitWithAnEditedTrackedFile covers a write that
+// mints a folder and edits a tracked file, reporting both, whose commit then
+// fails: the tracked file comes back to its committed content (it is
+// restored, never taken out of the index and cleaned) and the folder is gone.
+func TestClaimUndoesAFailedCommitWithAnEditedTrackedFile(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	mint := mintingWrite(st, &minted)
+	_, err := st.Claim(
+		func() (string, []string, error) {
+			id, paths, werr := mint()
+			if werr != nil {
+				return "", nil, werr
+			}
+			if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte("schema_version: 1\nextra: edited\n"), 0o644); err != nil {
+				return "", nil, err
+			}
+			return id, append(paths, "project.yaml"), nil
+		},
+		func(id string) string { return id },
+	)
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want a complete undo", err)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, "project.yaml")); rerr != nil || string(data) != "schema_version: 1\n" {
+		t.Fatalf("project.yaml = %q, %v, want its committed content", data, rerr)
+	}
+	if _, err := os.Stat(filepath.Join(work, "tickets", minted)); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived a failed commit (stat err %v)", err)
+	}
+}
+
+// TestUndoPathsNamesAFolderOnceWhenTwoOfItsStepsFail covers a created folder
+// whose unstaging fails (the index is locked) and whose clean then fails too (a
+// file in it is held open): it is named once.
+func TestUndoPathsNamesAFolderOnceWhenTwoOfItsStepsFail(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileExclusive has no portable non-Windows equivalent")
+	}
+	st, work := newTestStandaloneStore(t)
+	sha := strings.TrimSpace(runGit(t, work, "rev-parse", "HEAD"))
+	folder := filepath.Join(work, "tickets", "JIG-1")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	held := filepath.Join(folder, "ticket.yaml")
+	if err := os.WriteFile(held, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".git", "index.lock"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlock := lockFileExclusive(t, held)
+	defer unlock()
+
+	err := st.undoPaths(sha, []string{filepath.Join("tickets", "JIG-1")})
+	var upe *undoPathsError
+	if !errors.As(err, &upe) {
+		t.Fatalf("err = %v, want an *undoPathsError", err)
+	}
+	if len(upe.leftovers) != 1 || upe.leftovers[0] != filepath.Join("tickets", "JIG-1") {
+		t.Fatalf("leftovers = %v, want the folder once", upe.leftovers)
 	}
 }

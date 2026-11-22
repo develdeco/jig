@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,19 +105,14 @@ func cmdGraduate(e env, args []string, stdout io.Writer) int {
 			// before this error; running the checkpoint sync for them now,
 			// best-effort like every other call to this hook, keeps a
 			// partial failure from leaving them unmirrored until some
-			// unrelated later command happens to push. But a
-			// writeChartAfterMintError means this very attempt minted a
-			// ticket (its folder and ticket.yaml are on disk) whose chart
-			// write then failed, leaving it uncommitted; a sync is a full
-			// sync, not scoped to createdIDs, so it would see that folder too
-			// and open it a GitHub issue no commit backs - a record the
-			// printed recovery's "delete that ticket folder" would then
-			// orphan. Skip the sync entirely rather than risk that: the
-			// tickets in createdIDs stay unsynced until the next command that
-			// pushes commits this attempt's folder first, same as before
-			// this hook existed.
-			var wcErr *writeChartAfterMintError
-			if len(createdIDs) > 0 && !errors.As(err, &wcErr) {
+			// unrelated later command happens to push. A failed attempt
+			// leaves nothing behind - Claim undoes the ticket folder the
+			// write minted - unless the undo itself did not finish
+			// (store.IsUndoIncomplete): a sync is a full sync, not scoped to
+			// createdIDs, so it would see that leftover folder and open it a
+			// GitHub issue no commit backs. Skip the sync then, rather than
+			// risk that.
+			if len(createdIDs) > 0 && !store.IsUndoIncomplete(err) {
 				st.RunCheckpointHook()
 			}
 			return renderErr(stdout, graduateFailure(chart, createdIDs, err))
@@ -266,20 +262,6 @@ func createdTaskIDs(st *store.Store, ids []string) []string {
 	return tasks
 }
 
-// writeChartAfterMintError marks the one error claimOneChartEntry's write
-// can return after st.Mint has already minted and committed nothing to the
-// chart: the ticket folder and its ticket.yaml exist on disk, uncommitted,
-// with the chart entry still lacking an id. cmdGraduate's failure branch
-// tests for it with errors.As (it wraps the same *axi.Error Error() and
-// Help describe) to withhold the checkpoint sync specifically on this path
-// - see that branch's own comment for why.
-type writeChartAfterMintError struct {
-	err error
-}
-
-func (e *writeChartAfterMintError) Error() string { return e.err.Error() }
-func (e *writeChartAfterMintError) Unwrap() error { return e.err }
-
 // errChartFullyGraduated is claimOneChartEntry's internal sentinel: a fresh
 // read of the chart, inside store.Claim's own write (so it is current even
 // after a rejected claim pulled in another clone's work), found no entry
@@ -338,17 +320,19 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		if e.writeChart != nil {
 			writeChart = func(name string, entries []store.ChartEntry) error { return e.writeChart(st, name, entries) }
 		}
+		// A failed chart write leaves the chart file as it was (WriteChart
+		// replaces it atomically), so only the minted folder is reported: the
+		// file may hold edits no commit has, which Claim's undo would discard.
+		folder := []string{st.TicketRelDir(newID)}
 		if werr := writeChart(chart, entries); werr != nil {
-			return "", nil, &writeChartAfterMintError{&axi.Error{
+			// Claim undoes the folder, so nothing of this attempt stays behind.
+			return "", folder, &chartWriteError{ae: &axi.Error{
 				Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", newID, i+1, chart, werr),
 				Code: "VALIDATION_ERROR",
-				Help: []string{
-					fmt.Sprintf("Put `id: %s` on entry %d of charts/%s/tickets.yaml (or delete that ticket folder), then re-run", newID, i+1, chart),
-				},
 			}}
 		}
 		pos = i
-		return newID, []string{st.TicketRelDir(newID), "charts/" + chart + "/tickets.yaml"}, nil
+		return newID, append(folder, "charts/"+chart+"/tickets.yaml"), nil
 	}
 	msgFn := func(claimedID string) string { return fmt.Sprintf("chart %s: graduate %s", chart, claimedID) }
 
@@ -361,6 +345,15 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 	}
 	return id, pos, false, nil
 }
+
+// chartWriteError is the failure of an entry's chart write after its ticket
+// was minted. It carries no recovery line: whether "nothing was kept" holds
+// depends on whether Claim's undo finished, which only graduateFailure can ask
+// (store.IsUndoIncomplete).
+type chartWriteError struct{ ae *axi.Error }
+
+func (e *chartWriteError) Error() string { return e.ae.Msg }
+func (e *chartWriteError) Unwrap() error { return e.ae }
 
 // firstMissingID returns the 0-based position of the first entry with no
 // id, or -1 when every entry already has one.
@@ -408,6 +401,12 @@ func graduateFailure(chart string, createdIDs []string, err error) error {
 		// A copy: the caller's error is not this function's to change.
 		withMsg := *ae
 		withMsg.Msg = msg
+		// Only a complete undo leaves nothing to re-run over; after an
+		// incomplete one the finish-by-hand help is the recovery.
+		var cwe *chartWriteError
+		if errors.As(err, &cwe) && !store.IsUndoIncomplete(err) {
+			withMsg.Help = append(slices.Clone(withMsg.Help), fmt.Sprintf("Nothing was kept: re-run jig graduate %s", chart))
+		}
 		return &withMsg
 	}
 

@@ -527,7 +527,10 @@ func claimIssue(ctx context.Context, st *store.Store, client github.Client, it i
 			// tree is whole at every step.
 			made, lerr := st.LinkTrackerEntry(it.ref.entry, it.owner())
 			if lerr != nil {
-				return "", nil, lerr
+				// The record is on disk, and a link may be: report the entry's
+				// folder, which holds both, so Claim undoes them with the failed
+				// write and the folder goes with them.
+				return "", append(paths, st.TrackerRelPath(it.ref.entry)), lerr
 			}
 			if made == store.LinkMade || made == store.LinkReplaced {
 				paths = append(paths, st.TrackerRelPath(it.ref.entry))

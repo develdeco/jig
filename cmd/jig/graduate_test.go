@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -1308,22 +1309,16 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 	}
 }
 
-// TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint covers
-// this case: an entry whose st.Mint lands but whose chart write then fails
-// leaves its ticket folder and ticket.yaml on disk, uncommitted, with the
-// chart entry still missing its id - a half-minted ticket a full sync (not
-// scoped to createdIDs) would still find on its scan of the store root and
-// open a GitHub issue for, pushing a record no commit backs. jig graduate
-// must skip the checkpoint sync entirely on this failure, even though entry
-// A landed whole earlier in the same run, rather than risk that.
+// TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs: an entry
+// whose st.Mint lands but whose chart write then fails has its half-minted
+// ticket folder undone by Claim, so the store is clean, the checkpoint sync
+// runs for the entry that landed earlier in the run (A), and a re-run mints
+// the failed entry with the id the failed attempt would have taken.
 //
-// The chart write failure is driven through env.writeChart:
-// entry A's own WriteChart call passes through to the real st.WriteChart, and
-// entry B's is forced to fail, the same write-after-mint shape on every OS -
-// an OS-specific read-only chmod raced against store.AtomicWrite's own
-// os.Rename only fails this way on Windows (POSIX rename needs no write
-// permission on the target file itself, only its directory).
-func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.T) {
+// The chart write failure is driven through env.writeChart, so entry A's
+// own WriteChart call passes through to the real st.WriteChart, and entry B's
+// is forced to fail, the same write-after-mint shape on every OS.
+func TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs(t *testing.T) {
 	t.Parallel()
 	e := testEnv(t.TempDir())
 	clone := filepath.Join(t.TempDir(), "clone")
@@ -1332,6 +1327,9 @@ func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.
   - title: "Slice A"
   - title: "Slice B"
 `)
+	// A chart is committed before graduating, so the store is clean.
+	gitIn(t, clone, "add", "-A")
+	gitIn(t, clone, "commit", "-m", "add chart")
 
 	writeCalls := 0
 	e.writeChart = func(st *store.Store, chart string, entries []store.ChartEntry) error {
@@ -1341,27 +1339,122 @@ func TestGraduateSkipsTheCheckpointSyncOnAWriteChartFailureAfterMint(t *testing.
 		}
 		return st.WriteChart(chart, entries)
 	}
-
 	e.mirrorClient = &stubGitHub{}
 
 	var buf bytes.Buffer
 	code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
-
 	if code == 0 {
 		t.Fatalf("jig graduate mychart: exit 0, want a refusal on entry B's chart write:\n%s", buf.String())
 	}
 	if !strings.Contains(buf.String(), "failed to write chart") {
 		t.Fatalf("output missing \"failed to write chart\":\n%s", buf.String())
 	}
-
-	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2")); err != nil {
-		t.Fatalf("DEMO-2's half-minted ticket folder is gone: %v", err)
+	if !strings.Contains(buf.String(), "Nothing was kept: re-run jig graduate mychart") {
+		t.Fatalf("output lacks the re-run line after a complete undo:\n%s", buf.String())
 	}
-	if _, ok := treeRecordOf(t, clone, "DEMO-2"); ok {
-		t.Fatal("DEMO-2 (half-minted, uncommitted) got a GitHub issue record despite the WriteChart failure")
+
+	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2")); !os.IsNotExist(err) {
+		t.Fatalf("DEMO-2's folder survived the failed chart write (stat err %v)", err)
+	}
+	if status := strings.TrimSpace(gitIn(t, clone, "status", "--porcelain")); status != "" {
+		t.Fatalf("store is dirty after the failed run:\n%s", status)
+	}
+	if rec, ok := treeRecordOf(t, clone, "DEMO-1"); !ok || !strings.Contains(rec, "issue: 1") {
+		t.Fatalf("DEMO-1's record = %q, %v, want the checkpoint sync to have run for entry A", rec, ok)
+	}
+
+	e.writeChart = nil
+	buf.Reset()
+	if code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("re-run: exit %d\n%s", code, buf.String())
+	}
+	st, err := store.Open(clone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ReadChart("mychart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[1].ID != "DEMO-2" {
+		t.Fatalf("entry B's id = %q, want the id the failed attempt would have taken (DEMO-2)", entries[1].ID)
+	}
+}
+
+// TestGraduateFailedChartWriteKeepsUncommittedChartEntries: a chart whose
+// hand-written entries no commit holds survives a failed chart write byte for
+// byte, since the failed write never changed it and the undo has no claim on it.
+func TestGraduateFailedChartWriteKeepsUncommittedChartEntries(t *testing.T) {
+	t.Parallel()
+	_, storeRoot := setupGraduateStore(t)
+	const chart = `tickets:
+  - title: "Slice A"
+  - title: "Hand written B"
+    body: |
+      kept
+`
+	writeChart(t, storeRoot, "mychart", chart)
+	e := testEnv(t.TempDir())
+	e.writeChart = func(*store.Store, string, []store.ChartEntry) error {
+		return errors.New("forced chart write failure")
+	}
+	var buf bytes.Buffer
+	if code := run(e, []string{"graduate", "mychart", "--store", storeRoot}, &buf, strings.NewReader("")); code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a refusal:\n%s", buf.String())
+	}
+	data, err := os.ReadFile(filepath.Join(storeRoot, "charts", "mychart", "tickets.yaml"))
+	if err != nil || string(data) != chart {
+		t.Fatalf("chart file = %q, %v, want it untouched", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(storeRoot, "tickets", "DEMO-1")); !os.IsNotExist(err) {
+		t.Fatalf("the minted folder survived (stat err %v)", err)
+	}
+}
+
+// TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete covers the
+// remaining case: a file in entry B's minted ticket folder is held open, so
+// Claim's undo of entry B's
+// failed write cannot restore it. The error is IsUndoIncomplete, and the sync
+// is skipped rather than opening an issue for what was left behind.
+func TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("lockFileShared has no portable non-Windows equivalent")
+	}
+	t.Parallel()
+	e := testEnv(t.TempDir())
+	clone := filepath.Join(t.TempDir(), "clone")
+	newTestOriginCloneWithGitHubTracker(t, clone)
+	writeChart(t, clone, "mychart", `tickets:
+  - title: "Slice A"
+  - title: "Slice B"
+`)
+	gitIn(t, clone, "add", "-A")
+	gitIn(t, clone, "commit", "-m", "add chart")
+
+	writeCalls := 0
+	e.writeChart = func(st *store.Store, chart string, entries []store.ChartEntry) error {
+		writeCalls++
+		if writeCalls == 2 {
+			lockFileShared(t, filepath.Join(clone, "tickets", "DEMO-2", "ticket.yaml"))
+			return errors.New("forced failure on entry B's chart write")
+		}
+		return st.WriteChart(chart, entries)
+	}
+	e.mirrorClient = &stubGitHub{}
+
+	var buf bytes.Buffer
+	code := run(e, []string{"graduate", "mychart", "--store", clone}, &buf, strings.NewReader(""))
+	if code == 0 {
+		t.Fatalf("jig graduate mychart: exit 0, want a refusal:\n%s", buf.String())
+	}
+	if want := "(left in the store: " + filepath.Join("tickets", "DEMO-2") + ")"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("output lacks the exact leftover list %q:\n%s", want, buf.String())
+	}
+	if strings.Contains(buf.String(), "Nothing was kept") {
+		t.Fatalf("output claims nothing was kept after an undo that did not finish:\n%s", buf.String())
 	}
 	if _, ok := treeRecordOf(t, clone, "DEMO-1"); ok {
-		t.Fatal("DEMO-1 got synced despite the checkpoint hook being skipped entirely on this failure")
+		t.Fatal("DEMO-1 got synced despite an undo that did not finish")
 	}
 }
 
