@@ -286,9 +286,10 @@ func (s *Store) undoClaim(sha string, paths []string) (resetRan bool, err error)
 // is taken out of the index (`rm -r --cached --ignore-unmatch`, so a path
 // nothing staged is no error) and then cleaned off the disk with its ignored
 // files (-x), such as a ticket folder's .lock sidecar. On an unborn branch (sha
-// is "") nothing is restored, but each path is still taken out of the index. It is best effort: every step for every path and
-// the final clean are tried even after one fails, and the errors come back
-// joined, as an *undoPathsError naming the paths whose own step failed.
+// is "") nothing is restored, but each path is still taken out of the index.
+// It is best effort: every step for every path and the final clean are tried
+// even after one fails, and the errors come back joined, as an
+// *undoPathsError naming the paths whose own step failed.
 // Called with no paths it does nothing - `clean -fdx --` with no pathspec would
 // clean the whole store.
 func (s *Store) undoPaths(sha string, paths []string) error {
