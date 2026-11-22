@@ -710,7 +710,7 @@ makes the chart with `issue:`, and writes the record (no `synced:` key) and its
 link, returning every path as it touches it so a failure at any step leaves no
 folder or record behind. The checkpoint sync then finds the issue's record,
 calls no `CreateIssue`, and updates the item in place. The mirror reads
-nothing else back: an item is intake input at the bind and nowhere else.
+nothing else back: an item is intake input at intake and at the bind, nowhere else.
 
 `project.yaml`'s `trackers:` list takes at most one `github` entry (`repo:`
 the issue home, `project:` the GitHub Project's URL; both required,

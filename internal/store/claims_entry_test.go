@@ -58,6 +58,34 @@ func TestReserveEntryIsRefusedForAnEntryAnotherTicketHolds(t *testing.T) {
 	}
 }
 
+// TestReserveEntryTakesOverThisWritersUndoneLine: a line of this writer's for
+// a ticket the store does not hold is a bind that was undone, so the next bind
+// of the item reserves it again and its line is the latest; the same writer's
+// line for a ticket the store holds still refuses.
+func TestReserveEntryTakesOverThisWritersUndoneLine(t *testing.T) {
+	t.Parallel()
+	alice, _, _ := newWritersStore(t)
+	e := TrackerEntry{Provider: ProviderGitHub, Scope: "o/r", ID: "48"}
+	if err := alice.ReserveEntry(e, "JIG-90"); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.ReserveEntry(e, "JIG-91"); err != nil {
+		t.Fatalf("after an undone bind: %v, want the item reservable again", err)
+	}
+	lines := entryLines(t, alice)
+	if len(lines) != 2 || lines[1].Ticket != "JIG-91" {
+		t.Fatalf("entry lines = %+v, want JIG-91 last", lines)
+	}
+	// JIG-91 now exists in the store: a later bind is refused naming it.
+	if err := alice.CreateTicketRecord("JIG-91", Ticket{Title: "bound"}); err != nil {
+		t.Fatal(err)
+	}
+	err := alice.ReserveEntry(e, "JIG-92")
+	if axiCode(err) != "TRACKER_ENTRY_TAKEN" || !strings.Contains(err.Error(), "JIG-91") {
+		t.Errorf("ReserveEntry over a held ticket = %v, want TRACKER_ENTRY_TAKEN naming JIG-91", err)
+	}
+}
+
 // TestClaimEntryAppendsNothingInSingleMainMode: with no claims branch the
 // tracker tree is the guard, and no claims file appears.
 func TestClaimEntryAppendsNothingInSingleMainMode(t *testing.T) {

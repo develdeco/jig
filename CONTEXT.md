@@ -59,7 +59,7 @@ _Avoid_: branch name (a recorded `branch:` can be any name)
 
 **Mirror**:
 A tracker's copy of the store, written by jig at every checkpoint (its records
-committed and pushed with it). A tracker item is read as intake input at one point, the bind of a Bound issue, and nowhere else; the mirror itself is one-way. Today's one mirror projects every ticket and chart onto a GitHub
+committed and pushed with it). A tracker item is read as intake input, at intake and at the bind of a Bound issue, and nowhere else; the mirror itself is one-way. Today's one mirror projects every ticket and chart onto a GitHub
 issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,

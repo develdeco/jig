@@ -208,7 +208,7 @@ func cmdChart(e env, args []string, stdout io.Writer) int {
 }
 
 // chartNewUsage is the help line of a refusal for a missing name or title.
-const chartNewUsage = "Run `jig chart new <name> --title \"<title>\" [--need \"<what is needed>\" | --issue <ID>]`"
+const chartNewUsage = "Run `jig chart new <name> --title \"<title>\" [--need \"<what is needed>\" | --issue <ID>]`, or `jig chart new <name> --item <ref> [--title \"<title>\"]`"
 
 // withHelp is err with line as its Help when it is a *axi.Error with none.
 func withHelp(err error, line string) error {
