@@ -6,14 +6,16 @@ import (
 )
 
 // nodeOwners maps the node id of every issue the tracker tree holds a record
-// for to the ticket, or "chart <name>", that owns it: the issues a blocked-by
-// edge of the store's own can name.
-func nodeOwners(st *store.Store) (map[string]string, error) {
+// for to the ticket or chart that owns it. It is the one definition of "held"
+// that the sync's blocked-by rule and the bind's advisories share: an edge
+// between issues the store holds is the store's to keep or remove, an edge to
+// any other issue is left alone.
+func nodeOwners(st *store.Store) (map[string]store.TrackerOwner, error) {
 	recs, err := st.TrackerRecords()
 	if err != nil {
 		return nil, err
 	}
-	owners := map[string]string{}
+	owners := map[string]store.TrackerOwner{}
 	for _, rec := range recs {
 		if rec.Err != nil || rec.Entry.Provider != store.ProviderGitHub {
 			continue
@@ -22,10 +24,8 @@ func nodeOwners(st *store.Store) (map[string]string, error) {
 		if derr != nil || fields.NodeID == "" {
 			continue
 		}
-		if rec.Chart != "" {
-			owners[fields.NodeID] = "chart " + rec.Chart
-		} else if rec.Ticket != "" {
-			owners[fields.NodeID] = rec.Ticket
+		if o := rec.Owner(); o.Ticket != "" || o.Chart != "" {
+			owners[fields.NodeID] = o
 		}
 	}
 	return owners, nil

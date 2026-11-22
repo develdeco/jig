@@ -131,17 +131,16 @@ func linkParentsAndBlockers(ctx context.Context, st *store.Store, client github.
 		}
 	}
 
-	// held is the node id of every issue the store holds a record for: the
+	// held is the node id of every issue the tracker tree holds a record for: the
 	// only issues a blocked-by edge of the store's own can name, so an edge
 	// to any other issue is not the store's to remove.
-	held := map[string]bool{}
-	for _, lt := range tickets {
-		if lt.has {
-			held[lt.rec.NodeID] = true
-		}
+	owners, err := nodeOwners(st)
+	if err != nil {
+		return err
 	}
-	for _, rec := range charts {
-		held[rec.NodeID] = true
+	held := map[string]bool{}
+	for nodeID := range owners {
+		held[nodeID] = true
 	}
 	for _, it := range items {
 		if it.kind != "ticket" {

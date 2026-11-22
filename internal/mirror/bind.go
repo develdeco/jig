@@ -80,13 +80,14 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 		return BindResult{}, err
 	}
 
-	if detail.Number != o.Ref.Number {
-		// GitHub answers a transferred issue by the number it has now: the
-		// entry reserved and the record written would name another item.
+	if detail.Number != o.Ref.Number || !strings.EqualFold(detail.Repo, repo) {
+		// GitHub answers a transferred issue as it is now, in the repository
+		// it moved to: the entry reserved and the record written would name
+		// an item of another repository.
 		return BindResult{}, &axi.Error{
-			Msg:  fmt.Sprintf("%s#%d answered as #%d: the item was moved", repo, o.Ref.Number, detail.Number),
+			Msg:  fmt.Sprintf("%s#%d answered as %s#%d (%s): the item was moved", repo, o.Ref.Number, detail.Repo, detail.Number, detail.URL),
 			Code: "ITEM_NOT_FOUND",
-			Help: []string{fmt.Sprintf("Bind it by its current number: jig chart new %s --item %d", o.Chart, detail.Number)},
+			Help: []string{fmt.Sprintf("The item lives in %s now, not in the project's tracker %s: a bind takes only an item of the tracker", detail.Repo, repo)},
 		}
 	}
 	held, err := nodeOwners(st)
@@ -159,9 +160,22 @@ func BindItem(ctx context.Context, d Deps, o BindOpts) (BindResult, error) {
 		return BindResult{}, err
 	}
 
+	// The first sync keeps an edge to an issue the store holds no record of,
+	// and removes an edge between the bound issue and one it holds unless the
+	// blocked ticket's blocked_by lists the blocker.
 	for _, b := range detail.BlockedBy {
-		if who, ok := held[b.NodeID]; ok {
-			res.Advisories = append(res.Advisories, fmt.Sprintf("%d is blocked on the tracker by #%d, which is %s; the first sync removes the link unless %s is in the issue's blocked_by", detail.Number, b.Number, who, who))
+		o, ok := held[b.NodeID]
+		switch {
+		case !ok:
+		case o.Chart != "":
+			res.Advisories = append(res.Advisories, fmt.Sprintf("%d is blocked on the tracker by #%d, the issue of chart %s; the first sync removes that link", detail.Number, b.Number, o.Chart))
+		default:
+			res.Advisories = append(res.Advisories, fmt.Sprintf("%d is blocked on the tracker by #%d, which is %s; the first sync removes that link unless %s is in %s's blocked_by", detail.Number, b.Number, o.Ticket, o.Ticket, res.Issue))
+		}
+	}
+	for _, b := range detail.Blocking {
+		if o, ok := held[b.NodeID]; ok && o.Ticket != "" {
+			res.Advisories = append(res.Advisories, fmt.Sprintf("%d blocks #%d on the tracker, which is %s; the first sync removes that link unless %s is in %s's blocked_by", detail.Number, b.Number, o.Ticket, res.Issue, o.Ticket))
 		}
 	}
 	if !detail.Open {

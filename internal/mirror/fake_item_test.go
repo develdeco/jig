@@ -14,6 +14,9 @@ import (
 func (c *fakeClient) ItemByNumber(_ context.Context, owner, repo string, number int) (github.ItemDetail, error) {
 	c.read("ItemByNumber")
 	if d, ok := c.items[number]; ok {
+		if d.Repo == "" {
+			d.Repo = owner + "/" + repo
+		}
 		return d, nil
 	}
 	return github.ItemDetail{}, &axi.Error{Msg: fmt.Sprintf("%s/%s#%d is not an issue this token can read", owner, repo, number), Code: "ITEM_NOT_FOUND"}

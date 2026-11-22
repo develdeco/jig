@@ -33,7 +33,7 @@ func TestItemByNumber(t *testing.T) {
 	answer = `{"data":{"repository":{"issue":{"id":"I_1","number":48,"title":"T","body":"B","url":"https://github.com/o/r/issues/48",
 	  "closed":true,"stateReason":"COMPLETED","author":{"login":"ann"},
 	  "labels":{"nodes":[{"name":"bug"},{"name":"x"}]},"subIssues":{"totalCount":2},
-	  "blockedBy":{"nodes":[{"id":"I_40","number":40}]},
+	  "repository":{"nameWithOwner":"o/r"},"blockedBy":{"nodes":[{"id":"I_40","number":40}]},"blocking":{"nodes":[{"id":"I_51","number":51}]},
 	  "closedByPullRequestsReferences":{"totalCount":3}}}}}`
 	d, err := c.ItemByNumber(context.Background(), "o", "r", 48)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestItemByNumber(t *testing.T) {
 	}
 	if d.Number != 48 || d.NodeID != "I_1" || d.Title != "T" || d.Body != "B" || d.URL != "https://github.com/o/r/issues/48" ||
 		d.Open || d.StateReason != "COMPLETED" || d.Author != "ann" || len(d.Labels) != 2 || d.Labels[1] != "x" ||
-		d.SubItems != 2 || d.LinkedPullRequests != 3 || len(d.BlockedBy) != 1 || d.BlockedBy[0] != (BlockerRef{Number: 40, NodeID: "I_40"}) {
+		d.SubItems != 2 || d.LinkedPullRequests != 3 || len(d.BlockedBy) != 1 || d.BlockedBy[0] != (BlockerRef{Number: 40, NodeID: "I_40"}) || len(d.Blocking) != 1 || d.Blocking[0] != (BlockerRef{Number: 51, NodeID: "I_51"}) || d.Repo != "o/r" {
 		t.Fatalf("item = %+v", d)
 	}
 

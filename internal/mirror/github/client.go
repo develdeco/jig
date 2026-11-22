@@ -84,6 +84,11 @@ type ItemDetail struct {
 	SubItems int
 	// BlockedBy is the issues that block the item on the tracker.
 	BlockedBy []BlockerRef
+	// Blocking is the issues the item blocks on the tracker.
+	Blocking []BlockerRef
+	// Repo is the owner/repo the item lives in now, which is not the repo it
+	// was asked of when it was transferred.
+	Repo string
 	// LinkedPullRequests is how many pull requests the item lists as
 	// closing it (its closedByPullRequestsReferences, in any state).
 	LinkedPullRequests int

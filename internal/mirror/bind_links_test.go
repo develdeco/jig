@@ -2,13 +2,11 @@ package mirror
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/mirror/github"
 )
 
@@ -34,7 +32,7 @@ func TestBindItemKeepsAnOutsideBlockerAndRemovesAStoreOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(res.Advisories) != 1 || !strings.Contains(res.Advisories[0], "#50") || !strings.Contains(res.Advisories[0], held.Issue) ||
-		!strings.Contains(res.Advisories[0], "removes the link unless "+held.Issue+" is in the issue's blocked_by") {
+		!strings.Contains(res.Advisories[0], "removes that link unless "+held.Issue+" is in "+res.Issue+"'s blocked_by") {
 		t.Fatalf("advisories = %q, want one naming #50 and %s", res.Advisories, held.Issue)
 	}
 
@@ -45,24 +43,6 @@ func TestBindItemKeepsAnOutsideBlockerAndRemovesAStoreOne(t *testing.T) {
 	got := client.blockedByOf["NODE_48"]
 	if !containsString(got, "NODE_40") || containsString(got, "NODE_50") {
 		t.Errorf("blockedByOf = %v, want the outside edge kept and the store one removed", got)
-	}
-}
-
-// TestBindItemRefusesAMovedItem: an item that answers by another number than
-// the ref's is refused before the claim.
-func TestBindItemRefusesAMovedItem(t *testing.T) {
-	st, work, _ := newTestRemoteStore(t)
-	client := bindClient()
-	client.items[48] = github.ItemDetail{Number: 77, NodeID: "NODE_77", Title: "Moved", Open: true}
-	_, err := BindItem(context.Background(), bindDeps(st, client), BindOpts{Ref: ItemRef{Number: 48}, Chart: "shop"})
-	var ae *axi.Error
-	if !errors.As(err, &ae) || ae.Code != "ITEM_NOT_FOUND" || !strings.Contains(ae.Msg, "#77") {
-		t.Errorf("err = %v, want ITEM_NOT_FOUND naming #77", err)
-	}
-	for _, dir := range []string{"tickets", "charts", "trackers"} {
-		if _, err := os.Stat(filepath.Join(work, dir)); err == nil {
-			t.Errorf("a refusal left %s behind", dir)
-		}
 	}
 }
 

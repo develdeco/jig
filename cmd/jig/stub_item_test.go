@@ -13,10 +13,13 @@ import (
 func (s *stubGitHub) ItemByNumber(_ context.Context, owner, repo string, number int) (github.ItemDetail, error) {
 	if s.items != nil {
 		d, ok := s.items[number]
+		if ok && d.Repo == "" {
+			d.Repo = owner + "/" + repo
+		}
 		if !ok {
 			return github.ItemDetail{}, &axi.Error{Msg: owner + "/" + repo + "#" + strconv.Itoa(number) + " is not an issue this token can read", Code: "ITEM_NOT_FOUND"}
 		}
 		return d, nil
 	}
-	return github.ItemDetail{Number: number, NodeID: "NODE_ITEM_" + strconv.Itoa(number), Title: s.issueTitle, Open: true}, nil
+	return github.ItemDetail{Number: number, Repo: owner + "/" + repo, NodeID: "NODE_ITEM_" + strconv.Itoa(number), Title: s.issueTitle, Open: true}, nil
 }
