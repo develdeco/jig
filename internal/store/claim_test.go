@@ -1606,3 +1606,136 @@ func TestClaimFailedCommitRestoresUncommittedFilesInAReportedFolder(t *testing.T
 		}
 	}
 }
+
+// TestClaimIncompleteUndoKeepsTheRestoredWorkOutOfTheWipeRecipe covers a stale
+// index.lock: the commit and the undo's git steps fail on it, yet the snapshot
+// restore (plain file writes) works. The error is incomplete and names the
+// chart, but the finish-by-hand help must not tell the person to restore or
+// clean a path whose file holds the work just put back.
+func TestClaimIncompleteUndoKeepsTheRestoredWorkOutOfTheWipeRecipe(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	const chart = "charts/c/tickets.yaml"
+	if err := os.MkdirAll(filepath.Join(work, "charts", "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	committed := "entries:\n- title: one\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(chart)), []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "--", chart)
+	runGit(t, work, "commit", "-m", "chart")
+	handWritten := committed + "- title: two, typed by hand\n"
+	if err := os.WriteFile(filepath.Join(work, filepath.FromSlash(chart)), []byte(handWritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".git", "index.lock"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, chart, committed+"- title: one, id added\n", &minted), func(id string) string { return id })
+	if !IsUndoIncomplete(err) {
+		t.Fatalf("err = %v, want an incomplete undo (the index is locked)", err)
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, filepath.FromSlash(chart))); rerr != nil || string(data) != handWritten {
+		t.Fatalf("chart = %q, %v, want the hand-written entries", data, rerr)
+	}
+	var ae *axi.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("err = %v, want an *axi.Error inside", err)
+	}
+	for _, h := range ae.Help {
+		if strings.Contains(h, "git restore --source=HEAD") && strings.Contains(h, "tickets.yaml") {
+			t.Fatalf("help tells the person to restore the chart over the work just put back:\n%s", h)
+		}
+		if strings.Contains(h, "git clean") && strings.Contains(h, "tickets.yaml") {
+			t.Fatalf("help tells the person to clean the chart:\n%s", h)
+		}
+	}
+}
+
+// TestClaimSnapshotSkipsAFileItCannotRead covers one unreadable dirty file
+// elsewhere in the store: the claim goes on rather than refusing before its
+// write.
+func TestClaimSnapshotSkipsAFileItCannotRead(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	held := filepath.Join(work, "scratch.bin")
+	if err := os.WriteFile(held, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		defer lockFileExclusive(t, held)()
+	} else {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads any file")
+		}
+		if err := os.Chmod(held, 0); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(held, 0o600)
+	}
+	var minted string
+	if _, err := st.Claim(mintingWrite(st, &minted), func(id string) string { return id }); err != nil {
+		t.Fatalf("Claim = %v, want an unreadable unrelated file not to refuse it", err)
+	}
+}
+
+// TestClaimSnapshotIgnoresGitStderr covers a git that writes to stderr on
+// every call (GIT_TRACE here): the warning must not be parsed as a status
+// record, or the first dirty path goes unrecorded and its work is lost.
+func TestClaimSnapshotIgnoresGitStderr(t *testing.T) {
+	st, work := newTestStandaloneStore(t)
+	t.Setenv("GIT_TRACE", "1")
+	handWritten := "schema_version: 1\nhand: written\n"
+	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte(handWritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, "project.yaml", "schema_version: 1\nrewritten: yes\n", &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if data, rerr := os.ReadFile(filepath.Join(work, "project.yaml")); rerr != nil || string(data) != handWritten {
+		t.Fatalf("project.yaml = %q, %v, want the hand-written content", data, rerr)
+	}
+}
+
+// TestClaimFailedCommitRestoresAnUncommittedChmod covers a tracked file whose
+// mode a person changed without committing: the undo's git restore resets the
+// mode to the commit's, and the restore puts the recorded one back.
+func TestClaimFailedCommitRestoresAnUncommittedChmod(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("modes are not kept on Windows")
+	}
+	st, work := newTestStandaloneStore(t)
+	if err := os.Chmod(filepath.Join(work, "project.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failingHooks(t, filepath.Join(work, ".git", "hooks"), "pre-commit")
+	var minted string
+	_, err := st.Claim(chartRewritingWrite(st, work, "project.yaml", "schema_version: 1\nx: y\n", &minted), func(id string) string { return id })
+	if err == nil {
+		t.Fatal("Claim = nil, want the failing pre-commit hook to stop the commit")
+	}
+	if info, serr := os.Stat(filepath.Join(work, "project.yaml")); serr != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("project.yaml mode = %v, %v, want 0755", info, serr)
+	}
+}
+
+// TestClaimSnapshotTakesNoOptionalLock pins that the pre-write status does not
+// refresh the index on disk: a person's own git command in the store would
+// otherwise fail on the lock it took.
+func TestClaimSnapshotTakesNoOptionalLock(t *testing.T) {
+	st, _ := newTestStandaloneStore(t)
+	var minted string
+	argv := gittest.GitArgv(t, func() {
+		if _, err := st.Claim(mintingWrite(st, &minted), func(id string) string { return id }); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, a := range argv {
+		if slices.Contains(a, "status") && !slices.Contains(a, "--no-optional-locks") {
+			t.Fatalf("status without --no-optional-locks: %v", a)
+		}
+	}
+}

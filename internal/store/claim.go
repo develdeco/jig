@@ -379,6 +379,10 @@ func outermost(paths []string) []string {
 type undoPathsError struct {
 	err       error
 	leftovers []string
+	// kept are the leftovers whose files hold the work restoreSnapshot put
+	// back: the finish-by-hand help must not tell the person to restore or
+	// clean them from the commit, which would discard that work.
+	kept []string
 }
 
 func (e *undoPathsError) Error() string { return e.err.Error() }
@@ -417,15 +421,26 @@ func IsUndoIncomplete(err error) bool {
 // the leftover list and a help line to finish by hand.
 func withLeftovers(ae *axi.Error, cause, undoErr error, root string) error {
 	out := &axi.Error{Msg: ae.Msg, Code: ae.Code, Help: slices.Clone(ae.Help)}
-	var leftovers []string
+	var leftovers, kept []string
 	var upe *undoPathsError
 	if errors.As(undoErr, &upe) {
 		leftovers = upe.leftovers
+		kept = upe.kept
 	}
 	if len(leftovers) > 0 {
-		list := strings.Join(leftovers, ", ")
-		out.Msg += fmt.Sprintf(" (left in the store: %s)", list)
-		out.Help = append(out.Help, fmt.Sprintf("Finish by hand in %s once nothing holds %s: `git restore --source=HEAD --staged --worktree -- <path>` for one the store already tracked, otherwise `git rm -r --cached --ignore-unmatch -- <path>` and `git clean -fdx -- <path>`.", root, list))
+		out.Msg += fmt.Sprintf(" (left in the store: %s)", strings.Join(leftovers, ", "))
+		var wipe []string
+		for _, p := range leftovers {
+			if !slices.Contains(kept, p) {
+				wipe = append(wipe, p)
+			}
+		}
+		if len(wipe) > 0 {
+			out.Help = append(out.Help, fmt.Sprintf("Finish by hand in %s once nothing holds %s: `git restore --source=HEAD --staged --worktree -- <path>` for one the store already tracked, otherwise `git rm -r --cached --ignore-unmatch -- <path>` and `git clean -fdx -- <path>`.", root, strings.Join(wipe, ", ")))
+		}
+		if len(kept) > 0 {
+			out.Help = append(out.Help, fmt.Sprintf("In %s, %s already hold what they held before the write: keep their content, and once nothing holds the index lock only reset their index entry with `git reset -q -- <path>`.", root, strings.Join(kept, ", ")))
+		}
 	}
 	return &undoIncompleteError{ae: out, cause: cause, leftovers: leftovers}
 }
@@ -461,7 +476,8 @@ func (s *Store) undoFailedCommit(err error, pre string, havePre bool, paths []st
 	} else {
 		uerr = s.undoPaths("", paths)
 	}
-	return s.incompleteUndo(err, joinUndoErrors(uerr, s.restoreSnapshot(snap, paths)))
+	restored, rerr := s.restoreSnapshot(snap, paths)
+	return s.incompleteUndo(err, markKept(joinUndoErrors(uerr, rerr), restored))
 }
 
 // incompleteUndo returns err when uerr is nil, otherwise err's report that the
@@ -650,7 +666,7 @@ func pullAfterUndoError(root string, cause error) error {
 }
 
 // snapshotFile is what one store path held on disk just before a claim's
-// write: its bytes and permissions, or absent for a path a person had
+// write: its bytes and permissions (not the index entry), or absent for a path a person had
 // deleted without committing.
 type snapshotFile struct {
 	data   []byte
@@ -669,18 +685,29 @@ type snapshot map[string]snapshotFile
 // commit's older content: Sync commits leftovers only on a store with an
 // origin, so on any other store this is work no commit holds.
 func (s *Store) snapshotDirty() (snapshot, error) {
-	out, err := gitx.RunRaw(s.Root, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+	// Stdout only (a git warning on stderr must not read as a record), v2 so
+	// that the trimmed output loses no leading space, and no optional lock so
+	// that a person's own git command in the store is not made to fail on it.
+	out, err := gitx.Run(s.Root, "--no-optional-locks", "status", "--porcelain=v2", "-z", "--no-renames", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
 	snap := snapshot{}
-	fields := strings.Split(out, "\x00")
-	for i := 0; i < len(fields); i++ {
-		f := fields[i]
-		if len(f) < 4 {
+	for _, f := range strings.Split(out, "\x00") {
+		var rel string
+		switch {
+		case strings.HasPrefix(f, "? "):
+			rel = f[2:]
+		case strings.HasPrefix(f, "1 "):
+			// 1 XY sub mH mI mW hH hI path
+			parts := strings.SplitN(f, " ", 9)
+			if len(parts) < 9 {
+				continue
+			}
+			rel = parts[8]
+		default:
 			continue
 		}
-		rel := f[3:]
 		abs := filepath.Join(s.Root, filepath.FromSlash(rel))
 		info, serr := os.Lstat(abs)
 		switch {
@@ -689,11 +716,12 @@ func (s *Store) snapshotDirty() (snapshot, error) {
 		case serr != nil || !info.Mode().IsRegular():
 			// Not a plain file (a symlink, a folder): left to the undo as it is.
 		default:
-			data, rerr := os.ReadFile(abs)
-			if rerr != nil {
-				return nil, fmt.Errorf("record %s before the write: %w", rel, rerr)
+			// A file that cannot be read is left out too: it is as likely
+			// unrelated to the claim as not, and refusing every claim for it
+			// would be worse than the undo treating it as it does today.
+			if data, rerr := os.ReadFile(abs); rerr == nil {
+				snap[rel] = snapshotFile{data: data, perm: info.Mode().Perm()}
 			}
-			snap[rel] = snapshotFile{data: data, perm: info.Mode().Perm()}
 		}
 	}
 	return snap, nil
@@ -705,9 +733,9 @@ func (s *Store) snapshotDirty() (snapshot, error) {
 // made, so what comes back is only what existed before the write. Best
 // effort, as undoPaths is: every file is tried, and the failures come back
 // as an *undoPathsError naming them.
-func (s *Store) restoreSnapshot(snap snapshot, paths []string) error {
+func (s *Store) restoreSnapshot(snap snapshot, paths []string) (restored []string, err error) {
 	if len(snap) == 0 || len(paths) == 0 {
-		return nil
+		return nil, nil
 	}
 	defer s.invalidateTrackerIndex()
 	var errs []error
@@ -723,17 +751,23 @@ func (s *Store) restoreSnapshot(snap snapshot, paths []string) error {
 				err = nil
 			}
 		} else if err = os.MkdirAll(filepath.Dir(abs), 0o755); err == nil {
-			err = os.WriteFile(abs, f.data, f.perm)
+			// WriteFile keeps the mode of a file that exists, which git restore
+			// has just reset to the commit's.
+			if err = os.WriteFile(abs, f.data, f.perm); err == nil {
+				err = os.Chmod(abs, f.perm)
+			}
 		}
 		if err != nil {
 			errs = append(errs, err)
 			leftovers = append(leftovers, filepath.FromSlash(rel))
+			continue
 		}
+		restored = append(restored, rel)
 	}
 	if len(errs) == 0 {
-		return nil
+		return restored, nil
 	}
-	return &undoPathsError{err: errors.Join(errs...), leftovers: leftovers}
+	return restored, &undoPathsError{err: errors.Join(errs...), leftovers: leftovers}
 }
 
 // reaches reports whether rel is one of paths or inside one that is a folder.
@@ -761,4 +795,30 @@ func joinUndoErrors(a, b error) error {
 		return &undoPathsError{err: errors.Join(ua.err, ub.err), leftovers: append(slices.Clone(ua.leftovers), ub.leftovers...)}
 	}
 	return errors.Join(a, b)
+}
+
+// markKept marks, in err's leftovers, the paths that are or hold a file the
+// restore put back: their content is the person's now, whatever step of the
+// undo failed on them.
+func markKept(err error, restored []string) error {
+	var upe *undoPathsError
+	if !errors.As(err, &upe) {
+		return err
+	}
+	for _, l := range upe.leftovers {
+		if reachesAny(l, restored) && !slices.Contains(upe.kept, l) {
+			upe.kept = append(upe.kept, l)
+		}
+	}
+	return err
+}
+
+// reachesAny reports whether path is one of files or a folder holding one.
+func reachesAny(path string, files []string) bool {
+	for _, f := range files {
+		if reaches([]string{path}, f) {
+			return true
+		}
+	}
+	return false
 }
