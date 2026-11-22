@@ -91,7 +91,11 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // reset, nothing was committed) and returns the write's own error. A write
 // that fails before touching anything returns no paths and nothing is undone.
 // A commit that fails after write is undone the same way, and its own error
-// comes back (unwrapping through an incomplete undo's report too).
+// comes back (unwrapping through an incomplete undo's report too). Before
+// each write Claim records the store files that differ from the pre-claim
+// commit (snapshotDirty), and a failed commit puts a reported file back as
+// that record holds it: uncommitted work (a chart's hand-written entries, on
+// a store Sync does not commit) is not lost to the commit's older content.
 // Every undo is best effort: it tries each step for each path and the final
 // clean, and one that does not finish returns an error naming the leftover
 // paths and how to finish by hand, which unwraps to the write's own error
