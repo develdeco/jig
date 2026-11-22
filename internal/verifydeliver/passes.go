@@ -13,7 +13,7 @@ import (
 // latest covering pass of its own oracle, run by the slice's builder and
 // witnessed by jig at Commit, which is the head or one of its ancestors. A
 // gate round runs no command, so these are the only runs the reviewer is told
-// of, and it reads by what they cover and runs a test only to probe.
+// of, and it reads by what they cover and runs a test only to probe or to run a path the change reaches.
 type SlicePass struct {
 	Slice     string `json:"slice"`
 	Workspace string `json:"workspace"`
