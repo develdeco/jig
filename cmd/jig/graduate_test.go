@@ -1350,6 +1350,9 @@ func TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs(t *testing.T) {
 	if !strings.Contains(buf.String(), "failed to write chart") {
 		t.Fatalf("output missing \"failed to write chart\":\n%s", buf.String())
 	}
+	if !strings.Contains(buf.String(), "Nothing was kept: re-run jig graduate mychart") {
+		t.Fatalf("output lacks the re-run line after a complete undo:\n%s", buf.String())
+	}
 
 	if _, err := os.Stat(filepath.Join(clone, "tickets", "DEMO-2")); !os.IsNotExist(err) {
 		t.Fatalf("DEMO-2's folder survived the failed chart write (stat err %v)", err)
@@ -1419,6 +1422,9 @@ func TestGraduateSkipsTheCheckpointSyncWhenTheUndoIsIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "tickets.yaml") {
 		t.Fatalf("output does not name the leftover chart file:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "Nothing was kept") {
+		t.Fatalf("output claims nothing was kept after an undo that did not finish:\n%s", buf.String())
 	}
 	if _, ok := treeRecordOf(t, clone, "DEMO-1"); ok {
 		t.Fatal("DEMO-1 got synced despite an undo that did not finish")

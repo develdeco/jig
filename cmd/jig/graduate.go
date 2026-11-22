@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -322,11 +323,10 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 		touched := []string{st.TicketRelDir(newID), "charts/" + chart + "/tickets.yaml"}
 		if werr := writeChart(chart, entries); werr != nil {
 			// Claim undoes touched, so nothing of this attempt stays behind.
-			return "", touched, &axi.Error{
+			return "", touched, &chartWriteError{ae: &axi.Error{
 				Msg:  fmt.Sprintf("ticket %s was created for entry %d but failed to write chart %q: %v", newID, i+1, chart, werr),
 				Code: "VALIDATION_ERROR",
-				Help: []string{fmt.Sprintf("Nothing was kept: re-run jig graduate %s", chart)},
-			}
+			}}
 		}
 		pos = i
 		return newID, touched, nil
@@ -342,6 +342,15 @@ func claimOneChartEntry(e env, st *store.Store, cfg project.Config, chart string
 	}
 	return id, pos, false, nil
 }
+
+// chartWriteError is the failure of an entry's chart write after its ticket
+// was minted. It carries no recovery line: whether "nothing was kept" holds
+// depends on whether Claim's undo finished, which only graduateFailure can ask
+// (store.IsUndoIncomplete).
+type chartWriteError struct{ ae *axi.Error }
+
+func (e *chartWriteError) Error() string { return e.ae.Msg }
+func (e *chartWriteError) Unwrap() error { return e.ae }
 
 // firstMissingID returns the 0-based position of the first entry with no
 // id, or -1 when every entry already has one.
@@ -389,6 +398,12 @@ func graduateFailure(chart string, createdIDs []string, err error) error {
 		// A copy: the caller's error is not this function's to change.
 		withMsg := *ae
 		withMsg.Msg = msg
+		// Only a complete undo leaves nothing to re-run over; after an
+		// incomplete one the finish-by-hand help is the recovery.
+		var cwe *chartWriteError
+		if errors.As(err, &cwe) && !store.IsUndoIncomplete(err) {
+			withMsg.Help = append(slices.Clone(withMsg.Help), fmt.Sprintf("Nothing was kept: re-run jig graduate %s", chart))
+		}
 		return &withMsg
 	}
 

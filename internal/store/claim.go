@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -89,6 +90,8 @@ const idNotClaimedCode = "ID_NOT_CLAIMED"
 // uncommitted edit. Claim then undoes exactly those paths (undoPaths; no
 // reset, nothing was committed) and returns the write's own error. A write
 // that fails before touching anything returns no paths and nothing is undone.
+// A commit that fails after write is undone the same way, and its own error
+// comes back (unwrapping through an incomplete undo's report too).
 // Every undo is best effort: it tries each step for each path and the final
 // clean, and one that does not finish returns an error naming the leftover
 // paths and how to finish by hand, which unwraps to the write's own error
@@ -134,10 +137,7 @@ func (s *Store) Claim(write func() (id string, paths []string, err error), msg f
 		}
 		claimSHA, err := s.stageAndCommitPaths(paths, msg(id))
 		if err != nil {
-			if havePre {
-				_, _ = s.undoClaim(pre, paths)
-			}
-			return "", err
+			return "", s.undoFailedCommit(err, pre, havePre, paths)
 		}
 		if !hasRemote {
 			return id, nil
@@ -304,12 +304,19 @@ func (s *Store) undoPaths(sha string, paths []string) error {
 		errs = append(errs, err)
 		leftovers = append(leftovers, p)
 	}
-	if sha != "" {
+	// created are the paths that did not exist at sha: the clean's to take.
+	var created []string
+	if sha == "" {
+		created = paths
+	} else {
 		for _, p := range paths {
 			existed, err := gitx.PathExistsAtRev(s.Root, sha, p)
 			if err != nil {
 				fail(p, err)
 				continue
+			}
+			if !existed {
+				created = append(created, p)
 			}
 			if existed {
 				if _, err := gitx.Run(s.Root, "restore", "--source="+sha, "--staged", "--worktree", "--", p); err != nil {
@@ -325,8 +332,10 @@ func (s *Store) undoPaths(sha string, paths []string) error {
 	args := append([]string{"clean", "-fdx", "--"}, outermost(paths)...)
 	if _, err := gitx.Run(s.Root, args...); err != nil {
 		errs = append(errs, err)
-		for _, p := range paths {
-			if !slices.Contains(leftovers, p) {
+		// Only a path the clean was to take and that is still on disk is left
+		// over: a restored one was never the clean's.
+		for _, p := range created {
+			if _, serr := os.Lstat(filepath.Join(s.Root, filepath.FromSlash(p))); serr == nil && !slices.Contains(leftovers, p) {
 				leftovers = append(leftovers, p)
 			}
 		}
@@ -425,6 +434,27 @@ func (s *Store) undoFailedWrite(err error, pre string, havePre bool, paths []str
 		pre = ""
 	}
 	uerr := s.undoPaths(pre, paths)
+	return s.incompleteUndo(err, uerr)
+}
+
+// undoFailedCommit is Claim's answer to a commit that failed: the commit's
+// error comes back as it was, after what write touched is undone (HEAD is
+// still pre, so the reset is a no-op; an unborn branch only cleans). An undo
+// that does not finish is reported as undoFailedWrite reports it.
+func (s *Store) undoFailedCommit(err error, pre string, havePre bool, paths []string) error {
+	var uerr error
+	if havePre {
+		_, uerr = s.undoClaim(pre, paths)
+	} else {
+		uerr = s.undoPaths("", paths)
+	}
+	return s.incompleteUndo(err, uerr)
+}
+
+// incompleteUndo returns err when uerr is nil, otherwise err's report that the
+// undo did not finish: it unwraps to err, keeps err's own code and help, and
+// names the leftover paths (IsUndoIncomplete).
+func (s *Store) incompleteUndo(err, uerr error) error {
 	if uerr == nil {
 		return err
 	}
