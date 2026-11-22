@@ -19,3 +19,11 @@
 ## Consequences
 
 Amends [ADR 0005](0005-tracker-is-a-projection.md): a tracker item may be read as input at those two points, and the tracker is still a projection after. Amends [ADR 0028](0028-jig-mints-and-claims-every-ticket-id.md): the id is minted by jig, and the item's number is claimed beside it. The claims log gains a line kind; an older jig ignores a line whose kind it does not know. Labels, the author and an item's sub-items are read but not stored, and the mirror leaves an issue's links to other issues alone: it removes a blocked-by edge as drift only when the blocker is an issue the store holds a record for, which amends [ADR 0030](0030-jig-mirrors-the-store-onto-github-from-inside-every-command.md)'s ownership of blocked-by links as far as edges to other issues. The bind says which of an item's blockers the first sync would remove. A bind that fails after reserving its entry in the claims log releases it.
+
+## The skills carry the item
+
+The intake skill reads an item with `jig next <n>` (the bare number, since an unquoted `#` starts a comment) and mints nothing before the verdict. An item is one need, so one issue and one chart, made by the verdict's step `jig chart new <name> --item <n>` for a brief verdict and a chart verdict alike. The steps live in jig's help lines, so each skill gained a clause and none repeats them; intake's core moved one paragraph to its needs reference to keep its size cap.
+
+Rejected: a question at the verdict about what the item is to the chart, since there is one case; the skill running `gh`, since jig reads the item; listing the bind commands in the skill, since they duplicate the help lines; raising the 6000-byte cap.
+
+Consequence: the skills' words and the help lines change together. The intent rules of [ADR 0047](0047-after-a-chart-verdict-the-prompts-intent-decides.md) are read, unchanged, for an item's prompt.

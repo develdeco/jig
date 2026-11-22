@@ -208,10 +208,13 @@ func TestHereSendsWorkWithNoTicketToIntake(t *testing.T) {
 	t.Parallel()
 	for _, w := range []locate.Where{{StorePath: "/s", Branch: "main"}, {StorePath: "/s"}} {
 		help := strings.Join(hereView{}.help(hereCtx{Where: w}), "\n")
-		for _, want := range []string{"is fresh work, planned first with the intake skill (`jig skill intake`), which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue)", "run `jig next`"} {
+		for _, want := range []string{"is fresh work, planned first with the intake skill (`jig skill intake`), which writes the need first, makes an issue and its chart for each need, and decides brief or chart for each (a need raised later is another issue)", "run `jig next`", "or for a tracker item (`jig next 48` reads it), is fresh work", "an item is one need, one issue"} {
 			if !strings.Contains(help, want) {
 				t.Errorf("branch %q: help %q lacks %q", w.Branch, help, want)
 			}
+		}
+		if w.Branch != "" && !strings.Contains(help, "or an item: `jig here 48`") {
+			t.Errorf("branch %q: help %q does not name `jig here 48`", w.Branch, help)
 		}
 	}
 }

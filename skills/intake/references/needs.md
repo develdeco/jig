@@ -1,8 +1,12 @@
-Read when the prompt states more than one need, or a need comes after an issue was made. The verdict's one step is `chart-verdict`'s; this reference only decides how many issues there are and what each says.
+Read when the prompt states more than one need, a need comes after an issue was made, or the prompt names a tracker item. The verdict's one step is `chart-verdict`'s; this reference only decides how many issues there are and what each says.
 
 ## The need first
 
-Before the verdict, write the need as a short statement of what the person needs, never how the work is planned. Take it from the prompt when intake runs at once ("Fix this: ..."), or from the conversation when the person asks for it after the need was shaped there ("plan what we just discussed"). Show it in the confirmation; it is the `--need` of the verdict's step. It may be reworded while grilling; once the issue exists, a change to it goes to the issue's `body`. When the prompt names a tracker item, read the item for the need's text; binding it to the issue is not intake's.
+Before the verdict, write the need as a short statement of what the person needs, never how the work is planned. Take it from the prompt when intake runs at once ("Fix this: ..."), or from the conversation when the person asks for it after the need was shaped there ("plan what we just discussed"). Show it in the confirmation; it is the `--need` of the verdict's step. It may be reworded while grilling; once the issue exists, a change to it goes to the issue's `body`.
+
+## A tracker item
+
+An item is one need, so one issue, never split whatever the fog and never a row of the table below; what grilling finds for it goes in its chart. jig reads the item, never `gh`: run `jig next 48`, relay its advisories and refuse nothing. The item's title and text are the need, so the verdict's step takes `--item <n>` and no `--need`. A later edit of the item is drift, never a change of need; a change of need goes to the issue's `body`. An item jig says it cannot bind (another repo's, or one GitHub moved) is input only: its title and text are the step's `--need`, never `--item`. A bound item is its issue: work in that issue's chart and make nothing. A second session on one item is refused naming the issue: extend that chart.
 
 ## Several needs at once
 
@@ -26,3 +30,7 @@ After an issue's chart was made, tell a new request from a change to that issue 
 - A change to an issue whose pull request already merged is a new need.
 
 Judge the meaning, never match phrases. When the test is unclear, ask inside the confirmation and recommend one answer. Take "the issues this session made" from the conversation and from `jig recall`: an open issue near the words is extended, never repeated.
+
+## Where a change is written
+
+What the person needs, to the issue's `body` (its `ticket.yaml`); how the work is planned, to the chart (`tickets.yaml` entries, the map's decisions); a briefing, to its task's `brief.md`.
