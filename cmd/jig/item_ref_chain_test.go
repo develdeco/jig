@@ -41,7 +41,7 @@ func TestItemRefChain(t *testing.T) {
 	out, code := runMain(t, e, "", "next", "48", "--store", clone)
 	if code != 0 || !strings.Contains(out, "  bound: no\n") || !strings.Contains(out, "title: Coupons at checkout") ||
 		!strings.Contains(out, "The verdict makes its one issue and chart: jig chart new <name> --item 48") ||
-		!strings.Contains(out, "Once bound, jig next 48 answers as the issue does, with no network") {
+		!strings.Contains(out, "Once bound, jig next 48 answers as the issue does") {
 		t.Fatalf("unbound: exit %d\n%s", code, out)
 	}
 	if after := storeState(t, clone); after != before || len(c.asked) != 1 {

@@ -423,6 +423,8 @@ func (v hereView) help(hc hereCtx) []string {
 		return []string{"The store of this project is not on this machine; pass --store, or `jig map <repo>=<path>` once it is"}
 	case w.Item != nil && !w.Item.Bound:
 		return []string{fmt.Sprintf("Run `jig next %s` to read it; `jig here` reads no tracker", itemAsk(w.Item))}
+	case w.Item != nil && w.Item.Chart != "":
+		return []string{fmt.Sprintf("The item is bound to chart %s: run `jig next %s` for where it stands", w.Item.Chart, itemAsk(w.Item))}
 	case w.Ticket != "":
 		a, _ := hereConflicts(hc)
 		return append(conflictHelp(w.Ticket, a.Conflicts), fmt.Sprintf("Run `jig next %s` to see what is ready, `jig status %s` for the full state%s", w.Ticket, w.Ticket, promptHint(v.prompt)))

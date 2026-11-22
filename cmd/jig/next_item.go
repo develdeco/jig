@@ -33,7 +33,7 @@ func nextUnboundItem(e env, stdout io.Writer, cfg project.Config, item *locate.I
 	defer cancel()
 	detail, err := mirror.ReadItem(ctx, mirror.Deps{Cfg: cfg, Client: e.mirrorClient}, item.Repo, item.Number)
 	if err != nil {
-		return renderErr(stdout, unreadableItem(item, err))
+		return renderErr(stdout, locate.AddHelp(unreadableItem(item, err), item.Shadow))
 	}
 
 	view := newUnboundView(item, detail)
@@ -51,7 +51,7 @@ func nextUnboundItem(e env, stdout io.Writer, cfg project.Config, item *locate.I
 
 // unreadableItem is the refusal for an item that could not be read: not the
 // not-found one, which is the client's own, with its code. It is exit 1 and
-// names the cause; a bound ref and `jig here` need no network.
+// names the cause; `jig here` needs no network.
 func unreadableItem(item *locate.Item, err error) error {
 	var ae *axi.Error
 	if errors.As(err, &ae) && ae.Code == "ITEM_NOT_FOUND" {
@@ -66,7 +66,7 @@ func unreadableItem(item *locate.Item, err error) error {
 		Code: "ITEM_UNREADABLE",
 		Help: []string{
 			"Run `gh auth login`, or set GH_TOKEN, and run it again",
-			fmt.Sprintf("A bound ref and `jig here %s` need no network", itemAsk(item)),
+			fmt.Sprintf("`jig here %s` needs no network", itemAsk(item)),
 		},
 	}
 }
@@ -93,12 +93,18 @@ func newUnboundView(item *locate.Item, d github.ItemDetail) unboundView {
 		State: "open", Labels: append([]string{}, d.Labels...), LinkedPRs: d.LinkedPullRequests, Author: d.Author, Body: d.Body,
 		Advisories: []string{},
 	}
+	// The bind refuses an answer that is not the item asked for: GitHub
+	// answers a transferred issue as it is now, where it moved to.
+	moved := d.Number != item.Number || !strings.EqualFold(d.Repo, item.Repo)
+	bindable := !item.Other && !moved
 	if !d.Open {
 		v.State = "closed"
 		if reason := strings.ToLower(strings.ReplaceAll(d.StateReason, "_", " ")); reason != "" {
 			v.State += " (" + reason + ")"
 		}
-		v.Advisories = append(v.Advisories, fmt.Sprintf("%s is closed: the first sync after it is bound reopens it", item.Ref))
+		if bindable {
+			v.Advisories = append(v.Advisories, fmt.Sprintf("%s is closed: the first sync after it is bound reopens it", item.Ref))
+		}
 	}
 	if d.LinkedPullRequests > 0 {
 		v.Advisories = append(v.Advisories, fmt.Sprintf("%s has %d linked pull request(s): check that the work is not already done", item.Ref, d.LinkedPullRequests))
@@ -106,14 +112,18 @@ func newUnboundView(item *locate.Item, d github.ItemDetail) unboundView {
 	if item.Shadow != "" {
 		v.Advisories = append(v.Advisories, item.Shadow)
 	}
-	if item.Other {
+	switch {
+	case moved:
+		v.Advisories = append(v.Advisories, fmt.Sprintf("%s of %s was moved: GitHub answers it as %s#%d (%s), which the bind refuses", item.Ref, item.Repo, d.Repo, d.Number, d.URL))
+		v.Help = []string{fmt.Sprintf("Run intake with the moved item (%s) as its need; it cannot be bound to this project", d.URL)}
+	case item.Other:
 		v.Advisories = append(v.Advisories, fmt.Sprintf("%s is in %s, the project's tracker is %s: it can be read as input but not bound", item.Ref, item.Repo, item.TrackerRepo))
 		v.Help = []string{fmt.Sprintf("Run intake with tracker item %s of %s as its need; it cannot be bound to this project", item.Ref, item.Repo)}
-	} else {
+	default:
 		v.Help = []string{
 			fmt.Sprintf("Run intake with tracker item %s as its need: mint nothing before the verdict (jig skill intake)", item.Ref),
 			fmt.Sprintf("The verdict makes its one issue and chart: jig chart new <name> --item %s", item.Ref),
-			fmt.Sprintf("Once bound, jig next %s answers as the issue does, with no network", item.Ref),
+			fmt.Sprintf("Once bound, jig next %s answers as the issue does", item.Ref),
 		}
 	}
 	return v

@@ -1,6 +1,8 @@
 package locate
 
 import (
+	"errors"
+	"github.com/develdeco/jig/internal/axi"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,9 +133,47 @@ func TestLocateItemRefRefusals(t *testing.T) {
 	storeDir := bare.store("bare-tickets", "bare")
 	clone := bare.repo("app", "")
 	bare.mapProject("bare", project.MachineProject{Store: storeDir, Clones: map[string]string{"app": clone}})
-	_, err := Locate(bare.home, clone, Opts{Ticket: "48"})
-	if err == nil || !strings.Contains(err.Error(), "trackers:") {
-		t.Errorf("no tracker: err = %v, want a refusal naming trackers:", err)
+	// A ref is a ref only with a tracker: without one every word is read as it
+	// was before refs, even one the parser would refuse.
+	for _, word := range []string{"48", "#abc", "o/r#1"} {
+		got, err := Locate(bare.home, clone, Opts{Ticket: word})
+		if err != nil || got.Item != nil || got.Ticket != word || got.TicketHow != HowArg {
+			t.Errorf("no tracker, %q: %+v, %v, want the word as the ticket and no item", word, got, err)
+		}
+	}
+}
+
+// TestLocateItemRefChartOwner: a record whose owner key is chart: binds the
+// item to that chart, and names no ticket.
+func TestLocateItemRefChartOwner(t *testing.T) {
+	t.Parallel()
+	iw := newItemWorld(t)
+	iw.record("example/tracking", "70", "chart: plan\n")
+	mkdir(t, filepath.Join(iw.store, "charts", "plan"))
+	if err := os.WriteFile(filepath.Join(iw.store, "charts", "plan", "tickets.yaml"), []byte("tickets: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := iw.locate(iw.clone, Opts{Ticket: "70"})
+	if got.Ticket != "" || got.Item == nil || !got.Item.Bound || got.Item.Chart != "plan" || got.Item.Kind != "chart" {
+		t.Errorf("ticket %q, item %+v, want the item bound to chart plan and no ticket", got.Ticket, got.Item)
+	}
+}
+
+// TestLocateItemRefShadowHelp: a bare number that also names a chart or an
+// alias and fails as an item carries the line that says how to reach what it
+// hides, in the error's help.
+func TestLocateItemRefShadowHelp(t *testing.T) {
+	t.Parallel()
+	iw := newItemWorld(t)
+	iw.record("example/tracking", "80", "ticket: DEMO-9\n")
+	mkdir(t, filepath.Join(iw.store, "charts", "80"))
+	if err := os.WriteFile(filepath.Join(iw.store, "charts", "80", "tickets.yaml"), []byte("tickets: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := iw.locateErr("80")
+	var ae *axi.Error
+	if !errors.As(err, &ae) || !strings.Contains(strings.Join(ae.Help, "\n"), "jig status 80") {
+		t.Errorf("err = %v, want help naming `jig status 80`, which reaches a chart with no issue", err)
 	}
 }
 

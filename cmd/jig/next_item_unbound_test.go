@@ -57,7 +57,17 @@ func storeState(t *testing.T, clone string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return head + "\n" + status
+	// Every branch of the clone and of its origin: a writers store keeps its
+	// claims on a branch of its own.
+	refs, err := gitx.Run(clone, "for-each-ref", "--format=%(refname) %(objectname)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := gitx.Run(clone, "ls-remote", "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head + "\n" + status + "\n" + refs + "\n" + remote
 }
 
 // noHashHelp fails for a help line that starts a word with #, which sh and
@@ -95,7 +105,7 @@ func TestNextItemUnbound(t *testing.T) {
 	for _, line := range []string{
 		"Run intake with tracker item 49 as its need: mint nothing before the verdict (jig skill intake)",
 		"The verdict makes its one issue and chart: jig chart new <name> --item 49",
-		"Once bound, jig next 49 answers as the issue does, with no network",
+		"Once bound, jig next 49 answers as the issue does",
 	} {
 		if !strings.Contains(out, "\n  "+line+"\n") && !strings.HasSuffix(strings.TrimRight(out, "\n"), "  "+line) {
 			t.Errorf("help lacks %q:\n%s", line, out)
@@ -187,8 +197,66 @@ func TestNextItemRefused(t *testing.T) {
 	bare := filepath.Join(t.TempDir(), "bare")
 	newTestOriginClone(t, bare)
 	out, code = runMain(t, e, "", "next", "49", "--store", bare)
-	if code == 0 || !strings.Contains(out, "trackers:") {
-		t.Errorf("no tracker: exit %d, want a refusal naming trackers::\n%s", code, out)
+	if code == 0 || strings.Contains(out, "trackers:") || !strings.Contains(out, "ticket 49 not found") {
+		t.Errorf("no tracker: exit %d, want the word read as before refs (a ticket not found), never the tracker refusal:\n%s", code, out)
+	}
+}
+
+// TestNextItemMoved: an answer that is not the item asked for is shown as
+// moved, with no bind help and no reopening advisory, as the bind refuses it.
+func TestNextItemMoved(t *testing.T) {
+	t.Parallel()
+	e, clone, c := unboundClone(t)
+	c.items[60] = github.ItemDetail{Number: 9, Repo: "moved/elsewhere", Title: "Gone", URL: "https://github.com/moved/elsewhere/issues/9", Author: "kim", StateReason: "COMPLETED"}
+	out, code := runMain(t, e, "", "next", "60", "--store", clone)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "60 of example/tracking was moved: GitHub answers it as moved/elsewhere#9") || !strings.Contains(out, "help[1]:") {
+		t.Errorf("want the move shown and one help line:\n%s", out)
+	}
+	for _, bad := range []string{"jig chart new", "reopens it"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("a moved item has %q:\n%s", bad, out)
+		}
+	}
+	// A closed item of another repo cannot be bound either.
+	c.items[7] = github.ItemDetail{Number: 7, Repo: "other/repo", Title: "Done", URL: "https://github.com/other/repo/issues/7", StateReason: "COMPLETED"}
+	out, _ = runMain(t, e, "", "next", "other/repo#7", "--store", clone)
+	if strings.Contains(out, "reopens it") {
+		t.Errorf("a closed item of another repo has the reopening advisory:\n%s", out)
+	}
+}
+
+// TestNextItemShadowHelp: a bare number that also names a chart, when its read
+// fails, carries the line that says how to reach the chart.
+func TestNextItemShadowHelp(t *testing.T) {
+	t.Parallel()
+	e, clone, _ := unboundClone(t)
+	writeChart(t, clone, "99", "tickets: []\n")
+	out, code := runMain(t, e, "", "next", "99", "--store", clone)
+	if code == 0 || !strings.Contains(out, "code: ITEM_NOT_FOUND") || !strings.Contains(out, "jig status 99") {
+		t.Errorf("exit %d, want ITEM_NOT_FOUND with help naming `jig status 99`:\n%s", code, out)
+	}
+}
+
+// TestNextItemReadWritesNothingInWritersMode: reading an item leaves the claims
+// branch and every ref of a writers store as they were.
+func TestNextItemReadWritesNothingInWritersMode(t *testing.T) {
+	t.Parallel()
+	e, clone, _ := unboundClone(t)
+	if _, err := gitx.Run(clone, "config", "jig.writer", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := runMain(t, e, "", "store", "migrate", "--writers", "--store", clone); code != 0 {
+		t.Fatalf("migrate: exit %d\n%s", code, out)
+	}
+	before := storeState(t, clone)
+	if out, code := runMain(t, e, "", "next", "49", "--store", clone); code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if after := storeState(t, clone); after != before {
+		t.Errorf("the read changed the writers store:\n%s\n--\n%s", before, after)
 	}
 }
 
@@ -207,7 +275,7 @@ func TestNextItemUnreadable(t *testing.T) {
 		if code != 1 || !strings.Contains(out, "error: item 49 of example/tracking could not be read: ") || !strings.Contains(out, cause.Error()) {
 			t.Errorf("%s: exit %d, want exit 1 naming the cause:\n%s", name, code, out)
 		}
-		for _, want := range []string{"gh auth login", "GH_TOKEN", "need no network"} {
+		for _, want := range []string{"gh auth login", "GH_TOKEN", "needs no network"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s: help lacks %q:\n%s", name, want, out)
 			}

@@ -114,10 +114,13 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if item, err = locate.ResolveItem(st, cfg, ticket); err != nil {
 			return renderErr(stdout, err)
 		}
-		if !item.Bound {
+		if item != nil && !item.Bound {
 			return nextUnboundItem(e, stdout, cfg, item, ticketsSet || *forFlag != "" || *topology, *jsonOut)
 		}
-		ticket = item.Ticket
+		if item != nil {
+			ticket = item.Ticket + item.Chart
+		}
+		// With no tracker the word is no ref: it is read as it was before refs.
 		if asked, err = checkAsked(); err != nil {
 			return renderErr(stdout, err)
 		}

@@ -14,6 +14,7 @@ import (
 type itemBoundJSON struct {
 	Kind   string `json:"kind"`
 	Ticket string `json:"ticket,omitempty"`
+	Chart  string `json:"chart,omitempty"`
 }
 
 // itemRefJSON is what a command that was handed a tracker item's ref adds to
@@ -28,7 +29,7 @@ func itemBoundOf(it *locate.Item) itemBoundJSON {
 	if !it.Bound {
 		return itemBoundJSON{Kind: "no"}
 	}
-	return itemBoundJSON{Kind: it.Kind, Ticket: it.Ticket}
+	return itemBoundJSON{Kind: it.Kind, Ticket: it.Ticket, Chart: it.Chart}
 }
 
 func itemRefOf(it *locate.Item) *itemRefJSON {
@@ -43,7 +44,7 @@ func itemRefOf(it *locate.Item) *itemRefJSON {
 func itemPairs(it *locate.Item) [][2]string {
 	b := "no"
 	if it.Bound {
-		b = it.Kind + " " + it.Ticket
+		b = it.Kind + " " + it.Ticket + it.Chart
 	}
 	return [][2]string{{"ref", it.Ref}, {"repo", it.Repo}, {"bound", b}}
 }

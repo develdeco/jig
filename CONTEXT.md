@@ -67,7 +67,7 @@ reported and overwritten with the store's value at the next sync. A chart with a
 _Avoid_: tracker as the source of tickets
 
 **Bound issue**:
-An issue ticket minted from a tracker item someone made outside jig (`jig chart new --item`), its record written in the mint's own claim: the issue carries the item's title and text, the item's number is its tracker entry, and the first sync updates the item in place instead of opening another. After the bind the store owns the text and a later edit on the tracker is drift. One item is bound to one issue. To ask for it, give its number: `jig next <ref>` answers as the issue does, and `jig here <ref>` names the issue, both from the store with no network; an item not yet bound is read once by `jig next <ref>`.
+An issue ticket minted from a tracker item someone made outside jig (`jig chart new --item`), its record written in the mint's own claim: the issue carries the item's title and text, the item's number is its tracker entry, and the first sync updates the item in place instead of opening another. After the bind the store owns the text and a later edit on the tracker is drift. One item is bound to one issue. To ask for it, give its number: `jig next <ref>` answers as the issue does (which may ask the repo host for merge facts, as it does for the issue), and `jig here <ref>` names the issue from the store alone, with no network call; an item not yet bound is read once by `jig next <ref>`.
 _Avoid_: adopted issue, origin issue
 
 **Tracker tree**:

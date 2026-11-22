@@ -309,17 +309,24 @@ func (l *locator) attachTicket(st *store.Store) error {
 			if err != nil {
 				return err
 			}
-			w.Item = it
-			if it.Bound {
-				w.Ticket, w.TicketHow = it.Ticket, HowArgItem
-				l.explain("ticket: %s (the tracker item %s of %s is bound to it)", w.Ticket, it.Ref, it.Repo)
-			} else {
-				l.explain("ticket: none (the tracker item %s of %s is bound to no ticket)", it.Ref, it.Repo)
+			// A project with no GitHub tracker has no refs: the word is read
+			// as it was before them.
+			if it != nil {
+				w.Item = it
+				switch {
+				case it.Ticket != "":
+					w.Ticket, w.TicketHow = it.Ticket, HowArgItem
+					l.explain("ticket: %s (the tracker item %s of %s is bound to it)", w.Ticket, it.Ref, it.Repo)
+				case it.Chart != "":
+					l.explain("ticket: none (the tracker item %s of %s is bound to chart %s)", it.Ref, it.Repo, it.Chart)
+				default:
+					l.explain("ticket: none (the tracker item %s of %s is bound to no ticket)", it.Ref, it.Repo)
+				}
+				if it.Shadow != "" {
+					l.explain("shadow: %s", it.Shadow)
+				}
+				return nil
 			}
-			if it.Shadow != "" {
-				l.explain("shadow: %s", it.Shadow)
-			}
-			return nil
 		}
 		id, err := st.ResolveTicket(l.o.Ticket)
 		if err != nil {

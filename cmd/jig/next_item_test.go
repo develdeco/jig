@@ -27,7 +27,7 @@ func itemRig(t *testing.T) chartRig {
 func withoutItemLines(text string) string {
 	var keep []string
 	for _, l := range strings.Split(text, "\n") {
-		if l == "  ref: 48" || l == "  ref: 50" || l == "  ref: 77" || l == "  repo: example/tracking" || strings.HasPrefix(l, "  bound: ") {
+		if strings.HasPrefix(l, "  ref: ") || l == "  repo: example/tracking" || strings.HasPrefix(l, "  bound: ") {
 			continue
 		}
 		keep = append(keep, l)
@@ -61,7 +61,7 @@ func sameAnswer(t *testing.T, r chartRig, ref, id, bound string, flags ...string
 		t.Errorf("json of %s lacks ref and repo: %s", ref, gj)
 	}
 	b, _ := gm["bound"].(map[string]any)
-	if want := strings.Fields(bound); b["kind"] != want[0] || b["ticket"] != want[1] {
+	if want := strings.Fields(bound); b["kind"] != want[0] || b[map[bool]string{true: "chart", false: "ticket"}[want[0] == "chart"]] != want[1] {
 		t.Errorf("json bound of %s = %v, want %s", ref, gm["bound"], bound)
 	}
 	delete(gm, "ref")
@@ -88,6 +88,8 @@ func TestNextItemBound(t *testing.T) {
 	sameAnswer(t, r, "48", "TK-1", "issue TK-1", "--for", "build")
 	sameAnswer(t, r, "48", "TK-1", "issue TK-1", "--topology")
 	// A task owner answers as the task, and says its kind.
+	// A record whose owner key is chart: binds the item to that chart.
+	sameAnswer(t, r, "52", "plan", "chart plan")
 	sameAnswer(t, r, "50", "TK-2", "task TK-2")
 	sameAnswer(t, r, "50", "TK-2", "task TK-2", "--topology")
 	sameAnswer(t, r, "50", "TK-2", "task TK-2", "--for", "review")
@@ -117,7 +119,7 @@ func TestNextItemBound(t *testing.T) {
 	}
 
 	// A record that cannot be followed names its path.
-	for ref, want := range map[string]string{"51": "TK-404", "52": "names no ticket"} {
+	for ref, want := range map[string]string{"51": "TK-404"} {
 		out, code := r.run(t, "next", ref)
 		if code == 0 || !strings.Contains(filepath.ToSlash(out), ref+"/record.yaml") || !strings.Contains(out, want) {
 			t.Errorf("jig next %s: exit %d, want an error naming the record and %q:\n%s", ref, code, want, out)

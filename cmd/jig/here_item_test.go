@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,20 @@ import (
 
 	"github.com/develdeco/jig/internal/mirror/github"
 )
+
+// noCallsClient is a GitHub client that fails the test on any call: a command
+// that must stay offline is given it, never a nil client (which falls back to
+// the real gh token). Every method but the one overridden is the embedded nil
+// interface's, so a call to it panics and fails the test too.
+type noCallsClient struct {
+	github.Client
+	t *testing.T
+}
+
+func (c *noCallsClient) ItemByNumber(context.Context, string, string, int) (github.ItemDetail, error) {
+	c.t.Error("the command asked the host for an item")
+	return github.ItemDetail{}, nil
+}
 
 // boundItemClone is a store with a GitHub tracker whose item 48 is bound to
 // the issue DEMO-1 (by `jig chart new shop --item 48`), and the env that did it.
@@ -33,7 +48,7 @@ func TestHereItemRef(t *testing.T) {
 	t.Parallel()
 	e, clone := boundItemClone(t)
 	// Nothing past this point may ask the host.
-	e.mirrorClient = nil
+	e.mirrorClient = &noCallsClient{t: t}
 
 	out, code := runMain(t, e, "", "here", "48", "--store", clone, "--explain")
 	if code != 0 {
@@ -92,7 +107,7 @@ func TestHereItemRef(t *testing.T) {
 func TestHereItemRefShadow(t *testing.T) {
 	t.Parallel()
 	e, clone := boundItemClone(t)
-	e.mirrorClient = nil
+	e.mirrorClient = &noCallsClient{t: t}
 	writeChart(t, clone, "49", "issue: DEMO-1\nentries: []\n")
 	out, code := runMain(t, e, "", "here", "49", "--store", clone)
 	if code != 0 || !strings.Contains(out, "advisories[1]:") || !strings.Contains(out, "49 is also the name of a chart") {

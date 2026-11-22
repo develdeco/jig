@@ -1,6 +1,7 @@
 package locate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,8 +30,12 @@ type Item struct {
 	TrackerRepo string
 	// Bound is set when the tree holds a record for the item; Ticket is then
 	// the owner's id and Kind its kind (store.KindIssue ...).
-	Bound  bool
+	Bound bool
+	// Ticket is the owner when it is a ticket. A record whose owner is a chart
+	// (the mirror still writes one for a chart with no issue) gives Chart
+	// instead, with Kind "chart".
 	Ticket string
+	Chart  string
 	Kind   string
 	// Shadow is, for a bare number that also names a chart or an earlier
 	// ticket id, one advisory line saying what it hides and how to reach it.
@@ -62,22 +67,41 @@ func RefShaped(word string) bool {
 // record's owner is the ticket the item is bound to. Only the tree is read:
 // nothing is asked of the host, and nothing is written.
 //
-// A project with no GitHub tracker is refused here. An item of another repo
-// than the project's tracker is returned, with Other set: it can be read as
-// input (mirror.CheckItemRepo refuses it and a project with no tracker alike,
-// so the split is made here, in the caller's comparison).
+// A ref is a ref only in a project with a GitHub tracker: with none, the word
+// is nil, and it is read as it was before refs (a ticket id, an alias, a
+// chart). An item of another repo than the project's tracker is returned, with
+// Other set: it can be read as input (mirror.CheckItemRepo refuses it and a
+// project with no tracker alike, so the split is made here).
+//
+// When a bare number that also names an alias or a chart fails as an item, the
+// error's help carries the line that says how to reach what it hides.
 func ResolveItem(st *store.Store, cfg project.Config, word string) (*Item, error) {
-	if !RefShaped(word) {
+	if !RefShaped(word) || cfg.GitHub == nil {
 		return nil, nil
 	}
+	it, err := resolveItem(st, cfg, word)
+	if err != nil {
+		return nil, AddHelp(err, shadowOf(st, word))
+	}
+	return it, nil
+}
+
+// AddHelp returns err with line added to its help when err is an *axi.Error
+// and line is not empty; any other error is returned as it is.
+func AddHelp(err error, line string) error {
+	var ae *axi.Error
+	if line == "" || !errors.As(err, &ae) {
+		return err
+	}
+	cp := *ae
+	cp.Help = append(append([]string(nil), ae.Help...), line)
+	return &cp
+}
+
+func resolveItem(st *store.Store, cfg project.Config, word string) (*Item, error) {
 	ref, err := mirror.ParseItemRef(word)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.GitHub == nil {
-		// A ref with no repo cannot hit the other-repo refusal: this is the
-		// no-tracker one.
-		return nil, mirror.CheckItemRepo(mirror.ItemRef{Number: ref.Number}, cfg)
 	}
 	it := &Item{Ref: strconv.Itoa(ref.Number), Number: ref.Number, Repo: cfg.GitHub.Repo, TrackerRepo: cfg.GitHub.Repo}
 	if ref.Repo != "" && !strings.EqualFold(ref.Repo, cfg.GitHub.Repo) {
@@ -100,8 +124,8 @@ func ResolveItem(st *store.Store, cfg project.Config, word string) (*Item, error
 }
 
 // bindOwner reads the owner of the item's record into it: an error naming the
-// record when it cannot be read, is a chart's (the old key), or names a ticket
-// the store does not hold. Nothing is guessed.
+// record when it cannot be read or names a ticket or chart the store does not
+// hold; a chart's record binds the item to that chart. Nothing is guessed.
 func bindOwner(st *store.Store, rec store.TrackerRecord, it *Item) error {
 	path := filepath.Join(st.Root, filepath.FromSlash(rec.Rel))
 	fail := func(why string) error {
@@ -114,8 +138,16 @@ func bindOwner(st *store.Store, rec store.TrackerRecord, it *Item) error {
 	switch {
 	case rec.Err != nil:
 		return fail("cannot be read: " + rec.Err.Error())
+	case rec.Ticket == "" && rec.Chart != "":
+		// The mirror still writes a chart's record for a chart with no issue,
+		// and the tree check accepts it: the item is that chart's.
+		if _, err := os.Stat(st.ChartFile(rec.Chart)); err != nil {
+			return fail(fmt.Sprintf("names chart %s, which the store does not hold", rec.Chart))
+		}
+		it.Bound, it.Chart, it.Kind = true, rec.Chart, "chart"
+		return nil
 	case rec.Ticket == "":
-		return fail("names no ticket (a chart's record is the migration's to move, not read here)")
+		return fail("names neither a ticket nor a chart")
 	case !st.TicketExists(rec.Ticket):
 		return fail(fmt.Sprintf("names ticket %s, which the store does not hold", rec.Ticket))
 	}
@@ -131,11 +163,14 @@ func bindOwner(st *store.Store, rec store.TrackerRecord, it *Item) error {
 // earlier id a ticket carried: the ref wins, and the line says how to reach
 // what it hides.
 func shadowOf(st *store.Store, word string) string {
+	if word == "" || strings.Trim(word, "0123456789") != "" {
+		return ""
+	}
 	if id, err := st.ResolveTicket(word); err == nil && id != word && st.TicketExists(id) {
 		return fmt.Sprintf("%s is also an earlier id of ticket %s: it is read as the tracker item; reach the ticket as %s", word, id, id)
 	}
 	if _, err := os.Stat(st.ChartFile(word)); err == nil {
-		via := "through its tickets' ids"
+		via := "with `jig status " + word + "`, which gives its standing"
 		if issue, _ := st.ChartIssue(word); issue != "" {
 			via = "through its issue " + issue
 		}
