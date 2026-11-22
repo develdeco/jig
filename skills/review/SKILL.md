@@ -38,14 +38,15 @@ Every round, over the round's changes (a delta round: its delta's), before probi
 - the record or file shapes and states main, or an older writer, still produces that the changed code reads;
 - the doc and ADR sentences about the changed behavior, the change's own too, against the code they describe.
 
-Read each against the new behavior; when in doubt run the path in your worktree and put it back. One the change breaks is a finding at its own file and line. Reached code is read, not probed, and goes in `--reviewed`.
+Read each against the new behavior; when in doubt run the path in your worktree and put it back. One the change breaks is a finding at its own file and line. A reached path in a repo the round does not cover is filed at the changed line, naming that path in `--detail`. Reached code is read, not probed, and goes in `--reviewed`.
 
 ## Probe
 
 Every round, probe each term (operand, operator, condition, constant, call, return) of each function the change adds or alters on a critical path the intent names (none named: that carries what it asks for), unless `probed` lists it `current` and `caught`:
 
 - Mutate it in your worktree, run the narrowest test that covers it (by `seconds`), put the file back: one script per function, one mutate-run-restore loop with a command per mutant, not a call per term. Failing or timing out is `caught`, passing `survived`.
-- Read `jig skill review probes` to record a probe or set an `unprobed` hunk aside.
+- `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`
+- `unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.
 - A survivor at a seam is a finding, elsewhere at most a note; an equivalent mutant none.
 
 ## Report
@@ -73,7 +74,7 @@ jig review done T-1 --result result.json     # or: the whole report as one file
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. Asks the round left are the person's: put each to them and record their answer with `jig triage`, or, when the prompt told you to go with your recommendations, decide them yourself. A subagent stops at its verdict line.
+Relay `jig next <T>`'s `prompt:` to the person and stop. A subagent stops at its verdict line. Read `jig skill review then` when the person's prompt named later phases (a start-to-finish run) or the round left asks.
 
 ## Never
 
