@@ -327,3 +327,27 @@ func TestIntakeTrackerItem(t *testing.T) {
 		t.Error("skills/intake core still holds the paragraph that moved to the needs reference")
 	}
 }
+
+// TestIntakeItemDocs pins the glossary's Intake entry and the ADR section
+// that say a tracker item is one need, so one issue.
+func TestIntakeItemDocs(t *testing.T) {
+	root := repoRoot(t)
+	ctx, err := os.ReadFile(filepath.Join(root, "CONTEXT.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, "CONTEXT.md", string(normalizeEOL(ctx)),
+		"`--item <n>` when the work is a tracker item, which is one need and so one issue")
+	adrs, err := filepath.Glob(filepath.Join(root, "docs", "adr", "*tracker-item*"))
+	if err != nil || len(adrs) != 1 {
+		t.Fatalf("want one ADR about a tracker item, got %v (%v)", adrs, err)
+	}
+	data, err := os.ReadFile(adrs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := section(t, string(normalizeEOL(data)), "## The skills carry the item", "")
+	wantAll(t, "the ADR section", sec,
+		"mints nothing before the verdict", "An item is one need, so one issue and one chart",
+		"`jig chart new <name> --item <n>`", "Rejected:", "Consequence:")
+}
