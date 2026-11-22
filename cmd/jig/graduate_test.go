@@ -1309,14 +1309,13 @@ func TestGraduateSyncsAlreadyClaimedTicketsOnAPartialFailure(t *testing.T) {
 	}
 }
 
-// TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs covers r5-f1
-// as Claim now settles it: an entry whose st.Mint lands but whose chart write
-// then fails has its half-minted ticket folder undone by Claim, so the store
-// is clean, the checkpoint sync runs for the entry that landed earlier in the
-// run (A), and a re-run mints the failed entry with the id the failed attempt
-// would have taken.
+// TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs: an entry
+// whose st.Mint lands but whose chart write then fails has its half-minted
+// ticket folder undone by Claim, so the store is clean, the checkpoint sync
+// runs for the entry that landed earlier in the run (A), and a re-run mints
+// the failed entry with the id the failed attempt would have taken.
 //
-// The chart write failure is driven through env.writeChart (r6-f1): entry A's
+// The chart write failure is driven through env.writeChart, so entry A's
 // own WriteChart call passes through to the real st.WriteChart, and entry B's
 // is forced to fail, the same write-after-mint shape on every OS.
 func TestGraduateWriteChartFailureAfterMintLeavesNothingAndSyncs(t *testing.T) {
