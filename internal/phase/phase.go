@@ -616,7 +616,7 @@ func EverClaimed(lines []journal.Line) bool {
 // journal after that publish, so it is at the build, then the review, then the
 // publish again, and at the land once that publish is done.
 func Derive(f Facts, lines []journal.Line) Ticket {
-	again := reopened(f, lines)
+	again := Reopens(f, lines)
 	if again {
 		f.Published, f.Restacks = false, nil
 	}
@@ -669,12 +669,12 @@ var reopenEvents = map[string]bool{
 	journal.EventClaim: true, journal.EventVerified: true, journal.EventFixSlice: true, journal.EventSliceAdd: true,
 }
 
-// reopened says a published ticket has work the publish does not carry: it is
+// Reopens says a published ticket has work the publish does not carry: it is
 // open and has not landed, and a slice is not green or the journal has a build
 // line after its last publish-done. Landing or closing ends it, since work
 // after a merge is a new need; a ticket whose pull request the host reports
 // merged is read as landed for the same reason.
-func reopened(f Facts, lines []journal.Line) bool {
+func Reopens(f Facts, lines []journal.Line) bool {
 	if !f.Published || f.Closed != "" || f.Landed || f.MergedOnHost {
 		return false
 	}

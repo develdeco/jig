@@ -521,11 +521,6 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 	if t.Behind() && n.State == ready.StateDone {
 		n.State = stateBehind
 	}
-	// Work after the publish that is built and not yet reviewed or published
-	// again: every slice is green, and the ticket is not done.
-	if t.Reopened() && n.State == ready.StateDone {
-		n.State = ready.StateGreen
-	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
 	for _, ph := range t.Phases {
@@ -655,9 +650,32 @@ func readTicketData(st *store.Store, id string) (ticketData, error) {
 		if err != nil {
 			return ticketData{}, err
 		}
-		in.Landed, _ = phase.LandedIn(lines)
+		f := phase.Facts{Ticket: id, Published: true}
+		for _, s := range slices {
+			f.Slices = append(f.Slices, phase.Slice{ID: s.ID, State: states[s.ID].State})
+		}
+		if rec.Closed != nil {
+			f.Closed = rec.Closed.Phrase()
+		}
+		in.Reopened = phase.Reopens(f, lines)
 	}
 	return ticketData{in: in, title: rec.Title, rec: rec}, nil
+}
+
+// settleReopened takes back the reopening of a ticket the host reports merged
+// with no landed line: work after a merge is a new need, as phase.Derive reads
+// it. The host is asked only of a ticket that is reopened.
+func settleReopened(st *store.Store, merges mergeSource, in *ready.Ticket) {
+	if !in.Reopened || merges == nil {
+		return
+	}
+	lines, err := journal.Read(st, in.ID)
+	if err != nil {
+		return
+	}
+	if mergedOnHost(merges, phase.Facts{Ticket: in.ID, Published: true}, lines, "") {
+		in.Reopened = false
+	}
 }
 
 // blockerInputFor is blocker id as readiness sees it from the ticket dependent
@@ -696,6 +714,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	if err != nil {
 		return nextTicket{}, err
 	}
+	settleReopened(st, merges, &data.in)
 	if k := data.rec.KindOrDefault(); k != store.KindTask {
 		n, err := ownBranchFacts(st, cfg, mp, merges, data.rec, nextNotATask(st, data, k))
 		if err != nil {
@@ -780,7 +799,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	n.setPhase(st, id, asked, merges, plan)
 	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
-		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Reopened() && (n.derived == nil || !n.derived.Reopened()), Wanted: n.worktreeWanted(),
+		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Reopened, Wanted: n.worktreeWanted(),
 	})
 	if topology {
 		waves := ready.Waves(data.in.Slices)
@@ -1160,6 +1179,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	inputs := make([]ready.Ticket, len(ids))
 	for i, id := range ids {
 		datas[i] = readTicketDataOrProblem(st, id)
+		settleReopened(st, merges, &datas[i].in)
 		inputs[i] = datas[i].in
 	}
 	readMerges(st, merges, inputs, false)
