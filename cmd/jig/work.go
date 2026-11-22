@@ -100,6 +100,21 @@ func resolveWork(e env, stdout io.Writer, f workFlags, ticketArg string) (work, 
 	if err != nil {
 		return work{}, err
 	}
+	if it := where.Item; it != nil && where.Ticket == "" {
+		// The word was a tracker item's ref and no ticket is bound to it.
+		why := fmt.Sprintf("no ticket is bound to tracker item %s of %s", it.Ref, it.Repo)
+		if it.Chart != "" {
+			why = fmt.Sprintf("tracker item %s of %s is bound to chart %s, which is not a ticket", it.Ref, it.Repo, it.Chart)
+		}
+		return work{}, &axi.Error{
+			Msg:  why,
+			Code: "ITEM_NOT_A_TICKET",
+			Help: []string{fmt.Sprintf("Run `jig next %s` to read it", itemAsk(it))},
+		}
+	}
+	if where.TicketHow == locate.HowArgItem {
+		fmt.Fprintf(stdout, "%s is now %s\n", ticketArg, where.Ticket)
+	}
 	if where.Ticket == "" {
 		return work{}, &axi.Error{
 			Msg:  "no ticket: this directory is on no ticket's branch and none was named",

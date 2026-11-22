@@ -59,6 +59,9 @@ const (
 	HowArg = "arg"
 	// HowArgAlias: named explicitly by an id the ticket carried before.
 	HowArgAlias = "arg-alias"
+	// HowArgItem: named explicitly by a tracker item's ref whose record binds
+	// the ticket.
+	HowArgItem = "arg-item"
 	// HowBranch: the branch name leads with the ticket's id.
 	HowBranch = "branch"
 	// HowBranchAlias: the branch name leads with an id the ticket carried
@@ -109,6 +112,9 @@ type Where struct {
 	// from: a positional id, the branch name, and so on (HowArg ...).
 	Ticket    string
 	TicketHow string
+	// Item is the tracker item the ticket argument named, when it was a ref
+	// (ResolveItem): bound, it names the ticket; unbound, no ticket is named.
+	Item *Item
 	// Slice and SliceHow are the same for the slice.
 	Slice    string
 	SliceHow string
@@ -292,6 +298,36 @@ func (l *locator) attach() error {
 func (l *locator) attachTicket(st *store.Store) error {
 	w := &l.w
 	if l.o.Ticket != "" {
+		if RefShaped(l.o.Ticket) {
+			// A ref goes first: a bare number is the item's, ahead of a
+			// ticket's alias or a chart's name.
+			cfg, err := project.LoadConfigWith(l.o.Memo, w.JigHome, w.StorePath, w.Project, w.Root, w.RepoDir)
+			if err != nil {
+				return err
+			}
+			it, err := ResolveItem(st, cfg, l.o.Ticket)
+			if err != nil {
+				return err
+			}
+			// A project with no GitHub tracker has no refs: the word is read
+			// as it was before them.
+			if it != nil {
+				w.Item = it
+				switch {
+				case it.Ticket != "":
+					w.Ticket, w.TicketHow = it.Ticket, HowArgItem
+					l.explain("ticket: %s (the tracker item %s of %s is bound to it)", w.Ticket, it.Ref, it.Repo)
+				case it.Chart != "":
+					l.explain("ticket: none (the tracker item %s of %s is bound to chart %s)", it.Ref, it.Repo, it.Chart)
+				default:
+					l.explain("ticket: none (the tracker item %s of %s is bound to no ticket)", it.Ref, it.Repo)
+				}
+				if it.Shadow != "" {
+					l.explain("shadow: %s", it.Shadow)
+				}
+				return nil
+			}
+		}
 		id, err := st.ResolveTicket(l.o.Ticket)
 		if err != nil {
 			return err
