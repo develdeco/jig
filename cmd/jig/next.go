@@ -524,10 +524,7 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 		n.State = stateBehind
 	}
 	n.derived = &t
-	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
-	for _, ph := range t.Phases {
-		p.Phases = append(p.Phases, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
-	}
+	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt, Phases: phaseRows(t)}
 	if asked != "" {
 		a := t.For(asked)
 		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
@@ -1113,6 +1110,9 @@ type nextRow struct {
 	Ready     []string      `json:"ready"`
 	// Problem is why an invalid ticket could not be read.
 	Problem string `json:"problem,omitempty"`
+	// Digest is where the ticket stands (nextDigest), the one reading the
+	// screens take their words from.
+	Digest *nextDigest `json:"digest,omitempty"`
 }
 
 // nextSharedRank is a rank that more than one ready ticket holds, so which
@@ -1186,6 +1186,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	}
 	readMerges(st, merges, inputs, false)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
+	digestFrom := digestMerges(merges)
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked
 	slicesOf := map[string][]store.Slice{}
@@ -1200,6 +1201,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		for _, b := range s.Blocked {
 			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
 		}
+		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], row.BlockedBy)
+		row.Digest = &d
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
 			out.Tickets = append(out.Tickets, row)
