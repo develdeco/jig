@@ -235,6 +235,12 @@ type stubGitHub struct {
 	// created counts the issues CreateIssue has opened: each gets the next
 	// number, as GitHub gives them.
 	created int
+	// items, when set, is what ItemByNumber answers by number: a number with
+	// no entry is ITEM_NOT_FOUND. Unset, any number is an open item titled
+	// issueTitle.
+	items map[int]github.ItemDetail
+	// updated is the node ids UpdateIssue was called on.
+	updated []string
 }
 
 func (s *stubGitHub) CreateIssue(context.Context, string, string, string, string) (github.Issue, error) {
@@ -280,9 +286,12 @@ func (s *stubGitHub) FetchIssues(_ context.Context, nodeIDs []string) (map[strin
 	}
 	return states, nil
 }
-func (s *stubGitHub) UpdateIssue(context.Context, string, string, string) error { return nil }
-func (s *stubGitHub) CloseIssueCompleted(context.Context, string) error         { return nil }
-func (s *stubGitHub) ReopenIssue(context.Context, string) error                 { return nil }
+func (s *stubGitHub) UpdateIssue(_ context.Context, nodeID, _, _ string) error {
+	s.updated = append(s.updated, nodeID)
+	return nil
+}
+func (s *stubGitHub) CloseIssueCompleted(context.Context, string) error { return nil }
+func (s *stubGitHub) ReopenIssue(context.Context, string) error         { return nil }
 func (s *stubGitHub) ItemFieldValues(context.Context, []string) (map[string]github.ItemFields, error) {
 	return nil, nil
 }
