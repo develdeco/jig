@@ -3,7 +3,13 @@ name: ci
 on:
   push:
     branches: [main]
+  # Retargeting a pull request onto main fires edited, which is not a default
+  # type, so it starts no run; the push that updates a behind pull request is
+  # a synchronize into main and does run, and main's ruleset requires the
+  # branch up to date. edited is left out on purpose: jig publish edits pull
+  # request bodies, and each edit would rerun the whole suite.
   pull_request:
+    branches: [main]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -17,29 +23,29 @@ on:
     - cron: "37 9 * * *"
 
 concurrency:
-  # A pull request's newer push cancels the run of its older one, whose
-  # result nobody needs. Every other run - a push to main, the daily run, a
-  # dispatch, a release's call - is a group of its own, by its run id, and
-  # always finishes: main is where Windows tests each merge, so a merge's run
-  # is its only Windows verdict. A group shared by main's pushes cancels it at
-  # the next merge, and one that waits instead keeps a single run pending and
-  # drops it at the merge after.
+  # A newer push to a pull request into main cancels the run of its older
+  # one, whose result nobody needs. Every other run - a push to main, the
+  # daily run, a dispatch, a release's call - is a group of its own, by its
+  # run id, and always finishes: main is where Windows tests each merge, so
+  # a merge's run is its only Windows verdict. A group shared by main's
+  # pushes cancels it at the next merge, and one that waits instead keeps a
+  # single run pending and drops it at the merge after.
   group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  # Which jobs and test legs this run needs. A pull request runs the test
-  # job on Linux and macOS, and on Windows too only when it changes what
-  # Windows builds or runs differently: a _windows Go file or one with a
-  # build constraint, go.mod or go.sum, .gitattributes, or a workflow. A
+  # Which jobs and test legs this run needs. A pull request into main runs
+  # the test job on Linux and macOS, and on Windows too only when it changes
+  # what Windows builds or runs differently: a _windows Go file or one with
+  # a build constraint, go.mod or go.sum, .gitattributes, or a workflow. A
   # pull request that changes only docs (markdown at the root or in .github,
   # docs/, LICENSE), which no test reads but lint's, tests ./lint alone and
   # skips claude-cli. Every other event - a push to main, the daily
   # schedule, a dispatch, a release's call - runs everything on all three.
   # The Windows legs take 15 to 18 minutes, Linux and macOS 2 to 4, so a
   # Windows-only failure is found on main within the half hour after its
-  # merge and fixed forward. lint/workflow_test.go runs this job's step with synthetic
-  # changes.
+  # merge and fixed forward. lint/workflow_test.go runs this job's step with
+  # synthetic changes.
   plan:
     runs-on: ubuntu-latest
     permissions:
@@ -112,7 +118,7 @@ jobs:
 
   # Named in full so no matrix key beyond os can reach the check names main's
   # ruleset requires: test (ubuntu-latest) and test (macos-latest), which
-  # every pull request reports. lint/workflow_test.go checks them.
+  # every pull request into main reports. lint/workflow_test.go checks them.
   test:
     name: test (${{ matrix.os }})
     needs: plan
