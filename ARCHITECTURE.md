@@ -416,8 +416,11 @@ In writers mode:
 
 The claims log holds the facts that only one writer may hold. It is one file,
 `claims.ndjson`, with lines `{ts, kind, ticket, slice?, writer, session?, author}`, where
-`kind` is `id` (an id or alias is reserved), `driver` (the writer drives the ticket) or
-`release`. In writers mode it is alone on the orphan branch `claims`, which nobody checks
+`kind` is `id` (an id or alias is reserved), `driver` (the writer drives the ticket),
+`release`, or `entry` (a tracker entry, `github/<owner>/<repo>/<n>` in an `entry` key, is
+reserved for the issue in `ticket`: `Store.ReserveEntry`, which refuses
+`TRACKER_ENTRY_TAKEN` naming another ticket's line and appends nothing in single-main
+mode, where the tracker tree's own record check is the guard). In writers mode it is alone on the orphan branch `claims`, which nobody checks
 out: an append reads the tip, builds the blob, tree and commit with plumbing
 (`gitx.RunInput`), moves `refs/heads/claims` with a compare-and-swap `update-ref`, and
 pushes; a rejected push fetches, decides again on the log as the origin has it, and
@@ -698,6 +701,17 @@ request that fails with a server error, a 429 or 403, or a GraphQL
 all; a client error is reported at once, since retrying it would only
 repeat it.
 
+A record is written by the mirror after `CreateIssue`, or by a bind
+(`mirror.BindItem`, behind `jig chart new --item`, [ADR 0065](docs/adr/0065-a-tracker-item-can-be-intake-input-bound-once-as-an-issues-own.md)):
+a tracker item someone made outside jig is read once by number
+(`Client.ItemByNumber`), and one `Store.Claim` mints the issue ticket with the
+item's title and body, reserves the entry in the claims log in writers mode,
+makes the chart with `issue:`, and writes the record (no `synced:` key) and its
+link, returning every path as it touches it so a failure at any step leaves no
+folder or record behind. The checkpoint sync then finds the issue's record,
+calls no `CreateIssue`, and updates the item in place. The mirror reads
+nothing else back: an item is intake input at the bind and nowhere else.
+
 `project.yaml`'s `trackers:` list takes at most one `github` entry (`repo:`
 the issue home, `project:` the GitHub Project's URL; both required,
 `VALIDATION_ERROR` otherwise), validated by `internal/project`. A config
@@ -852,7 +866,7 @@ Routing (`route.go`) then applies triage to this round's `fix` batch and `ask` f
 
 ## A ticket's branch
 
-A ticket's working branch is the `branch:` recorded in its `ticket.yaml` when there is one, else a name derived from its id ([ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md), amended by ADR 0032). `store.ResolveTicketBranch` is the one resolver, and every command that names the branch resolves it there, once:
+An issue minted bound to an item has the item's number as its remote id from the mint, so its derived branch is `<n>-<slug>` at once. A ticket's working branch is the `branch:` recorded in its `ticket.yaml` when there is one, else a name derived from its id ([ADR 0013](docs/adr/0013-a-ticket-branch-is-recorded.md), amended by ADR 0032). `store.ResolveTicketBranch` is the one resolver, and every command that names the branch resolves it there, once:
 
 1. a recorded `branch:` wins, validated (the target branch and names git rejects are `TICKET_BRANCH_INVALID`);
 2. otherwise `<id>-<slug>`. The slug is `ticket.yaml`'s `slug:`: the lowercase ASCII words of the title joined by `-`, cut at a word boundary to at most 40 characters, fixed when `jig ticket new` or `jig graduate` mints the ticket so that editing the title never renames the branch (an older ticket derives it on read, and recording a branch writes it). The id is the GitHub issue number from the ticket's record in the tracker tree (`store.TrackerIDs`; a ticket with none there falls back to the record in its own folder) once the ticket is mirrored and the project's branches are led by GitHub (the marker's `branches: from:` is empty or `github`), else the store id;
