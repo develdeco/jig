@@ -347,7 +347,7 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 	blocks := roundBlocks(p, moved, true, deltas)
 	blocks = append(blocks, reviewerWorktreeBlocks(p, mp.Clones, dirExists)...)
 	help := []string{
-		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe, in your worktree, putting the file back",
+		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed), and run a test only to probe or to run a path the change reaches, in your worktree, putting the file back",
 		fmt.Sprintf("Probe each term of every function the change alters on a critical path the intent names, unless probed lists a current, caught probe of it, with the narrowest command (seconds above): `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`; set aside an unprobed hunk with no critical-path code with `jig probe %s --skip F[:A-B] --why W`", ticket, ticket),
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),
