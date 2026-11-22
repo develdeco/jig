@@ -1680,11 +1680,16 @@ func TestClaimSnapshotSkipsAFileItCannotRead(t *testing.T) {
 }
 
 // TestClaimSnapshotIgnoresGitStderr covers a git that writes to stderr on
-// every call (GIT_TRACE here): the warning must not be parsed as a status
+// every call (an fsmonitor hook here): the warning must not be parsed as a status
 // record, or the first dirty path goes unrecorded and its work is lost.
 func TestClaimSnapshotIgnoresGitStderr(t *testing.T) {
 	st, work := newTestStandaloneStore(t)
-	t.Setenv("GIT_TRACE", "1")
+	// An fsmonitor hook that complains on stderr makes every status warn.
+	hook := filepath.Join(t.TempDir(), "fsmonitor")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'warning: a complaint on stderr' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "config", "core.fsmonitor", filepath.ToSlash(hook))
 	handWritten := "schema_version: 1\nhand: written\n"
 	if err := os.WriteFile(filepath.Join(work, "project.yaml"), []byte(handWritten), 0o644); err != nil {
 		t.Fatal(err)
