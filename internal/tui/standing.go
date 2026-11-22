@@ -14,21 +14,29 @@ import (
 // stream), so a ticket cannot be at one step on a screen and at another in the
 // words an agent is given.
 
-// phaseOf is where the ticket stands: phase.Derive over the facts the screens
-// hold of it.
+// phaseOf is where the ticket stands: the words of each phase are the digest's
+// (`jig next --json`, the one reading of a ticket every screen shares), and the
+// sub-steps and their details are phase.Derive over the status and the journal
+// once the status is read. Where the two differ the digest's words win and the
+// detail stays. A ticket nothing has been read of stands at "reading".
 func (m *Model) phaseOf(t *ticket) phase.Ticket {
-	f, lines := m.factsOf(t)
-	return phase.Derive(f, lines)
+	d := readingPhases()
+	if t.status != nil {
+		f, lines := m.factsOf(t, t.status)
+		d = phase.Derive(f, lines)
+	}
+	if t.digest != nil {
+		t.digest.lay(&d)
+	}
+	return d
 }
 
-// factsOf gathers what internal/phase derives from, and the journal lines it
-// reads beside them. The status is the store's word on the brief, the slices
-// and the asks; with none read yet (the main screen reads none) the journal and
-// the roster are all there is, and the answer is what they show. Two facts are
-// not in the status: the gate rounds' reports, so the journal's gate lines decide
-// a round's verdict, and the blockers, so a ticket held up by another one's
-// publish reads as ready here and as blocked in `jig next`.
-func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
+// factsOf gathers what internal/phase derives the sub-steps from, and the
+// journal lines it reads beside them. The status is the store's word on the
+// brief, the slices and the asks. Two facts are not in it: the gate rounds'
+// reports, so the journal's gate lines decide a round's verdict, and the
+// blockers and merges, which only the digest says.
+func (m *Model) factsOf(t *ticket, st *statusInfo) (phase.Facts, []journal.Line) {
 	lines := make([]journal.Line, len(t.lines))
 	for i, l := range t.lines {
 		lines[i] = l.Line
@@ -46,67 +54,23 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 		},
 	}
 	fixes := t.fixRounds()
-	if st := t.status; st != nil {
-		f.Adopted, f.Branch = st.Branch != "", st.Branch
-		f.Closed = st.Closed
-		if b := st.Brief; b != nil {
-			f.BriefExists, f.Sections = true, len(b.Sections)
-			f.Approval, f.ApprovedBy, f.ApprovedHow = b.Approval, b.ApprovedBy, b.Provenance
-		}
-		for _, s := range st.Slices {
-			f.Slices = append(f.Slices, phase.Slice{
-				ID: s.ID, State: s.State, Goal: s.Goal, FromGate: fixes[s.ID],
-				BlockedBy:    splitPlus(s.BlockedBy),
-				OpenQuestion: len(t.openQuestions(m.zone, s.ID)) > 0,
-			})
-		}
-		for _, a := range st.Asks {
-			f.Asks = append(f.Asks, phase.Ask{ID: a.ID})
-		}
-		return f, lines
+	f.Adopted, f.Branch = st.Branch != "", st.Branch
+	f.Closed = st.Closed
+	if b := st.Brief; b != nil {
+		f.BriefExists, f.Sections = true, len(b.Sections)
+		f.Approval, f.ApprovedBy, f.ApprovedHow = b.Approval, b.ApprovedBy, b.Provenance
 	}
-
-	// No status yet: the slices the journal names, in the states it shows, and
-	// an approval line as the brief's.
-	for _, id := range t.sliceIDsFromLines() {
-		state := t.guessSliceState(id)
-		if f.Published && !t.touchedSincePublish(id) {
-			// A guess from lines is not the store's word: it never builds a
-			// published ticket again (a journal from before the claim and
-			// verified lines would guess every slice as building). A slice
-			// worked after the publish keeps its guess, and so does a status.
-			state = "green"
-		}
+	for _, s := range st.Slices {
 		f.Slices = append(f.Slices, phase.Slice{
-			ID: id, State: state, FromGate: fixes[id],
-			OpenQuestion: len(t.openQuestions(m.zone, id)) > 0,
+			ID: s.ID, State: s.State, Goal: s.Goal, FromGate: fixes[s.ID],
+			BlockedBy:    splitPlus(s.BlockedBy),
+			OpenQuestion: len(t.openQuestions(m.zone, s.ID)) > 0,
 		})
 	}
-	if i := t.latest("", journal.EventApproval); i >= 0 {
-		f.BriefExists, f.Approval = true, phase.ApprovalCurrent
-		f.ApprovedBy, f.ApprovedHow = personName(t.lines[i].Summary), t.lines[i].Provenance
-	}
-	// A review with no slice ever built is a branch the ticket took over.
-	if len(f.Slices) == 0 && len(t.stepLines(stepReview)) > 0 {
-		f.Adopted = true
+	for _, a := range st.Asks {
+		f.Asks = append(f.Asks, phase.Ask{ID: a.ID})
 	}
 	return f, lines
-}
-
-// touchedSincePublish says a line of slice id comes after the last publish-done.
-func (t *ticket) touchedSincePublish(id string) bool {
-	last := -1
-	for i, l := range t.lines {
-		if l.Event == journal.EventPublishDone {
-			last = i
-		}
-	}
-	for _, l := range t.lines[last+1:] {
-		if l.Slice == id {
-			return true
-		}
-	}
-	return false
 }
 
 // splitPlus is a status cell of ids joined by "+".

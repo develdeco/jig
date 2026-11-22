@@ -133,7 +133,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			r.t, r.title = t, firstOf(title, t.title)
 			r.d = m.phaseOf(t)
 			r.steps = m.stepRows(t, r.d)
-			r.needs = needsYou(r.d)
+			r.needs = needsYou(r.d) || t.digest.waitsForAnswer()
 			r.waits = t.blockers
 		}
 		if verb != nil {

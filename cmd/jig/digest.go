@@ -26,7 +26,9 @@ type nextDigest struct {
 	// Land included, as `jig next <ticket>` prints them. Neither is set for a
 	// ticket that is not a task, nor for one whose phase cannot be derived
 	// (PhaseProblem says why): nothing is guessed.
-	Current      string         `json:"current,omitempty"`
+	Current string `json:"current,omitempty"`
+	// Ready says Current can start now.
+	Ready        bool           `json:"ready"`
 	Phases       []nextPhaseRow `json:"phases,omitempty"`
 	PhaseProblem string         `json:"phase_problem,omitempty"`
 	// State is an issue's or multi-task's own pull request: waiting, ready,
@@ -115,7 +117,7 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 		d.Closed = data.rec.Closed.Phrase()
 	}
 	if derived != nil {
-		d.Current, d.Phases = string(derived.Current), phaseRows(*derived)
+		d.Current, d.Ready, d.Phases = string(derived.Current), derived.Ready, phaseRows(*derived)
 	}
 	d.PRs = digestPRs(st, cfg, merges, id, plan, shared)
 	d.Slices = sliceCounts(st, id, data)

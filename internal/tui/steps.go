@@ -34,6 +34,14 @@ func (m *Model) steps(t *ticket) []stepRow {
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+	if t.digest == nil && t.status == nil {
+		// Nothing was read of the ticket: its steps say so, with no state and
+		// no time.
+		for i := range rows {
+			rows[i].State, rows[i].Text, rows[i].Done = StateQueued, readingText, false
+		}
+		return rows
+	}
 	for i, took := range m.stepTimes(t, d) {
 		if took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took
@@ -82,31 +90,12 @@ func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StateOK
 	case changed:
 		s.State = StateFindings
-	case t.status == nil:
-		s.State, s.Text = m.unreadBrief(t, s.Text)
+	case t.status == nil && t.digest != nil && t.digest.PhaseProblem != "" && len(t.digest.Phases) == 0:
+		s.State = StateStalled
 	default:
 		s.State = StateBuilding
 	}
 	return s
-}
-
-// unreadBrief is the brief of a ticket whose status has not been read and
-// whose journal shows no approval or work: all the screens know of it is what
-// `jig next` listed it as.
-func (m *Model) unreadBrief(t *ticket, text string) (state, said string) {
-	switch t.rosterState {
-	case "new":
-		return StateBuilding, text
-	case "ready", "blocked":
-		// It has slices that nobody has started, and the journal holds no
-		// approval (or has not been delivered yet, which the next line
-		// mends).
-		return StateBuilding, "drafted · waiting for your approval"
-	case "invalid":
-		return StateStalled, "its slices.yaml cannot be read"
-	}
-	// Started or done (its lines are on their way), or not listed yet.
-	return StateQueued, "reading"
 }
 
 // hasSub is whether any sub-step of p is in state.

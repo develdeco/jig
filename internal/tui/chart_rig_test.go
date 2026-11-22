@@ -128,9 +128,9 @@ func chartRoster(charts ...map[string]any) string {
 		"tickets": []map[string]any{
 			{"id": "JIG-4", "title": "Coupon model", "state": "done"},
 			{"id": "JIG-5", "title": "Apply a coupon code", "state": "active"},
-			{"id": "JIG-6", "title": "Remove a coupon", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-5", "kind": "stacked", "fact": "its gate has no clean round"})},
-			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open"})},
-			{"id": "JIG-8", "title": "Show the discount", "state": "ready"},
+			{"id": "JIG-6", "title": "Remove a coupon", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-5", "kind": "stacked", "fact": "its gate has no clean round"}), "digest": draftedDigest()},
+			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": blocked(map[string]any{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open"}), "digest": draftedDigest()},
+			{"id": "JIG-8", "title": "Show the discount", "state": "ready", "digest": draftedDigest()},
 		},
 	}
 	if len(charts) > 0 {

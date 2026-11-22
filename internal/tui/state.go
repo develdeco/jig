@@ -40,6 +40,9 @@ type world struct {
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart
 	chartOrder []string
+	// rosterRead is set once the ticket list has been read: until then the
+	// screens do not know what the store holds, and say they are reading.
+	rosterRead bool
 }
 
 func newWorld() *world {
@@ -89,6 +92,9 @@ type ticket struct {
 	title string
 	// rosterState is the state `jig next` gave the ticket (ready, blocked, ...).
 	rosterState string
+	// digest is where `jig next --json` says the ticket stands: the one source
+	// of the words of its phases. nil until the roster that lists it is read.
+	digest *digestInfo
 	// lines are the journal lines, by instant.
 	lines []events.Envelope
 	// ledger are the machine ledger lines about the ticket, newest last.
@@ -182,7 +188,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	order := make([]string, 0, len(rows)+len(w.order))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.rosterState, t.blockers = r.Title, r.State, r.Blockers
+		t.title, t.rosterState, t.blockers, t.digest = r.Title, r.State, r.Blockers, r.Digest
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
@@ -193,6 +199,7 @@ func (w *world) setRoster(rows []rosterRow) {
 		}
 	}
 	w.order = order
+	w.rosterRead = true
 }
 
 // insertSorted puts e among lines by instant, after any line of the same
@@ -238,6 +245,7 @@ func short(sha string) string {
 type rosterRow struct {
 	ID, Title, State string
 	Blockers         []chartWait
+	Digest           *digestInfo
 }
 
 // latest is the position of the last line of the ticket whose event is one

@@ -6,6 +6,7 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │
   │▸ ✓ 4 Publish  21s     pull request opened · https://example.test/acme/dem… │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  land  waits for a merge
   ╭─ Publish ──────────────────────────────────────────────────── 4 of 5 done ─╮
   │  ✓ body          ccccccc                                                   │
   │  ✓ approval                                                                │
@@ -13,7 +14,6 @@ jig  demo › JIG-2  Config loader                                     ✓ publi
   │  ○ changelog                                                               │
   │  ✓ published                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
   ╭─ Activity ──────────────────────────────────────────────── latest 3 of 12 ─╮
   │  09:14:21 publish·done     ● finished                                      │
   │  09:14:20 publish·pr       ▲ opened https://example.test/acme/demo/pull/7  │

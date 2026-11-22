@@ -223,6 +223,36 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				Kind   string `json:"kind"`
 				Fact   string `json:"fact"`
 			} `json:"blocked_by"`
+			Digest *struct {
+				Kind         string `json:"kind"`
+				Parent       string `json:"parent"`
+				Current      string `json:"current"`
+				Ready        bool   `json:"ready"`
+				PhaseProblem string `json:"phase_problem"`
+				State        string `json:"state"`
+				Closed       string `json:"closed"`
+				Phases       []struct {
+					Name  string `json:"name"`
+					State string `json:"state"`
+					Text  string `json:"text"`
+				} `json:"phases"`
+				PRs []struct {
+					Repo   string `json:"repo"`
+					Number int    `json:"number"`
+					URL    string `json:"url"`
+					State  string `json:"state"`
+					Target string `json:"target"`
+				} `json:"prs"`
+				Slices *struct {
+					Total      int `json:"total"`
+					Green      int `json:"green"`
+					Building   int `json:"building"`
+					Queued     int `json:"queued"`
+					NeedsInput int `json:"needs_input"`
+					Failed     int `json:"failed"`
+					Stopped    int `json:"stopped"`
+				} `json:"slices"`
+			} `json:"digest"`
 		} `json:"tickets"`
 		Charts []struct {
 			Name        string   `json:"name"`
@@ -239,6 +269,19 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
 		for _, b := range t.BlockedBy {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact})
+		}
+		if g := t.Digest; g != nil {
+			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed}
+			for _, p := range g.Phases {
+				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text})
+			}
+			for _, p := range g.PRs {
+				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
+			}
+			if s := g.Slices; s != nil {
+				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped}
+			}
+			row.Digest = d
 		}
 		rows = append(rows, row)
 	}

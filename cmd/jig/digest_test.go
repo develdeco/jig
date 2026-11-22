@@ -121,7 +121,7 @@ func TestRosterDigestEqualsNextTicket(t *testing.T) {
 			}
 			continue
 		}
-		if d.Current != n.Phase.Name || !reflect.DeepEqual(d.Phases, n.Phase.Phases) {
+		if d.Current != n.Phase.Name || d.Ready != n.Phase.Ready || !reflect.DeepEqual(d.Phases, n.Phase.Phases) {
 			t.Errorf("%s: digest %s %+v, jig next has %s %+v", row.ID, d.Current, d.Phases, n.Phase.Name, n.Phase.Phases)
 		}
 		if len(d.Phases) != 5 {
