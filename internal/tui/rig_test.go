@@ -703,3 +703,40 @@ func touchedSincePublish(t *ticket, id string) bool {
 	}
 	return false
 }
+
+// sliceIDsFromLines are the slices the journal names, in order of first
+// appearance.
+func (t *ticket) sliceIDsFromLines() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range t.lines {
+		if l.Slice != "" && !seen[l.Slice] {
+			seen[l.Slice] = true
+			out = append(out, l.Slice)
+		}
+	}
+	return out
+}
+
+// guessSliceState is the state of a slice from its lines alone, for a ticket
+// whose status has not been read: verified means green, a question nobody
+// answered means needs-input, a stall since the last claim means stalled, a
+// claim means building. The fixtures use it to word what jig would.
+func (t *ticket) guessSliceState(slice string) string {
+	v := t.latest(slice, journal.EventVerified)
+	q := t.latest(slice, journal.EventQuestion)
+	a := t.latest(slice, journal.EventAnswer)
+	stall := t.latest(slice, journal.EventStall)
+	claim := t.latest(slice, journal.EventClaim, journal.EventDispatch, journal.EventRequeue)
+	switch {
+	case q >= 0 && q > a && q > v:
+		return StateNeedsInput
+	case stall >= 0 && stall > claim && stall > v:
+		return StateStalled
+	case v >= 0 && v > claim:
+		return StateGreen
+	case claim >= 0 || t.latest(slice, journal.EventVerifyPending, journal.EventOracle) >= 0:
+		return StateBuilding
+	}
+	return StateQueued
+}

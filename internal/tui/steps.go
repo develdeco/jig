@@ -113,12 +113,7 @@ func hasSub(p phase.Phase, state string) bool {
 func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Build)
 	s := rowOf(stepBuild, rowBuild, p)
-	slices := t.slices(m.zone)
-	counts := map[string]int{}
-	for _, sl := range slices {
-		counts[sl.State]++
-	}
-	n := len(slices)
+	counts, n := t.sliceCounts(m.zone)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -127,7 +122,7 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	case counts[StateGreen] == n:
 		// Every slice is green, but an earlier step is not done.
 		s.State = StateOK
-	case len(t.stepLines(stepBuild)) == 0:
+	case len(t.stepLines(stepBuild)) == 0 && counts[StateQueued] == n:
 		s.State = StateReady
 		if p.State == phase.StatePending || cannotStart(d, p) {
 			s.State = StateQueued

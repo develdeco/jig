@@ -115,16 +115,11 @@ func TestPublishCollectsTheJournalsAccount(t *testing.T) {
 	}
 }
 
-func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
+func TestSlicesWithoutAStatusAreNotGuessedFromTheirLines(t *testing.T) {
 	t.Parallel()
 	tk := ticketOf("JIG-1", jig1()...)
-	got := map[string]string{}
-	for _, s := range tk.slices(time.UTC) {
-		got[s.ID] = s.State
-	}
-	want := map[string]string{"a": StateGreen, "b": StateFail, "c": StateNeedsInput}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("guessed states = %v, want %v", got, want)
+	if rows := tk.slices(time.UTC); len(rows) != 0 {
+		t.Errorf("a ticket whose status was not read lists slices %+v, want none: the lines guess none", rows)
 	}
 	tk.status = parseStatus(statusJIG1())
 	if rows := tk.slices(time.UTC); len(rows) != 4 || rows[3].ID != "d" || rows[3].State != StateQueued {
