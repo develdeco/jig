@@ -133,7 +133,7 @@ func TestGateRefusalSummaryHoldsNoHostPath(t *testing.T) {
 		{"a rune across the cap is dropped whole", strings.Repeat("a", refusalSummaryCap-1) + "é", strings.Repeat("a", refusalSummaryCap-1)},
 		{"a rune that ends at the cap is kept", strings.Repeat("a", refusalSummaryCap-2) + "é", strings.Repeat("a", refusalSummaryCap-2) + "é"},
 		{"the path is cut before the cap applies", strings.Repeat("a ", 20) + "/home/x " + strings.Repeat("b", 700), strings.TrimRight(strings.Repeat("a ", 20), " ")},
-		{"a relative branch is kept","branch \"feature/x\" is neither in your clone nor on origin", "branch \"feature/x\" is neither in your clone nor on origin"},
+		{"a relative branch is kept", "branch \"feature/x\" is neither in your clone nor on origin", "branch \"feature/x\" is neither in your clone nor on origin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := refusalSummary(tc.msg); got != tc.want {
