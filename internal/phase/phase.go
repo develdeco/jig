@@ -458,6 +458,16 @@ type round struct {
 	Session string
 }
 
+// refusalSupersededBy are the lines after which a gate-refused line is no
+// longer the word on the review: the gate ran again (an open or a new
+// refusal), or the build moved on (a claim, an oracle, a verification, a fix
+// slice, a requeue or a restamp). Notes, asks and questions do not.
+var refusalSupersededBy = map[string]bool{
+	journal.EventGateOpen: true, journal.EventGateRefused: true, journal.EventClaim: true,
+	journal.EventOracle: true, journal.EventVerified: true, journal.EventVerifyError: true,
+	journal.EventFixSlice: true, journal.EventRequeue: true, journal.EventRestamp: true,
+}
+
 // buildEvents are the lines that show a ticket is being built, and that move
 // the head a clean round reviewed.
 var buildEvents = map[string]bool{
@@ -539,6 +549,9 @@ type digest struct {
 	rounds     []round
 	lastClosed int
 	builtSince bool
+	// refusal is the gate-refused line the review still reads as its word: the
+	// latest one, when no line after it supersedes it (refusalSupersededBy).
+	refusal *journal.Line
 	closedAt   map[int]int
 	approval   int
 	asks       []Ask
@@ -746,6 +759,11 @@ func newDigest(f Facts, lines []journal.Line) *digest {
 			d.approval = i
 		case buildEvents[l.Event] || startedEvents[l.Event]:
 			d.started = true
+		}
+		if l.Event == journal.EventGateRefused {
+			d.refusal = &lines[i]
+		} else if refusalSupersededBy[l.Event] {
+			d.refusal = nil
 		}
 	}
 	// The head moved when the build went on after the last round closed.
@@ -1273,6 +1291,12 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		if prevDone {
 			sub.Detail = "ready to open"
 		}
+		if d.refusal != nil {
+			sub.State, sub.Detail = SubNeedsYou, d.refusal.Code
+			if d.refusal.Code == "BRANCH_NOT_FOUND" {
+				sub.State = SubWaiting // the branch is the builder's to push
+			}
+		}
 		p.Subs = append(p.Subs, sub)
 	}
 
@@ -1284,6 +1308,8 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		} else {
 			p.Text += "waiting for a reviewer"
 		}
+	case d.refusal != nil && !clean:
+		p.Text = d.refusalText()
 	case !hasRound && !prevDone:
 		p.Text = "after the build"
 	case !hasRound:
@@ -1580,11 +1606,18 @@ func (d *digest) asksReason() string {
 	return fmt.Sprintf("%s of %s %s for a person to decide (`jig triage %s <id> keep|dismiss`)", count(n, "ask"), d.f.Ticket, plural(n, "waits", "wait"), d.f.Ticket)
 }
 
+// refusalText words the gate refusal the review stands on.
+func (d *digest) refusalText() string {
+	return "gate refused: " + d.refusal.Summary
+}
+
 // notReviewedReason says why no clean round stands for the head.
 func (d *digest) notReviewedReason() string {
 	f := d.f
 	last, ok := d.lastRound()
 	switch {
+	case d.refusal != nil:
+		return d.refusalText()
 	case !ok:
 		return fmt.Sprintf("no gate round has reviewed %s yet", f.Ticket)
 	case last.Clean && d.builtSince:
