@@ -84,7 +84,8 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 	keptPRStates(t, r.home, map[string]string{digestPR2: "OPEN", digestPR6: "OPEN", digestPR11: "MERGED", digestPR12: "MERGED"})
 	// The host cannot be run: every read of a pull request falls back to what
 	// this machine kept of it.
-	e := r.env().withLookPath(func(string) (string, error) { return filepath.Join(t.TempDir(), "gh-is-down"), nil })
+	down := filepath.Join(t.TempDir(), "gh-is-down")
+	e := r.env().withLookPath(func(string) (string, error) { return down, nil })
 	scope := []string{"--store", r.root}
 
 	var roster nextStore
