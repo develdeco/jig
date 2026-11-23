@@ -3,7 +3,6 @@ package tui
 import (
 	"slices"
 	"strings"
-	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -17,17 +16,6 @@ import (
 // A Runner need not be safe for concurrent use: the model calls it through
 // serial.
 type Runner func(args []string) (output string, code int)
-
-// serial is r made safe for concurrent use: one call at a time, so a status
-// read for a screen never overlaps a publish that a key started.
-func serial(r Runner) Runner {
-	var mu sync.Mutex
-	return func(args []string) (string, int) {
-		mu.Lock()
-		defer mu.Unlock()
-		return r(args)
-	}
-}
 
 // ranStep is one command that ran.
 type ranStep struct {
@@ -94,7 +82,7 @@ func (m *Model) exec(label, ticket string, steps ...[]string) tea.Cmd {
 	return func() tea.Msg {
 		res := outcome{Label: label, Ticket: ticket}
 		for _, args := range steps {
-			out, code := run(args)
+			out, code := run(classKey, args)
 			res.Steps = append(res.Steps, ranStep{Args: args, Out: out, Code: code})
 			if code != 0 {
 				break
@@ -118,9 +106,9 @@ func (m *Model) refreshStatus(id string) tea.Cmd {
 	t.loading, t.dirty = true, false
 	m.lastRead = m.now()
 	args := m.verbArgs("status", id)
-	run := m.run
+	run, c := m.run, m.readClass(id, "")
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(c, args)
 		return statusMsg{ticket: id, info: parseStatus(out)}
 	}
 }
@@ -137,7 +125,7 @@ func (m *Model) loadRoster() tea.Cmd {
 	args := m.verbArgs("next", "--json", "--roster")
 	run := m.run
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(classBackground, args)
 		rows, charts, err := parseRoster(out)
 		return rosterMsg{rows: rows, charts: charts, err: err, seq: seq}
 	}
@@ -152,12 +140,31 @@ func (m *Model) loadChart(name string) tea.Cmd {
 	c.loading, c.dirty = true, false
 	m.lastRead = m.now()
 	args := m.verbArgs("next", name, "--json")
-	run := m.run
+	run, cl := m.run, m.readClass("", name)
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(cl, args)
 		info, err := parseChart(out)
 		return chartMsg{name: name, info: info, err: err}
 	}
+}
+
+// readClass is the class of a read of ticket id's status or of chart name: the
+// read of the screen the person opened (the ticket on top, a ticket of the chart
+// on top, the chart on top) is the next to run; any other keeps what is on show
+// warm and waits for them.
+func (m *Model) readClass(id, chart string) class {
+	e := m.top()
+	switch e.screen {
+	case screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenLand, screenSlice:
+		if id != "" && id == e.ticket {
+			return classOpened
+		}
+	case screenChart:
+		if c := m.w.charts[e.chart]; c != nil && (chart == e.chart || (id != "" && slices.Contains(c.ids(), id))) {
+			return classOpened
+		}
+	}
+	return classBackground
 }
 
 // shownLine is the command as the person would type it, without the flags the

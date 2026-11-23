@@ -95,7 +95,7 @@ func (m *Model) loadBrief(id string) tea.Cmd {
 	args := m.verbArgs("brief", "show", id, "--text")
 	run := m.run
 	return func() tea.Msg {
-		out, code := run(args)
+		out, code := run(classOpened, args)
 		return briefMsg{ticket: id, text: parseBriefText(out, code)}
 	}
 }

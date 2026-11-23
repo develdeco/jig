@@ -187,10 +187,12 @@ type confirmation struct {
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
-	cfg  Config
-	st   styles
-	run  Runner
-	zone *time.Location
+	cfg Config
+	st  styles
+	run classedRunner
+	// queue is what run goes through: one command at a time, the next by class.
+	queue *queue
+	zone  *time.Location
 
 	w             *world
 	width, height int
@@ -291,7 +293,8 @@ func New(cfg Config) *Model {
 	}
 	m.st = styles{r: r}
 	if cfg.Run != nil {
-		m.run = serial(cfg.Run)
+		m.queue = &queue{run: cfg.Run}
+		m.run = m.queue.do
 	}
 	m.nav = []navEntry{{screen: screenMain}}
 	m.followNew, m.started = cfg.Ticket == "" && cfg.Chart == "", m.now()
