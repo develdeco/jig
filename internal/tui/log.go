@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -15,8 +16,8 @@ import (
 // the step and sub-step it belongs to ("build·clamp", "review·r2"): a journal
 // line by what it records; a call of a subagent by the sub-step its lines name;
 // any other call by the sub-step its session held when it made it, else by the
-// line it wrote, else by the step it led to (the step of the next line, or the
-// ticket's current step for a call after the latest).
+// line it wrote, else by the step it led to (the step of the next line, or no
+// step for a call after the latest).
 
 // logLines are the ticket's lines and moves, oldest first.
 func (t *ticket) logLines() []events.Envelope {
@@ -30,6 +31,69 @@ func (t *ticket) logLines() []events.Envelope {
 		}
 	}
 	return out
+}
+
+// workLines are the lines the clocks read: logLines with the calls that left
+// the ledger's tail (fold), so how long a step took does not depend on how many
+// calls it took to do it.
+func (t *ticket) workLines() []events.Envelope {
+	out := t.logLines()
+	for _, l := range t.older {
+		out = insertSorted(out, l)
+	}
+	return out
+}
+
+// workLedger is the machine ledger lines about the ticket the sub-steps' holders
+// are read from: what left the tail, then the tail.
+func (t *ticket) workLedger() []events.Envelope {
+	return append(append([]events.Envelope(nil), t.older...), t.ledger...)
+}
+
+// fold keeps, of the ledger lines gone leaving the tail (rest is what stays),
+// what the work of the ticket still needs of them: the session lines that tie a
+// holder to the ticket, a hold, a named landing, and of the calls only as many
+// as keep every stretch of work they bounded as long as it was (a call is left
+// out when the next call is no more than the liveWindow after the last one
+// kept), so a done step reads the same whether its calls fit the tail or not.
+func (t *ticket) fold(gone, rest []events.Envelope) {
+	for i, l := range gone {
+		if _, ok := l.At(); !ok {
+			continue
+		}
+		switch {
+		case isMove(l):
+			next := time.Time{}
+			for _, x := range append(append([]events.Envelope(nil), gone[i+1:]...), rest...) {
+				if nx, ok := x.At(); ok && isMove(x) {
+					next = nx
+					break
+				}
+			}
+			if last := t.lastFolded(); !last.IsZero() && !next.IsZero() && next.Sub(last) <= liveWindow {
+				continue
+			}
+		case isHold(l) || isLandNamed(l) || (l.Session != "" && (l.Event == journal.EventSessionStart || l.Event == journal.EventSessionTouch)):
+		default:
+			continue
+		}
+		slim := events.Envelope{Src: l.Src, Store: l.Store, Line: journal.Line{TS: l.TS, Ticket: l.Ticket, Event: l.Event, Session: l.Session, Agent: l.Agent, Outcome: l.Outcome, URL: l.URL}}
+		if isMove(l) {
+			slim.Command = "…"
+		}
+		t.older = append(t.older, slim)
+	}
+}
+
+// lastFolded is when the latest call kept by fold was made, zero for none.
+func (t *ticket) lastFolded() time.Time {
+	for i := len(t.older) - 1; i >= 0; i-- {
+		if isMove(t.older[i]) {
+			at, _ := t.older[i].At()
+			return at
+		}
+	}
+	return time.Time{}
 }
 
 // moveWindow is the time a sub-step was held, and by which session: a call
@@ -47,6 +111,24 @@ type moveWindow struct {
 	// borrowed is set for a window whose holder its sub-step's lines do not
 	// name (subTrack.borrowed): a window whose lines name its holder wins.
 	borrowed bool
+	// open is set for the window of a sub-step still under way.
+	open bool
+	// waiting is set for the window of a sub-step that waits for a person: it
+	// ends where the wait began, for a subagent as for a session.
+	waiting bool
+	// held are the waits the sub-step stood through that an answer ended: the
+	// window spans them, but nobody held the sub-step then.
+	held []waitSpan
+}
+
+// waitingAt says the sub-step of the window was standing in a wait at at.
+func (w moveWindow) waitingAt(at time.Time) bool {
+	for _, h := range w.held {
+		if at.After(h.start) && !at.After(h.end) {
+			return true
+		}
+	}
+	return false
 }
 
 // callAfter is how long after a sub-step's last line a call of its holder
@@ -55,9 +137,12 @@ type moveWindow struct {
 const callAfter = 2 * time.Second
 
 // moveWindows are the windows of the sub-steps of a ticket that stands as d
-// says that are done or under way and have a holder.
+// says that are done or under way and have a holder. A sub-step that waits for
+// a person has none: nobody holds it, so what a session does while it waits is
+// no work of it.
 func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 	now := m.now()
+	answered, _ := t.answered()
 	var ws []moveWindow
 	for step, p := range d.Phases {
 		for _, s := range p.Subs {
@@ -67,13 +152,34 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 			case s.State == phase.SubDone:
 				tr = t.doneTrack(step, s.Key)
 				end = tr.end.Add(callAfter)
+				if isWaitKey(s.Key) && s.WaitsFor != "" {
+					// A wait that ended was held by nobody while it stood, and
+					// is still no work: what its kind waits for, not its
+					// state, takes it out of the sessions' hands.
+					continue
+				}
+			case s.State == phase.SubNeedsYou:
+				if isWaitKey(s.Key) {
+					continue
+				}
+				// Nobody holds it while it waits, but its holder held it until
+				// the line that opened the wait: the calls before it are its
+				// work, those after are no one's.
+				tr = t.openTrack(step, s)
+				end = tr.end.Add(callAfter)
 			case subWeight(s) < 2:
-				tr = t.openTrack(step, s.Key)
+				tr = t.openTrack(step, s)
 			default:
 				continue
 			}
 			if tr.holder != "" && !tr.start.IsZero() {
-				ws = append(ws, moveWindow{step, s.Key, tr.holder, agentOf(tr.own), tr.start, end, tr.borrowed})
+				w := moveWindow{step: step, key: s.Key, holder: tr.holder, agent: agentOf(tr.own), start: tr.start, end: end, borrowed: tr.borrowed, open: s.State != phase.SubDone && s.State != phase.SubNeedsYou, waiting: s.State == phase.SubNeedsYou}
+				for _, a := range answered {
+					if a.step == step && a.key == s.Key {
+						w.held = append(w.held, a)
+					}
+				}
+				ws = append(ws, w)
 			}
 		}
 	}
@@ -116,7 +222,7 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 		}
 	}
 	if tr.holder == "" {
-		for _, l := range t.ledger {
+		for _, l := range t.workLedger() {
 			if l.Session != "" {
 				tr.holder = l.Session
 				if at, ok := l.At(); ok && prev.IsZero() {
@@ -135,8 +241,9 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 // placeOf is the step and sub-step key line l belongs to (key "" for the step
 // alone; step -1 for the ticket as a whole). all are the log's lines, oldest
 // first, for a call made outside every sub-step's window: it belongs to the
-// line it wrote (wroteLine), else to the step of the next line, or to the step
-// under way in d when none came after it.
+// line it wrote (wroteLine), else to the step of the next line, else to no step
+// (a call after the latest line that no sub-step held is work of nothing the
+// ticket knows).
 func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelope, d phase.Ticket) (int, string) {
 	if isHold(l) {
 		return holdPlace(l)
@@ -148,7 +255,7 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 	best := -1
 	if l.Agent != "" {
 		for i, w := range ws {
-			if w.agent == l.Agent && at.After(w.start) && (best < 0 || w.start.After(ws[best].start)) {
+			if w.agent == l.Agent && at.After(w.start) && !(w.waiting && at.After(w.end)) && !w.waitingAt(at) && (best < 0 || w.start.After(ws[best].start)) {
 				best = i
 			}
 		}
@@ -157,7 +264,7 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 		}
 	}
 	for i, w := range ws {
-		if w.holder != l.Session || !at.After(w.start) || at.After(w.end) {
+		if w.holder != l.Session || !at.After(w.start) || at.After(w.end) || w.waitingAt(at) {
 			continue
 		}
 		if best < 0 || (ws[best].borrowed && !w.borrowed) || (ws[best].borrowed == w.borrowed && w.start.After(ws[best].start)) {
@@ -176,11 +283,40 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 		}
 		if xt, ok := x.At(); ok && xt.After(at) {
 			if s := stepOfLine(x); s >= 0 {
+				if waitLine(d, s, t.subKey(x)) {
+					// The line that ended a wait explains no call made while
+					// it stood.
+					return -1, ""
+				}
 				return s, ""
 			}
 		}
 	}
-	return currentOf(d), ""
+	return -1, ""
+}
+
+// isWaitKey says the sub-step key is one whose whole kind is a wait: an approval
+// of the brief or of the push, or a landing's merge. A slice that asks waits
+// only for its answer, and its holder held it until it asked.
+func isWaitKey(key string) bool { return key == "approved" || key == "approval" || key == "merge" }
+
+// waitLine says the sub-step key of step is one that waits for a person or the
+// host: a line of it ends the wait, and explains no call made while it stood.
+func waitLine(d phase.Ticket, step int, key string) bool {
+	if step == stepReview && key == "asks" {
+		// A decision ends the wait for the asks, whatever state the asks are in
+		// or whether the round that left them has folded them away.
+		return true
+	}
+	for _, s := range d.Phases[step].Subs {
+		if s.Key == key {
+			// A sub-step that waits and is not the person's turn (an approval
+			// given, a merge named): the other lines of a slice that stands
+			// waiting for its answer (its claim, its question) end nothing.
+			return s.WaitsFor != "" && s.State != phase.SubNeedsYou
+		}
+	}
+	return false
 }
 
 // placedLine is a line of the log and the place it belongs to (placeOf).
@@ -193,14 +329,24 @@ type placedLine struct {
 // placed are the log's lines of a ticket that stands as d says, oldest first,
 // each with its place.
 func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
-	all := t.logLines()
+	out, _ := m.placedIn(t, d)
+	return out
+}
+
+// placedIn is placed with the windows the places came from.
+func (m *Model) placedIn(t *ticket, d phase.Ticket) ([]placedLine, []moveWindow) {
+	return m.placedFrom(t, d, t.logLines())
+}
+
+// placedFrom is placedIn for the lines all, oldest first.
+func (m *Model) placedFrom(t *ticket, d phase.Ticket, all []events.Envelope) ([]placedLine, []moveWindow) {
 	ws := m.moveWindows(t, d)
 	out := make([]placedLine, len(all))
 	for i, l := range all {
 		step, key := t.placeOf(l, ws, all, d)
 		out[i] = placedLine{l, step, key}
 	}
-	return out
+	return out, ws
 }
 
 // currentOf is the step under way in d: the first not done, the last when all

@@ -19,6 +19,12 @@ type stepRow struct {
 	Took  string
 	Done  bool
 	took  time.Duration
+	// Wait is how long the sub-step the step waits on has stood, when the step
+	// waits for a person or the host; waitWords are that sub-step's words.
+	Wait, waitWords string
+	// Idle is "idle since 17:30" for a step under way whose holder is gone or
+	// quiet, "" otherwise.
+	Idle string
 }
 
 // steps are the ticket's five steps, in order, as internal/phase derives them
@@ -45,9 +51,16 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 		}
 		return rows
 	}
-	for i, took := range m.stepTimes(t, d) {
-		if took > 0 {
+	c := m.clocks(t, d)
+	for i := range rows {
+		if took := c.work.ofStep(i); took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took
+		}
+		if w, ok := c.standingOf(i); ok && !rows[i].Done && rows[i].State != StateClosed {
+			rows[i].Wait, rows[i].waitWords = m.waitClock(w), w.words
+		}
+		if at, ok := c.idle[i]; ok && !rows[i].Done && rows[i].State != StateClosed && rows[i].Wait == "" {
+			rows[i].Idle = m.idleWords(at)
 		}
 	}
 	return rows
@@ -269,34 +282,6 @@ func cannotStart(d phase.Ticket, p phase.Phase) bool {
 	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
-// stepTimes are how long each step has taken: the gaps between consecutive
-// lines of the log that both belong to the step (placed), so a build that a
-// review sent a fix back to counts the fix and not the review between, and the
-// time from one step to the next (a person reading the outcome before prompting
-// the next phase) counts for neither. A line of no step (a spend) neither
-// starts nor ends a gap. The step under way also counts the time since its
-// latest line, while that line is the latest of the log: the brief waiting on
-// the person's answer, a slice being built.
-func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
-	var took [stepCount]time.Duration
-	var prev time.Time
-	prevStep := -1
-	for _, p := range m.placed(t, d) {
-		at, ok := p.l.At()
-		if p.step < 0 || !ok {
-			continue
-		}
-		if p.step == prevStep && at.After(prev) {
-			took[p.step] += at.Sub(prev)
-		}
-		prev, prevStep = at, p.step
-	}
-	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
-		took[cur] += m.now().Sub(prev)
-	}
-	return took
-}
-
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
@@ -318,7 +303,7 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 		// is at work, and the header says no more than the group does.
 		return StateBuilding, strings.ToLower(stepNames[cur.Step]) + " in progress"
 	}
-	return cur.State, stepWords(cur.Step, cur.State)
+	return cur.State, stepWordsOf(cur)
 }
 
 // stepState is a step in a state, the key of the header's words.
@@ -356,6 +341,18 @@ var headerWords = map[stepState]string{
 	{stepLand, StateReady}:         "waits to land",
 	{stepLand, StateFindings}:      "merged, not recorded",
 	{stepLand, StateOK}:            "landed",
+}
+
+// stepWordsOf is what the header says of a step row: its state's words, except
+// where the step's open sub-step waits and the state's words would read as work
+// ("brief being drafted" for a brief that is drafted and waits for approval).
+func stepWordsOf(s stepRow) string {
+	if s.Wait != "" && (s.State == StateBuilding || s.State == StatePublishing) {
+		if w := waitHeader(s.Step, waitSpan{words: s.waitWords}); w != "" {
+			return w
+		}
+	}
+	return stepWords(s.Step, s.State)
 }
 
 // stepWords is what the header says of step in state.

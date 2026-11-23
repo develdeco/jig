@@ -6,11 +6,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// liveWindow is how recent a ledger line of a session must be for the session to
-// count as working on a ticket now. One minute is a guess, to be measured on a
-// real run: this is the one place to change it.
-const liveWindow = time.Minute
-
 // live is whether a session is working on the ticket now, and how long ago its
 // latest sign was: a ledger line of the machine bound to the ticket (a tool
 // call, a session start or touch) within liveWindow of now, from a session that
