@@ -11,7 +11,7 @@ import (
 )
 
 // What a counter on a screen counts is work: the time a holder had a sub-step.
-// One function (work) computes it, and a step's row, the Steps panel's total, a
+// One function (clocks) computes it, and a step's row, the Steps panel's total, a
 // sub-step's "took" and the open sub-step's run time all read its answer, so a
 // number shown in two places is the same number.
 
@@ -99,9 +99,6 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 	}
 	return clocks{w, waits, idle}
 }
-
-// work is the work of the ticket (clocks).
-func (m *Model) work(t *ticket, d phase.Ticket) workTimes { return m.clocks(t, d).work }
 
 // windowOf is the window of the sub-step key of step that is under way, nil
 // when its holder is not known.
