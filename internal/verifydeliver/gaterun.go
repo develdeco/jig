@@ -60,6 +60,10 @@ type gateRun struct {
 	// (the gate-open line, or a recorded round's own files): the deferred
 	// best-effort push (pushFailure) is for exactly that.
 	journaled bool
+	// refused is true when the only thing the run journaled is a gate-refused
+	// line: no round was numbered, so a failure push names the refusal and
+	// not a round.
+	refused bool
 }
 
 // pushFailure is the best-effort push a round runs on any error after its
@@ -76,7 +80,71 @@ func (r *gateRun) pushFailure(err error) {
 	if r == nil || err == nil || !r.journaled {
 		return
 	}
+	if r.refused {
+		_ = r.d.Store.Push(fmt.Sprintf("%s: gate refused: %s", r.ticket, failureCode(err)))
+		return
+	}
 	_ = r.d.Store.Push(fmt.Sprintf("%s: gate round %d failed: %s", r.ticket, r.n, failureCode(err)))
+}
+
+// refusalSummaryCap bounds a gate-refused line's summary, as a failed
+// oracle's summary is bounded.
+const refusalSummaryCap = 600
+
+// refusalCodes are the refusals of a gate's preconditions that are journaled:
+// each is decided before the round opens, and says the gate was tried and why
+// it stopped. Any other error (a store that cannot be read, conflicting flags,
+// an internal failure) says nothing a reader could act on.
+var refusalCodes = map[string]bool{"GATE_NOT_GREEN": true, "BRANCH_NOT_FOUND": true, "INTENT_CONFLICT": true}
+
+// journalRefusal appends the gate-refused line for err when err is one of the
+// journaled refusals, and marks the run so the failure push carries the line.
+// A failed append is dropped: the refusal is what the caller reports, and a
+// journal error must not replace it.
+func (r *gateRun) journalRefusal(err error) {
+	var ae *axi.Error
+	if !errors.As(err, &ae) || !refusalCodes[ae.Code] {
+		return
+	}
+	line := journal.Line{Event: journal.EventGateRefused, Code: ae.Code, Summary: refusalSummary(ae.Msg)}
+	if journal.Append(r.d.Store, r.ticket, line) != nil {
+		return
+	}
+	r.journaled, r.refused = true, true
+}
+
+// refusalSummary renders a refusal's message as one line of at most
+// refusalSummaryCap bytes, cut before the first absolute host path: the
+// journal is pushed to a remote, and a path names a machine.
+func refusalSummary(msg string) string {
+	s := oneLine(msg)
+	at := 0
+	for _, f := range strings.Fields(msg) {
+		start := at + strings.Index(s[at:], f)
+		at = start + len(f)
+		if isAbsPath(strings.TrimLeft(f, "\"'(")) {
+			s = strings.TrimRight(s[:start], " :,;(\"'")
+			break
+		}
+	}
+	if len(s) > refusalSummaryCap {
+		cut := refusalSummaryCap
+		for cut > 0 && s[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		s = s[:cut]
+	}
+	return s
+}
+
+// isAbsPath reports whether a word starts an absolute path on either
+// platform: /dir, \\host, or a drive letter and a separator.
+func isAbsPath(w string) bool {
+	if strings.HasPrefix(w, "/") || strings.HasPrefix(w, `\\`) {
+		return true
+	}
+	return len(w) >= 3 && w[1] == ':' && (w[2] == '\\' || w[2] == '/') &&
+		(w[0] >= 'a' && w[0] <= 'z' || w[0] >= 'A' && w[0] <= 'Z')
 }
 
 // choose settles the copy of the ticket's branch the round works on in one of
@@ -100,10 +168,21 @@ func (r *gateRun) choose(gr *gateRepo) error {
 // left behind.
 //
 // Preconditions come before anything this round does is recorded or pushed:
-// a ticket short of green refuses with GATE_NOT_GREEN, and that refusal must
-// leave no trace - not a pushed intent.md, not a journal line - for a plain
-// rerun to be the whole recovery.
+// a ticket short of green refuses with GATE_NOT_GREEN, and that refusal opens
+// no round and writes no intent.md or other store file, for a plain rerun to
+// be the whole recovery. Its one trace is a gate-refused journal line, so the
+// review step can say a gate was tried and why it stopped; it is written here,
+// where every caller (jig gate, jig review context, the scripted gate) meets
+// the refusal.
 func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
+	r, err := gatePrepareRound(d, o, queueKept)
+	if err != nil {
+		r.journalRefusal(err)
+	}
+	return r, err
+}
+
+func gatePrepareRound(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	r := &gateRun{d: d, o: o, ticket: o.Ticket, qualified: len(d.Cfg.Repos) > 1}
 	ticket := o.Ticket
 
@@ -183,8 +262,9 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 
 	// `--intent`/`--doc`: record an explicit intent.md once every
 	// precondition above has passed - GATE_NOT_GREEN, and BRANCH_NOT_FOUND -
-	// so a refusal on either still leaves no trace: not a written intent.md,
-	// not a journal line, for a plain rerun to be the whole recovery. It is a
+	// so a refusal on either still opens no round and writes no intent.md,
+	// only the gate-refused line gatePrepare adds, for a plain rerun to be
+	// the whole recovery. It is a
 	// ticket-level record, not specific to this round's branch or frontier
 	// state, so nothing here reads clone or branch state; the write only needs
 	// to happen after every precondition that can still refuse the round. No
@@ -213,7 +293,7 @@ func gatePrepare(d Deps, o GateOpts, queueKept bool) (*gateRun, error) {
 	r.intentSHA256 = intentSHA256(r.intent.Source, r.intentText)
 
 	// Adoption is recorded last of the round's preconditions and first of its
-	// effects: a refusal above leaves nothing behind, so a plain rerun is the
+	// effects: a refusal above opens no round and adopts nothing, so a plain rerun is the
 	// whole recovery, and every later round and command finds the branch and
 	// where it started. The start sha is the branch's tip as the author left
 	// it, not the target's: what jig builds on the branch descends from the

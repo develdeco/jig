@@ -618,6 +618,8 @@ func describe(l events.Envelope) string {
 		return strings.TrimSpace("stalled " + firstOf(l.Summary, l.Outcome))
 	case journal.EventGateOpen:
 		return "gate round opened"
+	case journal.EventGateRefused:
+		return "gate refused: " + l.Summary
 	case journal.EventGateRound:
 		return roundWord(l, "findings")
 	case journal.EventGateClean:
@@ -683,7 +685,7 @@ func eventState(l events.Envelope) string {
 		return StateOK
 	case eventBriefSeen, eventSlicesSeen:
 		return StateBuilding
-	case journal.EventGateOpen, journal.EventGateReviewer:
+	case journal.EventGateOpen, journal.EventGateRefused, journal.EventGateReviewer:
 		return StateReviewing
 	case journal.EventGateRound:
 		return StateFindings
