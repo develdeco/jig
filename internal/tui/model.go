@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,10 +172,12 @@ type navEntry struct {
 // textInput is a line a person is typing: an answer.
 type textInput struct {
 	prompt string
-	about  []string
-	value  []rune
-	ticket string
-	qid    string
+	// head and about are what the person answers: who asked, and the question
+	// as written. The footer wraps about when it draws, so a resize re-wraps it.
+	head, about string
+	value       []rune
+	ticket      string
+	qid         string
 }
 
 // confirmation is an action that waits for a yes.
@@ -1265,9 +1268,13 @@ func (m *Model) beginAnswer() {
 			return
 		}
 	}
-	about := []string{"slice " + q.Slice + " asked:"}
-	about = append(about, strings.Split(q.Text, "\n")...)
-	m.input = &textInput{prompt: "answer " + q.ID, about: about, ticket: id, qid: q.ID}
+	m.input = &textInput{prompt: "answer " + q.ID, head: "slice " + q.Slice + " asked:", about: q.Text, ticket: id, qid: q.ID}
+	// A question is never answered from a cut: when the prompt with the whole
+	// question would leave the body under its floor, there is no prompt.
+	if need := minBodyRows + headerRows + len(m.footer(m.width)); m.height < need {
+		m.input = nil
+		m.notice = "the screen is too short to show the whole question " + q.ID + ": it needs " + strconv.Itoa(need) + " rows, this has " + strconv.Itoa(m.height)
+	}
 }
 
 // inputKey edits the line being typed.

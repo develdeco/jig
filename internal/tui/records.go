@@ -142,9 +142,43 @@ func wrap(text string, w, maxLines int) []string {
 	if w < 1 || maxLines < 1 {
 		return nil
 	}
+	lines := wordLines(text, w)
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		last := lines[len(lines)-1]
+		if width(last)+1 > w {
+			last = fit(last, w-1)
+			last = strings.TrimSuffix(last, "…")
+		}
+		lines[len(lines)-1] = last + "…"
+	}
+	return lines
+}
+
+// wrapWhole breaks text into lines of at most w cells and cuts none of it: it
+// breaks on spaces, keeps the line breaks the text has (a blank line stays a
+// blank line), cuts a word wider than a line into lines, and never ends in an
+// ellipsis. It is for text a person acts on, which a cut would leave unread.
+func wrapWhole(text string, w int) []string {
+	if w < 1 {
+		return nil
+	}
+	var lines []string
+	for _, para := range strings.Split(strings.TrimRight(text, "\n\r "), "\n") {
+		if got := wordLines(para, w); len(got) > 0 {
+			lines = append(lines, got...)
+		} else {
+			lines = append(lines, "")
+		}
+	}
+	return lines
+}
+
+// wordLines is text broken into lines of at most w cells on spaces, its line
+// breaks read as spaces.
+func wordLines(text string, w int) []string {
 	var lines []string
 	cur := ""
-	cut := false
 	for _, word := range strings.Fields(text) {
 		for width(word) > w {
 			head := ansi.Truncate(word, w, "")
@@ -174,17 +208,6 @@ func wrap(text string, w, maxLines int) []string {
 	}
 	if cur != "" {
 		lines = append(lines, cur)
-	}
-	if len(lines) > maxLines {
-		lines, cut = lines[:maxLines], true
-	}
-	if cut {
-		last := lines[len(lines)-1]
-		if width(last)+1 > w {
-			last = fit(last, w-1)
-			last = strings.TrimSuffix(last, "…")
-		}
-		lines[len(lines)-1] = last + "…"
 	}
 	return lines
 }

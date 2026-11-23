@@ -91,6 +91,13 @@ func (m *Model) page() page {
 	return m.mainPage()
 }
 
+// minBodyRows is the rows a screen's body keeps whatever the panel and the
+// footer ask for, and headerRows the rows over it: the title and its rule.
+const (
+	minBodyRows = 6
+	headerRows  = 2
+)
+
 // View draws the screen: a header, the body windowed so the cursor shows,
 // what the last command printed, and the keys, in exactly the height the
 // terminal has.
@@ -111,8 +118,8 @@ func (m *Model) View() string {
 	foot := m.footer(w)
 	panel := m.panel(w)
 	bodyH := h - len(head) - len(foot) - len(panel)
-	if bodyH < 6 && len(panel) > 0 {
-		panel = panel[:max(0, len(panel)-(6-bodyH))]
+	if bodyH < minBodyRows && len(panel) > 0 {
+		panel = panel[:max(0, len(panel)-(minBodyRows-bodyH))]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
@@ -312,11 +319,8 @@ func (m *Model) footer(w int) []string {
 	switch {
 	case m.input != nil:
 		out := []string{rule}
-		about := m.input.about
-		if len(about) > 4 {
-			about = append(about[:3:3], "…")
-		}
-		for _, l := range about {
+		out = append(out, fit("  "+m.st.dim(m.input.head), w))
+		for _, l := range wrapWhole(m.input.about, w-2) {
 			out = append(out, fit("  "+m.st.dim(l), w))
 		}
 		out = append(out, fit("  "+m.st.key(m.input.prompt+" ›")+" "+string(m.input.value)+m.st.dim("▏"), w))
