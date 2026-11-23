@@ -82,7 +82,7 @@ func (m *Model) exec(label, ticket string, steps ...[]string) tea.Cmd {
 	return func() tea.Msg {
 		res := outcome{Label: label, Ticket: ticket}
 		for _, args := range steps {
-			out, code := run(classKey, args)
+			out, code := run(classKey, about{}, args)
 			res.Steps = append(res.Steps, ranStep{Args: args, Out: out, Code: code})
 			if code != 0 {
 				break
@@ -106,9 +106,9 @@ func (m *Model) refreshStatus(id string) tea.Cmd {
 	t.loading, t.dirty = true, false
 	m.lastRead = m.now()
 	args := m.verbArgs("status", id)
-	run, c := m.run, m.readClass(id, "")
+	run := m.run
 	return func() tea.Msg {
-		out, _ := run(c, args)
+		out, _ := run(classOpened, about{ticket: id}, args)
 		return statusMsg{ticket: id, info: parseStatus(out)}
 	}
 }
@@ -125,7 +125,7 @@ func (m *Model) loadRoster() tea.Cmd {
 	args := m.verbArgs("next", "--json", "--roster")
 	run := m.run
 	return func() tea.Msg {
-		out, _ := run(classBackground, args)
+		out, _ := run(classBackground, about{}, args)
 		rows, charts, err := parseRoster(out)
 		return rosterMsg{rows: rows, charts: charts, err: err, seq: seq}
 	}
@@ -140,31 +140,36 @@ func (m *Model) loadChart(name string) tea.Cmd {
 	c.loading, c.dirty = true, false
 	m.lastRead = m.now()
 	args := m.verbArgs("next", name, "--json")
-	run, cl := m.run, m.readClass("", name)
+	run := m.run
 	return func() tea.Msg {
-		out, _ := run(cl, args)
+		out, _ := run(classOpened, about{chart: name}, args)
 		info, err := parseChart(out)
 		return chartMsg{name: name, info: info, err: err}
 	}
 }
 
-// readClass is the class of a read of ticket id's status or of chart name: the
-// read of the screen the person opened (the ticket on top, a ticket of the chart
-// on top, the chart on top) is the next to run; any other keeps what is on show
-// warm and waits for them.
-func (m *Model) readClass(id, chart string) class {
-	e := m.top()
-	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenLand, screenSlice:
-		if id != "" && id == e.ticket {
-			return classOpened
-		}
-	case screenChart:
-		if c := m.w.charts[e.chart]; c != nil && (chart == e.chart || (id != "" && slices.Contains(c.ids(), id))) {
-			return classOpened
-		}
+// syncScreen tells the queue which screen is on show, so the reads about it run
+// first: the ticket the screen is of, or the chart and the tickets and issue it
+// lists.
+func (m *Model) syncScreen() {
+	if m.queue == nil {
+		return
 	}
-	return classBackground
+	var on onShow
+	switch e := m.top(); e.screen {
+	case screenMain:
+	case screenChart:
+		on.chart = e.chart
+		if c := m.w.charts[e.chart]; c != nil {
+			on.chartTickets = c.ids()
+			if issue := c.issueID(); issue != "" {
+				on.chartTickets = append(on.chartTickets, issue)
+			}
+		}
+	default:
+		on.ticket = e.ticket
+	}
+	m.queue.show(on)
 }
 
 // shownLine is the command as the person would type it, without the flags the

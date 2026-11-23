@@ -2,6 +2,8 @@ package gitx
 
 import (
 	"bufio"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,7 +227,17 @@ func (k *Kept) loadLocked() {
 		return
 	}
 	var lines []string
-	sc := bufio.NewScanner(f)
+	data, rerr := io.ReadAll(f)
+	if rerr == nil && len(data) > 0 && data[len(data)-1] != '\n' {
+		// A write that was cut short leaves a last line with no end: it may be
+		// cut anywhere, after its tab included, and is no fact.
+		if i := bytes.LastIndexByte(data, '\n'); i >= 0 {
+			data = data[:i+1]
+		} else {
+			data = nil
+		}
+	}
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for sc.Scan() {
 		lines = append(lines, sc.Text())

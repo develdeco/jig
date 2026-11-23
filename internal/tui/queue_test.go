@@ -86,9 +86,14 @@ func untilWaiting(t *testing.T, q *queue, n int) {
 
 // ask runs a command in the queue on a goroutine and gives what it printed.
 func ask(q *queue, c class, line string) <-chan string {
+	return askAbout(q, c, about{}, line)
+}
+
+// askAbout is ask for a read that is about a ticket or a chart.
+func askAbout(q *queue, c class, a about, line string) <-chan string {
 	out := make(chan string, 1)
 	go func() {
-		got, _ := q.do(c, strings.Fields(line))
+		got, _ := q.do(c, a, strings.Fields(line))
 		out <- got
 	}()
 	return out
@@ -101,6 +106,7 @@ func TestAKeysCommandRunsBeforeBackgroundReads(t *testing.T) {
 	t.Parallel()
 	g := newGate()
 	q := &queue{run: g.run}
+	q.show(onShow{ticket: "T-1"})
 	first := ask(q, classBackground, "next --roster")
 	if got := g.next(t); got != "next --roster" {
 		t.Fatalf("began %q first", got)
@@ -109,7 +115,7 @@ func TestAKeysCommandRunsBeforeBackgroundReads(t *testing.T) {
 	// and two keys' commands wait, asked in that order.
 	ask(q, classBackground, "status T-2")
 	untilWaiting(t, q, 1)
-	ask(q, classOpened, "status T-1")
+	askAbout(q, classOpened, about{ticket: "T-1"}, "status T-1")
 	untilWaiting(t, q, 2)
 	ask(q, classKey, "answer T-1 q-1 yes")
 	untilWaiting(t, q, 3)

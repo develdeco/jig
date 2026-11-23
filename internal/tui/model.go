@@ -305,6 +305,7 @@ func New(cfg Config) *Model {
 	} else if cfg.Chart != "" {
 		m.nav = append(m.nav, navEntry{screen: screenChart, chart: cfg.Chart, follow: true})
 	}
+	m.syncScreen()
 	return m
 }
 
@@ -553,6 +554,7 @@ func (m *Model) waitEvents() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
+	m.syncScreen()
 	return next, cmd
 }
 

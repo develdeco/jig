@@ -16,7 +16,8 @@ import (
 func TestKeptFactsIgnoreWhatIsNotAnAnswer(t *testing.T) {
 	t.Parallel()
 	file := filepath.Join(t.TempDir(), "facts.txt")
-	if err := os.WriteFile(file, []byte("a b\t1\nnot a line\n\tno key\nc d\t0\ne f"), 0o644); err != nil {
+	// The last line was cut after its tab: it is no fact, not an answer of "".
+	if err := os.WriteFile(file, []byte("a b\t1\nnot a line\n\tno key\nc d\t0\ne f\t"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	k := &Kept{path: file}

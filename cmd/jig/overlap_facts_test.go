@@ -10,18 +10,25 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 )
 
+// verbOf is the git verb of an argv: the first word after the program (whatever
+// it is called, git or git.exe) and the options in front of the verb.
+func verbOf(argv []string) string {
+	for i := 1; i < len(argv); i++ {
+		if argv[i] == "-c" {
+			i++
+			continue
+		}
+		return argv[i]
+	}
+	return ""
+}
+
 // askedOf counts the git processes of argv that run verb.
 func askedOf(argv [][]string, verb string) int {
 	n := 0
 	for _, a := range argv {
-		for _, word := range a {
-			if word == "-c" || word == "git" || word == "maintenance.auto=false" {
-				continue
-			}
-			if word == verb {
-				n++
-			}
-			break
+		if verbOf(a) == verb {
+			n++
 		}
 	}
 	return n

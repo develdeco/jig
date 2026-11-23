@@ -13,6 +13,7 @@ import (
 	"github.com/develdeco/jig/internal/gittest"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
+	"github.com/develdeco/jig/internal/project/projecttest"
 )
 
 // rosterRows decodes what `jig next --json --roster` printed.
@@ -246,19 +247,32 @@ func newRosterWorld(t *testing.T, tickets, branches int, worktreeConfig bool) ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rosterWorld{rig: r, cfg: cfg, mp: project.MachineProject{Clones: map[string]string{"app": dir}}, e: r.env()}
-}
-
-// read is one roster read as `jig next --json --roster` makes it, and the rows
-// it gives.
-func (w rosterWorld) read(t *testing.T) nextRoster {
-	t.Helper()
-	end := readScope(w.rig.st, w.mp, w.rig.home)
-	defer end()
-	n, err := nextForRoster(w.rig.st, w.cfg, w.mp, newKeptMergeReader(w.e, w.rig.st, w.cfg, w.mp, w.rig.home))
-	if err != nil {
+	mp := project.MachineProject{Clones: map[string]string{"app": dir}}
+	if err := projecttest.SaveMachine(r.home, map[string]project.MachineProject{"demo": mp}); err != nil {
 		t.Fatal(err)
 	}
+	return rosterWorld{rig: r, cfg: cfg, mp: mp, e: r.env()}
+}
+
+// read is one roster read by the verb itself, `jig next --json --roster` on the
+// world's store, and the rows it printed: what the screens run is what is
+// measured.
+func (w rosterWorld) read(t *testing.T) nextRoster {
+	t.Helper()
+	out, code := runMain(t, w.e, "", "next", "--json", "--roster", "--store", w.rig.root)
+	if code != 0 {
+		t.Fatalf("jig next --json --roster: exit %d\n%s", code, out)
+	}
+	var n nextRoster
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "{") {
+			if err := json.Unmarshal([]byte(line), &n); err != nil {
+				t.Fatalf("the roster does not parse: %v", err)
+			}
+			return n
+		}
+	}
+	t.Fatalf("the roster printed no object:\n%s", out)
 	return n
 }
 
@@ -331,5 +345,64 @@ func TestRosterOfAThousandTickets(t *testing.T) {
 	}
 	if published != 500 {
 		t.Errorf("%d rows carry a pull request, want the 500 that published", published)
+	}
+}
+
+// TestRosterVerbReadsInOneScope: the verb the screens run opens the read scope
+// itself, so the cost rule holds for the process and not only for the functions
+// under it. A second read of the roster and of `jig next` starts the same few
+// git processes, and `jig next` the second time starts no diff and no merge,
+// since what it asked of git about each branch is kept under the jig home. The
+// chart index stands for the run. Not parallel: it counts the process's git.
+func TestRosterVerbReadsInOneScope(t *testing.T) {
+	w := newRosterWorld(t, 30, 12, true)
+	w.read(t)
+	argv := gittest.GitArgv(t, func() { w.read(t) })
+	if len(argv) > 4 {
+		t.Errorf("a roster read of 30 tickets and 12 branches started %d git processes: %v", len(argv), argv)
+	}
+
+	// Every pull request is open on this machine's word, so every branch is an
+	// open ticket's and the overlaps ask about it.
+	open := map[string]string{}
+	for i := 0; i < 12; i++ {
+		open[fmt.Sprintf("https://github.com/acme/app/pull/%d", 100+i)] = "OPEN"
+	}
+	keptPRStates(t, w.rig.home, open)
+	full := func() [][]string {
+		out, code := runMain(t, w.e, "", "next", "--json", "--store", w.rig.root)
+		if code != 0 {
+			t.Fatalf("jig next --json: exit %d\n%s", code, out)
+		}
+		return nil
+	}
+	first := gittest.GitArgv(t, func() { full() })
+	second := gittest.GitArgv(t, func() { full() })
+	if askedOf(first, "diff") == 0 {
+		t.Fatalf("a first read of the overlaps asked no diff of 12 branches: %v", first)
+	}
+	if got := askedOf(second, "diff") + askedOf(second, "merge-tree"); got != 0 {
+		t.Errorf("a second jig next asked %d diffs and merges, want none: %v", got, second)
+	}
+
+	// The scope pins the chart index: a chart made while it stands is not seen
+	// by it, and is once it ends.
+	end := readScope(w.rig.st, w.mp, w.rig.home)
+	before, err := w.rig.st.ChartNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.rig.chart(t, "late", "issue: ISS-9\ntickets:\n  - id: TK-1\n    title: One\n", "")
+	during, err := w.rig.st.ChartNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	end()
+	after, err := w.rig.st.ChartNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(during) != len(before) || len(after) != len(before)+1 {
+		t.Errorf("charts %v before, %v during the scope, %v after: the index is not pinned for the scope", before, during, after)
 	}
 }
