@@ -32,6 +32,7 @@ type planSpec struct {
 	// noSuiteTable leaves the table out, as an older jig's status does.
 	noSuiteTable bool
 	need         string
+	status       string
 	issue        *digestInfo
 	issueLines   []events.Envelope
 	unmet        []map[string]any
@@ -209,6 +210,9 @@ func planRig(t *testing.T, spec planSpec) *rig {
 
 // planStatus is `jig status SHOP-49`.
 func planStatus(spec planSpec) string {
+	if spec.status != "" {
+		return spec.status
+	}
 	need := spec.need
 	if need == "" {
 		need = planNeed
@@ -405,6 +409,19 @@ func TestIssuePlanPullRequestWaitsForTheSuiteAndTheTasks(t *testing.T) {
 	ready := &digestInfo{Kind: "issue", State: "ready"}
 	if row := pr(planRig(t, planSpec{issue: ready, prompt: "Publish SHOP-49", suite: []string{"demo,pass,go test,abcdef1234567,5,-,-,-,-"}})); !strings.Contains(row, `not opened yet · say "Publish SHOP-49"`) {
 		t.Errorf("everything met: %q", row)
+	}
+	// The words come from the status that derives them: its unmet suite is waited
+	// for, its prompt is said when nothing is left.
+	statusOf := func(extra string) planSpec {
+		return planSpec{issue: waiting, noSuiteTable: true, status: "ticket: SHOP-49\nstate: issue\nkind: issue\nchart: repeat\nneed: x\n" + extra}
+	}
+	suiteUnmet := planRig(t, statusOf("standing: waiting\nunmet[1]{code,why,prompt}:\n  LAND_SUITE_FAILED,failed,Add a fix task for SHOP-49\n"))
+	if row := pr(suiteUnmet); !strings.Contains(row, "not opened yet · waits for the suite") || strings.Contains(row, "Publish") {
+		t.Errorf("an unmet suite in the status: %q", row)
+	}
+	publishReady := planRig(t, statusOf("standing: ready\nprompt: Publish SHOP-49\n"))
+	if row := pr(publishReady); !strings.Contains(row, `not opened yet · say "Publish SHOP-49"`) {
+		t.Errorf("a ready status: %q", row)
 	}
 	// A task closed without landing waits for nothing and lands nothing: it reads
 	// closed with its reason, and the count of landed tasks leaves it out.

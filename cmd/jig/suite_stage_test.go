@@ -151,6 +151,21 @@ func TestStatusOfAContainerSaysWhatJigNextSays(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "standing: waiting") || !strings.Contains(out, "waits[") || !strings.Contains(out, "TK-3,building") {
 		t.Errorf("jig status TK-1: exit %d\n%s", code, out)
 	}
+
+	// A ready issue prints its prompt, and an issue whose suite failed prints the
+	// unmet row, as jig next does.
+	ready := newSuitePublishRig(t, suiteManifestYAML)
+	landTask(t, ready)
+	ready.record(journal.Line{Event: journal.EventFinalOracle, Commit: ready.tip(), Outcome: "pass", Seconds: 3, Command: "go test ./..."})
+	if out, _ := ready.run(t, "status", "TK-1"); !strings.Contains(out, "standing: ready") || !strings.Contains(out, "prompt: Publish TK-1") {
+		t.Errorf("jig status of a ready issue:\n%s", out)
+	}
+	failed := newSuitePublishRig(t, suiteManifestYAML)
+	landTask(t, failed)
+	failed.record(journal.Line{Event: journal.EventFinalOracle, Commit: failed.tip(), Outcome: "fail", Seconds: 3, Signature: "final:boom", Command: "go test ./..."})
+	if out, _ := failed.run(t, "status", "TK-1"); !strings.Contains(out, "unmet[1]{code,why,prompt}:") || !strings.Contains(out, "LAND_SUITE_FAILED") {
+		t.Errorf("jig status of an issue whose suite failed:\n%s", out)
+	}
 }
 
 // TestStatusOfAnIssueWithAnUnreadableSuite: a suite that cannot be read is a row
