@@ -147,13 +147,13 @@ func TestALedgerLineOfASessionBelongsToItsTicket(t *testing.T) {
 	}
 }
 
-func TestRosterOrdersTheTicketsAndKeepsTheOnesTheStreamAdded(t *testing.T) {
+func TestRosterOrdersTheTicketsAndListsNoOtherOne(t *testing.T) {
 	t.Parallel()
 	w := newWorld()
 	w.apply([]events.Envelope{jl(at(0, 1), "JIG-9", "a", journal.EventClaim)})
 	w.setRoster([]rosterRow{{ID: "JIG-2", Title: "Two", State: "ready"}, {ID: "JIG-1", Title: "One", State: "blocked"}})
-	if want := []string{"JIG-2", "JIG-1", "JIG-9"}; !reflect.DeepEqual(w.order, want) {
-		t.Errorf("order = %v, want the roster's, then the stream's", w.order)
+	if want := []string{"JIG-2", "JIG-1"}; !reflect.DeepEqual(w.order, want) {
+		t.Errorf("order = %v, want the roster's alone", w.order)
 	}
 	if tk := w.tickets["JIG-1"]; tk.title != "One" {
 		t.Errorf("JIG-1 = %+v", tk)

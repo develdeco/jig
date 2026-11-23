@@ -230,6 +230,9 @@ func (m *Model) header(w int) []string {
 	var right, title, idCrumb string
 	switch e.screen {
 	case screenMain:
+		if m.readingStore() {
+			break
+		}
 		n := len(m.w.order)
 		right = strconv.Itoa(n) + " " + plural(n, "ticket", "tickets")
 		if nc := len(m.w.chartOrder); nc > 0 {

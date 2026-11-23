@@ -36,6 +36,8 @@ func init() {
 			{"for", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already", false},
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
+			{"roster", "with --json: print only every ticket's row and the charts, the host never asked", false},
+			{"refresh-merges", "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else", false},
 		}, false},
 		Order: 301,
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
@@ -71,6 +73,8 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already")
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
+	rosterFlag := fs.Bool("roster", false, "with --json: print only every ticket's row and the charts, the host never asked")
+	refreshFlag := fs.Bool("refresh-merges", false, "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
 		return 0
@@ -87,6 +91,16 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			ticketsSet = true
 		}
 	})
+	if *refreshFlag {
+		if ticket != "" || *forFlag != "" || *topology || ticketsSet || *rosterFlag {
+			return renderErr(stdout, &axi.Error{Msg: "--refresh-merges refreshes the whole store's kept pull request states: it takes no ticket, chart, --for, --topology, --tickets or --roster", Code: "VALIDATION_ERROR"})
+		}
+	}
+	if *rosterFlag {
+		if err := rosterRefusal(ticket, *forFlag != "", *topology, ticketsSet, *jsonOut); err != nil {
+			return renderErr(stdout, err)
+		}
+	}
 	// The flags are checked against the ticket asked about; a ref is resolved
 	// to its owner first, so they are checked against that owner then.
 	checkAsked := func() (phase.Name, error) {
@@ -124,6 +138,24 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if asked, err = checkAsked(); err != nil {
 			return renderErr(stdout, err)
 		}
+	}
+	if *refreshFlag {
+		n := refreshMerges(st, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
+		fmt.Fprintf(stdout, "refreshed: %d\n", n)
+		return 0
+	}
+	if *rosterFlag {
+		defer readScope(st, mp, jigHome, false)()
+		n, err := nextForRoster(st, cfg, mp, newKeptMergeReader(e, st, cfg, mp, jigHome))
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		data, err := json.Marshal(n)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		fmt.Fprintf(stdout, "%s\n", data)
+		return 0
 	}
 	distribution := ""
 	if cwd, err := e.getwd(); err == nil {
@@ -190,6 +222,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		n.setReviewer(e, verifydeliver.Deps{Store: st, Home: jigHome})
 		out, blocks = n, n.blocks(*topology)
 	} else {
+		defer readScope(st, mp, jigHome, true)()
 		n, err := nextForStore(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
 		if err != nil {
 			return renderErr(stdout, err)
@@ -1176,6 +1209,9 @@ type nextRow struct {
 	// Digest is where the ticket stands (nextDigest), the one reading the
 	// screens take their words from.
 	Digest *nextDigest `json:"digest,omitempty"`
+	// Updated is the instant of the newest line of the ticket's journal (RFC
+	// 3339), absent for a ticket with none: how long ago the ticket last moved.
+	Updated string `json:"updated,omitempty"`
 }
 
 // nextSharedRank is a rank that more than one ready ticket holds, so which
@@ -1236,58 +1272,17 @@ var testPairWith = func(dir, a, b string) (string, []string) {
 // nextForStore lists the tickets of the store in order with what blocks each,
 // and the files local ticket branches fight over.
 func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource) (nextStore, error) {
-	ids, err := st.Tickets()
+	rows, err := readStoreRows(st, cfg, mp, merges)
 	if err != nil {
 		return nextStore{}, err
 	}
-	datas := make([]ticketData, len(ids))
-	inputs := make([]ready.Ticket, len(ids))
-	for i, id := range ids {
-		datas[i] = readTicketDataOrProblem(st, id)
-		settleRebuilding(st, merges, &datas[i].in)
-		inputs[i] = datas[i].in
-	}
-	readMerges(st, merges, inputs, false)
-	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
-	digestFrom := digestMerges(merges)
-	// The ready tickets in id order, with their ranks and slices.
-	var ranked []ready.Ranked
-	slicesOf := map[string][]store.Slice{}
-	for i, s := range ready.Tickets(inputs) {
-		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Rank: datas[i].rec.Rank, Ready: s.Ready}
-		if c := datas[i].rec.Closed; c != nil {
-			row.Closed = c.Phrase()
-		}
-		if row.Ready == nil {
-			row.Ready = []string{}
-		}
-		for _, b := range s.Blocked {
-			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
-		}
-		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], s.State, row.BlockedBy)
-		row.Digest = &d
-		if datas[i].problem != "" {
-			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
-			out.Tickets = append(out.Tickets, row)
-			continue
-		}
-		if k := datas[i].rec.KindOrDefault(); k != store.KindTask {
-			row.State, row.Kind, row.Ready = k, k, []string{}
-			out.Tickets = append(out.Tickets, row)
-			continue
-		}
-		out.Tickets = append(out.Tickets, row)
-		if s.State == ready.StateReady {
-			ranked = append(ranked, ready.Ranked{ID: s.ID, Rank: datas[i].rec.Rank})
-			slicesOf[s.ID] = datas[i].in.Slices
-		}
-	}
-	out.Next = ready.ByPriority(ranked)
+	out := nextStore{Tickets: rows.rows, Next: []string{}, Charts: chartRows(st)}
+	out.Next = ready.ByPriority(rows.ranked)
 	out.IssueOrder = issueOrder(afterDeps(st, cfg, mp, merges))
-	for _, s := range ready.SharedRanks(ranked) {
+	for _, s := range ready.SharedRanks(rows.ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
-	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, slicesOf)
+	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, rows.slicesOf)
 	out.Overlaps = findOverlaps(st, cfg, mp, ticketOpenFilter(st, merges))
 	return out, nil
 }
@@ -1561,16 +1556,23 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			continue
 		}
 		target := r.TargetBranch()
-		type bound struct{ ticket, branch string }
+		type bound struct{ ticket, branch, tip string }
 		var bounds []bound
 		tickets := map[string]bool{}
 		// Local branches first; origin's stand in for a ticket with no local
 		// branch here.
 		// One process lists both: git processes are what a session start pays
 		// for.
-		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/remotes/origin")
 		if err != nil {
 			continue
+		}
+		// tipOf is the commit each branch is at, from the same listing.
+		tipOf := map[string]string{}
+		for _, row := range strings.Split(listing, "\n") {
+			if tip, full, ok := strings.Cut(strings.TrimSpace(row), " "); ok {
+				tipOf[full] = tip
+			}
 		}
 		for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/"} {
 			local := map[string]bool{}
@@ -1578,8 +1580,8 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				local[id] = true
 			}
 			var refs, names []string
-			for _, full := range strings.Split(listing, "\n") {
-				full = strings.TrimSpace(full)
+			for _, row := range strings.Split(listing, "\n") {
+				_, full, _ := strings.Cut(strings.TrimSpace(row), " ")
 				if !strings.HasPrefix(full, prefix) {
 					continue
 				}
@@ -1597,7 +1599,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 					continue
 				}
 				if id := boundTo[name]; id != "" && !local[id] && (open == nil || open(id)) {
-					bounds = append(bounds, bound{id, refs[i]})
+					bounds = append(bounds, bound{id, refs[i], tipOf[prefix+name]})
 					tickets[id] = true
 				}
 			}
@@ -1605,10 +1607,10 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		if len(tickets) < 2 || (only != "" && !tickets[only]) {
 			continue
 		}
-		base := ""
+		base, baseTip := "", ""
 		for _, ref := range []string{target, "origin/" + target} {
-			if _, found, _ := gitx.ResolveCommit(dir, ref); found {
-				base = ref
+			if sha, found, _ := gitx.ResolveCommit(dir, ref); found {
+				base, baseTip = ref, sha
 				break
 			}
 		}
@@ -1631,7 +1633,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			go func() {
 				defer wg.Done()
 				defer func() { <-slots }()
-				changed[i], _ = gitx.DiffNameOnlySince(dir, base, b.branch, "ACDMRTUXB")
+				changed[i] = changedFiles(dir, base, b.branch, baseTip, b.tip)
 			}()
 		}
 		wg.Wait()
@@ -1658,6 +1660,10 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			files []string
 		}
 		type branchPair struct{ a, b string }
+		tipOfBranch := map[string]string{}
+		for _, b := range bounds {
+			tipOfBranch[b.branch] = b.tip
+		}
 		tested := map[branchPair]verdict{}
 		pairAt := map[branchPair]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
@@ -1678,7 +1684,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 							key := branchPair{ba, bb}
 							v, ok := tested[key]
 							if !ok {
-								v.state, v.files = testPair(dir, ba, bb)
+								v.state, v.files = mergedPair(dir, ba, bb, tipOfBranch[ba], tipOfBranch[bb])
 								tested[key] = v
 								pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: ba, BranchB: bb, State: v.state, Files: v.files})
 								pairAt[key] = len(pairs) - 1

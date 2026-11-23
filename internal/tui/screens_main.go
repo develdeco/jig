@@ -9,13 +9,16 @@ import (
 // of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page
+	if m.readingStore() {
+		// Main draws from the roster and from nothing else: the stream's replay
+		// names the tickets in the order it arrives, and rows drawn from it
+		// would all move when the list lands.
+		p.add(m.st.dim("reading the store…"))
+		return p
+	}
 	ids := m.w.order
 	if len(ids) == 0 && len(m.w.chartOrder) > 0 {
 		m.mainCharts(&p, 4, 0)
-		return p
-	}
-	if len(ids) == 0 && !m.w.rosterRead && m.run != nil {
-		p.add(m.st.dim("reading the store…"))
 		return p
 	}
 	if len(ids) == 0 {
@@ -34,7 +37,7 @@ func (m *Model) mainPage() page {
 	idW, titleW := 4, 0
 	for _, id := range ids {
 		t := m.w.tickets[id]
-		steps := m.steps(t)
+		steps := m.stepWords(t)
 		r := row{id: id, title: t.title, dots: m.stepDots(steps), detail: m.ticketDetail(t, steps), state: steps[currentStep(steps)].State}
 		rows = append(rows, r)
 		idW = max(idW, width(id))
@@ -53,6 +56,11 @@ func (m *Model) mainPage() page {
 	m.mainCharts(&p, idW, titleW)
 	return p
 }
+
+// readingStore is whether the screens have a runner and the store's ticket list
+// has not been read: nothing is known of what the store holds. A model with no
+// runner (a test, or a screen fed by the stream alone) draws the stream.
+func (m *Model) readingStore() bool { return m.run != nil && !m.w.rosterRead }
 
 // stepDots are a ticket's steps as icons, in order.
 func (m *Model) stepDots(steps []stepRow) string {

@@ -243,7 +243,7 @@ func TestTheReadsAResultAsksForAreTheOnesThatFixTheLine(t *testing.T) {
 	for _, c := range g.r.calls[before:] {
 		ran2 = append(ran2, c.Line)
 	}
-	if !slices.Contains(ran2, "status JIG-2 --store /s") || !slices.Contains(ran2, "next --json --store /s") {
+	if !slices.Contains(ran2, "status JIG-2 --store /s") || !slices.Contains(ran2, "next --json --roster --store /s") {
 		t.Errorf("the reads run after the gate = %q, want the ticket's status and the roster", ran2)
 	}
 	if g.m.last == nil || !g.m.last.Fixed || g.m.rosterBusy {

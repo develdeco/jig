@@ -67,6 +67,21 @@ func stepOfLine(l events.Envelope) int {
 // the ones the screens wrote from a status among them where their time puts
 // them.
 func (t *ticket) stepLines(step int) []events.Envelope {
+	memo := t.memoFor()
+	if got, ok := memo.stepLines[step]; ok {
+		return got
+	}
+	t.scanned += len(t.lines) + len(t.ledger)
+	out := t.readStepLines(step)
+	if memo.stepLines == nil {
+		memo.stepLines = map[int][]events.Envelope{}
+	}
+	memo.stepLines[step] = out
+	return out
+}
+
+// readStepLines is stepLines, read from the lines.
+func (t *ticket) readStepLines(step int) []events.Envelope {
 	var out []events.Envelope
 	for _, l := range t.lines {
 		if stepOfLine(l) == step {

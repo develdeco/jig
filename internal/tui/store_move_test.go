@@ -13,7 +13,7 @@ import (
 // and re-reads the ticket list and the open chart when it moved, and a line of
 // a ticket says the list may be out of date without any commit.
 
-const moveRosterVerb = "next --json --store /s"
+const moveRosterVerb = "next --json --roster --store /s"
 
 // storeRig is a project screen whose clock and store head the test moves: the
 // list was read when it opened, at t0.
