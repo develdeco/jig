@@ -111,8 +111,6 @@ func TestCanReadsTheDigest(t *testing.T) {
 		{"dismiss with asks", reviewOpen(), actDismiss, true, ""},
 		{"answer with no question", reviewOpen(), actAnswer, false, "no question is waiting for an answer"},
 		{"requeue with no stalled slice", buildUnder(), actRequeue, false, "no slice is stalled or env-blocked"},
-		{"requeue with a stalled slice", func() *digestInfo { d := buildUnder(); d.Slices = &digestSlices{Total: 2, Stalled: 1}; return d }(), actRequeue, true, ""},
-		{"requeue with an env-blocked slice", func() *digestInfo { d := buildUnder(); d.Slices = &digestSlices{Total: 2, EnvBlocked: 1}; return d }(), actRequeue, true, ""},
 		{"approve a waiting brief", briefWaiting(), actApprove, true, ""},
 		{"approve an approved brief", buildUnder(), actApprove, false, "the brief is not waiting for your approval"},
 		{"gate at the landing stop", landStop(), actGate, false, `landing is said to the session: "Land JIG-2"`},

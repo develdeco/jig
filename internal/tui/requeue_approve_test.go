@@ -182,3 +182,36 @@ func TestApproveAsksThenValidates(t *testing.T) {
 		t.Errorf("v on an approved brief: ask %+v, notice %q", a.m.ask, a.m.notice)
 	}
 }
+
+// TestKeysWaitForTheRecordsTheyActOn: a key is listed when the records its verb
+// acts on say it can run, and until they are read its reason is "reading…", not
+// a refusal that is false: u waits for the status, a for the question the roster
+// counts, and a slice's u for the status too.
+func TestKeysWaitForTheRecordsTheyActOn(t *testing.T) {
+	t.Parallel()
+	g := stuckRig(t, map[string]string{"b": StateStalled})
+	if ok, why := g.m.can(actRequeue); !ok || why != "" {
+		t.Fatalf("u with the status read and b stalled = %v, %q", ok, why)
+	}
+	tk := g.m.w.tickets["JIG-1"]
+	tk.status = nil
+	if ok, why := g.m.can(actRequeue); ok || why != readingText {
+		t.Errorf("u before the status is read = %v, %q, want reading", ok, why)
+	}
+	if hint := footerKeys(g.view()); strings.Contains(hint, "u requeue") {
+		t.Errorf("u is listed before the status is read:\n%s", hint)
+	}
+	g.m.nav = append(g.m.nav[:2:2], navEntry{screen: screenSlice, ticket: "JIG-1", slice: "b"})
+	if ok, why := g.m.can(actRequeue); ok || why != readingText {
+		t.Errorf("a slice's u before the status is read = %v, %q, want reading", ok, why)
+	}
+
+	// The roster counts a question the stream has not brought.
+	g = stuckRig(t, map[string]string{"b": StateStalled})
+	tk = g.m.w.tickets["JIG-1"]
+	tk.lines = nil
+	tk.digest.Slices.NeedsInput = 1
+	if ok, why := g.m.can(actAnswer); ok || why != readingText {
+		t.Errorf("a with only the roster's count = %v, %q, want reading", ok, why)
+	}
+}

@@ -110,8 +110,12 @@ func (m *Model) canRun(t *ticket, sub subject, a action) (bool, string) {
 			}
 			return false, "no question is waiting for an answer"
 		}
-		if d.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 {
+		if len(t.openQuestions(m.zone, "")) > 0 {
 			return true, ""
+		}
+		if d.waitsForAnswer() && len(t.questions(m.zone)) == 0 {
+			// The roster counts a question the stream has not brought yet.
+			return false, readingText
 		}
 		return false, "no question is waiting for an answer"
 	case actKeep, actDismiss:
@@ -132,7 +136,11 @@ func (m *Model) canRun(t *ticket, sub subject, a action) (bool, string) {
 			}
 			return false, "slice " + sub.slice + " is not stalled or env-blocked"
 		}
-		if d.Slices != nil && d.Slices.Stalled+d.Slices.EnvBlocked > 0 || len(t.stuckSlices()) > 0 {
+		// The verb acts on the slices the status names, so the status decides.
+		if t.status == nil {
+			return false, readingText
+		}
+		if len(t.stuckSlices()) > 0 {
 			return true, ""
 		}
 		return false, "no slice is stalled or env-blocked"

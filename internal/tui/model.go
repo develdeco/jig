@@ -238,7 +238,7 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	// ctx is what the keys of the screen on top act on, as the last frame
+	// keysOn is what the keys of the screen on top act on, as the last frame
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
@@ -1404,17 +1404,13 @@ func (m *Model) requeue() tea.Cmd {
 	id := m.keysOn.ticket
 	slice := m.keysOn.slice
 	if slice == "" {
+		// can said at least one is stuck.
 		stuck := m.w.tickets[id].stuckSlices()
-		switch len(stuck) {
-		case 1:
-			slice = stuck[0]
-		case 0:
-			m.notice = "no slice is stalled or env-blocked"
-			return nil
-		default:
+		if len(stuck) != 1 {
 			m.notice = "several slices are stalled: put the cursor on the one to requeue"
 			return nil
 		}
+		slice = stuck[0]
 	}
 	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
 }
