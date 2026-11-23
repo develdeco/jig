@@ -30,16 +30,8 @@ func askedRig(t *testing.T, ticket string) *rig {
 	return g
 }
 
-// hasGroup is whether a ticket screen draws its "needs you" group: the heading on
-// a line of its own, which no phase's words are.
-func hasGroup(page string) bool {
-	for _, l := range strings.Split(page, "\n") {
-		if strings.TrimSpace(l) == "needs you" {
-			return true
-		}
-	}
-	return false
-}
+// hasGroup is whether a ticket screen draws its "needs you" group.
+func hasGroup(page string) bool { return hasLine(page, "needs you") }
 
 // waitingOnAnswer is the roster's word that n slices of the ticket wait on an
 // answer, as `jig next` gives it once the store has moved.
@@ -169,8 +161,8 @@ func TestALandPromptIsNeverHeldBack(t *testing.T) {
 // TestAnOpenQuestionIsNeverHeldBackByALiveBuilder: a builder that asked with
 // `jig ask` and carries on keeps its ticket live, and its question is still the
 // person's to answer: the ticket screen's group, main's count and the chart's
-// header show it. What a live session records itself (the asks of a round it is
-// reviewing) is held back.
+// header show it. The asks of a round a live session is reviewing stay too, under
+// an asks group (TestALiveSessionKeepsTheRoundsAsksOnScreen).
 func TestAnOpenQuestionIsNeverHeldBackByALiveBuilder(t *testing.T) {
 	t.Parallel()
 	g := askedRig(t, "JIG-1")
@@ -190,12 +182,39 @@ func TestAnOpenQuestionIsNeverHeldBackByALiveBuilder(t *testing.T) {
 		t.Errorf("the chart header hides the question of a live builder:\n%s", v)
 	}
 
-	// The asks of a round a live session is reviewing are held back.
+	// The asks of a round a live session is reviewing do not make the needs-you group.
 	r := newRig(t, "JIG-2")
 	r.feed(jig2Mid()...)
 	r.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
 	if p := pagesText(r.m.ticketPage("JIG-2")); hasGroup(p) {
-		t.Errorf("a live session's own round holds its asks up:\n%s", p)
+		t.Errorf("a live session's own round draws the needs-you group:\n%s", p)
+	}
+}
+
+// TestALiveSessionKeepsTheRoundsAsksOnScreen: the asks of a recorded round stay
+// on the ticket screen, text and controls, while a session is live, since the
+// person decides them from there whoever else is at work; their group reads
+// asks then, and needs you again once no session is live.
+func TestALiveSessionKeepsTheRoundsAsksOnScreen(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...)
+	g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
+	p := pagesText(g.m.ticketPage("JIG-2"))
+	if hasGroup(p) || !hasLine(p, "asks") || !strings.Contains(p, "Unchecked error") {
+		t.Fatalf("a live session's round does not keep its asks under the asks group:\n%s", p)
+	}
+	g.press("enter") // the review step: the cursor lands on the first ask
+	g.press("esc", "end", "d")
+	if got := g.r.lines(); len(got) != 1 || got[0] != "triage JIG-2 r1-f2 dismiss --store /s" {
+		t.Errorf("d on a live ticket's ask ran %q", got)
+	}
+
+	q := newRig(t, "JIG-2")
+	q.feed(jig2Mid()...)
+	q.m.now = func() time.Time { return rigNow.Add(2 * liveWindow) }
+	if p := pagesText(q.m.ticketPage("JIG-2")); !hasGroup(p) {
+		t.Errorf("with no session live the group does not read needs you:\n%s", p)
 	}
 }
 
