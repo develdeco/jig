@@ -150,6 +150,11 @@ type navEntry struct {
 	// scroll is how many lines a page with no row to stand on is moved up, so a
 	// screen longer than its window can be read to its end.
 	scroll int
+	// lead is how many lines a page with rows is held above the window its
+	// cursor gives, so the lines above the first row can be read: set high when
+	// a screen opens at its top, raised by a move up from the first row, and
+	// cleared by any move of the cursor.
+	lead int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -877,12 +882,31 @@ func (m *Model) move(delta int) {
 		return
 	}
 	e.follow = false
+	if delta < 0 && e.sel == 0 {
+		// Already on the first row: the page moves up above it instead.
+		e.lead = min(e.lead-delta, 1<<20)
+		return
+	}
+	if delta > 0 && e.sel == n-1 && e.lead > 0 {
+		// On the last row with the page held above its window: the page moves
+		// back down toward it. The window clamps lead to what it can hold, so
+		// the first move after a screen opened at its top starts at once.
+		e.lead = max(0, e.lead-delta)
+		return
+	}
+	was := e.sel
 	e.sel += delta
 	if e.sel >= n {
 		e.sel = n - 1
 	}
 	if e.sel < 0 {
 		e.sel = 0
+	}
+	if e.sel != was {
+		e.lead = 0
+		if e.sel == 0 && delta <= -(1<<19) {
+			e.lead = 1 << 20
+		}
 	}
 }
 
@@ -957,6 +981,8 @@ func (m *Model) open() tea.Cmd {
 	if next.screen == screenReview {
 		// What the review screen is for, when something waits, is deciding it.
 		m.top().sel = m.askRow(ref)
+		// The page opens at its top, so the rounds are read before the rows.
+		m.top().lead = 1 << 20
 	}
 	var cmds []tea.Cmd
 	if next.screen == screenChart {

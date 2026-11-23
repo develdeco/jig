@@ -98,6 +98,7 @@ func TestReviewScreenMarksASupersededProbe(t *testing.T) {
 			{"1", "caught", "a.go:12", "s", "m3", "c"},
 			{"2", "caught", "a.go:4", "s", "m4", "c"},
 			{"2", "survived", "a.go:8", "s", "m5", "c"},
+			{"2", "survived", "a.go:12", "s", "m6", "c"},
 		}),
 	), 0)
 	g.feed(jig2Mid()...).press("enter")
@@ -105,15 +106,13 @@ func TestReviewScreenMarksASupersededProbe(t *testing.T) {
 	for _, want := range []string{
 		"round 1  a.go:4  survived · caught in round 2",
 		"round 1  a.go:8  survived · survived again in round 2",
+		"round 1  a.go:12  caught · survived in round 2 (caught in round 1)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
 	for _, l := range strings.Split(text, "\n") {
-		if strings.Contains(l, "a.go:12") && strings.Contains(l, " in round ") {
-			t.Errorf("a probe nobody probed again is marked: %q", l)
-		}
 		if strings.Contains(l, "round 2  a.go:") && strings.Contains(l, " in round ") {
 			t.Errorf("the latest probe of a line is marked superseded: %q", l)
 		}

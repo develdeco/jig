@@ -258,26 +258,59 @@ func (m *Model) probeRows(p *page, t *ticket) {
 		if pr.Outcome == "survived" {
 			state = StateFindings
 		}
-		head := "round " + strconv.Itoa(pr.Round) + "  " + pr.Where
-		if next := later[pr.Where]; next.Round > pr.Round {
-			again := ""
-			if next.Outcome == "survived" {
-				again = " again"
-			}
-			p.add(m.st.icon(state) + " " + m.st.dim(head+"  "+pr.Outcome+" · "+next.Outcome+again+" in round "+strconv.Itoa(next.Round)))
-			for _, l := range wrap(pr.Mutation, m.width-8, probeLines) {
-				p.add("    " + m.st.dim(l))
-			}
+		lead := "round " + strconv.Itoa(pr.Round) + "  "
+		tail := "  " + pr.Outcome
+		next := later[pr.Where]
+		superseded := next.Round > pr.Round
+		if superseded {
+			tail += " · " + supersededBy(pr, next)
+		}
+		// The path gives way, never the round or the verdict.
+		head := lead + tailCut(pr.Where, m.width-4-width(lead)-width(tail))
+		if superseded {
+			p.add(m.st.icon(state) + " " + m.st.dim(head+tail))
 		} else {
-			p.add(m.st.icon(state) + " " + head + "  " + m.st.state(state, pr.Outcome))
-			for _, l := range wrap(pr.Mutation, m.width-8, probeLines) {
-				p.add("    " + l)
+			p.add(m.st.icon(state) + " " + head + m.st.state(state, tail))
+		}
+		for _, l := range wrap(pr.Mutation, m.width-8, probeLines) {
+			if superseded {
+				l = m.st.dim(l)
 			}
+			p.add("    " + l)
 		}
 		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.width-8, probeLines) {
 			p.add("    " + m.st.dim(l))
 		}
 	}
+}
+
+// supersededBy is what the later round found of the line a probe probed: a
+// survivor probed again and caught, a survivor that survived again, or a caught
+// probe the later round lost.
+func supersededBy(pr, next statusProbe) string {
+	round := strconv.Itoa(next.Round)
+	switch {
+	case next.Outcome != "survived":
+		return next.Outcome + " in round " + round
+	case pr.Outcome == "survived":
+		return "survived again in round " + round
+	}
+	return "survived in round " + round + " (" + pr.Outcome + " in round " + strconv.Itoa(pr.Round) + ")"
+}
+
+// tailCut is s cut to w cells from its front, so the end of a file:line stays.
+func tailCut(s string, w int) string {
+	if w < 4 {
+		w = 4
+	}
+	r := []rune(s)
+	for len(r) > 1 && width(string(r)) > w {
+		r = r[1:]
+		if width("…"+string(r)) <= w {
+			return "…" + string(r)
+		}
+	}
+	return string(r)
 }
 
 // probeLines is how many lines a probe's text may take: more than any probe

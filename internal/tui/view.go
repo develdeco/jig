@@ -177,6 +177,12 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 			start = max(0, min(m.top().scroll, len(pg.lines)-h))
 		}
 	}
+	if n > 0 {
+		// lead is clamped to the lines above the window, so a move down from a
+		// page opened at its top lessens what is really held.
+		m.top().lead = min(m.top().lead, start)
+		start -= m.top().lead
+	}
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
