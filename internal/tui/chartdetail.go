@@ -70,7 +70,7 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 // `k` and `d` would decide from: an "ask" row with the ask's id, risk and
 // decision, and its text under it, wrapped whole. They are not counted in
 // detailMax and a short screen never cuts them (trimRuns); the window may, and
-// then the keys refuse (drawnWhole).
+// then the keys refuse (drawnAsks).
 func (m *Model) askDetailRows(t *ticket) []runRow {
 	asks := t.asks()
 	undecided := false

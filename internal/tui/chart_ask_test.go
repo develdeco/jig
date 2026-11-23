@@ -151,7 +151,7 @@ func TestChartKeepNeedsTheAskDrawnWhole(t *testing.T) {
 		t.Errorf("k at 100 by 24 ran %q", got)
 	}
 	g = askChartRig(t, 100, 18, askOne)
-	if whole, _ := g.m.askDrawn("r1-f1", g.m.notice); whole {
+	if g.m.drawn["r1-f1"] == askWhole {
 		t.Fatalf("the test needs the window to cut the ask at 100 by 18:\n%s", g.view())
 	}
 	g.press("k")
@@ -189,7 +189,7 @@ func TestChartDetailGivesUpSliceRowsBeforeAnAsk(t *testing.T) {
 		if got := strings.Contains(view, "hold     ⏸ agent 4f2a91c0"); got != c.hold {
 			t.Errorf("at height %d the hold row is drawn: %v, want %v:\n%s", c.height, got, c.hold, view)
 		}
-		if got, _ := g.m.askDrawn("r1-f1", g.m.notice); got != c.whole {
+		if got := g.m.drawn["r1-f1"] == askWhole; got != c.whole {
 			t.Errorf("at height %d the ask is drawn whole: %v, want %v:\n%s", c.height, got, c.whole, view)
 		}
 	}

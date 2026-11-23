@@ -203,11 +203,11 @@ type Model struct {
 	ask    *confirmation
 	last   *outcome
 	notice string
-	// pressed is the notice that was on screen when the key being handled was
-	// pressed: the key clears it, and what a key acts on is judged against the
-	// screen as the person read it.
-	pressed string
-	tail    bool
+	tail   bool
+	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
+	// a key has been taken in since that View: a key that acts on an ask acts
+	// on what the person read, never on a screen nobody has seen.
+	drawn map[string]int
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -915,6 +915,8 @@ func (m *Model) keys(k tea.KeyMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, r := range k.Runes {
 		cmds = append(cmds, m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}))
+		// No screen is drawn between the keys of one read.
+		m.drawn = nil
 	}
 	return tea.Batch(cmds...)
 }
@@ -932,8 +934,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if m.ask != nil {
 		return m.confirmKey(k)
 	}
-	// The notice a key was pressed over was on the screen the person read.
-	m.pressed, m.notice = m.notice, ""
+	m.notice = ""
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
@@ -1358,9 +1359,12 @@ func (m *Model) triage(decision string) tea.Cmd {
 	}
 	// A person decides an ask from what the screen shows: one drawn cut, or not
 	// drawn at all, is not decided.
-	switch whole, onPage := m.askDrawn(pick.ID, m.pressed); {
-	case whole:
-	case onPage:
+	switch drawn, seen := m.drawn[pick.ID]; {
+	case m.drawn == nil:
+		m.notice = "the screen changed under the key before it was drawn: press it again"
+		return nil
+	case drawn == askWhole:
+	case seen:
 		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
 		return nil
 	default:

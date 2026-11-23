@@ -38,7 +38,7 @@ type rowRef struct {
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
 // top edge its title in text and right. A line of an ask's text carries the
-// ask's id, so a screen can tell whether it drew the ask whole (drawnWhole).
+// ask's id, so View can record whether it drew the ask whole (drawnAsks).
 type pline struct {
 	text  string
 	ref   *rowRef
@@ -113,7 +113,9 @@ func (m *Model) View() string {
 		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, l.tailH)...)
 	}
 
-	body := m.window(l.pg, l.sel, l.pageH, w)
+	start := m.windowStart(l.pg, l.sel, l.pageH, true)
+	body := m.window(l.pg, l.sel, start, l.pageH, w)
+	m.drawn = drawnAsks(l.pg, start, l.pageH)
 	for len(body) < l.pageH {
 		body = append(body, "")
 	}
@@ -134,13 +136,8 @@ type screenLayout struct {
 	pageH, tailH      int
 }
 
-// layout lays the screen on top out as View draws it. It draws nothing and
-// moves nothing: what the cursor follows is View's to settle first.
-func (m *Model) layout() screenLayout { return m.layoutWith(m.notice) }
-
-// layoutWith is the layout with notice as the notice row: the row takes a row of
-// the body, so what a screen draws depends on it.
-func (m *Model) layoutWith(notice string) screenLayout {
+// layout lays the screen on top out as View draws it.
+func (m *Model) layout() screenLayout {
 	w, h := m.width, m.height
 	pg := m.page()
 	refs := pg.refs()
@@ -154,7 +151,7 @@ func (m *Model) layoutWith(notice string) screenLayout {
 
 	head := m.header(w)
 	foot := m.footer(w)
-	panel := m.panelWith(w, notice)
+	panel := m.panel(w)
 	bodyH := h - len(head) - len(foot) - len(panel)
 	if bodyH < minBodyRows && len(panel) > 0 {
 		panel = panel[:max(0, len(panel)-(minBodyRows-bodyH))]
@@ -172,26 +169,36 @@ func (m *Model) layoutWith(notice string) screenLayout {
 	return l
 }
 
-// askDrawn says whether the screen on top draws every line of the text tagged
-// with id, and whether the page has any line of it: the screen as View draws it
-// with notice on it, the same page and the same window. A key acts on the
-// screen the person read, and a key clears the notice it was pressed over, so
-// the caller says which notice that was. It is the one rule for acting on what a
-// person must read first, so it names no screen.
-func (m *Model) askDrawn(id, notice string) (whole, onPage bool) {
-	l := m.layoutWith(notice)
-	start := m.windowStart(l.pg, l.sel, l.pageH, false)
-	want, shown := 0, 0
-	for i, line := range l.pg.lines {
-		if line.ask != id {
+// What View drew of an ask: some of its lines, or all of them. An ask the page
+// has no line of is not in the record.
+const (
+	askCut = iota + 1
+	askWhole
+)
+
+// drawnAsks is what the window of h rows from start draws of each ask the page
+// has lines of. View records it as it draws, so a key acts on the screen the
+// person read, notice and tail and all, and the one rule for acting on what a
+// person must read first names no screen.
+func drawnAsks(pg page, start, h int) map[string]int {
+	total, shown := map[string]int{}, map[string]int{}
+	for i, line := range pg.lines {
+		if line.ask == "" {
 			continue
 		}
-		want++
-		if i >= start && i < start+l.pageH {
-			shown++
+		total[line.ask]++
+		if i >= start && i < start+h {
+			shown[line.ask]++
 		}
 	}
-	return want > 0 && shown == want, want > 0
+	out := make(map[string]int, len(total))
+	for id, n := range total {
+		out[id] = askCut
+		if shown[id] == n {
+			out[id] = askWhole
+		}
+	}
+	return out
 }
 
 // bodyRows is how many rows the screen's body has: the height less the
@@ -249,10 +256,9 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	return start
 }
 
-// window renders the page lines that fit in h rows with the sel-th
-// selectable row in view, marking that row.
-func (m *Model) window(pg page, sel, h, w int) []string {
-	start := m.windowStart(pg, sel, h, true)
+// window renders the page lines from start that fit in h rows, marking the
+// sel-th selectable row.
+func (m *Model) window(pg page, sel, start, h, w int) []string {
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -474,16 +480,13 @@ func (m *Model) keyHints() []string {
 }
 
 // panel is the last command as one line, and the notice, above the keys.
-func (m *Model) panel(w int) []string { return m.panelWith(w, m.notice) }
-
-// panelWith is the panel as it is with notice on it.
-func (m *Model) panelWith(w int, notice string) []string {
+func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
 		out = append(out, m.lastLine(m.last, w))
 	}
-	if notice != "" {
-		out = append(out, fit("  "+m.st.state(StateFindings, notice), w))
+	if m.notice != "" {
+		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
 	}
 	return out
 }

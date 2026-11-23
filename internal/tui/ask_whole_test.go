@@ -113,7 +113,7 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 	// On a screen too short for its text they run nothing and say what to do.
 	for _, key := range []string{"k", "d"} {
 		g = askRig(t, 80, 14, askOne)
-		if whole, _ := g.m.askDrawn("r1-f1", g.m.notice); whole {
+		if g.m.drawn["r1-f1"] == askWhole {
 			t.Fatalf("the test needs the ask cut by the window:\n%s", g.view())
 		}
 		g.press(key)
@@ -183,6 +183,43 @@ func TestTriageActsExactlyWhenTheViewHoldsTheWholeAsk(t *testing.T) {
 	}
 }
 
+// TestTriageIgnoresKeysOfOneReadAfterTheFirst: a read that brings several keys
+// is taken a key at a time with no screen drawn between them, so k and d after
+// another key of the same read are judged against nothing the person saw: they
+// run nothing and say to press again, at every height, with a notice on screen
+// and with the tail open.
+func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
+	t.Parallel()
+	read := func(g *rig, keys string) {
+		g.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(keys)})
+	}
+	for h := 10; h <= 60; h++ {
+		g := askRig(t, 60, h, askOne)
+		g.press("a") // a notice on screen
+		read(g, "xd")
+		if got := triaged(g); len(got) != 0 {
+			t.Fatalf("at height %d d after another key of one read ran %q", h, got)
+		}
+		if want := "the screen changed under the key before it was drawn: press it again"; g.m.notice != want {
+			t.Fatalf("at height %d notice = %q, want %q", h, g.m.notice, want)
+		}
+
+		g = askRig(t, 60, h, askOne)
+		g.press("t") // the tail open
+		read(g, "td")
+		if got := triaged(g); len(got) != 0 {
+			t.Fatalf("at height %d d after t in one read ran %q", h, got)
+		}
+
+		// A key of its own, after the screen is drawn, is judged as before.
+		whole := strings.Contains(readWords(g.view()), readWords(wholeAskText))
+		g.press("d")
+		if got := len(triaged(g)) == 1; got != whole {
+			t.Fatalf("at height %d the screen holds the whole ask: %v, d on its own acted: %v", h, whole, got)
+		}
+	}
+}
+
 // TestAskDrawnReadsTheWindowAsItIsDrawn: at every scroll position of the review
 // page the check agrees with the screen, an ask the page lacks is neither whole
 // nor on the page, and the check moves nothing.
@@ -208,33 +245,22 @@ func scrollAskDrawn(t *testing.T, height int) (whole, cut int) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want the review screen", g.m.Screen())
 	}
-	// The page opens held above its window by a lead the first draw settles: the
-	// check, run before that draw, leaves it as it was.
-	opened := *g.m.top()
-	g.m.askDrawn("r1-f1", "")
-	if after := *g.m.top(); after != opened {
-		t.Fatalf("the check moved the screen before its first draw: %+v became %+v", opened, after)
-	}
 	for i := 0; i < 80; i++ {
 		view := g.view()
 		want := strings.Contains(readWords(view), readWords(wholeAskText))
-		before := *g.m.top()
-		got, onPage := g.m.askDrawn("r1-f1", g.m.notice)
-		if got != want || !onPage {
-			t.Fatalf("scrolled %d lines: the check says whole %v on the page %v, the screen holds the ask whole: %v:\n%s", i, got, onPage, want, view)
+		state, onPage := g.m.drawn["r1-f1"]
+		if (state == askWhole) != want || !onPage {
+			t.Fatalf("scrolled %d lines: the record says %d (on the page %v), the screen holds the ask whole: %v:\n%s", i, state, onPage, want, view)
 		}
-		if after := *g.m.top(); after != before {
-			t.Fatalf("the check moved the screen: %+v became %+v", before, after)
-		}
-		if got {
+		if want {
 			whole++
 		} else {
 			cut++
 		}
 		g.press("down")
 	}
-	if got, onPage := g.m.askDrawn("r1-f9", ""); got || onPage {
-		t.Errorf("an ask the page lacks is whole: %v, on the page: %v", got, onPage)
+	if state, onPage := g.m.drawn["r1-f9"]; state != 0 || onPage {
+		t.Errorf("an ask the page lacks is on record as %d", state)
 	}
 	return whole, cut
 }
