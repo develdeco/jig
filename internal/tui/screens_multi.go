@@ -159,7 +159,9 @@ func (m *Model) cutFor(t *ticket, container, branch string) *ticket {
 	c := *t
 	c.lines = nil
 	for _, l := range t.lines {
-		if l.Event == journal.EventLanded && l.Into != container {
+		// What the task did into another issue (its pull request, its publish,
+		// its landing) is no line of this one's.
+		if (l.Event == journal.EventLanded || journal.IsPublishEvent(l.Event)) && l.Into != "" && l.Into != container {
 			continue
 		}
 		c.lines = append(c.lines, l)
@@ -170,34 +172,47 @@ func (m *Model) cutFor(t *ticket, container, branch string) *ticket {
 		merged = merged && strings.EqualFold(pr.State, "merged")
 	}
 	d.Phases = slices.Clone(t.digest.Phases)
-	published := len(d.PRs) > 0
+	// Publishing is for a task whose brief, build and review are done; one built
+	// again after a publish elsewhere has not earned a publish here.
+	built := true
+	for _, p := range d.Phases {
+		if p.Name == string(phase.Brief) || p.Name == string(phase.Build) || p.Name == string(phase.Review) {
+			built = built && p.State == phase.StateDone
+		}
+	}
+	published := built && len(d.PRs) > 0
+	open := built && d.Closed == ""
 	for i, p := range d.Phases {
 		switch p.Name {
 		case string(phase.Publish):
-			if published {
+			switch {
+			case published:
 				d.Phases[i].State, d.Phases[i].Text = phase.StateDone, "pull request opened"
-			} else {
-				d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "not published into "+container
+			case open:
+				d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "not published into "+container
+			case p.State == phase.StateDone && d.Closed == "":
+				d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "after a clean review"
 			}
 		case string(phase.Land):
 			switch {
-			case len(lines) > 0:
+			case published && len(lines) > 0:
 				d.Phases[i].State, d.Phases[i].Text = phase.StateDone, "landed"
-			case merged:
+			case published && merged:
 				d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "merged on the host, not recorded"
 			case published:
 				d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "waits for a merge"
-			default:
+			case d.Closed == "":
 				d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "after the publish"
 			}
 		}
 	}
 	switch {
-	case len(lines) > 0 || published:
+	case published:
 		d.Current, d.Ready = string(phase.Land), false
-	case d.Closed == "" && t.digest.Current == string(phase.Land):
-		// Done everything but publishing here: publishing is what is next.
+	case open:
 		d.Current, d.Ready = string(phase.Publish), true
+	case d.Current == string(phase.Land) || d.Current == string(phase.Publish):
+		d.Current, d.Ready = string(phase.Review), true
 	}
 	c.digest = &d
 	return &c

@@ -155,7 +155,12 @@ func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
 		{"landed there", nil, true, "✓ SHOP-1", "✓ ✓ ✓ ✓ ✓", "landed · into the issue's branch"},
 		{"waits to land there", nil, false, "◇ SHOP-1", "✓ ✓ ✓ ✓ ◇", `waits to land · say "Land SHOP-1"`},
 		{"closed before publishing", func(d *digestInfo) { d.Closed = "not planned"; d.PRs = d.PRs[:1] }, false, "⊖ SHOP-1", "", "closed · not planned"},
-		{"ready to publish there", func(d *digestInfo) { d.PRs = d.PRs[:1] }, false, "", "✓ ✓ ✓ ○ ○", "not published into SHOP-50"},
+		{"ready to publish there", func(d *digestInfo) { d.PRs = d.PRs[:1] }, false, "◆ SHOP-1", "✓ ✓ ✓ ◆ ○", "not published into SHOP-50"},
+		{"built again after its publish", func(d *digestInfo) {
+			d.Phases[2] = digestPhase{Name: "review", State: "current", Text: "ready to review"}
+			d.Phases[3].State, d.Phases[4].State = "pending", "pending"
+			d.Current, d.Ready = "review", true
+		}, false, "◆ SHOP-1", "✓ ✓ ◆ ○ ○", ""},
 	}
 	for _, c := range cases {
 		g := planMain(t, planSpec{second: true})
@@ -167,6 +172,15 @@ func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
 		g.pin("SHOP-1", &d)
 		if c.land {
 			g.feed(jl(at(40, 0), "SHOP-1", "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "502-another", "SHOP-50" }))
+		}
+		if c.name == "ready to publish there" {
+			// What it did into the other issue is in its journal, and is not read here.
+			g.feed(
+				jl(at(41, 0), "SHOP-1", "", journal.EventPr, func(l *journal.Line) {
+					l.Into, l.URL, l.Outcome = "SHOP-49", "https://example.test/acme/demo/pull/3", "opened"
+				}),
+				jl(at(41, 1), "SHOP-1", "", journal.EventPublishDone, func(l *journal.Line) { l.Into = "SHOP-49" }),
+			)
 		}
 		g.syncDigests()
 		g.press("end", "enter")
@@ -221,7 +235,7 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 	d.PRs = []digestPR{{Repo: "demo", Number: 3, State: "merged", Target: planBranch}}
 	g.pin("SHOP-1", &d)
 	g.syncDigests()
-	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "not published into SHOP-50 yet") || strings.Contains(row, "✓ ✓ ✓ ✓ ✓") || !strings.Contains(row, "✓ ✓ ✓ ○ ○") {
+	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "not published into SHOP-50 yet") || strings.Contains(row, "✓ ✓ ✓ ✓ ✓") || !strings.Contains(row, "◆ SHOP-1") || !strings.Contains(row, "✓ ✓ ✓ ◆ ○") {
 		t.Errorf("a task with no pull request into SHOP-50 reads %q", row)
 	}
 
