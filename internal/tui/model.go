@@ -238,11 +238,13 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	// paging counts the pages being built, nested; hintFor is the ticket the
-	// hint line is cut for while one is.
-	paging  int
-	hintFor string
-	started time.Time
+	// ctx is what the keys of the screen on top act on, as the last frame
+	// found it: the hint line is cut by it, and a key reads it again before it
+	// runs.
+	keysOn subject
+	// pageBuilds counts the pages built: a frame builds one.
+	pageBuilds int
+	started    time.Time
 }
 
 // New builds the model for cfg.
@@ -937,7 +939,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
 		switch k.String() {
-		case "a", "k", "d", "g", "p":
+		case "a", "k", "d", "g", "p", "u", "v":
 			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
 			return nil
 		}
@@ -1078,30 +1080,27 @@ func (m *Model) followSel() {
 // selected is the row under the cursor, nil when the screen has none.
 func (m *Model) selected() *rowRef {
 	m.followSel()
-	refs := m.page().refs()
+	return m.refIn(m.page())
+}
+
+// refIn is the row of pg under the cursor.
+func (m *Model) refIn(pg page) *rowRef {
+	refs := pg.refs()
 	sel := m.top().sel
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
-	if e := m.top(); e.lead > 0 {
-		// The window is cut by the rows the body has, which the hint line takes
-		// from and the hint line asks the cursor: cut for the last ticket, as in a page.
-		m.paging++
-		shown := m.rowShown(sel)
-		m.paging--
-		if !shown {
-			// A row the window does not show is not under the cursor: a key that
-			// acts on it would decide what its person cannot see.
-			return nil
-		}
+	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {
+		// A row the window does not show is not under the cursor: a key that
+		// acts on it would decide what its person cannot see.
+		return nil
 	}
 	return &refs[sel]
 }
 
-// rowShown says whether the sel-th selectable row of the page on top is in the
-// window the screen draws.
-func (m *Model) rowShown(sel int) bool {
-	pg := m.page()
+// rowShown says whether the sel-th selectable row of pg is in the window the
+// screen draws.
+func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
 	n := 0
@@ -1247,14 +1246,23 @@ func (m *Model) refreshAll() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// allow asks can whether the action runs: when it does not, the reason is the
-// notice and nothing runs. The hints list the keys by the same answer.
+// allow asks whether the key's action runs here: the screen must list it and can
+// must let it run; when not, the reason is the notice and nothing runs. The
+// hints list the keys by the same two answers.
 func (m *Model) allow(a action) bool {
-	ok, why := m.can(a)
-	if !ok {
-		m.notice = why
+	m.keysOn = m.subjectNow()
+	listed := false
+	for _, k := range m.screenKeys(m.keysOn) {
+		listed = listed || k.act == a
 	}
-	return ok
+	ok, why := m.canOn(m.keysOn, a)
+	switch {
+	case !ok:
+		m.notice = why
+	case !listed:
+		m.notice = string(a) + " is not done from this screen"
+	}
+	return ok && listed
 }
 
 // targetTicket is the ticket a key acts on: the open one, else the one under
@@ -1389,41 +1397,24 @@ func (m *Model) triage(decision string) tea.Cmd {
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
 }
 
-// requeue puts a stalled or env-blocked slice back in the queue: the one under
-// the cursor (or the one of the slice's own screen), else the only one. It runs
+// requeue puts a stalled or env-blocked slice back in the queue: the one the
+// keys act on (the cursor's, or the slice screen's), else the only one. It runs
 // at once: a requeue is a retry the builder's next claim takes.
 func (m *Model) requeue() tea.Cmd {
-	id := m.targetTicket()
-	t := m.w.tickets[id]
-	if t == nil || t.status == nil {
-		m.notice = readingText
-		return nil
-	}
-	var stuck []string
-	for _, s := range t.status.Slices {
-		if s.State == StateStalled || s.State == StateEnvBlocked {
-			stuck = append(stuck, s.ID)
+	id := m.keysOn.ticket
+	slice := m.keysOn.slice
+	if slice == "" {
+		stuck := m.w.tickets[id].stuckSlices()
+		switch len(stuck) {
+		case 1:
+			slice = stuck[0]
+		case 0:
+			m.notice = "no slice is stalled or env-blocked"
+			return nil
+		default:
+			m.notice = "several slices are stalled: put the cursor on the one to requeue"
+			return nil
 		}
-	}
-	slice := ""
-	if top := m.top(); top.screen == screenSlice {
-		slice = top.slice
-	} else if ref := m.selected(); ref != nil && ref.kind == rowSlice {
-		slice = ref.slice
-	}
-	switch {
-	case slice != "" && slices.Contains(stuck, slice):
-	case slice != "":
-		m.notice = "slice " + slice + " is not stalled or env-blocked"
-		return nil
-	case len(stuck) == 1:
-		slice = stuck[0]
-	case len(stuck) == 0:
-		m.notice = "no slice is stalled or env-blocked"
-		return nil
-	default:
-		m.notice = "several slices are stalled: put the cursor on the one to requeue"
-		return nil
 	}
 	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
 }

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"slices"
+
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -21,18 +23,53 @@ const (
 	actLandWord action = "land-word"
 )
 
-// can says whether action a can run now on the ticket a key acts on (the open
-// one, else the one under the cursor, as targetTicket says), and when it cannot,
-// why in a short sentence. It reads the roster's digest and the status already
-// read and runs nothing: the hints list a key by it and the key handler runs a
-// verb by it, so the two cannot disagree. The digest is the same reading `jig
-// next` gives, so no phase is derived here.
-func (m *Model) can(a action) (bool, string) {
-	return m.canOn(m.targetTicket(), a)
+// subject is what the keys of a screen act on: the ticket (the open one, else
+// the one under the cursor on main and a chart) and the slice (the slice
+// screen's, else the one the cursor's row is about), "" for none.
+type subject struct {
+	ticket, slice string
+	// onSlice says the slice is the screen's own.
+	onSlice bool
 }
 
-// canOn is can for the ticket id.
-func (m *Model) canOn(id string, a action) (bool, string) {
+// subjectNow reads the subject from the page on top.
+func (m *Model) subjectNow() subject {
+	m.followSel()
+	return m.subjectOf(m.page())
+}
+
+// subjectOf is the subject of the screen on top whose page is pg.
+func (m *Model) subjectOf(pg page) subject {
+	e := m.top()
+	ref := m.refIn(pg)
+	var s subject
+	if e.screen != screenMain && e.screen != screenChart {
+		s.ticket = e.ticket
+	} else if ref != nil && ref.kind == rowTicket {
+		s.ticket = ref.id
+	}
+	switch {
+	case e.screen == screenSlice:
+		s.slice, s.onSlice = e.slice, true
+	case ref != nil && (ref.kind == rowSlice || ref.kind == rowQuestion) && ref.ticket == s.ticket:
+		s.slice = ref.slice
+	}
+	return s
+}
+
+// can says whether action a can run now on what the keys act on, and when it
+// cannot, why in a short sentence. It reads the roster's digest and the status
+// already read and runs nothing: the hints list a key by it and the key handler
+// runs a verb by it, so the two cannot disagree. The digest is the same reading
+// `jig next` gives, so no phase is derived here.
+func (m *Model) can(a action) (bool, string) {
+	m.keysOn = m.subjectNow()
+	return m.canOn(m.keysOn, a)
+}
+
+// canOn is can for the subject sub.
+func (m *Model) canOn(sub subject, a action) (bool, string) {
+	id := sub.ticket
 	t := m.w.tickets[id]
 	switch {
 	case id == "" || t == nil:
@@ -45,7 +82,7 @@ func (m *Model) canOn(id string, a action) (bool, string) {
 	if a == actLandWord {
 		return m.landingNeedsYou(t), ""
 	}
-	ok, why := m.canRun(t, a)
+	ok, why := m.canRun(t, sub, a)
 	if !ok && m.landingNeedsYou(t) {
 		// At the landing stop nothing runs from here: the session merges.
 		why = landingWord(id)
@@ -59,7 +96,7 @@ func landingWord(id string) string {
 }
 
 // canRun is can for a ticket the roster has read.
-func (m *Model) canRun(t *ticket, a action) (bool, string) {
+func (m *Model) canRun(t *ticket, sub subject, a action) (bool, string) {
 	d := t.digest
 	switch a {
 	case actGate:
@@ -73,6 +110,12 @@ func (m *Model) canRun(t *ticket, a action) (bool, string) {
 		}
 		return false, notReady(t, phase.Publish)
 	case actAnswer:
+		if sub.onSlice {
+			if len(t.openQuestions(m.zone, sub.slice)) > 0 {
+				return true, ""
+			}
+			return false, "no question is waiting for an answer"
+		}
 		if d.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 {
 			return true, ""
 		}
@@ -86,7 +129,16 @@ func (m *Model) canRun(t *ticket, a action) (bool, string) {
 		}
 		return false, "no ask is waiting for a decision"
 	case actRequeue:
-		if d.Slices != nil && d.Slices.Stalled+d.Slices.EnvBlocked > 0 {
+		if sub.slice != "" {
+			if t.status == nil {
+				return false, readingText
+			}
+			if slices.Contains(t.stuckSlices(), sub.slice) {
+				return true, ""
+			}
+			return false, "slice " + sub.slice + " is not stalled or env-blocked"
+		}
+		if d.Slices != nil && d.Slices.Stalled+d.Slices.EnvBlocked > 0 || len(t.stuckSlices()) > 0 {
 			return true, ""
 		}
 		return false, "no slice is stalled or env-blocked"
@@ -114,4 +166,18 @@ func notReady(t *ticket, p phase.Name) string {
 		return "the " + string(p) + " is done: " + row.Text
 	}
 	return "the " + string(p) + " is not ready: " + row.Text
+}
+
+// stuckSlices are the slices the status says are stalled or env-blocked.
+func (t *ticket) stuckSlices() []string {
+	if t == nil || t.status == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range t.status.Slices {
+		if s.State == StateStalled || s.State == StateEnvBlocked {
+			out = append(out, s.ID)
+		}
+	}
+	return out
 }

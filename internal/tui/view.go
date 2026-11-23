@@ -69,13 +69,7 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top.
 func (m *Model) page() page {
-	// A page sizes its panels by the rows the body has, which the hint line's
-	// height takes from, and the hint line is cut by the row under the cursor,
-	// which the page gives: while a page is built the hint line is cut by the
-	// ticket View last found under the cursor, so the one never waits on the
-	// other.
-	m.paging++
-	defer func() { m.paging-- }()
+	m.pageBuilds++
 	e := m.top()
 	switch e.screen {
 	case screenTicket:
@@ -105,9 +99,10 @@ func (m *Model) View() string {
 	w, h := m.width, m.height
 	m.followSel()
 	pg := m.page()
-	if id := m.targetTicket(); id != m.hintFor {
-		// The hint line the page was sized by was cut for another ticket.
-		m.hintFor = id
+	if sub := m.subjectOf(pg); sub != m.keysOn {
+		// The page was sized by a hint line cut for another subject: it is
+		// built again, once, for this one.
+		m.keysOn = sub
 		pg = m.page()
 	}
 	refs := pg.refs()
@@ -374,10 +369,42 @@ type hint struct {
 // lets run now. The key back and the key quit come first, so a line that wraps
 // never strands them.
 func (m *Model) keyHints() []string {
-	id := m.hintFor
-	if m.paging == 0 {
-		id = m.targetTicket()
+	sub := m.keysOn
+	keys := m.screenKeys(sub)
+	// The key up to the issue, on the screens of a task that is in one's plan, and
+	// the one that shows the map, on the plan: each goes after the key quit, on
+	// a screen that has a key back.
+	var extra *hint
+	switch up := m.upFrom(); {
+	case up != "" && m.multiParent(up) != "":
+		extra = &hint{key: "c", text: "multi-task"}
+	case up != "" && len(m.issuesOf(up)) > 0:
+		extra = &hint{key: "c", text: "issue"}
+	case m.top().screen == screenChart:
+		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
+			extra = &hint{key: "m", text: "map"}
+		}
 	}
+	flat := make([]string, 0, 2*len(keys)+2)
+	for _, k := range keys {
+		if k.act != "" {
+			if ok, _ := m.canOn(sub, k.act); !ok {
+				continue
+			}
+		}
+		flat = append(flat, k.key, k.text)
+		if k.key == "q" && extra != nil && keys[0].key == "esc" {
+			flat = append(flat, extra.key, extra.text)
+		}
+	}
+	return flat
+}
+
+// screenKeys are the keys the screen on top has, in the order they are listed,
+// whether or not their action can run: the hint line lists the ones can lets
+// run, and a key the screen does not have runs nothing.
+func (m *Model) screenKeys(sub subject) []hint {
+	id := sub.ticket
 	move := hint{key: "↑↓", text: "move"}
 	open := hint{key: "enter", text: "open"}
 	back := hint{key: "esc", text: "back"}
@@ -395,9 +422,9 @@ func (m *Model) keyHints() []string {
 	var keys []hint
 	switch m.top().screen {
 	case screenMain:
-		keys = []hint{quit, move, open, gate, answer, say, tail, {key: "r", text: "refresh"}}
+		keys = []hint{quit, move, open, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenChart:
-		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, answer, say, tail, {key: "r", text: "refresh"}}
+		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:
 		keys = []hint{back, quit, move, open, answer, keep, dismiss, requeue, approve, gate, publish, say, land, tail}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
@@ -420,33 +447,7 @@ func (m *Model) keyHints() []string {
 	case screenLand:
 		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
 	}
-	// The key up to the issue, on the screens of a task that is in one's plan, and
-	// the one that shows the map, on the plan: each goes after the key quit, on
-	// a screen that has a key back.
-	var extra *hint
-	switch up := m.upFrom(); {
-	case up != "" && m.multiParent(up) != "":
-		extra = &hint{key: "c", text: "multi-task"}
-	case up != "" && len(m.issuesOf(up)) > 0:
-		extra = &hint{key: "c", text: "issue"}
-	case m.top().screen == screenChart:
-		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
-			extra = &hint{key: "m", text: "map"}
-		}
-	}
-	flat := make([]string, 0, 2*len(keys)+2)
-	for _, k := range keys {
-		if k.act != "" {
-			if ok, _ := m.canOn(id, k.act); !ok {
-				continue
-			}
-		}
-		flat = append(flat, k.key, k.text)
-		if k.key == "q" && extra != nil && keys[0].key == "esc" {
-			flat = append(flat, extra.key, extra.text)
-		}
-	}
-	return flat
+	return keys
 }
 
 // panel is the last command as one line (whole, for a verb that leaves the next
