@@ -52,6 +52,27 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 	}
 
+	if t.status != nil {
+		var states []statusVerification
+		for _, v := range t.status.Verifications {
+			if v.Slice == slice {
+				states = append(states, v)
+			}
+		}
+		if len(states) > 0 {
+			// Each commit that is not verified, in the status's words and with
+			// the command that clears it.
+			p.add("")
+			p.add(m.st.bold("verification"))
+			for _, v := range states {
+				p.add("  " + m.st.icon(v.icon()) + " " + short(v.Commit) + "  " + m.st.dim(v.State))
+				if v.Clear != "" {
+					p.add("      " + m.st.dim(v.Clear))
+				}
+			}
+		}
+	}
+
 	var qs []questionRow
 	for _, q := range t.questions(m.zone) {
 		if q.Slice == slice {

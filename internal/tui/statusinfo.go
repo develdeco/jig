@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // statusInfo is `jig status <ticket>`, read: the store's word on the ticket's
@@ -16,10 +18,15 @@ type statusInfo struct {
 	Slices []statusSlice
 	// LastRuns are the status's last_runs table by slice: each slice's last
 	// witnessed run and whether it covers the slice's last commit.
-	LastRuns  map[string]statusLastRun
-	Questions []statusQuestion
-	Stalled   []statusStalled
-	Asks      []statusAsk
+	LastRuns map[string]statusLastRun
+	// Verifications are the status's verification_states table: each commit
+	// of a slice whose verification is not a pass, in the words internal/phase
+	// tells it in and the command that clears it. A commit with no row is
+	// verified, as far as the status says.
+	Verifications []statusVerification
+	Questions     []statusQuestion
+	Stalled       []statusStalled
+	Asks          []statusAsk
 	// Brief is the brief's approval and sections; nil when the ticket has no
 	// brief (or the status predates the block).
 	Brief *statusBrief
@@ -92,6 +99,47 @@ type statusBriefSection struct {
 	Slices  []string
 }
 
+// statusVerification is a row of the status's verification_states table. Commit
+// is the sha the table shortens to twelve characters; State is the words
+// internal/phase tells the state in, with a failed run's first FAIL line or a
+// could-not-run summary after its colon; Clear is "" when the row names none.
+type statusVerification struct{ Slice, Commit, State, Clear string }
+
+// verificationOf is the row for the slice's commit sha, if the status has one.
+func (s *statusInfo) verificationOf(slice, sha string) (statusVerification, bool) {
+	if s == nil {
+		return statusVerification{}, false
+	}
+	for _, v := range s.Verifications {
+		if v.Slice == slice && v.Commit != "" && strings.HasPrefix(sha, v.Commit) {
+			return v, true
+		}
+	}
+	return statusVerification{}, false
+}
+
+// held is whether the state holds the builder at its stop: the commit has no
+// recorded result, which running its verification puts right.
+func (v statusVerification) held() bool { return v.State == string(phase.VerifyNoResult) }
+
+// failedRun is whether the state says the code failed its oracle, as against a
+// run that judged nothing or one that never started.
+func (v statusVerification) failedRun() bool {
+	return v.State == string(phase.VerifyFailed) || strings.HasPrefix(v.State, string(phase.VerifyFailed)+": ")
+}
+
+// icon is the state the verification is drawn in, the slice's: a state that
+// holds the builder is stalled, a failed one failed, the rest drawn back.
+func (v statusVerification) icon() string {
+	switch {
+	case v.held():
+		return StateStalled
+	case v.failedRun():
+		return StateFail
+	}
+	return StateQueued
+}
+
 type statusQuestion struct{ ID, Slice, Status string }
 
 type statusStalled struct{ Slice, Reason, Summary string }
@@ -132,6 +180,9 @@ func parseStatus(out string) *statusInfo {
 			info.LastRuns = map[string]statusLastRun{}
 		}
 		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
+	}
+	for _, r := range doc.Tables["verification_states"].Maps() {
+		info.Verifications = append(info.Verifications, statusVerification{Slice: r["slice"], Commit: r["commit"], State: r["state"], Clear: dash(r["clear"])})
 	}
 	info.FixBudget = doc.Scalars["fix_budget"]
 	if kv, ok := doc.KV["closed"]; ok {
