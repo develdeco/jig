@@ -160,6 +160,10 @@ type navEntry struct {
 	// a screen opens at its top, raised by a move up from the first row, and
 	// cleared by any move of the cursor.
 	lead int
+	// fresh is how many lines came in above the window of a page read below its
+	// top, which its first row counts; it is cleared once the window is back at
+	// the top.
+	fresh int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -545,8 +549,10 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	before := m.holdBefore(msg)
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
+	m.holdAfter(before)
 	return next, cmd
 }
 

@@ -197,6 +197,17 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 // selectable row in view, marking that row.
 func (m *Model) window(pg page, sel, h, w int) []string {
 	start := m.windowStart(pg, sel, h, true)
+	e := m.top()
+	if start == 0 {
+		e.fresh = 0
+	}
+	// A page read below its top that lines came in above says how many, in the
+	// row above the line it was at the top of the window: the window starts one
+	// line up, and that row is the count.
+	counted := e.fresh > 0 && start > 0
+	if counted {
+		start = min(start-1, max(0, len(pg.lines)-h))
+	}
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -209,6 +220,10 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 			idx++
 		}
 		if i < start || i >= end {
+			continue
+		}
+		if counted && i == start {
+			out = append(out, fit("  "+m.newRow(e.fresh), w))
 			continue
 		}
 		if l.box != boxNone {

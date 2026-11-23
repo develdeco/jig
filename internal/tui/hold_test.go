@@ -1,0 +1,97 @@
+package tui
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/develdeco/jig/internal/journal"
+)
+
+var newMark = regexp.MustCompile(`↑ \d+ new`)
+
+// markedRow is the row of a frame the cursor stands on.
+func markedRow(frame string) string {
+	for _, l := range strings.Split(frame, "\n") {
+		if strings.HasPrefix(l, "▸") {
+			return l
+		}
+	}
+	return ""
+}
+
+// TestACursorStaysOnItsRowWhenLinesComeInAbove: with the cursor on the older of
+// two fix slices, a newer one that comes in is a row above it, and the cursor is
+// still on the older one.
+func TestACursorStaysOnItsRowWhenLinesComeInAbove(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-6")
+	g.r.answer("status JIG-6 --store /s", fixSliceStatus(true), 0)
+	g.feed(fixSliceLines()...).press("down", "enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want review", g.m.Screen())
+	}
+	g.press("down") // fix-2 is on top, fix-1 under it
+	if row := markedRow(g.view()); !strings.Contains(row, "fix-1") {
+		t.Fatalf("the cursor is on %q, want fix-1:\n%s", row, g.view())
+	}
+	g.feed(jl(at(33, 31), "JIG-6", "fix-3", journal.EventFixSlice))
+	v := g.view()
+	if row := markedRow(v); !strings.Contains(row, "fix-1") {
+		t.Errorf("the cursor left its row: it is on %q:\n%s", row, v)
+	}
+	inOrder(t, "fix slices", v, "fix-3", "fix-2", "fix-1")
+
+	// A row that went away leaves the cursor where it was, as before.
+	g2 := newRig(t, "JIG-6")
+	g2.r.answer("status JIG-6 --store /s", fixSliceStatus(true), 0)
+	g2.feed(fixSliceLines()...).press("down", "enter", "down")
+	if g2.m.top().sel != 1 {
+		t.Fatalf("the cursor is at %d, want 1", g2.m.top().sel)
+	}
+}
+
+// TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove: a slice's timeline
+// read down the screen keeps the lines it shows when two come in above, says "↑
+// 2 new" in its first row, and says nothing once it is read back to its top.
+func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
+	for i := 0; i < 40; i++ {
+		g.feed(jl(at(i, 0), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")))
+	}
+	g.press("enter", "enter")
+	if g.m.Screen() != "slice" {
+		t.Fatalf("on %s, want slice", g.m.Screen())
+	}
+	for i := 0; i < 12; i++ {
+		g.press("down")
+	}
+	body := func() []string { return strings.Split(g.view(), "\n")[2:] }
+	before := body()
+	if newMark.MatchString(g.view()) {
+		t.Fatalf("a mark before any line came in:\n%s", g.view())
+	}
+	g.feed(
+		jl(at(41, 0), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+		jl(at(42, 0), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
+	)
+	after := body()
+	if got := strings.TrimSpace(after[0]); got != "↑ 2 new" {
+		t.Fatalf("the first row reads %q, want \"↑ 2 new\":\n%s", got, g.view())
+	}
+	// The lines it showed stay, all but the last, which the row took the place of.
+	for i := 0; i < len(before)-4; i++ {
+		if before[i] != after[i+1] {
+			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i+1], g.view())
+		}
+	}
+	g.press("up")
+	for i := 0; i < 40; i++ {
+		g.press("up")
+	}
+	if v := g.view(); newMark.MatchString(v) {
+		t.Errorf("the mark stays at the top:\n%s", v)
+	}
+}
