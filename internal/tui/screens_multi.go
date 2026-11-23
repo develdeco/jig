@@ -174,13 +174,21 @@ func (m *Model) cutFor(t *ticket, container, branch string) *ticket {
 	d.Phases = slices.Clone(t.digest.Phases)
 	// Publishing is for a task whose brief, build and review are done; one built
 	// again after a publish elsewhere has not earned a publish here.
+	// A landing is a fact of its issue: a task that landed here has every step
+	// done here, whatever it has done since for another issue.
+	landedHere := len(lines) > 0
+	if landedHere {
+		for i := range d.Phases {
+			d.Phases[i].State = phase.StateDone
+		}
+	}
 	built := true
 	for _, p := range d.Phases {
 		if p.Name == string(phase.Brief) || p.Name == string(phase.Build) || p.Name == string(phase.Review) {
 			built = built && p.State == phase.StateDone
 		}
 	}
-	published := built && len(d.PRs) > 0
+	published := built && (len(d.PRs) > 0 || landedHere)
 	open := built && d.Closed == ""
 	for i, p := range d.Phases {
 		switch p.Name {

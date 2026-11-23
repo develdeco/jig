@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/develdeco/jig/internal/journal"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -196,6 +197,38 @@ func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
 		if c.name == "closed before publishing" && strings.Contains(row, "✓ ✓ ✓ ✓ ✓") {
 			t.Errorf("%s: the dots read published: %q", c.name, row)
 		}
+	}
+}
+
+// TestALandingIsAFactOfItsIssue: a shared task that landed into the first issue
+// and was then built again for the second's open pull request reads landed in
+// the first's plan, every step done and counted, and reads its current steps in
+// the second's.
+func TestALandingIsAFactOfItsIssue(t *testing.T) {
+	t.Parallel()
+	g := planMain(t, planSpec{second: true})
+	g.m.height, g.m.width = 40, 110
+	d := *g.m.w.tickets["SHOP-1"].digest
+	d.Phases = slices.Clone(d.Phases)
+	d.Phases[2] = digestPhase{Name: "review", State: "current", Text: "ready to review"}
+	d.Phases[3].State, d.Phases[4].State = "pending", "pending"
+	d.Current, d.Ready = "review", true
+	g.pin("SHOP-1", &d)
+	g.syncDigests()
+
+	onRow(t, g, "SHOP-49")
+	g.press("enter")
+	first := stripANSI(g.view())
+	if row := lineWith(first, "SHOP-1  "); !strings.Contains(row, "✓ SHOP-1") || !strings.Contains(row, "✓ ✓ ✓ ✓ ✓") || !strings.Contains(row, "landed · into the issue's branch") {
+		t.Errorf("the first issue's plan reads a task it landed as %q", row)
+	}
+	if row := issueLine(first, "tasks"); !strings.Contains(row, "4 of 4 landed") {
+		t.Errorf("the first issue's count: %q", row)
+	}
+	g.press("esc")
+	g.press("end", "enter")
+	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "◆ SHOP-1") || !strings.Contains(row, "✓ ✓ ◆ ○ ○") {
+		t.Errorf("the second issue's plan reads the task as %q", row)
 	}
 }
 
