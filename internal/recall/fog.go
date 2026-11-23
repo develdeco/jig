@@ -99,14 +99,17 @@ func isFogHeading(text string) bool {
 
 // itemsOf splits the lines of a section into items: a bullet or numbered line
 // opens one, any other non-blank line continues the open one (or opens a
-// paragraph), and a blank line closes it.
+// paragraph), and a blank line closes it. A table row is skipped as a fence is,
+// and an item that only says "none" is no item.
 func itemsOf(lines []string) []string {
 	var items []string
 	var cur []string
 	fence := false
 	flush := func() {
 		if len(cur) > 0 {
-			items = append(items, strings.Join(cur, " "))
+			if text := strings.Join(cur, " "); !isNoneItem(text) {
+				items = append(items, text)
+			}
 			cur = nil
 		}
 	}
@@ -124,6 +127,11 @@ func itemsOf(lines []string) []string {
 			continue
 		}
 		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "|") {
+			// A table row is a layout of facts, not one decided or open item.
+			flush()
+			continue
+		}
 		if t == "" {
 			flush()
 			continue
@@ -164,4 +172,15 @@ func clip(s string, max int) string {
 		return s
 	}
 	return strings.TrimSpace(string(r[:max-3])) + "..."
+}
+
+// isNoneItem reports whether an item's text only says there is nothing: "none",
+// "none yet" or "n/a", in any case with a closing full stop. A text that merely
+// starts with "None" is an item.
+func isNoneItem(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(text), "."))) {
+	case "none", "none yet", "n/a":
+		return true
+	}
+	return false
 }
