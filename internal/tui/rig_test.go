@@ -321,9 +321,9 @@ type fakeRunner struct {
 
 func newRunner() *fakeRunner {
 	return &fakeRunner{by: map[string]ranStep{
-		"status JIG-1 --store /s": {Out: statusJIG1()},
-		"status JIG-2 --store /s": {Out: statusJIG2()},
-		"next --json --store /s":  {Out: rosterJSON()},
+		"status JIG-1 --store /s":         {Out: statusJIG1()},
+		"status JIG-2 --store /s":         {Out: statusJIG2()},
+		"next --json --roster --store /s": {Out: rosterJSON()},
 	}}
 }
 
@@ -465,7 +465,7 @@ func newRig(t *testing.T, ticket string) *rig {
 func newQuietRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	g := newRig(t, ticket)
-	g.r.answer("next --json --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
+	g.r.answer("next --json --roster --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
 	return g
 }
 

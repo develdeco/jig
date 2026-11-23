@@ -35,11 +35,21 @@ func (m *Model) steps(t *ticket) []stepRow {
 	return m.stepRows(t, m.phaseOf(t))
 }
 
-// stepRows are the five rows of a ticket that stands as d says. The phase gives
-// each row whether it is done and what it says; the screens add the state the
-// row is drawn in, and how long the step has taken (stepTimes).
-func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
-	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
+// stepWords are a ticket's five steps as a list draws them: the state and the
+// words of each, which are the digest's, and no time. A row of the project's
+// list or of a chart shows no clock, so none is computed for it: a frame costs
+// what it draws, and the work clocks (work.go) are counted where a screen shows
+// a time.
+func (m *Model) stepWords(t *ticket) []stepRow {
+	rows, _ := m.rowSteps(t, m.phaseOf(t))
+	return rows
+}
+
+// rowSteps are the five rows of a ticket that stands as d says, with the words
+// and the state of each and no time. known is false for a ticket nothing was
+// read of, whose steps say so.
+func (m *Model) rowSteps(t *ticket, d phase.Ticket) (rows []stepRow, known bool) {
+	rows = []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
 	if end, ok := m.endOf(t); ok {
 		endRows(rows, end, m.unfinished(t))
 	}
@@ -49,9 +59,20 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 		for i := range rows {
 			rows[i].State, rows[i].Text, rows[i].Done = StateQueued, readingText, false
 		}
+		return rows, false
+	}
+	return rows, true
+}
+
+// stepRows are the five rows of a ticket that stands as d says. The phase gives
+// each row whether it is done and what it says; the screens add the state the
+// row is drawn in, and how long the step has taken (stepTimes).
+func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
+	rows, known := m.rowSteps(t, d)
+	if !known {
 		return rows
 	}
-	c := m.clocks(t, d)
+	c := m.clocksOf(t)
 	for i := range rows {
 		if took := c.work.ofStep(i); took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took

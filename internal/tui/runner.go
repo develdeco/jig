@@ -3,7 +3,6 @@ package tui
 import (
 	"slices"
 	"strings"
-	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -17,17 +16,6 @@ import (
 // A Runner need not be safe for concurrent use: the model calls it through
 // serial.
 type Runner func(args []string) (output string, code int)
-
-// serial is r made safe for concurrent use: one call at a time, so a status
-// read for a screen never overlaps a publish that a key started.
-func serial(r Runner) Runner {
-	var mu sync.Mutex
-	return func(args []string) (string, int) {
-		mu.Lock()
-		defer mu.Unlock()
-		return r(args)
-	}
-}
 
 // ranStep is one command that ran.
 type ranStep struct {
@@ -94,7 +82,7 @@ func (m *Model) exec(label, ticket string, steps ...[]string) tea.Cmd {
 	return func() tea.Msg {
 		res := outcome{Label: label, Ticket: ticket}
 		for _, args := range steps {
-			out, code := run(args)
+			out, code := run(classKey, about{}, args)
 			res.Steps = append(res.Steps, ranStep{Args: args, Out: out, Code: code})
 			if code != 0 {
 				break
@@ -120,12 +108,13 @@ func (m *Model) refreshStatus(id string) tea.Cmd {
 	args := m.verbArgs("status", id)
 	run := m.run
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(classOpened, about{ticket: id}, args)
 		return statusMsg{ticket: id, info: parseStatus(out)}
 	}
 }
 
-// loadRoster reads the store's ticket list, one read at a time.
+// loadRoster reads the store's ticket list, one read at a time: the roster, the
+// rows of every ticket and the charts, which is all a screen reads of the store.
 func (m *Model) loadRoster() tea.Cmd {
 	if m.rosterBusy || m.run == nil {
 		return nil
@@ -133,10 +122,10 @@ func (m *Model) loadRoster() tea.Cmd {
 	m.rosterBusy, m.rosterStale, m.lastRoster = true, false, m.now()
 	m.rosterStarted++
 	seq := m.rosterStarted
-	args := m.verbArgs("next", "--json")
+	args := m.verbArgs("next", "--json", "--roster")
 	run := m.run
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(classBackground, about{}, args)
 		rows, charts, err := parseRoster(out)
 		return rosterMsg{rows: rows, charts: charts, err: err, seq: seq}
 	}
@@ -153,10 +142,34 @@ func (m *Model) loadChart(name string) tea.Cmd {
 	args := m.verbArgs("next", name, "--json")
 	run := m.run
 	return func() tea.Msg {
-		out, _ := run(args)
+		out, _ := run(classOpened, about{chart: name}, args)
 		info, err := parseChart(out)
 		return chartMsg{name: name, info: info, err: err}
 	}
+}
+
+// syncScreen tells the queue which screen is on show, so the reads about it run
+// first: the ticket the screen is of, or the chart and the tickets and issue it
+// lists.
+func (m *Model) syncScreen() {
+	if m.queue == nil {
+		return
+	}
+	var on onShow
+	switch e := m.top(); e.screen {
+	case screenMain:
+	case screenChart:
+		on.chart = e.chart
+		if c := m.w.charts[e.chart]; c != nil {
+			on.chartTickets = c.ids()
+			if issue := c.issueID(); issue != "" {
+				on.chartTickets = append(on.chartTickets, issue)
+			}
+		}
+	default:
+		on.ticket = e.ticket
+	}
+	m.queue.show(on)
 }
 
 // shownLine is the command as the person would type it, without the flags the

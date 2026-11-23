@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -74,6 +75,8 @@ type digestPR struct {
 	URL    string
 	State  string
 	Target string
+	// AsOf is when State was last read, when it was not read for this roster.
+	AsOf time.Time
 }
 
 // digestSlices counts a ticket's slices by state.

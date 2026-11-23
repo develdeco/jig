@@ -70,6 +70,10 @@ type nextDigestPR struct {
 	State  string `json:"state"`
 	// Target is the branch the pull request goes into.
 	Target string `json:"target,omitempty"`
+	// AsOf is when the state was read, as RFC 3339, when this run did not read
+	// it (it is this machine's last kept answer); absent for one it read, and
+	// for a merged pull request, which is final.
+	AsOf string `json:"as_of,omitempty"`
 }
 
 // nextSliceCounts is how many of a ticket's slices are in each state. Failed
@@ -225,7 +229,7 @@ func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id strin
 		if url == "" {
 			continue
 		}
-		out = append(out, nextDigestPR{Repo: r.Repo, Number: prNumber(url), URL: url, State: prState(merge, r.Repo, len(repos) > 1), Target: r.PRTarget})
+		out = append(out, nextDigestPR{Repo: r.Repo, Number: prNumber(url), URL: url, State: prState(merge, r.Repo, len(repos) > 1), Target: r.PRTarget, AsOf: prAsOf(merge, r.Repo, len(repos) > 1)})
 	}
 	return out
 }
@@ -326,7 +330,7 @@ func lastRun(lines []journal.Line, slice string) runEnd {
 
 // containerDigest is where an issue or a multi-task stands: its own pull
 // request's state (waiting, ready, published or landed) and its children.
-func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, kind string, blocked []nextBlocker) nextDigest {
+func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, kind string, blocked []nextBlocker) (nextDigest, []journal.Line) {
 	n := nextNotATask(st, data, kind)
 	d := nextDigest{Kind: kind, Parent: parentOf(st, data.in.ID, data.rec), BlockedBy: blocked, Children: n.Children, PRs: []nextDigestPR{}}
 	if data.rec.Closed != nil {
@@ -334,16 +338,18 @@ func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProj
 	}
 	// Its own pull request is a row like any ticket's: into the target for an
 	// issue, into the issue's branch for a multi-task.
-	if lines, err := journal.Read(st, data.in.ID); err == nil {
+	var lines []journal.Line
+	if read, err := journal.Read(st, data.in.ID); err == nil {
+		lines = read
 		d.PRs = digestPRs(st, cfg, merges, data.in.ID, data.rec, stack.Plan{Ticket: data.in.ID}, nil, lines)
 	}
 	r, err := containerReadiness(st, cfg, mp, merges, data.in.ID)
 	if err != nil {
 		d.PhaseProblem = err.Error()
-		return d
+		return d, lines
 	}
 	d.State = r.State
-	return d
+	return d, lines
 }
 
 // digestMerges is the merge source a listing states each ticket's standing
@@ -357,28 +363,31 @@ func digestMerges(m mergeSource) mergeSource {
 	return m
 }
 
-// rosterDigest is the digest of one row of the listing. A ticket whose files
-// could not be read says so and nothing else.
-func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, state string, blocked []nextBlocker) nextDigest {
+// rosterDigest is the digest of one row of the listing, and the instant of the
+// newest line of the ticket's journal (RFC 3339, "" for a ticket with none, or
+// whose journal the digest did not read). A ticket whose files could not be
+// read says so and nothing else.
+func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, state string, blocked []nextBlocker) (nextDigest, string) {
 	kind := data.rec.KindOrDefault()
 	if data.problem != "" {
-		return nextDigest{Kind: kind, PhaseProblem: data.problem, PRs: []nextDigestPR{}, BlockedBy: blocked}
+		return nextDigest{Kind: kind, PhaseProblem: data.problem, PRs: []nextDigestPR{}, BlockedBy: blocked}, ""
 	}
 	if kind != store.KindTask {
-		return containerDigest(st, cfg, mp, merges, data, kind, blocked)
+		d, lines := containerDigest(st, cfg, mp, merges, data, kind, blocked)
+		return d, newestLine(lines)
 	}
 	id := data.in.ID
 	plan, shared, err := taskPlan(st, cfg, mp, merges, id, data.rec)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), stack.Plan{Ticket: id}, nil, nil, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), stack.Plan{Ticket: id}, nil, nil, blocked), ""
 	}
 	t, lines, err := derivePhaseStackedLines(st, id, merges, plan)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, nil, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, nil, blocked), ""
 	}
 	d := taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, lines, blocked)
 	d.LandFirst = landFirstOf(st, cfg, mp, merges, id, data.rec, &t)
-	return d
+	return d, newestLine(lines)
 }
 
 // landFirstOf are the tickets that must land before task id, from the merge
