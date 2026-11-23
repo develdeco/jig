@@ -223,7 +223,8 @@ type nextTicket struct {
 	Distribution string `json:"distribution,omitempty"`
 	// Kind is named for a ticket that is not a task (an issue or a multi-task),
 	// which is not briefed or built: Chart (an issue's), Issues (a multi-task's)
-	// and Children say where it stands. Parent is a task's multi-task.
+	// and Children say where it stands. Parent is the one ticket its pull
+	// request goes into: a task's multi-task or issue (parentOf).
 	Kind      string        `json:"kind,omitempty"`
 	Parent    string        `json:"parent,omitempty"`
 	Chart     string        `json:"chart,omitempty"`
@@ -518,9 +519,7 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 		n.PhaseProblem = err.Error()
 		return
 	}
-	// A ticket built again that is owed a merge is behind once its fix is
-	// reviewed and the publish is next: the merge comes first.
-	if t.Behind() && (n.State == ready.StateDone || t.Rebuilding() && t.Current == phase.Publish && n.State == ready.StateGreen) {
+	if isBehind(t, n.State) {
 		n.State = stateBehind
 	}
 	n.derived = &t
@@ -530,6 +529,15 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
 	}
 	n.Phase = p
+}
+
+// isBehind says a ticket in state published its work and is owed a merge before
+// the publish that follows it: its stack plan owes its branch one and it is
+// done, or it is built again, reviewed and at its publish. A ticket built again
+// that is owed a merge is behind once its fix is reviewed and the publish is
+// next: the merge comes first.
+func isBehind(t phase.Ticket, state string) bool {
+	return t.Behind() && (state == ready.StateDone || t.Rebuilding() && t.Current == phase.Publish && state == ready.StateGreen)
 }
 
 // setReviewer says who reviews the ticket when review is the phase that can
@@ -730,6 +738,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		if err != nil {
 			return nextTicket{}, err
 		}
+		n.Parent = parentOf(st, id, data.rec)
 		if k == store.KindIssue {
 			if n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id); err != nil {
 				return nextTicket{}, err
@@ -776,7 +785,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
-		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: data.rec.Parent,
+		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: parentOf(st, id, data.rec),
 	}
 	if data.rec.Closed != nil {
 		n.Closed = data.rec.Closed.Phrase()
@@ -1212,7 +1221,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		for _, b := range s.Blocked {
 			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
 		}
-		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], row.BlockedBy)
+		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], s.State, row.BlockedBy)
 		row.Digest = &d
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}

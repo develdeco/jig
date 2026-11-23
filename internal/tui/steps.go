@@ -190,7 +190,7 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StatePublished
 	case p.State == phase.StatePending:
 		s.State = StateQueued
-	case t.rosterState == stateBehind:
+	case t.digest != nil && t.digest.Behind:
 		// Published, and owed a merge before the publish that follows it.
 		s.State = StateReady
 	case hasSub(p, phase.SubDone):

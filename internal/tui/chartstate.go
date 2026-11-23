@@ -136,7 +136,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 				r.steps = m.stepRows(t, r.d)
 				r.needs = needsYou(r.d) || t.digest.waitsForAnswer()
 				r.waits = t.blockers
-				r.behind = t.rosterState == stateBehind
+				r.behind = t.digest.Behind
 			}
 			r.done = t.digest != nil && r.steps[len(r.steps)-1].Done
 		}
@@ -152,10 +152,6 @@ func (m *Model) chartRows(c *chart) []chartRow {
 	}
 	return rows
 }
-
-// stateBehind is the state `jig next` gives a ticket that published and whose
-// branch is owed a merge: it stands at its publish again.
-const stateBehind = "behind"
 
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.

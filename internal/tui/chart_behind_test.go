@@ -24,8 +24,10 @@ func behindJSON() string {
 // behindDigest is the digest of the published JIG-4 once its parent merged: its
 // publish is current again, ready, and the roster says it is behind.
 func behindDigest() *digestInfo {
-	return task("publish", true, "done|approved", "done|3 of 3 green", "done|round 2 clean",
+	d := task("publish", true, "done|approved", "done|3 of 3 green", "done|round 2 clean",
 		"current|"+behindText, "pending|after the publish")
+	d.Behind = true
+	return d
 }
 
 // behindChartRig is the chart screen of the fixtures whose JIG-4 is behind, on a
@@ -36,7 +38,7 @@ func behindChartRig(t *testing.T) *rig {
 	g := newRig(t, "")
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", behindJSON(), status)
-	g.pin("JIG-4", behindDigest(), stateBehind)
+	g.pin("JIG-4", behindDigest())
 	g.feed(lines...)
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 36})
 	return onChart(g)

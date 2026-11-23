@@ -90,8 +90,6 @@ func (w *world) setCharts(listed []chartListing) {
 type ticket struct {
 	id    string
 	title string
-	// rosterState is the state `jig next` gave the ticket (ready, blocked, ...).
-	rosterState string
 	// digest is where `jig next --json` says the ticket stands: the one source
 	// of the words of its phases. nil until the roster that lists it is read.
 	digest *digestInfo
@@ -188,7 +186,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	order := make([]string, 0, len(rows)+len(w.order))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.rosterState, t.blockers, t.digest = r.Title, r.State, r.Blockers, r.Digest
+		t.title, t.blockers, t.digest = r.Title, r.Blockers, r.Digest
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)

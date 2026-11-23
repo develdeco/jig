@@ -154,6 +154,10 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 		if kind == "" && n.Parent != "" {
 			kind = "task of " + n.Parent
 		}
+		// A task of an issue is said so, as a task of a multi-task is.
+		if want, ok := map[string]string{"TK-1": "issue", "TK-2": "task of TK-1", "TK-4": "multi-task", "TK-5": "task of TK-4"}[id]; ok && !strings.Contains(frame, want) {
+			t.Errorf("%s: the screen does not say %q:\n%s", id, want, frame)
+		}
 		if kind != "" && !strings.Contains(frame, kind) {
 			t.Errorf("%s: the screen does not name %q:\n%s", id, kind, frame)
 		}

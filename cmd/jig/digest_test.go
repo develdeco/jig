@@ -11,8 +11,10 @@ import (
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/mergefacts"
+	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/ready"
+	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
 )
 
@@ -34,7 +36,7 @@ func digestRig(t *testing.T) (chartRig, issueMerges) {
 	r.ticket(t, "TK-7", "", false)
 	r.ticket(t, "TK-8", "", true)
 	r.ticket(t, "TK-9", "", true)
-	r.put(t, "tickets/TK-9/slices.yaml", sliceFile("alpha", "beta", "gamma"))
+	r.put(t, "tickets/TK-9/slices.yaml", sliceFile("alpha", "beta", "gamma", "delta"))
 	r.ticket(t, "TK-10", "", true)
 	r.ticket(t, "TK-11", "", true)
 	r.ticket(t, "TK-12", "", true)
@@ -52,10 +54,12 @@ func digestRig(t *testing.T) (chartRig, issueMerges) {
 			t.Fatal(err)
 		}
 	}
-	// TK-9: s0 failed its last run, s1 was stopped, s2 is being built.
+	// TK-9: s0 and s3 failed their last run, s1 was stopped, s2 is being built.
 	state("TK-9", "s0", "building")
 	state("TK-9", "s1", "building")
 	state("TK-9", "s2", "building")
+	state("TK-9", "s3", "building")
+	line("TK-9", journal.Line{Event: journal.EventOracle, Slice: "s3", Outcome: "fail"})
 	line("TK-9", journal.Line{Event: journal.EventOracle, Slice: "s0", Outcome: "fail"})
 	line("TK-9", journal.Line{Event: journal.EventOracle, Slice: "s1", Outcome: "fail", Cause: journal.CauseStopped})
 	// TK-10 is built and unreviewed.
@@ -158,8 +162,15 @@ func TestRosterDigestEqualsNextTicket(t *testing.T) {
 	if issue.Kind != store.KindIssue || len(issue.Children) == 0 || issue.Slices != nil {
 		t.Errorf("the issue's digest = %+v, want its kind and its children, no slice counts", issue)
 	}
-	if got := byID["TK-5"]; got.Parent != "TK-4" {
-		t.Errorf("TK-5 is a task of TK-4, its digest says %q", got.Parent)
+	// A task's parent is the one ticket its pull request goes into: its
+	// multi-task, else the issue whose chart lists it.
+	for id, want := range map[string]string{"TK-1": "", "TK-2": "TK-1", "TK-3": "TK-1", "TK-4": "TK-1", "TK-5": "TK-4", "TK-6": "", "TK-8": ""} {
+		if got := byID[id].Parent; got != want {
+			t.Errorf("%s's digest says its parent is %q, want %q", id, got, want)
+		}
+	}
+	if byID["TK-4"].Kind != store.KindMultiTask || byID["TK-4"].State != issue.State {
+		t.Errorf("the multi-task's digest = %+v, want its kind and its own pull request's state", byID["TK-4"])
 	}
 	if got := byID["TK-13"]; got.Closed != "covered by develdeco/jig#82" {
 		t.Errorf("TK-13's closed reason = %q", got.Closed)
@@ -180,11 +191,22 @@ func TestRosterDigestEqualsNextTicket(t *testing.T) {
 	if b := byID["TK-3"].BlockedBy; len(b) != 1 || b[0].Ticket != "TK-2" || len(b[0].PRs) != 1 || b[0].PRs[0].URL != digestPR2 || b[0].PRs[0].State != ready.PROpen {
 		t.Errorf("TK-3's blockers = %+v, want TK-2 with its open pull request", b)
 	}
+	for id, want := range map[string]nextDigestPR{
+		"TK-11": {Repo: "app", Number: 21, URL: digestPR11, State: "merged", Target: "main"},
+		"TK-12": {Repo: "app", Number: 22, URL: digestPR12, State: "merged", Target: "main"},
+	} {
+		if got := byID[id].PRs; len(got) != 1 || got[0] != want {
+			t.Errorf("%s's pull requests = %+v, want %+v", id, got, want)
+		}
+	}
 	if got := byID["TK-11"].PRs; len(got) != 1 || got[0].State != "merged" {
 		t.Errorf("TK-11's pull requests = %+v, want merged", got)
 	}
-	if got := byID["TK-9"].Slices; got == nil || *got != (nextSliceCounts{Total: 3, Building: 1, Failed: 1, Stopped: 1}) {
-		t.Errorf("TK-9's slice counts = %+v, want one building, one failed, one stopped", got)
+	if got := byID["TK-9"].Slices; got == nil || *got != (nextSliceCounts{Total: 4, Building: 1, Failed: 2, Stopped: 1}) {
+		t.Errorf("TK-9's slice counts = %+v, want one building, two failed, one stopped", got)
+	}
+	if byID["TK-3"].Slices == nil || byID["TK-3"].Slices.Queued != 1 || byID["TK-3"].Slices.Total != 1 {
+		t.Errorf("TK-3's slice counts = %+v, want its one queued slice", byID["TK-3"].Slices)
 	}
 	if got := byID["TK-10"].Slices; got == nil || *got != (nextSliceCounts{Total: 1, Green: 1}) {
 		t.Errorf("TK-10's slice counts = %+v", got)
@@ -262,6 +284,87 @@ func TestRosterDigestAsksTheHostOnlyAsTheListingDoes(t *testing.T) {
 	for _, id := range []string{"TK-6", "TK-11", "TK-12"} {
 		if states[id] != "unknown" {
 			t.Errorf("%s's pull request reads %q with no cached answer, want unknown, never open", id, states[id])
+		}
+	}
+}
+
+// TestADigestIsBehindByTheRuleOfJigNext: a published ticket whose stack plan owes
+// its branch a merge is behind when it is done, or built again, reviewed and at
+// its publish with every slice green; one with no merge owed, one that is not
+// done and one built again but not yet reviewed are not. jig next <ticket> turns
+// its state behind by the same rule (isBehind).
+func TestADigestIsBehindByTheRuleOfJigNext(t *testing.T) {
+	t.Parallel()
+	facts := phase.Facts{
+		Ticket: "JIG-1", BriefExists: true, Sections: 4, Approval: phase.ApprovalCurrent, ApprovedBy: "Dana", ApprovedHow: "person",
+		Published: true,
+		Slices:    []phase.Slice{{ID: "a", State: "green"}},
+	}
+	lines := []journal.Line{
+		{Event: journal.EventApproval, Provenance: "person"},
+		{Event: journal.EventClaim, Slice: "a"}, {Event: journal.EventVerified, Slice: "a", Commit: "c1"},
+		{Event: journal.EventGateOpen, Attempt: 1}, {Event: journal.EventGateClean, Attempt: 1},
+		{Event: journal.EventPr, URL: "https://example.test/pull/7", Commit: "c1"}, {Event: journal.EventPublishDone},
+	}
+	owed := []phase.Restack{{Repo: "app", Kind: phase.RestackTarget, Ref: "origin/main"}}
+
+	if isBehind(phase.Derive(facts, lines), ready.StateDone) {
+		t.Errorf("a published ticket owed no merge is behind")
+	}
+	facts.Restacks = owed
+	owing := phase.Derive(facts, lines)
+	if !isBehind(owing, ready.StateDone) {
+		t.Errorf("a published ticket owed a merge is not behind")
+	}
+	if isBehind(owing, ready.StateGreen) || isBehind(owing, ready.StateReady) {
+		t.Errorf("a ticket whose state is not done is behind, though it is not rebuilt")
+	}
+
+	// Built again: a fix slice queued after the publish.
+	facts.Slices = append(facts.Slices, phase.Slice{ID: "b", State: "queued"})
+	if rebuilt := phase.Derive(facts, lines); isBehind(rebuilt, ready.StateGreen) {
+		t.Errorf("a ticket built again and not reviewed is behind")
+	}
+	facts.Slices[1].State = "green"
+	lines = append(lines,
+		journal.Line{Event: journal.EventClaim, Slice: "b"}, journal.Line{Event: journal.EventVerified, Slice: "b", Commit: "c2"},
+		journal.Line{Event: journal.EventGateOpen, Attempt: 2}, journal.Line{Event: journal.EventGateClean, Attempt: 2})
+	if reviewed := phase.Derive(facts, lines); !isBehind(reviewed, ready.StateGreen) {
+		t.Errorf("a ticket built again, reviewed and at its publish is not behind")
+	}
+
+	// The digest carries it, from the same rule.
+	r, _ := digestRig(t)
+	data, err := readTicketData(r.st, "TK-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.Slices = facts.Slices[:1]
+	owingNow := phase.Derive(facts, lines[:7])
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil); !d.Behind {
+		t.Errorf("the digest of a published ticket owed a merge is not behind: %+v", d)
+	}
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateReady, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil); d.Behind {
+		t.Errorf("the digest of a ticket whose state is ready is behind")
+	}
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, nil, "its slices.yaml cannot be read", stack.Plan{Ticket: "TK-2"}, nil, nil); d.Behind || d.PhaseProblem == "" {
+		t.Errorf("the digest of a ticket whose phase could not be derived is behind, or lost its problem: %+v", d)
+	}
+}
+
+// TestASharedTaskHasNoParentAndATaskOfAnIssueHasIt: a task one issue's chart lists
+// goes into that issue; a task two issues list goes into each, so it names
+// neither as its parent (its shared rows name them).
+func TestASharedTaskHasNoParentAndATaskOfAnIssueHasIt(t *testing.T) {
+	t.Parallel()
+	r := sharedRig(t)
+	for id, want := range map[string]string{"SHOP-3": "", "SHOP-4": "SHOP-1", "SHOP-5": "SHOP-2", "SHOP-1": ""} {
+		rec, err := r.st.ReadTicket(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := parentOf(r.st, id, rec); got != want {
+			t.Errorf("the parent of %s is %q, want %q", id, got, want)
 		}
 	}
 }

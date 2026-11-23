@@ -370,21 +370,15 @@ type rig struct {
 	// from; pinned are the digests (and roster states) a test fixed, which the
 	// rig keeps as they are.
 	synced map[string]syncedFrom
-	pinned map[string]pin
+	pinned map[string]*digestInfo
 }
 
-// pin is a digest and the roster state a test gave a ticket.
-type pin struct {
-	digest *digestInfo
-	state  string
-}
-
-// pin fixes what the roster says of ticket id, whatever its lines show.
-func (g *rig) pin(id string, d *digestInfo, state string) {
+// pin fixes the digest the roster gives ticket id, whatever its lines show.
+func (g *rig) pin(id string, d *digestInfo) {
 	if g.pinned == nil {
-		g.pinned = map[string]pin{}
+		g.pinned = map[string]*digestInfo{}
 	}
-	g.pinned[id] = pin{d, state}
+	g.pinned[id] = d
 }
 
 // syncedFrom is what a ticket's digest was derived from: how many lines it had
@@ -404,8 +398,8 @@ func (g *rig) syncDigests() {
 		g.synced = map[string]syncedFrom{}
 	}
 	for id, t := range g.m.w.tickets {
-		if p, ok := g.pinned[id]; ok {
-			t.digest, t.rosterState = p.digest, p.state
+		if d, ok := g.pinned[id]; ok {
+			t.digest = d
 			continue
 		}
 		if len(t.lines) == 0 && t.status == nil {

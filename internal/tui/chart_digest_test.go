@@ -15,7 +15,7 @@ func TestChartRowAndDetailAgreeWithTheDigest(t *testing.T) {
 	g := chartRig(t)
 	// JIG-7 stands at its build and cannot start: its digest says so, and the
 	// roster lists the merge it waits for.
-	g.pin("JIG-7", task("build", false, "done|approved by Ada", "current|waits for JIG-4 to merge", pending[0], pending[1], pending[2]), "blocked")
+	g.pin("JIG-7", task("build", false, "done|approved by Ada", "current|waits for JIG-4 to merge", pending[0], pending[1], pending[2]))
 	onChart(g)
 	g.press("down", "down", "down", "down")
 	view := g.view()

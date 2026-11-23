@@ -14,7 +14,10 @@ import (
 type digestInfo struct {
 	Kind, Parent, Current string
 	Ready                 bool
-	Phases                []digestPhase
+	// Behind says the ticket published and owes a merge before its publish
+	// again.
+	Behind bool
+	Phases []digestPhase
 	// PhaseProblem is why the phases could not be told; State is an issue's or
 	// multi-task's own pull request (waiting, ready, published or landed).
 	PhaseProblem, State string

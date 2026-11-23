@@ -154,7 +154,7 @@ func TestRosterOrdersTheTicketsAndKeepsTheOnesTheStreamAdded(t *testing.T) {
 	if want := []string{"JIG-2", "JIG-1", "JIG-9"}; !reflect.DeepEqual(w.order, want) {
 		t.Errorf("order = %v, want the roster's, then the stream's", w.order)
 	}
-	if tk := w.tickets["JIG-1"]; tk.title != "One" || tk.rosterState != "blocked" {
+	if tk := w.tickets["JIG-1"]; tk.title != "One" {
 		t.Errorf("JIG-1 = %+v", tk)
 	}
 }

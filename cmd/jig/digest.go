@@ -22,6 +22,10 @@ type nextDigest struct {
 	// issue, "" for none.
 	Kind   string `json:"kind"`
 	Parent string `json:"parent,omitempty"`
+	// Behind says the ticket published and is owed a merge before the publish
+	// that follows it (isBehind), the one way a stack plan undoes a step: its
+	// publish is current again, and it is not done.
+	Behind bool `json:"behind,omitempty"`
 	// Current is the phase the ticket stands at and Phases its five phases,
 	// Land included, as `jig next <ticket>` prints them. Neither is set for a
 	// ticket that is not a task, nor for one whose phase cannot be derived
@@ -70,6 +74,17 @@ type nextSliceCounts struct {
 	Stopped    int `json:"stopped"`
 }
 
+// parentOf is the ticket a ticket's pull request goes into: its multi-task, or
+// the issue whose chart lists it. A shared task, which two issues list, and a
+// ticket no model chart lists have none: the shared rows name the issues.
+func parentOf(st *store.Store, id string, rec store.Ticket) string {
+	containers, err := st.ContainersOf(id, rec)
+	if err != nil || len(containers) != 1 {
+		return ""
+	}
+	return containers[0]
+}
+
 // phaseRows are a derived ticket's phases as `jig next <ticket>` prints them.
 func phaseRows(t phase.Ticket) []nextPhaseRow {
 	rows := make([]nextPhaseRow, 0, len(t.Phases))
@@ -111,13 +126,14 @@ func recordsPR(st *store.Store, id string) bool {
 // taskDigest is where a task stands: the phases derived with its stack plan
 // laid on them (derived, nil with problem when they could not be) and the rest
 // read beside them. blocked is what the ticket waits for, as the caller read it.
-func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id string, data ticketData, derived *phase.Ticket, problem string, plan stack.Plan, shared []nextIssueRow, blocked []nextBlocker) nextDigest {
-	d := nextDigest{Kind: store.KindTask, Parent: data.rec.Parent, BlockedBy: blocked, PhaseProblem: problem}
+func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id string, data ticketData, state string, derived *phase.Ticket, problem string, plan stack.Plan, shared []nextIssueRow, blocked []nextBlocker) nextDigest {
+	d := nextDigest{Kind: store.KindTask, Parent: parentOf(st, id, data.rec), BlockedBy: blocked, PhaseProblem: problem}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
 	}
 	if derived != nil {
 		d.Current, d.Ready, d.Phases = string(derived.Current), derived.Ready, phaseRows(*derived)
+		d.Behind = isBehind(*derived, state)
 	}
 	d.PRs = digestPRs(st, cfg, merges, id, plan, shared)
 	d.Slices = sliceCounts(st, id, data)
@@ -252,7 +268,7 @@ func lastRun(lines []journal.Line, slice string) runEnd {
 // request's state (waiting, ready, published or landed) and its children.
 func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, kind string, blocked []nextBlocker) nextDigest {
 	n := nextNotATask(st, data, kind)
-	d := nextDigest{Kind: kind, Parent: data.rec.Parent, BlockedBy: blocked, Children: n.Children, PRs: []nextDigestPR{}}
+	d := nextDigest{Kind: kind, Parent: parentOf(st, data.in.ID, data.rec), BlockedBy: blocked, Children: n.Children, PRs: []nextDigestPR{}}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
 	}
@@ -278,7 +294,7 @@ func digestMerges(m mergeSource) mergeSource {
 
 // rosterDigest is the digest of one row of the listing. A ticket whose files
 // could not be read says so and nothing else.
-func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, blocked []nextBlocker) nextDigest {
+func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, state string, blocked []nextBlocker) nextDigest {
 	kind := data.rec.KindOrDefault()
 	if data.problem != "" {
 		return nextDigest{Kind: kind, PhaseProblem: data.problem, PRs: []nextDigestPR{}, BlockedBy: blocked}
@@ -289,11 +305,11 @@ func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject
 	id := data.in.ID
 	plan, shared, err := taskPlan(st, cfg, mp, merges, id, data.rec)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, nil, err.Error(), stack.Plan{Ticket: id}, nil, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), stack.Plan{Ticket: id}, nil, blocked)
 	}
 	t, err := derivePhaseStacked(st, id, merges, plan)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, nil, err.Error(), plan, shared, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, blocked)
 	}
-	return taskDigest(st, cfg, merges, id, data, &t, "", plan, shared, blocked)
+	return taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, blocked)
 }
