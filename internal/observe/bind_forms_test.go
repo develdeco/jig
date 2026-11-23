@@ -26,3 +26,22 @@ func TestTheBindingReadsTheFormsACommandTakes(t *testing.T) {
 	expectTicket(t, "a cd with a subshell", r.call("a-2", "cd $(pwd) && ls"), "")
 	expectTicket(t, "a cd to home", r.call("a-2", "cd ~ && ls"), "")
 }
+
+// TestALeadingCdReadsATildeOnlyAtTheStart: the shell expands ~ at the start of
+// a path, so such a cd names no plain directory, while a ~ inside one (a
+// Windows short name, as in a runner's temp directory) is part of the path.
+func TestALeadingCdReadsATildeOnlyAtTheStart(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ cmd, want string }{
+		{"cd C:/Users/RUNNER~1/AppData/Local/Temp/wt && ls", "C:/Users/RUNNER~1/AppData/Local/Temp/wt"},
+		{`cd "/c/PROGRA~1/w" && ls`, "/c/PROGRA~1/w"},
+		{"cd ~ && ls", ""},
+		{"cd ~/work && ls", ""},
+		{"cd ~other/work && ls", ""},
+	} {
+		dir, cd := leadingCd(c.cmd)
+		if !cd || dir != c.want {
+			t.Errorf("leadingCd(%q) = %q, %v, want %q, true", c.cmd, dir, cd, c.want)
+		}
+	}
+}

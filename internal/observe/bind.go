@@ -480,8 +480,9 @@ func (h *handler) trackerOwner(n string) string {
 
 // leadingCd is the directory a command line that starts with `cd <dir> &&`
 // moves to, and whether it does. A directory that is not one plain path (a
-// variable, a substitution, a subshell) is "": shown on no ticket, never
-// guessed.
+// variable, a substitution, a subshell, a home the shell expands) is "":
+// shown on no ticket, never guessed. A shell expands ~ only at a word's start,
+// so one inside a path (a Windows short name such as RUNNER~1) is plain.
 func leadingCd(cmd string) (dir string, cd bool) {
 	s := strings.TrimSpace(cmd)
 	rest, ok := strings.CutPrefix(s, "cd ")
@@ -496,7 +497,7 @@ func leadingCd(cmd string) (dir string, cd bool) {
 	if len(dir) >= 2 && (dir[0] == '"' || dir[0] == '\'') && dir[len(dir)-1] == dir[0] {
 		dir = dir[1 : len(dir)-1]
 	}
-	if dir == "" || strings.ContainsAny(dir, "$`;|()<>*?\"'~") {
+	if dir == "" || strings.HasPrefix(dir, "~") || strings.ContainsAny(dir, "$`;|()<>*?\"'") {
 		return "", true
 	}
 	return dir, true
