@@ -168,8 +168,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	s.out.until(t, "waits to land")
 	s.keys("\r") // open JIG-1
 	s.out.until(t, "needs you")
-	s.keys("g")
-	r.untilRan(t, "gate JIG-1 --store /s")
+	s.keys("aOK")
+	r.untilRan(t, "answer --as person --store /s JIG-1 q-001 -- OK")
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatalf("Run = %v, want nil after q", err)
@@ -183,7 +183,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 		t.Errorf("the first screen is not the store being read before the roster:\n%s", first)
 	}
 	for i, f := range frames {
-		if !strings.Contains(f, "jig  demo") || !strings.Contains(f, "quit") {
+		// The keys: quit, or the answer being typed (enter sends, esc cancels).
+		if !strings.Contains(f, "jig  demo") || !(strings.Contains(f, "quit") || strings.Contains(f, "cancel")) {
 			t.Errorf("screen %d is not a whole screen (no header or no keys):\n%s", i, f)
 		}
 		if strings.Contains(f, "\x1b") {
@@ -311,8 +312,8 @@ func TestRunOnAScreenDrawsWithTheRendererAndEndsOnQ(t *testing.T) {
 	go func() { done <- Run(context.Background(), cfg, pr, out, true) }()
 
 	out.until(t, "needs you")
-	pw.Write([]byte("g"))
-	r.untilRan(t, "gate JIG-1 --store /s")
+	pw.Write([]byte("aOK"))
+	r.untilRan(t, "answer --as person --store /s JIG-1 q-001 -- OK")
 	pw.Write([]byte("q"))
 	select {
 	case err := <-done:

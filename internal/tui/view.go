@@ -69,6 +69,13 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top.
 func (m *Model) page() page {
+	// A page sizes its panels by the rows the body has, which the hint line's
+	// height takes from, and the hint line is cut by the row under the cursor,
+	// which the page gives: while a page is built the hint line is cut by the
+	// ticket View last found under the cursor, so the one never waits on the
+	// other.
+	m.paging++
+	defer func() { m.paging-- }()
 	e := m.top()
 	switch e.screen {
 	case screenTicket:
@@ -98,6 +105,11 @@ func (m *Model) View() string {
 	w, h := m.width, m.height
 	m.followSel()
 	pg := m.page()
+	if id := m.targetTicket(); id != m.hintFor {
+		// The hint line the page was sized by was cut for another ticket.
+		m.hintFor = id
+		pg = m.page()
+	}
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -350,72 +362,87 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 	return lines
 }
 
+// hint is a key on the hint line: the key, its meaning, and the action that
+// decides whether it is listed (none for a key that is always there).
+type hint struct {
+	key, text string
+	act       action
+}
+
 // keyHints are the keys that do something on the screen on top, as key and
-// meaning pairs.
+// meaning pairs: the screen's keys, and of those the actions only the ones can
+// lets run now. The key back and the key quit come first, so a line that wraps
+// never strands them.
 func (m *Model) keyHints() []string {
-	move := []string{"↑↓", "move"}
-	open := []string{"enter", "open"}
-	back := []string{"esc", "back"}
-	answer := []string{"a", "answer"}
-	keep := []string{"k", "keep"}
-	dismiss := []string{"d", "dismiss"}
-	gate := []string{"g", "gate"}
-	publish := []string{"p", "publish"}
-	land := []string{"5", "land"}
-	tail := []string{"t", "tail"}
-	quit := []string{"q", "quit"}
-	var keys [][]string
+	id := m.hintFor
+	if m.paging == 0 {
+		id = m.targetTicket()
+	}
+	move := hint{key: "↑↓", text: "move"}
+	open := hint{key: "enter", text: "open"}
+	back := hint{key: "esc", text: "back"}
+	answer := hint{"a", "answer", actAnswer}
+	keep := hint{"k", "keep", actKeep}
+	dismiss := hint{"d", "dismiss", actDismiss}
+	gate := hint{"g", "gate", actGate}
+	publish := hint{"p", "publish", actPublish}
+	say := hint{"say", `"Land ` + id + `"`, actLandWord}
+	land := hint{key: "5", text: "land"}
+	tail := hint{key: "t", text: "tail"}
+	quit := hint{key: "q", text: "quit"}
+	var keys []hint
 	switch m.top().screen {
 	case screenMain:
-		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
+		keys = []hint{quit, move, open, gate, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenChart:
-		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
+		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:
-		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, land, tail, quit}
+		keys = []hint{back, quit, move, open, answer, keep, dismiss, gate, publish, say, land, tail}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
-			keys = [][]string{back, tail, quit}
+			keys = []hint{back, quit, tail}
 		} else if isMulti(t) {
 			// A multi-task's tasks open; nothing else is done from its screen.
-			keys = [][]string{move, open, back, tail, quit}
+			keys = []hint{back, quit, move, open, tail}
 		}
 	case screenBrief:
-		keys = [][]string{move, open, back, land, tail, quit}
+		keys = []hint{back, quit, move, open, say, land, tail}
 	case screenBuild:
-		keys = [][]string{move, open, back, gate, land, tail, quit}
+		keys = []hint{back, quit, move, open, gate, say, land, tail}
 	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, land, tail, quit}
+		keys = []hint{back, quit, move, keep, dismiss, gate, say, land, tail}
 	case screenPublish:
-		keys = [][]string{{"↑↓", "scroll"}, back, publish, land, tail, quit}
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, publish, say, land, tail}
 	case screenSlice:
-		keys = [][]string{move, back, answer, land, tail, quit}
+		keys = []hint{back, quit, move, answer, say, land, tail}
 	case screenLand:
-		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
 	}
 	// The key up to the issue, on the screens of a task that is in one's plan, and
-	// the one that shows the map, on the plan: each goes after the key back.
-	var extra []string
-	switch id := m.upFrom(); {
-	case id != "" && m.multiParent(id) != "":
-		extra = []string{"c", "multi-task"}
-	case id != "" && len(m.issuesOf(id)) > 0:
-		extra = []string{"c", "issue"}
+	// the one that shows the map, on the plan: each goes after the key quit, on
+	// a screen that has a key back.
+	var extra *hint
+	switch up := m.upFrom(); {
+	case up != "" && m.multiParent(up) != "":
+		extra = &hint{key: "c", text: "multi-task"}
+	case up != "" && len(m.issuesOf(up)) > 0:
+		extra = &hint{key: "c", text: "issue"}
 	case m.top().screen == screenChart:
 		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
-			extra = []string{"m", "map"}
+			extra = &hint{key: "m", text: "map"}
 		}
 	}
-	if extra != nil {
-		for i, k := range keys {
-			if k[0] == "esc" {
-				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
-				break
+	flat := make([]string, 0, 2*len(keys)+2)
+	for _, k := range keys {
+		if k.act != "" {
+			if ok, _ := m.canOn(id, k.act); !ok {
+				continue
 			}
 		}
-	}
-	flat := make([]string, 0, 2*len(keys))
-	for _, k := range keys {
-		flat = append(flat, k...)
+		flat = append(flat, k.key, k.text)
+		if k.key == "q" && extra != nil && keys[0].key == "esc" {
+			flat = append(flat, extra.key, extra.text)
+		}
 	}
 	return flat
 }

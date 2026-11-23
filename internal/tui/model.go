@@ -238,7 +238,11 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	started   time.Time
+	// paging counts the pages being built, nested; hintFor is the ticket the
+	// hint line is cut for while one is.
+	paging  int
+	hintFor string
+	started time.Time
 }
 
 // New builds the model for cfg.
@@ -955,17 +959,27 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	case "esc", "left", "backspace":
 		m.back()
 	case "a":
-		m.beginAnswer()
+		if m.allow(actAnswer) {
+			m.beginAnswer()
+		}
 	case "k":
-		return m.triage("keep")
+		if m.allow(actKeep) {
+			return m.triage("keep")
+		}
 	case "d":
-		return m.triage("dismiss")
+		if m.allow(actDismiss) {
+			return m.triage("dismiss")
+		}
 	case "t":
 		m.tail = !m.tail
 	case "g":
-		return m.gate()
+		if m.allow(actGate) {
+			return m.gate()
+		}
 	case "p":
-		m.beginPublish()
+		if m.allow(actPublish) {
+			m.beginPublish()
+		}
 	case "5":
 		return m.openLand()
 	case "c":
@@ -1058,10 +1072,17 @@ func (m *Model) selected() *rowRef {
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
-	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
-		// A row the window does not show is not under the cursor: a key that
-		// acts on it would decide what its person cannot see.
-		return nil
+	if e := m.top(); e.lead > 0 {
+		// The window is cut by the rows the body has, which the hint line takes
+		// from and the hint line asks the cursor: cut for the last ticket, as in a page.
+		m.paging++
+		shown := m.rowShown(sel)
+		m.paging--
+		if !shown {
+			// A row the window does not show is not under the cursor: a key that
+			// acts on it would decide what its person cannot see.
+			return nil
+		}
 	}
 	return &refs[sel]
 }
@@ -1213,6 +1234,16 @@ func (m *Model) refreshAll() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// allow asks can whether the action runs: when it does not, the reason is the
+// notice and nothing runs. The hints list the keys by the same answer.
+func (m *Model) allow(a action) bool {
+	ok, why := m.can(a)
+	if !ok {
+		m.notice = why
+	}
+	return ok
 }
 
 // targetTicket is the ticket a key acts on: the open one, else the one under

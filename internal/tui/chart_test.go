@@ -134,10 +134,15 @@ func TestTheChartCursorStartsOnTheFirstTicketNotPublishedAndATicketOpensAndRetur
 func TestKeysOnTheChartActOnTheTicketUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	g.pin("JIG-8", reviewReady())
+	g.syncDigests()
 	g.press("down", "g")
 	if got := g.r.lines(); !reflect.DeepEqual(got, []string{"gate JIG-8 --store /s"}) {
 		t.Errorf("g ran %v, want the gate of JIG-8", got)
 	}
+	g.pin("JIG-8", publishReady())
+	g.pin("JIG-4", publishReady())
+	g.syncDigests()
 	g.press("p")
 	if v := g.view(); !strings.Contains(v, "publish JIG-8: approve the reviewed head") {
 		t.Errorf("p did not ask to publish JIG-8:\n%s", v)
@@ -280,7 +285,10 @@ func TestAKeyThatRanOnAChartsTicketMarksTheChartToBeRead(t *testing.T) {
 	t.Parallel()
 	g, advance := chartQuietRig(t)
 	before := g.r.ran("next checkout --json --store /s")
-	g.press("down", "g")
+	g.press("down")
+	g.pin(g.m.targetTicket(), reviewReady())
+	g.syncDigests()
+	g.press("g")
 	advance(10 * time.Second)
 	g.send(idleMsg{})
 	if n := g.r.ran("next checkout --json --store /s"); n != before+1 {

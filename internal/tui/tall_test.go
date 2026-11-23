@@ -107,8 +107,9 @@ func TestTheScreenOf80By24IsAsItWasWhateverTheCapsScaleTo(t *testing.T) {
 		t.Errorf("a screen shorter than 80x24 has other caps than the screen's: %d and %d", substepCap(bodyRef-5), activityCap(bodyRef-5))
 	}
 	g := newRig(t, "JIG-1")
-	if g.m.bodyRows() != bodyRef {
-		t.Fatalf("the 80x24 body is %d rows, but the caps were set for %d", g.m.bodyRows(), bodyRef)
+	// The hint line is one line or two, by the keys that can run.
+	if got := g.m.bodyRows(); got != bodyRef && got != bodyRef+1 {
+		t.Fatalf("the 80x24 body is %d rows, but the caps were set for %d", got, bodyRef)
 	}
 	if substepCap(45) <= substepLines || activityCap(45) <= activityLines {
 		t.Errorf("a body of 45 rows has caps %d and %d, want more than %d and %d", substepCap(45), activityCap(45), substepLines, activityLines)

@@ -237,7 +237,10 @@ func TestTriageOfTheOnlyUndecidedAskNeedsNoCursor(t *testing.T) {
 func TestGateRunsOnTheOpenTicket(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("g")
+	g.feed(jig2Mid()...)
+	g.pin("JIG-2", reviewReady())
+	g.syncDigests()
+	g.press("g")
 	want := []string{"gate JIG-2 --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands run = %q, want %q", got, want)
@@ -247,6 +250,8 @@ func TestGateRunsOnTheOpenTicket(t *testing.T) {
 func TestGateOnTheMainScreenIsForTheTicketUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
+	g.pin("JIG-2", reviewReady())
+	g.syncDigests()
 	g.press("down", "g")
 	want := []string{"gate JIG-2 --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
@@ -258,6 +263,8 @@ func TestPublishApprovesThenPushesAndOnlyOnYes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.feed(jig2Mid()...)
+	g.pin("JIG-2", publishReady())
+	g.syncDigests()
 	g.press("p")
 	if g.m.ask == nil || !strings.Contains(g.view(), "publish JIG-2") {
 		t.Fatalf("p did not ask first:\n%s", g.view())
@@ -282,9 +289,10 @@ func TestPublishApprovesThenPushesAndOnlyOnYes(t *testing.T) {
 
 func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 	t.Parallel()
-	g := newQuietRig(t, "JIG-2")
+	g := quietRigAt(t, "JIG-2", publishReady())
 	g.r.answer("publish JIG-2 --approve --store /s", "error: the latest round is not clean\ncode: PUBLISH_NOT_CLEAN\n", 1)
-	g.feed(jig2Mid()...).press("p", "y")
+	g.feed(jig2Mid()...)
+	g.press("p", "y")
 	want := []string{"publish JIG-2 --approve --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands run = %q, want only the refused approval: nothing is pushed on a refusal", got)
