@@ -131,6 +131,8 @@ type handler struct {
 	memRead bool
 
 	jlines []journal.Line
+	// jcache holds the journals the binding read, by ticket.
+	jcache map[string][]journal.Line
 	jread  bool
 	jerr   error
 

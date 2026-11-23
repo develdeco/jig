@@ -18,6 +18,10 @@ import (
 // ends, which at worst shows it a note a second time.
 const memoryWindow = 16 << 20
 
+// claimWindow is how far before a session's latest start line a held claim is
+// still looked for: a builder runs for hours.
+const claimWindow = 12 * time.Hour
+
 // sessionMemory is what the ledger says a session has done lately.
 type sessionMemory struct {
 	// started is the stamp of the session-start line, or of the earliest line
@@ -62,6 +66,8 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 	if session == "" {
 		return m, nil
 	}
+	past := false // the walk has passed the session's latest start
+	var cutoff time.Time
 	stopped := false            // the walk has passed the agent's own stop
 	closed := map[string]bool{} // the tickets whose review round the agent closed, after the walk's place
 	err := ledger.ReadBackward(root, memoryWindow, func(l journal.Line) bool {
@@ -86,6 +92,12 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 			if dir, cd := leadingCd(l.Command); l.Event == journal.EventTool && cd && dir != "" && len(m.agentDirs) < 4 {
 				m.agentDirs = append(m.agentDirs, resolveDir(dir, l.Cwd, ""))
 			}
+		}
+		if past {
+			// Before the session's latest start only the claims are read, and
+			// only as far back as a long run goes.
+			at, err := time.Parse(time.RFC3339Nano, l.TS)
+			return err != nil || !at.Before(cutoff)
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
 			m.started = at // the walk goes back in time: the last one set is the earliest
@@ -116,9 +128,19 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 				m.agentTicket, m.agentCwd = l.Ticket, l.Cwd
 			}
 		}
-		// A session-start line ends the walk: what came before it belongs to
-		// an earlier life of the session, or to none.
-		return l.Event != journal.EventSessionStart
+		// A session-start line ends what the session is and has been told: a
+		// session that resumes or compacts starts again under its id, and what
+		// came before belongs to an earlier life. The claims its agents hold
+		// are not: they are read on, back a claimWindow from the start.
+		if l.Event == journal.EventSessionStart {
+			past = true
+			if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
+				cutoff = at.Add(-claimWindow)
+			} else {
+				return false
+			}
+		}
+		return true
 	})
 	return m, err
 }

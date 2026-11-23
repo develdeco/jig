@@ -8,6 +8,8 @@ import (
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
+	"github.com/develdeco/jig/internal/locate"
+	"github.com/develdeco/jig/internal/store"
 )
 
 // A tool call is written on the ticket it belongs to, by the first of:
@@ -268,8 +270,17 @@ func (h *handler) ticketNamed(word string) string {
 	if word == "" || h.st == nil {
 		return ""
 	}
-	id, err := h.st.ResolveTicket(word)
-	if err != nil {
+	if h.st.TicketExists(word) {
+		return word // its folder says so: no ticket list is read
+	}
+	if locate.RefShaped(word) {
+		if it, err := locate.ResolveItem(h.st, h.cfg, word); err == nil && it != nil && it.Ticket != "" {
+			return it.Ticket
+		}
+		return ""
+	}
+	id, err := h.st.ResolveTicket(word) // an alias, found by a walk
+	if err != nil || !h.st.TicketExists(id) {
 		return ""
 	}
 	return id
@@ -304,18 +315,34 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 			return t, ""
 		}
 		read[t+"\x00"+c.slice] = true
-		if s, held := h.holds(t, c.slice); held {
+		if s, held := h.holds(t, c.slice, afterStop); held {
 			return t, s
 		}
 	}
 	return "", ""
 }
 
+// ticketJournal is the journal of a ticket, read once for the event.
+func (h *handler) ticketJournal(ticket string) ([]journal.Line, error) {
+	if lines, ok := h.jcache[ticket]; ok {
+		return lines, nil
+	}
+	lines, err := journal.Read(h.st, ticket)
+	if err != nil {
+		return nil, err
+	}
+	if h.jcache == nil {
+		h.jcache = map[string][]journal.Line{}
+	}
+	h.jcache[ticket] = lines
+	return lines, nil
+}
+
 // holds reports whether the session holds a claim on ticket that the event's
 // agent made: the slice it names, or when it names none, any claim the ledger
 // says the agent made. It returns the slice held.
-func (h *handler) holds(ticket, slice string) (string, bool) {
-	lines, err := journal.Read(h.st, ticket)
+func (h *handler) holds(ticket, slice string, afterStop bool) (string, bool) {
+	lines, err := h.ticketJournal(ticket)
 	if err != nil {
 		h.fail(err)
 		return "", false
@@ -323,7 +350,7 @@ func (h *handler) holds(ticket, slice string) (string, bool) {
 	session := h.session()
 	var held []*journal.Line // the session's claims not released since, oldest first
 	for i, l := range lines {
-		if l.Session != session {
+		if l.Session != session && l.Event != journal.EventVerified {
 			continue
 		}
 		switch l.Event {
@@ -331,6 +358,13 @@ func (h *handler) holds(ticket, slice string) (string, bool) {
 			held = append(held, &lines[i])
 		case journal.EventRelease:
 			held = deleteSlice(held, l.Slice)
+		case journal.EventVerified:
+			// The build flow never releases a green slice: a claim ends when
+			// its slice is verified, for the calls after it. The stop that
+			// follows still places the agent.
+			if !afterStop {
+				held = deleteSlice(held, l.Slice)
+			}
 		}
 	}
 	for i := len(held) - 1; i >= 0; i-- {
@@ -389,6 +423,9 @@ func (h *handler) ticketAt(dir string) string {
 	branch, ok := gitx.HeadBranch(dir)
 	if !ok || branch == "" || h.st == nil {
 		return ""
+	}
+	if lead := store.BranchLeadID(branch); lead != "" && h.st.TicketExists(lead) {
+		return lead // its folder says so: no ticket list is read
 	}
 	id, _, err := h.st.TicketForBranch(branch)
 	if err != nil {
