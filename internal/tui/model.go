@@ -218,6 +218,9 @@ type Model struct {
 	headKnown   bool
 	rosterStale bool
 	lastRoster  time.Time
+	// rosterEnded is when the last list read came back: the spacing between
+	// reads counts from it, so a slow list is never read again at once.
+	rosterEnded time.Time
 	// followNew is set while screens opened on no ticket wait to open the
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
@@ -397,7 +400,7 @@ func (m *Model) onIdle() tea.Cmd {
 // still sees it through its idle status read.
 func (m *Model) onStoreIdle() tea.Cmd {
 	m.readHead()
-	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.lastRoster) < m.idleAfter {
+	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.rosterEnded) < m.idleAfter {
 		return nil
 	}
 	cmds := []tea.Cmd{m.loadRoster()}
@@ -694,6 +697,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 
 func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
 	m.rosterBusy = false
+	m.rosterEnded = m.now()
 	if msg.err != nil {
 		m.rosterFails++
 		if m.rosterFails < readRetries {

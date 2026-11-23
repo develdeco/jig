@@ -14,6 +14,10 @@ func (m *Model) mainPage() page {
 		m.mainCharts(&p, 4, 0)
 		return p
 	}
+	if len(ids) == 0 && !m.w.rosterRead && m.run != nil {
+		p.add(m.st.dim("reading the store…"))
+		return p
+	}
 	if len(ids) == 0 {
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
@@ -65,9 +69,17 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 	if n := len(t.openQuestions(m.zone, "")); n > 0 {
 		return m.st.state(StateNeedsInput, strconv.Itoa(n)+" open "+plural(n, "question", "questions"))
 	}
+	if d := t.digest; d != nil && len(d.Phases) == 0 {
+		// An issue or a multi-task has no phases: its own words say what it is.
+		return m.st.state(steps[currentStep(steps)].State, steps[currentStep(steps)].Text)
+	}
+	kind := ""
+	if k := t.digest.kindWords(); k != "" {
+		kind = m.st.dim(k + " · ")
+	}
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return m.st.state(cur.State, strings.TrimSpace("published "+t.publish().PR))
+		return kind + m.st.state(cur.State, strings.TrimSpace("published "+t.publish().PR))
 	}
-	return m.st.dim(stepNames[cur.Step]+": ") + m.st.state(cur.State, cur.Text)
+	return kind + m.st.dim(stepNames[cur.Step]+": ") + m.st.state(cur.State, cur.Text)
 }

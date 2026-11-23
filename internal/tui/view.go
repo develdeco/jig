@@ -232,6 +232,11 @@ func (m *Model) header(w int) []string {
 		if t != nil && t.title != "" {
 			title = t.title
 		}
+		if t != nil && e.screen == screenTicket {
+			if k := t.digest.kindWords(); k != "" {
+				crumbs += "  " + m.st.dim(k)
+			}
+		}
 		switch e.screen {
 		case screenBrief:
 			crumbs += " › 1 brief"
