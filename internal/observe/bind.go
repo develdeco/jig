@@ -303,9 +303,24 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 		return "", ""
 	}
 	mem := h.memory()
+	if afterStop {
+		// A stop is placed by the agent's latest claim whether or not it has
+		// ended: an ended claim stops binding calls, never where the agent's
+		// spend goes.
+		for _, c := range mem.claims {
+			t := h.ticketNamed(c.word)
+			if t == "" {
+				t = c.ticket
+			}
+			if t != "" {
+				return t, c.slice
+			}
+		}
+		return "", ""
+	}
 	read := map[string]bool{}
 	for _, c := range mem.claims {
-		if c.ended && !afterStop {
+		if c.ended {
 			continue
 		}
 		t := h.ticketNamed(c.word)
