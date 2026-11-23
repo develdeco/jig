@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/develdeco/jig/internal/journal"
 	"strings"
 	"testing"
 )
@@ -134,6 +135,53 @@ func TestMultiTaskNestsUnderTheIssuesTasks(t *testing.T) {
 	g.press("enter")
 	if g.m.Screen() != "ticket" || g.m.top().ticket != "SHOP-6" {
 		t.Errorf("enter on a nested task opened %s of %q", g.m.Screen(), g.m.top().ticket)
+	}
+}
+
+// TestASharedTaskRowDrawsEveryPartFromItsOwnIssue: the icon, the five dots and
+// the words of a task two issues list, in the plan of the second, are drawn from
+// the task as it stands there, whatever it did into the first: landed there,
+// waiting to land there, closed before it published, and ready to publish there.
+func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		edit  func(d *digestInfo)
+		land  bool
+		icon  string
+		dots  string
+		words string
+	}{
+		{"landed there", nil, true, "✓ SHOP-1", "✓ ✓ ✓ ✓ ✓", "landed · into the issue's branch"},
+		{"waits to land there", nil, false, "◇ SHOP-1", "✓ ✓ ✓ ✓ ◇", `waits to land · say "Land SHOP-1"`},
+		{"closed before publishing", func(d *digestInfo) { d.Closed = "not planned"; d.PRs = d.PRs[:1] }, false, "⊖ SHOP-1", "", "closed · not planned"},
+		{"ready to publish there", func(d *digestInfo) { d.PRs = d.PRs[:1] }, false, "", "✓ ✓ ✓ ○ ○", "not published into SHOP-50"},
+	}
+	for _, c := range cases {
+		g := planMain(t, planSpec{second: true})
+		g.m.height, g.m.width = 40, 110
+		d := *g.m.w.tickets["SHOP-1"].digest
+		if c.edit != nil {
+			c.edit(&d)
+		}
+		g.pin("SHOP-1", &d)
+		if c.land {
+			g.feed(jl(at(40, 0), "SHOP-1", "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "502-another", "SHOP-50" }))
+		}
+		g.syncDigests()
+		g.press("end", "enter")
+		row := lineWith(stripANSI(g.view()), "SHOP-1  ")
+		for _, want := range []string{c.icon, c.dots, c.words} {
+			if want != "" && !strings.Contains(row, want) {
+				t.Errorf("%s: the row lacks %q: %q", c.name, want, row)
+			}
+		}
+		if c.name == "ready to publish there" && (strings.Contains(row, "✓ SHOP-1") || strings.Contains(row, "◇") || strings.Contains(row, "landed")) {
+			t.Errorf("%s: the row reads a landing or a publish that is not here: %q", c.name, row)
+		}
+		if c.name == "closed before publishing" && strings.Contains(row, "✓ ✓ ✓ ✓ ✓") {
+			t.Errorf("%s: the dots read published: %q", c.name, row)
+		}
 	}
 }
 

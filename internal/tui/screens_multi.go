@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -97,21 +98,16 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 			r.mark = StateQueued
 		}
 	case m.shared(r.t):
-		r.end, r.atEnd = m.endInIssue(r.t, container, branch)
-		r.done = r.atEnd
-		// The icon and the last two steps are this issue's, not another's: a task
-		// with no pull request into it has published nothing here, whatever it did
-		// into the other, and stands where its own earlier steps put it.
-		r.steps = slices.Clone(r.steps)
+		// Every part of the row, its icon, its five dots and its words, is drawn
+		// from the task as it stands in this issue and from nothing of the other's.
+		cut := m.cutFor(r.t, container, branch)
+		r.t, r.d = cut, m.phaseOf(cut)
+		r.steps = m.stepRows(cut, r.d)
+		r.end, r.atEnd = m.endOf(cut)
+		r.done = r.steps[stepPublish].Done
+		r.mark = ""
 		if r.atEnd {
 			r.mark = r.end.State
-			r.steps[stepPublish].State, r.steps[stepPublish].Done = StateOK, true
-			r.steps[stepLand].State = r.end.State
-			r.steps[stepLand].Done = r.end.State == StateLanded
-		} else {
-			for _, i := range []int{stepPublish, stepLand} {
-				r.steps[i].State, r.steps[i].Done = StateQueued, false
-			}
 		}
 	}
 	return r
@@ -146,12 +142,13 @@ func (m *Model) landedInto(t *ticket, container string) []landedAt {
 	return out
 }
 
-// endInIssue is where the task t stands at its end as far as issue container
-// goes, whose branch is branch: its pull request into that branch and the
-// landing recorded into that issue, never another issue's. It is endStateOf over
-// the digest cut down to those two facts; false while the task has no pull
-// request into the branch.
-func (m *Model) endInIssue(t *ticket, container, branch string) (endState, bool) {
+// cutFor is the task t as it stands in issue container, whose branch is branch:
+// a copy whose digest has only the pull request into that branch and whose
+// Publish and Land phases say what that pull request and the landing recorded
+// into that issue make of them (closed stays closed), and whose journal has no
+// landed line of another issue. Whatever draws from it, an end state, the five
+// steps or a note, can read nothing of the other issue.
+func (m *Model) cutFor(t *ticket, container, branch string) *ticket {
 	d := *t.digest
 	d.PRs = nil
 	for _, pr := range t.digest.PRs {
@@ -159,30 +156,51 @@ func (m *Model) endInIssue(t *ticket, container, branch string) (endState, bool)
 			d.PRs = append(d.PRs, pr)
 		}
 	}
-	lines := m.landedInto(t, container)
-	d.Phases = slices.Clone(t.digest.Phases)
+	c := *t
+	c.lines = nil
+	for _, l := range t.lines {
+		if l.Event == journal.EventLanded && l.Into != container {
+			continue
+		}
+		c.lines = append(c.lines, l)
+	}
+	lines := m.landedInto(&c, container)
 	merged := len(d.PRs) > 0
 	for _, pr := range d.PRs {
 		merged = merged && strings.EqualFold(pr.State, "merged")
 	}
+	d.Phases = slices.Clone(t.digest.Phases)
+	published := len(d.PRs) > 0
 	for i, p := range d.Phases {
 		switch p.Name {
 		case string(phase.Publish):
-			d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "not published into "+container
-			if len(d.PRs) > 0 {
+			if published {
 				d.Phases[i].State, d.Phases[i].Text = phase.StateDone, "pull request opened"
+			} else {
+				d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "not published into "+container
 			}
 		case string(phase.Land):
-			d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "waits for a merge"
 			switch {
 			case len(lines) > 0:
 				d.Phases[i].State, d.Phases[i].Text = phase.StateDone, "landed"
 			case merged:
-				d.Phases[i].Text = "merged on the host, not recorded"
+				d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "merged on the host, not recorded"
+			case published:
+				d.Phases[i].State, d.Phases[i].Text = phase.StateCurrent, "waits for a merge"
+			default:
+				d.Phases[i].State, d.Phases[i].Text = phase.StatePending, "after the publish"
 			}
 		}
 	}
-	return endStateOf(t.id, &d, lines)
+	switch {
+	case len(lines) > 0 || published:
+		d.Current, d.Ready = string(phase.Land), false
+	case d.Closed == "" && t.digest.Current == string(phase.Land):
+		// Done everything but publishing here: publishing is what is next.
+		d.Current, d.Ready = string(phase.Publish), true
+	}
+	c.digest = &d
+	return &c
 }
 
 // inBranch says the issue's branch as such in words that name it, so a row stays
