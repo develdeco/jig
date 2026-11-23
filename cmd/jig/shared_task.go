@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
@@ -232,6 +233,21 @@ func sharedRows(st *store.Store, input stack.Input, merges mergeSource, id strin
 
 // prState is the state of a pull request recorded for a repo, from the merge
 // fact read for its issue.
+// prAsOf is when the state prState gives was read, "" when this run read it or
+// it merged.
+func prAsOf(m ready.Merge, repo string, several bool) string {
+	for i, r := range m.Repos {
+		if several && r.Repo != repo && !(i == 0 && r.Repo == "") {
+			continue
+		}
+		if !r.Met && !r.AsOf.IsZero() {
+			return r.AsOf.UTC().Format(time.RFC3339)
+		}
+		return ""
+	}
+	return ""
+}
+
 func prState(m ready.Merge, repo string, several bool) string {
 	for i, r := range m.Repos {
 		if several && r.Repo != repo && !(i == 0 && r.Repo == "") {

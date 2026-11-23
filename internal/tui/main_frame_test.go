@@ -59,6 +59,16 @@ func listed(id string) rosterRow {
 	}}
 }
 
+// rosterListing is a roster that lists the ids and nothing else of them, so
+// what a screen says of a ticket is what its lines say.
+func rosterListing(ids ...string) string {
+	var rows []string
+	for _, id := range ids {
+		rows = append(rows, `{"id":"`+id+`","title":"Ticket `+id+`","state":"ready"}`)
+	}
+	return `{"tickets":[` + strings.Join(rows, ",") + `]}` + "\n"
+}
+
 // quietConfig is a model's configuration with a runner that prints nothing.
 func quietConfig() Config {
 	return Config{Run: func([]string) (string, int) { return "", 0 }, Zone: time.UTC, Width: 100, Height: 24, Project: "demo",

@@ -401,6 +401,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 					URL    string `json:"url"`
 					State  string `json:"state"`
 					Target string `json:"target"`
+					AsOf   string `json:"as_of"`
 				} `json:"prs"`
 				Slices *struct {
 					Total      int `json:"total"`
@@ -441,7 +442,11 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
 			}
 			for _, p := range g.PRs {
-				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
+				pr := digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target}
+				if at, err := time.Parse(time.RFC3339, p.AsOf); err == nil {
+					pr.AsOf = at
+				}
+				d.PRs = append(d.PRs, pr)
 			}
 			for _, c := range g.Children {
 				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})

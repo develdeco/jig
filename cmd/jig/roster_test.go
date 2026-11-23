@@ -291,9 +291,27 @@ func TestRosterGitProcessesDoNotGrowWithTicketsOrBranches(t *testing.T) {
 		// Both are read once before counting, so what is counted is a read
 		// that finds the answers about ancestry kept.
 		var counts [2]int
+		var rows nextRoster
 		for i, w := range []rosterWorld{small, large} {
 			w.read(t)
-			counts[i] = gittest.CountGit(t, func() { w.read(t) })
+			counts[i] = gittest.CountGit(t, func() { rows = w.read(t) })
+		}
+		// The rows are the store's tickets, in its id order, each with a digest.
+		ids, err := large.rig.st.Tickets()
+		if err != nil || len(rows.Tickets) != len(ids) {
+			t.Fatalf("%s: %d rows for %d tickets (%v)", layout.name, len(rows.Tickets), len(ids), err)
+		}
+		withPR := 0
+		for i, row := range rows.Tickets {
+			if row.ID != ids[i] || row.Digest == nil {
+				t.Fatalf("%s: row %d is %s with digest %v, want %s with one", layout.name, i, row.ID, row.Digest, ids[i])
+			}
+			if len(row.Digest.PRs) > 0 {
+				withPR++
+			}
+		}
+		if withPR != 60 {
+			t.Errorf("%s: %d rows carry a pull request, want the 60 that published", layout.name, withPR)
 		}
 		if counts[0] != counts[1] {
 			t.Errorf("%s: a read starts %d git processes of 12 tickets and %d of 120", layout.name, counts[0], counts[1])
@@ -305,47 +323,22 @@ func TestRosterGitProcessesDoNotGrowWithTicketsOrBranches(t *testing.T) {
 	}
 }
 
-// TestRosterOfAThousandTickets: a store of 1,000 tickets and 500 local
-// branches is read into its rows, in id order, with the same few git processes
-// as a small one; the wall time is logged.
-func TestRosterOfAThousandTickets(t *testing.T) {
+// TestRosterOfAThousandTicketsByHand reads a store of 1,000 tickets and 500
+// local branches and logs the wall time and the processes of a first read and
+// of the next: the figure of the pull request's demo (under 2 s once the facts
+// are kept). It builds the store for seconds, so it runs only by hand:
+// JIG_ROSTER_THOUSAND=1 go test ./cmd/jig -run ByHand -v.
+func TestRosterOfAThousandTicketsByHand(t *testing.T) {
+	if os.Getenv("JIG_ROSTER_THOUSAND") == "" {
+		t.Skip("by hand: set JIG_ROSTER_THOUSAND=1")
+	}
 	w := newRosterWorld(t, 1000, 500, true)
-	var n nextRoster
 	started := time.Now()
 	first := gittest.CountGit(t, func() { w.read(t) })
 	t.Logf("1,000 tickets and 500 branches, a first read: %s, %d git processes", time.Since(started), first)
 	started = time.Now()
-	count := gittest.CountGit(t, func() { n = w.read(t) })
+	count := gittest.CountGit(t, func() { w.read(t) })
 	t.Logf("1,000 tickets and 500 branches: %s, %d git processes", time.Since(started), count)
-	if len(n.Tickets) != 1000 {
-		t.Fatalf("%d rows, want 1000", len(n.Tickets))
-	}
-	ids, err := w.rig.st.Tickets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, row := range n.Tickets {
-		if row.ID != ids[i] {
-			t.Fatalf("row %d is %s, want %s: rows are in the store's id order", i, row.ID, ids[i])
-		}
-		if row.Digest == nil {
-			t.Fatalf("%s has no digest", row.ID)
-		}
-	}
-	small := newRosterWorld(t, 12, 6, true)
-	small.read(t)
-	if want := gittest.CountGit(t, func() { small.read(t) }); count != want {
-		t.Errorf("%d git processes for 1,000 tickets, %d for 12", count, want)
-	}
-	published := 0
-	for _, row := range n.Tickets {
-		if len(row.Digest.PRs) > 0 {
-			published++
-		}
-	}
-	if published != 500 {
-		t.Errorf("%d rows carry a pull request, want the 500 that published", published)
-	}
 }
 
 // TestRosterVerbReadsInOneScope: the verb the screens run opens the read scope
@@ -387,7 +380,7 @@ func TestRosterVerbReadsInOneScope(t *testing.T) {
 
 	// The scope pins the chart index: a chart made while it stands is not seen
 	// by it, and is once it ends.
-	end := readScope(w.rig.st, w.mp, w.rig.home)
+	end := readScope(w.rig.st, w.mp, w.rig.home, true)
 	before, err := w.rig.st.ChartNames()
 	if err != nil {
 		t.Fatal(err)

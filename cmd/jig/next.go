@@ -145,7 +145,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		return 0
 	}
 	if *rosterFlag {
-		defer readScope(st, mp, jigHome)()
+		defer readScope(st, mp, jigHome, false)()
 		n, err := nextForRoster(st, cfg, mp, newKeptMergeReader(e, st, cfg, mp, jigHome))
 		if err != nil {
 			return renderErr(stdout, err)
@@ -222,7 +222,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		n.setReviewer(e, verifydeliver.Deps{Store: st, Home: jigHome})
 		out, blocks = n, n.blocks(*topology)
 	} else {
-		defer readScope(st, mp, jigHome)()
+		defer readScope(st, mp, jigHome, true)()
 		n, err := nextForStore(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
 		if err != nil {
 			return renderErr(stdout, err)

@@ -3,7 +3,7 @@ package gitx
 import (
 	"bufio"
 	"bytes"
-	"io"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +36,11 @@ var scopes = struct {
 // scopedRepo is one directory's open scope.
 type scopedRepo struct {
 	open int
-	// facts is where the facts about commits are kept, nil for none.
-	facts *Kept
+	// ancestry and overlaps are where facts about commits are kept, nil for
+	// none: whether one commit is in another's history, and the files a branch
+	// changes and whether two branches merge. They are files of their own, so
+	// a read that asks only the first reads none of the second.
+	ancestry, overlaps *Kept
 
 	once sync.Once
 	// tips maps a full ref name under refs/heads and refs/remotes to the commit
@@ -49,13 +52,16 @@ type scopedRepo struct {
 }
 
 // BeginScope opens a read scope for each of dirs, keeping facts about commits in
-// the file at keptPath ("" keeps none). The returned function ends it, and
-// writes the answers learned to the file. Scopes nest: a directory is open
-// until every scope that opened it has ended.
-func BeginScope(keptPath string, dirs ...string) (end func()) {
-	var kept *Kept
-	if keptPath != "" {
-		kept = keptFileAt(keptPath)
+// the files at ancestryPath and overlapsPath ("" keeps none of that kind). The
+// returned function ends it, and writes the facts learned to the files. Scopes
+// nest: a directory is open until every scope that opened it has ended.
+func BeginScope(ancestryPath, overlapsPath string, dirs ...string) (end func()) {
+	var ancestry, overlaps *Kept
+	if ancestryPath != "" {
+		ancestry = keptFileAt(ancestryPath, validAncestry, maxAncestryBytes)
+	}
+	if overlapsPath != "" {
+		overlaps = keptFileAt(overlapsPath, validOverlap, maxOverlapBytes)
 	}
 	keys := make([]string, 0, len(dirs))
 	scopes.Lock()
@@ -70,8 +76,11 @@ func BeginScope(keptPath string, dirs ...string) (end func()) {
 			scopes.by[key] = s
 		}
 		s.open++
-		if s.facts == nil {
-			s.facts = kept
+		if s.ancestry == nil {
+			s.ancestry = ancestry
+		}
+		if s.overlaps == nil {
+			s.overlaps = overlaps
 		}
 		keys = append(keys, key)
 	}
@@ -89,8 +98,11 @@ func BeginScope(keptPath string, dirs ...string) (end func()) {
 				}
 			}
 			scopes.Unlock()
-			if kept != nil {
-				kept.flush()
+			if ancestry != nil {
+				ancestry.flush()
+			}
+			if overlaps != nil {
+				overlaps.flush()
 			}
 		})
 	}
@@ -103,11 +115,18 @@ func scopeOf(dir string) *scopedRepo {
 	return scopes.by[memoKey(dir)]
 }
 
-// kept is where the scope keeps facts about commits, nil for none.
-func (s *scopedRepo) kept() *Kept {
+// keptAncestry and keptOverlaps are where the scope keeps those facts, nil for
+// none.
+func (s *scopedRepo) keptAncestry() *Kept {
 	scopes.Lock()
 	defer scopes.Unlock()
-	return s.facts
+	return s.ancestry
+}
+
+func (s *scopedRepo) keptOverlaps() *Kept {
+	scopes.Lock()
+	defer scopes.Unlock()
+	return s.overlaps
 }
 
 // load lists the repo's branches once.
@@ -163,13 +182,16 @@ func listedCommit(dir, rev string) (sha string, found, answered bool) {
 
 // Kept is a file of facts about commit ids kept on this machine: a line for
 // each, "<key> TAB <answer>", where the key names the question and the ids it is
-// about (whether one commit is in another's history, which files a branch
-// changes past a base, whether two branches merge). A commit id names its whole
-// history, so what is asked of ids never changes: the file is only ever added
-// to, a line that is not whole is skipped, and a fact is asked of git once, by
-// this process or any other.
+// about. A commit id names its whole history, so what is asked of ids never
+// changes: the file is only ever added to, a fact is asked of git once, by this
+// process or any other, and a line that does not parse whole (a write cut short,
+// or joined with another's append) is no fact. The file is bounded by bytes and
+// cut back to its newest facts, so reading it costs what a roster asks, never
+// how long the machine has been used.
 type Kept struct {
-	path string
+	path     string
+	valid    func(key, answer string) bool
+	maxBytes int
 
 	mu       sync.Mutex
 	loaded   bool
@@ -186,9 +208,12 @@ type askedFact struct {
 	err  error
 }
 
-// maxKeptFacts is how many facts the file holds before it is cut back to its
-// newest half, so a long-lived machine's file does not grow without bound.
-const maxKeptFacts = 60000
+// The bounds, in bytes, of the two files: an ancestry fact is about 90 bytes, an
+// overlap fact a few kilobytes.
+const (
+	maxAncestryBytes = 1 << 20
+	maxOverlapBytes  = 4 << 20
+)
 
 var keptFiles = struct {
 	sync.Mutex
@@ -196,23 +221,43 @@ var keptFiles = struct {
 }{by: map[string]*Kept{}}
 
 // keptFileAt is the process's one handle on the file at path.
-func keptFileAt(path string) *Kept {
+func keptFileAt(path string, valid func(key, answer string) bool, maxBytes int) *Kept {
 	keptFiles.Lock()
 	defer keptFiles.Unlock()
 	if k := keptFiles.by[path]; k != nil {
 		return k
 	}
-	k := &Kept{path: path}
+	k := &Kept{path: path, valid: valid, maxBytes: maxBytes}
 	keptFiles.by[path] = k
 	return k
 }
 
-// KeptFor is the facts kept for dir by the scope open for it, nil when none is.
-func KeptFor(dir string) *Kept {
+// KeptOverlaps is the overlap facts kept for dir by the scope open for it, nil
+// when none is.
+func KeptOverlaps(dir string) *Kept {
 	if s := scopeOf(dir); s != nil {
-		return s.kept()
+		return s.keptOverlaps()
 	}
 	return nil
+}
+
+// validAncestry says a line is whole: "ancestor <id> <id>" and 0 or 1.
+func validAncestry(key, answer string) bool {
+	f := strings.Split(key, " ")
+	return len(f) == 3 && f[0] == "ancestor" && isCommitID(f[1]) && isCommitID(f[2]) && (answer == "0" || answer == "1")
+}
+
+// validOverlap says a line is whole: "diff <id> <id> <filter>" or "merge <id>
+// <id>", and a JSON answer.
+func validOverlap(key, answer string) bool {
+	f := strings.Split(key, " ")
+	switch {
+	case len(f) == 4 && f[0] == "diff" && isCommitID(f[1]) && isCommitID(f[2]) && f[3] != "":
+	case len(f) == 3 && f[0] == "merge" && isCommitID(f[1]) && isCommitID(f[2]):
+	default:
+		return false
+	}
+	return json.Valid([]byte(answer))
 }
 
 // loadLocked reads the file once; the caller holds k.mu.
@@ -222,40 +267,34 @@ func (k *Kept) loadLocked() {
 	}
 	k.loaded = true
 	k.known = map[string]string{}
-	f, err := os.Open(k.path)
+	data, err := os.ReadFile(k.path)
 	if err != nil {
 		return
 	}
-	var lines []string
-	data, rerr := io.ReadAll(f)
-	if rerr == nil && len(data) > 0 && data[len(data)-1] != '\n' {
-		// A write that was cut short leaves a last line with no end: it may be
-		// cut anywhere, after its tab included, and is no fact.
-		if i := bytes.LastIndexByte(data, '\n'); i >= 0 {
-			data = data[:i+1]
-		} else {
-			data = nil
+	cut := false
+	if len(data) > k.maxBytes {
+		// Only the newest facts are kept: from a line start past the half.
+		data = data[len(data)-k.maxBytes/2:]
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
 		}
+		cut = true
 	}
+	var kept []string
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for sc.Scan() {
-		lines = append(lines, sc.Text())
-	}
-	// Closed before the file is replaced: Windows does not rename over one
-	// that is open.
-	_ = f.Close()
-	for _, l := range lines {
-		key, answer, ok := strings.Cut(l, "\t")
-		if !ok || key == "" {
+		line := sc.Text()
+		key, answer, ok := strings.Cut(line, "\t")
+		if !ok || !k.valid(key, answer) {
 			continue
 		}
 		k.known[key] = answer
+		kept = append(kept, line)
 	}
-	if len(lines) > maxKeptFacts {
-		keep := lines[len(lines)-maxKeptFacts/2:]
+	if cut {
 		if tmp, err := os.CreateTemp(filepath.Dir(k.path), "kept-*"); err == nil {
-			_, werr := tmp.WriteString(strings.Join(keep, "\n") + "\n")
+			_, werr := tmp.WriteString(strings.Join(kept, "\n") + "\n")
 			cerr := tmp.Close()
 			if werr == nil && cerr == nil && os.Rename(tmp.Name(), k.path) == nil {
 				return
@@ -291,7 +330,7 @@ func (k *Kept) Answer(key string, ask func() (string, error)) (string, error) {
 
 	k.mu.Lock()
 	delete(k.inflight, key)
-	if c.err == nil {
+	if c.err == nil && k.valid(key, c.out) {
 		k.known[key] = c.out
 		k.pending = append(k.pending, key+"\t"+c.out)
 	}
@@ -300,8 +339,9 @@ func (k *Kept) Answer(key string, ask func() (string, error)) (string, error) {
 	return c.out, c.err
 }
 
-// flush appends the facts learned since the last flush. A file that cannot be
-// written loses them: they are asked again.
+// flush appends the facts learned since the last flush, each line whole and
+// ended, in one write. A file that cannot be written loses them: they are asked
+// again.
 func (k *Kept) flush() {
 	k.mu.Lock()
 	pending := k.pending

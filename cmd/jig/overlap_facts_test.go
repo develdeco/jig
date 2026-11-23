@@ -49,7 +49,7 @@ func overlapsRig(t *testing.T) (conflictRig, string) {
 // is kept in.
 func scanned(t *testing.T, r conflictRig, facts string) (rows []nextOverlap, diffs, merges int) {
 	t.Helper()
-	end := gitx.BeginScope(facts, r.dir)
+	end := gitx.BeginScope("", facts, r.dir)
 	argv := gittest.GitArgv(t, func() { rows = findOverlaps(r.st, r.cfg, r.mp, nil) })
 	end()
 	return rows, askedOf(argv, "diff"), askedOf(argv, "merge-tree")

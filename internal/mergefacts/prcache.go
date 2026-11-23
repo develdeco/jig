@@ -106,15 +106,18 @@ func (c *PRCache) Read(url string) PRRead {
 		}
 		c.failed += c.now().Sub(now)
 	}
+	// The host did not answer only if it was asked.
+	offline := c.Ask != nil
 	if have {
-		return PRRead{State: kept.State, AsOf: kept.At, Offline: true}
+		return PRRead{State: kept.State, AsOf: kept.At, Offline: offline}
 	}
-	return PRRead{Offline: true}
+	return PRRead{Offline: offline}
 }
 
 // Cached says what the cache holds of the pull request at url, the host never
 // asked and the age of an answer no matter: this run's answer, else the kept
-// one, dated; none ("" state, offline) when it holds nothing. It is for a
+// one, dated; none ("" state) when it holds nothing. It never says the host did
+// not answer, since it never asked. It is for a
 // reader that must not wait on the network for a pull request nobody asked
 // about.
 func (c *PRCache) Cached(url string) PRRead {
@@ -124,9 +127,9 @@ func (c *PRCache) Cached(url string) PRRead {
 		return got
 	}
 	if kept, ok := c.load()[url]; ok {
-		return PRRead{State: kept.State, AsOf: kept.At, Offline: true}
+		return PRRead{State: kept.State, AsOf: kept.At}
 	}
-	return PRRead{Offline: true}
+	return PRRead{}
 }
 
 func (c *PRCache) now() time.Time {

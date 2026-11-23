@@ -235,20 +235,16 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 // setRoster takes the tickets `jig next` listed: their titles and states, and
 // the order they are listed in.
 func (w *world) setRoster(rows []rosterRow) {
-	listed := map[string]bool{}
-	order := make([]string, 0, len(rows)+len(w.order))
+	order := make([]string, 0, len(rows))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.blockers, t.digest, t.updated = r.Title, r.Blockers, r.Digest, r.Updated
 		t.awaiting = false
-		listed[r.ID] = true
 		order = append(order, r.ID)
 	}
-	for _, id := range w.order {
-		if !listed[id] {
-			order = append(order, id)
-		}
-	}
+	// The list is the roster's and nothing else: an id the stream knows and the
+	// roster does not (one an old journal names, or a ticket made since the
+	// read, which the stream's line asks the roster to list) is no row.
 	w.order = order
 	w.rosterRead = true
 }

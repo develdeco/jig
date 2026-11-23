@@ -45,7 +45,7 @@ func scopeRepo(t *testing.T, n int) (dir string, tips map[string]string) {
 // Not parallel: it counts the process's git.
 func TestScopeAnswersBranchTipsFromOneListing(t *testing.T) {
 	dir, tips := scopeRepo(t, 8)
-	end := BeginScope("", dir)
+	end := BeginScope("", "", dir)
 	defer end()
 	asked := gittest.CountGit(t, func() {
 		for name, want := range tips {
@@ -82,7 +82,7 @@ func TestScopeAnswersBranchTipsFromOneListing(t *testing.T) {
 func TestScopeLeavesWhatItCannotListToGit(t *testing.T) {
 	dir, tips := scopeRepo(t, 1)
 	other, otherTips := scopeRepo(t, 1)
-	end := BeginScope("", dir)
+	end := BeginScope("", "", dir)
 	defer end()
 	if _, err := RunEnv(dir, rewritePinned, "tag", "v1"); err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestScopeKeepsAncestryOnThisMachine(t *testing.T) {
 		return got
 	}
 
-	end := BeginScope(file, dir)
+	end := BeginScope(file, "", dir)
 	var first map[string]bool
 	asked := gittest.CountGit(t, func() { first = pairs() })
 	end()
@@ -150,7 +150,7 @@ func TestScopeKeepsAncestryOnThisMachine(t *testing.T) {
 	keptFiles.Lock()
 	delete(keptFiles.by, file)
 	keptFiles.Unlock()
-	end = BeginScope(file, dir)
+	end = BeginScope(file, "", dir)
 	defer end()
 	var second map[string]bool
 	asked = gittest.CountGit(t, func() { second = pairs() })

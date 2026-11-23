@@ -24,7 +24,7 @@ const diffFilter = "ACDMRTUXB"
 // asked of git. A failed ask is no files and is not kept.
 func changedFiles(dir, base, branch, baseTip, tip string) []string {
 	ask := func() ([]string, error) { return gitx.DiffNameOnlySince(dir, base, branch, diffFilter) }
-	kept := gitx.KeptFor(dir)
+	kept := gitx.KeptOverlaps(dir)
 	if kept == nil || baseTip == "" || tip == "" {
 		files, _ := ask()
 		return files
@@ -51,7 +51,7 @@ func changedFiles(dir, base, branch, baseTip, tip string) []string {
 // tips are known, else asked of git. A pair git could not try is untested and is
 // not kept, so the next read tries it again.
 func mergedPair(dir, a, b, tipA, tipB string) (string, []string) {
-	kept := gitx.KeptFor(dir)
+	kept := gitx.KeptOverlaps(dir)
 	if kept == nil || tipA == "" || tipB == "" {
 		return testPair(dir, a, b)
 	}

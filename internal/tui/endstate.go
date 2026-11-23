@@ -129,6 +129,9 @@ func prWords(prs []digestPR, state bool) string {
 			switch s := strings.ToLower(pr.State); s {
 			case "open", "merged", "closed":
 				word = " " + s
+				if !pr.AsOf.IsZero() {
+					note = " (as of " + pr.AsOf.UTC().Format("15:04 UTC") + ")"
+				}
 			default:
 				note = " (state not read)"
 			}

@@ -32,10 +32,10 @@ func TestPRCacheReadOnceReadsTheFileOnceAndAsksNoHost(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			got := c.Read("https://github.com/acme/app/pull/1")
-			if got.State != "OPEN" || !got.AsOf.Equal(at) || !got.Offline {
-				t.Errorf("a kept state = %+v, want OPEN as of %s, offline", got, at)
+			if got.State != "OPEN" || !got.AsOf.Equal(at) || got.Offline {
+				t.Errorf("a kept state = %+v, want OPEN as of %s, and no word that the host did not answer", got, at)
 			}
-			if got := c.Read("https://github.com/acme/app/pull/2"); got.State != "" || !got.Offline {
+			if got := c.Read("https://github.com/acme/app/pull/2"); got.State != "" || got.Offline {
 				t.Errorf("a state never kept = %+v, want unknown", got)
 			}
 		}()

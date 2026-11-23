@@ -766,11 +766,18 @@ func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	if e := m.top(); e.screen == screenChart && m.w.charts[e.chart] != nil {
 		shown = m.w.charts[e.chart].listing.Tickets
 	}
+	first := !m.w.rosterRead
 	under, onRow := m.rowUnderCursor()
 	m.w.setRoster(msg.rows)
 	m.w.setCharts(msg.charts)
 	m.putCursorOn(under, onRow)
 	var cmds []tea.Cmd
+	if first && m.top().screen == screenMain && m.mainWaitsOnMerge() {
+		// What the roster shows of a merge is the last state kept, which may be
+		// old at launch: the host is asked once, in the background, as the merge
+		// timer does after.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	}
 	if was && !m.awaitingTicket() {
 		// The awaited ticket is listed: read it.
 		cmds = append(cmds, m.refreshStatus(m.cfg.Ticket))
@@ -1068,11 +1075,16 @@ func (m *Model) putCursorOn(ref rowRef, ok bool) {
 	if !ok {
 		return
 	}
-	for i, r := range m.page().refs() {
+	refs := m.page().refs()
+	for i, r := range refs {
 		if r == ref {
 			m.top().sel = i
 			return
 		}
+	}
+	// A row the new list lacks leaves the cursor on the last one there is.
+	if e := m.top(); e.sel >= len(refs) {
+		e.sel = max(0, len(refs)-1)
 	}
 }
 

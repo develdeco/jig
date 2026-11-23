@@ -148,7 +148,7 @@ func newestLine(lines []journal.Line) string {
 // stands for the run, each repo's branches are listed once and facts about
 // commits are kept on this machine under the jig home. The returned function
 // ends it.
-func readScope(st *store.Store, mp project.MachineProject, jigHome string) (end func()) {
+func readScope(st *store.Store, mp project.MachineProject, jigHome string, overlaps bool) (end func()) {
 	unpin := st.PinCharts()
 	var dirs []string
 	seen := map[string]bool{}
@@ -163,11 +163,16 @@ func readScope(st *store.Store, mp project.MachineProject, jigHome string) (end 
 			dirs = append(dirs, dir)
 		}
 	}
-	facts := ""
+	// The roster reads the ancestry facts and no other: the overlap facts are
+	// the full listing's.
+	ancestry, overlapFacts := "", ""
 	if jigHome != "" {
-		facts = home.CommitFactsPath(jigHome)
+		ancestry = home.AncestryPath(jigHome)
+		if overlaps {
+			overlapFacts = home.OverlapsPath(jigHome)
+		}
 	}
-	endGit := gitx.BeginScope(facts, dirs...)
+	endGit := gitx.BeginScope(ancestry, overlapFacts, dirs...)
 	return func() {
 		endGit()
 		unpin()

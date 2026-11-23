@@ -70,6 +70,10 @@ type nextDigestPR struct {
 	State  string `json:"state"`
 	// Target is the branch the pull request goes into.
 	Target string `json:"target,omitempty"`
+	// AsOf is when the state was read, as RFC 3339, when this run did not read
+	// it (it is this machine's last kept answer); absent for one it read, and
+	// for a merged pull request, which is final.
+	AsOf string `json:"as_of,omitempty"`
 }
 
 // nextSliceCounts is how many of a ticket's slices are in each state. Failed
@@ -225,7 +229,7 @@ func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id strin
 		if url == "" {
 			continue
 		}
-		out = append(out, nextDigestPR{Repo: r.Repo, Number: prNumber(url), URL: url, State: prState(merge, r.Repo, len(repos) > 1), Target: r.PRTarget})
+		out = append(out, nextDigestPR{Repo: r.Repo, Number: prNumber(url), URL: url, State: prState(merge, r.Repo, len(repos) > 1), Target: r.PRTarget, AsOf: prAsOf(merge, r.Repo, len(repos) > 1)})
 	}
 	return out
 }
