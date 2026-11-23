@@ -24,13 +24,13 @@ func onRow(t *testing.T, g *rig, id string) {
 func TestAnIssueOpensItsPlanFromMainAndTheChartRow(t *testing.T) {
 	t.Parallel()
 	g := planMain(t, planSpec{})
-	onRow(t, g, "GATE-49")
+	onRow(t, g, "SHOP-49")
 	g.press("enter")
 	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" {
 		t.Fatalf("enter on the issue opened %s of %q, want its plan:\n%s", g.m.Screen(), g.m.top().chart, g.view())
 	}
 	v := stripANSI(g.view())
-	for _, want := range []string{"Need", "Tasks", "Issue", "T-1", "landed"} {
+	for _, want := range []string{"Need", "Tasks", "Issue", "SHOP-1", "landed"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the plan lacks %q:\n%s", want, v)
 		}
@@ -56,7 +56,7 @@ func TestAnIssueOpensItsPlanFromMainAndTheChartRow(t *testing.T) {
 	// An issue no chart plans keeps its ticket screen.
 	lone := planMain(t, planSpec{})
 	lone.m.w.charts["repeat"].listing.Issue = ""
-	onRow(t, lone, "GATE-49")
+	onRow(t, lone, "SHOP-49")
 	lone.press("enter")
 	if lone.m.Screen() != "ticket" {
 		t.Errorf("an issue no chart plans opened %s, want its ticket screen", lone.m.Screen())
@@ -70,9 +70,9 @@ func TestAnIssueOpensItsPlanFromMainAndTheChartRow(t *testing.T) {
 func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 	t.Parallel()
 	g := planRig(t, planSpec{loose: true})
-	onRow(t, g, "T-2")
+	onRow(t, g, "SHOP-2")
 	g.press("enter")
-	if g.m.Screen() != "ticket" || g.m.top().ticket != "T-2" {
+	if g.m.Screen() != "ticket" || g.m.top().ticket != "SHOP-2" {
 		t.Fatalf("enter opened %s of %q", g.m.Screen(), g.m.top().ticket)
 	}
 	if v := stripANSI(g.view()); !strings.Contains(v, "c issue") {
@@ -80,10 +80,10 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 	}
 	g.press("c")
 	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" || !strings.Contains(stripANSI(g.view()), "Need") {
-		t.Fatalf("c opened %s of %q, want the plan of GATE-49:\n%s", g.m.Screen(), g.m.top().chart, g.view())
+		t.Fatalf("c opened %s of %q, want the plan of SHOP-49:\n%s", g.m.Screen(), g.m.top().chart, g.view())
 	}
 	g.press("esc")
-	if g.m.Screen() != "ticket" || g.m.top().ticket != "T-2" {
+	if g.m.Screen() != "ticket" || g.m.top().ticket != "SHOP-2" {
 		t.Errorf("esc went to %s of %q, want the task's screen again", g.m.Screen(), g.m.top().ticket)
 	}
 	// From a step's screen as well.
@@ -103,10 +103,10 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 		t.Fatalf("the last chart row is %q, want second", s.m.top().chart)
 	}
 	s.press("enter")
-	if s.m.top().ticket != "T-1" {
-		t.Fatalf("enter opened %q, want T-1", s.m.top().ticket)
+	if s.m.top().ticket != "SHOP-1" {
+		t.Fatalf("enter opened %q, want SHOP-1", s.m.top().ticket)
 	}
-	if v := stripANSI(s.view()); !strings.Contains(v, "task of GATE-49 and GATE-50") {
+	if v := stripANSI(s.view()); !strings.Contains(v, "task of SHOP-49 and SHOP-50") {
 		t.Errorf("the header of a shared task does not name both issues:\n%s", v)
 	}
 	s.press("c")
@@ -115,7 +115,7 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 	}
 	// Reached from the list, with no plan on the way, c opens the first in chart order.
 	s2 := planMain(t, planSpec{second: true})
-	onRow(t, s2, "T-1")
+	onRow(t, s2, "SHOP-1")
 	s2.press("enter", "c")
 	if s2.m.top().chart != "repeat" {
 		t.Errorf("c from the list opened %q, want the first plan, repeat", s2.m.top().chart)
@@ -123,13 +123,13 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 
 	// A task of no issue.
 	l := planMain(t, planSpec{loose: true})
-	onRow(t, l, "T-9")
+	onRow(t, l, "SHOP-9")
 	l.press("enter")
 	if v := stripANSI(l.view()); strings.Contains(v, "c issue") {
 		t.Errorf("a task of no issue offers c:\n%s", v)
 	}
 	l.press("c")
-	if l.m.Screen() != "ticket" || l.m.top().ticket != "T-9" {
+	if l.m.Screen() != "ticket" || l.m.top().ticket != "SHOP-9" {
 		t.Errorf("c on a task of no issue went to %s of %q", l.m.Screen(), l.m.top().ticket)
 	}
 }
@@ -140,7 +140,7 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 func TestMTogglesTheMapOnThePlan(t *testing.T) {
 	t.Parallel()
 	g := planRig(t, planSpec{})
-	g.m.height = 40
+	g.m.height, g.m.width = 40, 100
 	if v := stripANSI(g.view()); strings.Contains(v, "Map") || !strings.Contains(v, "m map") {
 		t.Fatalf("the plan shows the map before m, or hides the hint:\n%s", v)
 	}
@@ -148,7 +148,7 @@ func TestMTogglesTheMapOnThePlan(t *testing.T) {
 	if g.m.Screen() != "chart" {
 		t.Fatalf("m left the plan for %s", g.m.Screen())
 	}
-	if v := stripANSI(g.view()); !strings.Contains(v, "Map") || !strings.Contains(v, "Plans issue GATE-49.") || !strings.Contains(v, "Need") {
+	if v := stripANSI(g.view()); !strings.Contains(v, "Map") || !strings.Contains(v, "Plans issue SHOP-49.") || !strings.Contains(v, "Need") {
 		t.Errorf("m did not show the map beside the plan:\n%s", v)
 	}
 	g.press("m")

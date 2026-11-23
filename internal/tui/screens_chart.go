@@ -176,7 +176,7 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
 
 // chartNoteIn is chartNote with or without the kind a ticket says of itself
-// ("task of GATE-49 · "), which a screen that is about that parent need not say.
+// ("task of <issue> · "), which a screen that is about that parent need not say.
 func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":

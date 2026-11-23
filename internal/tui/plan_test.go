@@ -11,8 +11,8 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// The plan fixtures: an issue GATE-49 whose chart "repeat" lists tasks T-1 to
-// T-4, all of them published into the issue's branch.
+// The plan fixtures: an issue SHOP-49 whose chart "repeat" lists tasks SHOP-1 to
+// SHOP-4, all of them published into the issue's branch.
 
 const (
 	planBranch = "501-review-rounds-stop-repeating-work"
@@ -23,7 +23,7 @@ const (
 // landed everything with no suite declared and its pull request into main
 // merged and landed.
 type planSpec struct {
-	// tasks are the chart's tasks in order (T-1 to T-4 when none); landed says
+	// tasks are the chart's tasks in order (SHOP-1 to SHOP-4 when none); landed says
 	// which of them landed into the branch (all when nil).
 	tasks  []string
 	landed map[string]bool
@@ -38,21 +38,21 @@ type planSpec struct {
 	prompt       string
 	// closed are the tasks closed without landing, each with its reason.
 	closed map[string]string
-	// second adds an issue GATE-50 whose chart lists T-1 too, and loose a task
-	// T-9 that no chart lists.
+	// second adds an issue SHOP-50 whose chart lists SHOP-1 too, and loose a task
+	// SHOP-9 that no chart lists.
 	second, loose bool
-	// multi adds the multi-task MT-1 to the chart with its tasks T-5, landed into
-	// it, and T-6, not.
+	// multi adds the multi-task SHOP-7 to the chart with its tasks SHOP-5, landed into
+	// it, and SHOP-6, not.
 	multi bool
 	// multiDigest replaces the multi-task's digest (published, its pull request
-	// open) and kidsLanded lands T-6 too.
+	// open) and kidsLanded lands SHOP-6 too.
 	multiDigest *digestInfo
 	kidsLanded  bool
 }
 
 func (s planSpec) taskIDs() []string {
 	if len(s.tasks) == 0 {
-		return []string{"T-1", "T-2", "T-3", "T-4"}
+		return []string{"SHOP-1", "SHOP-2", "SHOP-3", "SHOP-4"}
 	}
 	return s.tasks
 }
@@ -74,26 +74,26 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	ids := spec.taskIDs()
 	if spec.multi {
 		// A multi-task of the chart and its two tasks, listed after the others.
-		ids = append(slices.Clone(ids), "MT-1", "T-5", "T-6")
+		ids = append(slices.Clone(ids), "SHOP-7", "SHOP-5", "SHOP-6")
 	}
-	tickets := []map[string]any{{"id": "GATE-49", "title": "Review rounds stop repeating work", "state": "issue"}}
+	tickets := []map[string]any{{"id": "SHOP-49", "title": "Review rounds stop repeating work", "state": "issue"}}
 	entries := []map[string]any{}
 	for _, id := range ids {
 		tickets = append(tickets, map[string]any{"id": id, "title": "Task " + id, "state": "done"})
 		entries = append(entries, entry(id, "Task "+id, "publish", []string{"done", "done", "done", "done"}, false))
 	}
-	charts := []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0, "issue": "GATE-49"}}
+	charts := []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0, "issue": "SHOP-49"}}
 	if spec.loose {
-		tickets = append(tickets, map[string]any{"id": "T-9", "title": "Task T-9", "state": "done"})
+		tickets = append(tickets, map[string]any{"id": "SHOP-9", "title": "Task SHOP-9", "state": "done"})
 	}
 	if spec.second {
-		// T-1 is listed by a second issue's chart too: a shared task.
-		tickets = append(tickets, map[string]any{"id": "GATE-50", "title": "Another issue", "state": "issue"})
-		charts = append(charts, map[string]any{"name": "second", "title": "Second plan", "tickets": []string{"T-1"}, "ungraduated": 0, "issue": "GATE-50"})
+		// SHOP-1 is listed by a second issue's chart too: a shared task.
+		tickets = append(tickets, map[string]any{"id": "SHOP-50", "title": "Another issue", "state": "issue"})
+		charts = append(charts, map[string]any{"name": "second", "title": "Second plan", "tickets": []string{"SHOP-1"}, "ungraduated": 0, "issue": "SHOP-50"})
 	}
 	roster := jsonLine(map[string]any{"tickets": tickets, "charts": charts})
 	issueBlock := map[string]any{
-		"ticket": "GATE-49", "stage": "landing", "state": "waiting", "branch": planBranch, "prompt": spec.prompt,
+		"ticket": "SHOP-49", "stage": "landing", "state": "waiting", "branch": planBranch, "prompt": spec.prompt,
 		"stack": []map[string]any{{"repo": "demo", "start_from": "origin/main", "pr_target": "main"}},
 	}
 	if spec.unmet != nil {
@@ -102,10 +102,10 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	verb := jsonLine(map[string]any{
 		"chart": "repeat", "title": "Repeat rounds", "ready": false, "code": "CHART_DONE", "started": true, "ungraduated": 0,
 		"briefs": []string{}, "run": [][]string{}, "tickets": entries,
-		"map":   map[string]any{"destination": []string{"Plans issue GATE-49."}},
+		"map":   map[string]any{"destination": []string{"Plans issue SHOP-49."}},
 		"issue": issueBlock,
 	})
-	status := map[string]string{"GATE-49": planStatus(spec)}
+	status := map[string]string{"SHOP-49": planStatus(spec)}
 	for _, id := range ids {
 		status[id] = untouchedStatus(id)
 	}
@@ -114,29 +114,29 @@ func planMain(t *testing.T, spec planSpec) *rig {
 		second := jsonLine(map[string]any{
 			"chart": "second", "title": "Second plan", "ready": false, "code": "CHART_DONE", "started": true, "ungraduated": 0,
 			"briefs": []string{}, "run": [][]string{}, "tickets": []map[string]any{entries[0]},
-			"map":   map[string]any{"destination": []string{"Plans issue GATE-50."}},
-			"issue": map[string]any{"ticket": "GATE-50", "stage": "landing", "state": "waiting", "branch": "502-another", "stack": []map[string]any{{"repo": "demo", "start_from": "origin/main", "pr_target": "main"}}},
+			"map":   map[string]any{"destination": []string{"Plans issue SHOP-50."}},
+			"issue": map[string]any{"ticket": "SHOP-50", "stage": "landing", "state": "waiting", "branch": "502-another", "stack": []map[string]any{{"repo": "demo", "start_from": "origin/main", "pr_target": "main"}}},
 		})
 		g.r.answer("next second --json --store /s", second, 0)
-		g.r.answer("status GATE-50 --store /s", strings.ReplaceAll(planStatus(spec), "GATE-49", "GATE-50"), 0)
-		g.pin("GATE-50", &digestInfo{Kind: "issue", State: "waiting"})
+		g.r.answer("status SHOP-50 --store /s", strings.ReplaceAll(planStatus(spec), "SHOP-49", "SHOP-50"), 0)
+		g.pin("SHOP-50", &digestInfo{Kind: "issue", State: "waiting"})
 	}
 	if spec.loose {
-		g.r.answer("status T-9 --store /s", untouchedStatus("T-9"), 0)
-		g.pin("T-9", task("build", true, "done|no brief on record", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish"))
+		g.r.answer("status SHOP-9 --store /s", untouchedStatus("SHOP-9"), 0)
+		g.pin("SHOP-9", task("build", true, "done|no brief on record", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish"))
 	}
 
 	for _, id := range ids {
 		d := task("land", false, "done|no brief on record", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "current|waits for a merge")
-		d.Parent = "GATE-49"
+		d.Parent = "SHOP-49"
 		if spec.isLanded(id) {
 			d.Phases[4] = digestPhase{Name: "land", State: "done", Text: "landed"}
 		}
 		if reason, ok := spec.closed[id]; ok {
 			d = task("publish", false, "done|closed", "done|closed", "done|closed", "done|closed", "done|none · closed without a pull request")
-			d.Parent, d.Closed = "GATE-49", reason
+			d.Parent, d.Closed = "SHOP-49", reason
 		}
-		if spec.second && id == "T-1" {
+		if spec.second && id == "SHOP-1" {
 			// A task two issues list has no one parent, and one pull request into
 			// each issue's branch.
 			d.Parent = ""
@@ -146,46 +146,46 @@ func planMain(t *testing.T, spec planSpec) *rig {
 			}
 		}
 		switch id {
-		case "MT-1":
-			d = &digestInfo{Kind: "multi-task", Parent: "GATE-49", State: "published", Children: []digestChild{{ID: "T-5", Title: "Task T-5"}, {ID: "T-6", Title: "Task T-6"}},
+		case "SHOP-7":
+			d = &digestInfo{Kind: "multi-task", Parent: "SHOP-49", State: "published", Children: []digestChild{{ID: "SHOP-5", Title: "Task SHOP-5"}, {ID: "SHOP-6", Title: "Task SHOP-6"}},
 				PRs: []digestPR{{Repo: "demo", Number: 7, State: "open", Target: planBranch}}}
 			if spec.multiDigest != nil {
 				d = spec.multiDigest
 			}
-		case "T-5", "T-6":
-			d.Parent = "MT-1"
-			if id == "T-6" && !spec.kidsLanded {
+		case "SHOP-5", "SHOP-6":
+			d.Parent = "SHOP-7"
+			if id == "SHOP-6" && !spec.kidsLanded {
 				d.Phases[4] = digestPhase{Name: "land", State: "current", Text: "waits for a merge"}
 			}
 		}
 		g.pin(id, d)
 	}
 	if spec.multi {
-		g.r.answer("status MT-1 --store /s", "ticket: MT-1\nstate: multi-task\nkind: multi-task\nbranch: 503-the-multi-task\nneed: \"What the multi-task is for.\"\n", 0)
+		g.r.answer("status SHOP-7 --store /s", "ticket: SHOP-7\nstate: multi-task\nkind: multi-task\nbranch: 503-the-multi-task\nneed: \"What the multi-task is for.\"\n", 0)
 	}
 	issue := spec.issue
 	if issue == nil {
 		issue = landedIssue()
 	}
-	g.pin("GATE-49", issue)
+	g.pin("SHOP-49", issue)
 
 	var lines []events.Envelope
 	for i, id := range ids {
 		switch {
-		case id == "T-5":
-			lines = append(lines, jl(at(20, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "MT-1" }))
-		case id == "T-6" && spec.kidsLanded:
-			lines = append(lines, jl(at(21, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "MT-1" }))
-		case id == "MT-1" && spec.multiDigest != nil && spec.multiDigest.State == "landed":
-			lines = append(lines, jl(at(25, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "GATE-49" }))
-		case id == "MT-1" || id == "T-6":
+		case id == "SHOP-5":
+			lines = append(lines, jl(at(20, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "SHOP-7" }))
+		case id == "SHOP-6" && spec.kidsLanded:
+			lines = append(lines, jl(at(21, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "SHOP-7" }))
+		case id == "SHOP-7" && spec.multiDigest != nil && spec.multiDigest.State == "landed":
+			lines = append(lines, jl(at(25, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "SHOP-49" }))
+		case id == "SHOP-7" || id == "SHOP-6":
 		case spec.isLanded(id):
-			lines = append(lines, jl(at(10+i, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "GATE-49" }))
+			lines = append(lines, jl(at(10+i, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "SHOP-49" }))
 		}
 	}
 	lines = append(lines, spec.issueLines...)
 	if spec.issueLines == nil && spec.issue == nil {
-		lines = append(lines, jl(at(30, 0), "GATE-49", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
+		lines = append(lines, jl(at(30, 0), "SHOP-49", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
 	}
 	g.feed(lines...)
 	return g
@@ -203,13 +203,13 @@ func planRig(t *testing.T, spec planSpec) *rig {
 	return g
 }
 
-// planStatus is `jig status GATE-49`.
+// planStatus is `jig status SHOP-49`.
 func planStatus(spec planSpec) string {
 	need := spec.need
 	if need == "" {
 		need = planNeed
 	}
-	blocks := []string{"ticket: GATE-49", "state: issue", "kind: issue", "chart: repeat", "need: " + axi.Quote(need)}
+	blocks := []string{"ticket: SHOP-49", "state: issue", "kind: issue", "chart: repeat", "need: " + axi.Quote(need)}
 	if !spec.noSuiteTable {
 		suite := spec.suite
 		if suite == nil {
@@ -242,13 +242,13 @@ func issueLine(v, label string) string {
 // where it stands, not a landing.
 func TestIssuePlanListsItsTasksWithWhereEachLanded(t *testing.T) {
 	t.Parallel()
-	g := planRig(t, planSpec{landed: map[string]bool{"T-1": true, "T-2": true, "T-3": true}})
-	g.m.height = 40
+	g := planRig(t, planSpec{landed: map[string]bool{"SHOP-1": true, "SHOP-2": true, "SHOP-3": true}})
+	g.m.height, g.m.width = 40, 100
 	v := stripANSI(g.view())
 
 	last := -1
 	for i, want := range []string{
-		"T-1  Task T-1", "T-2  Task T-2", "T-3  Task T-3", "T-4  Task T-4",
+		"SHOP-1  Task SHOP-1", "SHOP-2  Task SHOP-2", "SHOP-3  Task SHOP-3", "SHOP-4  Task SHOP-4",
 	} {
 		at := strings.Index(v, want)
 		if at < 0 || at < last {
@@ -256,21 +256,21 @@ func TestIssuePlanListsItsTasksWithWhereEachLanded(t *testing.T) {
 		}
 		last = at
 	}
-	for i, id := range []string{"T-1", "T-2", "T-3"} {
+	for i, id := range []string{"SHOP-1", "SHOP-2", "SHOP-3"} {
 		want := "landed · into the issue's branch at 09:1" + strconv.Itoa(i) + ":00"
 		if row := lineWith(v, id+"  Task"); !strings.Contains(row, want) {
 			t.Errorf("%s's row lacks %q:\n%s", id, want, row)
 		}
 	}
-	if row := lineWith(v, "T-4  Task"); strings.Contains(row, "landed") || !strings.Contains(row, "waits to land") {
-		t.Errorf("T-4 has not landed, its row says:\n%s", row)
+	if row := lineWith(v, "SHOP-4  Task"); strings.Contains(row, "landed") || !strings.Contains(row, "waits to land") {
+		t.Errorf("SHOP-4 has not landed, its row says:\n%s", row)
 	}
 	for _, want := range []string{"Need", "Review rounds repeat the same findings.", "Stop them from coming back once a person has decided.", "Tasks", "3 of 4 landed", "Issue"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the plan lacks %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(v, "task of GATE-49") {
+	if strings.Contains(v, "task of SHOP-49") {
 		t.Errorf("a task row repeats the issue it is listed under:\n%s", v)
 	}
 	if strings.Contains(v, "Map") || strings.Contains(v, "Tickets") {
@@ -284,7 +284,7 @@ func TestIssuePlanListsItsTasksWithWhereEachLanded(t *testing.T) {
 func TestIssuePlanStagesNameBranchSuitePullRequestAndLanding(t *testing.T) {
 	t.Parallel()
 	g := planRig(t, planSpec{})
-	g.m.height = 40
+	g.m.height, g.m.width = 40, 100
 	v := stripANSI(g.view())
 	// A line carries the icon of its state: the tasks all landed, and the merged
 	// pull request, are done; some tasks landed is under way.
@@ -293,8 +293,8 @@ func TestIssuePlanStagesNameBranchSuitePullRequestAndLanding(t *testing.T) {
 			t.Errorf("the %s line lacks the icon %s: %q", label, icon, row)
 		}
 	}
-	some := planRig(t, planSpec{issue: &digestInfo{Kind: "issue", State: "waiting"}, landed: map[string]bool{"T-1": true}})
-	some.m.height = 40
+	some := planRig(t, planSpec{issue: &digestInfo{Kind: "issue", State: "waiting"}, landed: map[string]bool{"SHOP-1": true}})
+	some.m.height, some.m.width = 40, 100
 	if row := issueLine(stripANSI(some.view()), "tasks"); !strings.Contains(row, "◐ tasks") || !strings.Contains(row, "1 of 4 landed") {
 		t.Errorf("one task of four landed: %q", row)
 	}
@@ -328,7 +328,7 @@ func TestIssuePlanSuiteLineForEachStanding(t *testing.T) {
 		want  []string
 	}{
 		{"pass", []string{"demo,pass,go test ./...,4d577e2aaaaaa,41,-,-,-,-"}, []string{"passed at 4d577e2 in 41 s: `go test ./...`"}},
-		{"fail with its fix task", []string{"demo,fail,go test ./...,4d577e2aaaaaa,9,\"final:boom\",-,T-5,-", "demo,pass,go test ./...,9999999aaaaaa,12,-,-,-,-"}, []string{"failed at 4d577e2: final:boom · fix: T-5", "passed at 9999999 in 12 s"}},
+		{"fail with its fix task", []string{"demo,fail,go test ./...,4d577e2aaaaaa,9,\"final:boom\",-,SHOP-5,-", "demo,pass,go test ./...,9999999aaaaaa,12,-,-,-,-"}, []string{"failed at 4d577e2: final:boom · fix: SHOP-5", "passed at 9999999 in 12 s"}},
 		{"waived", []string{"demo,waived,go test ./...,4d577e2aaaaaa,-,-,\"ci runs it\",-,-"}, []string{"waived: ci runs it"}},
 		{"unrun", []string{"demo,unrun,go test ./...,4d577e2aaaaaa,-,-,-,-,-"}, []string{"not run at 4d577e2"}},
 		{"no clone", []string{"demo,unrun,-,-,-,-,-,-,\"demo has no clone on this machine\""}, []string{"demo has no clone on this machine"}},
@@ -337,10 +337,10 @@ func TestIssuePlanSuiteLineForEachStanding(t *testing.T) {
 	for _, c := range cases {
 		spec := planSpec{suite: c.suite}
 		if c.name == "fail with its fix task" {
-			spec.tasks = []string{"T-1", "T-2", "T-3", "T-4", "T-5"}
+			spec.tasks = []string{"SHOP-1", "SHOP-2", "SHOP-3", "SHOP-4", "SHOP-5"}
 		}
 		g := planRig(t, spec)
-		g.m.height = 40
+		g.m.height, g.m.width = 40, 100
 		v := stripANSI(g.view())
 		for _, want := range c.want {
 			if !strings.Contains(v, want) {
@@ -373,7 +373,7 @@ func TestIssuePlanSuiteLineForEachStanding(t *testing.T) {
 	if !strings.Contains(words, "\x1b[31m") {
 		t.Errorf("a failed suite is not red: %q", words)
 	}
-	if !strings.Contains(words, "add a fix task for GATE-49") {
+	if !strings.Contains(words, "add a fix task for SHOP-49") {
 		t.Errorf("a failed suite with no fix task does not say to add one: %q", words)
 	}
 }
@@ -385,10 +385,10 @@ func TestIssuePlanPullRequestWaitsForTheSuiteAndTheTasks(t *testing.T) {
 	t.Parallel()
 	waiting := &digestInfo{Kind: "issue", State: "waiting"}
 	pr := func(g *rig) string {
-		g.m.height = 40
+		g.m.height, g.m.width = 40, 100
 		return issueLine(stripANSI(g.view()), "PR")
 	}
-	landedSome := map[string]bool{"T-1": true, "T-2": true}
+	landedSome := map[string]bool{"SHOP-1": true, "SHOP-2": true}
 	if row := pr(planRig(t, planSpec{issue: waiting, landed: landedSome, suite: []string{"demo,unrun,go test,abcdef1234567,-,-,-,-,-"}})); !strings.Contains(row, "not opened yet · waits for 2 tasks and the suite") {
 		t.Errorf("two tasks not landed and the suite not run: %q", row)
 	}
@@ -399,15 +399,15 @@ func TestIssuePlanPullRequestWaitsForTheSuiteAndTheTasks(t *testing.T) {
 		t.Errorf("every task landed, the suite failed: %q", row)
 	}
 	ready := &digestInfo{Kind: "issue", State: "ready"}
-	if row := pr(planRig(t, planSpec{issue: ready, prompt: "Publish GATE-49", suite: []string{"demo,pass,go test,abcdef1234567,5,-,-,-,-"}})); !strings.Contains(row, `not opened yet · say "Publish GATE-49"`) {
+	if row := pr(planRig(t, planSpec{issue: ready, prompt: "Publish SHOP-49", suite: []string{"demo,pass,go test,abcdef1234567,5,-,-,-,-"}})); !strings.Contains(row, `not opened yet · say "Publish SHOP-49"`) {
 		t.Errorf("everything met: %q", row)
 	}
 	// A task closed without landing waits for nothing and lands nothing: it reads
 	// closed with its reason, and the count of landed tasks leaves it out.
-	closed := planRig(t, planSpec{issue: waiting, landed: map[string]bool{"T-1": true, "T-2": true, "T-3": true}, closed: map[string]string{"T-4": "not planned"}})
-	closed.m.height = 40
+	closed := planRig(t, planSpec{issue: waiting, landed: map[string]bool{"SHOP-1": true, "SHOP-2": true, "SHOP-3": true}, closed: map[string]string{"SHOP-4": "not planned"}})
+	closed.m.height, closed.m.width = 40, 100
 	cv := stripANSI(closed.view())
-	if row := lineWith(cv, "T-4  Task"); !strings.Contains(row, "⊖") || !strings.Contains(row, "closed · not planned") {
+	if row := lineWith(cv, "SHOP-4  Task"); !strings.Contains(row, "⊖") || !strings.Contains(row, "closed · not planned") {
 		t.Errorf("a closed task reads:\n%s", row)
 	}
 	if row := issueLine(cv, "PR"); !strings.Contains(row, "ready to open") || strings.Contains(row, "waits for") {
@@ -422,19 +422,19 @@ func TestIssuePlanPullRequestWaitsForTheSuiteAndTheTasks(t *testing.T) {
 		t.Errorf("a suite the chart says is unmet: %q", row)
 	}
 	gone := planRig(t, planSpec{issue: &digestInfo{Kind: "issue", State: "waiting", Closed: "not planned"}})
-	gone.m.height = 40
+	gone.m.height, gone.m.width = 40, 100
 	if row := issueLine(stripANSI(gone.view()), "landing"); !strings.Contains(row, "⊖ landing") || !strings.Contains(row, "closed · not planned") {
 		t.Errorf("a closed issue's landing: %q", row)
 	}
 	// An open pull request reads open, and the landing waits for the person.
 	open := &digestInfo{Kind: "issue", State: "published", PRs: []digestPR{{Number: 512, State: "open", Target: "main"}}}
 	g = planRig(t, planSpec{issue: open})
-	g.m.height = 40
+	g.m.height, g.m.width = 40, 100
 	v := stripANSI(g.view())
 	if row := issueLine(v, "PR"); !strings.Contains(row, "PR #512 into main · open") {
 		t.Errorf("an open pull request: %q", row)
 	}
-	if row := issueLine(v, "landing"); !strings.Contains(row, `waits to land · say "Land GATE-49"`) {
+	if row := issueLine(v, "landing"); !strings.Contains(row, `waits to land · say "Land SHOP-49"`) {
 		t.Errorf("the landing of a published issue: %q", row)
 	}
 }
@@ -459,7 +459,7 @@ func TestALegacyChartScreenIsUnchanged(t *testing.T) {
 		}
 	}
 	golden(t, "chart", v)
-	if n := g.r.ran("status GATE-49 --store /s"); n != 0 {
+	if n := g.r.ran("status SHOP-49 --store /s"); n != 0 {
 		t.Errorf("a legacy chart read an issue %d times", n)
 	}
 }

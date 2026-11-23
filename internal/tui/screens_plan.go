@@ -509,7 +509,7 @@ func prWordsOf(pr digestPR) string {
 	return head + " · " + word
 }
 
-// planLanding is where the issue's own landing stands, in RUN-18's states: it
+// planLanding is where the issue's own landing stands, in the end states' words: it
 // waits for its pull request, waits to land at the person's word, landed, or was
 // closed.
 func (m *Model) planLanding(id string, issue *ticket) (state, words string) {
