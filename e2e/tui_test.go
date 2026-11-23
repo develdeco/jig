@@ -219,7 +219,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if reviewer, _ := b.report(t, "1")["reviewer"].(map[string]any); reviewer["session"] != "s-builder" || reviewer["agent"] != "agent-reviewer" {
 		t.Errorf("report.yaml reviewer = %v, want the subagent agent-reviewer of session s-builder", reviewer)
 	}
-	if screen := screens.until("round 1 left 1 ask"); !strings.Contains(screen, "Which greeting does the product want?") {
+	if screen := screens.until("round 1: 1 ask waits for you"); !strings.Contains(screen, "Which greeting does the product want?") {
 		t.Errorf("the screen with the round's findings does not show the ask:\n%s", screen)
 	}
 

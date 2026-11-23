@@ -37,8 +37,9 @@ type world struct {
 	// sessionInfo is what each session's session-start line in the ledger
 	// said of it (people.go), whatever ticket the line named.
 	sessionInfo map[string]sessionInfo
-	// sessionEnd is when each session's session-end line in the ledger said it
-	// ended, whatever ticket the line named.
+	// sessionEnd is when each session's latest session-end line was written,
+	// whatever ticket the line names: the end of a session names none, and
+	// ends the sessions of every ticket it worked on.
 	sessionEnd map[string]time.Time
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart

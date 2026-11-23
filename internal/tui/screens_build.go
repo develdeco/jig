@@ -100,19 +100,31 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 	}
 	failed, failedOK := t.lastRunFailed(s.ID)
 	for _, c := range commits {
-		line := m.st.icon(c.State) + " " + short(c.SHA)
+		// How the commit stands is the status's word: its verification state
+		// as internal/phase tells it, with the command that clears it. A commit
+		// the table has no row for is verified, as the journal says.
+		row, hasRow := t.status.verificationOf(s.ID, c.SHA)
+		icon := c.State
+		switch {
+		case t.status == nil:
+			icon = StateQueued
+		case hasRow:
+			icon = row.icon()
+		}
+		line := m.st.icon(icon) + " " + short(c.SHA)
 		if c.Subject != "" {
 			line += " “" + c.Subject + "”"
 		}
 		// The time is the end of the line, so the commit's words give way to it.
 		when := m.commitWhen(c)
 		p.add(pre + fit(line, room-width(when)-2) + m.st.dim("  "+when))
-		if c.State == StateQueued && len(c.Runs) == 0 && c.Error == nil {
-			p.add(pre + "  " + m.st.dim(fit("no recorded result", room-4)))
-		}
 		for _, run := range c.Runs {
 			state := StateGreen
-			if run.Outcome != "pass" {
+			switch {
+			case run.Cause != "":
+				// A run that judged nothing is not the code failing.
+				state = StateQueued
+			case run.Outcome != "pass":
 				state = StateStalled
 			}
 			p.add(pre + "  " + m.st.icon(state) + " " + m.st.dim(fit(oracleWords(run), room-4)))
@@ -120,8 +132,21 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 				m.failureTail(p, pre+"    ", run, room-4)
 			}
 		}
-		if c.Error != nil {
-			p.add(pre + "  " + m.st.icon(StateStalled) + " " + m.st.dim(fit("could not be verified: "+firstOf(c.Error.Summary, "no reason recorded"), room-4)))
+		switch {
+		case t.status == nil:
+			p.add(pre + "  " + m.st.dim(readingText))
+		case hasRow:
+			// The state in phase's words, then the command that clears it.
+			for i, l := range wrap(row.State, room-4, 2) {
+				lead := "  " + m.st.icon(icon) + " "
+				if i > 0 {
+					lead = "    "
+				}
+				p.add(pre + lead + m.st.dim(l))
+			}
+			for _, l := range wrap(row.Clear, room-4, 2) {
+				p.add(pre + "    " + m.st.dim(l))
+			}
 		}
 	}
 

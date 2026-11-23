@@ -58,6 +58,7 @@ func (n *nextChart) layModelRows(c phase.Chart) {
 	if !c.Model {
 		return
 	}
+	n.Model = true
 	n.Lands, n.Publish = []nextChartLand{}, []nextChartPublish{}
 	for _, l := range c.Lands {
 		n.Lands = append(n.Lands, nextChartLand{Ticket: l.ID, Prompt: l.Prompt, After: orEmpty(l.After), State: l.State})

@@ -13,7 +13,7 @@ jig  demo › shop  Shop                                           ? run needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ────────────────────────────────────────────────── waits for a merge ─╮
   │  next     say "Continue shop"                                              │
-  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/p… │
+  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
   │  09:14:21 JIG-4 publish·done ● finished                                    │

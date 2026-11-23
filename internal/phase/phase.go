@@ -1071,7 +1071,7 @@ func (d *digest) brief() (Phase, bool) {
 		p.Subs = d.briefSubs(planned, "")
 		return p, true
 	case f.BriefExists && f.Approval == ApprovalChanged:
-		p.Text = "changed after " + d.who() + " approved it: it needs approving again"
+		p.Text = "brief changed after approval: approve again"
 		p.Subs = d.briefSubs(planned, "changed")
 		return p, false
 	case f.BriefExists && d.started:
@@ -1367,7 +1367,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 			p.Text += " · by " + d.reviewer(last.Session, last.N, false)
 		}
 	case len(undecided) > 0:
-		p.Text = fmt.Sprintf("round %d left %s · %d wait for your decision", last.N, count(len(d.asks), "ask"), len(undecided))
+		p.Text = roundDecisionText(last.N, fixesTotal, len(undecided))
 	case fixesOpen > 0:
 		p.Text = fmt.Sprintf("round %d sent fixes back · the build is on them", last.N)
 	case len(d.asks) > 0:
@@ -1376,6 +1376,21 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		p.Text = fmt.Sprintf("round %d's fixes are green · round %d is next", last.N, last.N+1)
 	}
 	return p, clean
+}
+
+// roundDecisionText says what a round that left asks to decide did: how many
+// fixes it sent back to the build and how many asks wait for the person, with
+// the verb agreeing, and no fix clause when it sent none.
+func roundDecisionText(n, fixes, asks int) string {
+	wait := "waits"
+	if asks != 1 {
+		wait = "wait"
+	}
+	text := fmt.Sprintf("round %d: ", n)
+	if fixes > 0 {
+		text += count(fixes, "fix") + " sent back, "
+	}
+	return text + count(asks, "ask") + " " + wait + " for you"
 }
 
 // fixesOf are how many of the fix slices round n queued are not green yet, and
