@@ -177,7 +177,7 @@ before SHOP-1 exists, and fills in when it does.
 
 A chart is a row on the main screen after the tickets, with how many of its
 tickets published. Enter opens its screen: the chart's map (destination, what
-was decided, the fog), its tickets with the same four step marks and what each
+was decided, the fog), its tickets with the same five step marks and what each
 waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
 (what to say to your agent, the briefs to write, the build waves, and where it
 ends) and the tickets' activity together. Under the tickets, a Detail panel shows
