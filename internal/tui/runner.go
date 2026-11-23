@@ -48,6 +48,9 @@ type outcome struct {
 	// it is taken.
 	Print string
 	Fixed bool
+	// After is how many roster reads had begun when the result arrived: a read
+	// numbered above it started after the command and is the first to fix Print.
+	After int
 }
 
 // shown is the step the screen reports: the one that failed, else the last.
@@ -72,6 +75,8 @@ type (
 		rows   []rosterRow
 		charts []chartListing
 		err    error
+		// seq is the read's place among the roster reads begun.
+		seq int
 	}
 )
 
@@ -125,12 +130,14 @@ func (m *Model) loadRoster() tea.Cmd {
 		return nil
 	}
 	m.rosterBusy, m.rosterStale, m.lastRoster = true, false, m.now()
+	m.rosterStarted++
+	seq := m.rosterStarted
 	args := m.verbArgs("next", "--json")
 	run := m.run
 	return func() tea.Msg {
 		out, _ := run(args)
 		rows, charts, err := parseRoster(out)
-		return rosterMsg{rows: rows, charts: charts, err: err}
+		return rosterMsg{rows: rows, charts: charts, err: err, seq: seq}
 	}
 }
 

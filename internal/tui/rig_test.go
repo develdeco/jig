@@ -414,7 +414,7 @@ func (g *rig) syncDigests() {
 	}
 	// The roster read that brings a digest is a message the model takes in, and a
 	// line that was about the ticket's old standing goes with it.
-	g.m.settleLast(true)
+	g.m.settleLast(rosterMsg{seq: 1 << 30})
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a
@@ -433,6 +433,17 @@ func newRig(t *testing.T, ticket string) *rig {
 	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, MergeEvery: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 		Now: func() time.Time { return rigNow }, Home: rigHome})
 	return &rig{t: t, m: m, r: r}
+}
+
+// newQuietRig is newRig over a store whose roster lists nothing new: a roster
+// read leaves each ticket's digest as the rig derived it from the lines, as a
+// store that a command did not move would (titles, and no digest of its own). A test of the line a command leaves
+// uses it, since the canned roster describes other tickets' standing.
+func newQuietRig(t *testing.T, ticket string) *rig {
+	t.Helper()
+	g := newRig(t, ticket)
+	g.r.answer("next --json --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
+	return g
 }
 
 // feed delivers a batch of the stream and settles what it starts.

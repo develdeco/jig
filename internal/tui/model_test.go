@@ -101,7 +101,7 @@ func TestTheCursorStaysOnItsScreen(t *testing.T) {
 
 func TestAnswerRunsTheVerbAsAPerson(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-1")
+	g := newQuietRig(t, "JIG-1")
 	g.feed(jig1()...).press("a")
 	if g.m.input == nil || g.m.input.qid != "q-001" {
 		t.Fatalf("a opened %+v, want the answer to q-001, the only open question", g.m.input)
@@ -282,7 +282,7 @@ func TestPublishApprovesThenPushesAndOnlyOnYes(t *testing.T) {
 
 func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := newQuietRig(t, "JIG-2")
 	g.r.answer("publish JIG-2 --approve --store /s", "error: the latest round is not clean\ncode: PUBLISH_NOT_CLEAN\n", 1)
 	g.feed(jig2Mid()...).press("p", "y")
 	want := []string{"publish JIG-2 --approve --store /s"}

@@ -26,7 +26,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a success says the verb's sentence", func(t *testing.T) {
-		g := newRig(t, "JIG-2")
+		g := newQuietRig(t, "JIG-2")
 		g.r.answer("triage JIG-2 r1-f2 dismiss --store /s", "triage:\n  ticket: JIG-2\n  decision: dismiss\nhelp[1]:\n  The next round applies it\n", 0)
 		g.feed(jig2Mid()...).press("enter", "down", "d")
 		got := lastPanel(g.view())
@@ -39,7 +39,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 	})
 
 	t.Run("a failure says its error and its code", func(t *testing.T) {
-		g := newRig(t, "JIG-2")
+		g := newQuietRig(t, "JIG-2")
 		g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
 		g.feed(jig2Mid()...).press("enter", "g")
 		got := lastPanel(g.view())
@@ -49,7 +49,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 	})
 
 	t.Run("a chain whose second step failed shows the failure", func(t *testing.T) {
-		g := newRig(t, "JIG-2")
+		g := newQuietRig(t, "JIG-2")
 		g.r.answer("publish JIG-2 --yes --store /s", "error: the head moved\ncode: PUBLISH_STALE\n", 1)
 		g.feed(jig2Mid()...).press("p", "y")
 		got := lastPanel(g.view())
@@ -59,7 +59,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 	})
 
 	t.Run("a long sentence is cut", func(t *testing.T) {
-		g := newRig(t, "JIG-2")
+		g := newQuietRig(t, "JIG-2")
 		g.r.answer("triage JIG-2 r1-f2 dismiss --store /s", "help[1]:\n  "+strings.Repeat("word ", 40)+"\n", 0)
 		g.feed(jig2Mid()...).press("enter", "down", "d")
 		got := lastPanel(g.view())
@@ -74,7 +74,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 // changed, and goes on leaving the screen.
 func TestLastCommandPanelExpiresWhenTheTicketMoves(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := newQuietRig(t, "JIG-2")
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
 	g.feed(jig2Mid()...).press("enter", "g")
 	if len(lastPanel(g.view())) != 1 {
@@ -107,7 +107,7 @@ func TestLastCommandPanelExpiresWhenTheTicketMoves(t *testing.T) {
 // line.
 func TestACommandsOwnEffectDoesNotRemoveItsLine(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := newQuietRig(t, "JIG-2")
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
 	g.feed(jig2Mid()...)
 	refusal := func(sec int) {
@@ -131,6 +131,70 @@ func TestACommandsOwnEffectDoesNotRemoveItsLine(t *testing.T) {
 	}
 }
 
+// TestTheLineIsFixedByTheFirstRosterReadAfterTheResult: in the program's order of
+// messages (the result, its status read, the refusal it journaled, then the
+// roster read that carries the digest that says so) the line stays, and goes at
+// a later move. A roster read that was already out when the result arrived does
+// not fix it; one that began after does. Driven through Update with no rig sync.
+func TestTheLineIsFixedByTheFirstRosterReadAfterTheResult(t *testing.T) {
+	t.Parallel()
+	refused := func(g *rig, text string) rosterMsg {
+		d := *g.m.w.tickets["JIG-2"].digest
+		d.Phases = append([]digestPhase(nil), d.Phases...)
+		for i := range d.Phases {
+			if d.Phases[i].Name == "review" {
+				d.Phases[i].Text = text
+			}
+		}
+		return rosterMsg{rows: []rosterRow{{ID: "JIG-2", Title: "Config loader", State: "ready", Digest: &d}}, seq: g.m.rosterStarted}
+	}
+	ran := func(g *rig) {
+		g.m.Update(ranMsg{result: outcome{Label: "gate", Ticket: "JIG-2", Steps: []ranStep{{
+			Args: g.m.verbArgs("gate", "JIG-2"), Out: "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", Code: 1}}}})
+	}
+	refusal := jl(at(12, 0), "JIG-2", "", journal.EventGateRefused, func(l *journal.Line) { l.Code, l.Summary = "GATE_NOT_GREEN", "slice a is queued" })
+	shown := func(g *rig) int { return len(lastPanel(g.view())) }
+
+	t.Run("the roster read that follows", func(t *testing.T) {
+		g := newQuietRig(t, "JIG-2")
+		g.feed(jig2Mid()...)
+		ran(g)
+		g.m.Update(statusMsg{ticket: "JIG-2", info: parseStatus(statusJIG2())})
+		g.m.Update(eventsMsg{refusal})
+		if shown(g) != 1 {
+			t.Fatalf("the line is gone before any roster read:\n%s", g.view())
+		}
+		g.m.Update(refused(g, "gate refused: slice a is queued"))
+		if shown(g) != 1 {
+			t.Fatalf("the roster read that carries the command's own refusal removed the line:\n%s", g.view())
+		}
+		g.m.Update(refused(g, "round 2 open · waiting for a reviewer"))
+		if shown(g) != 0 {
+			t.Errorf("the line outlived a later move of the ticket:\n%s", g.view())
+		}
+	})
+
+	t.Run("a roster read that was already out", func(t *testing.T) {
+		g := newQuietRig(t, "JIG-2")
+		g.feed(jig2Mid()...)
+		out := g.m.rosterStarted
+		ran(g)
+		stale := refused(g, "round 1: 2 asks wait for you")
+		stale.seq = out
+		_, cmd := g.m.Update(stale)
+		if cmd == nil {
+			t.Errorf("a read from before the result did not ask for one after it")
+		}
+		if g.m.last == nil || g.m.last.Fixed {
+			t.Fatalf("a read from before the result fixed the line: %+v", g.m.last)
+		}
+		g.m.Update(refused(g, "gate refused: slice a is queued"))
+		if g.m.last == nil || !g.m.last.Fixed || shown(g) != 1 {
+			t.Errorf("the read after the result did not fix the line: %+v", g.m.last)
+		}
+	})
+}
+
 // TestAChartCommandLineExpiresWithTheChartsStanding: a command with no ticket,
 // made on a chart's screen, is gone once the chart's verdict reads differently.
 func TestAChartCommandLineExpiresWithTheChartsStanding(t *testing.T) {
@@ -141,12 +205,12 @@ func TestAChartCommandLineExpiresWithTheChartsStanding(t *testing.T) {
 		t.Fatal("the chart screen has no chart read")
 	}
 	g.m.last = &outcome{Steps: []ranStep{{Args: []string{"next", c.info.Name}, Out: "ok\n"}}, Print: g.m.standingPrint(""), Fixed: true}
-	g.m.settleLast(false)
+	g.m.settleLast(nil)
 	if g.m.last == nil {
 		t.Fatal("the line went with the chart unchanged")
 	}
 	c.info.Prompt += " again"
-	g.m.settleLast(false)
+	g.m.settleLast(nil)
 	if g.m.last != nil {
 		t.Errorf("the line outlived the chart's verdict: %+v", g.m.last)
 	}
