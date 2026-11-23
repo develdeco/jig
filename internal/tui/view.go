@@ -207,7 +207,7 @@ func (m *Model) header(w int) []string {
 	if m.cfg.Project != "" {
 		crumbs += "  " + m.cfg.Project
 	}
-	var right string
+	var right, title, idCrumb string
 	switch e.screen {
 	case screenMain:
 		n := len(m.w.order)
@@ -228,8 +228,9 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
-		if t != nil && t.title != "" && e.screen == screenTicket {
-			crumbs += "  " + t.title
+		idCrumb = crumbs
+		if t != nil && t.title != "" {
+			title = t.title
 		}
 		if t != nil && e.screen == screenTicket {
 			if k := t.digest.kindWords(); k != "" {
@@ -261,6 +262,13 @@ func (m *Model) header(w int) []string {
 				}
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
+		}
+	}
+	if title != "" {
+		// The title gives way first: it takes what the id, the step and the
+		// state leave, whole or cut, and none when nothing is left.
+		if room := w - width(crumbs) - width(right) - 3; room > 1 {
+			crumbs = idCrumb + "  " + fit(title, room) + strings.TrimPrefix(crumbs, idCrumb)
 		}
 	}
 	gap := w - width(crumbs) - width(right)

@@ -457,7 +457,8 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
-// at, whether it can start now (Code and Reason say why not), the prompt that
+// at, whether it can start now (Code and Reason say why not, and, while a
+// review stands on a gate refusal, Reason is that refusal), the prompt that
 // starts it, each phase's state, and what --for asked.
 type nextPhase struct {
 	Name   string          `json:"name"`
@@ -524,6 +525,10 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt, Phases: phaseRows(t)}
+	if _, text := t.Refusal(); text != "" && t.Ready {
+		// The review can start, and says the gate was tried and why it stopped.
+		p.Reason = text
+	}
 	if asked != "" {
 		a := t.For(asked)
 		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
@@ -965,7 +970,8 @@ func (n nextTicket) blocks(topology bool) []string {
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
 // phase the ticket is at, whether it can start now, the prompt that starts it,
-// why not when it cannot, and the answer to --for.
+// the reason (why the phase cannot start or, while a review stands on a gate
+// refusal, that refusal), and the answer to --for.
 func (n nextTicket) phasePairs() [][2]string {
 	p := n.Phase
 	if p == nil {
@@ -978,7 +984,7 @@ func (n nextTicket) phasePairs() [][2]string {
 		}
 	}
 	add("prompt", p.Prompt)
-	if !p.Ready {
+	if !p.Ready || p.Reason != "" {
 		add("code", p.Code)
 		add("reason", p.Reason)
 	}

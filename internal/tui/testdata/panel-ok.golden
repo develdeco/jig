@@ -1,4 +1,4 @@
-jig  demo › JIG-2 › 3 review                                   ! review findings
+jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ○ low     beta/b.go:2    noted   Rename the helper  r1-f4
       a clearer name, whenever the file is next touched

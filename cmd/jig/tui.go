@@ -7,6 +7,7 @@ import (
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tui"
 )
@@ -124,6 +125,12 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Scope:      []string{"--store", st.Root},
 		Project:    cfg.Name,
 		MergeEvery: *mergeEvery,
+		// The idle tick compares the store's head: a chart made or a ticket
+		// graduated by another process adds no line the stream shows, but a
+		// store commit moves the head. A brief written to its files and left
+		// uncommitted does not, so the ticket's own screen reads its status on
+		// idle for that, and the list shows it at the next head move.
+		StoreHead: func() (string, error) { return gitx.RevParse(st.Root, "HEAD") },
 	}, stdin, stdout, e.stdoutIsTerminal(stdout))
 	if err != nil {
 		return renderErr(stdout, err)
