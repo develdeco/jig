@@ -202,6 +202,10 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	s := startRun(t, plainConfig(src, r))
 	s.out.until(t, "open question")
 
+	// A ticket made after the start: the store now lists it, and its first
+	// line asks the screens to read the roster again, which brings its row.
+	r.answer("next --json --roster --store /s", rosterJSONWith(map[string]any{
+		"id": "JIG-7", "title": "New work", "state": "ready", "digest": draftedDigest()}), 0)
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
 	s.out.until(t, "JIG-7")
 	s.keys("q")

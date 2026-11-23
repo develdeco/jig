@@ -66,3 +66,16 @@ func TestMainRefreshesMergesOnceAtLaunch(t *testing.T) {
 	start(cmd)
 	g.none(t, "a list with no row that waits on a merge")
 }
+
+// TestAStreamLineAfterTheRosterAddsNoRow: the stream's replay can arrive after
+// the first roster; a line for an id the roster does not list makes no row and
+// is not counted, so the header never reads more tickets than the store holds.
+func TestAStreamLineAfterTheRosterAddsNoRow(t *testing.T) {
+	t.Parallel()
+	m := New(quietConfig())
+	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2")}, seq: 1})
+	m.w.apply([]events.Envelope{jl(at(3, 1), "T-23", "a", "claim"), jl(at(3, 2), "JIG-1", "a", "claim")})
+	if frame := m.View(); strings.Contains(frame, "T-23") || !strings.Contains(frame, "2 tickets") {
+		t.Errorf("a stream line after the roster made a row or was counted:\n%s", frame)
+	}
+}

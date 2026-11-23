@@ -292,6 +292,16 @@ func draftedDigest() map[string]any {
 
 // rosterJSON is `jig next --json` for the store: JIG-1 is in its build, JIG-2
 // published and waits for a merge, JIG-3 has a brief waiting for its approval.
+// rosterJSONWith is rosterJSON with more rows after its own.
+func rosterJSONWith(rows ...map[string]any) string {
+	var r struct {
+		Tickets []map[string]any `json:"tickets"`
+	}
+	_ = json.Unmarshal([]byte(rosterJSON()), &r)
+	data, _ := json.Marshal(map[string]any{"tickets": append(r.Tickets, rows...)})
+	return string(data) + "\n"
+}
+
 func rosterJSON() string {
 	data, _ := json.Marshal(map[string]any{"tickets": []map[string]any{
 		{"id": "JIG-1", "title": "Greeting copy", "state": "ready", "digest": digestJSON("build", true,
