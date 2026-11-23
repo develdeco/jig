@@ -290,24 +290,6 @@ func scrollAskDrawn(t *testing.T, height int) (whole, cut int) {
 	return whole, cut
 }
 
-// TestAskOnAScreenThatDoesNotDrawItIsNotShown: k and d on a screen with no line
-// of the ask say to open the ticket, not to make the screen taller.
-func TestAskOnAScreenThatDoesNotDrawItIsNotShown(t *testing.T) {
-	t.Parallel()
-	g := askRig(t, 80, 60, askOne)
-	g.press("esc", "down") // the project's list, the cursor moved to JIG-2
-	if got := g.m.targetTicket(); got != "JIG-2" {
-		t.Fatalf("the cursor is on %q:\n%s", got, g.view())
-	}
-	g.press("d")
-	if got := triaged(g); len(got) != 0 {
-		t.Errorf("d on a screen that draws no ask ran %q", got)
-	}
-	if want := "ask r1-f1 is not shown on this screen: open JIG-2 to read it"; g.m.notice != want {
-		t.Errorf("notice = %q, want %q", g.m.notice, want)
-	}
-}
-
 // TestANoticeIsDrawnWhole: a notice is wrapped into the rows it needs, so the
 // frame holds all of it, the row count of the too-short prompt and the ticket a
 // refusal sends the person to included.

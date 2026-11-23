@@ -245,7 +245,13 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	started   time.Time
+	// keysOn is what the keys of the screen on top act on, as the last frame
+	// found it: the hint line is cut by it, and a key reads it again before it
+	// runs.
+	keysOn subject
+	// pageBuilds counts the pages built: a frame builds one.
+	pageBuilds int
+	started    time.Time
 }
 
 // New builds the model for cfg.
@@ -878,6 +884,9 @@ func (m *Model) settleLast(msg tea.Msg) {
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
 	m.last.After = m.rosterStarted
+	if msg.result.Label == labelPublishWhat {
+		m.publishRead(m.last)
+	}
 	var cmds []tea.Cmd
 	if msg.result.Ticket != "" {
 		// The roster read that follows is the one that says what the command did.
@@ -939,7 +948,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
 		switch k.String() {
-		case "a", "k", "d", "g", "p":
+		case "a", "k", "d", "g", "p", "u", "v":
 			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
 			return nil
 		}
@@ -964,17 +973,35 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	case "esc", "left", "backspace":
 		m.back()
 	case "a":
-		m.beginAnswer()
+		if m.allow(actAnswer) {
+			m.beginAnswer()
+		}
 	case "k":
-		return m.triage("keep")
+		if m.allow(actKeep) {
+			return m.triage("keep")
+		}
 	case "d":
-		return m.triage("dismiss")
+		if m.allow(actDismiss) {
+			return m.triage("dismiss")
+		}
+	case "u":
+		if m.allow(actRequeue) {
+			return m.requeue()
+		}
+	case "v":
+		if m.allow(actApprove) {
+			m.askApprove()
+		}
 	case "t":
 		m.tail = !m.tail
 	case "g":
-		return m.gate()
+		if m.allow(actGate) {
+			return m.gate()
+		}
 	case "p":
-		m.beginPublish()
+		if m.allow(actPublish) {
+			return m.beginPublish()
+		}
 	case "5":
 		return m.openLand()
 	case "c":
@@ -1062,12 +1089,17 @@ func (m *Model) followSel() {
 // selected is the row under the cursor, nil when the screen has none.
 func (m *Model) selected() *rowRef {
 	m.followSel()
-	refs := m.page().refs()
+	return m.refIn(m.page())
+}
+
+// refIn is the row of pg under the cursor.
+func (m *Model) refIn(pg page) *rowRef {
+	refs := pg.refs()
 	sel := m.top().sel
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
-	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {
 		// A row the window does not show is not under the cursor: a key that
 		// acts on it would decide what its person cannot see.
 		return nil
@@ -1075,10 +1107,9 @@ func (m *Model) selected() *rowRef {
 	return &refs[sel]
 }
 
-// rowShown says whether the sel-th selectable row of the page on top is in the
-// window the screen draws.
-func (m *Model) rowShown(sel int) bool {
-	pg := m.page()
+// rowShown says whether the sel-th selectable row of pg is in the window the
+// screen draws.
+func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
 	n := 0
@@ -1222,6 +1253,25 @@ func (m *Model) refreshAll() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// allow asks whether the key's action runs here: the screen must list it and can
+// must let it run; when not, the reason is the notice and nothing runs. The
+// hints list the keys by the same two answers.
+func (m *Model) allow(a action) bool {
+	m.keysOn = m.subjectNow()
+	listed := false
+	for _, k := range m.screenKeys(m.keysOn) {
+		listed = listed || k.act == a
+	}
+	ok, why := m.canOn(m.keysOn, a)
+	switch {
+	case !ok:
+		m.notice = why
+	case !listed:
+		m.notice = string(a) + " is not done from this screen"
+	}
+	return ok && listed
 }
 
 // targetTicket is the ticket a key acts on: the open one, else the one under
@@ -1377,6 +1427,36 @@ func (m *Model) triage(decision string) tea.Cmd {
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
 }
 
+// requeue puts a stalled or env-blocked slice back in the queue: the one the
+// keys act on (the cursor's, or the slice screen's), else the only one. It runs
+// at once: a requeue is a retry the builder's next claim takes.
+func (m *Model) requeue() tea.Cmd {
+	id := m.keysOn.ticket
+	slice := m.keysOn.slice
+	if slice == "" {
+		// can said at least one is stuck.
+		stuck := m.w.tickets[id].stuckSlices()
+		if len(stuck) != 1 {
+			m.notice = "several slices are stalled: put the cursor on the one to requeue"
+			return nil
+		}
+		slice = stuck[0]
+	}
+	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
+}
+
+// askApprove asks to approve the brief as it stands: the verb records the
+// approval as the person's, since the runner has them at the keys.
+func (m *Model) askApprove() {
+	id := m.targetTicket()
+	m.ask = &confirmation{
+		prompt: "approve the brief of " + id + " as it is now?",
+		run: func() tea.Cmd {
+			return m.exec("validate", id, m.verbArgs("validate", id))
+		},
+	}
+}
+
 // gate opens a gate round on the ticket.
 func (m *Model) gate() tea.Cmd {
 	id := m.targetTicket()
@@ -1391,18 +1471,48 @@ func (m *Model) gate() tea.Cmd {
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
-// beginPublish asks to publish the ticket: a person's approval of the
-// reviewed head, then the push and the pull request.
-func (m *Model) beginPublish() {
+// beginPublish renders the ticket's pull request body, which pushes nothing, to
+// read what its What says: the verb's own word on it comes back as publishRead.
+func (m *Model) beginPublish() tea.Cmd {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
-		return
+		return nil
 	}
 	if m.w.tickets[id].awaiting {
 		m.notice = id + " does not exist yet"
+		return nil
+	}
+	return m.exec(labelPublishWhat, id, m.verbArgs("publish", id, "--body"))
+}
+
+// whatPending says a rendered body has a What nobody wrote: a `what` row (or one
+// for each repo of a ticket of several) the verb says is pending.
+func whatPending(out string) bool {
+	for k, v := range parseAxi(out).KV["publish_body"] {
+		if (k == "what" || strings.HasPrefix(k, "what_")) && v == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// publishRead takes in the render beginPublish ran. With a What to write it
+// stops: nothing is asked or pushed, and the panel keeps the verb's own help
+// line for it, whole. A render the verb refused is shown as any refusal. A body
+// with its What asks to publish, and the render leaves no line of its own.
+func (m *Model) publishRead(res *outcome) {
+	s := res.shown()
+	if s.Code != 0 || whatPending(s.Out) {
 		return
 	}
+	m.last = nil
+	m.askPublish(res.Ticket)
+}
+
+// askPublish asks to publish the ticket: a person's approval of the
+// reviewed head, then the push and the pull request.
+func (m *Model) askPublish(id string) {
 	m.ask = &confirmation{
 		prompt: "publish " + id + ": approve the reviewed head, push it and open the pull request?",
 		run: func() tea.Cmd {

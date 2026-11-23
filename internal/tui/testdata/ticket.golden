@@ -9,7 +9,8 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
   │  ✖ slice b  failed its last run                                            │
-  │  +3 more                                                                   │
+  │  ? slice c  waits for your answer                                          │
+  │  +2 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c  q-001
@@ -20,5 +21,4 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  09:01:10 build·b · verification requested for bbbbbbb                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate
-  p publish · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · enter open · a answer · 5 land · t tail

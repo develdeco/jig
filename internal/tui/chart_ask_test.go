@@ -133,33 +133,24 @@ func TestShortenRunsGivesBackOnlyWhatIsCuttable(t *testing.T) {
 	}
 }
 
-func TestChartKeepNeedsTheAskDrawnWhole(t *testing.T) {
+// TestChartRecordsTheAskItDrewAndKeepsKToItself: the Detail panel is drawn whole
+// at 100 by 24 and cut at 100 by 18, as the record View keeps says. The chart
+// screen lists no k and d, so they run nothing there whatever it drew, and say
+// so; the ask is read and decided on its ticket's screens.
+func TestChartRecordsTheAskItDrewAndKeepsKToItself(t *testing.T) {
 	t.Parallel()
-	// Drawn whole in the Detail panel, k keeps the ask the panel shows.
-	g := askChartRig(t, 100, 70, askOne)
-	g.press("k")
-	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-5 r1-f1 keep") {
-		t.Errorf("k on the chart with the ask drawn whole ran %q", got)
-	}
-
-	// At 100 by 24 the Detail panel is the last that fits whole; at 100 by 18
-	// the window cuts it after its state row, and k runs no triage and says
-	// which ticket to open.
-	g = askChartRig(t, 100, 24, askOne)
-	g.press("k")
-	if got := triaged(g); len(got) != 1 {
-		t.Errorf("k at 100 by 24 ran %q", got)
-	}
-	g = askChartRig(t, 100, 18, askOne)
-	if g.m.drawn["r1-f1"] == askWhole {
-		t.Fatalf("the test needs the window to cut the ask at 100 by 18:\n%s", g.view())
-	}
-	g.press("k")
-	if got := triaged(g); len(got) != 0 {
-		t.Errorf("k decided an ask the chart did not draw whole: %q", got)
-	}
-	if want := "ask r1-f1 is not drawn whole on this screen: make the screen taller, or open JIG-5 to read it"; g.m.notice != want {
-		t.Errorf("the notice = %q, want %q", g.m.notice, want)
+	for h, want := range map[int]int{70: askWhole, 24: askWhole, 18: askCut} {
+		g := askChartRig(t, 100, h, askOne)
+		if got := g.m.drawn["r1-f1"]; got != want {
+			t.Errorf("at height %d the record says %d, want %d:\n%s", h, got, want, g.view())
+		}
+		g.press("k")
+		if got := triaged(g); len(got) != 0 {
+			t.Errorf("k on the chart ran %q", got)
+		}
+		if want := "keep is not done from this screen"; g.m.notice != want {
+			t.Errorf("notice = %q, want %q", g.m.notice, want)
+		}
 	}
 }
 
@@ -192,14 +183,5 @@ func TestChartDetailGivesUpSliceRowsBeforeAnAsk(t *testing.T) {
 		if got := g.m.drawn["r1-f1"] == askWhole; got != c.whole {
 			t.Errorf("at height %d the ask is drawn whole: %v, want %v:\n%s", c.height, got, c.whole, view)
 		}
-	}
-}
-
-func TestChartKeepWithSeveralAsksKeepsTodaysNotice(t *testing.T) {
-	t.Parallel()
-	g := askChartRig(t, 100, 70, askOne, askTwo)
-	g.press("k")
-	if got := triaged(g); len(got) != 0 || !strings.Contains(g.m.notice, "several asks are waiting") {
-		t.Errorf("k with two asks open ran %q, notice %q", got, g.m.notice)
 	}
 }

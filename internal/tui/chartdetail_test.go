@@ -150,9 +150,13 @@ func TestChartDetailOfATicketTheScreensDoNotKnowSaysSo(t *testing.T) {
 func TestChartDetailTakesItsRowsFromTheMapAndTheRunPanelFirst(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	// One row short of 80 by 24: the hint line of a chart is one line when no
+	// key of a ticket can run, which leaves a row more than the screen the
+	// panels' budget was set on.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 23})
 	v := g.view()
 	if strings.Contains(v, "map:") || strings.Contains(v, "╭─ Map") {
-		t.Errorf("the 80 by 24 screen still has the map:\n%s", v)
+		t.Errorf("the short screen still has the map:\n%s", v)
 	}
 	run := strings.Join(panelLines(strings.Split(v, "\n"), "Run"), "\n")
 	if !strings.Contains(run, "next ") || !strings.Contains(run, "ends at") || strings.Contains(run, "wave") {
@@ -248,7 +252,7 @@ func TestChartDetailGivesUpRowsDownToOneOnAShortScreen(t *testing.T) {
 		t.Errorf("the rows do not name each slice, its stage and its holder, the label on the first only:\n%s", got)
 	}
 
-	for _, c := range []struct{ height, rows int }{{24, 2}, {23, 1}} {
+	for _, c := range []struct{ height, rows int }{{23, 2}, {22, 1}} {
 		v := buildingRig(t, 80, c.height, 3).view()
 		panel = detailPanelOf(t, v)
 		if len(panel)-2 != c.rows || !strings.Contains(strings.Join(panel, "\n"), "slice    s1 · claimed") || strings.Contains(strings.Join(panel, "\n"), "s3") {
