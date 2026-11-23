@@ -12,10 +12,17 @@ import tea "github.com/charmbracelet/bubbletea"
 type mergeRefreshedMsg struct{}
 
 // mainWaitsOnMerge is whether a row of the project's list waits on a merge: a
-// ticket that published and has not landed.
+// ticket that published and has not landed, or an issue or a multi-task whose own
+// pull request is open.
 func (m *Model) mainWaitsOnMerge() bool {
 	for _, id := range m.w.order {
-		if end, ok := m.endOf(m.w.tickets[id]); ok && (end.State == StateWaitsToLand || end.State == StateOnLand) {
+		t := m.w.tickets[id]
+		if end, ok := m.endOf(t); ok && (end.State == StateWaitsToLand || end.State == StateOnLand) {
+			return true
+		}
+		// An issue or a multi-task has no phases of its own: its own pull request
+		// is open when its digest says published.
+		if d := t.digest; d != nil && len(d.Phases) == 0 && d.Closed == "" && d.State == "published" {
 			return true
 		}
 	}
