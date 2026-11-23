@@ -22,6 +22,8 @@ type chartListing struct {
 	// order; Ungraduated counts the ones that have none yet.
 	Tickets     []string
 	Ungraduated int
+	// Issue is the issue the chart plans, "" for none.
+	Issue string
 }
 
 // chartInfo is `jig next <chart> --json`, read.
@@ -40,6 +42,11 @@ type chartInfo struct {
 	Tickets []chartTicket
 	// Ends are the tickets the run stops at, each behind a merge.
 	Ends []chartEnd
+	// Lands are the landings an issue's run stops at, in the verb's order.
+	Lands []chartLand
+	// Model is whether the chart plans an issue's tickets: its ends are landings, in
+	// the words the verb carries from internal/phase, whether a landing is open or not.
+	Model bool
 	// History are the commits of the store that changed something under the
 	// chart's folder, newest first, as the verb printed them; none for an older
 	// jig, which says none.
@@ -49,7 +56,31 @@ type chartInfo struct {
 	// Spend is what the run has cost so far; nil when no ticket has any, and
 	// for an older jig, which says none.
 	Spend *chartSpend
+	// Issue is the issue the chart plans, with where its own run stands; nil for
+	// a chart that plans none (a legacy chart), which the screens draw as ever.
+	Issue *chartIssue
 }
+
+// chartIssue is the issue block of a chart that plans an issue: the ticket,
+// where the run stands in its tail (Stage), the issue's own pull request state
+// (State), its branch, where its pull request goes in each repo, and what its
+// publish still waits for.
+type chartIssue struct {
+	Ticket, Stage, State, Prompt, Branch string
+	Stack                                []chartStack
+	Unmet                                []chartUnmet
+	// Waits are the entries and tickets of the chart the issue's pull request
+	// waits for: Code is the ticket (empty for an entry with none yet) and Why its
+	// standing.
+	Waits []chartUnmet
+}
+
+// chartStack is where the issue's branch starts and its pull request goes in one
+// repo.
+type chartStack struct{ Repo, StartFrom, PRTarget string }
+
+// chartUnmet is one thing the issue's publish waits for, by its stable code.
+type chartUnmet struct{ Code, Why string }
 
 // chartSpend is the chart's spend: the sum of its tickets' latest spend lines,
 // subagents included. Tickets counts the tickets that have spend and Agents
@@ -63,18 +94,11 @@ type chartSpend struct {
 }
 
 // chartTicket is one entry of a chart: a ticket, or (ID "") an entry that has
-// none yet.
+// none yet. Where the ticket stands and what it waits for is its digest's, not
+// the chart's.
 type chartTicket struct {
 	ID, Title string
-	// Phase is the phase the ticket is at (brief, build, review or publish),
-	// Steps the four phases' states (done, current or pending), and Ready whether
-	// Phase can start now.
-	Phase   string
-	Steps   []string
-	Ready   bool
-	Problem string
-	// Waits are the needs of the ticket that are not met.
-	Waits []chartWait
+	Problem   string
 }
 
 // chartWait is a need of a ticket that is not met: the ticket it is on and in
@@ -82,6 +106,14 @@ type chartTicket struct {
 type chartWait struct {
 	Ticket, Kind, Fact string
 	PRs                []chartPR
+}
+
+// chartLand is a landing of an issue's run: Prompt is the person's word for it
+// ("Land <T>"), State its words from internal/phase, After the tickets that
+// land before it.
+type chartLand struct {
+	Ticket, Prompt, State string
+	After                 []string
 }
 
 // chartPR is a pull request a chart waits for.
@@ -139,18 +171,9 @@ func parseChart(out string) (*chartInfo, error) {
 		Briefs      []string   `json:"briefs"`
 		Run         [][]string `json:"run"`
 		Tickets     []struct {
-			ID      string   `json:"id"`
-			Title   string   `json:"title"`
-			Phase   string   `json:"phase"`
-			Steps   []string `json:"steps"`
-			Ready   bool     `json:"ready"`
-			Problem string   `json:"problem"`
-			Waits   []struct {
-				Ticket string    `json:"ticket"`
-				Kind   string    `json:"kind"`
-				Fact   string    `json:"fact"`
-				PRs    []chartPR `json:"prs"`
-			} `json:"waits_for"`
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			Problem string `json:"problem"`
 		} `json:"tickets"`
 		Ends []struct {
 			Ticket  string    `json:"ticket"`
@@ -159,6 +182,13 @@ func parseChart(out string) (*chartInfo, error) {
 			Fact    string    `json:"fact"`
 			PRs     []chartPR `json:"prs"`
 		} `json:"ends"`
+		Model bool `json:"model"`
+		Lands []struct {
+			Ticket string   `json:"ticket"`
+			Prompt string   `json:"prompt"`
+			After  []string `json:"after"`
+			State  string   `json:"state"`
+		} `json:"lands"`
 		History []struct {
 			SHA     string `json:"sha"`
 			Time    string `json:"time"`
@@ -177,6 +207,26 @@ func parseChart(out string) (*chartInfo, error) {
 			USD      float64  `json:"usd"`
 			Unpriced []string `json:"unpriced"`
 		} `json:"spend"`
+		Issue *struct {
+			Ticket string `json:"ticket"`
+			Stage  string `json:"stage"`
+			State  string `json:"state"`
+			Prompt string `json:"prompt"`
+			Branch string `json:"branch"`
+			Stack  []struct {
+				Repo      string `json:"repo"`
+				StartFrom string `json:"start_from"`
+				PRTarget  string `json:"pr_target"`
+			} `json:"stack"`
+			Unmet []struct {
+				Code string `json:"code"`
+				Why  string `json:"why"`
+			} `json:"unmet"`
+			Waits []struct {
+				Ticket   string `json:"ticket"`
+				Standing string `json:"standing"`
+			} `json:"waits"`
+		} `json:"issue"`
 	}
 	if err := json.Unmarshal([]byte(obj), &v); err != nil {
 		var syntax *json.SyntaxError
@@ -193,14 +243,14 @@ func parseChart(out string) (*chartInfo, error) {
 		Started: v.Started, Ungraduated: v.Ungraduated, Briefs: v.Briefs, Run: v.Run,
 	}
 	for _, t := range v.Tickets {
-		ct := chartTicket{ID: t.ID, Title: t.Title, Phase: t.Phase, Steps: t.Steps, Ready: t.Ready, Problem: t.Problem}
-		for _, w := range t.Waits {
-			ct.Waits = append(ct.Waits, chartWait{Ticket: w.Ticket, Kind: w.Kind, Fact: w.Fact, PRs: w.PRs})
-		}
-		info.Tickets = append(info.Tickets, ct)
+		info.Tickets = append(info.Tickets, chartTicket{ID: t.ID, Title: t.Title, Problem: t.Problem})
 	}
 	for _, e := range v.Ends {
 		info.Ends = append(info.Ends, chartEnd{Ticket: e.Ticket, Blocker: e.Blocker, Kind: e.Kind, Fact: e.Fact, PRs: e.PRs})
+	}
+	info.Model = v.Model
+	for _, l := range v.Lands {
+		info.Lands = append(info.Lands, chartLand{Ticket: l.Ticket, Prompt: l.Prompt, State: l.State, After: l.After})
 	}
 	for _, h := range v.History {
 		// An entry whose time cannot be placed among the lines is left out.
@@ -213,6 +263,18 @@ func parseChart(out string) (*chartInfo, error) {
 	}
 	if v.Spend != nil {
 		info.Spend = &chartSpend{Tickets: v.Spend.Tickets, Agents: v.Spend.Agents, Tokens: v.Spend.Tokens, USD: v.Spend.USD, Unpriced: v.Spend.Unpriced}
+	}
+	if is := v.Issue; is != nil && is.Ticket != "" {
+		info.Issue = &chartIssue{Ticket: is.Ticket, Stage: is.Stage, State: is.State, Prompt: is.Prompt, Branch: is.Branch}
+		for _, r := range is.Stack {
+			info.Issue.Stack = append(info.Issue.Stack, chartStack{Repo: r.Repo, StartFrom: r.StartFrom, PRTarget: r.PRTarget})
+		}
+		for _, w := range is.Waits {
+			info.Issue.Waits = append(info.Issue.Waits, chartUnmet{Code: w.Ticket, Why: w.Standing})
+		}
+		for _, u := range is.Unmet {
+			info.Issue.Unmet = append(info.Issue.Unmet, chartUnmet{Code: u.Code, Why: u.Why})
+		}
 	}
 	return info, nil
 }

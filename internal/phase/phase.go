@@ -167,7 +167,19 @@ type Sub struct {
 	// Detail is a few words on where it stands: "5 sections", "verified
 	// d7101d0", "1 fix, 1 ask".
 	Detail string
+	// WaitsFor says who the sub-step waits for once it is under way: the
+	// person (an approval, an answer, a decision) or the host (a merge), ""
+	// for a sub-step that is work, or that waits on other slices or on its
+	// environment. A sub-step that waits is held by no session, and the time
+	// it stands is a wait, not work.
+	WaitsFor string
 }
+
+// Who a waiting sub-step waits for (Sub.WaitsFor).
+const (
+	WaitsForPerson = "person"
+	WaitsForHost   = "host"
+)
 
 // Phase is one phase of a ticket.
 type Phase struct {
@@ -176,7 +188,10 @@ type Phase struct {
 	State string
 	// Text is where the phase stands, in a few words.
 	Text string
-	Subs []Sub
+	// Changed says the brief was edited after its approval; set for the brief
+	// phase alone.
+	Changed bool
+	Subs    []Sub
 }
 
 // Slice is a slice as Derive reads it.
@@ -188,8 +203,12 @@ type Slice struct {
 	Goal  string
 	// BlockedBy are the slices this one waits for.
 	BlockedBy []string
-	// FromGate is the round that queued a fix slice, 0 for a planned slice.
+	// FromGate is the round that queued a fix slice, 0 for a planned slice or
+	// for a fix slice nothing places in a round (see Fix).
 	FromGate int
+	// Fix says the slice is a fix slice whose round is not known; a slice with
+	// a FromGate is one already.
+	Fix bool
 	// OpenQuestion is whether a question of the slice has no answer yet.
 	OpenQuestion bool
 }
@@ -458,6 +477,16 @@ type round struct {
 	Session string
 }
 
+// refusalSupersededBy are the lines after which a gate-refused line is no
+// longer the word on the review: the gate ran again (an open, a new refusal,
+// or the close of a round it was refused beside), or the build moved on (a claim, an oracle, a verification, a fix
+// slice, a requeue or a restamp). Notes, asks and questions do not.
+var refusalSupersededBy = map[string]bool{
+	journal.EventGateOpen: true, journal.EventGateRound: true, journal.EventGateClean: true, journal.EventGateRefused: true, journal.EventClaim: true,
+	journal.EventOracle: true, journal.EventVerified: true, journal.EventVerifyError: true,
+	journal.EventFixSlice: true, journal.EventRequeue: true, journal.EventRestamp: true,
+}
+
 // buildEvents are the lines that show a ticket is being built, and that move
 // the head a clean round reviewed.
 var buildEvents = map[string]bool{
@@ -539,12 +568,15 @@ type digest struct {
 	rounds     []round
 	lastClosed int
 	builtSince bool
-	closedAt   map[int]int
-	approval   int
-	asks       []Ask
-	notes      []Ask
-	slices     []sliceView
-	pub        publishView
+	// refusal is the gate-refused line the review still reads as its word: the
+	// latest one, when no line after it supersedes it (refusalSupersededBy).
+	refusal  *journal.Line
+	closedAt map[int]int
+	approval int
+	asks     []Ask
+	notes    []Ask
+	slices   []sliceView
+	pub      publishView
 	// landed and hasPR are what land read of the lines: every pull request has
 	// a landed line, and some repo has a pull request.
 	landed, hasPR bool
@@ -641,6 +673,9 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	landP, landDone := d.land(publishDone)
 
 	t := Ticket{Phases: [5]Phase{briefP, buildP, reviewP, publishP, landP}, d: d}
+	for i := range t.Phases {
+		setWaits(&t.Phases[i])
+	}
 	done := [5]bool{briefDone, buildDone, reviewDone, publishDone, landDone}
 	cur := Work - 1
 	for i, dn := range done {
@@ -665,6 +700,24 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 		t.stand()
 	}
 	return t
+}
+
+// setWaits names who each waiting sub-step of p waits for: the person for one
+// that needs them (an approval, an answer, a decision), and for an approval that
+// was given, since the time it stood is still a wait; the host for the merge of
+// a landing, waiting or made. A sub-step blocked on other slices or on its
+// environment waits for no one and has none.
+func setWaits(p *Phase) {
+	for i := range p.Subs {
+		s := &p.Subs[i]
+		approval := (p.Name == Brief && s.Key == "approved") || (p.Name == Publish && s.Key == "approval")
+		switch {
+		case s.State == SubNeedsYou, approval && s.State == SubDone:
+			s.WaitsFor = WaitsForPerson
+		case p.Name == Land && s.Key == "merge" && (s.State == SubWaiting || s.State == SubDone):
+			s.WaitsFor = WaitsForHost
+		}
+	}
 }
 
 // rebuildEvents are the journal lines that show work went on after a publish:
@@ -747,6 +800,11 @@ func newDigest(f Facts, lines []journal.Line) *digest {
 		case buildEvents[l.Event] || startedEvents[l.Event]:
 			d.started = true
 		}
+		if l.Event == journal.EventGateRefused {
+			d.refusal = &lines[i]
+		} else if refusalSupersededBy[l.Event] {
+			d.refusal = nil
+		}
 	}
 	// The head moved when the build went on after the last round closed.
 	if last, ok := d.lastRound(); ok {
@@ -761,7 +819,7 @@ func newDigest(f Facts, lines []journal.Line) *digest {
 	// The store shows work began where the journal does not (a slice past
 	// queued, a round on record, a fix slice a round queued).
 	for _, s := range f.Slices {
-		if s.State != sliceQueued || s.FromGate > 0 {
+		if s.State != sliceQueued || s.isFix() {
 			d.started = true
 		}
 	}
@@ -950,7 +1008,7 @@ func (p *publishView) repoOf(name string) *repoView {
 func (d *digest) planned() int {
 	n := 0
 	for _, s := range d.f.Slices {
-		if s.FromGate == 0 {
+		if !s.isFix() {
 			n++
 		}
 	}
@@ -1016,7 +1074,7 @@ func (d *digest) brief() (Phase, bool) {
 		p.Subs = d.briefSubs(planned, "")
 		return p, true
 	case f.BriefExists && f.Approval == ApprovalChanged:
-		p.Text = "changed after " + d.who() + " approved it: it needs approving again"
+		p.Text, p.Changed = "brief changed after approval: approve again", true
 		p.Subs = d.briefSubs(planned, "changed")
 		return p, false
 	case f.BriefExists && d.started:
@@ -1109,7 +1167,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 		if s.State == sliceGreen {
 			green++
 		}
-		if s.FromGate > 0 {
+		if s.isFix() {
 			fixes++
 		}
 	}
@@ -1142,11 +1200,17 @@ func (d *digest) untouched() bool {
 	return true
 }
 
+// isFix is whether the slice is a fix slice, with its round known or not.
+func (s Slice) isFix() bool { return s.FromGate > 0 || s.Fix }
+
 // sliceLabel is how a slice is named in the sub-steps: a fix slice says which
 // round queued it.
 func sliceLabel(s Slice) string {
 	if s.FromGate > 0 {
 		return fmt.Sprintf("fix slice %s (round %d)", s.ID, s.FromGate)
+	}
+	if s.Fix {
+		return "fix slice " + s.ID
 	}
 	return "slice " + s.ID
 }
@@ -1273,6 +1337,12 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		if prevDone {
 			sub.Detail = "ready to open"
 		}
+		if d.refusal != nil {
+			sub.State, sub.Detail = SubNeedsYou, d.refusal.Code
+			if d.refusal.Code == "BRANCH_NOT_FOUND" {
+				sub.State = SubWaiting // the branch is the builder's to push
+			}
+		}
 		p.Subs = append(p.Subs, sub)
 	}
 
@@ -1284,6 +1354,8 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		} else {
 			p.Text += "waiting for a reviewer"
 		}
+	case d.refusal != nil && !clean:
+		p.Text = d.refusalText()
 	case !hasRound && !prevDone:
 		p.Text = "after the build"
 	case !hasRound:
@@ -1298,7 +1370,7 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 			p.Text += " · by " + d.reviewer(last.Session, last.N, false)
 		}
 	case len(undecided) > 0:
-		p.Text = fmt.Sprintf("round %d left %s · %d wait for your decision", last.N, count(len(d.asks), "ask"), len(undecided))
+		p.Text = roundDecisionText(last.N, fixesTotal, len(undecided))
 	case fixesOpen > 0:
 		p.Text = fmt.Sprintf("round %d sent fixes back · the build is on them", last.N)
 	case len(d.asks) > 0:
@@ -1307,6 +1379,21 @@ func (d *digest) review(prevDone bool) (Phase, bool) {
 		p.Text = fmt.Sprintf("round %d's fixes are green · round %d is next", last.N, last.N+1)
 	}
 	return p, clean
+}
+
+// roundDecisionText says what a round that left asks to decide did: how many
+// fixes it sent back to the build and how many asks wait for the person, with
+// the verb agreeing, and no fix clause when it sent none.
+func roundDecisionText(n, fixes, asks int) string {
+	wait := "waits"
+	if asks != 1 {
+		wait = "wait"
+	}
+	text := fmt.Sprintf("round %d: ", n)
+	if fixes > 0 {
+		text += count(fixes, "fix") + " sent back, "
+	}
+	return text + count(asks, "ask") + " " + wait + " for you"
 }
 
 // fixesOf are how many of the fix slices round n queued are not green yet, and
@@ -1580,11 +1667,18 @@ func (d *digest) asksReason() string {
 	return fmt.Sprintf("%s of %s %s for a person to decide (`jig triage %s <id> keep|dismiss`)", count(n, "ask"), d.f.Ticket, plural(n, "waits", "wait"), d.f.Ticket)
 }
 
+// refusalText words the gate refusal the review stands on.
+func (d *digest) refusalText() string {
+	return "gate refused: " + d.refusal.Summary
+}
+
 // notReviewedReason says why no clean round stands for the head.
 func (d *digest) notReviewedReason() string {
 	f := d.f
 	last, ok := d.lastRound()
 	switch {
+	case d.refusal != nil:
+		return d.refusalText()
 	case !ok:
 		return fmt.Sprintf("no gate round has reviewed %s yet", f.Ticket)
 	case last.Clean && d.builtSince:
@@ -1679,4 +1773,15 @@ func firstOf(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+// Refusal is the gate refusal the ticket's review stands on: its code and the
+// words `gate refused: <summary>`, when the ticket is at the review with no
+// round open and no later line has superseded the refusal. Both are empty
+// otherwise.
+func (t Ticket) Refusal() (code, text string) {
+	if t.d == nil || t.d.refusal == nil || t.Current != Review || t.d.f.Open != nil {
+		return "", ""
+	}
+	return t.d.refusal.Code, t.d.refusalText()
 }

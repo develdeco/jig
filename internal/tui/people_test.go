@@ -100,13 +100,13 @@ func TestAReviewerThatBuiltNothingIsJustTheReviewer(t *testing.T) {
 	if got := g.m.say(tk, took); got != "reviewer (Claude Code · Opus 5) took it" {
 		t.Errorf("gate-reviewer says %q, want the reviewer on the model it started on", got)
 	}
-	if got := tk.reviewerName("s-fresh"); got != "reviewer" {
+	if got := tk.reviewerName("s-fresh", 0); got != "reviewer" {
 		t.Errorf("reviewerName = %q, want reviewer", got)
 	}
-	if got := tk.reviewerName("s-builder"); got != "reviewer subagent" {
+	if got := tk.reviewerName("s-builder", 0); got != "reviewer subagent" {
 		t.Errorf("reviewerName of the builder = %q, want reviewer subagent", got)
 	}
-	if got := tk.reviewerName("s-nobody"); got != "" {
+	if got := tk.reviewerName("s-nobody", 0); got != "" {
 		t.Errorf("reviewerName of a session with no role = %q, want none", got)
 	}
 }

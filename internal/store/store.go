@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ import (
 // Store is a truth-repo checkout rooted at Root.
 type Store struct {
 	Root string
+
+	// charts holds each chart's tickets.yaml as last decoded, so a command that
+	// asks about many tickets decodes a chart once (chartindex.go).
+	charts chartIndex
 
 	// checkpointNotice and checkpointBound, when set, replace the package
 	// defaults of the checkpoint lock's wait (a test shortens them).
@@ -234,6 +239,18 @@ func (s *Store) HasRemote() bool {
 // (and a landing whose push origin rejected) records before taking what moved
 // on origin.
 const leftoversMessage = "jig: record uncommitted store state"
+
+// mirrorIssueRecord is the subject of the commit the tracker mirror makes when
+// it records a created issue: "<what>: github issue <owner>/<repo>#<n>".
+var mirrorIssueRecord = regexp.MustCompile(`^.+: github issue [^/\s]+/[^#\s]+#[0-9]+$`)
+
+// isHousekeeping reports whether a commit subject is the store's own
+// bookkeeping, which says nothing a person did: the leftovers record, the
+// tracker sync's landing and the mirror's record of a created issue. A new
+// housekeeping message is added here, beside the messages.
+func isHousekeeping(subject string) bool {
+	return subject == leftoversMessage || subject == trackerLandMessage || mirrorIssueRecord.MatchString(subject)
+}
 
 // Sync stages and commits any uncommitted store state left behind by an
 // earlier command that failed after writing to the store - for example a

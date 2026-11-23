@@ -22,7 +22,7 @@ func publishRig(t *testing.T, body, changelog, height int) *rig {
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2DoneWith(numbered("body", body), numbered("changelog", changelog)), 0)
 	g.m.height = height
-	g.feed(jig2()...).press("enter")
+	g.feed(jig2()...).press("up", "enter")
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want the publish screen", g.m.Screen())
 	}

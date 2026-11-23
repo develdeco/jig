@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"slices"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/gitx"
+	"github.com/develdeco/jig/internal/locate"
 	"github.com/develdeco/jig/internal/store"
 	"github.com/develdeco/jig/internal/tui"
 )
@@ -34,8 +37,8 @@ func init() {
 	})
 }
 
-// cmdTUI implements `jig tui [T|C] [--store P] [--project N] [--merge-every D]`: eight screens
-// (the project, a ticket, its brief, build, review and publish, a slice, a
+// cmdTUI implements `jig tui [T|C] [--store P] [--project N] [--merge-every D]`: nine screens
+// (the project, a ticket, its brief, build, review, publish and land, a slice, a
 // chart) over the event stream `jig events` prints, acting only by running
 // verbs (internal/tui). With a ticket the screens open on it, with a chart (a
 // word that is no ticket of the store) on the chart's screen. It reads and
@@ -109,6 +112,12 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return renderErr(stdout, err)
 		}
 		ticket = id
+		// An issue's screen is its plan, the screen of the chart that plans it.
+		if rec, err := st.ReadTicket(id); err == nil && rec.KindOrDefault() == store.KindIssue {
+			if name, _ := st.ChartOfIssue(id); name != "" {
+				chart, ticket = name, ""
+			}
+		}
 	}
 
 	scope := events.Scope{
@@ -124,6 +133,12 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Scope:      []string{"--store", st.Root},
 		Project:    cfg.Name,
 		MergeEvery: *mergeEvery,
+		// The idle tick compares the store's head: a chart made or a ticket
+		// graduated by another process adds no line the stream shows, but a
+		// store commit moves the head. A brief written to its files and left
+		// uncommitted does not, so the ticket's own screen reads its status on
+		// idle for that, and the list shows it at the next head move.
+		StoreHead: func() (string, error) { return gitx.RevParse(st.Root, "HEAD") },
 	}, stdin, stdout, e.stdoutIsTerminal(stdout))
 	if err != nil {
 		return renderErr(stdout, err)
@@ -166,6 +181,17 @@ func tuiRunner(e env) tui.Runner {
 	pe.stdinIsTerminal = func(r io.Reader) bool {
 		_, ok := r.(personAtTheKeys)
 		return ok
+	}
+	// The person at the keys is nobody's agent: the terminal jig tui was
+	// launched from may be a harness session's shell, and what the person does
+	// from the screens must not carry that session. Only this env is wrapped,
+	// so jig tui's own reads and a script's run of a verb are unchanged.
+	inner := e.getenv
+	pe.getenv = func(key string) string {
+		if key == locate.SessionEnv || slices.Contains(locate.HarnessSessionEnv, key) {
+			return ""
+		}
+		return inner(key)
 	}
 	return func(args []string) (string, int) {
 		var out bytes.Buffer

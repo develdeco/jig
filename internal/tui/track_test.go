@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -57,7 +58,7 @@ func TestALoneOraclePassIsBuildingNotVerifying(t *testing.T) {
 
 	// On the build screen a commit with only a pending line says so.
 	g := newRig(t, "JIG-1")
-	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
+	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"})+axi.Table("verification_states", []string{"slice", "commit", "state", "clear"}, [][]string{{"a", a[:12], "no recorded result", "jig verify JIG-1 --slice a"}}), 0)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", a, "", "first", "", ""))).press("enter")
 	text := pageText(g)
 	if !strings.Contains(text, "no recorded result") || strings.Contains(text, "verifying") {

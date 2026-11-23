@@ -125,7 +125,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	)
 	g.press("down", "enter") // from the build, the current step, to the review
 	v := g.view()
-	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1: alpha/a.go:3 Unchecked error"} {
+	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
@@ -222,30 +222,6 @@ func TestADecidedAskSaysSoBeforeItsTitle(t *testing.T) {
 	}
 	if a, b := strings.Index(lines[0], "a long title"), strings.Index(lines[1], "short"); a != b {
 		t.Errorf("titles start at %d and %d, want them aligned", a, b)
-	}
-}
-
-// TestAnUnreadTicketsBriefSaysWhatTheRosterKnows: before its status is read,
-// a ticket's brief step says what `jig next` told: no slices yet is a brief
-// being drafted, slices nobody started with no approval in the journal wait
-// for it, and a ticket whose work started or ended is only being read (its
-// lines, approval among them, are on their way).
-func TestAnUnreadTicketsBriefSaysWhatTheRosterKnows(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "")
-	g.m.w.setRoster([]rosterRow{
-		{ID: "JIG-10", Title: "New", State: "new"}, {ID: "JIG-11", Title: "Planned", State: "ready"},
-		{ID: "JIG-12", Title: "Waits", State: "blocked"}, {ID: "JIG-13", Title: "Built", State: "green"},
-		{ID: "JIG-14", Title: "Shipped", State: "done"}, {ID: "JIG-15", Title: "Going", State: "active"},
-		{ID: "JIG-16", Title: "Broken", State: "invalid"},
-	})
-	for id, want := range map[string]string{
-		"JIG-10": "being drafted", "JIG-11": "drafted · waiting for your approval", "JIG-12": "drafted · waiting for your approval",
-		"JIG-13": "reading", "JIG-14": "reading", "JIG-15": "reading", "JIG-16": "its slices.yaml cannot be read",
-	} {
-		if s := g.m.steps(g.m.w.tickets[id])[stepBrief]; s.Text != want {
-			t.Errorf("%s brief = %+v, want %q", id, s, want)
-		}
 	}
 }
 
@@ -374,21 +350,21 @@ func TestEachStepCountsItsTimeAndTheStepsTheirTotal(t *testing.T) {
 	g.feed(
 		ll(at(0, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-b", "claude", "claude-sonnet-5" }),
 		ll(at(1, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-b" }),
-		tool(at(1, 1), "s-b", "jig ticket new --title Round", said("Mint the ticket")),
-		tool(at(2, 30), "s-b", "jig validate SHOP-1", said("Check the slices")),
+		toolOn("SHOP-1", at(1, 1), "s-b", "jig ticket new --title Round", said("Mint the ticket")),
+		toolOn("SHOP-1", at(2, 30), "s-b", "jig validate SHOP-1", said("Check the slices")),
 		jl(at(4, 0), "SHOP-1", "", journal.EventApproval, with("s-b", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),
-		tool(at(5, 0), "s-b", "jig skill build", said("Read the build skill")),
+		toolOn("SHOP-1", at(5, 0), "s-b", "jig skill build", said("Read the build skill")),
 		jl(at(5, 10), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(5, 40), "s-b", "go test ./...", said("Run the tests")),
+		toolOn("SHOP-1", at(5, 40), "s-b", "go test ./...", said("Run the tests")),
 	)
 	steps := g.m.steps(g.m.w.tickets["SHOP-1"])
-	for step, want := range map[int]string{stepBrief: "2m 59s", stepBuild: "1m 00s", stepReview: "", stepPublish: ""} {
+	for step, want := range map[int]string{stepBrief: "2m 59s", stepBuild: "1m 00s", stepReview: "", stepPublish: "", stepLand: ""} {
 		if got := steps[step].Took; got != want {
 			t.Errorf("%s took %q, want %q", stepNames[step], got, want)
 		}
 	}
-	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 4 · total 3m 59s") {
-		t.Errorf("the Steps panel's title does not give the total:\n%s", top)
+	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 5 · worked 3m 59s") {
+		t.Errorf("the Steps panel's title does not give the work:\n%s", top)
 	}
 }
 

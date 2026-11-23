@@ -150,7 +150,7 @@ func TestTheScreensStandWhereInternalPhaseSaysTheTicketStands(t *testing.T) {
 			t.Errorf("%s: the screens stand at %s (ready %v), phase.Derive at %s (ready %v)", tc.name, got.Current, got.Ready, d.Current, d.Ready)
 		}
 		steps := m.steps(tk)
-		for i, p := range d.Work() {
+		for i, p := range d.Phases {
 			if got.States[i] != p.State {
 				t.Errorf("%s: the screens have %s %s, phase.Derive %s", tc.name, p.Name, got.States[i], p.State)
 			}
@@ -158,51 +158,6 @@ func TestTheScreensStandWhereInternalPhaseSaysTheTicketStands(t *testing.T) {
 				t.Errorf("%s: the %s row says %q, phase.Derive %q", tc.name, p.Name, steps[i].Text, p.Text)
 			}
 		}
-	}
-}
-
-// TestAnOldJournalOfAPublishedTicketIsNotBuiltAgainByAGuess: a journal from
-// before claim and verified lines (a dispatch and a result for each slice, then
-// the publish) guesses its slices as building; with no status read, that guess
-// never builds a published ticket again, while a claim after the publish does.
-func TestAnOldJournalOfAPublishedTicketIsNotBuiltAgainByAGuess(t *testing.T) {
-	t.Parallel()
-	line := func(i int, slice, event string) events.Envelope {
-		return events.Envelope{Src: events.SrcJournal, Store: "demo", Line: journal.Line{TS: at(0, i), Ticket: "OLD-1", Slice: slice, Event: event}}
-	}
-	old := []events.Envelope{
-		line(0, "a", journal.EventDispatch), line(1, "b", journal.EventDispatch),
-		line(2, "", journal.EventPublishDone),
-	}
-	m := New(Config{Zone: time.UTC})
-	m.w.apply(old)
-	st, ok := m.Standing("OLD-1")
-	if !ok || st.States != [4]string{"done", "done", "done", "done"} {
-		t.Fatalf("an old journal of a published ticket stands at %+v, want four phases done", st)
-	}
-	m.w.apply([]events.Envelope{line(3, "a", journal.EventClaim)})
-	if st, _ := m.Standing("OLD-1"); st.Current != "build" {
-		t.Errorf("a claim after the publish stands at %s, want the build again", st.Current)
-	}
-}
-
-// TestAStatusNobodyReadYetStandsOnTheJournalAlone: the main screen reads no
-// status, and a ticket seen only through its lines still stands where the
-// lines say.
-func TestAStatusNobodyReadYetStandsOnTheJournalAlone(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "")
-	g.feed(jig2()...)
-	st, ok := g.m.Standing("JIG-2")
-	if !ok || st.Current != "publish" || st.States != [4]string{"done", "done", "done", "done"} {
-		t.Errorf("a published ticket seen by its lines stands at %+v, want four phases done", st)
-	}
-	g.feed(jig1()...)
-	if st, _ := g.m.Standing("JIG-1"); st.Current != "build" || st.States[0] != "done" {
-		t.Errorf("a ticket mid-build seen by its lines stands at %+v, want the build current", st)
-	}
-	if _, ok := g.m.Standing("NOPE-1"); ok {
-		t.Errorf("a ticket the screens know nothing of has a standing")
 	}
 }
 

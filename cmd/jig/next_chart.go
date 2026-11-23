@@ -39,6 +39,10 @@ type nextChart struct {
 	Run     [][]string        `json:"run"`
 	Tickets []nextChartTicket `json:"tickets"`
 	Ends    []nextChartEnd    `json:"ends"`
+	// Model says the chart plans an issue's tickets (phase.Chart.Model): lands,
+	// publish and an empty list are left out of the output, so this is the one
+	// field that tells every model chart apart from a legacy one.
+	Model bool `json:"model,omitempty"`
 	// Lands, Publish and Issue are a model chart's: left out for a legacy one.
 	Lands   []nextChartLand    `json:"lands,omitempty"`
 	Publish []nextChartPublish `json:"publish,omitempty"`
@@ -122,7 +126,8 @@ type nextChartCommit struct {
 const chartHistoryLimit = 20
 
 // chartHistory is the chart's store history for --json: the newest commits that
-// touched charts/<name>/, newest first. It is never nil, and it is empty when
+// touched charts/<name>/, newest first, without the store's own housekeeping
+// commits (Store.ChartHistory). It is never nil, and it is empty when
 // the history cannot be read (the store is not a git repository, it has no
 // commit yet, git fails): a problem is an empty list, never a reason to hide
 // the chart, and nothing is printed for it.
@@ -489,6 +494,9 @@ type nextChartRow struct {
 	Title       string   `json:"title"`
 	Tickets     []string `json:"tickets"`
 	Ungraduated int      `json:"ungraduated"`
+	// Issue is the issue the chart plans, "" for a chart that plans none: what
+	// the screens read to open an issue on its plan.
+	Issue string `json:"issue,omitempty"`
 }
 
 // chartRows lists the store's charts. A chart whose tickets.yaml cannot be read
@@ -504,6 +512,7 @@ func chartRows(st *store.Store) []nextChartRow {
 		if data, err := os.ReadFile(st.ChartMapFile(name)); err == nil {
 			row.Title = recall.MapTitle(string(data))
 		}
+		row.Issue, _ = st.ChartIssue(name)
 		if entries, err := st.ReadChart(name); err == nil {
 			for _, e := range entries {
 				if e.ID == "" {

@@ -93,6 +93,19 @@ func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan
 	return derivePhaseStackedFor(st, ticket, merges, plan, "")
 }
 
+// derivePhaseStackedLines is derivePhaseStacked that also gives the journal
+// lines it read, for a caller that reads the same ticket's lines for more (the
+// roster's digest) and would otherwise parse them again.
+func derivePhaseStackedLines(st *store.Store, ticket string, merges mergeSource, plan stack.Plan) (phase.Ticket, []journal.Line, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges, "")
+	if err != nil {
+		return phase.Ticket{}, nil, err
+	}
+	f.Restacks = restackAsks(plan)
+	f.MergedOnHost = mergedOnHost(merges, f, lines, "")
+	return phase.Derive(f, lines), lines, nil
+}
+
 // derivePhaseStackedFor is derivePhaseStacked read for a chart's issue.
 func derivePhaseStackedFor(st *store.Store, ticket string, merges mergeSource, plan stack.Plan, issue string) (phase.Ticket, error) {
 	f, lines, err := phaseFactsWith(st, ticket, merges, issue)
@@ -409,6 +422,8 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 		return fmt.Sprintf("%s: the reviewer ends it with `jig review done %s`%s", t.Reason, ticket, prompt)
 	case t.Code == phase.CodeAsksUndecided:
 		return t.Reason + prompt
+	case refusedAdvice(t, ticket) != "":
+		return refusedAdvice(t, ticket) + prompt
 	case t.Current == phase.Review && closedRounds(t) == 0:
 		return fmt.Sprintf("Run `jig gate %s` to open a gate round%s", ticket, prompt)
 	case t.Current == phase.Review:
@@ -420,6 +435,21 @@ func phaseAdvice(t phase.Ticket, ticket string) string {
 		return fmt.Sprintf("Run %s, then `jig publish %s` to update the PR and point it at its base%s", mergeAsks(t), ticket, prompt)
 	}
 	return fmt.Sprintf("Run `jig publish %s` to open or update the PR%s", ticket, prompt)
+}
+
+// refusedAdvice is what a refused gate asks of whoever reads it, by the code
+// of the refusal; "" when the ticket's review stands on no refusal.
+func refusedAdvice(t phase.Ticket, ticket string) string {
+	code, text := t.Refusal()
+	switch code {
+	case "INTENT_CONFLICT":
+		return fmt.Sprintf("%s: the brief is the ticket's intent, so run `jig gate %s` without --intent or --doc", text, ticket)
+	case "BRANCH_NOT_FOUND":
+		return fmt.Sprintf("%s: commit the work on the branch in the clone or push it, then run `jig gate %s`", text, ticket)
+	case "GATE_NOT_GREEN":
+		return fmt.Sprintf("%s: build what is left (`jig next %s`), then run `jig gate %s`", text, ticket, ticket)
+	}
+	return ""
 }
 
 // mergeAsks words the merges a ticket that is behind is owed.

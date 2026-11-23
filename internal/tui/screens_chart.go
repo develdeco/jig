@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
@@ -26,6 +28,9 @@ func (m *Model) chartPage(name string) page {
 	if c == nil {
 		p.add(m.st.dim("no chart " + name))
 		return p
+	}
+	if c.issueID() != "" {
+		return m.planPage(c)
 	}
 	rows := m.chartRows(c)
 	tickets := m.chartTicketsPanel(c, rows)
@@ -50,6 +55,9 @@ func (m *Model) chartPage(name string) page {
 	var run []runRow
 	if c.info != nil {
 		run = m.runRows(c.info)
+		if age, live := c.live(m.w, m.now()); live {
+			run = m.runningRows(run, c.info, age)
+		}
 	}
 	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
 	if spare < 0 && len(run) > 1 {
@@ -87,21 +95,29 @@ func (m *Model) chartPage(name string) page {
 }
 
 // chartTicketsPanel is the chart's tickets, a row each the cursor can stand on:
-// the ticket's state, id and title, its four steps, and a note on where it
+// the ticket's state, id and title, its five steps, and a note on where it
 // stands in the chart. The note's column is sized first, so the words that say
 // what a ticket waits for are never the part cut.
 func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
-	var p page
 	total, done, _ := chartProgress(rows)
 	right := fmt.Sprintf("%d of %d published", done, total)
 	if total == 0 {
 		right = "none graduated"
 	}
-	p.boxTop("Tickets", right)
+	return m.ticketRowsPanel(c, rows, "Tickets", right, m.chartNote, nil)
+}
+
+// ticketRowsPanel is the panel of a chart's tickets as chartTicketsPanel draws
+// it, under title and with right at its edge: noteOf says the words after each
+// row's steps, and sub, when set, the lines a row has under it that the cursor
+// does not stand on.
+func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) (string, bool), sub func(chartRow) []string) page {
+	var p page
+	p.boxTop(title, right)
 
 	// The entries that have no ticket yet: fog, listed after the tickets.
 	var fog []string
-	if c.info != nil {
+	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
 				fog = append(fog, t.Title)
@@ -109,15 +125,16 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 		}
 	}
 
-	idW, titleW, noteW, ownW := 0, 0, 0, 0
+	idW, titleW, noteW, ownW, nestW := 0, 0, 0, 0, 0
 	for _, title := range fog {
 		titleW = max(titleW, width(title))
 	}
 	notes := make([]string, len(rows))
 	for i, r := range rows {
 		var own bool
-		notes[i], own = m.chartNote(r)
+		notes[i], own = noteOf(r)
 		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
+		nestW = max(nestW, 2*r.depth)
 		if own {
 			ownW = max(ownW, width(notes[i]))
 		}
@@ -125,22 +142,28 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 	// "icon id  title  ◐ ○ ○ ○  note" in the room a panel's text has. The words
 	// the chart says itself keep their whole column, the title gives way to them,
 	// and a status's own words are cut at the end of the line.
-	room := m.width - 7 - (2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
+	room := m.width - 7 - (nestW + 2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
 	noteW = max(ownW, min(noteW, room-min(titleW, 16)))
 	titleW = min(titleW, max(0, room-noteW))
 	for i, r := range rows {
-		line := m.st.icon(r.state()) + " " + pad(r.id, idW)
+		line := spaces(2*r.depth) + m.st.icon(r.state()) + " " + pad(r.id, idW)
 		if titleW > 0 {
 			line += "  " + pad(r.title, titleW)
 		}
 		line += "  " + m.chartDots(r) + "  " + notes[i]
 		p.boxRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		if sub != nil {
+			for _, l := range sub(r) {
+				p.boxAdd(l)
+			}
+		}
 	}
 
 	for _, title := range fog {
 		p.boxAdd(m.st.dim("·" + spaces(1+idW) + "  " + pad(title, titleW) + "  fog · not graduated"))
 	}
-	if n := c.listing.Ungraduated; c.info == nil && n > 0 {
+	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
+		n := c.listing.Ungraduated
 		fog = append(fog, "")
 		p.boxAdd(m.st.dim("· " + strconv.Itoa(n) + " " + plural(n, "entry", "entries") + " not graduated"))
 	}
@@ -155,22 +178,29 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 // for when its build has not begun, that it can start, or where it stands as
 // on the project's list. own says they are the chart's own words, which a
 // narrow row must not cut, and not the ticket's status.
-func (m *Model) chartNote(r chartRow) (note string, own bool) {
+func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
+
+// chartNoteIn is chartNote with or without the kind a ticket says of itself
+// ("task of <issue> · "), which a screen that is about that parent need not say.
+func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
+	case r.t == nil || r.t.digest == nil:
+		// The roster has not listed the ticket: nothing of it is known.
+		return m.st.dim(readingText), true
 	case r.behind:
 		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	case r.done:
 		return m.st.state(StatePublished, "published"), true
 	case len(r.waits) > 0:
 		return m.st.dim(waitNote(r.waits[0])), true
-	case r.verb != nil && r.verb.Ready:
-		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.verb.Phase+" next"), true
+	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
+		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
 	case r.t != nil:
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	}
 	return "", false
 }
@@ -194,7 +224,21 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		next = m.st.dim(info.Reason)
 	}
 	rows := []runRow{{"next", next, 0}}
-	if len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "" {
+	first, then := landingsOf(info)
+	switch {
+	case first != nil:
+		// The run stops at a landing: the person's word is the landing's, not
+		// the run's, and the reason is the landing's state as phase words it.
+		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
+		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
+		for _, l := range then {
+			words := "also " + l.Prompt
+			if len(l.After) > 0 {
+				words = "then " + l.Prompt + ", after " + andList(l.After)
+			}
+			rows = append(rows, runRow{"", m.st.dim(words), 1})
+		}
+	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
 		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})
 	}
 	if len(info.Briefs) > 0 {
@@ -208,12 +252,52 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		if i == 0 {
 			label = "ends at"
 		}
-		rows = append(rows, runRow{label, endNote(e), 1})
+		note := endNote(e)
+		if info.Model && e.Kind != kindStacked && e.Fact != "" {
+			// An issue's run waits for a landing, not a merge: the verb's fact is
+			// the words internal/phase wrote for it.
+			note = e.Fact
+		}
+		rows = append(rows, runRow{label, note, 1})
 	}
 	if info.Spend != nil {
 		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
 	}
 	return rows
+}
+
+// runningRows are the Run panel's rows while a session is at work on the run:
+// the next row says so and how long ago it was last seen, in place of the
+// prompt that would start another run. A landing's prompt is the person's word,
+// which a session merges at, so it is never held back.
+func (m *Model) runningRows(rows []runRow, info *chartInfo, age time.Duration) []runRow {
+	if first, _ := landingsOf(info); first != nil || len(rows) == 0 {
+		return rows
+	}
+	rows = append([]runRow(nil), rows...)
+	rows[0].text = m.st.dim("running · a session worked on it " + ago(age) + " ago")
+	return rows
+}
+
+// landingsOf are the landings of a run that stopped at one: the first the
+// person may ask for now (the first that waits for no other), and the ones after
+// it. Nil when the run is not at a landing stop or no landing is open to ask.
+func landingsOf(info *chartInfo) (first *chartLand, then []chartLand) {
+	if info.Code != phase.CodeChartWaitsLand {
+		return nil, nil
+	}
+	for i := range info.Lands {
+		l := info.Lands[i]
+		if first == nil && len(l.After) == 0 {
+			first = &info.Lands[i]
+			continue
+		}
+		then = append(then, l)
+	}
+	if first == nil {
+		return nil, nil
+	}
+	return first, then
 }
 
 // spendWords is what a chart's run has cost, in the parts the Run panel's row

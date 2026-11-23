@@ -1,4 +1,4 @@
-jig  demo › checkout  Coupons at checkout                                              ◐ in progress
+jig  demo › checkout  Coupons at checkout                                            ? run needs you
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Map ───────────────────────────────────────────────────────────────── charts/checkout/map.md ─╮
   │  destination  A customer takes a coupon code from the cart to a discounted order.              │
@@ -9,11 +9,11 @@ jig  demo › checkout  Coupons at checkout                                     
   │  out of scope · Gift cards                                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────────────────────────── 1 of 5 published ─╮
-  │  ✓ JIG-4  Coupon model         ✓ ✓ ✓ ✓  published https://example.test/acme/demo/pull/7        │
-  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○  Build: 1 of 3 green · slice s2 is being built          │
-  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○  ready · brief next                                     │
-  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○  stacked on JIG-5                                       │
-  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │
+  │  ◇ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"                     │
+  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is being built        │
+  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                   │
+  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                     │
+  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open              │
   │  ·        Stack two coupons    fog · not graduated                                             │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
@@ -23,7 +23,7 @@ jig  demo › checkout  Coupons at checkout                                     
   │  next     say "Continue checkout"                                                              │
   │  wave 1   JIG-8                                                                                │
   │  wave 2   JIG-6                                                                                │
-  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/pull/7 is open         │
+  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                                          │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────────────────────────── latest 9 of 18 ─╮
   │  09:14:21 JIG-4 publish·done     ● finished                                                    │

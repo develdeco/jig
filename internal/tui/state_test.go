@@ -115,16 +115,11 @@ func TestPublishCollectsTheJournalsAccount(t *testing.T) {
 	}
 }
 
-func TestSlicesWithoutAStatusAreGuessedFromTheirLines(t *testing.T) {
+func TestSlicesWithoutAStatusAreNotGuessedFromTheirLines(t *testing.T) {
 	t.Parallel()
 	tk := ticketOf("JIG-1", jig1()...)
-	got := map[string]string{}
-	for _, s := range tk.slices(time.UTC) {
-		got[s.ID] = s.State
-	}
-	want := map[string]string{"a": StateGreen, "b": StateFail, "c": StateNeedsInput}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("guessed states = %v, want %v", got, want)
+	if rows := tk.slices(time.UTC); len(rows) != 0 {
+		t.Errorf("a ticket whose status was not read lists slices %+v, want none: the lines guess none", rows)
 	}
 	tk.status = parseStatus(statusJIG1())
 	if rows := tk.slices(time.UTC); len(rows) != 4 || rows[3].ID != "d" || rows[3].State != StateQueued {
@@ -137,17 +132,18 @@ func TestALedgerLineOfASessionBelongsToItsTicket(t *testing.T) {
 	w := newWorld()
 	touched, fresh := w.apply([]events.Envelope{
 		ll(at(0, 1), "T", journal.EventVerifySpawned, func(l *journal.Line) { l.Session = "s-1" }),
-		ll(at(0, 2), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
-		ll(at(0, 3), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-other", "Bash" }),
+		ll(at(0, 2), "T", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
+		ll(at(0, 3), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-1", "Bash" }),
+		ll(at(0, 4), "", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-other", "Bash" }),
 	})
 	if !fresh || !touched["T"] || len(touched) != 1 {
 		t.Errorf("touched = %v fresh = %v", touched, fresh)
 	}
 	if got := len(w.tickets["T"].ledger); got != 2 {
-		t.Errorf("ticket T has %d ledger lines, want its spawn line and its session's tool line", got)
+		t.Errorf("ticket T has %d ledger lines, want its spawn line and the tool line that names it, not the session's later call that names none", got)
 	}
-	if got := len(w.feed); got != 3 {
-		t.Errorf("the feed holds %d lines, want all 3", got)
+	if got := len(w.feed); got != 4 {
+		t.Errorf("the feed holds %d lines, want all 4", got)
 	}
 }
 
@@ -159,7 +155,7 @@ func TestRosterOrdersTheTicketsAndKeepsTheOnesTheStreamAdded(t *testing.T) {
 	if want := []string{"JIG-2", "JIG-1", "JIG-9"}; !reflect.DeepEqual(w.order, want) {
 		t.Errorf("order = %v, want the roster's, then the stream's", w.order)
 	}
-	if tk := w.tickets["JIG-1"]; tk.title != "One" || tk.rosterState != "blocked" {
+	if tk := w.tickets["JIG-1"]; tk.title != "One" {
 		t.Errorf("JIG-1 = %+v", tk)
 	}
 }

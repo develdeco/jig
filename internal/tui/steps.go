@@ -19,9 +19,15 @@ type stepRow struct {
 	Took  string
 	Done  bool
 	took  time.Duration
+	// Wait is how long the sub-step the step waits on has stood, when the step
+	// waits for a person or the host; waitWords are that sub-step's words.
+	Wait, waitWords string
+	// Idle is "idle since 17:30" for a step under way whose holder is gone or
+	// quiet, "" otherwise.
+	Idle string
 }
 
-// steps are the ticket's four steps, in order, as internal/phase derives them
+// steps are the ticket's five steps, in order, as internal/phase derives them
 // (standing.go): a step is done only when every step before it is, so a review
 // that found fixes takes the build back, and the build is not done again until
 // they are green.
@@ -29,14 +35,32 @@ func (m *Model) steps(t *ticket) []stepRow {
 	return m.stepRows(t, m.phaseOf(t))
 }
 
-// stepRows are the four rows of a ticket that stands as d says. The phase gives
+// stepRows are the five rows of a ticket that stands as d says. The phase gives
 // each row whether it is done and what it says; the screens add the state the
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
-	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
-	for i, took := range m.stepTimes(t, d) {
-		if took > 0 {
+	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
+	if end, ok := m.endOf(t); ok {
+		endRows(rows, end, m.unfinished(t))
+	}
+	if t.digest == nil && (t.status == nil || t.status.Closed != "") {
+		// Nothing was read of the ticket: its steps say so, with no state and
+		// no time.
+		for i := range rows {
+			rows[i].State, rows[i].Text, rows[i].Done = StateQueued, readingText, false
+		}
+		return rows
+	}
+	c := m.clocks(t, d)
+	for i := range rows {
+		if took := c.work.ofStep(i); took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took
+		}
+		if w, ok := c.standingOf(i); ok && !rows[i].Done && rows[i].State != StateClosed {
+			rows[i].Wait, rows[i].waitWords = m.waitClock(w), w.words
+		}
+		if at, ok := c.idle[i]; ok && !rows[i].Done && rows[i].State != StateClosed && rows[i].Wait == "" {
+			rows[i].Idle = m.idleWords(at)
 		}
 	}
 	return rows
@@ -73,40 +97,21 @@ func currentStep(steps []stepRow) int {
 func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Brief)
 	s := rowOf(stepBrief, rowBrief, p)
-	changed := t.status != nil && t.status.Brief != nil && t.status.Brief.Approval == phase.ApprovalChanged
+	changed := t.digestPhaseChanged(p)
 	switch {
-	case s.Done && hasSub(p, phase.SubNeedsYou):
+	case s.Done && t.subIs(p, phase.SubNeedsYou):
 		// The work started without an approval.
 		s.State = StateFindings
 	case s.Done:
 		s.State = StateOK
 	case changed:
 		s.State = StateFindings
-	case t.status == nil:
-		s.State, s.Text = m.unreadBrief(t, s.Text)
+	case t.digest != nil && t.digest.PhaseProblem != "" && len(t.digest.Phases) == 0:
+		s.State = StateStalled
 	default:
 		s.State = StateBuilding
 	}
 	return s
-}
-
-// unreadBrief is the brief of a ticket whose status has not been read and
-// whose journal shows no approval or work: all the screens know of it is what
-// `jig next` listed it as.
-func (m *Model) unreadBrief(t *ticket, text string) (state, said string) {
-	switch t.rosterState {
-	case "new":
-		return StateBuilding, text
-	case "ready", "blocked":
-		// It has slices that nobody has started, and the journal holds no
-		// approval (or has not been delivered yet, which the next line
-		// mends).
-		return StateBuilding, "drafted · waiting for your approval"
-	case "invalid":
-		return StateStalled, "its slices.yaml cannot be read"
-	}
-	// Started or done (its lines are on their way), or not listed yet.
-	return StateQueued, "reading"
 }
 
 // hasSub is whether any sub-step of p is in state.
@@ -124,12 +129,7 @@ func hasSub(p phase.Phase, state string) bool {
 func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Build)
 	s := rowOf(stepBuild, rowBuild, p)
-	slices := t.slices(m.zone)
-	counts := map[string]int{}
-	for _, sl := range slices {
-		counts[sl.State]++
-	}
-	n := len(slices)
+	counts, n := t.sliceCounts(m.zone)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -138,9 +138,9 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	case counts[StateGreen] == n:
 		// Every slice is green, but an earlier step is not done.
 		s.State = StateOK
-	case len(t.stepLines(stepBuild)) == 0:
+	case len(t.stepLines(stepBuild)) == 0 && counts[StateQueued] == n:
 		s.State = StateReady
-		if p.State == phase.StatePending {
+		if p.State == phase.StatePending || cannotStart(d, p) {
 			s.State = StateQueued
 		}
 	default:
@@ -165,7 +165,7 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Review)
 	s := rowOf(stepReview, rowReview, p)
 	rounds := t.rounds(m.zone)
-	pending := p.State == phase.StatePending
+	pending := p.State == phase.StatePending || cannotStart(d, p)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -204,53 +204,106 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StatePublished
+		if prs := prWords(t.digest.prs(), true); prs != "" && p.Text != "" && !strings.HasPrefix(p.Text, "closed") {
+			s.Text = "published · " + prs
+		}
 	case p.State == phase.StatePending:
 		s.State = StateQueued
-	case hasSub(p, phase.SubDone):
+	case t.digest != nil && t.digest.Behind:
+		// Published, and owed a merge before the publish that follows it.
+		s.State = StateReady
+	case t.subIs(p, phase.SubDone):
 		s.State = StatePublishing
+	case cannotStart(d, p):
+		s.State = StateQueued
 	default:
 		s.State = StateReady
 	}
 	return s
 }
 
-// stepTimes are how long each step has taken: the gaps between consecutive
-// lines of the log that both belong to the step (placed), so a build that a
-// review sent a fix back to counts the fix and not the review between, and the
-// time from one step to the next (a person reading the outcome before prompting
-// the next phase) counts for neither. A line of no step (a spend) neither
-// starts nor ends a gap. The step under way also counts the time since its
-// latest line, while that line is the latest of the log: the brief waiting on
-// the person's answer, a slice being built.
-func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
-	var took [stepCount]time.Duration
-	var prev time.Time
-	prevStep := -1
-	for _, p := range m.placed(t, d) {
-		at, ok := p.l.At()
-		if p.step < 0 || !ok {
-			continue
+// unfinished are the steps of a closed ticket whose work was not done when it
+// closed, as the digest says: phase.Derive marks every phase of a closed ticket
+// done, so the digest tells them apart from the ticket's own facts.
+func (m *Model) unfinished(t *ticket) [stepCount]bool {
+	var out [stepCount]bool
+	for _, name := range t.digest.unfinished() {
+		for i, step := range stepNames {
+			if strings.EqualFold(step, name) {
+				out[i] = true
+			}
 		}
-		if p.step == prevStep && at.After(prev) {
-			took[p.step] += at.Sub(prev)
+	}
+	return out
+}
+
+// endRows lay the end state of a ticket on its rows: the land step is drawn in
+// the end state's icon and colour, and a ticket closed reads closed in each step
+// it never finished (a phase not done, or one the digest calls done because the
+// ticket closed, unfinished), whatever the phase of that step says; a step it
+// finished keeps its words.
+func endRows(rows []stepRow, end endState, unfinished [stepCount]bool) {
+	rows[stepLand].State = end.State
+	if end.State != StateClosed {
+		return
+	}
+	for i := range rows {
+		switch {
+		case !rows[i].Done || (unfinished[i] && i != stepPublish):
+			rows[i].State, rows[i].Text = StateClosed, "closed"
+		case unfinished[i]:
+			// Closed before it published: its words are the reason it closed.
+			rows[i].State = StateClosed
 		}
-		prev, prevStep = at, p.step
 	}
-	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
-		took[cur] += m.now().Sub(prev)
+	rows[stepLand].State = StateClosed
+}
+
+// landRow is the land: waiting for the publish, for the person's word to merge,
+// for a merge made on the host to be recorded, or landed. A ticket with no pull
+// request to merge, or closed, has nothing to land and is past this step.
+func (m *Model) landRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Land)
+	s := rowOf(stepLand, rowLand, p)
+	switch {
+	case s.Done:
+		s.State = StateOK
+	case p.State == phase.StatePending:
+		s.State = StateQueued
+	default:
+		s.State = StateReady
 	}
-	return took
+	return s
+}
+
+// cannotStart says p is the phase the ticket stands at and the digest says it
+// cannot start now: it waits for a blocker, not for the person.
+func cannotStart(d phase.Ticket, p phase.Phase) bool {
+	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
+	if end, ok := m.endOf(t); ok {
+		return end.State, end.Word
+	}
+	if t.digest == nil && t.status != nil && t.status.Closed != "" {
+		// Only the status is in: what it says of a closed ticket, nothing of
+		// its steps, which the digest tells.
+		return StateClosed, "closed"
+	}
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return cur.State, "published"
+		return cur.State, "landed"
 	}
-	return cur.State, stepWords(cur.Step, cur.State)
+	if cur.State == StateFindings && m.ticketLive(t) && len(t.openQuestions(m.zone, "")) == 0 {
+		// What waits for the person is held back with its group while a session
+		// is at work, and the header says no more than the group does.
+		return StateBuilding, strings.ToLower(stepNames[cur.Step]) + " in progress"
+	}
+	return cur.State, stepWordsOf(cur)
 }
 
 // stepState is a step in a state, the key of the header's words.
@@ -284,6 +337,22 @@ var headerWords = map[stepState]string{
 	{stepPublish, StateReady}:      "ready to publish",
 	{stepPublish, StatePublishing}: "publishing",
 	{stepPublish, StatePublished}:  "published",
+	{stepLand, StateQueued}:        "waiting to land",
+	{stepLand, StateReady}:         "waits to land",
+	{stepLand, StateFindings}:      "merged, not recorded",
+	{stepLand, StateOK}:            "landed",
+}
+
+// stepWordsOf is what the header says of a step row: its state's words, except
+// where the step's open sub-step waits and the state's words would read as work
+// ("brief being drafted" for a brief that is drafted and waits for approval).
+func stepWordsOf(s stepRow) string {
+	if s.Wait != "" && (s.State == StateBuilding || s.State == StatePublishing) {
+		if w := waitHeader(s.Step, waitSpan{words: s.waitWords}); w != "" {
+			return w
+		}
+	}
+	return stepWords(s.Step, s.State)
 }
 
 // stepWords is what the header says of step in state.

@@ -215,15 +215,19 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 // closed (`jig close`), such as "covered by develdeco/jig#82" or "not planned",
 // when it was.
 type nextTicket struct {
-	Ticket       string `json:"ticket"`
-	Title        string `json:"title,omitempty"`
-	State        string `json:"state"`
-	Closed       string `json:"closed,omitempty"`
-	Branch       string `json:"branch"`
-	Distribution string `json:"distribution,omitempty"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state"`
+	Closed string `json:"closed,omitempty"`
+	// LandFirst are the tickets that must land before this one (the digest's
+	// land_first, built by the same function).
+	LandFirst    []string `json:"land_first,omitempty"`
+	Branch       string   `json:"branch"`
+	Distribution string   `json:"distribution,omitempty"`
 	// Kind is named for a ticket that is not a task (an issue or a multi-task),
 	// which is not briefed or built: Chart (an issue's), Issues (a multi-task's)
-	// and Children say where it stands. Parent is a task's multi-task.
+	// and Children say where it stands. Parent is the one ticket its pull
+	// request goes into: a task's multi-task or issue (parentOf).
 	Kind      string        `json:"kind,omitempty"`
 	Parent    string        `json:"parent,omitempty"`
 	Chart     string        `json:"chart,omitempty"`
@@ -239,6 +243,15 @@ type nextTicket struct {
 	Unmet  []nextUnmet `json:"unmet,omitempty"`
 	// Waived are an issue's suite waivers standing at its tips.
 	Waived []string `json:"waived,omitempty"`
+	// Need is the body of an issue or a multi-task and Suite an issue's suite
+	// history by repo: what `jig status` adds for the plan screen. `jig next`
+	// leaves both out.
+	Need string `json:"need,omitempty"`
+	// Standing is a container's own pull request as `jig next` derives it
+	// (waiting, ready, published or landed): `jig status` prints it with the
+	// waits, the unmet and the prompt of the same derivation.
+	Standing string         `json:"standing,omitempty"`
+	Suite    []nextSuiteRow `json:"suite,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -378,6 +391,18 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		if len(n.Issues) > 0 {
 			blocks = append(blocks, "issue: "+strings.Join(n.Issues, ", "))
 		}
+		if n.Branch != "" {
+			blocks = append(blocks, "branch: "+axi.Quote(n.Branch))
+		}
+		if n.Standing != "" {
+			blocks = append(blocks, "standing: "+n.Standing)
+		}
+		if n.Prompt != "" {
+			blocks = append(blocks, "prompt: "+axi.Quote(n.Prompt))
+		}
+		if n.Need != "" {
+			blocks = append(blocks, "need: "+axi.Quote(n.Need))
+		}
 	} else {
 		pairs := [][2]string{{"ticket", n.Ticket}}
 		if n.Title != "" {
@@ -448,6 +473,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 	case verb == "next" && n.State == land.StateWaiting:
 		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
 	}
+	if len(n.Suite) > 0 {
+		blocks = append(blocks, suiteBlock(n.Suite))
+	}
 	if len(n.Waived) > 0 {
 		blocks = append(blocks, axi.KV("waived", waivedRows(n.Waived)))
 	}
@@ -456,7 +484,8 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 }
 
 // nextPhase is the phase block of `jig next <ticket>`: the phase the ticket is
-// at, whether it can start now (Code and Reason say why not), the prompt that
+// at, whether it can start now (Code and Reason say why not, and, while a
+// review stands on a gate refusal, Reason is that refusal), the prompt that
 // starts it, each phase's state, and what --for asked.
 type nextPhase struct {
 	Name   string          `json:"name"`
@@ -473,6 +502,15 @@ type nextPhaseRow struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 	Text  string `json:"text"`
+	// NeedsYou says a sub-step of the phase waits on the person (a brief the
+	// work started without an approval, an ask nobody decided), and SubDone that
+	// one of its sub-steps is done. A screen draws a step's mark from them, so a
+	// reader that has the phases and not the sub-steps marks the step as one
+	// that has them.
+	NeedsYou bool `json:"needs_you,omitempty"`
+	SubDone  bool `json:"sub_done,omitempty"`
+	// Changed says the brief was edited after its approval.
+	Changed bool `json:"changed,omitempty"`
 }
 
 // nextPhaseAsked is the answer to --for: whether that phase can run now, what
@@ -518,21 +556,29 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 		n.PhaseProblem = err.Error()
 		return
 	}
-	// A ticket built again that is owed a merge is behind once its fix is
-	// reviewed and the publish is next: the merge comes first.
-	if t.Behind() && (n.State == ready.StateDone || t.Rebuilding() && t.Current == phase.Publish && n.State == ready.StateGreen) {
+	if isBehind(t, n.State) {
 		n.State = stateBehind
 	}
 	n.derived = &t
-	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
-	for _, ph := range t.Phases {
-		p.Phases = append(p.Phases, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
+	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt, Phases: phaseRows(t)}
+	if _, text := t.Refusal(); text != "" && t.Ready {
+		// The review can start, and says the gate was tried and why it stopped.
+		p.Reason = text
 	}
 	if asked != "" {
 		a := t.For(asked)
 		p.For = &nextPhaseAsked{Phase: string(asked), Ready: a.Ready, Code: a.Code, Reason: a.Reason, Warning: a.Warning}
 	}
 	n.Phase = p
+}
+
+// isBehind says a ticket in state published its work and is owed a merge before
+// the publish that follows it: its stack plan owes its branch one and it is
+// done, or it is built again, reviewed and at its publish. A ticket built again
+// that is owed a merge is behind once its fix is reviewed and the publish is
+// next: the merge comes first.
+func isBehind(t phase.Ticket, state string) bool {
+	return t.Behind() && (state == ready.StateDone || t.Rebuilding() && t.Current == phase.Publish && state == ready.StateGreen)
 }
 
 // setReviewer says who reviews the ticket when review is the phase that can
@@ -557,6 +603,17 @@ type nextBlocker struct {
 	Kind   string `json:"kind,omitempty"`
 	Fact   string `json:"fact,omitempty"`
 	AsOf   string `json:"as_of,omitempty"`
+	// PRs are the pull requests the blocker's merge rests on, with the state the
+	// host gave them (OPEN, CLOSED or MERGED), so a screen can say a wait is for
+	// a pull request that is open.
+	PRs []nextBlockerPR `json:"prs,omitempty"`
+}
+
+// nextBlockerPR is a pull request a blocker's merge fact rests on.
+type nextBlockerPR struct {
+	Repo  string `json:"repo,omitempty"`
+	URL   string `json:"url"`
+	State string `json:"state,omitempty"`
 }
 
 // nextBatch is one repo's ready slices, in the order they build, and where the
@@ -722,6 +779,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 		if err != nil {
 			return nextTicket{}, err
 		}
+		n.Parent = parentOf(st, id, data.rec)
 		if k == store.KindIssue {
 			if n.LandsAfter, err = afterRows(afterDeps(st, cfg, mp, merges), id); err != nil {
 				return nextTicket{}, err
@@ -768,7 +826,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 
 	n := nextTicket{
 		Ticket: id, Title: data.title, State: status.State, Branch: branch, Distribution: distribution,
-		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: data.rec.Parent,
+		Ready: []nextBatch{}, Unplaced: place.Unplaced, Ambiguous: place.Ambiguous, Parent: parentOf(st, id, data.rec),
 	}
 	if data.rec.Closed != nil {
 		n.Closed = data.rec.Closed.Phrase()
@@ -799,6 +857,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	n.Advice = distributionAdvice(n.Ready)
 	n.setPhase(st, id, asked, merges, plan)
+	n.LandFirst = landFirstOf(st, cfg, mp, merges, id, data.rec, n.derived)
 	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
 		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Rebuilding, Wanted: n.worktreeWanted(),
@@ -948,7 +1007,8 @@ func (n nextTicket) blocks(topology bool) []string {
 
 // phasePairs are the lines `jig next <ticket>` adds to its next block: the
 // phase the ticket is at, whether it can start now, the prompt that starts it,
-// why not when it cannot, and the answer to --for.
+// the reason (why the phase cannot start or, while a review stands on a gate
+// refusal, that refusal), and the answer to --for.
 func (n nextTicket) phasePairs() [][2]string {
 	p := n.Phase
 	if p == nil {
@@ -961,7 +1021,7 @@ func (n nextTicket) phasePairs() [][2]string {
 		}
 	}
 	add("prompt", p.Prompt)
-	if !p.Ready {
+	if !p.Ready || p.Reason != "" {
 		add("code", p.Code)
 		add("reason", p.Reason)
 	}
@@ -1113,6 +1173,9 @@ type nextRow struct {
 	Ready     []string      `json:"ready"`
 	// Problem is why an invalid ticket could not be read.
 	Problem string `json:"problem,omitempty"`
+	// Digest is where the ticket stands (nextDigest), the one reading the
+	// screens take their words from.
+	Digest *nextDigest `json:"digest,omitempty"`
 }
 
 // nextSharedRank is a rank that more than one ready ticket holds, so which
@@ -1186,6 +1249,7 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 	}
 	readMerges(st, merges, inputs, false)
 	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
+	digestFrom := digestMerges(merges)
 	// The ready tickets in id order, with their ranks and slices.
 	var ranked []ready.Ranked
 	slicesOf := map[string][]store.Slice{}
@@ -1200,6 +1264,8 @@ func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject
 		for _, b := range s.Blocked {
 			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
 		}
+		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], s.State, row.BlockedBy)
+		row.Digest = &d
 		if datas[i].problem != "" {
 			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
 			out.Tickets = append(out.Tickets, row)

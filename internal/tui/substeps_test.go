@@ -62,8 +62,8 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	g := shop1Rig(t)
 	golden(t, "ticket-substeps", g.view())
 
-	if refs := g.m.page().refs(); len(refs) != 4 {
-		t.Errorf("the page has %d rows for the cursor, want the 4 steps and no sub-step", len(refs))
+	if refs := g.m.page().refs(); len(refs) != 5 {
+		t.Errorf("the page has %d rows for the cursor, want the 5 steps and no sub-step", len(refs))
 	}
 	for _, tc := range []struct {
 		keys  []string
@@ -246,7 +246,8 @@ func TestSubstepsOfAPublishInTwoReposListAPullRequestForEach(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Repos(), 0)
-	g.feed(jig2Repos()...)
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30}) // the landing stop is a row of the needs-you block
+	g.feed(jig2Repos()...).press("up")               // the cursor follows the land step
 	v := g.view()
 	for _, want := range []string{
 		"Publish ─", "✓ pull request api  https://example.test/acme/api/pull/7",

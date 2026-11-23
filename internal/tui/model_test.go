@@ -75,7 +75,7 @@ func TestATicketGivenOpensItsScreenWithTheProjectBehindIt(t *testing.T) {
 func TestOpeningAQuestionGoesToItsSlice(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("down", "down", "down") // the question under "needs a person"
+	g.feed(jig1()...).press("down", "down", "down", "down") // the question under "needs a person"
 	g.press("enter")
 	if g.m.Screen() != "slice" || g.m.top().slice != "c" {
 		t.Fatalf("on %s %q, want slice c", g.m.Screen(), g.m.top().slice)
@@ -101,7 +101,7 @@ func TestTheCursorStaysOnItsScreen(t *testing.T) {
 
 func TestAnswerRunsTheVerbAsAPerson(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-1")
+	g := newQuietRig(t, "JIG-1")
 	g.feed(jig1()...).press("a")
 	if g.m.input == nil || g.m.input.qid != "q-001" {
 		t.Fatalf("a opened %+v, want the answer to q-001, the only open question", g.m.input)
@@ -177,7 +177,7 @@ func TestAnswerAsksWhichQuestionWhenSeveralAreOpen(t *testing.T) {
 	if g.m.input != nil || !strings.Contains(g.m.notice, "several questions") {
 		t.Fatalf("a with two questions open and the cursor on no question: input %+v, notice %q", g.m.input, g.m.notice)
 	}
-	g.press("down", "down", "down", "down") // the second question
+	g.press("down", "down", "down", "down", "down") // the second question
 	if ref := g.m.selected(); ref == nil || ref.id != "q-002" {
 		t.Fatalf("cursor is on %+v, want q-002", ref)
 	}
@@ -282,7 +282,7 @@ func TestPublishApprovesThenPushesAndOnlyOnYes(t *testing.T) {
 
 func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := newQuietRig(t, "JIG-2")
 	g.r.answer("publish JIG-2 --approve --store /s", "error: the latest round is not clean\ncode: PUBLISH_NOT_CLEAN\n", 1)
 	g.feed(jig2Mid()...).press("p", "y")
 	want := []string{"publish JIG-2 --approve --store /s"}
@@ -290,7 +290,7 @@ func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 		t.Fatalf("commands run = %q, want only the refused approval: nothing is pushed on a refusal", got)
 	}
 	v := g.view()
-	for _, w := range []string{"✖ jig publish JIG-2 --approve", "code: PUBLISH_NOT_CLEAN"} {
+	for _, w := range []string{"✖ jig publish JIG-2 --approve", "the latest round is not clean"} {
 		if !strings.Contains(v, w) {
 			t.Errorf("the screen lacks %q:\n%s", w, v)
 		}

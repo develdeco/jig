@@ -1,4 +1,4 @@
-jig  demo › JIG-1 › 1 brief                                    ? build needs you
+jig  demo › JIG-1  Greeting copy › 1 brief                     ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ✓ approved by an agent, as Ada Lovelace · 4 sections, 4 slices
     approved 2026-10-23 09:00 by an agent, as Ada Lovelace
@@ -21,4 +21,4 @@ jig  demo › JIG-1 › 1 brief                                    ? build needs
   ? c  Pick the tone  workspace copy · oracle go test ./...
   ○ d  Ship the copy  workspace copy · oracle go test ./... · after b, c
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · t tail · q quit
+  ↑↓ move · enter open · esc back · 5 land · t tail · q quit

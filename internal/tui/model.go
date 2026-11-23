@@ -65,6 +65,13 @@ type Config struct {
 	// IdleTick is how often the model looks at the clock for that; zero is 1s,
 	// and a negative value never looks (a test that drives the clock itself).
 	IdleTick time.Duration
+	// StoreHead reads the store's HEAD commit, cheaply and in process. Each
+	// idle tick compares it with the last head read; a head that moved marks the
+	// ticket list stale, and the next idle tick reads the list (and the open
+	// chart) again. A graduation, a chart made or a brief committed by another
+	// process adds no line the stream shows, so the head is what says the store
+	// moved. Nil never compares.
+	StoreHead func() (string, error)
 	// MergeEvery is how often a screen that waits on a merge is read again: a
 	// merge on the host writes no line to any journal, so the screen sees it
 	// only when its verb is read. Zero is 2m, and a negative value never reads
@@ -94,7 +101,7 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the eight screens is showing.
+// screenKind is which of the nine screens is showing.
 type screenKind int
 
 const (
@@ -106,6 +113,7 @@ const (
 	screenBrief                     // a ticket's brief: its approval, sections and slices
 	screenPublish                   // a ticket's publish: body, approval, pull request
 	screenChart                     // a chart: its map, tickets, run and activity
+	screenLand                      // a ticket's land: its pull requests, the merges to make and the landings
 )
 
 func (s screenKind) String() string {
@@ -126,6 +134,8 @@ func (s screenKind) String() string {
 		return "publish"
 	case screenChart:
 		return "chart"
+	case screenLand:
+		return "land"
 	}
 	return "?"
 }
@@ -140,9 +150,16 @@ type navEntry struct {
 	sel    int
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
+	// showMap shows the Map panel on the plan of an issue, which hides it.
+	showMap bool
 	// scroll is how many lines a page with no row to stand on is moved up, so a
 	// screen longer than its window can be read to its end.
 	scroll int
+	// lead is how many lines a page with rows is held above the window its
+	// cursor gives, so the lines above the first row can be read: set high when
+	// a screen opens at its top, raised by a move up from the first row, and
+	// cleared by any move of the cursor.
+	lead int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -166,7 +183,7 @@ type confirmation struct {
 	run    func() tea.Cmd
 }
 
-// Model is the TUI: eight screens over the event stream and the verbs. It is a
+// Model is the TUI: nine screens over the event stream and the verbs. It is a
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
@@ -185,15 +202,18 @@ type Model struct {
 	notice string
 	tail   bool
 
-	ctx         context.Context
-	cancel      context.CancelFunc
-	stream      chan events.Envelope
-	streamErr   chan error
-	rosterBusy  bool
-	rosterFails int
-	retryDelay  time.Duration
-	awaitEvery  time.Duration
-	quitting    bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	stream     chan events.Envelope
+	streamErr  chan error
+	rosterBusy bool
+	// rosterStarted counts the roster reads begun, so a read can be told from one
+	// that was already out when something happened.
+	rosterStarted int
+	rosterFails   int
+	retryDelay    time.Duration
+	awaitEvery    time.Duration
+	quitting      bool
 
 	// The idle read: when the screen last took an event of the ticket it shows
 	// and when it last started to read that ticket's status, by now.
@@ -204,6 +224,16 @@ type Model struct {
 	// home matches the home folder in any of its spellings (homePattern).
 	home                *regexp.Regexp
 	lastEvent, lastRead time.Time
+	// The store's head as the idle tick last read it, and whether the ticket
+	// list is out of date: the head moved, or a journal line touched a ticket
+	// since the list was read, at lastRoster.
+	head        string
+	headKnown   bool
+	rosterStale bool
+	lastRoster  time.Time
+	// rosterEnded is when the last list read came back: the spacing between
+	// reads counts from it, so a slow list is never read again at once.
+	rosterEnded time.Time
 	// followNew is set while screens opened on no ticket wait to open the
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
@@ -280,6 +310,7 @@ func (m *Model) Init() tea.Cmd {
 		parent = context.Background()
 	}
 	m.ctx, m.cancel = context.WithCancel(parent)
+	m.readHead()
 	cmds := []tea.Cmd{m.startStream(), m.loadRoster()}
 	if id := m.watching(); id != "" {
 		cmds = append(cmds, m.refreshStatus(id))
@@ -369,6 +400,46 @@ func (m *Model) onMerge() tea.Cmd {
 // only place the screens can see them; the read is made for the watched ticket
 // alone, so the cost of a quiet screen is one status every few seconds.
 func (m *Model) onIdle() tea.Cmd {
+	return tea.Batch(m.onStoreIdle(), m.onWatchedIdle())
+}
+
+// onStoreIdle compares the store's head with the last one read, on every
+// screen, and reads the ticket list again, and the chart on the screen, when
+// the list is stale. The first head is the baseline and a head that could not
+// be read marks nothing and keeps the baseline. A list read is made no sooner
+// than idleAfter after the last one and never doubled, so a store that does not
+// move costs one head read a tick and no verb. A brief written to its files
+// without a commit may leave the head where it is; the ticket's own screen
+// still sees it through its idle status read.
+func (m *Model) onStoreIdle() tea.Cmd {
+	m.readHead()
+	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.rosterEnded) < m.idleAfter {
+		return nil
+	}
+	cmds := []tea.Cmd{m.loadRoster()}
+	if e := m.top(); e.screen == screenChart {
+		cmds = append(cmds, m.loadChart(e.chart))
+	}
+	return tea.Batch(cmds...)
+}
+
+// readHead reads the store's head and marks the list stale when it moved since
+// the last one read. The first read is the baseline: Init makes it next to the
+// first list read, so a commit that lands in the first second is a move.
+func (m *Model) readHead() {
+	if m.cfg.StoreHead == nil {
+		return
+	}
+	if head, err := m.cfg.StoreHead(); err == nil {
+		if m.headKnown && head != m.head {
+			m.rosterStale = true
+		}
+		m.head, m.headKnown = head, true
+	}
+}
+
+// onWatchedIdle is the idle read of the screen's own ticket or chart.
+func (m *Model) onWatchedIdle() tea.Cmd {
 	if e := m.top(); e.screen == screenChart {
 		return m.onChartIdle(e.chart)
 	}
@@ -474,6 +545,12 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	m.settleLast(msg)
+	return next, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -527,6 +604,19 @@ func (m *Model) onEvents(envs []events.Envelope) tea.Cmd {
 	for _, e := range envs {
 		if t := m.w.tickets[e.Ticket]; t != nil && e.Src == events.SrcJournal && stepOfLine(e) == stepBrief {
 			t.briefStale = true
+		}
+	}
+	// A line of a ticket may be one no commit carries (a landing written by
+	// another session), so it says the list may be out of date as well.
+	for _, e := range envs {
+		if e.Src != events.SrcJournal || e.Ticket == "" {
+			continue
+		}
+		// The replay of what the store held at start is older than the list
+		// read made then; a line from another machine merges in with a store
+		// commit, which the head comparison sees.
+		if at, ok := e.At(); !ok || !at.Before(m.lastRoster) {
+			m.rosterStale = true
 		}
 	}
 	var cmds []tea.Cmd
@@ -588,6 +678,11 @@ func (m *Model) chartTouched(name string, touched map[string]bool) []tea.Cmd {
 			cmds = append(cmds, m.refreshStatus(id))
 		}
 	}
+	if issue := c.issueID(); issue != "" && touched[issue] {
+		c.dirty = true
+		m.lastEvent = m.now()
+		cmds = append(cmds, m.refreshStatus(issue))
+	}
 	return cmds
 }
 
@@ -625,7 +720,18 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 }
 
 func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
+	cmd := m.takeRoster(msg)
+	if m.last != nil && !m.last.Fixed && m.last.Ticket != "" && msg.seq <= m.last.After {
+		// The read was already out when the command's result arrived: it may
+		// not say what the command did, so one that starts now does.
+		return tea.Batch(cmd, m.loadRoster())
+	}
+	return cmd
+}
+
+func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	m.rosterBusy = false
+	m.rosterEnded = m.now()
 	if msg.err != nil {
 		m.rosterFails++
 		if m.rosterFails < readRetries {
@@ -684,7 +790,9 @@ func (m *Model) onChart(msg chartMsg) tea.Cmd {
 		// read does not stop the timer.
 		c.mergeWait = len(msg.info.Ends) > 0
 	}
-	return nil
+	// The plan of an issue reads its need and its suite from the issue's own
+	// status, read whenever the chart is.
+	return m.refreshIssue(c)
 }
 
 // retryAfter asks, after a moment, for the read of ticket (or of the ticket
@@ -699,7 +807,7 @@ func (m *Model) retryAfter(ticket string) tea.Cmd {
 func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 	c := m.w.charts[e.chart]
 	e.entered = true
-	cmds := []tea.Cmd{m.loadChart(e.chart)}
+	cmds := []tea.Cmd{m.loadChart(e.chart), m.refreshIssue(c)}
 	for _, id := range c.ids() {
 		if t := m.w.tickets[id]; t != nil && t.status == nil {
 			cmds = append(cmds, m.refreshStatus(id))
@@ -708,8 +816,66 @@ func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 	return cmds
 }
 
+// standingPrint is where the ticket stands, as its phases' states and words:
+// what the panel's line is made against, so the line goes when it changes. A
+// command with no ticket is about the chart on show, whose verdict is its
+// standing; one made elsewhere has none and stays until the screen changes.
+func (m *Model) standingPrint(ticket string) string {
+	if ticket == "" {
+		if e := m.top(); e.screen == screenChart {
+			if c := m.w.charts[e.chart]; c != nil && c.info != nil {
+				return strings.Join([]string{c.info.Code, c.info.Reason, c.info.Prompt}, "\x1f")
+			}
+		}
+		return ""
+	}
+	t := m.w.tickets[ticket]
+	if t == nil {
+		return ""
+	}
+	var parts []string
+	for _, p := range m.phaseOf(t).Phases {
+		parts = append(parts, string(p.Name)+"\x1f"+p.State+"\x1f"+p.Text)
+	}
+	return strings.Join(parts, "\x1e")
+}
+
+// settleLast keeps the last command's line against what it was about. The
+// ticket's phases are the roster's digest, so the first roster read that began
+// after the result arrived (the chart's read, for a line with no ticket) takes
+// the standing as the command left it, and a status read or a read that was
+// already out does not; each later message removes the line once the ticket's
+// phases read differently, or the chart's verdict does.
+func (m *Model) settleLast(msg tea.Msg) {
+	if m.last == nil {
+		return
+	}
+	if !m.last.Fixed {
+		switch r := msg.(type) {
+		case rosterMsg:
+			if m.last.Ticket != "" && r.err == nil && r.seq > m.last.After {
+				m.last.Print, m.last.Fixed = m.standingPrint(m.last.Ticket), true
+			}
+		case chartMsg:
+			if m.last.Ticket == "" && r.err == nil {
+				m.last.Print, m.last.Fixed = m.standingPrint(""), true
+			}
+		}
+		return
+	}
+	if m.standingPrint(m.last.Ticket) != m.last.Print {
+		m.last = nil
+	}
+}
+
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
+	m.last.After = m.rosterStarted
+	var cmds []tea.Cmd
+	if msg.result.Ticket != "" {
+		// The roster read that follows is the one that says what the command did.
+		cmds = append(cmds, m.loadRoster())
+	}
 	if e := m.top(); e.screen == screenChart {
 		// What a key did to one of the chart's tickets is read once things are quiet.
 		if c := m.w.charts[e.chart]; c != nil && c.has(msg.result.Ticket) {
@@ -719,10 +885,10 @@ func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	if id := msg.result.Ticket; id != "" && m.w.tickets[id] != nil {
 		m.w.tickets[id].dirty = true
 		if m.watching() == id {
-			return m.refreshStatus(id)
+			cmds = append(cmds, m.refreshStatus(id))
 		}
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 // quit ends the stream and the program.
@@ -760,6 +926,15 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.confirmKey(k)
 	}
 	m.notice = ""
+	if m.top().screen == screenLand {
+		// The land screen shows the landing and acts on nothing: the session
+		// merges and records it at the person's word, said to it, not here.
+		switch k.String() {
+		case "a", "k", "d", "g", "p":
+			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
+			return nil
+		}
+	}
 	switch k.String() {
 	case "q":
 		return m.quit()
@@ -791,6 +966,12 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.gate()
 	case "p":
 		m.beginPublish()
+	case "5":
+		return m.openLand()
+	case "c":
+		return m.openIssue()
+	case "m":
+		m.toggleMap()
 	case "r":
 		return m.refreshAll()
 	}
@@ -809,12 +990,38 @@ func (m *Model) move(delta int) {
 		return
 	}
 	e.follow = false
+	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
+	switch {
+	case delta <= -(1 << 19):
+		// Home: the first row, with the page held at its top.
+		e.sel, e.lead = 0, 1<<20
+		return
+	case delta >= 1<<19:
+		e.sel, e.lead = n-1, 0
+		return
+	case e.lead > 0 || (delta < 0 && e.sel == 0):
+		// A page held above its cursor's window is read a line at a time, from
+		// whatever row the cursor is on, until it is back at the window; and
+		// up from the first row moves the page above it. The window clamps lead
+		// to the lines there are, so the first move after a screen opened at
+		// its top starts at once.
+		if delta < 0 {
+			e.lead = min(e.lead-delta, 1<<20)
+		} else {
+			e.lead = max(0, e.lead-delta)
+		}
+		return
+	}
+	was := e.sel
 	e.sel += delta
 	if e.sel >= n {
 		e.sel = n - 1
 	}
 	if e.sel < 0 {
 		e.sel = 0
+	}
+	if e.sel != was {
+		e.lead = 0
 	}
 }
 
@@ -833,7 +1040,7 @@ func (m *Model) followSel() {
 		return
 	}
 	t := m.w.tickets[e.ticket]
-	if t == nil {
+	if t == nil || isMulti(t) {
 		return
 	}
 	cur := currentStep(m.steps(t))
@@ -851,7 +1058,31 @@ func (m *Model) selected() *rowRef {
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
+	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+		// A row the window does not show is not under the cursor: a key that
+		// acts on it would decide what its person cannot see.
+		return nil
+	}
 	return &refs[sel]
+}
+
+// rowShown says whether the sel-th selectable row of the page on top is in the
+// window the screen draws.
+func (m *Model) rowShown(sel int) bool {
+	pg := m.page()
+	h := m.bodyRows()
+	start := m.windowStart(pg, sel, h, false)
+	n := 0
+	for i, l := range pg.lines {
+		if l.ref == nil {
+			continue
+		}
+		if n == sel {
+			return i >= start && i < start+h
+		}
+		n++
+	}
+	return false
 }
 
 // open goes into the row under the cursor.
@@ -866,6 +1097,10 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:
 		next = navEntry{screen: screenTicket, ticket: ref.id, follow: true}
+		if chart := m.planOf(ref.id); chart != "" {
+			// An issue's screen is its plan, the screen of the chart that plans it.
+			next = navEntry{screen: screenChart, chart: chart, follow: true}
+		}
 	case rowBrief:
 		next = navEntry{screen: screenBrief, ticket: ref.ticket}
 	case rowBuild:
@@ -874,6 +1109,8 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenReview, ticket: ref.ticket}
 	case rowPublish:
 		next = navEntry{screen: screenPublish, ticket: ref.ticket}
+	case rowLand:
+		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowQuestion:
@@ -889,6 +1126,8 @@ func (m *Model) open() tea.Cmd {
 	if next.screen == screenReview {
 		// What the review screen is for, when something waits, is deciding it.
 		m.top().sel = m.askRow(ref)
+		// The page opens at its top, so the rounds are read before the rows.
+		m.top().lead = 1 << 20
 	}
 	var cmds []tea.Cmd
 	if next.screen == screenChart {
@@ -901,6 +1140,29 @@ func (m *Model) open() tea.Cmd {
 		cmds = append(cmds, m.loadBrief(next.ticket))
 	}
 	return tea.Batch(cmds...)
+}
+
+// openLand opens the Land screen of the ticket on the screen, whatever the
+// cursor is on: from the ticket's screen, a step's or a slice's. The land screen
+// itself, the project's list and a chart's have no ticket of their own to open
+// it for.
+func (m *Model) openLand() tea.Cmd {
+	e := m.top()
+	switch e.screen {
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish:
+	default:
+		return nil
+	}
+	t := m.w.tickets[e.ticket]
+	if t == nil || t.awaiting {
+		return nil
+	}
+	m.nav = append(m.nav, navEntry{screen: screenLand, ticket: e.ticket})
+	m.last = nil
+	if t.status == nil || t.dirty {
+		return m.refreshStatus(e.ticket)
+	}
+	return nil
 }
 
 // askRow is the position, among the rows of the review screen on top, of the
@@ -938,6 +1200,7 @@ func (m *Model) refreshAll() tea.Cmd {
 			for _, id := range c.ids() {
 				cmds = append(cmds, m.refreshStatus(id))
 			}
+			cmds = append(cmds, m.refreshIssue(c))
 		}
 	}
 	if id := m.watching(); id != "" {

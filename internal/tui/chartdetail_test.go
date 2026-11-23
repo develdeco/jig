@@ -124,7 +124,7 @@ func TestChartDetailOfATicketWithNothingBuilding(t *testing.T) {
 	g := chartScreenRig(t)
 	g.press("up")
 	panel := detailPanelOf(t, g.view())
-	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state    published") {
+	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state    waits to land") {
 		t.Errorf("the panel of a published ticket does not say so in its one row:\n%s", strings.Join(panel, "\n"))
 	}
 	g.press("down", "down")
@@ -135,12 +135,12 @@ func TestChartDetailOfATicketWithNothingBuilding(t *testing.T) {
 }
 
 // TestChartDetailOfATicketTheScreensDoNotKnowSaysSo: a ticket the chart lists
-// that no line or status has reached has the row "not read yet".
+// that no line or status has reached has the row "reading…".
 func TestChartDetailOfATicketTheScreensDoNotKnowSaysSo(t *testing.T) {
 	t.Parallel()
 	rows := chartRig(t).m.chartDetailRows(chartRow{id: "JIG-9"})
-	if len(rows) != 1 || rows[0].label != "state" || !strings.Contains(rows[0].text, "not read yet") {
-		t.Errorf("got %v, want the one state row, not read yet", rows)
+	if len(rows) != 1 || rows[0].label != "state" || !strings.Contains(rows[0].text, "reading…") {
+		t.Errorf("got %v, want the one state row, reading", rows)
 	}
 }
 

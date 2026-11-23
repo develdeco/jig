@@ -33,20 +33,20 @@ func TestTheLogTagsEachCallWithWhatItWasFor(t *testing.T) {
 	g.feed(
 		ll(at(0, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-b", "claude", "claude-sonnet-5" }),
 		ll(at(1, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-b" }),
-		tool(at(1, 10), "s-b", "jig skill intake", said("Read the intake skill")),
+		toolOn("SHOP-1", at(1, 10), "s-b", "jig skill intake", said("Read the intake skill")),
 		jl(at(2, 0), "SHOP-1", "", journal.EventApproval, with("s-b", "", "", "Dana <dana@example.invalid>", "0123456789ab", "agent")),
-		tool(at(2, 8), "s-b", "jig validate SHOP-1", said("Record the approval")),
-		tool(at(2, 10), "s-b", "jig skill build", said("Read the build skill")),
+		toolOn("SHOP-1", at(2, 8), "s-b", "jig validate SHOP-1", said("Record the approval")),
+		toolOn("SHOP-1", at(2, 10), "s-b", "jig skill build", said("Read the build skill")),
 		jl(at(3, 0), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(3, 10), "s-b", "go test ./...", said("Run the tests")),
+		toolOn("SHOP-1", at(3, 10), "s-b", "go test ./...", said("Run the tests")),
 		jl(at(3, 30), "SHOP-1", "round", journal.EventVerified, with("", sha('a'), "", "", "", "")),
 		jl(at(4, 0), "SHOP-1", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 1 }),
 		jl(at(4, 10), "SHOP-1", "", journal.EventGateReviewer, func(l *journal.Line) { l.Attempt, l.Session, l.Model = 1, "s-b", "claude-opus-5" }),
-		tool(at(4, 20), "s-b", "git diff main", said("Show the branch diff"), func(l *journal.Line) { l.Agent = "a-rev" }),
+		toolOn("SHOP-1", at(4, 20), "s-b", "git diff main", said("Show the branch diff"), func(l *journal.Line) { l.Agent = "a-rev" }),
 		jl(at(5, 0), "SHOP-1", "", journal.EventGateClean, func(l *journal.Line) { l.Attempt, l.Session, l.Agent = 1, "s-b", "a-rev" }),
-		tool(at(5, 9), "s-b", "jig review done SHOP-1", said("Close the review round"), func(l *journal.Line) { l.Agent = "a-rev" }),
+		toolOn("SHOP-1", at(5, 9), "s-b", "jig review done SHOP-1", said("Close the review round"), func(l *journal.Line) { l.Agent = "a-rev" }),
 		jl(at(5, 30), "SHOP-1", "", journal.EventPrBody, func(l *journal.Line) { l.Commit = sha('a') }),
-		tool(at(5, 40), "s-b", "git push origin SHOP-1-round", said("Push the branch")),
+		toolOn("SHOP-1", at(5, 40), "s-b", "git push origin SHOP-1-round", said("Push the branch")),
 	)
 	rows := strings.Split(g.view(), "\n")
 	act := strings.Join(panelLines(rows, "Activity"), "\n")
@@ -75,7 +75,7 @@ func TestTheLogTagsEachCallWithWhatItWasFor(t *testing.T) {
 		jl(at(6, 0), "SHOP-1", "", journal.EventChangelog),
 		jl(at(6, 0), "SHOP-1", "", journal.EventPr, func(l *journal.Line) { l.URL = "https://example.test/acme/shop/pull/1" }),
 		jl(at(6, 0), "SHOP-1", "", journal.EventPublishDone),
-		tool(at(6, 12), "s-b", "jig publish SHOP-1 --pr https://example.test/acme/shop/pull/1", said("Record the pull request")),
+		toolOn("SHOP-1", at(6, 12), "s-b", "jig publish SHOP-1 --pr https://example.test/acme/shop/pull/1", said("Record the pull request")),
 	)
 	act = strings.Join(panelLines(strings.Split(g.view(), "\n"), "Activity"), "\n")
 	if line := lineWith(act, "09:05:40"); !strings.Contains(line, "publish·pr ") || !strings.Contains(line, "Push the branch") {

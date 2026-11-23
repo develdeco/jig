@@ -40,7 +40,7 @@ func shopRig(t *testing.T) *rig {
 	roster := jsonLine(map[string]any{
 		"tickets": []map[string]any{
 			{"id": "JIG-4", "title": "Coupon model", "state": "done"},
-			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": []map[string]any{{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open"}}},
+			{"id": "JIG-7", "title": "Coupons in receipts", "state": "blocked", "blocked_by": []map[string]any{{"ticket": "JIG-4", "kind": "merged", "fact": "its PR is open", "prs": []map[string]any{pull("7", "OPEN")}}}},
 		},
 		"charts": []map[string]any{{"name": "shop", "title": "Shop", "tickets": []string{"JIG-4", "JIG-7"}, "ungraduated": 0}},
 	})
@@ -353,12 +353,8 @@ func TestParseChart(t *testing.T) {
 	if len(info.Tickets) != 6 || info.Tickets[5].ID != "" || info.Tickets[5].Title != "Stack two coupons" {
 		t.Errorf("the entry with no ticket is not kept: %+v", info.Tickets)
 	}
-	seven := info.Tickets[4]
-	if seven.ID != "JIG-7" || seven.Phase != "brief" || len(seven.Steps) != 4 || !seven.Ready || len(seven.Waits) != 1 || seven.Waits[0].Ticket != "JIG-4" {
+	if seven := info.Tickets[4]; seven.ID != "JIG-7" || seven.Title != "Coupons in receipts" {
 		t.Errorf("JIG-7 = %+v", seven)
-	}
-	if w := seven.Waits[0]; w.Kind != "merged" || len(w.PRs) != 1 || w.PRs[0] != (chartPR{Repo: "shop", URL: "https://example.test/acme/shop/pull/7", State: "OPEN"}) {
-		t.Errorf("JIG-7's need = %+v", w)
 	}
 	if len(info.Ends) != 1 || info.Ends[0].Ticket != "JIG-7" || info.Ends[0].Blocker != "JIG-4" {
 		t.Errorf("ends = %+v", info.Ends)
@@ -446,7 +442,7 @@ func TestParseRosterKeepsTheBlockersAndTheCharts(t *testing.T) {
 	if want := []chartWait{{Ticket: "JIG-5", Kind: "stacked", Fact: "its gate has no clean round"}}; !reflect.DeepEqual(rows[2].Blockers, want) {
 		t.Errorf("JIG-6's blockers = %+v, want %+v", rows[2].Blockers, want)
 	}
-	if want := []chartWait{{Ticket: "JIG-4", Kind: "merged", Fact: "its PR is open"}}; !reflect.DeepEqual(rows[3].Blockers, want) {
+	if want := []chartWait{{Ticket: "JIG-4", Kind: "merged", Fact: "its PR is open", PRs: []chartPR{{Repo: "shop", URL: "https://example.test/acme/shop/pull/7", State: "OPEN"}}}}; !reflect.DeepEqual(rows[3].Blockers, want) {
 		t.Errorf("JIG-7's blockers = %+v, want %+v", rows[3].Blockers, want)
 	}
 	want := []chartListing{{Name: "checkout", Title: "Coupons at checkout", Tickets: []string{"JIG-4", "JIG-5", "JIG-6", "JIG-7", "JIG-8"}, Ungraduated: 1}}
@@ -484,19 +480,25 @@ func TestTheChartRowsAreWhatTheTicketsListSaysUntilTheVerbIsRead(t *testing.T) {
 	}
 }
 
-// TestAChartTicketTheScreensKnowNothingOfIsDrawnFromTheVerb: a ticket graduated
-// a moment ago, before the list or the stream names it, has its steps as the
-// verb says them.
-func TestAChartTicketTheScreensKnowNothingOfIsDrawnFromTheVerb(t *testing.T) {
+// TestChartRowReadsReadingUntilTheRosterIsThere: a ticket graduated a moment
+// ago, before the roster or the stream names it, is a row that says reading, in
+// the list and in the Detail panel, and nothing of what the verb knows of it: a
+// row has its ticket's digest and nothing else.
+func TestChartRowReadsReadingUntilTheRosterIsThere(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
 	roster := jsonLine(map[string]any{"tickets": []map[string]any{}, "charts": []map[string]any{checkoutListing()}})
 	answerChart(g, roster, "checkout", checkoutJSON(), nil)
 	g.feed().press("enter")
 	v := g.view()
-	for _, want := range []string{"✓ JIG-4  Coupon model", "✓ ✓ ✓ ✓", "◐ JIG-5", "✓ ◐ ○ ○", "ready · brief next", "waits for JIG-4 merged"} {
+	for _, want := range []string{"○ JIG-4  Coupon model", "○ ○ ○ ○", "reading…", "state    reading…"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, v)
+		}
+	}
+	for _, guess := range []string{"ready · brief next", "stacked on JIG-5", "✓ ✓ ✓ ✓", "published https", "state    published"} {
+		if strings.Contains(v, guess) {
+			t.Errorf("the screen says %q of a ticket the roster has not listed:\n%s", guess, v)
 		}
 	}
 }
@@ -505,6 +507,11 @@ func TestAChartTicketTheScreensKnowNothingOfIsDrawnFromTheVerb(t *testing.T) {
 func TestChartStatusWords(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
+	// JIG-4 has landed: a ticket that waits for the person's "Land" has the
+	// chart say it needs you before the verb's word, as a question does.
+	landed := task("land", false, "done|a", "done|b", "done|c", "done|pull request opened", "done|landed")
+	g.pin("JIG-4", landed)
+	g.syncDigests()
 	c := g.m.w.charts["checkout"]
 	status := func() (string, string) { return g.m.chartStatus(c, g.m.chartRows(c)) }
 
@@ -569,11 +576,11 @@ func TestWaitAndEndNotes(t *testing.T) {
 		e    chartEnd
 		want string
 	}{
-		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "merged", PRs: open}, "A-2 waits for A-1 merged · https://example.test/pull/3 is open"},
-		{chartEnd{Ticket: "A-2", Blocker: "A-1", PRs: []chartPR{{URL: "https://example.test/pull/3"}}}, "A-2 waits for A-1 merged · https://example.test/pull/3"},
-		{chartEnd{Ticket: "A-2", Blocker: "A-1", Fact: "it is not published yet"}, "A-2 waits for A-1 merged · it is not published yet"},
-		{chartEnd{Ticket: "A-2", Blocker: "A-1"}, "A-2 waits for A-1 merged"},
-		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "stacked", PRs: open}, "A-2 retargets when A-1 merges · https://example.test/pull/3 is open"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "merged", PRs: open}, "A-2 waits for A-1 to merge · PR #3 open"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", PRs: []chartPR{{URL: "https://example.test/pull/3"}}}, "A-2 waits for A-1 to merge · PR #3"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", Fact: "it is not published yet"}, "A-2 waits for A-1 to merge · it is not published yet"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1"}, "A-2 waits for A-1 to merge"},
+		{chartEnd{Ticket: "A-2", Blocker: "A-1", Kind: "stacked", PRs: open}, "A-2 retargets when A-1 merges · PR #3 open"},
 	} {
 		if got := endNote(tc.e); got != tc.want {
 			t.Errorf("endNote(%+v) = %q, want %q", tc.e, got, tc.want)

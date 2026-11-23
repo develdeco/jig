@@ -30,20 +30,27 @@ type world struct {
 	order   []string
 	// feed is the latest lines of the whole stream, newest last.
 	feed []events.Envelope
-	// sessions binds a session to the ticket its lines last named, so a
-	// ledger line that carries a session and no ticket (a tool call) can be
-	// shown with the ticket's.
-	sessions map[string]string
+	// binder places the ledger lines: a line is on the ticket it names, the
+	// early calls of a subagent join its first bound line's ticket, and a call
+	// heard twice is one (events.Binder, the rule `jig events` reads by).
+	binder *events.Binder
 	// sessionInfo is what each session's session-start line in the ledger
 	// said of it (people.go), whatever ticket the line named.
 	sessionInfo map[string]sessionInfo
+	// sessionEnd is when each session's latest session-end line was written,
+	// whatever ticket the line names: the end of a session names none, and
+	// ends the sessions of every ticket it worked on.
+	sessionEnd map[string]time.Time
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart
 	chartOrder []string
+	// rosterRead is set once the ticket list has been read: until then the
+	// screens do not know what the store holds, and say they are reading.
+	rosterRead bool
 }
 
 func newWorld() *world {
-	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}, sessionInfo: map[string]sessionInfo{}, charts: map[string]*chart{}}
+	return &world{tickets: map[string]*ticket{}, binder: events.NewBinder(true), sessionInfo: map[string]sessionInfo{}, sessionEnd: map[string]time.Time{}, charts: map[string]*chart{}}
 }
 
 // chart is what is known of one chart: how the store listing names it, and
@@ -87,12 +94,17 @@ func (w *world) setCharts(listed []chartListing) {
 type ticket struct {
 	id    string
 	title string
-	// rosterState is the state `jig next` gave the ticket (ready, blocked, ...).
-	rosterState string
+	// digest is where `jig next --json` says the ticket stands: the one source
+	// of the words of its phases. nil until the roster that lists it is read.
+	digest *digestInfo
 	// lines are the journal lines, by instant.
 	lines []events.Envelope
 	// ledger are the machine ledger lines about the ticket, newest last.
 	ledger []events.Envelope
+	// older are the lines that left the ledger's tail, kept as little as the
+	// work they said needs (fold): the calls that still bound the stretches
+	// the holders worked in, with none of their words.
+	older []events.Envelope
 	// status is the last `jig status` read, nil before the first.
 	status *statusInfo
 	// seen are the lines the screens wrote themselves, from a status that
@@ -136,43 +148,66 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 // touched, and whether any of them was new to the screens.
 func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bool) {
 	touched = map[string]bool{}
-	for _, e := range envs {
-		w.feed = append(w.feed, e)
-		if len(w.feed) > feedCap {
-			w.feed = w.feed[len(w.feed)-feedCap:]
-		}
-		if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
-			info := w.sessionInfo[e.Session]
-			info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
-			w.sessionInfo[e.Session] = info
-		}
-		id := e.Ticket
-		if e.Session != "" && id != "" {
-			w.sessions[e.Session] = id
-		}
-		if id == "" && e.Src == events.SrcLedger {
-			id = w.sessions[e.Session]
-		}
-		if id == "" {
-			continue
-		}
-		t, isNew := w.ticketFor(id)
-		if isNew {
-			t.firstAt, _ = e.At()
-		}
-		fresh = fresh || isNew
-		t.awaiting = false
-		touched[id] = true
-		if e.Src == events.SrcJournal {
-			t.lines = insertSorted(t.lines, e)
-			continue
-		}
-		t.ledger = append(t.ledger, e)
-		if len(t.ledger) > ledgerCap {
-			t.ledger = t.ledger[len(t.ledger)-ledgerCap:]
+	for _, in := range envs {
+		for _, e := range w.place(in) {
+			w.take(e, touched, &fresh)
 		}
 	}
 	return touched, fresh
+}
+
+// place is the lines of the stream that line in is, placed: a journal line as
+// it is, a ledger line as the binder places it (none while it is an early call
+// held for its agent's first bound line, several when it is that line).
+func (w *world) place(in events.Envelope) []events.Envelope {
+	if in.Src != events.SrcLedger {
+		return []events.Envelope{in}
+	}
+	placed := w.binder.Bind(in.Line)
+	out := make([]events.Envelope, len(placed))
+	for i, l := range placed {
+		out[i] = events.Envelope{Src: in.Src, Store: in.Store, Line: l}
+	}
+	return out
+}
+
+// take puts one placed line in the feed and on its ticket.
+func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
+	w.feed = append(w.feed, e)
+	if len(w.feed) > feedCap {
+		w.feed = w.feed[len(w.feed)-feedCap:]
+	}
+	if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
+		info := w.sessionInfo[e.Session]
+		info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
+		w.sessionInfo[e.Session] = info
+	}
+	if e.Src == events.SrcLedger && e.Session != "" && e.Event == journal.EventSessionEnd {
+		if at, ok := e.At(); ok && at.After(w.sessionEnd[e.Session]) {
+			w.sessionEnd[e.Session] = at
+		}
+	}
+	id := e.Ticket
+	if id == "" {
+		return
+	}
+	t, isNew := w.ticketFor(id)
+	if isNew {
+		t.firstAt, _ = e.At()
+	}
+	*fresh = *fresh || isNew
+	t.awaiting = false
+	touched[id] = true
+	if e.Src == events.SrcJournal {
+		t.lines = insertSorted(t.lines, e)
+		return
+	}
+	t.ledger = append(t.ledger, e)
+	if len(t.ledger) > ledgerCap {
+		n := len(t.ledger) - ledgerCap
+		t.fold(t.ledger[:n], t.ledger[n:])
+		t.ledger = t.ledger[n:]
+	}
 }
 
 // setRoster takes the tickets `jig next` listed: their titles and states, and
@@ -182,7 +217,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	order := make([]string, 0, len(rows)+len(w.order))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.rosterState, t.blockers = r.Title, r.State, r.Blockers
+		t.title, t.blockers, t.digest = r.Title, r.Blockers, r.Digest
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
@@ -193,6 +228,7 @@ func (w *world) setRoster(rows []rosterRow) {
 		}
 	}
 	w.order = order
+	w.rosterRead = true
 }
 
 // insertSorted puts e among lines by instant, after any line of the same
@@ -238,6 +274,7 @@ func short(sha string) string {
 type rosterRow struct {
 	ID, Title, State string
 	Blockers         []chartWait
+	Digest           *digestInfo
 }
 
 // latest is the position of the last line of the ticket whose event is one
@@ -264,20 +301,6 @@ var buildEventNames = []string{
 	journal.EventOracle, journal.EventVerified, journal.EventVerifyError, journal.EventQuestion,
 	journal.EventAnswer, journal.EventStall, journal.EventRequeue, journal.EventResult,
 	journal.EventFixSlice, journal.EventSliceAdd,
-}
-
-// sliceIDsFromLines are the slices the journal names, in order of first
-// appearance.
-func (t *ticket) sliceIDsFromLines() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, l := range t.lines {
-		if l.Slice != "" && !seen[l.Slice] {
-			seen[l.Slice] = true
-			out = append(out, l.Slice)
-		}
-	}
-	return out
 }
 
 // questionRow is a question the builder asked and, once there is one, its
@@ -526,20 +549,17 @@ var relevantSliceEvents = []string{
 	journal.EventStall, journal.EventRequeue, journal.EventNote,
 }
 
-// slices are the ticket's slices: the store's list when a status has been
-// read (its states are the store's), else the slices the journal names.
+// slices are the ticket's slices as the store's status lists them, and none
+// before a status has been read: the screens guess no slice from the lines. Until
+// then the counts of the digest stand for them (sliceCounts).
 func (t *ticket) slices(zone *time.Location) []sliceRow {
 	var out []sliceRow
-	if t.status != nil && len(t.status.Slices) > 0 {
+	if t.status != nil {
 		for _, s := range t.status.Slices {
 			out = append(out, sliceRow{
 				ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts,
 				Workspace: s.Workspace, Oracle: s.Oracle, FromGate: s.FromGate,
 			})
-		}
-	} else {
-		for _, id := range t.sliceIDsFromLines() {
-			out = append(out, sliceRow{ID: id, State: t.guessSliceState(id)})
 		}
 	}
 	for i := range out {
@@ -559,27 +579,29 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	return out
 }
 
-// guessSliceState is the state of a slice from its lines alone, for a ticket
-// whose status has not been read: verified means green, a question nobody
-// answered means needs-input, a stall since the last claim means stalled, a
-// claim means building.
-func (t *ticket) guessSliceState(slice string) string {
-	v := t.latest(slice, journal.EventVerified)
-	q := t.latest(slice, journal.EventQuestion)
-	a := t.latest(slice, journal.EventAnswer)
-	stall := t.latest(slice, journal.EventStall)
-	claim := t.latest(slice, journal.EventClaim, journal.EventDispatch, journal.EventRequeue)
-	switch {
-	case q >= 0 && q > a && q > v:
-		return StateNeedsInput
-	case stall >= 0 && stall > claim && stall > v:
-		return StateStalled
-	case v >= 0 && v > claim:
-		return StateGreen
-	case claim >= 0 || t.latest(slice, journal.EventVerifyPending, journal.EventOracle) >= 0:
-		return StateBuilding
+// sliceCounts is how many of the ticket's slices are in each state, and how
+// many it has: the digest's counts when the roster listed the ticket, so the
+// build step's mark is the same before the status is read and after, else the
+// status's list. A slice the store holds building
+// counts as failed when its last covering run judged the code and failed it; one
+// whose run was stopped before it could judge is still being built.
+func (t *ticket) sliceCounts(zone *time.Location) (counts map[string]int, n int) {
+	counts = map[string]int{}
+	if d := t.digest; d != nil && d.Slices != nil {
+		s := d.Slices
+		counts[StateGreen], counts[StateQueued], counts[StateNeedsInput], counts[StateFail] = s.Green, s.Queued, s.NeedsInput, s.Failed
+		counts[StateStalled], counts[StateEnvBlocked] = s.Stalled, s.EnvBlocked
+		counts[StateBuilding] = s.Building + s.Stopped
+		return counts, s.Total
 	}
-	return StateQueued
+	if t.status != nil {
+		rows := t.slices(zone)
+		for _, r := range rows {
+			counts[r.State]++
+		}
+		return counts, len(rows)
+	}
+	return counts, 0
 }
 
 // describe is one line's account of itself.
@@ -618,6 +640,8 @@ func describe(l events.Envelope) string {
 		return strings.TrimSpace("stalled " + firstOf(l.Summary, l.Outcome))
 	case journal.EventGateOpen:
 		return "gate round opened"
+	case journal.EventGateRefused:
+		return "gate refused: " + l.Summary
 	case journal.EventGateRound:
 		return roundWord(l, "findings")
 	case journal.EventGateClean:
@@ -679,11 +703,9 @@ func eventState(l events.Envelope) string {
 		return StateStalled
 	case journal.EventQuestion:
 		return StateNeedsInput
-	case journal.EventAnswer, journal.EventCall, journal.EventApproval, journal.EventRevalidate:
+	case journal.EventAnswer, journal.EventCall, journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return StateOK
-	case eventBriefSeen, eventSlicesSeen:
-		return StateBuilding
-	case journal.EventGateOpen, journal.EventGateReviewer:
+	case journal.EventGateOpen, journal.EventGateRefused, journal.EventGateReviewer:
 		return StateReviewing
 	case journal.EventGateRound:
 		return StateFindings

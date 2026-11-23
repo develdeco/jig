@@ -49,10 +49,10 @@ func TestReviewScreenSaysWhoReviewedEachRoundAndHowFarTheyStood(t *testing.T) {
 	text := pageText(g)
 	for _, want := range []string{
 		"✖ round 1  not clean  raised 1 ask",
-		"reviewer (Codex · Gpt 5) · NOT independent: it built what it reviewed",
+		"builder reviewing its own change (Codex · Gpt 5)",
 		"full 0000000..ccccccc · 4 files read",
 		"reviewer · independence unknown · s-review", // round 2: nothing known of its model
-		"delta ?..ddddddd", // its base is not known, and it has no findings file
+		"delta ?..ddddddd",                           // its base is not known, and it has no findings file
 		"fix budget 3 of 3 rounds used, reached",
 	} {
 		if !strings.Contains(text, want) {

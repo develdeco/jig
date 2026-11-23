@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -16,6 +17,10 @@ import (
 // began further back than this is treated as having begun where the window
 // ends, which at worst shows it a note a second time.
 const memoryWindow = 16 << 20
+
+// claimWindow is how far before a session's latest start line a held claim is
+// still looked for: a builder runs for hours.
+const claimWindow = 12 * time.Hour
 
 // sessionMemory is what the ledger says a session has done lately.
 type sessionMemory struct {
@@ -37,6 +42,13 @@ type sessionMemory struct {
 	// for a hook payload that names the session's directory instead. Empty
 	// for the session's own agent.
 	agentTicket, agentCwd string
+	// claims are the `jig claim` calls of the event's agent, newest first, as
+	// the tool lines say (bindTool reads them).
+	claims []claimCall
+	// agentDirs are the directories the event's agent's latest calls moved
+	// to with a leading cd, newest first: where a subagent works when its
+	// hook payload names the session's directory.
+	agentDirs []string
 	// delivered holds the Refs of the notes already given to the agent (as
 	// context or in a refusal to stop), blocked the Refs it was refused a
 	// Stop for. A subagent shares its session's id and hears its notes on its
@@ -54,9 +66,44 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 	if session == "" {
 		return m, nil
 	}
+	past := false // the walk has passed the session's latest start
+	var cutoff time.Time
+	stopped := false            // the walk has passed the agent's own stop
+	closed := map[string]bool{} // the tickets whose review round the agent closed, after the walk's place
 	err := ledger.ReadBackward(root, memoryWindow, func(l journal.Line) bool {
+		if past {
+			// Back from a resume or a compact the walk goes only as far as a
+			// long run, whoever wrote the line.
+			if at, err := time.Parse(time.RFC3339Nano, l.TS); err != nil || at.Before(cutoff) {
+				return false
+			}
+		}
 		if l.Session != session {
 			return true
+		}
+		if l.Agent == agent {
+			// A subagent's stop ends the claims it made before it, unless jig refused it (the agent works on). The
+			// session's own agent stops at every turn and keeps its claim.
+			if agent != "" && l.Event == journal.EventHook && l.Outcome == KindStop && !strings.HasPrefix(l.Summary, "blocked:") {
+				stopped = true
+			}
+			if c, ok := claimCallOf(l); ok {
+				c.ended = stopped
+				m.claims = append(m.claims, c)
+			} else if l.Event == journal.EventTool && ledger.RunsJig(l.Command, "", "review", "done") {
+				closed[reviewWord(l.Command)] = true
+			} else if c, ok := roleCallOf(l); ok {
+				c.ended = stopped || (c.kind == roleReview && closed[c.word])
+				m.claims = append(m.claims, c)
+			}
+			if dir, cd := leadingCd(l.Command); l.Event == journal.EventTool && cd && dir != "" && len(m.agentDirs) < 4 {
+				m.agentDirs = append(m.agentDirs, resolveDir(dir, l.Cwd, ""))
+			}
+		}
+		if past {
+			// Before the session's latest start only the claims are read, down
+			// to the start the session began its life with.
+			return l.Event != journal.EventSessionStart || l.Outcome == "resume" || l.Outcome == "compact"
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
 			m.started = at // the walk goes back in time: the last one set is the earliest
@@ -87,9 +134,20 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 				m.agentTicket, m.agentCwd = l.Ticket, l.Cwd
 			}
 		}
-		// A session-start line ends the walk: what came before it belongs to
-		// an earlier life of the session, or to none.
-		return l.Event != journal.EventSessionStart
+		// A session-start line ends what the session is and has been told: a
+		// session that resumes or compacts starts again under its id, and what
+		// came before belongs to an earlier life. The claims its agents hold
+		// are not: they are read on, back a claimWindow from the start.
+		if l.Event == journal.EventSessionStart {
+			// Only a resume or a compact starts the session again with its
+			// agents still working; a fresh start ends the walk.
+			at, err := time.Parse(time.RFC3339Nano, l.TS)
+			if err != nil || (l.Outcome != "resume" && l.Outcome != "compact") {
+				return false
+			}
+			past, cutoff = true, at.Add(-claimWindow)
+		}
+		return true
 	})
 	return m, err
 }

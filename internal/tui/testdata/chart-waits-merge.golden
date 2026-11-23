@@ -1,19 +1,19 @@
-jig  demo › shop  Shop                                       ○ waits for a merge
+jig  demo › shop  Shop                                           ? run needs you
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Map ───────────────────────────────────────────────── charts/shop/map.md ─╮
   │  destination  Receipts show the coupon.                                    │
   │  decided      ✓ One line per coupon                                        │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 2 published ─╮
-  │  ✓ JIG-4  Coupon model    ✓ ✓ ✓ ✓  published https://example.test/acme/de… │
-  │▸ ◐ JIG-7  Coupons in re…  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open │
+  │  ◇ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"        │
+  │▸ ◐ JIG-7  Coupons in …  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────── JIG-7 ─╮
   │  state    brief being drafted                                              │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ────────────────────────────────────────────────── waits for a merge ─╮
   │  next     say "Continue shop"                                              │
-  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/p… │
+  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
   │  09:14:21 JIG-4 publish·done ● finished                                    │

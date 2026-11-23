@@ -41,6 +41,17 @@ type outcome struct {
 	Label  string
 	Ticket string
 	Steps  []ranStep
+	// Print is where the ticket (or the chart on show) stood at the first roster
+	// read (the chart's read, for a line with no ticket) that began after the
+	// command's result arrived, so the command's own effect (a
+	// refusal it journaled, an approval it wrote) is part of it; the line the
+	// panel prints for it is gone once a later read differs. Fixed is set once
+	// it is taken.
+	Print string
+	Fixed bool
+	// After is how many roster reads had begun when the result arrived: a read
+	// numbered above it started after the command and is the first to fix Print.
+	After int
 }
 
 // shown is the step the screen reports: the one that failed, else the last.
@@ -65,6 +76,8 @@ type (
 		rows   []rosterRow
 		charts []chartListing
 		err    error
+		// seq is the read's place among the roster reads begun.
+		seq int
 	}
 )
 
@@ -117,13 +130,15 @@ func (m *Model) loadRoster() tea.Cmd {
 	if m.rosterBusy || m.run == nil {
 		return nil
 	}
-	m.rosterBusy = true
+	m.rosterBusy, m.rosterStale, m.lastRoster = true, false, m.now()
+	m.rosterStarted++
+	seq := m.rosterStarted
 	args := m.verbArgs("next", "--json")
 	run := m.run
 	return func() tea.Msg {
 		out, _ := run(args)
 		rows, charts, err := parseRoster(out)
-		return rosterMsg{rows: rows, charts: charts, err: err}
+		return rosterMsg{rows: rows, charts: charts, err: err, seq: seq}
 	}
 }
 

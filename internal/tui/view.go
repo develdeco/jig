@@ -16,6 +16,7 @@ const (
 	rowBuild    = "build"
 	rowReview   = "review"
 	rowPublish  = "publish"
+	rowLand     = "land"
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
@@ -82,6 +83,8 @@ func (m *Model) page() page {
 		return m.briefPage(e.ticket)
 	case screenPublish:
 		return m.publishPage(e.ticket)
+	case screenLand:
+		return m.landPage(e.ticket)
 	case screenChart:
 		return m.chartPage(e.chart)
 	}
@@ -146,9 +149,11 @@ func (m *Model) bodyRows() int {
 	return h
 }
 
-// window renders the page lines that fit in h rows with the sel-th
-// selectable row in view, marking that row.
-func (m *Model) window(pg page, sel, h, w int) []string {
+// windowStart is the first page line a window of h rows shows with the sel-th
+// selectable row in view, then moved up by what the page is held above it
+// (lead). With clamp, lead is cut to the lines there are above the window, so a
+// page opened at its top lessens what is held as it is read down.
+func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	selLine, n := 0, 0
 	for i, l := range pg.lines {
 		if l.ref == nil {
@@ -177,6 +182,21 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 			start = max(0, min(m.top().scroll, len(pg.lines)-h))
 		}
 	}
+	if n > 0 {
+		lead := m.top().lead
+		if clamp {
+			lead = min(lead, start)
+			m.top().lead = lead
+		}
+		start = max(0, start-lead)
+	}
+	return start
+}
+
+// window renders the page lines that fit in h rows with the sel-th
+// selectable row in view, marking that row.
+func (m *Model) window(pg page, sel, h, w int) []string {
+	start := m.windowStart(pg, sel, h, true)
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -207,7 +227,7 @@ func (m *Model) header(w int) []string {
 	if m.cfg.Project != "" {
 		crumbs += "  " + m.cfg.Project
 	}
-	var right string
+	var right, title, idCrumb string
 	switch e.screen {
 	case screenMain:
 		n := len(m.w.order)
@@ -228,8 +248,14 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
-		if t != nil && t.title != "" && e.screen == screenTicket {
-			crumbs += "  " + t.title
+		idCrumb = crumbs
+		if t != nil && t.title != "" {
+			title = t.title
+		}
+		if t != nil && e.screen == screenTicket {
+			if k := m.kindIn(t); k != "" {
+				crumbs += "  " + m.st.dim(k)
+			}
 		}
 		switch e.screen {
 		case screenBrief:
@@ -240,11 +266,17 @@ func (m *Model) header(w int) []string {
 			crumbs += " › 3 review"
 		case screenPublish:
 			crumbs += " › 4 publish"
+		case screenLand:
+			crumbs += " › 5 land"
 		case screenSlice:
 			crumbs += " › 2 build › slice " + m.st.bold(e.slice)
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
+			if isMulti(t) {
+				// A multi-task has no phase: its word is where its own pull request is.
+				state, label = m.multiLabel(t)
+			}
 			if t.awaiting {
 				state, label = StateQueued, "waiting"
 			}
@@ -256,6 +288,13 @@ func (m *Model) header(w int) []string {
 				}
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
+		}
+	}
+	if title != "" {
+		// The title gives way first: it takes what the id, the step and the
+		// state leave, whole or cut, and none when nothing is left.
+		if room := w - width(crumbs) - width(right) - 3; room > 1 {
+			crumbs = idCrumb + "  " + fit(title, room) + strings.TrimPrefix(crumbs, idCrumb)
 		}
 	}
 	gap := w - width(crumbs) - width(right)
@@ -322,6 +361,7 @@ func (m *Model) keyHints() []string {
 	dismiss := []string{"d", "dismiss"}
 	gate := []string{"g", "gate"}
 	publish := []string{"p", "publish"}
+	land := []string{"5", "land"}
 	tail := []string{"t", "tail"}
 	quit := []string{"q", "quit"}
 	var keys [][]string
@@ -331,21 +371,47 @@ func (m *Model) keyHints() []string {
 	case screenChart:
 		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
 	case screenTicket:
-		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, tail, quit}
+		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, land, tail, quit}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
 			keys = [][]string{back, tail, quit}
+		} else if isMulti(t) {
+			// A multi-task's tasks open; nothing else is done from its screen.
+			keys = [][]string{move, open, back, tail, quit}
 		}
 	case screenBrief:
-		keys = [][]string{move, open, back, tail, quit}
+		keys = [][]string{move, open, back, land, tail, quit}
 	case screenBuild:
-		keys = [][]string{move, open, back, gate, tail, quit}
+		keys = [][]string{move, open, back, gate, land, tail, quit}
 	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, tail, quit}
+		keys = [][]string{move, back, keep, dismiss, gate, land, tail, quit}
 	case screenPublish:
-		keys = [][]string{{"↑↓", "scroll"}, back, publish, tail, quit}
+		keys = [][]string{{"↑↓", "scroll"}, back, publish, land, tail, quit}
 	case screenSlice:
-		keys = [][]string{move, back, answer, tail, quit}
+		keys = [][]string{move, back, answer, land, tail, quit}
+	case screenLand:
+		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
+	}
+	// The key up to the issue, on the screens of a task that is in one's plan, and
+	// the one that shows the map, on the plan: each goes after the key back.
+	var extra []string
+	switch id := m.upFrom(); {
+	case id != "" && m.multiParent(id) != "":
+		extra = []string{"c", "multi-task"}
+	case id != "" && len(m.issuesOf(id)) > 0:
+		extra = []string{"c", "issue"}
+	case m.top().screen == screenChart:
+		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
+			extra = []string{"m", "map"}
+		}
+	}
+	if extra != nil {
+		for i, k := range keys {
+			if k[0] == "esc" {
+				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
+				break
+			}
+		}
 	}
 	flat := make([]string, 0, 2*len(keys))
 	for _, k := range keys {
@@ -354,34 +420,76 @@ func (m *Model) keyHints() []string {
 	return flat
 }
 
-// panel is what the last command printed and the notice, above the keys.
+// panel is the last command as one line, and the notice, above the keys.
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		for _, s := range m.last.Steps {
-			state := StateOK
-			if s.Code != 0 {
-				state = StateFail
-			}
-			out = append(out, fit("  "+m.st.icon(state)+" "+m.st.bold(m.shownLine(s.Args)), w))
-		}
-		shown := m.last.shown()
-		lines := outputLines(shown.Out)
-		if len(lines) > 6 {
-			lines = append(lines[:5:5], "…")
-		}
-		for _, l := range lines {
-			if shown.Code != 0 && (strings.HasPrefix(l, "error:") || strings.HasPrefix(l, "code:")) {
-				out = append(out, fit("    "+m.st.state(StateFail, l), w))
-				continue
-			}
-			out = append(out, fit("    "+m.st.dim(l), w))
-		}
+		out = append(out, m.lastLine(m.last, w))
 	}
 	if m.notice != "" {
 		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
 	}
 	return out
+}
+
+// lastLine is a key's command as typed and what the verb said of it: its own
+// first sentence when it worked, its error and code when it did not. The step
+// that failed is the one shown, so a chain that stopped reads as the failure.
+// The raw output is not printed, and a line too long for the screen is cut.
+func (m *Model) lastLine(o *outcome, w int) string {
+	s := o.shown()
+	state, said := StateOK, firstSentence(s.Out)
+	if s.Code != 0 {
+		state, said = StateFail, errorSentence(s.Out)
+	}
+	line := "  " + m.st.icon(state) + " " + m.st.bold(m.shownLine(s.Args))
+	if said != "" {
+		if state == StateFail {
+			said = m.st.state(StateFail, said)
+		} else {
+			said = m.st.dim(said)
+		}
+		line += "  " + said
+	}
+	return fit(line, w)
+}
+
+// firstSentence is what a verb that worked says of it: the first line of its
+// help, which is a sentence, else its first line.
+func firstSentence(out string) string {
+	lines := outputLines(out)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "help[") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1])
+		}
+	}
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
+	}
+	return ""
+}
+
+// errorSentence is a refusal's error and its code, "error text (CODE)"; output
+// that names neither says its first line.
+func errorSentence(out string) string {
+	var msg, code string
+	for _, l := range outputLines(out) {
+		switch {
+		case msg == "" && strings.HasPrefix(l, "error:"):
+			msg = strings.TrimSpace(strings.TrimPrefix(l, "error:"))
+		case code == "" && strings.HasPrefix(l, "code:"):
+			code = strings.TrimSpace(strings.TrimPrefix(l, "code:"))
+		}
+	}
+	switch {
+	case msg != "" && code != "":
+		return msg + " (" + code + ")"
+	case msg != "":
+		return msg
+	case code != "":
+		return code
+	}
+	return firstSentence(out)
 }
 
 // outputLines are the lines a command printed, without blanks.

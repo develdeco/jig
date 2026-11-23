@@ -249,7 +249,7 @@ func TestGateAdoptsTheBranchItReviews(t *testing.T) {
 }
 
 // TestGateRefusesAnAdoptionThatCannotStand covers each refusal, and that
-// each leaves nothing behind: no journal line (gateRefused), no adopted
+// each opens no round: no journal line but gate-refused (gateRefused), no adopted
 // branch, no start sha, and - for the ones decided before the lease - no gate
 // lease, so a plain rerun is the whole recovery.
 //

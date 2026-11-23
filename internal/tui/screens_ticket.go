@@ -29,7 +29,7 @@ func substepCap(body int) int { return substepLines + max(0, body-bodyRef)/3 }
 // adds. Together with substepCap they take all the rows a tall terminal adds.
 func activityCap(body int) int { return activityLines + max(0, body-bodyRef)*2/3 }
 
-// ticketPage is one ticket: its four steps in order, then the sub-steps of the
+// ticketPage is one ticket: its five steps in order, then the sub-steps of the
 // step under the cursor, what waits for a person, what to do next, and the
 // activity of that step (the current step until the cursor moves).
 func (m *Model) ticketPage(id string) page {
@@ -42,6 +42,10 @@ func (m *Model) ticketPage(id string) page {
 	if t.awaiting {
 		return m.waitingPage(id)
 	}
+	if isMulti(t) {
+		// A multi-task has no five steps: its screen is the plan one level down.
+		return m.multiPage(t)
+	}
 	d := m.phaseOf(t)
 	steps := m.stepRows(t, d)
 	cur := currentStep(steps)
@@ -50,7 +54,7 @@ func (m *Model) ticketPage(id string) page {
 		right = "done"
 	}
 	if total := totalTook(steps); total > 0 {
-		right += " · total " + ago(total)
+		right += " · worked " + ago(total)
 	}
 	p.boxTop("Steps", right)
 	for i, s := range steps {
@@ -63,15 +67,41 @@ func (m *Model) ticketPage(id string) page {
 	// next: the status's help is written for the session, which reads it
 	// itself, and the session tells the person the prompt a phase waits for.
 	var needs page
+	// The group is drawn while something still waits on the person: a question
+	// nobody answered or an ask nobody decided (the asks already decided stay
+	// beside the ones left, so a decision can be seen). When the last answer or
+	// decision is journaled the group goes. The asks of a round stay with their
+	// controls whether or not a session is live, since the person decides them
+	// from here whoever else is at work; only the words that tell the person to
+	// act wait for the line to go quiet.
 	qs := t.openQuestions(m.zone, "")
 	asks := t.asks()
-	if len(qs)+len(asks) > 0 {
-		needs.add(m.st.bold("needs you"))
+	undecided := false
+	for _, a := range asks {
+		undecided = undecided || a.Decision == ""
+	}
+	if !undecided {
+		asks = nil
+	}
+	// The landing is the person's word, which a session merges at: never held
+	// back.
+	landing := m.landingNeedsYou(t)
+	if len(qs)+len(asks) > 0 || landing {
+		// A live session holds back the call to act, not the asks: the group
+		// reads asks while one is at work and only asks wait.
+		heading := "needs you"
+		if len(qs) == 0 && !landing && m.ticketLive(t) {
+			heading = "asks"
+		}
+		needs.add(m.st.bold(heading))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
+		}
+		if landing {
+			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
 		}
 	}
 
@@ -80,7 +110,7 @@ func (m *Model) ticketPage(id string) page {
 	// first, the sub-steps block takes what is left up to its own most, and
 	// the blank lines that set text apart from text come out of what remains
 	// of that. The activity panel gets the rest.
-	focus := m.ticketFocus(steps, len(qs))
+	focus := m.ticketFocus(steps, len(qs), len(asks))
 	body := m.bodyRows()
 	var groups []page
 	for _, g := range []page{needs} {
@@ -147,8 +177,26 @@ func (m *Model) stepLine(s stepRow, current bool) string {
 	name := pad(stepNames[s.Step], 8)
 	num := strconv.Itoa(s.Step+1) + " "
 	text := s.Text
+	if s.Wait != "" {
+		// The clock goes last and always shows: the words give way to it. 21
+		// cells are the icon, number, name and time before the text, 7 the
+		// panel's frame and marker.
+		text = fit(text, m.width-7-21-width(s.Wait)-1) + " " + s.Wait
+	}
 	took := m.st.dim(pad(s.Took, 7))
+	if s.Idle != "" {
+		text = fit(text, m.width-7-21-width(s.Idle)-3) + " · " + s.Idle
+	}
 	switch {
+	case s.Idle != "":
+		// A step nobody is working on is drawn back, its time stopped.
+		name, text = m.st.bold(name), m.st.dim(text)
+		took = m.st.dim(pad(s.Took, 7))
+	case s.Wait != "":
+		// A step that waits for a person or the host reads it in the colour of
+		// a turn that is not the builder's, current or not.
+		name, text = m.st.bold(name), m.st.state(StateNeedsInput, text)
+		took = pad(s.Took, 7)
 	case current && !s.Done:
 		name, text, took = m.st.bold(name), m.st.state(s.State, text), pad(s.Took, 7)
 	case current:
@@ -164,7 +212,7 @@ func (m *Model) stepLine(s stepRow, current bool) string {
 // ask, and the current step while the cursor follows it. The screen's rows are
 // the steps, then the open questions, then the asks, so the cursor's place says
 // which.
-func (m *Model) ticketFocus(steps []stepRow, questions int) int {
+func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 	e := m.top()
 	switch {
 	case e.follow:
@@ -173,8 +221,10 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 		return max(0, e.sel)
 	case e.sel < len(steps)+questions:
 		return stepBuild
+	case e.sel < len(steps)+questions+asks:
+		return stepReview
 	}
-	return stepReview
+	return stepLand
 }
 
 // substepsPanel is a panel of the sub-steps of step, height lines tall with its
@@ -196,6 +246,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
+	c := m.clocks(t, m.phaseOf(t))
 	focus, openRows := focusIndex(subs), 0
 	if focus >= 0 {
 		// The open sub-step takes what the other lines leave; with too many
@@ -212,7 +263,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	if openRows == 0 {
 		shown := pickSubs(subs, room)
 		for _, i := range shown {
-			p.boxAdd(m.foldedLine(t, step, subs[i], labelW))
+			p.boxAdd(m.foldedLine(t, step, subs[i], labelW, c))
 		}
 		if more := len(subs) - len(shown); more > 0 && room >= 2 {
 			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
@@ -236,11 +287,11 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	for i, s := range subs {
 		switch {
 		case i == focus:
-			for _, line := range m.openLines(t, step, s, subs, labelW, openRows) {
+			for _, line := range m.openLines(t, step, s, subs, labelW, openRows, c) {
 				p.boxAdd(line)
 			}
 		case shownAt[i]:
-			p.boxAdd(m.foldedLine(t, step, s, labelW))
+			p.boxAdd(m.foldedLine(t, step, s, labelW, c))
 		}
 	}
 	if more := len(others) - len(picked); more > 0 {
@@ -255,8 +306,8 @@ const labelMaxW = 16
 
 // foldedLine is a sub-step on one line: subLine with what the status adds to
 // its detail (subDetail), and how long it took once it is done.
-func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int) string {
-	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), t.subSummary(step, s)), " · ")
+func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int, c clocks) string {
+	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), m.subSummary(c, step, s)), " · ")
 	return m.subLine(step, s, labelW)
 }
 

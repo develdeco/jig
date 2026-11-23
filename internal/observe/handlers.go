@@ -32,6 +32,7 @@ func (h *handler) sessionStart() Result {
 			Model:      h.ev.Model,
 			Transcript: h.transcript(),
 			Commit:     h.head(),
+			Source:     h.ev.Source,
 		}))
 	}
 	h.hook("")
@@ -137,6 +138,7 @@ func (h *handler) tool() Result {
 	}
 
 	l := h.base(journal.EventTool)
+	l.Ticket, l.Slice = h.bindTool()
 	l.Tool = h.ev.Tool
 	l.Command = oneLine(h.ev.Command, 400)
 	l.Description = oneLine(h.ev.Description, 200)

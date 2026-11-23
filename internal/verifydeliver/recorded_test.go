@@ -110,7 +110,7 @@ func TestGatePrepareOpensARoundWithoutMakingOne(t *testing.T) {
 
 // TestGatePrepareRefusesWhatHasNoCopy: the branch is read from the clone, else
 // from origin, else not at all. A branch neither has is BRANCH_NOT_FOUND, and a
-// refusal leaves no trace: no journal line, no open record.
+// refusal opens no round: its one trace is a gate-refused journal line.
 func TestGatePrepareRefusesWhatHasNoCopy(t *testing.T) {
 	t.Parallel()
 	fx := fixture.Generate(t, fixture.Opts{Home: t.TempDir()})
@@ -124,8 +124,8 @@ func TestGatePrepareRefusesWhatHasNoCopy(t *testing.T) {
 
 	_, err := GatePrepare(d, GateOpts{Ticket: fx.Ticket})
 	wantAxiCode(t, err, "BRANCH_NOT_FOUND")
-	if lines, _ := journal.Read(d.Store, fx.Ticket); len(lines) != 0 {
-		t.Fatalf("the refused gate journaled %+v", lines)
+	if lines, _ := journal.Read(d.Store, fx.Ticket); len(lines) != 1 || lines[0].Event != journal.EventGateRefused || lines[0].Code != "BRANCH_NOT_FOUND" {
+		t.Fatalf("the refused gate journaled %+v, want one gate-refused line", lines)
 	}
 
 	// A branch only another machine has built on: the journal records the

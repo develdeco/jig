@@ -30,7 +30,9 @@ func (m *Model) slicePage(id, slice string) page {
 	if g := t.goals()[slice]; g != "" {
 		p.add(m.st.bold(g))
 	}
-	if row == nil {
+	if row == nil && t.status == nil {
+		p.add(m.st.dim("reading the ticket's status"))
+	} else if row == nil {
 		p.add(m.st.dim("slice " + slice + " has no lines yet"))
 	} else {
 		facts := []string{m.st.icon(row.State) + " " + m.st.state(row.State, row.State), strconv.Itoa(row.Attempts) + " " + plural(row.Attempts, "try", "tries")}
@@ -47,6 +49,27 @@ func (m *Model) slicePage(id, slice string) page {
 		p.add(strings.Join(facts, m.st.dim(" · ")))
 		if where := sliceFacts(*row, false); where != "" {
 			p.add(m.st.dim(where))
+		}
+	}
+
+	if t.status != nil {
+		var states []statusVerification
+		for _, v := range t.status.Verifications {
+			if v.Slice == slice {
+				states = append(states, v)
+			}
+		}
+		if len(states) > 0 {
+			// Each commit that is not verified, in the status's words and with
+			// the command that clears it.
+			p.add("")
+			p.add(m.st.bold("verification"))
+			for _, v := range states {
+				p.add("  " + m.st.icon(v.icon()) + " " + short(v.Commit) + "  " + m.st.dim(v.State))
+				if v.Clear != "" {
+					p.add("      " + m.st.dim(v.Clear))
+				}
+			}
 		}
 	}
 

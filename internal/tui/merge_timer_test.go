@@ -56,7 +56,7 @@ func TestAChartThatEndsAtAMergeIsReadAgainOnTheTimer(t *testing.T) {
 		}
 	}
 	_, status := chartTickets()
-	answerChart(g, chartRoster(checkoutListing()), "checkout", withoutEnds(), status)
+	answerChart(g, mergedRoster(), "checkout", withoutEnds(), status)
 	g.send(mergeMsg{})
 	if v := g.view(); strings.Contains(v, mergeWaitText) {
 		t.Errorf("the screen still shows the wait after a read that lists no end:\n%s", v)
@@ -141,7 +141,7 @@ func TestAPublishedTicketsScreenIsReadAgainOnTheTimer(t *testing.T) {
 	if n := g.r.statusReads("JIG-2"); n != reads+1 {
 		t.Fatalf("the ticket screen read the status %d more times on a tick, want 1", n-reads)
 	}
-	g.press("enter")
+	g.press("up", "enter")
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}

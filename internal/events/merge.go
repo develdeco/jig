@@ -37,8 +37,9 @@ type Scope struct {
 	Ledger string
 	// AllLedger puts every ledger line in scope. Otherwise a ledger line is
 	// in scope when it is about a ticket of the journals: it names that
-	// ticket, or it names none and its session was last bound to that ticket
-	// by an earlier line (a tool line carries a session and no ticket).
+	// ticket, or it is an early call of a subagent whose first bound line
+	// names it (Binder), or it is the end of a session whose lines were. Any
+	// other line that names none is on none.
 	AllLedger bool
 }
 
@@ -65,8 +66,12 @@ type Reader struct {
 
 	files     map[string]*fileState
 	ledgerOff int64
-	// bound is the ticket each session was last seen on.
-	bound map[string]string
+	// binder places the ledger lines on tickets (binder.go).
+	binder *Binder
+	// placed are the sessions a scoped reader found a ledger line in scope for:
+	// the end of one names no ticket, and is handed back for the tickets its
+	// lines were on.
+	placed map[string]bool
 }
 
 // fileState is what a Reader remembers of one journal file.
@@ -88,7 +93,9 @@ func NewReader(scope Scope, since time.Time) *Reader {
 		scope: scope,
 		since: since,
 		files: map[string]*fileState{},
-		bound: map[string]string{},
+		// A stream of the whole ledger has no ticket to place a line on, and
+		// holds nothing back.
+		binder: NewBinder(!scope.AllLedger),
 	}
 }
 
@@ -217,8 +224,8 @@ func (r *Reader) readJournal(j Journal) ([]item, error) {
 }
 
 // readLedger returns the ledger lines after the last offset that are in
-// scope. Every line moves the session bindings, in file order, whether or
-// not it is returned.
+// scope. Every line goes through the binder, in file order, whether or not it
+// is returned.
 func (r *Reader) readLedger(tickets map[string]bool) ([]item, error) {
 	lines, off, err := ledger.ReadFrom(r.scope.Ledger, r.ledgerOff)
 	if err != nil {
@@ -226,23 +233,28 @@ func (r *Reader) readLedger(tickets map[string]bool) ([]item, error) {
 	}
 	r.ledgerOff = off
 	var out []item
-	for _, l := range lines {
-		if l.Session != "" && l.Ticket != "" {
-			r.bound[l.Session] = l.Ticket
-		}
-		if !r.scope.AllLedger {
-			about := l.Ticket
-			if about == "" && l.Session != "" {
-				about = r.bound[l.Session]
+	for _, raw := range lines {
+		for _, l := range r.binder.Bind(raw) {
+			if !r.scope.AllLedger {
+				inScope := l.Ticket != "" && tickets[l.Ticket]
+				// A session's end names no ticket, and is on none; it is the
+				// end of every session whose lines the reader handed back.
+				ends := l.Event == journal.EventSessionEnd && l.Ticket == "" && r.placed[l.Session]
+				if !inScope && !ends {
+					continue
+				}
+				if inScope && l.Session != "" {
+					if r.placed == nil {
+						r.placed = map[string]bool{}
+					}
+					r.placed[l.Session] = true
+				}
 			}
-			if about == "" || !tickets[about] {
-				continue
+			env := Envelope{Src: SrcLedger, Line: l}
+			at, _ := env.At()
+			if r.keep(at) {
+				out = append(out, item{env: env, at: at})
 			}
-		}
-		env := Envelope{Src: SrcLedger, Line: l}
-		at, _ := env.At()
-		if r.keep(at) {
-			out = append(out, item{env: env, at: at})
 		}
 	}
 	return out, nil

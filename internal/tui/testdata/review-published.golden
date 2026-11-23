@@ -1,4 +1,4 @@
-jig  demo › JIG-2 › 3 review                                         ✓ published
+jig  demo › JIG-2  Config loader › 3 review                      ◇ waits to land
 ────────────────────────────────────────────────────────────────────────────────
   ✓ round 2 clean · by reviewer
     fix budget 1 of 3 rounds used
@@ -21,4 +21,4 @@ jig  demo › JIG-2 › 3 review                                         ✓ pub
   │  09:13:30 ● round 2 · reviewer finished: clean                             │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · esc back · k keep · d dismiss · g gate · t tail · q quit
+  ↑↓ move · esc back · k keep · d dismiss · g gate · 5 land · t tail · q quit

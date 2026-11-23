@@ -118,6 +118,10 @@ _Avoid_: ready queue, backlog
 One of the stages a ticket goes through: brief, build, review and publish (the TUI calls them steps), then **Land**, which runs only at the person's word. Each has a skill (`intake`, `build`, `review`, `publish`, `land`) and a prompt that asks for it: "Plan SHOP-1", "Build SHOP-1", "Review SHOP-1", "Publish SHOP-1", "Land SHOP-1". Where a ticket stands is derived from its journal lines and its status, never recorded (`internal/phase`, shown by `jig next <ticket>`, `jig status` and the TUI): a phase is done only when the ones before it are, a phase that cannot start says what it waits for, and asking again for a phase that is done is warned about, not refused.
 _Avoid_: stage, task
 
+**Phase digest**:
+Where one ticket stands, as the roster (`jig next --json`) gives it in each row's `digest`: its kind, the five phases with their words, the pull requests it recorded and where they go, what it waits for and its slices counted. Every TUI screen takes its words from it, so a screen cannot say what `jig next <ticket>` does not.
+_Avoid_: status, standing
+
 **Sub-step**:
 A part of a phase with a state of its own: a slice in the build; a gate round, the asks and the fixes in the review; the body, the approval, a pull request and the changelog in the publish. `internal/phase` derives them with the phase, the TUI lists them under the step under the cursor, and each line of its activity names the sub-step it advances.
 _Avoid_: task, sub-task
@@ -137,6 +141,10 @@ _Avoid_: batch, pipeline, campaign
 **Chart standing**:
 Where a chart is, derived from its tickets' journal lines and records and never recorded (`phase.DeriveChart`, shown by `jig next <chart>` and `jig status <chart>`, and by the TUI's chart screen): each ticket's wave and reach (done, here, after a merge, or blocked), the tickets to brief, the build waves that can run now, where the run would end and the pull requests it waits on, whether the chart started, and the verdict with the prompt that moves it ("Take <chart> to PR", "Continue <chart>", or none). An entry with no ticket yet whose `blocked_by` ref does not resolve is a row with a problem (blocked, with the reason, while the verdict points to `jig validate <chart>`), not a refusal of the chart; a chart with no entries yet says to add them and check them with `jig validate`. It ends at the tasks' pull requests into their containers: the multi-task's and the issue's own open afterwards, once their children have landed, as `jig next <T>` of each says (`Publish <T>`, [ADR 0062](docs/adr/0062-a-container-publishes-once-its-children-have-landed.md)). A model chart's standing adds `lands` (every published, unlanded ticket in row order with its `Land <T>` prompt, what must land `after` first and its Land state, the issue's own landing last), `publish` (a multi-task whose tasks have all landed), and an `issue` block (the issue's stage: landing, suite, fix, publish, published or landed, with its branch, unmet preconditions and the worktrees for its suite); its verdict is `CHART_WAITS_LAND` when only a landing is left (the help says `Land <T> (or merge it on the host), then ask: <prompt>`, for a legacy chart's `CHART_WAITS_MERGE` too), and it is `CHART_DONE` only once the issue has landed. `jig next <issue>` answers it. The TUI reads it again every two minutes while the chart ends at a merge, since a merge on the host writes no journal line. It also lists the tickets of one wave that build in one workspace of a repo (`workspace_overlaps`, each pair in Plan order), which the session stacks as a `stacked` edge of the later ticket on the earlier ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md), [ADR 0045](docs/adr/0045-an-overlap-in-a-chart-run-is-a-stacked-edge.md)).
 _Avoid_: chart status, run state
+
+**Issue plan**:
+The TUI screen of an issue, which is also the screen of the chart that plans it: the issue's need, its tasks in chart order each with where it landed, and its own stages, one line each (its branch, how many tasks landed, its suite for each repo, its pull request and its landing). A multi-task's screen is the same plan one level down, with no suite. `c` goes up to it from a task, and `m` shows the chart's map in it.
+_Avoid_: issue screen, issue card
 
 **Chart detail**:
 The Detail panel of the TUI's chart screen: the ticket under the cursor, in four rows at most, between the Tickets and the Run panels. One row for each slice being built (its id, its stage, the session that holds its claim and the agent whose call claimed it), then the stops jig held an agent at that no step has moved past, the newest two (a hold is current until a journal line of a step follows it), or one `state` row when there is neither. It reads nothing beyond the stream and `jig status`, so moving the cursor runs no verb ([ADR 0037](docs/adr/0037-a-chart-is-run-from-the-main-session.md)).
@@ -307,7 +315,7 @@ A file, or lines of it, a gate reviewer sets aside as holding no term on a criti
 _Avoid_: waiver, exclusion
 
 **Unprobed hunk**:
-A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed.
+A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed. The round keeps the list it left in its `findings.yaml`, and `jig status` and the review screen show it.
 _Avoid_: uncovered line, coverage gap
 
 **Repo-qualified file**:
@@ -369,6 +377,10 @@ _Avoid_: merge phase, ship, release
 **Landed**:
 The journal line `jig land` writes for each repo of a ticket whose pull request merged: the `repo` (in a project of several), the pull request (`url`), `base` (the branch it merged into, as the host says), `into` (the **Container**'s id, empty for the target; the field a **Shared task** keeps its landings apart by), the merge commit when the host gives one, and `provenance`: `agent` when a session ran `jig land` after it named the merge, `person` at a terminal, `host` for a merge made on the host. It is a record of a merge, not a second source of one: the **Merge fact** still reads the host.
 _Avoid_: merged line, shipped
+
+**End state**:
+Where a ticket stands once it has published or closed, one of four that the TUI draws with their own word and icon from the ticket's digest and its **Landed** lines, never from a host call made at draw time: *published* (the pull request is open and `land_first`, the tickets that must land before it, names some), *waits to land* (nothing must land first, or the host merged and nobody recorded it, so "Land SHOP-1" is the person's next word), *landed*, and *closed*. One function says it (`endStateOf`), and every screen reads it.
+_Avoid_: finished, done
 
 **Lands after**:
 The suggestion that one **Issue** is landed after another, recorded as `after:` on the issue's `ticket.yaml` by `jig depend <issue> --after <issue>` (`--clear` removes it) and nowhere else: not a `blocked_by` entry, so nothing that reads `blocked_by` (ready, the mirror, status, restack) reads it, and not a rule of `land.Rules`, so `jig land` refuses nothing on it. `jig depend` refuses an edge that cannot be true (`AFTER_NOT_ISSUE`, `AFTER_SELF`, `AFTER_CYCLE`) and `jig validate` reports the same three in a hand-edited record. `land.Suggestions` gives each predecessor as `landed` (a landed line in every repo it built in), `not landed` or `closed`, and `jig next <issue>` (`lands_after`), `jig next` (`issue_order`) and `jig land <issue>` all read that one list. Landing out of the suggested order is the person's word ("Land X"); a person who wants the order kept says "Land the other first". Between two issues it is the only edge: code both need is a **Shared task**.

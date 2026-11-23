@@ -74,6 +74,9 @@ type Event struct {
 	// StopActive is true on a stop event that follows an earlier refusal to
 	// stop: the agent is already continuing because a hook asked it to.
 	StopActive bool
+	// Source is how a session start began, for a harness that says: startup,
+	// resume, clear or compact.
+	Source string
 }
 
 // Result is what the core hands back for an Event, in jig's own words. An

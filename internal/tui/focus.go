@@ -83,10 +83,12 @@ func (t *ticket) trackOf(step int, key string) subTrack {
 // line naming one, since the ticket's latest line: what that session has done
 // since are its moves. A ticket whose journal names no session yet is held by
 // the session the machine ledger ties to it (the one that minted it, for a
-// brief), since its first line there.
-func (t *ticket) openTrack(step int, key string) subTrack {
-	tr := t.trackOf(step, key)
-	if len(tr.own) > 0 {
+// brief), since its first line there. A sub-step that waits for a person is held
+// by nobody until a line of its own says so: the session that wrote the latest
+// line is not its holder.
+func (t *ticket) openTrack(step int, s phase.Sub) subTrack {
+	tr := t.trackOf(step, s.Key)
+	if len(tr.own) > 0 || s.State == phase.SubNeedsYou {
 		return tr
 	}
 	for _, l := range t.seen {
@@ -104,7 +106,7 @@ func (t *ticket) openTrack(step int, key string) subTrack {
 			return tr
 		}
 	}
-	for _, l := range t.ledger {
+	for _, l := range t.workLedger() {
 		if l.Session == "" {
 			continue
 		}
@@ -162,6 +164,12 @@ const outcomeStopBlock = "stop-block"
 // unattended session's.
 func isHold(l events.Envelope) bool {
 	return l.Src == events.SrcLedger && l.Event == journal.EventNoteDelivered && l.Outcome == outcomeStopBlock
+}
+
+// isLandNamed is whether a machine ledger line says `jig land` named a merge
+// for a session to make: a line of the land step, and no call.
+func isLandNamed(l events.Envelope) bool {
+	return l.Src == events.SrcLedger && l.Event == journal.EventLandNamed
 }
 
 // holdPlace is the step and sub-step a hold is about, from the note's ref: a
@@ -241,6 +249,9 @@ func (m *Model) tildeHome(cmd string) string {
 // failing command marked with its exit status.
 func (m *Model) moveText(t *ticket, l events.Envelope) string {
 	if l.Src != events.SrcLedger {
+		return m.st.icon(eventState(l)) + " " + m.say(t, l)
+	}
+	if isLandNamed(l) {
 		return m.st.icon(eventState(l)) + " " + m.say(t, l)
 	}
 	if isHold(l) {
@@ -530,7 +541,7 @@ func (m *Model) trackLine(state string, stages []string, reached int) string {
 // openParts are what the open sub-step s shows: its track, its fields and its
 // latest move (nil when it has made none).
 func (m *Model) openParts(t *ticket, step int, s phase.Sub) (subTrack, []field, *events.Envelope) {
-	tr := t.openTrack(step, s.Key)
+	tr := t.openTrack(step, s)
 	moves := t.moves(tr, true, m.now())
 	var last *events.Envelope
 	if len(moves) > 0 {
@@ -574,15 +585,17 @@ func trimFields(fs []field, n int) []field {
 // line (label, track, how long it has run), its fields, and its live line, the
 // latest move with how long ago it was made. Fields give way when rows are few;
 // the line and the live line stay.
-func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int) []string {
-	tr, fs, last := m.openParts(t, step, s)
+func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int, c clocks) []string {
+	_, fs, last := m.openParts(t, step, s)
 	now := m.now()
 	state := subState(step, s)
 	w := max(20, m.width-7)
 
 	right := ""
-	if !tr.start.IsZero() && now.After(tr.start) {
-		right = m.st.state(state, ago(now.Sub(tr.start)))
+	if w, ok := c.waitOf(step, s.Key); ok && w.standing() {
+		right = m.st.state(state, m.waitClock(w))
+	} else if took := c.work.of(step, s.Key); took > 0 {
+		right = m.st.state(state, ago(took))
 	}
 	head := m.st.icon(state) + " " + m.st.bold(pad(s.Label, labelW)) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
@@ -625,14 +638,17 @@ func ago(d time.Duration) string {
 }
 
 // subSummary is what a folded sub-step that is done adds to its line: how long
-// it took from its first line to its last, when that is known.
-func (t *ticket) subSummary(step int, s phase.Sub) string {
+// it took (its work), or for one that waited, how long it waited, when that is
+// known.
+func (m *Model) subSummary(c clocks, step int, s phase.Sub) string {
 	if s.State != phase.SubDone {
 		return ""
 	}
-	tr := t.trackOf(step, s.Key)
-	if tr.start.IsZero() || !tr.end.After(tr.start) {
-		return ""
+	if w, ok := c.waitOf(step, s.Key); ok && !w.standing() {
+		return "waited " + m.waitClock(w)
 	}
-	return "took " + span(tr.end.Sub(tr.start))
+	if took := c.work.of(step, s.Key); took > 0 {
+		return "took " + span(took)
+	}
+	return ""
 }

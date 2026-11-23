@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -9,10 +10,10 @@ import (
 
 // What a chart's standing is (which ticket waits for which, what a run would
 // do, whether it is ready) is the verb's word: internal/phase derives it and
-// `jig next <chart>` prints it, so the chart screen only draws it. What the
-// screens add is their own: where each of the chart's tickets stands among its
-// four steps (the same rows the project's list draws), and which of them needs
-// the person.
+// `jig next <chart>` prints it, so the chart screen only draws it. Where each
+// of the chart's tickets stands among its five steps, and what it waits for, is
+// the ticket's digest (`jig next --json`): the same words its screen and the
+// project's list draw, so a row and its ticket cannot differ.
 
 // The kinds of need a ticket can wait on.
 const kindStacked = "stacked"
@@ -25,10 +26,6 @@ const (
 	behindOwes = "owes a merge, then a publish"
 	behindText = behindWord + " · " + behindOwes
 )
-
-// stepUnderWay is the state a step is drawn in while it is under way, for a
-// ticket the screens know only from the verb's word.
-var stepUnderWay = [stepCount]string{StateBuilding, StateBuilding, StateReviewing, StatePublishing}
 
 // ids are the chart's tickets as the screens know them: the entries of the
 // verb that have a ticket once it has been read, in its order, then the ones
@@ -105,152 +102,109 @@ func (c *chart) title() string {
 // chartRow is one ticket of a chart as the screens show it.
 type chartRow struct {
 	id, title string
-	// t and d are the ticket and where it stands, nil and zero when the screens
-	// know no such ticket yet; steps are its four rows.
+	// t and d are the ticket and where its digest says it stands, nil and zero
+	// when the screens know no such ticket yet; steps are its rows, saying
+	// "reading" until the roster has listed the ticket.
 	t     *ticket
 	d     phase.Ticket
 	steps []stepRow
 	// verb is the verb's entry for the ticket, nil before it was read.
 	verb *chartTicket
-	// waits are the needs of the ticket that are not met: the verb's, or the
-	// ticket list's blockers until the verb has been read.
+	// waits are the needs of the ticket that are not met, as its digest lists
+	// them.
 	waits []chartWait
 	// done is whether the ticket is published; needs, whether it waits for the
-	// person; behind, whether the verb has a ticket the screens derive as
-	// published at its publish again (followVerb).
+	// person; behind, whether the ticket published and owes a merge, then a
+	// publish again.
 	done, needs, behind bool
+	// end is where the ticket stands at its end, when atEnd says it does.
+	end   endState
+	atEnd bool
+	// depth is how far the row is nested in a plan: 1 for a task of a
+	// multi-task listed under it.
+	depth int
+	// mark is the state a row is drawn in when it is not its current step's, and
+	// bare says it draws no steps: a multi-task's row in a plan.
+	mark string
+	bare bool
 }
 
 // chartRows are the chart's tickets that have a ticket, in the verb's order (the
-// chart's own before it was read). A ticket the verb lists stands where the verb
-// says (followVerb); the screens' own derivation adds the detail the verb has no
-// word for.
+// chart's own before it was read). A ticket stands where its digest says, and
+// waits for what the digest says; a ticket the roster has not listed yet reads
+// "reading" and nothing else. The verb's entry adds only the chart's own facts
+// (its problem, the entries with no ticket).
 func (m *Model) chartRows(c *chart) []chartRow {
 	var rows []chartRow
-	add := func(id, title string, verb *chartTicket) {
-		r := chartRow{id: id, title: title, verb: verb}
-		if t := m.w.tickets[id]; t != nil {
-			r.t, r.title = t, firstOf(title, t.title)
-			r.d = m.phaseOf(t)
-			r.steps = m.stepRows(t, r.d)
-			r.needs = needsYou(r.d)
-			r.waits = t.blockers
-		}
-		if verb != nil {
-			r.waits = verb.Waits
-			if r.steps != nil {
-				r.steps, r.behind = followVerb(r.steps, *verb)
-			}
-		}
-		switch {
-		case r.steps != nil:
-			r.done = r.steps[len(r.steps)-1].Done
-		case verb != nil:
-			r.done = len(verb.Steps) > 0 && verb.Steps[len(verb.Steps)-1] == phase.StateDone
-		}
-		rows = append(rows, r)
-	}
 	for _, id := range c.ids() {
-		verb := c.verbOf(id)
-		if verb != nil {
-			add(id, verb.Title, verb)
+		if verb := c.verbOf(id); verb != nil {
+			rows = append(rows, m.rowOf(id, verb.Title, verb))
 		} else {
-			add(id, "", nil)
+			rows = append(rows, m.rowOf(id, "", nil))
 		}
 	}
 	return rows
 }
 
-// followVerb is the rows of a ticket with each step done as the verb says. The
-// verb derives a chart's tickets with their stack plans read and the screens
-// derive a ticket from its journal and status alone, so the two part when a
-// stack plan owes a published ticket a merge: the verb has its publish current
-// again, and the journal says it published. A chart is the verb's word, so a
-// step the verb has done is done and one it has not is not, whatever the rows
-// say; a step the two agree on keeps its row whole, with the detail only the
-// screens have. behind says the verb has the ticket at its publish again while
-// the screens have it published, the one way a stack plan undoes a step. The
-// ticket screens read no verb and stay as the screens derive them.
-func followVerb(rows []stepRow, verb chartTicket) (followed []stepRow, behind bool) {
-	followed = slices.Clone(rows)
-	for i := range followed {
-		if i >= len(verb.Steps) {
-			break
+// rowOf is the row of ticket id as the screens show it, under title when the
+// chart names one.
+func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
+	r := chartRow{id: id, title: title, verb: verb}
+	if t := m.w.tickets[id]; t != nil {
+		r.t, r.title = t, firstOf(title, t.title)
+		r.d = readingPhases()
+		r.steps = m.stepRows(t, r.d)
+		if t.digest != nil {
+			r.d = m.phaseOf(t)
+			r.steps = m.stepRows(t, r.d)
+			// A question and a landing are the person's whoever else is at work; what a
+			// live session records itself (an approval, a round's asks) waits.
+			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(t, r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
+			r.waits = t.blockers
+			r.behind = t.digest.Behind
+			r.end, r.atEnd = m.endOf(t)
 		}
-		s := &followed[i]
-		done := verb.Steps[i] == phase.StateDone
-		if s.Done == done {
-			continue
-		}
-		was := s.Done
-		s.Done = done
-		switch {
-		case done && i == stepPublish:
-			s.State, s.Text = StatePublished, ""
-		case done:
-			s.State, s.Text = StateOK, ""
-		case verb.Steps[i] == phase.StateCurrent && verb.Ready:
-			s.State = StateReady
-			s.Text = stepWords(i, s.State)
-		default:
-			s.State = StateQueued
-			s.Text = stepWords(i, s.State)
-		}
-		if was && i == stepPublish && verb.Steps[i] == phase.StateCurrent {
-			behind = true
-			s.Text = behindText
-		}
+		r.done = t.digest != nil && r.steps[stepPublish].Done
 	}
-	return followed, behind
+	return r
 }
 
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.
-func needsYou(d phase.Ticket) bool {
-	for _, p := range d.Work() {
-		if p.State == phase.StateCurrent && hasSub(p, phase.SubNeedsYou) {
+func needsYou(t *ticket, d phase.Ticket) bool {
+	for _, p := range d.Phases {
+		if p.State == phase.StateCurrent && t.subIs(p, phase.SubNeedsYou) {
 			return true
 		}
 	}
 	return false
 }
 
-// state is the state the ticket's row is drawn in: its current step's.
+// state is the state the ticket's row is drawn in: its current step's, queued
+// for a ticket nothing is known of.
 func (r chartRow) state() string {
+	if r.mark != "" {
+		return r.mark
+	}
 	if r.steps != nil {
 		return r.steps[currentStep(r.steps)].State
-	}
-	if r.verb != nil {
-		for i, s := range r.verb.Steps {
-			if s == phase.StateCurrent && i < stepCount {
-				return stepUnderWay[i]
-			}
-		}
-		if r.done {
-			return StatePublished
-		}
 	}
 	return StateQueued
 }
 
-// chartDots are the ticket's four steps as icons: the screens' own derivation, or
-// the verb's words for a ticket the screens do not know yet.
+// chartDots are the ticket's steps as icons; queued ones for a ticket the
+// screens know nothing of.
 func (m *Model) chartDots(r chartRow) string {
+	if r.bare {
+		// A multi-task has no five steps of its own: the column is left empty.
+		return spaces(2*stepCount - 1)
+	}
 	if r.steps != nil {
 		return m.stepDots(r.steps)
 	}
 	parts := make([]string, stepCount)
 	for i := range parts {
-		state := StateQueued
-		if r.verb != nil && i < len(r.verb.Steps) {
-			switch r.verb.Steps[i] {
-			case phase.StateDone:
-				state = StateOK
-			case phase.StateCurrent:
-				state = stepUnderWay[i]
-			}
-		}
-		parts[i] = m.st.icon(state)
+		parts[i] = m.st.icon(StateQueued)
 	}
 	return strings.Join(parts, " ")
 }
@@ -276,6 +230,11 @@ func chartProgress(rows []chartRow) (total, done, needs int) {
 func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 	total, done, needs := chartProgress(rows)
 	switch {
+	case c.info != nil && c.info.Code == phase.CodeChartWaitsLand:
+		// The run stops at a landing, which is the person's word: it says so
+		// before it says that a ticket needs them, since the landing is what
+		// they are asked for.
+		return StateNeedsInput, "landing waits for you"
 	case needs > 0:
 		return StateNeedsInput, "run needs you"
 	case c.info != nil:
@@ -284,10 +243,18 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 			return StatePublished, "done"
 		case phase.CodeChartWaitsMerge:
 			return StateQueued, "waits for a merge"
+		case phase.CodeChartWaitsLand:
+			// The run stops at a landing, which is the person's word.
+			return StateNeedsInput, "landing waits for you"
 		case phase.CodeChartBlocked:
 			return StateStalled, "blocked"
 		case phase.CodeChartNotGraduated:
 			return StateQueued, "not graduated"
+		}
+		if _, live := c.live(m.w, m.now()); live {
+			// A session is at work on the run: it is running, whatever else
+			// the verdict says of what comes next.
+			return StateBuilding, "running"
 		}
 		switch {
 		case c.info.Ready && c.info.Started:
@@ -300,6 +267,9 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 		return StateQueued, "not graduated"
 	case done == total:
 		return StatePublished, "done"
+	}
+	if _, live := c.live(m.w, m.now()); live {
+		return StateBuilding, "running"
 	}
 	for _, r := range rows {
 		if r.t != nil && len(r.t.lines) > 0 {
@@ -324,25 +294,41 @@ func waitNote(w chartWait) string {
 	return note
 }
 
-// endNote is where a run stops, in words: "SHOP-5 waits for SHOP-2 merged ·
-// <pr> is open", or for a published ticket stacked on a parent whose pull
-// request is open, "SHOP-5 retargets when SHOP-2 merges · <pr> is open".
+// endNote is where a run stops, in words, naming the pull request to merge
+// once: "SHOP-5 waits for SHOP-2 to merge · PR #7 open", or for a published
+// ticket stacked on a parent whose pull request is open, "SHOP-5 retargets
+// when SHOP-2 merges · PR #7 open". The verb's own fact is said only when the
+// blocker has no pull request, since it says the same of the one it has.
 func endNote(e chartEnd) string {
-	text := e.Ticket + " waits for " + e.Blocker + " " + firstOf(e.Kind, "merged")
+	text := e.Ticket + " waits for " + e.Blocker + " to merge"
 	if e.Kind == kindStacked {
 		// A published ticket on a parent whose pull request is open: it is done,
 		// and the parent's merge owes it a retarget (ADR 0038).
 		text = e.Ticket + " retargets when " + e.Blocker + " merges"
 	}
 	switch {
-	case len(e.PRs) > 0 && e.PRs[0].State != "":
-		return text + " · " + e.PRs[0].URL + " is " + strings.ToLower(e.PRs[0].State)
 	case len(e.PRs) > 0:
-		return text + " · " + e.PRs[0].URL
+		return text + " · " + chartPRWords(e.PRs[0])
 	case e.Fact != "":
 		return text + " · " + e.Fact
 	}
 	return text
+}
+
+// prNumber matches the number a pull request's address ends in.
+var prNumber = regexp.MustCompile(`/(?:pull|pulls|merge_requests)/(\d+)`)
+
+// chartPRWords names a pull request and its state: "PR #7 open", or its address when
+// no number can be read from it.
+func chartPRWords(pr chartPR) string {
+	name := pr.URL
+	if m := prNumber.FindStringSubmatch(pr.URL); m != nil {
+		name = "PR #" + m[1]
+	}
+	if pr.State != "" {
+		name += " " + strings.ToLower(pr.State)
+	}
+	return name
 }
 
 // runWord is where the chart's run stands, for the Run panel's edge.

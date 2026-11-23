@@ -1,6 +1,6 @@
-jig  demo › JIG-2 › 3 review                                   ! review findings
+jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ! round 1 left 2 asks · 2 wait for your decision
+  ! round 1: 2 asks wait for you
     fix budget 1 of 3 rounds used
 
   rounds
@@ -21,4 +21,4 @@ jig  demo › JIG-2 › 3 review                                   ! review find
       the import is hidden in this scope
 
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · esc back · k keep · d dismiss · g gate · t tail · q quit
+  ↑↓ move · esc back · k keep · d dismiss · g gate · 5 land · t tail · q quit

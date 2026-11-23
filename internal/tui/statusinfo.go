@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // statusInfo is `jig status <ticket>`, read: the store's word on the ticket's
@@ -16,10 +18,15 @@ type statusInfo struct {
 	Slices []statusSlice
 	// LastRuns are the status's last_runs table by slice: each slice's last
 	// witnessed run and whether it covers the slice's last commit.
-	LastRuns  map[string]statusLastRun
-	Questions []statusQuestion
-	Stalled   []statusStalled
-	Asks      []statusAsk
+	LastRuns map[string]statusLastRun
+	// Verifications are the status's verification_states table: each commit
+	// of a slice whose verification is not a pass, in the words internal/phase
+	// tells it in and the command that clears it. A commit with no row is
+	// verified, as far as the status says.
+	Verifications []statusVerification
+	Questions     []statusQuestion
+	Stalled       []statusStalled
+	Asks          []statusAsk
 	// Brief is the brief's approval and sections; nil when the ticket has no
 	// brief (or the status predates the block).
 	Brief *statusBrief
@@ -32,8 +39,39 @@ type statusInfo struct {
 	Rounds   []statusRound
 	Findings []statusFinding
 	Publish  *statusPublish
+	// Probes, ProbeSkips and Unprobed are the status's ledger tables: every
+	// probe and skip the rounds recorded, and the hunks the latest round that
+	// recorded them left. Empty for a status that predates them.
+	Probes     []statusProbe
+	ProbeSkips []statusSkip
+	Unprobed   []statusHunk
+	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
+	// suite by repo: what the plan screen reads. Both are empty for a task.
+	Need  string
+	Suite []statusSuite
+	// Standing, Prompt, Waits and Unmet are an issue's or multi-task's own pull
+	// request as `jig next` derives it: waiting, ready, published or landed, what
+	// to say next, the children not landed and what else is unmet.
+	Standing, Prompt string
+	Waits            []statusWait
+	Unmet            []statusUnmet
 	// Err is set when the status itself was refused.
 	Err *axiErr
+}
+
+// statusWait is a child of a container that has not landed, with its standing.
+type statusWait struct{ Ticket, Standing string }
+
+// statusUnmet is a precondition of a container's publish that is not met.
+type statusUnmet struct{ Code, Why, Prompt string }
+
+// statusSuite is a row of an issue status's suite table: where a repo's suite
+// stands at a tip of the issue's branch, and the tasks begun after it failed.
+type statusSuite struct {
+	Repo, Standing, Command, Tip string
+	Seconds                      int
+	Signature, Waiver, Why       string
+	Fixes                        []string
 }
 
 type statusSlice struct {
@@ -60,6 +98,30 @@ type statusRound struct {
 	Fix, Ask, Note                    int
 	Scope, Base, Head                 string
 	Files                             int // -1 when the round has no findings.yaml
+	// Probes, Survived, Skipped and Unprobed are the round's ledger counts, -1
+	// where the status did not say (a round no reviewer ran, a status that
+	// predates the columns, and for Unprobed a round that did not record it).
+	Probes, Survived, Skipped, Unprobed int
+}
+
+// statusProbe is a row of the status's probes table, Where being file:line.
+type statusProbe struct {
+	Round                                   int
+	Outcome, Where, Seam, Mutation, Command string
+}
+
+// statusSkip is a row of the status's probe_skips table; Range is from-to or
+// "whole file".
+type statusSkip struct {
+	Round            int
+	File, Range, Why string
+}
+
+// statusHunk is a row of the status's unprobed table.
+type statusHunk struct {
+	Round    int
+	File     string
+	From, To int
 }
 
 // statusFinding is a row of the status's findings table: a finding the latest
@@ -90,6 +152,47 @@ type statusBrief struct {
 type statusBriefSection struct {
 	Heading string
 	Slices  []string
+}
+
+// statusVerification is a row of the status's verification_states table. Commit
+// is the sha the table shortens to twelve characters; State is the words
+// internal/phase tells the state in, with a failed run's first FAIL line or a
+// could-not-run summary after its colon; Clear is "" when the row names none.
+type statusVerification struct{ Slice, Commit, State, Clear string }
+
+// verificationOf is the row for the slice's commit sha, if the status has one.
+func (s *statusInfo) verificationOf(slice, sha string) (statusVerification, bool) {
+	if s == nil {
+		return statusVerification{}, false
+	}
+	for _, v := range s.Verifications {
+		if v.Slice == slice && v.Commit != "" && strings.HasPrefix(sha, v.Commit) {
+			return v, true
+		}
+	}
+	return statusVerification{}, false
+}
+
+// held is whether the state holds the builder at its stop: the commit has no
+// recorded result, which running its verification puts right.
+func (v statusVerification) held() bool { return v.State == string(phase.VerifyNoResult) }
+
+// failedRun is whether the state says the code failed its oracle, as against a
+// run that judged nothing or one that never started.
+func (v statusVerification) failedRun() bool {
+	return v.State == string(phase.VerifyFailed) || strings.HasPrefix(v.State, string(phase.VerifyFailed)+": ")
+}
+
+// icon is the state the verification is drawn in, the slice's: a state that
+// holds the builder is stalled, a failed one failed, the rest drawn back.
+func (v statusVerification) icon() string {
+	switch {
+	case v.held():
+		return StateStalled
+	case v.failedRun():
+		return StateFail
+	}
+	return StateQueued
 }
 
 type statusQuestion struct{ ID, Slice, Status string }
@@ -133,6 +236,27 @@ func parseStatus(out string) *statusInfo {
 		}
 		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
 	}
+	info.Need = doc.Scalars["need"]
+	info.Standing, info.Prompt = doc.Scalars["standing"], doc.Scalars["prompt"]
+	for _, r := range doc.Tables["waits"].Maps() {
+		info.Waits = append(info.Waits, statusWait{Ticket: r["ticket"], Standing: r["standing"]})
+	}
+	for _, r := range doc.Tables["unmet"].Maps() {
+		info.Unmet = append(info.Unmet, statusUnmet{Code: r["code"], Why: r["why"], Prompt: r["prompt"]})
+	}
+	for _, r := range doc.Tables["suite"].Maps() {
+		row := statusSuite{
+			Repo: r["repo"], Standing: r["standing"], Command: dash(r["command"]), Tip: dash(r["tip"]), Seconds: atoi(dash(r["seconds"])),
+			Signature: dash(r["signature"]), Waiver: dash(r["waiver"]), Why: dash(r["why"]),
+		}
+		if f := dash(r["fixes"]); f != "" {
+			row.Fixes = strings.Split(f, "+")
+		}
+		info.Suite = append(info.Suite, row)
+	}
+	for _, r := range doc.Tables["verification_states"].Maps() {
+		info.Verifications = append(info.Verifications, statusVerification{Slice: r["slice"], Commit: r["commit"], State: r["state"], Clear: dash(r["clear"])})
+	}
 	info.FixBudget = doc.Scalars["fix_budget"]
 	if kv, ok := doc.KV["closed"]; ok {
 		info.Closed = closedPhrase(kv["reason"], kv["by"])
@@ -146,7 +270,19 @@ func parseStatus(out string) *statusInfo {
 			N: atoi(r["round"]), Verdict: r["verdict"], Reviewer: dash(r["reviewer"]), Harness: dash(r["harness"]), Model: dash(r["model"]),
 			Independent: dash(r["independent"]), Fix: atoi(r["fix"]), Ask: atoi(r["ask"]), Note: atoi(r["note"]),
 			Scope: dash(r["scope"]), Base: dash(r["base"]), Head: dash(r["head"]), Files: files,
+			Probes: count(r["probes"]), Survived: count(r["survived"]), Skipped: count(r["skipped"]), Unprobed: count(r["unprobed"]),
 		})
+	}
+	for _, r := range doc.Tables["probes"].Maps() {
+		info.Probes = append(info.Probes, statusProbe{
+			Round: atoi(r["round"]), Outcome: r["outcome"], Where: r["file:line"], Seam: r["seam"], Mutation: r["mutation"], Command: r["command"],
+		})
+	}
+	for _, r := range doc.Tables["probe_skips"].Maps() {
+		info.ProbeSkips = append(info.ProbeSkips, statusSkip{Round: atoi(r["round"]), File: r["file"], Range: r["range"], Why: r["why"]})
+	}
+	for _, r := range doc.Tables["unprobed"].Maps() {
+		info.Unprobed = append(info.Unprobed, statusHunk{Round: atoi(r["round"]), File: r["file"], From: atoi(r["from"]), To: atoi(r["to"])})
 	}
 	for _, r := range doc.Tables["findings"].Maps() {
 		info.Findings = append(info.Findings, statusFinding{
@@ -181,6 +317,16 @@ func parseStatus(out string) *statusInfo {
 		info.Asks = append(info.Asks, statusAsk{ID: r["id"], Risk: r["risk"], Where: r["file:line"], Title: r["title"], Why: r["why"]})
 	}
 	return info
+}
+
+// count is a ledger cell as a number, -1 for a cell the status left "-" or did
+// not have.
+func count(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return -1
+	}
+	return atoi(s)
 }
 
 // closedPhrase is how a ticket was closed, in the words of its closure:
@@ -219,16 +365,60 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			Title     string `json:"title"`
 			State     string `json:"state"`
 			BlockedBy []struct {
-				Ticket string `json:"ticket"`
-				Kind   string `json:"kind"`
-				Fact   string `json:"fact"`
+				Ticket string    `json:"ticket"`
+				Kind   string    `json:"kind"`
+				Fact   string    `json:"fact"`
+				PRs    []chartPR `json:"prs"`
 			} `json:"blocked_by"`
+			Digest *struct {
+				Kind         string   `json:"kind"`
+				Parent       string   `json:"parent"`
+				Current      string   `json:"current"`
+				Ready        bool     `json:"ready"`
+				Behind       bool     `json:"behind"`
+				PhaseProblem string   `json:"phase_problem"`
+				State        string   `json:"state"`
+				Closed       string   `json:"closed"`
+				LandFirst    []string `json:"land_first"`
+				Unfinished   []string `json:"unfinished"`
+				Children     []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"children"`
+				Phases []struct {
+					Name     string `json:"name"`
+					State    string `json:"state"`
+					Text     string `json:"text"`
+					NeedsYou bool   `json:"needs_you"`
+					SubDone  bool   `json:"sub_done"`
+					Changed  bool   `json:"changed"`
+				} `json:"phases"`
+				PRs []struct {
+					Repo   string `json:"repo"`
+					Number int    `json:"number"`
+					URL    string `json:"url"`
+					State  string `json:"state"`
+					Target string `json:"target"`
+				} `json:"prs"`
+				Slices *struct {
+					Total      int `json:"total"`
+					Green      int `json:"green"`
+					Building   int `json:"building"`
+					Queued     int `json:"queued"`
+					NeedsInput int `json:"needs_input"`
+					Failed     int `json:"failed"`
+					Stopped    int `json:"stopped"`
+					Stalled    int `json:"stalled"`
+					EnvBlocked int `json:"env_blocked"`
+				} `json:"slices"`
+			} `json:"digest"`
 		} `json:"tickets"`
 		Charts []struct {
 			Name        string   `json:"name"`
 			Title       string   `json:"title"`
 			Tickets     []string `json:"tickets"`
 			Ungraduated int      `json:"ungraduated"`
+			Issue       string   `json:"issue"`
 		} `json:"charts"`
 	}
 	if err := json.Unmarshal([]byte(obj), &next); err != nil {
@@ -238,13 +428,29 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	for _, t := range next.Tickets {
 		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
 		for _, b := range t.BlockedBy {
-			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact})
+			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
+		}
+		if g := t.Digest; g != nil {
+			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
+			for _, p := range g.Phases {
+				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
+			}
+			for _, p := range g.PRs {
+				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
+			}
+			for _, c := range g.Children {
+				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})
+			}
+			if s := g.Slices; s != nil {
+				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped, Stalled: s.Stalled, EnvBlocked: s.EnvBlocked}
+			}
+			row.Digest = d
 		}
 		rows = append(rows, row)
 	}
 	var charts []chartListing
 	for _, c := range next.Charts {
-		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated})
+		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated, Issue: c.Issue})
 	}
 	return rows, charts, nil
 }
