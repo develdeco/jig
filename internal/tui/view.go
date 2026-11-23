@@ -43,6 +43,9 @@ type pline struct {
 	ref   *rowRef
 	box   int
 	right string
+	// cont marks a continuation row: a line a row's free text wrapped onto. It
+	// belongs to the row above it, and the cursor never stands on it.
+	cont bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -54,6 +57,19 @@ func (p *page) add(text string) { p.lines = append(p.lines, pline{text: text}) }
 
 func (p *page) addRow(ref rowRef, text string) {
 	p.lines = append(p.lines, pline{text: text, ref: &ref})
+}
+
+// addLaid adds the lines the allocator laid a row out in: the first is the
+// row, with the cursor's ref when it has one, and the rest are its
+// continuation rows.
+func (p *page) addLaid(ref *rowRef, lines []string) {
+	for i, l := range lines {
+		pl := pline{text: l, cont: i > 0}
+		if i == 0 {
+			pl.ref = ref
+		}
+		p.lines = append(p.lines, pl)
+	}
 }
 
 // refs are the selectable rows, top to bottom.

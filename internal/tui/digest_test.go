@@ -11,9 +11,14 @@ import (
 
 // pagesText is a page's lines, with no marker, one to a row.
 func pagesText(p page) string {
-	lines := make([]string, len(p.lines))
-	for i, l := range p.lines {
-		lines[i] = l.text
+	var lines []string
+	for _, l := range p.lines {
+		if l.cont && len(lines) > 0 {
+			// A row's words are one text, wherever the screen wrapped them.
+			lines[len(lines)-1] += " " + strings.TrimSpace(l.text)
+			continue
+		}
+		lines = append(lines, l.text)
 	}
 	return strings.Join(lines, "\n")
 }

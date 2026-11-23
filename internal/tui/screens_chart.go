@@ -551,25 +551,12 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	p.boxEnd()
 }
 
-// mainCharts adds the project's charts to p after its tickets: a row each, with
-// how many of its tickets are published and whether one needs the person. The
-// columns follow the tickets' (idW, titleW) and widen for a longer name or
-// title, as far as the row has room.
-func (m *Model) mainCharts(p *page, idW, titleW int) {
-	if len(m.w.chartOrder) == 0 {
-		return
-	}
-	nameW, ownW := idW, 0
-	for _, name := range m.w.chartOrder {
-		nameW = max(nameW, width(name))
-		ownW = max(ownW, width(m.w.charts[name].title()))
-	}
-	// The room left once the icon, the name, "chart" and the counts are drawn.
-	titleW = max(titleW, min(ownW, max(0, m.width-nameW-42)))
-	if len(p.lines) > 0 {
-		p.add("")
-	}
-	p.add(m.st.dim("charts"))
+// mainChartCells are the project's charts as rows of main's table, after its
+// tickets: the state icon, the name, the title, "chart", and how many of its
+// tickets are published and whether one needs the person.
+func (m *Model) mainChartCells() ([]rowRef, [][]string) {
+	var refs []rowRef
+	var cells [][]string
 	for _, name := range m.w.chartOrder {
 		c := m.w.charts[name]
 		rows := m.chartRows(c)
@@ -579,21 +566,17 @@ func (m *Model) mainCharts(p *page, idW, titleW int) {
 		if title == name {
 			title = ""
 		}
-		line := m.st.icon(state) + " " + pad(name, nameW)
-		if titleW > 0 {
-			line += "  " + pad(title, titleW)
-		}
-		line += "  " + m.st.dim("chart") + "  "
-		if total == 0 {
-			line += m.st.dim("not graduated")
-		} else {
-			line += m.st.dim(fmt.Sprintf("%d of %d published", done, total))
+		counts := m.st.dim("not graduated")
+		if total > 0 {
+			counts = m.st.dim(fmt.Sprintf("%d of %d published", done, total))
 		}
 		if needs > 0 {
-			line += m.st.state(StateNeedsInput, fmt.Sprintf(" · %d needs you", needs))
+			counts += m.st.state(StateNeedsInput, fmt.Sprintf(" · %d needs you", needs))
 		}
-		p.addRow(rowRef{kind: rowChart, id: name}, line)
+		refs = append(refs, rowRef{kind: rowChart, id: name})
+		cells = append(cells, []string{m.st.icon(state), name, title, m.st.dim("chart"), counts})
 	}
+	return refs, cells
 }
 
 // chartFirstOpen is the position, among a chart screen's rows, of the first
