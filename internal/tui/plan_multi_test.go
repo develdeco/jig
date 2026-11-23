@@ -175,6 +175,9 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 	if !strings.Contains(row, "landed · into the issue's branch at 09:10:00") || strings.Contains(row, "#4") || strings.Contains(row, "waits to land") {
 		t.Errorf("SHOP-49's plan reads SHOP-1 as %q, want it landed there", row)
 	}
+	if !strings.Contains(row, "✓ SHOP-1") {
+		t.Errorf("SHOP-49's icon for the task it landed is not landed: %q", row)
+	}
 	if row := issueLine(first, "tasks"); !strings.Contains(row, "4 of 4 landed") {
 		t.Errorf("SHOP-49's tasks line: %q", row)
 	}
