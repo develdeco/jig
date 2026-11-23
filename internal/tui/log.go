@@ -149,13 +149,16 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 			case s.State == phase.SubDone:
 				tr = t.doneTrack(step, s.Key)
 				end = tr.end.Add(callAfter)
-				if s.WaitsFor != "" && tr.borrowed {
-					// A wait that ended was held by nobody while it stood: the
-					// session that happens to have written the line before it
-					// held nothing.
+				if isWaitKey(s.Key) && s.WaitsFor != "" {
+					// A wait that ended was held by nobody while it stood, and
+					// is still no work: what its kind waits for, not its
+					// state, takes it out of the sessions' hands.
 					continue
 				}
 			case s.State == phase.SubNeedsYou:
+				if isWaitKey(s.Key) {
+					continue
+				}
 				// Nobody holds it while it waits, but its holder held it until
 				// the line that opened the wait: the calls before it are its
 				// work, those after are no one's.
@@ -289,14 +292,20 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 	return -1, ""
 }
 
+// isWaitKey says the sub-step key is one whose whole kind is a wait: an approval
+// of the brief or of the push, or a landing's merge. A slice that asks waits
+// only for its answer, and its holder held it until it asked.
+func isWaitKey(key string) bool { return key == "approved" || key == "approval" || key == "merge" }
+
 // waitLine says the sub-step key of step is one that waits for a person or the
 // host: a line of it ends the wait, and explains no call made while it stood.
 func waitLine(d phase.Ticket, step int, key string) bool {
 	for _, s := range d.Phases[step].Subs {
 		if s.Key == key {
-			// Only a wait that ended: the other lines of a sub-step that
-			// stands waiting (a slice's claim, its question) end nothing.
-			return s.WaitsFor != "" && s.State == phase.SubDone
+			// A sub-step that waits and is not the person's turn (an approval
+			// given, a merge named): the other lines of a slice that stands
+			// waiting for its answer (its claim, its question) end nothing.
+			return s.WaitsFor != "" && s.State != phase.SubNeedsYou
 		}
 	}
 	return false

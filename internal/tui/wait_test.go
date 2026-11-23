@@ -213,6 +213,63 @@ func TestAWaitStartsAtTheLineThatOpenedItNotAtItsOwn(t *testing.T) {
 	}
 }
 
+// TestAnApprovalByAnotherSessionHoldsNoWindow: the approval line names a session
+// that is not the drafting one; the drafting session's calls during the wait
+// are still no work of the brief, and the wait still runs from the draft.
+func TestAnApprovalByAnotherSessionHoldsNoWindow(t *testing.T) {
+	t.Parallel()
+	g := draftedRig(t)
+	g.r.answer("status SHOP-1 --store /s", approvedStatus(), 0)
+	atClock(g, "2026-10-23T10:05:00Z")
+	g.feed(
+		toolOn("SHOP-1", at(3, 0), "s-b", "go test ./...", said("Run the tests")),
+		jl("2026-10-23T10:02:07Z", "SHOP-1", "", journal.EventApproval, with("s-c", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),
+	)
+	tk := g.m.w.tickets["SHOP-1"]
+	if got := g.m.steps(tk)[stepBrief].Took; got != "6s" {
+		t.Errorf("the brief took %q, want its 6s of drafting", got)
+	}
+	w, ok := g.m.clocks(tk, g.m.phaseOf(tk)).waitOf(stepBrief, "approved")
+	if !ok || w.end.Sub(w.start) != time.Hour+2*time.Minute {
+		t.Errorf("the approval's wait = %+v (%v), want 1h 02m from the draft's last line", w, ok)
+	}
+}
+
+// TestACallWhileTheLandingWaitedIsNoWork: the builder's session calls on the
+// ticket while the landing waits; the call is placed in no step, before and
+// after the merge is named and after it is recorded.
+func TestACallWhileTheLandingWaitedIsNoWork(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
+	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+	atClock(g, "2026-10-23T09:19:00Z")
+	g.feed(jig2()...)
+	g.feed(
+		toolOn("JIG-2", at(15, 30), "s-builder", "gh pr checks", said("Look at the checks")),
+		toolOn("JIG-2", at(16, 30), "s-builder", "gh pr checks", said("Look at the checks")),
+		toolOn("JIG-2", at(17, 30), "s-builder", "gh pr checks", said("Look at the checks")),
+		ll(at(18, 45), "JIG-2", journal.EventLandNamed, func(l *journal.Line) { l.Session = "s-builder" }),
+	)
+	check := func(when, land string) {
+		t.Helper()
+		tk := g.m.w.tickets["JIG-2"]
+		for _, p := range g.m.placed(tk, g.m.phaseOf(tk)) {
+			if p.l.Command == "gh pr checks" && p.step != -1 {
+				t.Errorf("%s: a call made while the landing waited is placed in %s", when, tagOf(p.step, p.key))
+			}
+		}
+		if got := g.m.steps(tk)[stepLand].Took; got != land {
+			t.Errorf("%s: the land step took %q, want %q", when, got, land)
+		}
+	}
+	check("merge named", "")
+	g.feed(jl("2026-10-23T09:19:00Z", "JIG-2", "", journal.EventLanded, func(l *journal.Line) {
+		l.URL, l.Session = "https://example.test/acme/demo/pull/7", "s-builder"
+	}))
+	check("recorded", "15s")
+}
+
 // TestAnAnsweredQuestionIsAWaitNotWork: a slice's question stood unanswered for
 // three minutes; what the builder's session did meanwhile and the time until the
 // answer are the wait's, and the slice counts the minute before the question and
