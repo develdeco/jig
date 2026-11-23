@@ -155,21 +155,30 @@ func TestTriageActsExactlyWhenTheViewHoldsTheWholeAsk(t *testing.T) {
 	// A notice on screen takes a row of the body, and a key clears it: the key
 	// is judged against the screen the person read, notice and all. "a" with no
 	// question open leaves one.
-	for _, withNotice := range []bool{false, true} {
+	// The tail pane takes half the body and cuts the page to what is left: with
+	// it open the cursor stands on the ask, and the keys are judged against
+	// what the page's share of the body drew.
+	for _, variant := range []string{"plain", "notice", "tail"} {
 		acted, refused := 0, 0
 		for h := 10; h <= 60; h++ {
 			g := askRig(t, 60, h, askOne)
-			if withNotice {
+			switch variant {
+			case "notice":
 				g.press("a")
 				if g.m.notice == "" {
 					t.Fatal("a with no question open left no notice")
+				}
+			case "tail":
+				g.press("t", "end")
+				if !g.m.tail {
+					t.Fatal("t did not open the tail")
 				}
 			}
 			whole := strings.Contains(readWords(g.view()), readWords(wholeAskText))
 			g.press("d")
 			got := len(triaged(g)) == 1
 			if got != whole {
-				t.Errorf("at height %d (notice on screen: %v) the screen holds the whole ask: %v, d acted: %v:\n%s", h, withNotice, whole, got, g.view())
+				t.Errorf("at height %d (%s) the screen holds the whole ask: %v, d acted: %v:\n%s", h, variant, whole, got, g.view())
 			}
 			if got {
 				acted++
@@ -178,7 +187,7 @@ func TestTriageActsExactlyWhenTheViewHoldsTheWholeAsk(t *testing.T) {
 			}
 		}
 		if acted == 0 || refused == 0 {
-			t.Errorf("the heights tried did not cross the edge (notice on screen: %v): acted %d, refused %d", withNotice, acted, refused)
+			t.Errorf("the heights tried did not cross the edge (%s): acted %d, refused %d", variant, acted, refused)
 		}
 	}
 }
@@ -204,8 +213,15 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 			t.Fatalf("at height %d notice = %q, want %q", h, g.m.notice, want)
 		}
 
+		// The tail left open, and closed by a key that comes before the d.
 		g = askRig(t, 60, h, askOne)
-		g.press("t") // the tail open
+		g.press("t", "end")
+		read(g, "xd")
+		if got := triaged(g); len(got) != 0 {
+			t.Fatalf("at height %d d after another key of one read, the tail open, ran %q", h, got)
+		}
+		g = askRig(t, 60, h, askOne)
+		g.press("t")
 		read(g, "td")
 		if got := triaged(g); len(got) != 0 {
 			t.Fatalf("at height %d d after t in one read ran %q", h, got)
@@ -216,6 +232,15 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 		g.press("d")
 		if got := len(triaged(g)) == 1; got != whole {
 			t.Fatalf("at height %d the screen holds the whole ask: %v, d on its own acted: %v", h, whole, got)
+		}
+
+		// The first key of a read is judged against the screen drawn, as a key
+		// of its own is: it acts when the screen holds the whole ask.
+		g = askRig(t, 60, h, askOne)
+		whole = strings.Contains(readWords(g.view()), readWords(wholeAskText))
+		read(g, "dx")
+		if got := len(triaged(g)) == 1; got != whole {
+			t.Fatalf("at height %d the screen holds the whole ask: %v, the first d of a read acted: %v", h, whole, got)
 		}
 	}
 }
