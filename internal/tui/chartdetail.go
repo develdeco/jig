@@ -32,8 +32,8 @@ const claimSlack = time.Minute
 
 // chartDetailRows are the rows of the Detail panel for the ticket of r: a row
 // for each slice being built (its id, its stage, the session that holds it and
-// the agent that claimed it), then the holds that are current, the newest two
-// oldest first, and, when there is neither, the one row that says where the
+// the agent that claimed it), then the holds that are current, the newest two,
+// newest first, and, when there is neither, the one row that says where the
 // ticket stands. A hold weighs 0 so a short screen gives up slice rows before
 // it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {

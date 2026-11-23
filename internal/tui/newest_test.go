@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // backwards is envs in the reverse of the order they were written in, so a
@@ -142,6 +143,26 @@ func TestTheTailReadsNewestFirst(t *testing.T) {
 	newestOnTop(t, "main", clocksOf(rows), 5)
 	if first := clocksOf(rows)[0]; first != "09:14:21" {
 		t.Errorf("main: the first row of the tail is %s, want 09:14:21", first)
+	}
+}
+
+// TestACutTailEndsWithTheCountOfTheLinesItDoesNotShow: a tail with more lines
+// than its pane keeps the newest and ends with the number of the others.
+func TestACutTailEndsWithTheCountOfTheLinesItDoesNotShow(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	for i := 0; i < 40; i++ {
+		g.feed(jl(at(i, 0), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")))
+	}
+	g.press("t")
+	rows := tailRows(g.view())
+	timed := len(clocksOf(rows))
+	if timed == 0 || timed == 40 || rows[len(rows)-1] != fmt.Sprintf("↓ %d older", 40-timed) {
+		t.Errorf("the tail shows %d of 40 lines and ends with %q:\n%s", timed, rows[len(rows)-1], strings.Join(rows, "\n"))
+	}
+	newestOnTop(t, "tail", clocksOf(rows), 3)
+	if first := clocksOf(rows)[0]; first != "09:39:00" {
+		t.Errorf("the tail starts at %s, want 09:39:00", first)
 	}
 }
 

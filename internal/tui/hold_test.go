@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -87,11 +88,48 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i+1], g.view())
 		}
 	}
-	g.press("up")
-	for i := 0; i < 40; i++ {
+	// Read to its end with the mark up, the page still shows its last row: the
+	// count of the older lines the timeline left out.
+	for i := 0; i < 200; i++ {
+		g.press("down")
+	}
+	if v := g.view(); !newMark.MatchString(v) || !strings.Contains(v, "↓ 2 older") {
+		t.Errorf("the end of the page is not in view under the mark:\n%s", v)
+	}
+	for i := 0; i < 300; i++ {
 		g.press("up")
 	}
 	if v := g.view(); newMark.MatchString(v) {
 		t.Errorf("the mark stays at the top:\n%s", v)
+	}
+}
+
+// TestTheCountOfNewLinesNeverHidesTheCursor: a page of rows read below its top,
+// with the cursor on its last row, shows that row under the count, and with it
+// on a row in the middle too.
+func TestTheCountOfNewLinesNeverHidesTheCursor(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-1")
+	var pg page
+	for i := 0; i < 30; i++ {
+		pg.addRow(rowRef{kind: rowSlice, id: strconv.Itoa(i)}, "row "+strconv.Itoa(i))
+	}
+	g.m.top().fresh = 2
+	for _, c := range []struct{ sel, lead int }{{29, 0}, {20, 0}, {15, 4}} { // the last has the window held above the cursor, so its row is the window's last
+		sel := c.sel
+		g.m.top().lead = c.lead
+		out := g.m.window(pg, sel, 10, 80)
+		if !newMark.MatchString(out[0]) {
+			t.Errorf("sel %d: the first row reads %q, want the count", sel, out[0])
+		}
+		marked := ""
+		for _, l := range out {
+			if strings.HasPrefix(l, "▸") {
+				marked = l
+			}
+		}
+		if want := "row " + strconv.Itoa(sel); !strings.Contains(marked, want) {
+			t.Errorf("sel %d: the marked row is %q, want %q in view:\n%s", sel, marked, want, strings.Join(out, "\n"))
+		}
 	}
 }

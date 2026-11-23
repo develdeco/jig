@@ -57,6 +57,19 @@ func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 		"round 1  beta/b.go:4", "round 1  alpha/a.go:9", "round 1  alpha/a.go:20")
 }
 
+// TestTheRoundUnderWayReadsAboveTheClosedOnes: a round that is open and has no
+// closing line yet is the newest, whatever number its row takes.
+func TestTheRoundUnderWayReadsAboveTheClosedOnes(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(backwards(append(jig2Mid(), jl(at(13, 0), "JIG-2", "", journal.EventGateOpen)))...).press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want review", g.m.Screen())
+	}
+	rounds, _, _ := strings.Cut(pageText(g), "\nasks\n")
+	inOrder(t, "rounds", rounds, "round 2  open", "round 1  findings")
+}
+
 // TestFixSlicesSentBackReadNewestFirst: the fix slices a round sent back are
 // listed with the latest on top, and each row still opens its slice.
 func TestFixSlicesSentBackReadNewestFirst(t *testing.T) {

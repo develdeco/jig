@@ -203,10 +203,24 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 	}
 	// A page read below its top that lines came in above says how many, in the
 	// row above the line it was at the top of the window: the window starts one
-	// line up, and that row is the count.
+	// line up, and that row is the count. That drops the window's last line, so
+	// when that is the page's end or the line the cursor stands on, the count
+	// takes the first line's row instead and the window stays where it was.
 	counted := e.fresh > 0 && start > 0
 	if counted {
-		start = min(start-1, max(0, len(pg.lines)-h))
+		selLine, n := -1, 0
+		for i, l := range pg.lines {
+			if l.ref == nil {
+				continue
+			}
+			if n == sel {
+				selLine = i
+			}
+			n++
+		}
+		if last := start + h - 1; last < len(pg.lines)-1 && last != selLine {
+			start--
+		}
 	}
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
