@@ -145,8 +145,8 @@ func newestLine(lines []journal.Line) string {
 }
 
 // readScope opens the reads a listing of the whole store makes: the chart index
-// stands for the run, each repo's branches are listed once and answers about
-// ancestry are kept on this machine under the jig home. The returned function
+// stands for the run, each repo's branches are listed once and facts about
+// commits are kept on this machine under the jig home. The returned function
 // ends it.
 func readScope(st *store.Store, mp project.MachineProject, jigHome string) (end func()) {
 	unpin := st.PinCharts()
@@ -163,11 +163,11 @@ func readScope(st *store.Store, mp project.MachineProject, jigHome string) (end 
 			dirs = append(dirs, dir)
 		}
 	}
-	ancestry := ""
+	facts := ""
 	if jigHome != "" {
-		ancestry = home.AncestryPath(jigHome)
+		facts = home.CommitFactsPath(jigHome)
 	}
-	endGit := gitx.BeginScope(ancestry, dirs...)
+	endGit := gitx.BeginScope(facts, dirs...)
 	return func() {
 		endGit()
 		unpin()

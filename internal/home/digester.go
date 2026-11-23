@@ -34,11 +34,12 @@ func PullRequestStatesPath(root string) string {
 	return filepath.Join(root, "cache", "pull-requests.json")
 }
 
-// AncestryPath returns the file this machine keeps its answers about whether
-// one commit is in another's history in: <root>/cache/ancestry.txt. An answer
-// is a fact for ever, since a commit id names its whole history, so the file is
-// only ever added to; it is a cache, never a store's record, and is safe to
-// delete.
-func AncestryPath(root string) string {
-	return filepath.Join(root, "cache", "ancestry.txt")
+// CommitFactsPath returns the file this machine keeps what it has asked git
+// about commits in: whether one is in another's history, which files a branch
+// changes, whether two branches merge, <root>/cache/commit-facts.txt. Such an
+// answer is a fact for ever, since a commit id names its whole history, so the
+// file is only ever added to; it is a cache, never a store's record, and is safe
+// to delete.
+func CommitFactsPath(root string) string {
+	return filepath.Join(root, "cache", "commit-facts.txt")
 }

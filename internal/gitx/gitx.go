@@ -330,9 +330,16 @@ func CommitsIn(dir, rangeSpec string) ([]string, error) {
 // exit 1 is false (not an ancestor, not an error), and any other outcome
 // (e.g. an unknown object after a rebase) is an error.
 func IsAncestor(dir, ancestor, descendant string) (bool, error) {
-	if s := scopeOf(dir); s != nil && s.kept() != nil {
-		if a, d, ok := ancestryIDs(dir, ancestor, descendant); ok {
-			return s.kept().answer(a, d, func() (bool, error) { return isAncestorByGit(dir, ancestor, descendant) })
+	if k := KeptFor(dir); k != nil {
+		if ids, ok := commitIDs(dir, ancestor, descendant); ok {
+			out, err := k.Answer("ancestor "+ids[0]+" "+ids[1], func() (string, error) {
+				is, err := isAncestorByGit(dir, ancestor, descendant)
+				if is {
+					return "1", err
+				}
+				return "0", err
+			})
+			return out == "1", err
 		}
 	}
 	return isAncestorByGit(dir, ancestor, descendant)

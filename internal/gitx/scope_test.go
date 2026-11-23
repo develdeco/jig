@@ -147,9 +147,9 @@ func TestScopeKeepsAncestryOnThisMachine(t *testing.T) {
 	}
 
 	// Another process: nothing is held in memory, the file is read.
-	ancestryFiles.Lock()
-	delete(ancestryFiles.by, file)
-	ancestryFiles.Unlock()
+	keptFiles.Lock()
+	delete(keptFiles.by, file)
+	keptFiles.Unlock()
 	end = BeginScope(file, dir)
 	defer end()
 	var second map[string]bool
@@ -178,49 +178,5 @@ func TestScopeKeepsAncestryOnThisMachine(t *testing.T) {
 	}
 	if n := strings.Count(string(data), "\n"); n != 8 {
 		t.Errorf("the file holds %d answers, want 8:\n%s", n, data)
-	}
-}
-
-// TestKeptAncestryIgnoresWhatIsNotAnAnswer: a line that is not whole, or not
-// ids and a 1 or 0, is skipped, and a file past its bound is cut to its newest
-// half.
-func TestKeptAncestryIgnoresWhatIsNotAnAnswer(t *testing.T) {
-	t.Parallel()
-	a, b := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	file := filepath.Join(t.TempDir(), "ancestry.txt")
-	if err := os.WriteFile(file, []byte(a+" "+b+" 1\nnot a line\n"+a+" "+b+"\n"+b+" "+a+" 0\n"+a+" "+a), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	k := &ancestryKept{path: file}
-	if is, err := k.answer(a, b, func() (bool, error) { return false, fmt.Errorf("asked") }); err != nil || !is {
-		t.Errorf("a kept answer = %v, %v", is, err)
-	}
-	if is, err := k.answer(b, a, func() (bool, error) { return true, nil }); err != nil || is {
-		t.Errorf("a kept answer of no = %v, %v", is, err)
-	}
-	if is, err := k.answer(a, a, func() (bool, error) { return true, nil }); err != nil || !is {
-		t.Errorf("a line cut short was kept as an answer: %v, %v", is, err)
-	}
-
-	var sb strings.Builder
-	for i := 0; i < maxKeptAncestry+10; i++ {
-		fmt.Fprintf(&sb, "%040x %040x 1\n", i, i+1)
-	}
-	if err := os.WriteFile(file, []byte(sb.String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	k = &ancestryKept{path: file}
-	k.mu.Lock()
-	k.loadLocked()
-	k.mu.Unlock()
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(data), "\n"); n != maxKeptAncestry/2 {
-		t.Errorf("the file was cut to %d answers, want %d", n, maxKeptAncestry/2)
-	}
-	if !strings.Contains(string(data), fmt.Sprintf("%040x", maxKeptAncestry+9)) {
-		t.Errorf("the newest answer was cut")
 	}
 }

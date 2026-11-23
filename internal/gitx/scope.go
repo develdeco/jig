@@ -34,8 +34,8 @@ var scopes = struct {
 // scopedRepo is one directory's open scope.
 type scopedRepo struct {
 	open int
-	// ancestry is where the answers about ancestry are kept, nil for none.
-	ancestry *ancestryKept
+	// facts is where the facts about commits are kept, nil for none.
+	facts *Kept
 
 	once sync.Once
 	// tips maps a full ref name under refs/heads and refs/remotes to the commit
@@ -46,14 +46,14 @@ type scopedRepo struct {
 	ok        bool
 }
 
-// BeginScope opens a read scope for each of dirs, keeping ancestry answers in
-// the file at ancestryPath ("" keeps none). The returned function ends it, and
+// BeginScope opens a read scope for each of dirs, keeping facts about commits in
+// the file at keptPath ("" keeps none). The returned function ends it, and
 // writes the answers learned to the file. Scopes nest: a directory is open
 // until every scope that opened it has ended.
-func BeginScope(ancestryPath string, dirs ...string) (end func()) {
-	var kept *ancestryKept
-	if ancestryPath != "" {
-		kept = ancestryFileAt(ancestryPath)
+func BeginScope(keptPath string, dirs ...string) (end func()) {
+	var kept *Kept
+	if keptPath != "" {
+		kept = keptFileAt(keptPath)
 	}
 	keys := make([]string, 0, len(dirs))
 	scopes.Lock()
@@ -68,8 +68,8 @@ func BeginScope(ancestryPath string, dirs ...string) (end func()) {
 			scopes.by[key] = s
 		}
 		s.open++
-		if s.ancestry == nil {
-			s.ancestry = kept
+		if s.facts == nil {
+			s.facts = kept
 		}
 		keys = append(keys, key)
 	}
@@ -101,11 +101,11 @@ func scopeOf(dir string) *scopedRepo {
 	return scopes.by[memoKey(dir)]
 }
 
-// kept is where the scope keeps ancestry answers, nil for none.
-func (s *scopedRepo) kept() *ancestryKept {
+// kept is where the scope keeps facts about commits, nil for none.
+func (s *scopedRepo) kept() *Kept {
 	scopes.Lock()
 	defer scopes.Unlock()
-	return s.ancestry
+	return s.facts
 }
 
 // load lists the repo's branches once.
@@ -159,63 +159,82 @@ func listedCommit(dir, rev string) (sha string, found, answered bool) {
 	return oid, ok, true
 }
 
-// ancestryKept is a file of answers about ancestry: one line for each pair of
-// commit ids, "<ancestor> <descendant> <1 or 0>". An answer never changes, so
-// the file is only ever appended to; a line that is not whole is skipped.
-type ancestryKept struct {
+// Kept is a file of facts about commit ids kept on this machine: a line for
+// each, "<key> TAB <answer>", where the key names the question and the ids it is
+// about (whether one commit is in another's history, which files a branch
+// changes past a base, whether two branches merge). A commit id names its whole
+// history, so what is asked of ids never changes: the file is only ever added
+// to, a line that is not whole is skipped, and a fact is asked of git once, by
+// this process or any other.
+type Kept struct {
 	path string
 
 	mu       sync.Mutex
 	loaded   bool
-	known    map[string]bool
+	known    map[string]string
 	pending  []string
-	inflight map[string]*askedAncestry
+	inflight map[string]*askedFact
 }
 
-// askedAncestry is a question being put to the program, so that the same pair
-// asked at the same time by two readers is put once.
-type askedAncestry struct {
+// askedFact is a question being put to the program, so that the same one asked
+// at the same time by two readers is put once.
+type askedFact struct {
 	done chan struct{}
-	is   bool
+	out  string
 	err  error
 }
 
-// maxKeptAncestry is how many answers the file holds before it is cut back to
-// its newest half, so a long-lived machine's file does not grow without bound.
-const maxKeptAncestry = 60000
+// maxKeptFacts is how many facts the file holds before it is cut back to its
+// newest half, so a long-lived machine's file does not grow without bound.
+const maxKeptFacts = 60000
 
-var ancestryFiles = struct {
+var keptFiles = struct {
 	sync.Mutex
-	by map[string]*ancestryKept
-}{by: map[string]*ancestryKept{}}
+	by map[string]*Kept
+}{by: map[string]*Kept{}}
 
-// ancestryFileAt is the process's one handle on the file at path.
-func ancestryFileAt(path string) *ancestryKept {
-	ancestryFiles.Lock()
-	defer ancestryFiles.Unlock()
-	if k := ancestryFiles.by[path]; k != nil {
+// keptFileAt is the process's one handle on the file at path.
+func keptFileAt(path string) *Kept {
+	keptFiles.Lock()
+	defer keptFiles.Unlock()
+	if k := keptFiles.by[path]; k != nil {
 		return k
 	}
-	k := &ancestryKept{path: path}
-	ancestryFiles.by[path] = k
+	k := &Kept{path: path}
+	keptFiles.by[path] = k
 	return k
 }
 
-func ancestryKey(a, d string) string { return a + " " + d }
+// KeptFor is the facts kept for dir by the scope open for it, nil when none is.
+func KeptFor(dir string) *Kept {
+	if s := scopeOf(dir); s != nil {
+		return s.kept()
+	}
+	return nil
+}
+
+// CommitOf is the commit the full branch name ref (refs/heads/x or
+// refs/remotes/o/x) names in dir, from the scope's listing; false when no scope
+// is open for dir or it cannot say.
+func CommitOf(dir, ref string) (string, bool) {
+	sha, found, answered := listedCommit(dir, ref)
+	return sha, answered && found && isCommitID(sha)
+}
 
 // loadLocked reads the file once; the caller holds k.mu.
-func (k *ancestryKept) loadLocked() {
+func (k *Kept) loadLocked() {
 	if k.loaded {
 		return
 	}
 	k.loaded = true
-	k.known = map[string]bool{}
+	k.known = map[string]string{}
 	f, err := os.Open(k.path)
 	if err != nil {
 		return
 	}
 	var lines []string
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
 	for sc.Scan() {
 		lines = append(lines, sc.Text())
 	}
@@ -223,16 +242,15 @@ func (k *ancestryKept) loadLocked() {
 	// that is open.
 	_ = f.Close()
 	for _, l := range lines {
-		a, rest, ok := strings.Cut(l, " ")
-		d, v, ok2 := strings.Cut(rest, " ")
-		if !ok || !ok2 || !isCommitID(a) || !isCommitID(d) || (v != "1" && v != "0") {
+		key, answer, ok := strings.Cut(l, "\t")
+		if !ok || key == "" {
 			continue
 		}
-		k.known[ancestryKey(a, d)] = v == "1"
+		k.known[key] = answer
 	}
-	if len(lines) > maxKeptAncestry {
-		keep := lines[len(lines)-maxKeptAncestry/2:]
-		if tmp, err := os.CreateTemp(filepath.Dir(k.path), "ancestry-*"); err == nil {
+	if len(lines) > maxKeptFacts {
+		keep := lines[len(lines)-maxKeptFacts/2:]
+		if tmp, err := os.CreateTemp(filepath.Dir(k.path), "kept-*"); err == nil {
 			_, werr := tmp.WriteString(strings.Join(keep, "\n") + "\n")
 			cerr := tmp.Close()
 			if werr == nil && cerr == nil && os.Rename(tmp.Name(), k.path) == nil {
@@ -243,49 +261,44 @@ func (k *ancestryKept) loadLocked() {
 	}
 }
 
-// answer is whether a is an ancestor of d: the kept answer, or the one a
-// reader asking the same pair just now is waiting for, else ask's, which is
-// kept when it is an answer and not an error.
-func (k *ancestryKept) answer(a, d string, ask func() (bool, error)) (bool, error) {
-	key := ancestryKey(a, d)
+// Answer is the kept answer to the question key, or the one a reader asking the
+// same just now is waiting for, else ask's, which is kept when it is an answer
+// and not an error. key and the answer hold no tab or line break.
+func (k *Kept) Answer(key string, ask func() (string, error)) (string, error) {
 	k.mu.Lock()
 	k.loadLocked()
-	if is, ok := k.known[key]; ok {
+	if out, ok := k.known[key]; ok {
 		k.mu.Unlock()
-		return is, nil
+		return out, nil
 	}
 	if c, ok := k.inflight[key]; ok {
 		k.mu.Unlock()
 		<-c.done
-		return c.is, c.err
+		return c.out, c.err
 	}
-	c := &askedAncestry{done: make(chan struct{})}
+	c := &askedFact{done: make(chan struct{})}
 	if k.inflight == nil {
-		k.inflight = map[string]*askedAncestry{}
+		k.inflight = map[string]*askedFact{}
 	}
 	k.inflight[key] = c
 	k.mu.Unlock()
 
-	c.is, c.err = ask()
+	c.out, c.err = ask()
 
 	k.mu.Lock()
 	delete(k.inflight, key)
 	if c.err == nil {
-		k.known[key] = c.is
-		v := "0"
-		if c.is {
-			v = "1"
-		}
-		k.pending = append(k.pending, key+" "+v)
+		k.known[key] = c.out
+		k.pending = append(k.pending, key+"\t"+c.out)
 	}
 	k.mu.Unlock()
 	close(c.done)
-	return c.is, c.err
+	return c.out, c.err
 }
 
-// flush appends the answers learned since the last flush. A file that cannot
-// be written loses them: they are asked again.
-func (k *ancestryKept) flush() {
+// flush appends the facts learned since the last flush. A file that cannot be
+// written loses them: they are asked again.
+func (k *Kept) flush() {
 	k.mu.Lock()
 	pending := k.pending
 	k.pending = nil
@@ -318,23 +331,20 @@ func isCommitID(s string) bool {
 	return true
 }
 
-// ancestryIDs are the two commit ids a question names, a branch taken from the
-// scope's listing, and ok false when either is still not an id.
-func ancestryIDs(dir, a, d string) (ia, id string, ok bool) {
-	ia, id = a, d
-	if !isCommitID(ia) {
-		sha, found, answered := listedCommit(dir, ia)
-		if !answered || !found {
-			return "", "", false
+// commitIDs are the commit ids the refs name: an id as it is, a full branch
+// name as the scope's listing has it; ok is false when any is neither.
+func commitIDs(dir string, refs ...string) (ids []string, ok bool) {
+	ids = make([]string, len(refs))
+	for i, ref := range refs {
+		if isCommitID(ref) {
+			ids[i] = ref
+			continue
 		}
-		ia = sha
-	}
-	if !isCommitID(id) {
-		sha, found, answered := listedCommit(dir, id)
-		if !answered || !found {
-			return "", "", false
+		sha, found, answered := listedCommit(dir, ref)
+		if !answered || !found || !isCommitID(sha) {
+			return nil, false
 		}
-		id = sha
+		ids[i] = sha
 	}
-	return ia, id, isCommitID(ia) && isCommitID(id)
+	return ids, true
 }

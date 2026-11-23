@@ -1544,16 +1544,23 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			continue
 		}
 		target := r.TargetBranch()
-		type bound struct{ ticket, branch string }
+		type bound struct{ ticket, branch, tip string }
 		var bounds []bound
 		tickets := map[string]bool{}
 		// Local branches first; origin's stand in for a ticket with no local
 		// branch here.
 		// One process lists both: git processes are what a session start pays
 		// for.
-		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+		listing, err := gitx.Run(dir, "for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/remotes/origin")
 		if err != nil {
 			continue
+		}
+		// tipOf is the commit each branch is at, from the same listing.
+		tipOf := map[string]string{}
+		for _, row := range strings.Split(listing, "\n") {
+			if tip, full, ok := strings.Cut(strings.TrimSpace(row), " "); ok {
+				tipOf[full] = tip
+			}
 		}
 		for _, prefix := range []string{"refs/heads/", "refs/remotes/origin/"} {
 			local := map[string]bool{}
@@ -1561,8 +1568,8 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				local[id] = true
 			}
 			var refs, names []string
-			for _, full := range strings.Split(listing, "\n") {
-				full = strings.TrimSpace(full)
+			for _, row := range strings.Split(listing, "\n") {
+				_, full, _ := strings.Cut(strings.TrimSpace(row), " ")
 				if !strings.HasPrefix(full, prefix) {
 					continue
 				}
@@ -1580,7 +1587,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 					continue
 				}
 				if id := boundTo[name]; id != "" && !local[id] && (open == nil || open(id)) {
-					bounds = append(bounds, bound{id, refs[i]})
+					bounds = append(bounds, bound{id, refs[i], tipOf[prefix+name]})
 					tickets[id] = true
 				}
 			}
@@ -1588,10 +1595,10 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 		if len(tickets) < 2 || (only != "" && !tickets[only]) {
 			continue
 		}
-		base := ""
+		base, baseTip := "", ""
 		for _, ref := range []string{target, "origin/" + target} {
-			if _, found, _ := gitx.ResolveCommit(dir, ref); found {
-				base = ref
+			if sha, found, _ := gitx.ResolveCommit(dir, ref); found {
+				base, baseTip = ref, sha
 				break
 			}
 		}
@@ -1614,7 +1621,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			go func() {
 				defer wg.Done()
 				defer func() { <-slots }()
-				changed[i], _ = gitx.DiffNameOnlySince(dir, base, b.branch, "ACDMRTUXB")
+				changed[i] = changedFiles(dir, base, b.branch, baseTip, b.tip)
 			}()
 		}
 		wg.Wait()
@@ -1641,6 +1648,10 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 			files []string
 		}
 		type branchPair struct{ a, b string }
+		tipOfBranch := map[string]string{}
+		for _, b := range bounds {
+			tipOfBranch[b.branch] = b.tip
+		}
 		tested := map[branchPair]verdict{}
 		pairAt := map[branchPair]int{}
 		for _, f := range sortedStrings(mapKeys(files)) {
@@ -1661,7 +1672,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 							key := branchPair{ba, bb}
 							v, ok := tested[key]
 							if !ok {
-								v.state, v.files = testPair(dir, ba, bb)
+								v.state, v.files = mergedPair(dir, ba, bb, tipOfBranch[ba], tipOfBranch[bb])
 								tested[key] = v
 								pairs = append(pairs, testedPair{Repo: r.Name(), A: ids[i], B: ids[j], BranchA: ba, BranchB: bb, State: v.state, Files: v.files})
 								pairAt[key] = len(pairs) - 1
