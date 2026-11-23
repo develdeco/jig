@@ -102,6 +102,9 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
 		screen.until(t, "› "+id+"  Ticket "+id)
 		screen.until(t, head(land.Text, 20))
+		if id == "TK-13" {
+			screen.until(t, "⊖ 1 Brief") // the status is read: the steps it never finished are told
+		}
 		frame := lastScreen(screen.String())
 		if header := strings.Split(frame, "\n")[0]; !strings.Contains(header, w.icon+" "+w.word) {
 			t.Errorf("%s: its header does not say %s %s:\n%s", id, w.icon, w.word, header)
