@@ -211,6 +211,36 @@ func TestACallWhileAWaitStoodIsNoWorkOfTheNextStep(t *testing.T) {
 	}
 }
 
+// TestASliceThatAskedKeepsItsWorkBeforeTheQuestion: a builder worked on its
+// slice for twenty minutes, calling every minute, and asked; while the question
+// stands the slice waits for the person, and the build still reads the work
+// before the question.
+func TestASliceThatAskedKeepsItsWorkBeforeTheQuestion(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: parked",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"c", "needs-input", "1", "-", "q-001", "Pick the tone"},
+		}),
+		axi.Table("questions", []string{"id", "slice", "status"}, [][]string{{"q-001", "c", "open"}}),
+	}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	atClock(g, "2026-10-23T09:30:00Z")
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	envs := []events.Envelope{jl(at(1, 0), "SHOP-1", "c", journal.EventClaim, with("s-b", "", "", "", "", ""))}
+	for m := 2; m <= 20; m++ {
+		envs = append(envs, toolOn("SHOP-1", at(m, 0), "s-b", "go test ./...", said("Run the tests")))
+	}
+	envs = append(envs, jl(at(22, 0), "SHOP-1", "c", journal.EventQuestion, with("s-b", "", "", "Formal or casual?", "q-001", "agent")))
+	g.feed(envs...)
+	if got := g.m.steps(g.m.w.tickets["SHOP-1"])[stepBuild].Took; got != "21m 00s" {
+		t.Errorf("the build took %q while its question stood, want the 21 minutes before it", got)
+	}
+	tk := g.m.w.tickets["SHOP-1"]
+	if waitLine(g.m.phaseOf(tk), stepBuild, "slice:c") {
+		t.Errorf("a line of a slice that still waits for its answer is taken for the end of a wait")
+	}
+}
+
 // TestALongOracleRunIsWork: an oracle run of seven minutes is work, though no
 // line or call falls inside it: the line that ends it says how long it ran.
 func TestALongOracleRunIsWork(t *testing.T) {

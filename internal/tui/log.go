@@ -156,14 +156,18 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 					continue
 				}
 			case s.State == phase.SubNeedsYou:
-				continue
+				// Nobody holds it while it waits, but its holder held it until
+				// the line that opened the wait: the calls before it are its
+				// work, those after are no one's.
+				tr = t.openTrack(step, s)
+				end = tr.end.Add(callAfter)
 			case subWeight(s) < 2:
 				tr = t.openTrack(step, s)
 			default:
 				continue
 			}
 			if tr.holder != "" && !tr.start.IsZero() {
-				w := moveWindow{step: step, key: s.Key, holder: tr.holder, agent: agentOf(tr.own), start: tr.start, end: end, borrowed: tr.borrowed, open: s.State != phase.SubDone}
+				w := moveWindow{step: step, key: s.Key, holder: tr.holder, agent: agentOf(tr.own), start: tr.start, end: end, borrowed: tr.borrowed, open: s.State != phase.SubDone && s.State != phase.SubNeedsYou}
 				for _, a := range answered {
 					if a.step == step && a.key == s.Key {
 						w.held = append(w.held, a)
@@ -290,7 +294,9 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 func waitLine(d phase.Ticket, step int, key string) bool {
 	for _, s := range d.Phases[step].Subs {
 		if s.Key == key {
-			return s.WaitsFor != ""
+			// Only a wait that ended: the other lines of a sub-step that
+			// stands waiting (a slice's claim, its question) end nothing.
+			return s.WaitsFor != "" && s.State == phase.SubDone
 		}
 	}
 	return false
