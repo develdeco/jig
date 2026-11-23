@@ -167,7 +167,19 @@ type Sub struct {
 	// Detail is a few words on where it stands: "5 sections", "verified
 	// d7101d0", "1 fix, 1 ask".
 	Detail string
+	// WaitsFor says who the sub-step waits for once it is under way: the
+	// person (an approval, an answer, a decision) or the host (a merge), ""
+	// for a sub-step that is work, or that waits on other slices or on its
+	// environment. A sub-step that waits is held by no session, and the time
+	// it stands is a wait, not work.
+	WaitsFor string
 }
+
+// Who a waiting sub-step waits for (Sub.WaitsFor).
+const (
+	WaitsForPerson = "person"
+	WaitsForHost   = "host"
+)
 
 // Phase is one phase of a ticket.
 type Phase struct {
@@ -658,6 +670,9 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 	landP, landDone := d.land(publishDone)
 
 	t := Ticket{Phases: [5]Phase{briefP, buildP, reviewP, publishP, landP}, d: d}
+	for i := range t.Phases {
+		setWaits(&t.Phases[i])
+	}
 	done := [5]bool{briefDone, buildDone, reviewDone, publishDone, landDone}
 	cur := Work - 1
 	for i, dn := range done {
@@ -682,6 +697,24 @@ func Derive(f Facts, lines []journal.Line) Ticket {
 		t.stand()
 	}
 	return t
+}
+
+// setWaits names who each waiting sub-step of p waits for: the person for one
+// that needs them (an approval, an answer, a decision), and for an approval that
+// was given, since the time it stood is still a wait; the host for the merge of
+// a landing, waiting or made. A sub-step blocked on other slices or on its
+// environment waits for no one and has none.
+func setWaits(p *Phase) {
+	for i := range p.Subs {
+		s := &p.Subs[i]
+		approval := (p.Name == Brief && s.Key == "approved") || (p.Name == Publish && s.Key == "approval")
+		switch {
+		case s.State == SubNeedsYou, approval && s.State == SubDone:
+			s.WaitsFor = WaitsForPerson
+		case p.Name == Land && s.Key == "merge" && (s.State == SubWaiting || s.State == SubDone):
+			s.WaitsFor = WaitsForHost
+		}
+	}
 }
 
 // rebuildEvents are the journal lines that show work went on after a publish:

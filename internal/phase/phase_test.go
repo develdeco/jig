@@ -256,9 +256,9 @@ func TestBriefSubSteps(t *testing.T) {
 	drafted.Approval = ApprovalNone
 	got := Derive(drafted, nil).Of(Brief)
 	want := []Sub{
-		{"drafted", "brief drafted", SubDone, "4 sections"},
-		{"slices", "slices written", SubDone, "3 slices"},
-		{"approved", "brief approved", SubNeedsYou, "waits for your approval"},
+		{Key: "drafted", Label: "brief drafted", State: SubDone, Detail: "4 sections"},
+		{Key: "slices", Label: "slices written", State: SubDone, Detail: "3 slices"},
+		{Key: "approved", Label: "brief approved", State: SubNeedsYou, Detail: "waits for your approval", WaitsFor: WaitsForPerson},
 	}
 	if !reflect.DeepEqual(got.Subs, want) || got.State != StateCurrent {
 		t.Errorf("drafted brief: %+v, want %+v, current", got, want)
@@ -351,14 +351,14 @@ func TestBuildSubStepsFollowTheSlices(t *testing.T) {
 	}
 	b := Derive(f, lines).Of(Build)
 	want := []Sub{
-		{"slice:a", "slice a", SubDone, "verified d7101d0"},
-		{"slice:b", "slice b", SubActive, "claimed by session 01234567"},
-		{"slice:c", "slice c", SubWaiting, "waits for b"},
-		{"slice:d", "slice d", SubPending, "ready to build"},
-		{"slice:e", "slice e", SubNeedsYou, "waits for your answer"},
-		{"slice:f", "slice f", SubFailed, "stalled"},
-		{"slice:g", "slice g", SubWaiting, "waits for its environment"},
-		{"slice:r1-fix-1", "fix slice r1-fix-1 (round 1)", SubActive, "claimed"},
+		{"slice:a", "slice a", SubDone, "verified d7101d0", ""},
+		{"slice:b", "slice b", SubActive, "claimed by session 01234567", ""},
+		{"slice:c", "slice c", SubWaiting, "waits for b", ""},
+		{"slice:d", "slice d", SubPending, "ready to build", ""},
+		{"slice:e", "slice e", SubNeedsYou, "waits for your answer", WaitsForPerson},
+		{"slice:f", "slice f", SubFailed, "stalled", ""},
+		{"slice:g", "slice g", SubWaiting, "waits for its environment", ""},
+		{"slice:r1-fix-1", "fix slice r1-fix-1 (round 1)", SubActive, "claimed", ""},
 	}
 	if !reflect.DeepEqual(b.Subs, want) {
 		t.Errorf("build sub-steps:\n got %+v\nwant %+v", b.Subs, want)
@@ -401,14 +401,14 @@ func TestReviewSubSteps(t *testing.T) {
 
 	// Nothing reviewed: a round 1 waits.
 	got := pending(allGreen(), built())
-	if !reflect.DeepEqual(got.Subs, []Sub{{"round:1", "round 1", SubPending, "ready to open"}}) {
+	if !reflect.DeepEqual(got.Subs, []Sub{{"round:1", "round 1", SubPending, "ready to open", ""}}) {
 		t.Errorf("before a round: %+v", got.Subs)
 	}
 	if got.Text != "ready for a fresh session to review the change" {
 		t.Errorf("review text before a round = %q", got.Text)
 	}
 	// ... but not before the build is done.
-	if got := pending(approved(), nil); !reflect.DeepEqual(got.Subs, []Sub{{"round:1", "round 1", SubPending, ""}}) || got.Text != "after the build" {
+	if got := pending(approved(), nil); !reflect.DeepEqual(got.Subs, []Sub{{"round:1", "round 1", SubPending, "", ""}}) || got.Text != "after the build" {
 		t.Errorf("review before the build: %+v", got)
 	}
 
