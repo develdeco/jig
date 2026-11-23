@@ -313,6 +313,11 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 	if cur.Done {
 		return cur.State, "landed"
 	}
+	if cur.State == StateFindings && m.ticketLive(t) && len(t.openQuestions(m.zone, "")) == 0 {
+		// What waits for the person is held back with its group while a session
+		// is at work, and the header says no more than the group does.
+		return StateBuilding, strings.ToLower(stepNames[cur.Step]) + " in progress"
+	}
 	return cur.State, stepWords(cur.Step, cur.State)
 }
 

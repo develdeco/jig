@@ -147,7 +147,7 @@ func TestTailPane(t *testing.T) {
 
 func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := newQuietRig(t, "JIG-2")
 	g.r.answer("triage JIG-2 r1-f2 dismiss --store /s", strings.Join([]string{
 		"triage:", "  ticket: JIG-2", "  finding: r1-f2", "  decision: dismiss", "  provenance: person",
 		"help[1]:", "  The next round applies it: run `jig gate JIG-2`",

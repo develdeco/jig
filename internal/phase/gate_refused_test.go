@@ -73,7 +73,7 @@ func TestReviewGateRefused(t *testing.T) {
 		f := allGreen()
 		f.Asks = []Ask{{ID: "r1-f1"}}
 		got := review(f, append(append([]journal.Line{}, beside...), ln(journal.EventGateRound, attempt(1))))
-		if got.Text != "round 1 left 1 ask · 1 wait for your decision" {
+		if got.Text != "round 1: 1 ask waits for you" {
 			t.Errorf("after a round with findings: text = %q", got.Text)
 		}
 		if s := sub(t, got, "round:2"); s.State != SubPending || s.Detail == "INTENT_CONFLICT" {

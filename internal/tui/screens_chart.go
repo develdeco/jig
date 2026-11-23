@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
@@ -50,6 +52,9 @@ func (m *Model) chartPage(name string) page {
 	var run []runRow
 	if c.info != nil {
 		run = m.runRows(c.info)
+		if age, live := c.live(m.w, m.now()); live {
+			run = m.runningRows(run, c.info, age)
+		}
 	}
 	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
 	if spare < 0 && len(run) > 1 {
@@ -197,7 +202,21 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		next = m.st.dim(info.Reason)
 	}
 	rows := []runRow{{"next", next, 0}}
-	if len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "" {
+	first, then := landingsOf(info)
+	switch {
+	case first != nil:
+		// The run stops at a landing: the person's word is the landing's, not
+		// the run's, and the reason is the landing's state as phase words it.
+		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
+		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
+		for _, l := range then {
+			words := "also " + l.Prompt
+			if len(l.After) > 0 {
+				words = "then " + l.Prompt + ", after " + andList(l.After)
+			}
+			rows = append(rows, runRow{"", m.st.dim(words), 1})
+		}
+	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
 		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})
 	}
 	if len(info.Briefs) > 0 {
@@ -211,12 +230,52 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		if i == 0 {
 			label = "ends at"
 		}
-		rows = append(rows, runRow{label, endNote(e), 1})
+		note := endNote(e)
+		if info.Model && e.Kind != kindStacked && e.Fact != "" {
+			// An issue's run waits for a landing, not a merge: the verb's fact is
+			// the words internal/phase wrote for it.
+			note = e.Fact
+		}
+		rows = append(rows, runRow{label, note, 1})
 	}
 	if info.Spend != nil {
 		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
 	}
 	return rows
+}
+
+// runningRows are the Run panel's rows while a session is at work on the run:
+// the next row says so and how long ago it was last seen, in place of the
+// prompt that would start another run. A landing's prompt is the person's word,
+// which a session merges at, so it is never held back.
+func (m *Model) runningRows(rows []runRow, info *chartInfo, age time.Duration) []runRow {
+	if first, _ := landingsOf(info); first != nil || len(rows) == 0 {
+		return rows
+	}
+	rows = append([]runRow(nil), rows...)
+	rows[0].text = m.st.dim("running · a session worked on it " + ago(age) + " ago")
+	return rows
+}
+
+// landingsOf are the landings of a run that stopped at one: the first the
+// person may ask for now (the first that waits for no other), and the ones after
+// it. Nil when the run is not at a landing stop or no landing is open to ask.
+func landingsOf(info *chartInfo) (first *chartLand, then []chartLand) {
+	if info.Code != phase.CodeChartWaitsLand {
+		return nil, nil
+	}
+	for i := range info.Lands {
+		l := info.Lands[i]
+		if first == nil && len(l.After) == 0 {
+			first = &info.Lands[i]
+			continue
+		}
+		then = append(then, l)
+	}
+	if first == nil {
+		return nil, nil
+	}
+	return first, then
 }
 
 // spendWords is what a chart's run has cost, in the parts the Run panel's row

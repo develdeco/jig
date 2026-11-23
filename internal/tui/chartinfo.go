@@ -40,6 +40,11 @@ type chartInfo struct {
 	Tickets []chartTicket
 	// Ends are the tickets the run stops at, each behind a merge.
 	Ends []chartEnd
+	// Lands are the landings an issue's run stops at, in the verb's order.
+	Lands []chartLand
+	// Model is whether the chart plans an issue's tickets: its ends are landings, in
+	// the words the verb carries from internal/phase, whether a landing is open or not.
+	Model bool
 	// History are the commits of the store that changed something under the
 	// chart's folder, newest first, as the verb printed them; none for an older
 	// jig, which says none.
@@ -75,6 +80,14 @@ type chartTicket struct {
 type chartWait struct {
 	Ticket, Kind, Fact string
 	PRs                []chartPR
+}
+
+// chartLand is a landing of an issue's run: Prompt is the person's word for it
+// ("Land <T>"), State its words from internal/phase, After the tickets that
+// land before it.
+type chartLand struct {
+	Ticket, Prompt, State string
+	After                 []string
 }
 
 // chartPR is a pull request a chart waits for.
@@ -143,6 +156,13 @@ func parseChart(out string) (*chartInfo, error) {
 			Fact    string    `json:"fact"`
 			PRs     []chartPR `json:"prs"`
 		} `json:"ends"`
+		Model bool `json:"model"`
+		Lands []struct {
+			Ticket string   `json:"ticket"`
+			Prompt string   `json:"prompt"`
+			After  []string `json:"after"`
+			State  string   `json:"state"`
+		} `json:"lands"`
 		History []struct {
 			SHA     string `json:"sha"`
 			Time    string `json:"time"`
@@ -181,6 +201,10 @@ func parseChart(out string) (*chartInfo, error) {
 	}
 	for _, e := range v.Ends {
 		info.Ends = append(info.Ends, chartEnd{Ticket: e.Ticket, Blocker: e.Blocker, Kind: e.Kind, Fact: e.Fact, PRs: e.PRs})
+	}
+	info.Model = v.Model
+	for _, l := range v.Lands {
+		info.Lands = append(info.Lands, chartLand{Ticket: l.Ticket, Prompt: l.Prompt, State: l.State, After: l.After})
 	}
 	for _, h := range v.History {
 		// An entry whose time cannot be placed among the lines is left out.

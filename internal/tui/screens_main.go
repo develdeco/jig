@@ -74,6 +74,8 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 	if atEnd && end.State == StateClosed {
 		return kind + m.st.state(end.State, end.Words)
 	}
+	// A question is the person's whoever else is at work, so a live session
+	// never holds its count back.
 	if n := len(t.openQuestions(m.zone, "")); n > 0 {
 		return m.st.state(StateNeedsInput, strconv.Itoa(n)+" open "+plural(n, "question", "questions"))
 	}
