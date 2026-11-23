@@ -79,7 +79,13 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 					gap -= overlap(prev, at, x.start, x.end)
 				}
 			}
-			if gap > 0 && gap <= liveWindow {
+			if gap > liveWindow {
+				// A silence this long is idle, unless the line that ends it
+				// says how long its run was (an oracle line's wall time): that
+				// is work, a command a call or a line closed.
+				gap = min(gap, time.Duration(p.l.Seconds)*time.Second)
+			}
+			if gap > 0 {
 				w[workRef{p.step, key}] += gap
 			}
 		}
@@ -133,22 +139,21 @@ func withStarts(lines []placedLine, ws []moveWindow) []placedLine {
 
 // tailOwner is the sub-step of p that the time since the step's latest line
 // belongs to: the sub-step at work (under way, or failed and the builder's to
-// fix) that the line is of, else the first one at work, else the step's own
-// time. False when none is at work and one waits for a person.
+// fix) that the line is of, else the first one at work. False when none is at
+// work: nobody holds the step, whether it waits for a person, between its
+// slices or parked, and the time passing is no work.
 func tailOwner(p phase.Phase, lineKey string) (string, bool) {
-	first, atWork, waits := "", false, false
+	first, atWork := "", false
 	for _, s := range p.Subs {
-		switch s.State {
-		case phase.SubActive, phase.SubFailed:
-			if s.Key == lineKey {
-				return lineKey, true
-			}
-			if !atWork {
-				first, atWork = s.Key, true
-			}
-		case phase.SubNeedsYou:
-			waits = true
+		if s.State != phase.SubActive && s.State != phase.SubFailed {
+			continue
+		}
+		if s.Key == lineKey {
+			return lineKey, true
+		}
+		if !atWork {
+			first, atWork = s.Key, true
 		}
 	}
-	return first, atWork || !waits
+	return first, atWork
 }

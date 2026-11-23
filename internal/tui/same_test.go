@@ -142,6 +142,51 @@ func TestWhatLeavesTheTailKeepsWhatTheWorkNeeds(t *testing.T) {
 	}
 }
 
+// TestAStepNobodyHoldsCountsNoTime: slice a is verified, slice b is ready and
+// nobody has taken it, and the builder's session has ended: the build counts
+// its 40 seconds of work, not the hour since.
+func TestAStepNobodyHoldsCountsNoTime(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: building",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Do a"}, {"b", "queued", "0", "-", "-", "Do b"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	atClock(g, "2026-10-23T10:00:40Z")
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	g.feed(
+		jl(at(0, 0), "SHOP-1", "a", journal.EventClaim, with("s-b", "", "", "", "", "")),
+		toolOn("SHOP-1", at(0, 10), "s-b", "go test ./...", said("Run the tests")),
+		jl(at(0, 40), "SHOP-1", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+		ll(at(1, 0), "", journal.EventSessionEnd, with("s-b", "", "", "", "", "")),
+	)
+	if got := g.m.steps(g.m.w.tickets["SHOP-1"])[stepBuild].Took; got != "40s" {
+		t.Errorf("the build took %q an hour on, want its 40s of work", got)
+	}
+}
+
+// TestALongOracleRunIsWork: an oracle run of seven minutes is work, though no
+// line or call falls inside it: the line that ends it says how long it ran.
+func TestALongOracleRunIsWork(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: green",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "green", "1", "-", "-", "Do a"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	atClock(g, "2026-10-23T09:30:00Z")
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	g.feed(
+		jl(at(0, 0), "SHOP-1", "a", journal.EventClaim, with("s-b", "", "", "", "", "")),
+		toolOn("SHOP-1", at(0, 30), "s-b", "jig verify", said("Run the oracle")),
+		jl(at(7, 30), "SHOP-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), func(l *journal.Line) { l.Seconds = 420 }),
+		jl(at(7, 31), "SHOP-1", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
+	)
+	if got := g.m.steps(g.m.w.tickets["SHOP-1"])[stepBuild].Took; got != "7m 31s" {
+		t.Errorf("the build took %q, want the seven minutes of the run and the half minute before it", got)
+	}
+}
+
 // TestOneCounterReadsTheSameInBothPlaces: a step's time on its row is the sum
 // of the work its sub-steps and the step itself counted, and the time a done
 // sub-step reads in the block is the one the sum took.

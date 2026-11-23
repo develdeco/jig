@@ -149,6 +149,12 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 			case s.State == phase.SubDone:
 				tr = t.doneTrack(step, s.Key)
 				end = tr.end.Add(callAfter)
+				if s.WaitsFor != "" && tr.borrowed {
+					// A wait that ended was held by nobody while it stood: the
+					// session that happens to have written the line before it
+					// held nothing.
+					continue
+				}
 			case s.State == phase.SubNeedsYou:
 				continue
 			case subWeight(s) < 2:
@@ -266,12 +272,23 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 			continue
 		}
 		if xt, ok := x.At(); ok && xt.After(at) {
-			if s := stepOfLine(x); s >= 0 {
+			if s := stepOfLine(x); s >= 0 && !waitLine(d, s, t.subKey(x)) {
 				return s, ""
 			}
 		}
 	}
 	return -1, ""
+}
+
+// waitLine says the sub-step key of step is one that waits for a person or the
+// host: a line of it ends the wait, and explains no call made while it stood.
+func waitLine(d phase.Ticket, step int, key string) bool {
+	for _, s := range d.Phases[step].Subs {
+		if s.Key == key {
+			return s.WaitsFor != ""
+		}
+	}
+	return false
 }
 
 // placedLine is a line of the log and the place it belongs to (placeOf).

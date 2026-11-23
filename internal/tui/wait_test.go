@@ -103,6 +103,8 @@ func TestADoneWaitReadsWaited(t *testing.T) {
 	g := draftedRig(t)
 	g.r.answer("status SHOP-1 --store /s", approvedStatus(), 0)
 	atClock(g, "2026-10-23T10:05:00Z")
+	// The drafting session goes on with a call of its own while the brief waits.
+	g.feed(toolOn("SHOP-1", at(3, 0), "s-b", "go test ./...", said("Run the tests")))
 	g.feed(jl("2026-10-23T10:02:07Z", "SHOP-1", "", journal.EventApproval, with("", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")))
 	tk := g.m.w.tickets["SHOP-1"]
 	subs := g.m.phaseOf(tk).Of(phase.Brief).Subs
