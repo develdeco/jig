@@ -54,6 +54,10 @@ type outcome struct {
 	After int
 }
 
+// leavesTheMove says the verb's result leaves the next move to someone else (the
+// gate opens a round for a reviewer), so its help line is shown whole.
+func (o outcome) leavesTheMove() bool { return o.Label == "gate" }
+
 // shown is the step the screen reports: the one that failed, else the last.
 func (o outcome) shown() ranStep {
 	if len(o.Steps) == 0 {

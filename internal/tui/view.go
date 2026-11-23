@@ -447,16 +447,50 @@ func (m *Model) keyHints() []string {
 	return flat
 }
 
-// panel is the last command as one line, and the notice, above the keys.
+// panel is the last command as one line (whole, for a verb that leaves the next
+// move to someone else), and the notice, above the keys.
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		out = append(out, m.lastLine(m.last, w))
+		out = append(out, m.lastLines(m.last, w)...)
 	}
 	if m.notice != "" {
 		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
 	}
 	return out
+}
+
+// helpWrapRows is the most rows a verb's help line takes in the panel when it is
+// shown whole: a sentence of the verb's own is never this long.
+const helpWrapRows = 6
+
+// lastLines are the panel's rows for a key's command: the one line, and for a
+// verb that leaves the next move to someone else the help line it printed, whole
+// and wrapped, beneath the command. The words are the verb's own; the TUI adds
+// none. They are part of the line and expire with it.
+func (m *Model) lastLines(o *outcome, w int) []string {
+	if s := o.shown(); o.leavesTheMove() && s.Code == 0 {
+		if help, ok := firstHelp(s.Out); ok {
+			out := []string{fit("  "+m.st.icon(StateOK)+" "+m.st.bold(m.shownLine(s.Args)), w)}
+			for _, l := range wrap(help, w-4, helpWrapRows) {
+				out = append(out, "    "+m.st.dim(l))
+			}
+			return out
+		}
+	}
+	return []string{m.lastLine(o, w)}
+}
+
+// firstHelp is the first line of the help a verb printed, false when it printed
+// none.
+func firstHelp(out string) (string, bool) {
+	lines := outputLines(out)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "help[") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1]), true
+		}
+	}
+	return "", false
 }
 
 // lastLine is a key's command as typed and what the verb said of it: its own
