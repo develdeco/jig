@@ -203,7 +203,11 @@ type Model struct {
 	ask    *confirmation
 	last   *outcome
 	notice string
-	tail   bool
+	// pressed is the notice that was on screen when the key being handled was
+	// pressed: the key clears it, and what a key acts on is judged against the
+	// screen as the person read it.
+	pressed string
+	tail    bool
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -928,7 +932,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if m.ask != nil {
 		return m.confirmKey(k)
 	}
-	m.notice = ""
+	// The notice a key was pressed over was on the screen the person read.
+	m.pressed, m.notice = m.notice, ""
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
@@ -1353,8 +1358,13 @@ func (m *Model) triage(decision string) tea.Cmd {
 	}
 	// A person decides an ask from what the screen shows: one drawn cut, or not
 	// drawn at all, is not decided.
-	if !m.drawnWhole(pick.ID) {
+	switch whole, onPage := m.askDrawn(pick.ID, m.pressed); {
+	case whole:
+	case onPage:
 		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
+		return nil
+	default:
+		m.notice = "ask " + pick.ID + " is not shown on this screen: open " + id + " to read it"
 		return nil
 	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))

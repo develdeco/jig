@@ -136,7 +136,11 @@ type screenLayout struct {
 
 // layout lays the screen on top out as View draws it. It draws nothing and
 // moves nothing: what the cursor follows is View's to settle first.
-func (m *Model) layout() screenLayout {
+func (m *Model) layout() screenLayout { return m.layoutWith(m.notice) }
+
+// layoutWith is the layout with notice as the notice row: the row takes a row of
+// the body, so what a screen draws depends on it.
+func (m *Model) layoutWith(notice string) screenLayout {
 	w, h := m.width, m.height
 	pg := m.page()
 	refs := pg.refs()
@@ -150,7 +154,7 @@ func (m *Model) layout() screenLayout {
 
 	head := m.header(w)
 	foot := m.footer(w)
-	panel := m.panel(w)
+	panel := m.panelWith(w, notice)
 	bodyH := h - len(head) - len(foot) - len(panel)
 	if bodyH < minBodyRows && len(panel) > 0 {
 		panel = panel[:max(0, len(panel)-(minBodyRows-bodyH))]
@@ -168,12 +172,14 @@ func (m *Model) layout() screenLayout {
 	return l
 }
 
-// drawnWhole says whether the screen on top draws every line of the text
-// tagged with id, as View would draw it now: the same page, the same window.
-// It is the one rule for acting on what a person must read first, so it names
-// no screen.
-func (m *Model) drawnWhole(id string) bool {
-	l := m.layout()
+// askDrawn says whether the screen on top draws every line of the text tagged
+// with id, and whether the page has any line of it: the screen as View draws it
+// with notice on it, the same page and the same window. A key acts on the
+// screen the person read, and a key clears the notice it was pressed over, so
+// the caller says which notice that was. It is the one rule for acting on what a
+// person must read first, so it names no screen.
+func (m *Model) askDrawn(id, notice string) (whole, onPage bool) {
+	l := m.layoutWith(notice)
 	start := m.windowStart(l.pg, l.sel, l.pageH, false)
 	want, shown := 0, 0
 	for i, line := range l.pg.lines {
@@ -185,7 +191,7 @@ func (m *Model) drawnWhole(id string) bool {
 			shown++
 		}
 	}
-	return want > 0 && shown == want
+	return want > 0 && shown == want, want > 0
 }
 
 // bodyRows is how many rows the screen's body has: the height less the
@@ -468,13 +474,16 @@ func (m *Model) keyHints() []string {
 }
 
 // panel is the last command as one line, and the notice, above the keys.
-func (m *Model) panel(w int) []string {
+func (m *Model) panel(w int) []string { return m.panelWith(w, m.notice) }
+
+// panelWith is the panel as it is with notice on it.
+func (m *Model) panelWith(w int, notice string) []string {
 	var out []string
 	if m.last != nil {
 		out = append(out, m.lastLine(m.last, w))
 	}
-	if m.notice != "" {
-		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
+	if notice != "" {
+		out = append(out, fit("  "+m.st.state(StateFindings, notice), w))
 	}
 	return out
 }

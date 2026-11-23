@@ -113,7 +113,7 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 	// On a screen too short for its text they run nothing and say what to do.
 	for _, key := range []string{"k", "d"} {
 		g = askRig(t, 80, 14, askOne)
-		if g.m.drawnWhole("r1-f1") {
+		if whole, _ := g.m.askDrawn("r1-f1", g.m.notice); whole {
 			t.Fatalf("the test needs the ask cut by the window:\n%s", g.view())
 		}
 		g.press(key)
@@ -152,23 +152,108 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 // window that cuts the text in the middle refuses too.
 func TestTriageActsExactlyWhenTheViewHoldsTheWholeAsk(t *testing.T) {
 	t.Parallel()
-	acted, refused := 0, 0
-	for h := 10; h <= 60; h++ {
-		g := askRig(t, 60, h, askOne)
-		whole := strings.Contains(readWords(g.view()), readWords(wholeAskText))
-		g.press("d")
-		got := len(triaged(g)) == 1
-		if got != whole {
-			t.Errorf("at height %d the screen holds the whole ask: %v, d acted: %v:\n%s", h, whole, got, g.view())
+	// A notice on screen takes a row of the body, and a key clears it: the key
+	// is judged against the screen the person read, notice and all. "a" with no
+	// question open leaves one.
+	for _, withNotice := range []bool{false, true} {
+		acted, refused := 0, 0
+		for h := 10; h <= 60; h++ {
+			g := askRig(t, 60, h, askOne)
+			if withNotice {
+				g.press("a")
+				if g.m.notice == "" {
+					t.Fatal("a with no question open left no notice")
+				}
+			}
+			whole := strings.Contains(readWords(g.view()), readWords(wholeAskText))
+			g.press("d")
+			got := len(triaged(g)) == 1
+			if got != whole {
+				t.Errorf("at height %d (notice on screen: %v) the screen holds the whole ask: %v, d acted: %v:\n%s", h, withNotice, whole, got, g.view())
+			}
+			if got {
+				acted++
+			} else {
+				refused++
+			}
 		}
-		if got {
-			acted++
-		} else {
-			refused++
+		if acted == 0 || refused == 0 {
+			t.Errorf("the heights tried did not cross the edge (notice on screen: %v): acted %d, refused %d", withNotice, acted, refused)
 		}
 	}
-	if acted == 0 || refused == 0 {
-		t.Errorf("the heights tried did not cross the edge: acted %d, refused %d", acted, refused)
+}
+
+// TestAskDrawnReadsTheWindowAsItIsDrawn: at every scroll position of the review
+// page the check agrees with the screen, an ask the page lacks is neither whole
+// nor on the page, and the check moves nothing.
+func TestAskDrawnReadsTheWindowAsItIsDrawn(t *testing.T) {
+	t.Parallel()
+	whole, cut := 0, 0
+	for height := 9; height <= 22; height++ {
+		w, c := scrollAskDrawn(t, height)
+		whole, cut = whole+w, cut+c
+	}
+	if whole == 0 || cut == 0 {
+		t.Errorf("the scrolls did not cross the edge both ways: whole %d, cut %d", whole, cut)
+	}
+}
+
+// scrollAskDrawn scrolls the review page of an ask a line at a time at the
+// height given, and says how often the check found the ask whole and how often
+// cut.
+func scrollAskDrawn(t *testing.T, height int) (whole, cut int) {
+	t.Helper()
+	g := askRig(t, 60, height, askOne)
+	g.press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want the review screen", g.m.Screen())
+	}
+	// The page opens held above its window by a lead the first draw settles: the
+	// check, run before that draw, leaves it as it was.
+	opened := *g.m.top()
+	g.m.askDrawn("r1-f1", "")
+	if after := *g.m.top(); after != opened {
+		t.Fatalf("the check moved the screen before its first draw: %+v became %+v", opened, after)
+	}
+	for i := 0; i < 80; i++ {
+		view := g.view()
+		want := strings.Contains(readWords(view), readWords(wholeAskText))
+		before := *g.m.top()
+		got, onPage := g.m.askDrawn("r1-f1", g.m.notice)
+		if got != want || !onPage {
+			t.Fatalf("scrolled %d lines: the check says whole %v on the page %v, the screen holds the ask whole: %v:\n%s", i, got, onPage, want, view)
+		}
+		if after := *g.m.top(); after != before {
+			t.Fatalf("the check moved the screen: %+v became %+v", before, after)
+		}
+		if got {
+			whole++
+		} else {
+			cut++
+		}
+		g.press("down")
+	}
+	if got, onPage := g.m.askDrawn("r1-f9", ""); got || onPage {
+		t.Errorf("an ask the page lacks is whole: %v, on the page: %v", got, onPage)
+	}
+	return whole, cut
+}
+
+// TestAskOnAScreenThatDoesNotDrawItIsNotShown: k and d on a screen with no line
+// of the ask say to open the ticket, not to make the screen taller.
+func TestAskOnAScreenThatDoesNotDrawItIsNotShown(t *testing.T) {
+	t.Parallel()
+	g := askRig(t, 80, 60, askOne)
+	g.press("esc", "down") // the project's list, the cursor moved to JIG-2
+	if got := g.m.targetTicket(); got != "JIG-2" {
+		t.Fatalf("the cursor is on %q:\n%s", got, g.view())
+	}
+	g.press("d")
+	if got := triaged(g); len(got) != 0 {
+		t.Errorf("d on a screen that draws no ask ran %q", got)
+	}
+	if want := "ask r1-f1 is not shown on this screen: open JIG-2 to read it"; g.m.notice != want {
+		t.Errorf("notice = %q, want %q", g.m.notice, want)
 	}
 }
 
