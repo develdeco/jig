@@ -15,9 +15,9 @@ import (
 // sub-step's "took" and the open sub-step's run time all read its answer, so a
 // number shown in two places is the same number.
 
-// workRef names where work was counted: a sub-step by its step and key, or a
-// step's own time by its step and the key "" (the time between its sub-steps,
-// and the calls no sub-step held).
+// workRef names where work was counted: a sub-step by its step and key. A step
+// with no sub-step to count in (the key "") is the one place a gap can land
+// without one.
 type workRef struct {
 	step int
 	key  string
@@ -29,7 +29,7 @@ type workTimes map[workRef]time.Duration
 // of is the work of the sub-step key of step; "" for the step's own.
 func (w workTimes) of(step int, key string) time.Duration { return w[workRef{step, key}] }
 
-// ofStep is the work of step: its own and its sub-steps' added up.
+// ofStep is the work of step: its sub-steps' added up.
 func (w workTimes) ofStep(step int) time.Duration {
 	var d time.Duration
 	for r, v := range w {
@@ -75,8 +75,14 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 			key := workKey(lines, i)
 			gap := at.Sub(prev)
 			for _, x := range waits {
-				if x.step == p.step && !x.standing() {
+				switch {
+				case x.step != p.step:
+				case !x.standing():
 					gap -= overlap(prev, at, x.start, x.end)
+				case x.key == key:
+					// A wait that still stands, and a line of its own sub-step
+					// closes the gap: the decision of one of several asks.
+					gap -= overlap(prev, at, x.start, m.now())
 				}
 			}
 			if gap > liveWindow {
@@ -109,8 +115,9 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 }
 
 // workKey is the sub-step the work that ends at lines[i] is counted in: the one
-// the line belongs to, and for a call placed in its step alone (one that led to
-// the next line) the sub-step of the next line of the step.
+// the line belongs to, and for a line placed in its step alone the sub-step of
+// the next line of the step that names one (a call that led to it), else of the
+// latest before it: no time is the step's own.
 func workKey(lines []placedLine, i int) string {
 	if lines[i].key != "" || lines[i].step < 0 {
 		return lines[i].key
@@ -121,6 +128,12 @@ func workKey(lines []placedLine, i int) string {
 		}
 		if x.step >= 0 && x.step != lines[i].step {
 			break
+		}
+	}
+	// No sub-step follows it: the work closes into the one before.
+	for j := i - 1; j >= 0; j-- {
+		if lines[j].step == lines[i].step && lines[j].key != "" {
+			return lines[j].key
 		}
 	}
 	return ""

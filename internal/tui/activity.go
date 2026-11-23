@@ -253,6 +253,8 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "asks"
 	case journal.EventFixSlice:
 		return "fixes"
+	case journal.EventFinalOracle:
+		return subFinal
 	case journal.EventPrBody, journal.EventPublishPicks:
 		return "body"
 	case journal.EventPublishApproved:

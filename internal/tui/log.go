@@ -303,6 +303,11 @@ func isWaitKey(key string) bool { return key == "approved" || key == "approval" 
 // waitLine says the sub-step key of step is one that waits for a person or the
 // host: a line of it ends the wait, and explains no call made while it stood.
 func waitLine(d phase.Ticket, step int, key string) bool {
+	if step == stepReview && key == "asks" {
+		// A decision ends the wait for the asks, whatever state the asks are in
+		// or whether the round that left them has folded them away.
+		return true
+	}
 	for _, s := range d.Phases[step].Subs {
 		if s.Key == key {
 			// A sub-step that waits and is not the person's turn (an approval

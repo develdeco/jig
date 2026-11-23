@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -93,7 +94,69 @@ func TestAStepRowIsTheSumOfItsSubSteps(t *testing.T) {
 	if sum, row := sumOf(b, stepBuild); sum != row || row != 2*time.Minute {
 		t.Errorf("the build's slices add up to %v and its row says %v, want 2m both", sum, row)
 	}
-	_ = phase.Build
+
+	// The ticket's last run, after the review, is a sub-step of the build of
+	// its own, and no time goes to the step's own key.
+	f := newRig(t, "JIG-2")
+	atClock(f, "2026-10-23T09:30:00Z")
+	f.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+	f.feed(jig2()...)
+	f.feed(
+		toolOn("JIG-2", at(13, 31), "s-main", "jig verify JIG-2 --final", said("Run the final check")),
+		jl(at(13, 35), "JIG-2", "", journal.EventFinalOracle, with("", sha('c'), "pass", "", "", ""), func(l *journal.Line) { l.Seconds = 240 }),
+		jl(at(13, 36), "JIG-2", "", journal.EventEnvDown),
+	)
+	tk := f.m.w.tickets["JIG-2"]
+	d := f.m.phaseOf(tk)
+	c := f.m.clocks(tk, d)
+	var sum time.Duration
+	final := false
+	for _, s := range d.Of(phase.Build).Subs {
+		sum += c.work.of(stepBuild, s.Key)
+		final = final || (s.Key == "final" && s.Label == "final run" && s.Detail == "passed" && c.work.of(stepBuild, s.Key) > 0)
+	}
+	if !final || c.work.of(stepBuild, "") != 0 || sum != f.m.steps(tk)[stepBuild].took {
+		t.Errorf("the build: final run present %v, the step's own time %v, sub-steps add up to %v, row says %v", final, c.work.of(stepBuild, ""), sum, f.m.steps(tk)[stepBuild].took)
+	}
+}
+
+// TestTheAsksWaitIsNeverReviewWork: the asks a round left wait for the person
+// from the round's close to the decision of the last of them, and nothing in it
+// is work: not a call of a session in between, not the time before one of
+// several is decided, not a run of decisions that ends the review's lines.
+func TestTheAsksWaitIsNeverReviewWork(t *testing.T) {
+	t.Parallel()
+	read := func(status string, lines []events.Envelope, now string) (*rig, waitSpan) {
+		g := newRig(t, "JIG-2")
+		atClock(g, now)
+		g.r.answer("status JIG-2 --store /s", status, 0)
+		g.feed(lines...)
+		tk := g.m.w.tickets["JIG-2"]
+		w, _ := g.m.clocks(tk, g.m.phaseOf(tk)).waitOf(stepReview, "asks")
+		return g, w
+	}
+	review := func(g *rig) string { return g.m.steps(g.m.w.tickets["JIG-2"])[stepReview].Took }
+
+	// (a) a session calls before the first decision.
+	lines := append(append([]events.Envelope{}, jig2()...),
+		toolOn("JIG-2", at(11, 32), "s-main", "jig next JIG-2"),
+		toolOn("JIG-2", at(11, 59), "s-main", "jig triage JIG-2"))
+	g, w := read(statusJIG2Done(), lines, "2026-10-23T09:20:00Z")
+	if got := review(g); got != "1m 55s" || w.end.Sub(w.start) != 35*time.Second {
+		t.Errorf("(a) the review took %q, its asks waited %v, want 1m 55s and 35s", got, w.end.Sub(w.start))
+	}
+
+	// (b) one ask decided and one still open: the open one still waits.
+	g, _ = read(statusJIG2(), jig2()[:5], "2026-10-23T09:12:30Z")
+	if got := review(g); got != "30s" {
+		t.Errorf("(b) the review took %q with an ask still open, want 30s", got)
+	}
+
+	// (c) the decisions are the review's latest lines.
+	g, w = read(statusJIG2Done(), jig2()[:6], "2026-10-23T09:12:30Z")
+	if got := review(g); got != "30s" || w.end.Sub(w.start) != 35*time.Second {
+		t.Errorf("(c) the review took %q, its asks waited %v, want 30s and 35s", got, w.end.Sub(w.start))
+	}
 }
 
 // TestTheAsksWaitClosesWhenTheAsksAreDecided: the asks a round left waited for
