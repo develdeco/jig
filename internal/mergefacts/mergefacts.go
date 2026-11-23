@@ -94,6 +94,26 @@ func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
 	return m, nil
 }
 
+// Cached is a reader of the same project that asks the host nothing: a pull
+// request is in the state this reader's cache holds of it, or in none (so its
+// state reads unknown, never open). A reader whose pull requests are not a
+// PRCache reads none; the facts it has read are kept. It is for a listing that states where each of many
+// tickets stands without a host call for each.
+func (r *Reader) Cached() *Reader {
+	c := &Reader{Store: r.Store, Cfg: r.Cfg, Clones: r.Clones}
+	// What this reader already read stands: a fact just read is not read again.
+	if len(r.memo) > 0 {
+		c.memo = make(map[string]ready.Merge, len(r.memo))
+		for k, m := range r.memo {
+			c.memo[k] = m
+		}
+	}
+	if cache, ok := r.PRs.(*PRCache); ok {
+		c.PRs = cachedOnly{cache}
+	}
+	return c
+}
+
 func (r *Reader) remember(key string, m ready.Merge) {
 	if r.memo == nil {
 		r.memo = map[string]ready.Merge{}

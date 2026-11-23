@@ -150,6 +150,11 @@ type navEntry struct {
 	// scroll is how many lines a page with no row to stand on is moved up, so a
 	// screen longer than its window can be read to its end.
 	scroll int
+	// lead is how many lines a page with rows is held above the window its
+	// cursor gives, so the lines above the first row can be read: set high when
+	// a screen opens at its top, raised by a move up from the first row, and
+	// cleared by any move of the cursor.
+	lead int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -218,6 +223,9 @@ type Model struct {
 	headKnown   bool
 	rosterStale bool
 	lastRoster  time.Time
+	// rosterEnded is when the last list read came back: the spacing between
+	// reads counts from it, so a slow list is never read again at once.
+	rosterEnded time.Time
 	// followNew is set while screens opened on no ticket wait to open the
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
@@ -397,7 +405,7 @@ func (m *Model) onIdle() tea.Cmd {
 // still sees it through its idle status read.
 func (m *Model) onStoreIdle() tea.Cmd {
 	m.readHead()
-	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.lastRoster) < m.idleAfter {
+	if !m.rosterStale || m.rosterBusy || m.now().Sub(m.rosterEnded) < m.idleAfter {
 		return nil
 	}
 	cmds := []tea.Cmd{m.loadRoster()}
@@ -694,6 +702,7 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 
 func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
 	m.rosterBusy = false
+	m.rosterEnded = m.now()
 	if msg.err != nil {
 		m.rosterFails++
 		if m.rosterFails < readRetries {
@@ -877,12 +886,38 @@ func (m *Model) move(delta int) {
 		return
 	}
 	e.follow = false
+	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
+	switch {
+	case delta <= -(1 << 19):
+		// Home: the first row, with the page held at its top.
+		e.sel, e.lead = 0, 1<<20
+		return
+	case delta >= 1<<19:
+		e.sel, e.lead = n-1, 0
+		return
+	case e.lead > 0 || (delta < 0 && e.sel == 0):
+		// A page held above its cursor's window is read a line at a time, from
+		// whatever row the cursor is on, until it is back at the window; and
+		// up from the first row moves the page above it. The window clamps lead
+		// to the lines there are, so the first move after a screen opened at
+		// its top starts at once.
+		if delta < 0 {
+			e.lead = min(e.lead-delta, 1<<20)
+		} else {
+			e.lead = max(0, e.lead-delta)
+		}
+		return
+	}
+	was := e.sel
 	e.sel += delta
 	if e.sel >= n {
 		e.sel = n - 1
 	}
 	if e.sel < 0 {
 		e.sel = 0
+	}
+	if e.sel != was {
+		e.lead = 0
 	}
 }
 
@@ -919,7 +954,31 @@ func (m *Model) selected() *rowRef {
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
+	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+		// A row the window does not show is not under the cursor: a key that
+		// acts on it would decide what its person cannot see.
+		return nil
+	}
 	return &refs[sel]
+}
+
+// rowShown says whether the sel-th selectable row of the page on top is in the
+// window the screen draws.
+func (m *Model) rowShown(sel int) bool {
+	pg := m.page()
+	h := m.bodyRows()
+	start := m.windowStart(pg, sel, h, false)
+	n := 0
+	for i, l := range pg.lines {
+		if l.ref == nil {
+			continue
+		}
+		if n == sel {
+			return i >= start && i < start+h
+		}
+		n++
+	}
+	return false
 }
 
 // open goes into the row under the cursor.
@@ -957,6 +1016,8 @@ func (m *Model) open() tea.Cmd {
 	if next.screen == screenReview {
 		// What the review screen is for, when something waits, is deciding it.
 		m.top().sel = m.askRow(ref)
+		// The page opens at its top, so the rounds are read before the rows.
+		m.top().lead = 1 << 20
 	}
 	var cmds []tea.Cmd
 	if next.screen == screenChart {

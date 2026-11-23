@@ -78,7 +78,7 @@ func TestTUIShowsTheStoreAndEndsOnQ(t *testing.T) {
 
 	keys, out, wait := startTUI(t, e)
 	out.until(t, T)
-	out.until(t, "slice a is being built")
+	out.until(t, "Build: 0 of 4 green") // the digest's words, from the roster
 	if got := out.String(); strings.Contains(got, "\x1b") {
 		t.Errorf("a pipe got an escape sequence:\n%q", got)
 	}

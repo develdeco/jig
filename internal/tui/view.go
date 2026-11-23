@@ -146,9 +146,11 @@ func (m *Model) bodyRows() int {
 	return h
 }
 
-// window renders the page lines that fit in h rows with the sel-th
-// selectable row in view, marking that row.
-func (m *Model) window(pg page, sel, h, w int) []string {
+// windowStart is the first page line a window of h rows shows with the sel-th
+// selectable row in view, then moved up by what the page is held above it
+// (lead). With clamp, lead is cut to the lines there are above the window, so a
+// page opened at its top lessens what is held as it is read down.
+func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	selLine, n := 0, 0
 	for i, l := range pg.lines {
 		if l.ref == nil {
@@ -177,6 +179,21 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 			start = max(0, min(m.top().scroll, len(pg.lines)-h))
 		}
 	}
+	if n > 0 {
+		lead := m.top().lead
+		if clamp {
+			lead = min(lead, start)
+			m.top().lead = lead
+		}
+		start = max(0, start-lead)
+	}
+	return start
+}
+
+// window renders the page lines that fit in h rows with the sel-th
+// selectable row in view, marking that row.
+func (m *Model) window(pg page, sel, h, w int) []string {
+	start := m.windowStart(pg, sel, h, true)
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -231,6 +248,11 @@ func (m *Model) header(w int) []string {
 		idCrumb = crumbs
 		if t != nil && t.title != "" {
 			title = t.title
+		}
+		if t != nil && e.screen == screenTicket {
+			if k := t.digest.kindWords(); k != "" {
+				crumbs += "  " + m.st.dim(k)
+			}
 		}
 		switch e.screen {
 		case screenBrief:

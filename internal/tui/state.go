@@ -40,6 +40,9 @@ type world struct {
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart
 	chartOrder []string
+	// rosterRead is set once the ticket list has been read: until then the
+	// screens do not know what the store holds, and say they are reading.
+	rosterRead bool
 }
 
 func newWorld() *world {
@@ -87,8 +90,9 @@ func (w *world) setCharts(listed []chartListing) {
 type ticket struct {
 	id    string
 	title string
-	// rosterState is the state `jig next` gave the ticket (ready, blocked, ...).
-	rosterState string
+	// digest is where `jig next --json` says the ticket stands: the one source
+	// of the words of its phases. nil until the roster that lists it is read.
+	digest *digestInfo
 	// lines are the journal lines, by instant.
 	lines []events.Envelope
 	// ledger are the machine ledger lines about the ticket, newest last.
@@ -198,7 +202,7 @@ func (w *world) setRoster(rows []rosterRow) {
 	order := make([]string, 0, len(rows)+len(w.order))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.rosterState, t.blockers = r.Title, r.State, r.Blockers
+		t.title, t.blockers, t.digest = r.Title, r.Blockers, r.Digest
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
@@ -209,6 +213,7 @@ func (w *world) setRoster(rows []rosterRow) {
 		}
 	}
 	w.order = order
+	w.rosterRead = true
 }
 
 // insertSorted puts e among lines by instant, after any line of the same
@@ -254,6 +259,7 @@ func short(sha string) string {
 type rosterRow struct {
 	ID, Title, State string
 	Blockers         []chartWait
+	Digest           *digestInfo
 }
 
 // latest is the position of the last line of the ticket whose event is one
@@ -280,20 +286,6 @@ var buildEventNames = []string{
 	journal.EventOracle, journal.EventVerified, journal.EventVerifyError, journal.EventQuestion,
 	journal.EventAnswer, journal.EventStall, journal.EventRequeue, journal.EventResult,
 	journal.EventFixSlice, journal.EventSliceAdd,
-}
-
-// sliceIDsFromLines are the slices the journal names, in order of first
-// appearance.
-func (t *ticket) sliceIDsFromLines() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, l := range t.lines {
-		if l.Slice != "" && !seen[l.Slice] {
-			seen[l.Slice] = true
-			out = append(out, l.Slice)
-		}
-	}
-	return out
 }
 
 // questionRow is a question the builder asked and, once there is one, its
@@ -542,20 +534,17 @@ var relevantSliceEvents = []string{
 	journal.EventStall, journal.EventRequeue, journal.EventNote,
 }
 
-// slices are the ticket's slices: the store's list when a status has been
-// read (its states are the store's), else the slices the journal names.
+// slices are the ticket's slices as the store's status lists them, and none
+// before a status has been read: the screens guess no slice from the lines. Until
+// then the counts of the digest stand for them (sliceCounts).
 func (t *ticket) slices(zone *time.Location) []sliceRow {
 	var out []sliceRow
-	if t.status != nil && len(t.status.Slices) > 0 {
+	if t.status != nil {
 		for _, s := range t.status.Slices {
 			out = append(out, sliceRow{
 				ID: s.ID, State: s.State, BlockedBy: s.BlockedBy, Question: s.Question, Attempts: s.Attempts,
 				Workspace: s.Workspace, Oracle: s.Oracle, FromGate: s.FromGate,
 			})
-		}
-	} else {
-		for _, id := range t.sliceIDsFromLines() {
-			out = append(out, sliceRow{ID: id, State: t.guessSliceState(id)})
 		}
 	}
 	for i := range out {
@@ -575,27 +564,27 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 	return out
 }
 
-// guessSliceState is the state of a slice from its lines alone, for a ticket
-// whose status has not been read: verified means green, a question nobody
-// answered means needs-input, a stall since the last claim means stalled, a
-// claim means building.
-func (t *ticket) guessSliceState(slice string) string {
-	v := t.latest(slice, journal.EventVerified)
-	q := t.latest(slice, journal.EventQuestion)
-	a := t.latest(slice, journal.EventAnswer)
-	stall := t.latest(slice, journal.EventStall)
-	claim := t.latest(slice, journal.EventClaim, journal.EventDispatch, journal.EventRequeue)
-	switch {
-	case q >= 0 && q > a && q > v:
-		return StateNeedsInput
-	case stall >= 0 && stall > claim && stall > v:
-		return StateStalled
-	case v >= 0 && v > claim:
-		return StateGreen
-	case claim >= 0 || t.latest(slice, journal.EventVerifyPending, journal.EventOracle) >= 0:
-		return StateBuilding
+// sliceCounts is how many of the ticket's slices are in each state, and how
+// many it has: the status's list once it has been read, else the digest's
+// counts, which come from the same facts. A slice the store holds building
+// counts as failed when its last covering run judged the code and failed it; one
+// whose run was stopped before it could judge is still being built.
+func (t *ticket) sliceCounts(zone *time.Location) (counts map[string]int, n int) {
+	counts = map[string]int{}
+	if t.status != nil {
+		rows := t.slices(zone)
+		for _, r := range rows {
+			counts[r.State]++
+		}
+		return counts, len(rows)
 	}
-	return StateQueued
+	if d := t.digest; d != nil && d.Slices != nil {
+		s := d.Slices
+		counts[StateGreen], counts[StateQueued], counts[StateNeedsInput], counts[StateFail] = s.Green, s.Queued, s.NeedsInput, s.Failed
+		counts[StateBuilding] = s.Building + s.Stopped
+		return counts, s.Total
+	}
+	return counts, 0
 }
 
 // describe is one line's account of itself.

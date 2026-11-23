@@ -93,6 +93,19 @@ func derivePhaseStacked(st *store.Store, ticket string, merges mergeSource, plan
 	return derivePhaseStackedFor(st, ticket, merges, plan, "")
 }
 
+// derivePhaseStackedLines is derivePhaseStacked that also gives the journal
+// lines it read, for a caller that reads the same ticket's lines for more (the
+// roster's digest) and would otherwise parse them again.
+func derivePhaseStackedLines(st *store.Store, ticket string, merges mergeSource, plan stack.Plan) (phase.Ticket, []journal.Line, error) {
+	f, lines, err := phaseFactsWith(st, ticket, merges, "")
+	if err != nil {
+		return phase.Ticket{}, nil, err
+	}
+	f.Restacks = restackAsks(plan)
+	f.MergedOnHost = mergedOnHost(merges, f, lines, "")
+	return phase.Derive(f, lines), lines, nil
+}
+
 // derivePhaseStackedFor is derivePhaseStacked read for a chart's issue.
 func derivePhaseStackedFor(st *store.Store, ticket string, merges mergeSource, plan stack.Plan, issue string) (phase.Ticket, error) {
 	f, lines, err := phaseFactsWith(st, ticket, merges, issue)

@@ -233,7 +233,7 @@ func statusJIG2() string {
 // roundColumns and findingColumns are the columns of `jig status`'s rounds and
 // findings tables.
 var (
-	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files"}
+	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed", "probes", "survived", "skipped", "unprobed"}
 	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by"}
 )
 
@@ -270,12 +270,37 @@ func statusJIG2DoneWith(body, changelog string) string {
 	}, "\n") + "\n"
 }
 
-// rosterJSON is `jig next --json` for the store: JIG-3 is not started.
+// digestJSON is a ticket's digest as `jig next --json` prints it: the phases in
+// order, each "state|text", the phase the ticket stands at and whether it can
+// start.
+func digestJSON(current string, ready bool, phases ...string) map[string]any {
+	names := []string{"brief", "build", "review", "publish", "land"}
+	rows := make([]map[string]string, 0, len(phases))
+	for i, p := range phases {
+		state, text, _ := strings.Cut(p, "|")
+		rows = append(rows, map[string]string{"name": names[i], "state": state, "text": text})
+	}
+	return map[string]any{"kind": "task", "current": current, "ready": ready, "phases": rows, "prs": []any{}}
+}
+
+// draftedDigest is the digest of a ticket whose brief is drafted and waits for
+// its approval.
+func draftedDigest() map[string]any {
+	return digestJSON("brief", false, "current|drafted · waiting for your approval", "pending|after the brief", "pending|after the build",
+		"pending|after a clean review", "pending|after the publish")
+}
+
+// rosterJSON is `jig next --json` for the store: JIG-1 is in its build, JIG-2
+// published and waits for a merge, JIG-3 has a brief waiting for its approval.
 func rosterJSON() string {
 	data, _ := json.Marshal(map[string]any{"tickets": []map[string]any{
-		{"id": "JIG-1", "title": "Greeting copy", "state": "ready"},
-		{"id": "JIG-2", "title": "Config loader", "state": "ready"},
-		{"id": "JIG-3", "title": "Release notes", "state": "blocked"},
+		{"id": "JIG-1", "title": "Greeting copy", "state": "ready", "digest": digestJSON("build", true,
+			"done|approved by an agent, as Ada Lovelace · 4 sections, 4 slices", "current|1 of 4 green · slice c needs your answer",
+			"pending|after the build", "pending|after a clean review", "pending|after the publish")},
+		{"id": "JIG-2", "title": "Config loader", "state": "ready", "digest": digestJSON("land", false,
+			"done|no brief on record", "done|1 slice green, each verified by jig", "done|round 2 clean · by reviewer",
+			"done|pull request opened · https://example.test/acme/demo/pull/7", "current|waits for a merge")},
+		{"id": "JIG-3", "title": "Release notes", "state": "blocked", "digest": draftedDigest()},
 	}})
 	return string(data) + "\n"
 }
@@ -341,6 +366,52 @@ type rig struct {
 	m       *Model
 	r       *fakeRunner
 	started bool
+	// synced is, for each ticket whose digest the rig made, what it was made
+	// from; pinned are the digests (and roster states) a test fixed, which the
+	// rig keeps as they are.
+	synced map[string]syncedFrom
+	pinned map[string]*digestInfo
+}
+
+// pin fixes the digest the roster gives ticket id, whatever its lines show.
+func (g *rig) pin(id string, d *digestInfo) {
+	if g.pinned == nil {
+		g.pinned = map[string]*digestInfo{}
+	}
+	g.pinned[id] = d
+}
+
+// syncedFrom is what a ticket's digest was derived from: how many lines it had
+// and the status it had read.
+type syncedFrom struct {
+	lines  int
+	status *statusInfo
+}
+
+// syncDigests plays `jig next`, which the screens read again when the store
+// moves: a ticket the stream or a status has told something of takes the digest
+// derived from the facts the model holds of it, so a fixture is worded by what
+// it says, as the verb would word it. A ticket with neither keeps what the
+// roster read gave it.
+func (g *rig) syncDigests() {
+	if g.synced == nil {
+		g.synced = map[string]syncedFrom{}
+	}
+	for id, t := range g.m.w.tickets {
+		if d, ok := g.pinned[id]; ok {
+			t.digest = d
+			continue
+		}
+		if len(t.lines) == 0 && t.status == nil {
+			continue
+		}
+		from := syncedFrom{len(t.lines), t.status}
+		if got, ok := g.synced[id]; ok && got == from && t.digest != nil {
+			continue
+		}
+		g.synced[id] = from
+		t.digest = fakeDigest(g.m, t)
+	}
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a
@@ -377,6 +448,7 @@ func (g *rig) send(msg tea.Msg) {
 	g.t.Helper()
 	_, cmd := g.m.Update(msg)
 	g.settle(cmd)
+	g.syncDigests()
 }
 
 // settle runs cmd and every command its messages start, to the end.
@@ -539,4 +611,125 @@ func TestBriefScreenNeverWordsAnAlreadyWordedApprovalAgain(t *testing.T) {
 			t.Errorf("approver for %q = %q, want %q", c.by, got, c.want)
 		}
 	}
+}
+
+// fakeDigest is the digest of t as jig derives it from the facts of its journal
+// and its status.
+func fakeDigest(m *Model, t *ticket) *digestInfo {
+	var f phase.Facts
+	var lines []journal.Line
+	if t.status != nil {
+		f, lines = m.factsOf(t, t.status)
+	} else {
+		f, lines = journalFacts(m, t)
+	}
+	d := phase.Derive(f, lines)
+	dg := &digestInfo{Kind: "task", Current: string(d.Current), Ready: d.Ready}
+	for _, p := range d.Phases {
+		dg.Phases = append(dg.Phases, digestPhase{Name: string(p.Name), State: p.State, Text: p.Text})
+	}
+	dg.Slices = &digestSlices{Total: len(f.Slices)}
+	for _, sl := range f.Slices {
+		switch {
+		case sl.OpenQuestion || sl.State == StateNeedsInput:
+			dg.Slices.NeedsInput++
+		case sl.State == StateGreen:
+			dg.Slices.Green++
+		case sl.State == StateBuilding:
+			dg.Slices.Building++
+		case sl.State == StateQueued:
+			dg.Slices.Queued++
+		}
+	}
+	return dg
+}
+
+// journalFacts are the facts of a ticket whose status nobody read, as its
+// journal shows them: the slices it names in the states it gives them, and an
+// approval line as the brief's.
+func journalFacts(m *Model, t *ticket) (phase.Facts, []journal.Line) {
+	lines := make([]journal.Line, len(t.lines))
+	for i, l := range t.lines {
+		lines[i] = l.Line
+	}
+	f := phase.Facts{
+		Ticket:      t.id,
+		Open:        phase.OpenRoundIn(lines),
+		Published:   t.publish().Done,
+		SessionName: func(session, role string) string { return m.whoWithAs(t, session, role) },
+		ReviewerName: func(session string, round int, detailed bool) string {
+			if detailed {
+				return m.reviewerWho(t, session, round, "", nil)
+			}
+			return m.reviewerRole(t, session, round)
+		},
+	}
+	for _, id := range t.sliceIDsFromLines() {
+		state := t.guessSliceState(id)
+		if f.Published && !touchedSincePublish(t, id) {
+			state = "green"
+		}
+		f.Slices = append(f.Slices, phase.Slice{ID: id, State: state, FromGate: t.fixRound(id), Fix: t.isFixSlice(id), OpenQuestion: len(t.openQuestions(m.zone, id)) > 0})
+	}
+	if i := t.latest("", journal.EventApproval); i >= 0 {
+		f.BriefExists, f.Approval = true, phase.ApprovalCurrent
+		f.ApprovedBy, f.ApprovedHow = personName(t.lines[i].Summary), t.lines[i].Provenance
+	}
+	if len(f.Slices) == 0 && len(t.stepLines(stepReview)) > 0 {
+		f.Adopted = true
+	}
+	return f, lines
+}
+
+// touchedSincePublish says a line of slice id comes after the last publish-done.
+func touchedSincePublish(t *ticket, id string) bool {
+	last := -1
+	for i, l := range t.lines {
+		if l.Event == journal.EventPublishDone {
+			last = i
+		}
+	}
+	for _, l := range t.lines[last+1:] {
+		if l.Slice == id {
+			return true
+		}
+	}
+	return false
+}
+
+// sliceIDsFromLines are the slices the journal names, in order of first
+// appearance.
+func (t *ticket) sliceIDsFromLines() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range t.lines {
+		if l.Slice != "" && !seen[l.Slice] {
+			seen[l.Slice] = true
+			out = append(out, l.Slice)
+		}
+	}
+	return out
+}
+
+// guessSliceState is the state of a slice from its lines alone, for a ticket
+// whose status has not been read: verified means green, a question nobody
+// answered means needs-input, a stall since the last claim means stalled, a
+// claim means building. The fixtures use it to word what jig would.
+func (t *ticket) guessSliceState(slice string) string {
+	v := t.latest(slice, journal.EventVerified)
+	q := t.latest(slice, journal.EventQuestion)
+	a := t.latest(slice, journal.EventAnswer)
+	stall := t.latest(slice, journal.EventStall)
+	claim := t.latest(slice, journal.EventClaim, journal.EventDispatch, journal.EventRequeue)
+	switch {
+	case q >= 0 && q > a && q > v:
+		return StateNeedsInput
+	case stall >= 0 && stall > claim && stall > v:
+		return StateStalled
+	case v >= 0 && v > claim:
+		return StateGreen
+	case claim >= 0 || t.latest(slice, journal.EventVerifyPending, journal.EventOracle) >= 0:
+		return StateBuilding
+	}
+	return StateQueued
 }

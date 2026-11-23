@@ -706,8 +706,14 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 			return GateReport{}, err
 		}
 		report.Probes = len(probes)
-		report.Unprobed = len(unprobedHunks(coverHunks(round.Review.Hunks, result.Probes, result.Skipped)))
-		if err := writeReviewerRound(d, ticket, n, report, report.Scope, result.ReviewedPaths, routed, cleared, result.Summary, probes, skips); err != nil {
+		left := unprobedHunks(coverHunks(round.Review.Hunks, result.Probes, result.Skipped))
+		report.Unprobed = len(left)
+		// Never nil: an empty list says the round recorded that it left none.
+		unprobed := make([]UnprobedHunk, 0, len(left))
+		for _, h := range left {
+			unprobed = append(unprobed, UnprobedHunk{File: h.File, From: h.From, To: h.To})
+		}
+		if err := writeReviewerRound(d, ticket, n, report, report.Scope, result.ReviewedPaths, routed, cleared, result.Summary, probes, skips, unprobed); err != nil {
 			return GateReport{}, err
 		}
 		event := journal.EventGateRound

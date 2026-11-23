@@ -57,6 +57,9 @@ func (m *Model) ticketPage(id string) page {
 		p.boxRow(rowRef{kind: s.Kind, ticket: id}, m.stepLine(s, i == cur))
 	}
 	p.boxEnd()
+	if line := m.landLine(t); line != "" {
+		p.add(line)
+	}
 
 	// What follows the sub-steps: the rows that wait for a person, whose
 	// cursor places come after the steps'. There is no line of what to run

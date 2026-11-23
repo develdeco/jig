@@ -159,6 +159,9 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
+	case r.t == nil || r.t.digest == nil:
+		// The roster has not listed the ticket: nothing of it is known.
+		return m.st.dim(readingText), true
 	case r.behind:
 		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
@@ -167,8 +170,8 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 		return m.st.state(StatePublished, "published"), true
 	case len(r.waits) > 0:
 		return m.st.dim(waitNote(r.waits[0])), true
-	case r.verb != nil && r.verb.Ready:
-		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.verb.Phase+" next"), true
+	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
+		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
 	case r.t != nil:
 		return m.ticketDetail(r.t, r.steps), false
 	}

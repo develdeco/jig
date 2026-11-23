@@ -56,7 +56,7 @@ func TestAChartThatEndsAtAMergeIsReadAgainOnTheTimer(t *testing.T) {
 		}
 	}
 	_, status := chartTickets()
-	answerChart(g, chartRoster(checkoutListing()), "checkout", withoutEnds(), status)
+	answerChart(g, mergedRoster(), "checkout", withoutEnds(), status)
 	g.send(mergeMsg{})
 	if v := g.view(); strings.Contains(v, mergeWaitText) {
 		t.Errorf("the screen still shows the wait after a read that lists no end:\n%s", v)

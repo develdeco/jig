@@ -37,8 +37,8 @@ const claimSlack = time.Minute
 // ticket stands. A hold weighs 0 so a short screen gives up slice rows before
 // it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {
-	if r.t == nil {
-		return []runRow{{"state", m.st.dim("not read yet"), 0}}
+	if r.t == nil || r.t.digest == nil {
+		return []runRow{{"state", m.st.dim(readingText), 0}}
 	}
 	var rows []runRow
 	subs := r.d.Of(phase.Build).Subs
@@ -67,8 +67,7 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 }
 
 // chartStateWord is where the ticket of r stands, in the words of a header: its
-// current step in its state, from the row's own steps, which follow the verb
-// (followVerb), and not from the screens' derivation alone as stepLabel's do. A
+// current step in its state, from the row's own steps, which are its digest's. A
 // ticket that is behind owes a merge and a publish, and is not said to be
 // published.
 func chartStateWord(r chartRow) string {
