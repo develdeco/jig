@@ -47,8 +47,8 @@ func TestAClaimIsReadPastACompactionOnlyAsFarAsALongRun(t *testing.T) {
 }
 
 // TestAStopAfterItsSlicesVerificationIsPlacedByTheClaim: a builder verifies
-// its slice and then stops; the verification ends the claim for its calls, not
-// for the stop that places it.
+// its slice and then stops; the verification ends nothing, so the stop is
+// placed by the claim.
 func TestAStopAfterItsSlicesVerificationIsPlacedByTheClaim(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
@@ -56,7 +56,7 @@ func TestAStopAfterItsSlicesVerificationIsPlacedByTheClaim(t *testing.T) {
 	r.start("startup")
 	r.claimCall("a-1", r.fx.Ticket, "a")
 	r.addTo(r.fx.Ticket, journal.Line{Event: journal.EventVerified, Slice: "a", Session: "s1"})
-	expectTicket(t, "a call after the verification", r.call("a-1", "git status"), "")
+	expectTicket(t, "a call after the verification", r.call("a-1", "git status"), r.fx.Ticket)
 	for i := 0; i < 2; i++ {
 		r.handle(r.ev(KindStop, func(e *Event) { e.Agent = "a-1" }))
 	}

@@ -1,6 +1,9 @@
 package observe
 
 import (
+	"os"
+
+	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,7 +21,7 @@ import (
 //     as a claim call does, or a path under the store's tickets/<T>/ folder
 //     (a drafter's write of the brief).
 //  2. the ticket whose role the call's own agent holds: a claim until its
-//     release or its slice's verification, a review round from `jig review context` to `jig review done`. A
+//     release, its ticket's publish or its agent's stop, a review round from `jig review context` to `jig review done`. A
 //     harness reports the session's directory for a subagent that works in a
 //     worktree of its own, so the directory says nothing of what the agent is
 //     on; its role does.
@@ -187,7 +190,9 @@ func claimWord(cmd string) string {
 				}
 				continue
 			}
-			return strings.Trim(a, `"'`)
+			if a = strings.Trim(a, `"'`); idShaped(a) || locate.RefShaped(a) {
+				return a
+			}
 		}
 	}
 	return ""
@@ -315,7 +320,7 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 			return t, ""
 		}
 		read[t+"\x00"+c.slice] = true
-		if s, held := h.holds(t, c.slice, afterStop); held {
+		if s, held := h.holds(t, c.slice); held {
 			return t, s
 		}
 	}
@@ -341,7 +346,7 @@ func (h *handler) ticketJournal(ticket string) ([]journal.Line, error) {
 // holds reports whether the session holds a claim on ticket that the event's
 // agent made: the slice it names, or when it names none, any claim the ledger
 // says the agent made. It returns the slice held.
-func (h *handler) holds(ticket, slice string, afterStop bool) (string, bool) {
+func (h *handler) holds(ticket, slice string) (string, bool) {
 	lines, err := h.ticketJournal(ticket)
 	if err != nil {
 		h.fail(err)
@@ -350,7 +355,7 @@ func (h *handler) holds(ticket, slice string, afterStop bool) (string, bool) {
 	session := h.session()
 	var held []*journal.Line // the session's claims not released since, oldest first
 	for i, l := range lines {
-		if l.Session != session && l.Event != journal.EventVerified {
+		if l.Session != session && l.Event != journal.EventPr {
 			continue
 		}
 		switch l.Event {
@@ -358,13 +363,12 @@ func (h *handler) holds(ticket, slice string, afterStop bool) (string, bool) {
 			held = append(held, &lines[i])
 		case journal.EventRelease:
 			held = deleteSlice(held, l.Slice)
-		case journal.EventVerified:
-			// The build flow never releases a green slice: a claim ends when
-			// its slice is verified, for the calls after it. The stop that
-			// follows still places the agent.
-			if !afterStop {
-				held = deleteSlice(held, l.Slice)
-			}
+		case journal.EventPr:
+			// A ticket's publish ends every claim on it: where a session's
+			// hand-built work ends, since the build flow never releases a
+			// green slice. A verification ends nothing: the builder's calls
+			// before its next claim are still its slice's.
+			held = nil
 		}
 	}
 	for i := len(held) - 1; i >= 0; i-- {
@@ -427,11 +431,36 @@ func (h *handler) ticketAt(dir string) string {
 	if lead := store.BranchLeadID(branch); lead != "" && h.st.TicketExists(lead) {
 		return lead // its folder says so: no ticket list is read
 	}
+	if lead := store.BranchLeadIssue(branch); lead != "" {
+		return h.trackerOwner(lead)
+	}
 	id, _, err := h.st.TicketForBranch(branch)
 	if err != nil {
 		return ""
 	}
 	return id
+}
+
+// trackerOwner is the ticket the one tracker record of issue number n names,
+// read from its own file: TicketForBranch walks every ticket and tracker file
+// to find it. A store with no GitHub tracker, a number with no record, and a
+// record that names no ticket the store holds are none.
+func (h *handler) trackerOwner(n string) string {
+	if h.cfg.GitHub == nil {
+		return ""
+	}
+	entry := store.TrackerEntry{Provider: store.ProviderGitHub, Scope: strings.ToLower(h.cfg.GitHub.Repo), ID: n}
+	data, err := os.ReadFile(h.st.TrackerRecordPath(entry))
+	if err != nil {
+		return ""
+	}
+	var rec struct {
+		Ticket string `yaml:"ticket"`
+	}
+	if yaml.Unmarshal(data, &rec) != nil || rec.Ticket == "" || !h.st.TicketExists(rec.Ticket) {
+		return ""
+	}
+	return rec.Ticket
 }
 
 // leadingCd is the directory a command line that starts with `cd <dir> &&`

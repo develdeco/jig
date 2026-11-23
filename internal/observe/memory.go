@@ -101,8 +101,9 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 			}
 		}
 		if past {
-			// Before the session's latest start only the claims are read.
-			return true
+			// Before the session's latest start only the claims are read, down
+			// to the start the session began its life with.
+			return l.Event != journal.EventSessionStart || l.Outcome == "resume" || l.Outcome == "compact"
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
 			m.started = at // the walk goes back in time: the last one set is the earliest
