@@ -242,15 +242,24 @@ func (h *handler) bindTicket() (ticket, slice string) {
 		}
 	}
 	if t := h.jigTicketWord(h.ev.Command); t != "" {
-		return t, ""
+		return t, h.heldSlice(t)
 	}
 	if t := h.pathTicket(); t != "" {
-		return t, ""
+		return t, h.heldSlice(t)
 	}
 	if t, s := h.claimBinding(false); t != "" {
 		return t, s
 	}
 	return h.worktreeTicket(), ""
+}
+
+// heldSlice is the slice the event's agent holds on ticket, "" when it holds
+// none there: a call that names its own ticket is under its slice.
+func (h *handler) heldSlice(ticket string) string {
+	if t, s := h.claimBinding(false); t == ticket {
+		return s
+	}
+	return ""
 }
 
 // ticketNamed is the ticket a word of a command names (its id, or an id it
