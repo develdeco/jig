@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/events"
 )
@@ -504,7 +504,8 @@ func outputLines(out string) []string {
 }
 
 // tailLines are the last n lines of the stream the screen is about, one line
-// each, newest last.
+// each, newest first; a stream that does not fit ends with the row that counts
+// the lines the screen kept and does not show.
 func (m *Model) tailLines(w, n int) []string {
 	var envs []events.Envelope
 	e := m.top()
@@ -518,19 +519,9 @@ func (m *Model) tailLines(w, n int) []string {
 					envs = append(append(envs, t.lines...), t.ledger...)
 				}
 			}
-			sort.SliceStable(envs, func(i, j int) bool {
-				a, _ := envs[i].At()
-				b, _ := envs[j].At()
-				return a.Before(b)
-			})
 		}
 	} else if t := m.w.tickets[e.ticket]; t != nil {
 		envs = append(append(envs, t.lines...), t.ledger...)
-		sort.SliceStable(envs, func(i, j int) bool {
-			a, _ := envs[i].At()
-			b, _ := envs[j].At()
-			return a.Before(b)
-		})
 		if e.screen == screenSlice {
 			var only []events.Envelope
 			for _, l := range envs {
@@ -541,12 +532,14 @@ func (m *Model) tailLines(w, n int) []string {
 			envs = only
 		}
 	}
-	if len(envs) > n {
-		envs = envs[len(envs)-n:]
-	}
+	envs = newestFirst(envs, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	envs, older := cutNewest(envs, n)
 	out := make([]string, 0, n)
 	for _, l := range envs {
 		out = append(out, fit("  "+m.tailLine(l, e.screen == screenMain || e.screen == screenChart), w))
+	}
+	if older > 0 {
+		out = append(out, fit("  "+m.olderRow(older), w))
 	}
 	return out
 }

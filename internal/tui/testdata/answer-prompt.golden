@@ -12,10 +12,10 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c: Formal or casual?  q-001
-  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
+  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 8 ─╮
   │  09:02:00 build·c ? builder asks: Formal or casual?                        │
   │  09:01:40 build·b ✖ its oracle failed: TestB: want 2, got 3                │
-  │  09:01:10 build·b · verification requested for bbbbbbb                     │
+  │  ↓ 6 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   slice c asked:

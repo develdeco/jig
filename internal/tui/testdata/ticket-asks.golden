@@ -14,10 +14,10 @@ jig  demo › JIG-2  Config loader                               ! review findin
   needs you
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 4 ─╮
+  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 4 ─╮
   │  09:11:30 review·r1 ! reviewer finished with findings                      │
   │  09:11:00 review·r1 ◎ opened                                               │
-  │  09:10:30 build·a   ● verified ccccccc                                     │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate

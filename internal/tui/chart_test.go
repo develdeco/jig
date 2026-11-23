@@ -762,7 +762,7 @@ func TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines(t *testing.T) {
 		}
 		last = at
 	}
-	for _, want := range []string{"latest 12 of 23", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
+	for _, want := range []string{"latest 11 of 23", "↓ 12 older", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the Activity lacks %q:\n%s", want, v)
 		}

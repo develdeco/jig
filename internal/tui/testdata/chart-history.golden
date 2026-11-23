@@ -25,7 +25,7 @@ jig  demo › checkout  Coupons at checkout                                     
   │  wave 2   JIG-6                                                                                │
   │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                                          │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 12 of 23 ─╮
+  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 11 of 23 ─╮
   │  09:14:25 chart store            · aaaaaaa chart checkout: tighten the destination             │
   │  09:14:21 chart store            · bbbbbbb chart checkout: graduate JIG-8                      │
   │  09:14:21 JIG-4 publish·done     ● finished                                                    │
@@ -37,7 +37,7 @@ jig  demo › checkout  Coupons at checkout                                     
   │  09:13:30 JIG-4 review·r2        ● reviewer finished: clean                                    │
   │  09:13:10 chart store            · eeeeeee chart checkout: graduate JIG-5                      │
   │  09:13:00 JIG-4 review·r2        ◎ opened                                                      │
-  │  09:12:05 JIG-4 review·asks      + you kept r1-f2                                              │
+  │  ↓ 12 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail · r refresh · q quit

@@ -14,11 +14,11 @@ jig  demo › JIG-2  Config loader › 3 review                      ◇ waits t
   asks
   nothing: no finding waits for a person
 
-  ╭─ Review activity ────────────────────────────────────────── latest 4 of 6 ─╮
-  │  09:12:00 - asks · you dismissed r1-f1: not a bug                          │
-  │  09:12:05 + asks · you kept r1-f2                                          │
-  │  09:13:00 ◎ round 2 · opened                                               │
+  ╭─ Review activity ────────────────────────────────────────── latest 3 of 6 ─╮
   │  09:13:30 ● round 2 · reviewer finished: clean                             │
+  │  09:13:00 ◎ round 2 · opened                                               │
+  │  09:12:05 + asks · you kept r1-f2                                          │
+  │  ↓ 3 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · esc back · k keep · d dismiss · g gate · 5 land · t tail · q quit

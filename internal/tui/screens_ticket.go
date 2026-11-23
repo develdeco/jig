@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -435,12 +437,11 @@ func subState(step int, s phase.Sub) string {
 // least, so the newest line and the panel's edge stay on the screen. Each
 // line names the sub-step it advances.
 func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
-	lines := t.stepLines(step)
-	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
+	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	lines, older := cutNewest(all, min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2)))
 	right := ""
-	if n := len(lines); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
-		lines = lines[n-keep:]
+	if older > 0 {
+		right = fmt.Sprintf("latest %d of %d", len(lines), len(all))
 	}
 	p.boxTop(stepNames[step]+" activity", right)
 	if len(lines) == 0 {
@@ -449,6 +450,9 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	labels := m.subLabelsOf(t)
 	for _, l := range lines {
 		p.boxAdd(m.activityLine(t, labels, l))
+	}
+	if older > 0 {
+		p.boxAdd(m.olderRow(older))
 	}
 	p.boxEnd()
 }
