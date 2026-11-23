@@ -23,7 +23,7 @@ jig  demo › checkout  Coupons at checkout                                     
   │  next     say "Continue checkout"                                                              │
   │  wave 1   JIG-8                                                                                │
   │  wave 2   JIG-6                                                                                │
-  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/pull/7 is open         │
+  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                                          │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 12 of 23 ─╮
   │  09:14:25 chart store            · aaaaaaa chart checkout: tighten the destination             │

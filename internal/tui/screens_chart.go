@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/develdeco/jig/internal/phase"
 )
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
@@ -197,7 +199,17 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		next = m.st.dim(info.Reason)
 	}
 	rows := []runRow{{"next", next, 0}}
-	if len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "" {
+	first, then := landingsOf(info)
+	switch {
+	case first != nil:
+		// The run stops at a landing: the person's word is the landing's, not
+		// the run's, and the reason is the landing's state as phase words it.
+		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
+		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
+		for _, l := range then {
+			rows = append(rows, runRow{"", m.st.dim("then " + l.Prompt + ", after " + andList(l.After)), 1})
+		}
+	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
 		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})
 	}
 	if len(info.Briefs) > 0 {
@@ -217,6 +229,27 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
 	}
 	return rows
+}
+
+// landingsOf are the landings of a run that stopped at one: the first the
+// person may ask for now (the first that waits for no other), and the ones after
+// it. Nil when the run is not at a landing stop or no landing is open to ask.
+func landingsOf(info *chartInfo) (first *chartLand, then []chartLand) {
+	if info.Code != phase.CodeChartWaitsLand {
+		return nil, nil
+	}
+	for i := range info.Lands {
+		l := info.Lands[i]
+		if first == nil && len(l.After) == 0 {
+			first = &info.Lands[i]
+			continue
+		}
+		then = append(then, l)
+	}
+	if first == nil {
+		return nil, nil
+	}
+	return first, then
 }
 
 // spendWords is what a chart's run has cost, in the parts the Run panel's row
