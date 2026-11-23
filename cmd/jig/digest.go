@@ -101,7 +101,12 @@ func parentOf(st *store.Store, id string, rec store.Ticket) string {
 func phaseRows(t phase.Ticket) []nextPhaseRow {
 	rows := make([]nextPhaseRow, 0, len(t.Phases))
 	for _, ph := range t.Phases {
-		rows = append(rows, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
+		row := nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text, Changed: ph.Changed}
+		for _, s := range ph.Subs {
+			row.NeedsYou = row.NeedsYou || s.State == phase.SubNeedsYou
+			row.SubDone = row.SubDone || s.State == phase.SubDone
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }

@@ -97,9 +97,9 @@ func currentStep(steps []stepRow) int {
 func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Brief)
 	s := rowOf(stepBrief, rowBrief, p)
-	changed := t.status != nil && t.status.Brief != nil && t.status.Brief.Approval == phase.ApprovalChanged
+	changed := t.digestPhaseChanged(p)
 	switch {
-	case s.Done && hasSub(p, phase.SubNeedsYou):
+	case s.Done && t.subIs(p, phase.SubNeedsYou):
 		// The work started without an approval.
 		s.State = StateFindings
 	case s.Done:
@@ -212,7 +212,7 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	case t.digest != nil && t.digest.Behind:
 		// Published, and owed a merge before the publish that follows it.
 		s.State = StateReady
-	case hasSub(p, phase.SubDone):
+	case t.subIs(p, phase.SubDone):
 		s.State = StatePublishing
 	case cannotStart(d, p):
 		s.State = StateQueued

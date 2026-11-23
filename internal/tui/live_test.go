@@ -321,7 +321,7 @@ func TestALiveTicketsOwnAsksAndApprovalsStayHeldBackOnTheChart(t *testing.T) {
 
 // hasNeedsPhase is whether the ticket's phases say something waits on the person.
 func hasNeedsPhase(g *rig, id string) bool {
-	return needsYou(g.m.phaseOf(g.m.w.tickets[id]))
+	return needsYou(g.m.w.tickets[id], g.m.phaseOf(g.m.w.tickets[id]))
 }
 
 // TestAQuestionOnABriefCountsWhileASessionIsLive: a live planner's open question

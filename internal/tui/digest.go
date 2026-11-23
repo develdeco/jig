@@ -36,8 +36,36 @@ type digestInfo struct {
 // digestChild is one entry under an issue or a multi-task.
 type digestChild struct{ ID, Title string }
 
-// digestPhase is one phase's state (done, current or pending) and its words.
-type digestPhase struct{ Name, State, Text string }
+// digestPhase is one phase's state (done, current or pending) and its words,
+// and whether a sub-step of it needs the person or is done: what a step's mark
+// reads of the sub-steps, so it is the same before a status is read and after.
+type digestPhase struct {
+	Name, State, Text          string
+	NeedsYou, SubDone, Changed bool
+}
+
+// digestPhaseChanged is whether the brief phase p was edited after its
+// approval, as the digest says; a ticket with no digest falls back to the
+// status it read.
+func (t *ticket) digestPhaseChanged(p phase.Phase) bool {
+	if t.digest != nil && len(t.digest.Phases) > 0 {
+		dp, _ := t.digest.phase(p.Name)
+		return dp.Changed
+	}
+	return t.status != nil && t.status.Brief != nil && t.status.Brief.Approval == phase.ApprovalChanged
+}
+
+// subIs is whether the phase p of the ticket has a sub-step in state (needs-you
+// or done), as the roster's digest says, so that the answer does not change
+// when the ticket's status is read. A ticket the roster did not list falls back
+// to the sub-steps it has.
+func (t *ticket) subIs(p phase.Phase, state string) bool {
+	if t.digest != nil && len(t.digest.Phases) > 0 {
+		dp, _ := t.digest.phase(p.Name)
+		return state == phase.SubNeedsYou && dp.NeedsYou || state == phase.SubDone && dp.SubDone
+	}
+	return hasSub(p, state)
+}
 
 // digestPR is a pull request a ticket recorded, and where it goes.
 type digestPR struct {

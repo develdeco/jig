@@ -663,7 +663,7 @@ func fakeDigest(m *Model, t *ticket) *digestInfo {
 	d := phase.Derive(f, lines)
 	dg := &digestInfo{Kind: "task", Current: string(d.Current), Ready: d.Ready}
 	for _, p := range d.Phases {
-		dg.Phases = append(dg.Phases, digestPhase{Name: string(p.Name), State: p.State, Text: p.Text})
+		dg.Phases = append(dg.Phases, digestPhaseOf(p))
 	}
 	dg.Slices = &digestSlices{Total: len(f.Slices)}
 	for _, sl := range f.Slices {

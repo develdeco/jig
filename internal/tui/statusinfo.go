@@ -386,9 +386,12 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 					Title string `json:"title"`
 				} `json:"children"`
 				Phases []struct {
-					Name  string `json:"name"`
-					State string `json:"state"`
-					Text  string `json:"text"`
+					Name     string `json:"name"`
+					State    string `json:"state"`
+					Text     string `json:"text"`
+					NeedsYou bool   `json:"needs_you"`
+					SubDone  bool   `json:"sub_done"`
+					Changed  bool   `json:"changed"`
 				} `json:"phases"`
 				PRs []struct {
 					Repo   string `json:"repo"`
@@ -428,7 +431,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 		if g := t.Digest; g != nil {
 			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
 			for _, p := range g.Phases {
-				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text})
+				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
 			}
 			for _, p := range g.PRs {
 				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})

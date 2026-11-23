@@ -196,3 +196,71 @@ func TestARosterThatFailedKeepsTheLastDigestAndSaysWhy(t *testing.T) {
 		t.Errorf("the digest after a failed read is %+v, want the last one", got)
 	}
 }
+
+// digestPhaseOf is the digest's row for a derived phase, as `jig next` words it.
+func digestPhaseOf(p phase.Phase) digestPhase {
+	d := digestPhase{Name: string(p.Name), State: p.State, Text: p.Text, Changed: p.Changed}
+	for _, s := range p.Subs {
+		d.NeedsYou = d.NeedsYou || s.State == phase.SubNeedsYou
+		d.SubDone = d.SubDone || s.State == phase.SubDone
+	}
+	return d
+}
+
+// TestAStepMarkIsTheSameBeforeAndAfterTheStatusIsRead: a step's mark reads the
+// roster's digest alone, so the project's list, which never reads a status, and
+// a screen that has read one draw the same marks for a ticket. Each variant is
+// a step whose mark a sub-step could change: a brief the work started without
+// an approval, a brief edited after its approval, a publish that has begun.
+func TestAStepMarkIsTheSameBeforeAndAfterTheStatusIsRead(t *testing.T) {
+	t.Parallel()
+	pending := []string{"pending|a", "pending|b", "pending|c", "pending|d"}
+	started := task("build", false, "done|never approved: the work started without it", "current|1 of 2 green", pending[2], pending[3], "pending|e")
+	started.Phases[0].NeedsYou = true
+	changed := task("brief", false, "current|brief changed after approval: approve again", pending[0], pending[1], pending[2], "pending|e")
+	changed.Phases[0].NeedsYou, changed.Phases[0].Changed = true, true
+	publishing := task("publish", true, "done|approved by Ada", "done|1 slice green", "done|round 1 clean", "current|body written", "pending|e")
+	publishing.Phases[3].SubDone = true
+	plain := task("build", false, "done|approved by Ada", "current|1 of 2 green", pending[2], pending[3], "pending|e")
+
+	g := newRig(t, "JIG-1")
+	g.feed(jig1()...)
+	tk := g.m.w.tickets["JIG-1"]
+	read := tk.status
+	if read == nil {
+		t.Fatal("the status was not read")
+	}
+	// The digest counts the slices the status lists: both come from the same facts.
+	counts, n := tk.sliceCounts(g.m.zone)
+	slices := &digestSlices{Total: n, Green: counts[StateGreen], Building: counts[StateBuilding], Queued: counts[StateQueued], NeedsInput: counts[StateNeedsInput], Failed: counts[StateFail]}
+	marks := func() []string {
+		var out []string
+		for _, s := range g.m.steps(tk) {
+			out = append(out, s.State)
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		d    *digestInfo
+		want map[int]string
+	}{
+		"a brief the work started without": {started, map[int]string{stepBrief: StateFindings}},
+		"a brief changed after approval":   {changed, map[int]string{stepBrief: StateFindings}},
+		"a publish that has begun":         {publishing, map[int]string{stepPublish: StatePublishing}},
+		"a ticket with nothing to mark":    {plain, map[int]string{stepBrief: StateOK}},
+	} {
+		tk.digest, tc.d.Slices = tc.d, slices
+		tk.status = nil
+		before := marks()
+		tk.status = read
+		after := marks()
+		if strings.Join(before, " ") != strings.Join(after, " ") {
+			t.Errorf("%s: the marks are %v before the status is read and %v after", name, before, after)
+		}
+		for step, want := range tc.want {
+			if before[step] != want {
+				t.Errorf("%s: step %d is %s, want %s", name, step+1, before[step], want)
+			}
+		}
+	}
+}

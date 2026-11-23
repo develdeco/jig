@@ -118,8 +118,8 @@ func TestParseRoster(t *testing.T) {
 	}
 	// Each row carries the digest the verb printed for it.
 	want := &digestInfo{Kind: "task", Current: "land", Phases: []digestPhase{
-		{"brief", "done", "no brief on record"}, {"build", "done", "1 slice green, each verified by jig"}, {"review", "done", "round 2 clean · by reviewer"},
-		{"publish", "done", "pull request opened · https://example.test/acme/demo/pull/7"}, {"land", "current", "waits for a merge"},
+		{Name: "brief", State: "done", Text: "no brief on record"}, {Name: "build", State: "done", Text: "1 slice green, each verified by jig"}, {Name: "review", State: "done", Text: "round 2 clean · by reviewer"},
+		{Name: "publish", State: "done", Text: "pull request opened · https://example.test/acme/demo/pull/7"}, {Name: "land", State: "current", Text: "waits for a merge"},
 	}}
 	if !reflect.DeepEqual(rows[1].Digest, want) {
 		t.Errorf("JIG-2's digest = %+v, want %+v", rows[1].Digest, want)

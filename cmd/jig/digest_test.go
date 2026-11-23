@@ -368,3 +368,22 @@ func TestASharedTaskHasNoParentAndATaskOfAnIssueHasIt(t *testing.T) {
 		}
 	}
 }
+
+// TestPhaseRowsCarryWhatAStepsMarkReadsOfItsSubSteps: a phase with a sub-step
+// that needs the person, or one that is done, or a brief changed after its
+// approval, says so in its row, and one with none says none.
+func TestPhaseRowsCarryWhatAStepsMarkReadsOfItsSubSteps(t *testing.T) {
+	t.Parallel()
+	var d phase.Ticket
+	d.Phases[0] = phase.Phase{Name: phase.Brief, Changed: true, Subs: []phase.Sub{{State: phase.SubPending}, {State: phase.SubNeedsYou}}}
+	d.Phases[1] = phase.Phase{Name: phase.Build, Subs: []phase.Sub{{State: phase.SubActive}}}
+	d.Phases[3] = phase.Phase{Name: phase.Publish, Subs: []phase.Sub{{State: phase.SubDone}, {State: phase.SubActive}}}
+	rows := phaseRows(d)
+	for i, want := range []struct{ needsYou, subDone, changed bool }{
+		{true, false, true}, {false, false, false}, {false, false, false}, {false, true, false}, {false, false, false},
+	} {
+		if got := (struct{ needsYou, subDone, changed bool }{rows[i].NeedsYou, rows[i].SubDone, rows[i].Changed}); got != want {
+			t.Errorf("row %d carries %+v, want %+v", i, got, want)
+		}
+	}
+}
