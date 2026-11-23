@@ -249,6 +249,9 @@ func (h *handler) repoAndTarget() (name, target string) {
 // uncommitted changes. It asks git without taking its optional locks, so it
 // cannot get in the way of the agent next git command.
 func (h *handler) dirtyTracked() []string {
+	if h.noDir {
+		return nil
+	}
 	out, err := gitx.RunRaw(h.w.Cwd, "--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return nil

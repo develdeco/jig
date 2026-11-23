@@ -234,16 +234,26 @@ func (h *handler) worktreeTicket() string {
 	if dir == "" || h.st == nil {
 		return ""
 	}
-	from := h.ev.Cwd
+	return h.ticketAt(resolveDir(dir, h.ev.Cwd, h.d.Cwd))
+}
+
+// resolveDir is the directory a cd names, from the directory the command ran
+// in (else the fallback).
+func resolveDir(dir, from, fallback string) string {
 	if from == "" {
-		from = h.d.Cwd
+		from = fallback
 	}
 	dir = normalDir(dir)
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(from, dir)
 	}
+	return dir
+}
+
+// ticketAt is the ticket the branch checked out in dir binds, "" for none.
+func (h *handler) ticketAt(dir string) string {
 	branch, ok := gitx.HeadBranch(dir)
-	if !ok || branch == "" {
+	if !ok || branch == "" || h.st == nil {
 		return ""
 	}
 	id, _, err := h.st.TicketForBranch(branch)

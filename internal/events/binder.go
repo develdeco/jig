@@ -1,6 +1,12 @@
 package events
 
-import "github.com/develdeco/jig/internal/journal"
+import (
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/develdeco/jig/internal/journal"
+)
 
 // A ledger line is on the ticket it names. The hook that wrote it bound it
 // when it was written (internal/observe), so a reader guesses nothing from the
@@ -37,8 +43,22 @@ type seat struct {
 }
 
 // callKey is what makes two tool lines one call: the session, the agent, the
-// instant, the tool and the command.
-type callKey struct{ session, agent, ts, tool, command string }
+// tool, the command, the words, the files and the exit status; the instants
+// are compared apart (foldWindow).
+type callKey struct{ session, agent, tool, command, description, files, exit string }
+
+// stamp is the instant a call was last seen, and its text when it did not
+// parse.
+type stamp struct {
+	ts string
+	at time.Time
+	ok bool
+}
+
+// foldWindow is how close two copies of a call are in time to be one: the
+// hooks that hear a call stamp it at their own instants, and one agent does
+// not repeat the same call in less.
+const foldWindow = 500 * time.Millisecond
 
 // Binder places ledger lines on tickets as they arrive in file order. It is
 // for one goroutine.
@@ -47,7 +67,7 @@ type Binder struct {
 	seats map[seatKey]*seat
 	tick  uint64
 
-	seen map[callKey]struct{}
+	seen map[callKey]stamp
 	ring []callKey
 	next int
 }
@@ -56,7 +76,7 @@ type Binder struct {
 // held until its first bound line; without it every line is placed as it
 // arrives, for a reader that has no ticket to place a line on.
 func NewBinder(hold bool) *Binder {
-	return &Binder{hold: hold, seats: map[seatKey]*seat{}, seen: map[callKey]struct{}{}}
+	return &Binder{hold: hold, seats: map[seatKey]*seat{}, seen: map[callKey]stamp{}}
 }
 
 // Bind takes one line and returns the lines that are placed now, in order: the
@@ -96,12 +116,20 @@ func (b *Binder) Bind(l journal.Line) []journal.Line {
 	return append(out, l)
 }
 
-// double reports whether the tool line is one the Binder has seen before, and
-// remembers it when it is not.
+// double reports whether the tool line is a call the Binder has seen: the
+// same session, agent, tool, command, words, files and exit status within
+// foldWindow of its last copy (two hooks stamp a call at their own instants,
+// a few milliseconds apart). It remembers the call when it is not.
 func (b *Binder) double(l journal.Line) bool {
-	k := callKey{l.Session, l.Agent, l.TS, l.Tool, l.Command}
-	if _, ok := b.seen[k]; ok {
-		return true
+	k := callKey{l.Session, l.Agent, l.Tool, l.Command, l.Description, strings.Join(l.Files, "\x00"), exitOf(l)}
+	at, err := time.Parse(time.RFC3339Nano, l.TS)
+	now := stamp{ts: l.TS, at: at, ok: err == nil}
+	if prev, seen := b.seen[k]; seen {
+		if (now.ok && prev.ok && at.Sub(prev.at).Abs() <= foldWindow) || (!now.ok && !prev.ok && prev.ts == l.TS) {
+			return true
+		}
+		b.seen[k] = now
+		return false
 	}
 	if len(b.ring) < maxFold {
 		b.ring = append(b.ring, k)
@@ -110,8 +138,15 @@ func (b *Binder) double(l journal.Line) bool {
 		b.ring[b.next] = k
 		b.next = (b.next + 1) % maxFold
 	}
-	b.seen[k] = struct{}{}
+	b.seen[k] = now
 	return false
+}
+
+func exitOf(l journal.Line) string {
+	if l.Exit == nil {
+		return "-"
+	}
+	return strconv.Itoa(*l.Exit)
 }
 
 // seat is the seat of an agent, made when it has none. When there are too many,

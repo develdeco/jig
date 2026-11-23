@@ -188,7 +188,9 @@ func TestReaderFoldsIdenticalLines(t *testing.T) {
 	r.writeJournal("T-1", jline("2026-10-23T09:00:00Z", "T-1", "claim", ""))
 	call := journal.Line{TS: "2026-10-23T09:01:00Z", Event: "tool", Session: "s1", Agent: "a-1", Ticket: "T-1", Tool: "Bash", Command: "go test"}
 	r.ledgerAppend(call)
-	r.ledgerAppend(call)
+	double := call
+	double.TS = "2026-10-23T09:01:00.031Z" // the second hook stamped it a few milliseconds on
+	r.ledgerAppend(double)
 	later := call
 	later.TS = "2026-10-23T09:01:01Z"
 	otherCmd := call
@@ -199,14 +201,21 @@ func TestReaderFoldsIdenticalLines(t *testing.T) {
 	otherAgent.Agent = "a-2"
 	otherSession := call
 	otherSession.Session = "s2"
-	for _, l := range []journal.Line{later, otherCmd, otherTool, otherAgent, otherSession} {
+	otherWords := call
+	otherWords.Description = "another reason"
+	otherFiles := call
+	otherFiles.Files = []string{"a.go"}
+	exit := 1
+	otherExit := call
+	otherExit.Exit = &exit
+	for _, l := range []journal.Line{later, otherCmd, otherTool, otherAgent, otherSession, otherWords, otherFiles, otherExit} {
 		r.ledgerAppend(l)
 	}
 	envs, err := Read(r.scope(false, "T-1"), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(ledgerView(envs)); got != 6 {
-		t.Errorf("%d call lines, want 6: the double folded and the five that differ kept: %v", got, ledgerView(envs))
+	if got := len(ledgerView(envs)); got != 9 {
+		t.Errorf("%d call lines, want 9: the double folded and the eight that differ kept: %v", got, ledgerView(envs))
 	}
 }

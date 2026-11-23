@@ -136,6 +136,10 @@ type handler struct {
 
 	unattendedKnown, unattendedVal bool
 
+	// noDir is set when the event was placed on a ticket without a directory
+	// of its own: no directory finding is read.
+	noDir bool
+
 	errs []error
 }
 

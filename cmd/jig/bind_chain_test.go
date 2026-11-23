@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/gitx"
@@ -53,7 +54,7 @@ func TestChartRunCallsBindToTheirTicket(t *testing.T) {
 	}
 
 	// fire is one hook event at the n-th second, from the session's
-	// directory, run twice as a machine and a project hook both would.
+	// directory, run twice as a machine and a project hook both would, the second stamped a few milliseconds after the first.
 	fire := func(n int, event, agent string, extra map[string]any) {
 		t.Helper()
 		p := map[string]any{"session_id": "s1", "cwd": fx.RepoDir, "hook_event_name": event, "transcript_path": transcript}
@@ -68,7 +69,7 @@ func TestChartRunCallsBindToTheirTicket(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < 2; i++ {
-			if out, code := runMain(t, e.withClock(fixedClock(mustTime(t, eventsAt(n)))), string(data), "observe", "--harness", "claude"); code != 0 {
+			if out, code := runMain(t, e.withClock(fixedClock(mustTime(t, eventsAt(n)).Add(time.Duration(i)*30*time.Millisecond))), string(data), "observe", "--harness", "claude"); code != 0 {
 				t.Fatalf("observe %s at %d: exit %d\n%s", event, n, code, out)
 			}
 		}

@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -40,6 +41,10 @@ type sessionMemory struct {
 	// claims are the `jig claim` calls of the event's agent, newest first, as
 	// the tool lines say (bindTool reads them).
 	claims []claimCall
+	// agentDirs are the directories the event's agent's latest calls moved
+	// to with a leading cd, newest first: where a subagent works when its
+	// hook payload names the session's directory.
+	agentDirs []string
 	// delivered holds the Refs of the notes already given to the agent (as
 	// context or in a refusal to stop), blocked the Refs it was refused a
 	// Stop for. A subagent shares its session's id and hears its notes on its
@@ -63,14 +68,17 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 			return true
 		}
 		if l.Agent == agent {
-			// A subagent's stop ends the claims it made before it. The
+			// A subagent's stop ends the claims it made before it, unless jig refused it (the agent works on). The
 			// session's own agent stops at every turn and keeps its claim.
-			if agent != "" && l.Event == journal.EventHook && l.Outcome == KindStop {
+			if agent != "" && l.Event == journal.EventHook && l.Outcome == KindStop && !strings.HasPrefix(l.Summary, "blocked:") {
 				stopped = true
 			}
 			if c, ok := claimCallOf(l); ok {
 				c.ended = stopped
 				m.claims = append(m.claims, c)
+			}
+			if dir, cd := leadingCd(l.Command); l.Event == journal.EventTool && cd && dir != "" && len(m.agentDirs) < 4 {
+				m.agentDirs = append(m.agentDirs, resolveDir(dir, l.Cwd, ""))
 			}
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
