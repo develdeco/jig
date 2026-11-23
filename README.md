@@ -191,6 +191,8 @@ chart ends at a merge the screen reads it every two minutes, and `r` reads it
 now. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
 4f2a91c0 held at its stop · commit 7f03c55 for slice apply has no recorded result").
 
+A chart that plans an issue opens on the issue's plan instead, and so does the issue's own row: the need, the tasks with where each landed (a multi-task's tasks under it), and the issue's branch, suite, pull request and landing, one line each. `m` shows the chart's map, `c` on a task goes up to its issue, and esc comes back.
+
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your
 `y` it pushes the branch and opens the pull request). Every action it takes is a

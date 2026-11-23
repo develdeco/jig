@@ -273,6 +273,10 @@ func (m *Model) header(w int) []string {
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
+			if isMulti(t) {
+				// A multi-task has no phase: its word is where its own pull request is.
+				state, label = m.multiLabel(t)
+			}
 			if t.awaiting {
 				state, label = StateQueued, "waiting"
 			}

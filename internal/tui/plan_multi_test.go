@@ -21,12 +21,15 @@ func TestMultiTaskScreenIsItsPlanOneLevelDown(t *testing.T) {
 	v := stripANSI(g.view())
 	for _, want := range []string{
 		"Need", "What the multi-task is for.",
-		"Tasks", "1 of 2 landed", "SHOP-5", "landed · into the issue's branch", "SHOP-6", "waits to land",
+		"Tasks", "1 of 2 landed", "SHOP-5", "landed · into the multi-task's branch", "SHOP-6", "waits to land",
 		"Multi-task", "503-the-multi-task", "PR #7 into the issue's branch · open",
 	} {
 		if !strings.Contains(strings.ReplaceAll(v, planBranch, "the issue's branch"), want) {
 			t.Errorf("the multi-task's plan lacks %q:\n%s", want, v)
 		}
+	}
+	if head := strings.Split(v, "\n")[0]; !strings.Contains(head, "published") || strings.Contains(head, "review") {
+		t.Errorf("the multi-task's header says a task's step: %q", head)
 	}
 	if row := issueLine(v, "tasks"); !strings.Contains(row, "1 of 2 landed") {
 		t.Errorf("the tasks line is %q", row)
@@ -153,6 +156,9 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 	}
 	if !strings.Contains(row, "PR #4 open") || strings.Contains(row, "#3") {
 		t.Errorf("SHOP-50's plan names the wrong pull request: %q", row)
+	}
+	if !strings.Contains(row, "◇ SHOP-1") || strings.Contains(row, "✓ ✓ ✓ ✓ ✓") {
+		t.Errorf("SHOP-50's icon and steps read the other issue's landing: %q", row)
 	}
 	if lineWith(second, "SHOP-2  ") != "" {
 		t.Errorf("SHOP-50's plan lists a task it does not have:\n%s", second)

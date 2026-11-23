@@ -170,7 +170,7 @@ func (m *Model) planPage(c *chart) page {
 	if total == 0 {
 		right = "none graduated"
 	}
-	tasks := m.ticketRowsPanel(c, rows, "Tasks", right, m.planNote(is.Ticket, is.Branch),
+	tasks := m.ticketRowsPanel(c, rows, "Tasks", right, m.planNote(is.Ticket, is.Branch, issueBranchWords),
 		func(r chartRow) []string {
 			if tip, ok := fixes[r.id]; ok {
 				return []string{m.st.dim("    ↳ added after the failed suite" + tipWords(tip))}
@@ -209,7 +209,7 @@ const issueBranchWords = "the issue's branch"
 // chart screen says of it, less the parent every row here shares. A
 // multi-task's are its own, and a task two issues list says what its pull
 // request into this issue and its landing there say, and nothing of the other's.
-func (m *Model) planNote(container, branch string) func(chartRow) (string, bool) {
+func (m *Model) planNote(container, branch, label string) func(chartRow) (string, bool) {
 	return func(r chartRow) (string, bool) {
 		switch t := r.t; {
 		case t == nil || t.digest == nil:
@@ -217,7 +217,7 @@ func (m *Model) planNote(container, branch string) func(chartRow) (string, bool)
 			return m.multiNote(r, branch), false
 		case m.shared(t):
 			if r.atEnd {
-				note := m.st.state(r.end.State, inBranch(r.end.Words, branch))
+				note := m.st.state(r.end.State, inBranch(r.end.Words, branch, label))
 				if r.end.State == StateWaitsToLand {
 					// Not landed here yet: the pull request into this issue is the
 					// one that waits, and no other issue's is named.
@@ -234,7 +234,7 @@ func (m *Model) planNote(container, branch string) func(chartRow) (string, bool)
 			return m.st.dim("not published into " + container + " yet"), false
 		}
 		note, own := m.chartNoteIn(r, false)
-		return inBranch(note, branch), own
+		return inBranch(note, branch, label), own
 	}
 }
 

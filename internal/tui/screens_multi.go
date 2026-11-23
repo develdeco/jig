@@ -99,6 +99,16 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 	case m.shared(r.t):
 		r.end, r.atEnd = m.endInIssue(r.t, container, branch)
 		r.done = r.atEnd
+		// The icon and the last step are this issue's, not another's landing.
+		r.steps = slices.Clone(r.steps)
+		r.mark = StateQueued
+		if r.atEnd {
+			r.mark = r.end.State
+			r.steps[stepLand].State = r.end.State
+			r.steps[stepLand].Done = r.end.State == StateLanded
+		} else {
+			r.steps[stepLand].State, r.steps[stepLand].Done = StateQueued, false
+		}
 	}
 	return r
 }
@@ -173,11 +183,29 @@ func (m *Model) endInIssue(t *ticket, container, branch string) (endState, bool)
 
 // inBranch says the issue's branch as such in words that name it, so a row stays
 // whole on a narrow screen and the Issue panel names the branch once.
-func inBranch(words, branch string) string {
+func inBranch(words, branch, label string) string {
 	if branch == "" {
 		return words
 	}
-	return strings.ReplaceAll(words, "into "+branch, "into "+issueBranchWords)
+	return strings.ReplaceAll(words, "into "+branch, "into "+label)
+}
+
+// multiLabel is a multi-task's state and word in its header: closed, landed,
+// published (its pull request is open), or how many of its tasks have landed.
+func (m *Model) multiLabel(t *ticket) (state, label string) {
+	d := t.digest
+	landed, total := m.childrenLanded(d)
+	switch {
+	case d.Closed != "":
+		return StateClosed, "closed"
+	case d.State == land.StateLanded:
+		return StateLanded, "landed"
+	case len(d.PRs) > 0:
+		return StatePublishing, "published"
+	case landed > 0 && landed == total:
+		return StateReady, "ready to publish"
+	}
+	return StateBuilding, fmt.Sprintf("%d of %d landed", landed, total)
 }
 
 // prShort says pull requests by number and state, the target left out: a row of
@@ -210,7 +238,7 @@ func (m *Model) multiNote(r chartRow, branch string) string {
 	case d.Closed != "":
 		return kind + m.st.state(StateClosed, "closed · "+d.Closed)
 	case d.State == land.StateLanded:
-		return kind + m.st.state(StateLanded, inBranch(landedWords("landed", m.landedLines(r.t)), branch))
+		return kind + m.st.state(StateLanded, inBranch(landedWords("landed", m.landedLines(r.t)), branch, issueBranchWords))
 	case len(d.PRs) > 0:
 		return kind + fmt.Sprintf("%d of %d landed · ", landed, total) + prShort(d.PRs)
 	}
@@ -239,7 +267,7 @@ func (m *Model) multiPage(t *ticket) page {
 	if total == 0 {
 		right = "none graduated"
 	}
-	tasks := m.ticketRowsPanel(nil, rows, "Tasks", right, m.planNote(t.id, branch), nil)
+	tasks := m.ticketRowsPanel(nil, rows, "Tasks", right, m.planNote(t.id, branch, "the multi-task's branch"), nil)
 	p.lines = append(p.lines, tasks.lines...)
 
 	p.boxTop("Multi-task", t.id)
