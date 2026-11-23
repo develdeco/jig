@@ -9,7 +9,7 @@ jig  demo › SHOP-1                                           ◐ build in prog
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 7s                                 │
-  │  ◐ slice clamp  claimed ── run ── verified                             10s │
+  │  ◐ slice clamp  claimed ── run ── verified                          1m 03s │
   │      goal     Clamp negative quantities                                    │
   │      now      57m 20s · verification requested for bbbbbbb “Clamp negativ… │
   │  ○ slice cart   waits for clamp                                            │

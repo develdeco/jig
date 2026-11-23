@@ -46,9 +46,9 @@ func (w workTimes) ofStep(step int) time.Duration {
 // fix back to counts the fix and not the review between, and the time from one
 // step to the next (a person reading the outcome before prompting the next
 // phase) counts for neither. A line of no step (a spend, a call nothing held)
-// neither starts nor ends a gap. A gap between two lines of one sub-step is that
-// sub-step's work; one between lines of two sub-steps is the step's own. What of
-// a gap a wait that ended covers is the wait's (wait.go), not work.
+// neither starts nor ends a gap. A gap is the work of the sub-step whose line
+// closes it, so a step's time is the sum of its sub-steps'. What of a gap a wait
+// that ended covers is the wait's (wait.go), not work.
 //
 // The step under way also counts the time since its latest line, while that
 // line is the latest of the log and the step has a sub-step at work: a slice
@@ -57,11 +57,12 @@ func (w workTimes) ofStep(step int) time.Duration {
 func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 	placed, ws := m.placedFrom(t, d, t.workLines())
 	closed, open := t.answered()
-	waits := append(closed, phaseWaits(placed, d, open)...)
+	waits := append(append(closed, phaseWaits(placed, d, open)...), asksWaits(placed, d)...)
 	w := workTimes{}
 	var prev time.Time
 	prevStep, prevKey := -1, ""
-	for _, p := range withStarts(placed, ws) {
+	lines := withStarts(placed, ws)
+	for i, p := range lines {
 		at, ok := p.l.At()
 		if p.step < 0 || !ok || p.l.Src == srcStatus {
 			// A line the screen wrote when it noticed a change says when it
@@ -69,10 +70,9 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 			continue
 		}
 		if p.step == prevStep && at.After(prev) {
-			key := ""
-			if p.key == prevKey {
-				key = p.key
-			}
+			// A gap belongs to the sub-step whose line closes it: a number
+			// shown for a step is the sum of its sub-steps'.
+			key := workKey(lines, i)
 			gap := at.Sub(prev)
 			for _, x := range waits {
 				if x.step == p.step && !x.standing() {
@@ -106,6 +106,24 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 		}
 	}
 	return clocks{w, waits, idle}
+}
+
+// workKey is the sub-step the work that ends at lines[i] is counted in: the one
+// the line belongs to, and for a call placed in its step alone (one that led to
+// the next line) the sub-step of the next line of the step.
+func workKey(lines []placedLine, i int) string {
+	if lines[i].key != "" || lines[i].step < 0 {
+		return lines[i].key
+	}
+	for _, x := range lines[i+1:] {
+		if x.step == lines[i].step && x.key != "" {
+			return x.key
+		}
+		if x.step >= 0 && x.step != lines[i].step {
+			break
+		}
+	}
+	return ""
 }
 
 // windowOf is the window of the sub-step key of step that is under way, nil

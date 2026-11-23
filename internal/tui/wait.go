@@ -131,6 +131,44 @@ func phaseWaits(placed []placedLine, d phase.Ticket, openQuestions map[string]ti
 	return out
 }
 
+// asksWaits are the waits for the person's decision on the asks a round left
+// that the decisions ended: the sub-step stops waiting when the last is
+// decided, so the phase no longer says it waited. Each runs from the line that
+// closed the round (the latest line of the review that is not a decision) to
+// the last decision before the next line that is not one.
+func asksWaits(placed []placedLine, d phase.Ticket) []waitSpan {
+	for _, s := range d.Phases[stepReview].Subs {
+		if s.Key == "asks" && s.State == phase.SubNeedsYou {
+			return nil // standing: phaseWaits has it
+		}
+	}
+	var out []waitSpan
+	var opened, last, before time.Time
+	flush := func() {
+		if !opened.IsZero() && last.After(opened) {
+			out = append(out, waitSpan{stepReview, "asks", phase.WaitsForPerson, "waits for your decision", opened, last})
+		}
+		opened = time.Time{}
+	}
+	for _, p := range placed {
+		at, ok := p.l.At()
+		if !ok || p.step != stepReview {
+			continue
+		}
+		if p.l.Event == journal.EventTriage {
+			if opened.IsZero() {
+				opened = before
+			}
+			last = at
+			continue
+		}
+		flush()
+		before = at
+	}
+	flush()
+	return out
+}
+
 // waitEnd is the line that closed the wait of the sub-step key of step: its
 // first line, or for a landing the person's word to merge (the session merging
 // is at work), else its record.

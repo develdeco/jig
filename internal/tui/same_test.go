@@ -289,10 +289,9 @@ func TestOneCounterReadsTheSameInBothPlaces(t *testing.T) {
 	for _, s := range d.Of(phase.Build).Subs {
 		sum += c.work.of(stepBuild, s.Key)
 	}
-	sum += c.work.of(stepBuild, "")
 	row := g.m.steps(tk)[stepBuild]
 	if row.took != sum || row.took != c.work.ofStep(stepBuild) || row.Took != "1m 10s" {
-		t.Errorf("the row says %v (%q), its sub-steps and the step's own add up to %v, want 1m 10s in both", row.took, row.Took, sum)
+		t.Errorf("the row says %v (%q), its sub-steps add up to %v, want 1m 10s in both", row.took, row.Took, sum)
 	}
 	panel := g.m.substepsPanel(tk, stepBuild, d.Of(phase.Build).Subs, 10)
 	var lines []string

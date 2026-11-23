@@ -9,7 +9,7 @@ jig  demo › SHOP-1                                                            
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 37s                                                    │
-  │  ◐ slice clamp  claimed ── run ── verified                                                 10s │
+  │  ◐ slice clamp  claimed ── run ── verified                                                 33s │
   │      goal     Clamp negative quantities to zero before the total is taken, so a cart that      │
   │               holds a returned item never charges less than nothing; a quantity above the      │
   │               stock is left to the checkout, which knows the stock and says so to the person…  │
