@@ -1,14 +1,14 @@
 jig  demo › JIG-1  Greeting copy                               ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────── step 2 of 4 · total 59m 29s ─╮
+  ╭─ Steps ────────────────────────────────────── step 2 of 5 · total 59m 29s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │▸ ? 2 Build    59m 29s 1 of 4 green · slice c needs your answer             │
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
+  │  ○ 5 Land             after the publish                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
   │  ✖ slice b  failed its last run                                            │
-  │  +3 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c: Formal or casual?  q-001

@@ -28,21 +28,21 @@ func TestChartRowAndDetailAgreeWithTheDigest(t *testing.T) {
 		t.Errorf("JIG-7's Detail says it can start, or does not say it waits:\n%s", panel)
 	}
 
-	// A published ticket reads published on its row, in the Detail and on its
+	// A published ticket that waits to land reads so on its row, in the Detail and on its
 	// own screen, from one digest.
 	g.press("up", "up", "up", "up")
 	view = g.view()
-	if row := lineWith(view, "JIG-4"); !strings.Contains(row, "✓ ✓ ✓ ✓") || !strings.Contains(row, "published") {
+	if row := lineWith(view, "JIG-4"); !strings.Contains(row, "✓ ✓ ✓ ✓ ◆") || !strings.Contains(row, "waits for a merge") {
 		t.Errorf("JIG-4's row does not say it published:\n%s", row)
 	}
-	if panel := strings.Join(detailPanelOf(t, view), "\n"); !strings.Contains(panel, "state    published") {
+	if panel := strings.Join(detailPanelOf(t, view), "\n"); !strings.Contains(panel, "state    waits to land") {
 		t.Errorf("JIG-4's Detail does not say it published:\n%s", panel)
 	}
 	g.press("enter")
 	if g.m.Screen() != "ticket" {
 		t.Fatalf("on %s, want the ticket screen", g.m.Screen())
 	}
-	if screen := g.view(); !strings.Contains(screen, "✓ published") || !strings.Contains(screen, "4 Publish") {
+	if screen := g.view(); !strings.Contains(screen, "◆ waits to land") || !strings.Contains(screen, "4 Publish") || !strings.Contains(screen, "5 Land") {
 		t.Errorf("JIG-4's screen does not say it published:\n%s", screen)
 	}
 }

@@ -99,7 +99,7 @@ func TestPublishScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
-	g.feed(jig2()...).press("enter")
+	g.feed(jig2()...).press("up", "enter")
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}
@@ -251,7 +251,7 @@ func TestPublishScreenOfATicketInTwoRepos(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Repos(), 0)
-	g.feed(jig2Repos()...).press("enter")
+	g.feed(jig2Repos()...).press("up", "enter")
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}

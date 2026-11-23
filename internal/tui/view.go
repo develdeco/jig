@@ -16,6 +16,7 @@ const (
 	rowBuild    = "build"
 	rowReview   = "review"
 	rowPublish  = "publish"
+	rowLand     = "land"
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"

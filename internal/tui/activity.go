@@ -11,8 +11,9 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// A ticket goes through four steps, in order: its brief is agreed, its slices
-// are built and verified, the change is reviewed, and it is published. Every
+// A ticket goes through five steps, in order: its brief is agreed, its slices
+// are built and verified, the change is reviewed, it is published, and its pull
+// requests are landed. Every
 // journal line belongs to one of them, and a screen says a line in words: who
 // did it by role, the slice by its goal, the commit by its subject. A line also
 // advances a sub-step of its step (a slice, a round, the body of the pull
@@ -24,11 +25,12 @@ const (
 	stepBuild
 	stepReview
 	stepPublish
+	stepLand
 	stepCount
 )
 
 // stepNames are the steps as the screens title them.
-var stepNames = [stepCount]string{"Brief", "Build", "Review", "Publish"}
+var stepNames = [stepCount]string{"Brief", "Build", "Review", "Publish", "Land"}
 
 // The lines the screens write themselves. The planner writes brief.md and
 // slices.yaml, which make no journal line, so a screen that waits on lines sees
@@ -53,6 +55,8 @@ func stepOfLine(l events.Envelope) int {
 	case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
 		journal.EventSquash, journal.EventMemorize, journal.EventChangelog, journal.EventPublishPicks, journal.EventReviewNotes:
 		return stepPublish
+	case journal.EventLanded, journal.EventLandNamed:
+		return stepLand
 	case journal.EventSpend:
 		return -1
 	}
@@ -69,7 +73,13 @@ func (t *ticket) stepLines(step int) []events.Envelope {
 			out = append(out, l)
 		}
 	}
-	for _, s := range t.seen {
+	extra := append([]events.Envelope(nil), t.seen...)
+	for _, l := range t.ledger {
+		if isLandNamed(l) {
+			extra = append(extra, l)
+		}
+	}
+	for _, s := range extra {
 		if stepOfLine(s) != step {
 			continue
 		}
@@ -219,7 +229,7 @@ type subLabels map[string]string
 func (m *Model) subLabelsOf(t *ticket) subLabels {
 	out := subLabels{}
 	d := m.phaseOf(t)
-	for _, p := range d.Work() {
+	for _, p := range d.Phases {
 		for _, s := range p.Subs {
 			out[s.Key] = s.Label
 		}
@@ -259,6 +269,10 @@ func (t *ticket) subKey(l events.Envelope) string {
 		return "changelog"
 	case journal.EventPublishDone:
 		return "done"
+	case journal.EventLandNamed:
+		return "merge"
+	case journal.EventLanded:
+		return "record"
 	}
 	if l.Slice != "" && stepOfLine(l) == stepBuild {
 		return "slice:" + l.Slice
@@ -294,6 +308,7 @@ func (t *ticket) roundOf(l events.Envelope) int {
 var fallbackLabels = map[string]string{
 	"drafted": "brief drafted", "approved": "brief approved", "slices": "slices written", "asks": "asks", "fixes": "fixes",
 	"body": "body", "approval": "approval", "pr": "pull request", "changelog": "changelog", "done": "published",
+	"merge": "merge", "record": "record",
 }
 
 // labelOf is the sub-step a line advances, in the words of the sub-steps
@@ -496,8 +511,21 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return strings.TrimSpace("what the ticket taught was memorized: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventPublishDone:
 		return "finished"
+	case journal.EventLandNamed:
+		return "the merge was named for the session to make"
+	case journal.EventLanded:
+		return strings.TrimSpace("landed " + repoWords(l) + landedInto(l))
 	}
 	return strings.TrimSpace(l.Event + " " + firstOf(l.Summary, l.Outcome))
+}
+
+// landedInto is where a landed line says the pull request went: "into <branch>"
+// when it names one.
+func landedInto(l events.Envelope) string {
+	if into := firstOf(l.Base, l.Into); into != "" {
+		return "into " + into
+	}
+	return ""
 }
 
 // repoWords is the repo a publish line names with a space after it, none for a

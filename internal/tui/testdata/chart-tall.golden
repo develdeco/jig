@@ -9,11 +9,11 @@ jig  demo › checkout  Coupons at checkout                                     
   │  out of scope · Gift cards                                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────────────────────────── 1 of 5 published ─╮
-  │  ✓ JIG-4  Coupon model         ✓ ✓ ✓ ✓  published https://example.test/acme/demo/pull/7        │
-  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○  Build: 1 of 3 green · slice s2 is being built          │
-  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○  ready · brief next                                     │
-  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○  stacked on JIG-5                                       │
-  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open                │
+  │  ◆ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◆  Land: waits for a merge                              │
+  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is being built        │
+  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                   │
+  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                     │
+  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open              │
   │  ·        Stack two coupons    fog · not graduated                                             │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮

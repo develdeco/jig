@@ -102,7 +102,7 @@ func (c *chart) title() string {
 type chartRow struct {
 	id, title string
 	// t and d are the ticket and where its digest says it stands, nil and zero
-	// when the screens know no such ticket yet; steps are its four rows, saying
+	// when the screens know no such ticket yet; steps are its rows, saying
 	// "reading" until the roster has listed the ticket.
 	t     *ticket
 	d     phase.Ticket
@@ -138,7 +138,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
 			}
-			r.done = t.digest != nil && r.steps[len(r.steps)-1].Done
+			r.done = t.digest != nil && r.steps[stepPublish].Done
 		}
 		rows = append(rows, r)
 	}
@@ -156,7 +156,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.
 func needsYou(d phase.Ticket) bool {
-	for _, p := range d.Work() {
+	for _, p := range d.Phases {
 		if p.State == phase.StateCurrent && hasSub(p, phase.SubNeedsYou) {
 			return true
 		}
@@ -173,7 +173,7 @@ func (r chartRow) state() string {
 	return StateQueued
 }
 
-// chartDots are the ticket's four steps as icons; queued ones for a ticket the
+// chartDots are the ticket's steps as icons; queued ones for a ticket the
 // screens know nothing of.
 func (m *Model) chartDots(r chartRow) string {
 	if r.steps != nil {

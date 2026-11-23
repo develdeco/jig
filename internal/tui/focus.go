@@ -164,6 +164,12 @@ func isHold(l events.Envelope) bool {
 	return l.Src == events.SrcLedger && l.Event == journal.EventNoteDelivered && l.Outcome == outcomeStopBlock
 }
 
+// isLandNamed is whether a machine ledger line says `jig land` named a merge
+// for a session to make: a line of the land step, and no call.
+func isLandNamed(l events.Envelope) bool {
+	return l.Src == events.SrcLedger && l.Event == journal.EventLandNamed
+}
+
 // holdPlace is the step and sub-step a hold is about, from the note's ref: a
 // review or publish still to do, else the slice the agent builds (a running
 // verification, uncommitted changes, a red oracle).
@@ -241,6 +247,9 @@ func (m *Model) tildeHome(cmd string) string {
 // failing command marked with its exit status.
 func (m *Model) moveText(t *ticket, l events.Envelope) string {
 	if l.Src != events.SrcLedger {
+		return m.st.icon(eventState(l)) + " " + m.say(t, l)
+	}
+	if isLandNamed(l) {
 		return m.st.icon(eventState(l)) + " " + m.say(t, l)
 	}
 	if isHold(l) {

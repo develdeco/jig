@@ -54,7 +54,7 @@ func (m *Model) mainPage() page {
 	return p
 }
 
-// stepDots are a ticket's steps as four icons, in order.
+// stepDots are a ticket's steps as icons, in order.
 func (m *Model) stepDots(steps []stepRow) string {
 	parts := make([]string, len(steps))
 	for i, s := range steps {
@@ -79,7 +79,7 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 	}
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return kind + m.st.state(cur.State, strings.TrimSpace("published "+t.publish().PR))
+		return kind + m.st.state(cur.State, cur.Text)
 	}
 	return kind + m.st.dim(stepNames[cur.Step]+": ") + m.st.state(cur.State, cur.Text)
 }

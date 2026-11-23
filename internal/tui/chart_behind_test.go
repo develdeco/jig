@@ -101,14 +101,14 @@ func TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords(t *testing.T) {
 	g := chartScreenRig(t)
 	c := g.m.w.charts["checkout"]
 	row := g.m.chartRows(c)[0]
-	if !row.done || row.behind || row.state() != StatePublished {
-		t.Errorf("JIG-4 = done %v behind %v state %s, want published", row.done, row.behind, row.state())
+	if !row.done || row.behind || row.state() != StateReady {
+		t.Errorf("JIG-4 = done %v behind %v state %s, want it waiting to land", row.done, row.behind, row.state())
 	}
 	if got := g.m.chartFirstOpen(c); got != 1 {
 		t.Errorf("the cursor follows to row %d, want 1, JIG-5", got)
 	}
 	g.press("up")
-	if panel := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(panel, "state    published") || strings.Contains(panel, "behind") {
+	if panel := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(panel, "state    waits to land") || strings.Contains(panel, "behind") {
 		t.Errorf("the Detail panel of a published ticket does not say so:\n%s", panel)
 	}
 }

@@ -358,12 +358,12 @@ func TestEachStepCountsItsTimeAndTheStepsTheirTotal(t *testing.T) {
 		tool(at(5, 40), "s-b", "go test ./...", said("Run the tests")),
 	)
 	steps := g.m.steps(g.m.w.tickets["SHOP-1"])
-	for step, want := range map[int]string{stepBrief: "2m 59s", stepBuild: "1m 00s", stepReview: "", stepPublish: ""} {
+	for step, want := range map[int]string{stepBrief: "2m 59s", stepBuild: "1m 00s", stepReview: "", stepPublish: "", stepLand: ""} {
 		if got := steps[step].Took; got != want {
 			t.Errorf("%s took %q, want %q", stepNames[step], got, want)
 		}
 	}
-	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 4 · total 3m 59s") {
+	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 5 · total 3m 59s") {
 		t.Errorf("the Steps panel's title does not give the total:\n%s", top)
 	}
 }

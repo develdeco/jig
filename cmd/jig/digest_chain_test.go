@@ -75,7 +75,7 @@ func lastScreen(out string) string {
 // failed and a stopped slice, in review, published with an open pull request,
 // merged on the host and not recorded, landed, closed, an issue and a task of
 // it) is read by `jig tui` on a pipe: the first screen says it is reading the
-// store, and each ticket's screen has the phase words, the kind and the pull
+// store, and each ticket's screen has the phase words of its five steps, the kind and the pull
 // request target `jig next <ticket> --json` gives. A chart's row reads as the
 // ticket's own row on the project's list.
 func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
@@ -134,19 +134,20 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
 		screen.until(t, "› "+id+"  Ticket "+id) // the roster has been read: the title is its
 		if n.Phase != nil {
-			for i, p := range n.Phase.Phases[:4] {
-				screen.until(t, head(p.Text, 24))
-				_ = i
+			for i, p := range n.Phase.Phases {
+				want := p.Text
+				if i == 3 && len(d.PRs) > 0 && !strings.HasPrefix(p.Text, "closed") {
+					// A published ticket's Publish row names its pull request.
+					want = "published · PR #" + strconv.Itoa(d.PRs[0].Number) + " into " + d.PRs[0].Target
+				}
+				screen.until(t, head(want, 24))
 			}
 		}
 		frame := lastScreen(screen.String())
 		if n.Phase != nil {
 			land := n.Phase.Phases[4]
-			if land.State != "pending" && !strings.Contains(frame, "land  "+head(land.Text, 20)) {
-				t.Errorf("%s: the screen has no Land line %q:\n%s", id, land.Text, frame)
-			}
-			if land.State == "pending" && strings.Contains(frame, "land  ") {
-				t.Errorf("%s: the screen has a Land line before the publish:\n%s", id, frame)
+			if !strings.Contains(frame, "5 Land") || !strings.Contains(frame, head(land.Text, 20)) {
+				t.Errorf("%s: the screen has no fifth step saying %q:\n%s", id, land.Text, frame)
 			}
 		}
 		// The kind, and a task's issue.

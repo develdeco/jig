@@ -5,8 +5,8 @@ jig  demo › shop  Shop                                       ○ waits for a m
   │  decided      ✓ One line per coupon                                        │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 2 published ─╮
-  │  ✓ JIG-4  Coupon model    ✓ ✓ ✓ ✓  published https://example.test/acme/de… │
-  │▸ ◐ JIG-7  Coupons in re…  ◐ ○ ○ ○  waits for JIG-4 merged · its PR is open │
+  │  ◆ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◆  Land: waits for a merge                 │
+  │▸ ◐ JIG-7  Coupons in …  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────── JIG-7 ─╮
   │  state    brief being drafted                                              │

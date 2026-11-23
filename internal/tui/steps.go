@@ -21,7 +21,7 @@ type stepRow struct {
 	took  time.Duration
 }
 
-// steps are the ticket's four steps, in order, as internal/phase derives them
+// steps are the ticket's five steps, in order, as internal/phase derives them
 // (standing.go): a step is done only when every step before it is, so a review
 // that found fixes takes the build back, and the build is not done again until
 // they are green.
@@ -29,11 +29,11 @@ func (m *Model) steps(t *ticket) []stepRow {
 	return m.stepRows(t, m.phaseOf(t))
 }
 
-// stepRows are the four rows of a ticket that stands as d says. The phase gives
+// stepRows are the five rows of a ticket that stands as d says. The phase gives
 // each row whether it is done and what it says; the screens add the state the
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
-	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
 	if t.digest == nil && t.status == nil {
 		// Nothing was read of the ticket: its steps say so, with no state and
 		// no time.
@@ -188,6 +188,9 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StatePublished
+		if prs := prWords(t.digest.prs()); prs != "" && p.Text != "" && !strings.HasPrefix(p.Text, "closed") {
+			s.Text = "published · " + prs
+		}
 	case p.State == phase.StatePending:
 		s.State = StateQueued
 	case t.digest != nil && t.digest.Behind:
@@ -197,6 +200,25 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StatePublishing
 	case cannotStart(d, p):
 		s.State = StateQueued
+	default:
+		s.State = StateReady
+	}
+	return s
+}
+
+// landRow is the land: waiting for the publish, for the person's word to merge,
+// for a merge made on the host to be recorded, or landed. A ticket with no pull
+// request to merge, or closed, has nothing to land and is past this step.
+func (m *Model) landRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Land)
+	s := rowOf(stepLand, rowLand, p)
+	switch {
+	case s.Done:
+		s.State = StateOK
+	case p.State == phase.StatePending:
+		s.State = StateQueued
+	case strings.Contains(p.Text, "not recorded"):
+		s.State = StateFindings
 	default:
 		s.State = StateReady
 	}
@@ -243,7 +265,7 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return cur.State, "published"
+		return cur.State, "landed"
 	}
 	return cur.State, stepWords(cur.Step, cur.State)
 }
@@ -279,6 +301,10 @@ var headerWords = map[stepState]string{
 	{stepPublish, StateReady}:      "ready to publish",
 	{stepPublish, StatePublishing}: "publishing",
 	{stepPublish, StatePublished}:  "published",
+	{stepLand, StateQueued}:        "waiting to land",
+	{stepLand, StateReady}:         "waits to land",
+	{stepLand, StateFindings}:      "merged, not recorded",
+	{stepLand, StateOK}:            "landed",
 }
 
 // stepWords is what the header says of step in state.

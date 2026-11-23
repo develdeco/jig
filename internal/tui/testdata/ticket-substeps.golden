@@ -1,16 +1,16 @@
 jig  demo › SHOP-1                                           ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────── step 2 of 4 · total 58m 30s ─╮
+  ╭─ Steps ────────────────────────────────────── step 2 of 5 · total 58m 30s ─╮
   │  ✓ 1 Brief            approved by Dana (person) · 3 sections, 3 slices     │
   │▸ ◐ 2 Build    58m 30s 1 of 3 green · slice clamp is being built            │
   │  ○ 3 Review           after the build                                      │
   │  ○ 4 Publish          after a clean review                                 │
+  │  ○ 5 Land             after the publish                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 7s                                 │
   │  ◐ slice clamp  claimed ── run ── verified                         57m 30s │
   │      goal     Clamp negative quantities                                    │
-  │      held by  builder                                                      │
   │      now      57m 20s · verification requested for bbbbbbb “Clamp negativ… │
   │  ○ slice cart   waits for clamp                                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
