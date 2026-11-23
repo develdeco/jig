@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -136,6 +137,10 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 		if n.Phase != nil {
 			for i, p := range n.Phase.Phases {
 				want := p.Text
+				if d.Closed != "" && i < 3 && slices.Contains(d.Unfinished, p.Name) {
+					// A step a closed ticket never finished reads closed.
+					want = "closed"
+				}
 				if i == 3 && len(d.PRs) > 0 && !strings.HasPrefix(p.Text, "closed") {
 					// A published ticket's Publish row names its pull request.
 					want = "published · PR #" + strconv.Itoa(d.PRs[0].Number)

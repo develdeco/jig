@@ -37,7 +37,7 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	if end, ok := m.endOf(t); ok {
 		endRows(rows, end, m.unfinished(t))
 	}
-	if t.digest == nil && t.status == nil {
+	if t.digest == nil && (t.status == nil || t.status.Closed != "") {
 		// Nothing was read of the ticket: its steps say so, with no state and
 		// no time.
 		for i := range rows {
@@ -302,6 +302,11 @@ func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
 func (m *Model) stepLabel(t *ticket) (state, label string) {
 	if end, ok := m.endOf(t); ok {
 		return end.State, end.Word
+	}
+	if t.digest == nil && t.status != nil && t.status.Closed != "" {
+		// Only the status is in: what it says of a closed ticket, nothing of
+		// its steps, which the digest tells.
+		return StateClosed, "closed"
 	}
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]

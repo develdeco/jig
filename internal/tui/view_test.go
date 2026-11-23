@@ -91,7 +91,10 @@ func TestReviewScreenPublished(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
-	g.feed(jig2()...).press("up", "enter") // from the publish, the current step, up to the review
+	g.feed(jig2()...).press("up", "up", "enter") // from the land, the current step, up to the review
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want review", g.m.Screen())
+	}
 	golden(t, "review-published", g.view())
 }
 

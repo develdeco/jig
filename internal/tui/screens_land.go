@@ -67,6 +67,10 @@ func (m *Model) landPage(id string) page {
 	switch {
 	case len(rows) == 0 && atEnd && end.State == StateClosed:
 		p.boxAdd(m.st.dim("closed without a pull request to merge"))
+	case len(rows) == 0 && len(t.digest.prs()) > 0:
+		// Published, and built again or behind: its pull requests merge once it
+		// publishes again.
+		p.boxAdd(m.st.dim("no merge to make until it publishes again"))
 	case len(rows) == 0:
 		p.boxAdd(m.st.dim("no pull request to land yet"))
 	}
@@ -84,7 +88,9 @@ func (m *Model) landPage(id string) page {
 // by whom, the others the merge to make and what the host says of them. A landed
 // line no pull request of the digest names is listed after them.
 func (m *Model) landRows(t *ticket, end endState, atEnd bool) []landRow {
-	if atEnd && end.State == StateClosed {
+	if !atEnd || end.State == StateClosed {
+		// Not at the landing: unpublished, behind or built again, nothing is
+		// to be merged yet.
 		return nil
 	}
 	lines := m.landedLines(t)
