@@ -9,13 +9,15 @@ import (
 // of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page
+	if !m.w.rosterRead && m.run != nil {
+		// Nothing is drawn from the stream before the roster is read: rows
+		// listed in replay order would re-sort under the cursor when it arrives.
+		p.add(m.st.dim("reading the store…"))
+		return p
+	}
 	ids := m.w.order
 	if len(ids) == 0 && len(m.w.chartOrder) > 0 {
 		m.mainCharts(&p, 4, 0)
-		return p
-	}
-	if len(ids) == 0 && !m.w.rosterRead && m.run != nil {
-		p.add(m.st.dim("reading the store…"))
 		return p
 	}
 	if len(ids) == 0 {

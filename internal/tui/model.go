@@ -148,6 +148,11 @@ type navEntry struct {
 	slice  string
 	chart  string
 	sel    int
+	// cur is the row the main screen's cursor stands on, by identity, found
+	// again on each draw wherever the page now has it; curSet is false until
+	// the page has had a row to stand on.
+	cur    rowIdentity
+	curSet bool
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -981,6 +986,11 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // move puts the cursor delta rows on, within the screen's rows. A cursor
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
+	m.moveBy(delta)
+	m.noteCursor()
+}
+
+func (m *Model) moveBy(delta int) {
 	m.followSel()
 	pg := m.page()
 	n := len(pg.refs())
@@ -1030,6 +1040,10 @@ func (m *Model) move(delta int) {
 // step is done.
 func (m *Model) followSel() {
 	e := m.top()
+	if e.screen == screenMain {
+		m.followRow(e)
+		return
+	}
 	if e.screen == screenChart && e.follow {
 		if c := m.w.charts[e.chart]; c != nil {
 			e.sel = m.chartFirstOpen(c)
@@ -1048,6 +1062,39 @@ func (m *Model) followSel() {
 		e.sel = cur
 	}
 	e.lastCur = cur
+}
+
+// noteCursor remembers the row under the main screen's cursor as an identity.
+func (m *Model) noteCursor() {
+	e := m.top()
+	if e.screen != screenMain {
+		return
+	}
+	refs := m.page().refs()
+	if e.sel >= 0 && e.sel < len(refs) {
+		e.cur, e.curSet = refs[e.sel].identity(), true
+	}
+}
+
+// followRow puts the main screen's cursor on the row it stood on, wherever the
+// page now has it. A row that left the page leaves the cursor on the row at
+// the same place, or the nearest one, and that row is the one it follows from
+// then on.
+func (m *Model) followRow(e *navEntry) {
+	refs := m.page().refs()
+	if len(refs) == 0 {
+		return
+	}
+	if e.curSet {
+		for i, r := range refs {
+			if r.identity() == e.cur {
+				e.sel = i
+				return
+			}
+		}
+	}
+	e.sel = min(max(e.sel, 0), len(refs)-1)
+	e.cur, e.curSet = refs[e.sel].identity(), true
 }
 
 // selected is the row under the cursor, nil when the screen has none.
