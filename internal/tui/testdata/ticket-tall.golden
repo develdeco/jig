@@ -1,22 +1,22 @@
 jig  demo › BIG-1                                                                ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · total 58m 30s ─╮
+  ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 8m 20s ─╮
   │  ✓ 1 Brief            no brief on record                                                       │
-  │▸ ◐ 2 Build    58m 30s 8 of 12 green · slice s9 is being built                                  │
+  │▸ ◐ 2 Build    8m 20s  8 of 12 green · slice s9 is being built · idle since 09:09               │
   │  ○ 3 Review           after the build                                                          │
   │  ○ 4 Publish          after a clean review                                                     │
   │  ○ 5 Land             after the publish                                                        │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ───────────────────────────────────────────────────────────────────────── 8 of 12 done ─╮
   │  ✓ slice s1   verified 1111111 · took 40s                                                      │
-  │  ✓ slice s2   verified 2222222 · took 40s                                                      │
-  │  ✓ slice s3   verified 3333333 · took 40s                                                      │
-  │  ✓ slice s4   verified 4444444 · took 40s                                                      │
-  │  ✓ slice s5   verified 5555555 · took 40s                                                      │
-  │  ✓ slice s6   verified 6666666 · took 40s                                                      │
-  │  ✓ slice s7   verified 7777777 · took 40s                                                      │
-  │  ✓ slice s8   verified 8888888 · took 40s                                                      │
-  │  ◐ slice s9   claimed ── run ── verified                                               50m 30s │
+  │  ✓ slice s2   verified 2222222 · took 1m 00s                                                   │
+  │  ✓ slice s3   verified 3333333 · took 1m 00s                                                   │
+  │  ✓ slice s4   verified 4444444 · took 1m 00s                                                   │
+  │  ✓ slice s5   verified 5555555 · took 1m 00s                                                   │
+  │  ✓ slice s6   verified 6666666 · took 1m 00s                                                   │
+  │  ✓ slice s7   verified 7777777 · took 1m 00s                                                   │
+  │  ✓ slice s8   verified 8888888 · took 1m 00s                                                   │
+  │  ◐ slice s9   claimed ── run ── verified                                                   40s │
   │      goal     Slice s9                                                                         │
   │      held by  builder                                                                          │
   │      commit   9999999 “Slice s9”                                                               │

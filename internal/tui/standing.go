@@ -28,7 +28,20 @@ func (m *Model) phaseOf(t *ticket) phase.Ticket {
 	if t.digest != nil {
 		t.digest.lay(&d)
 	}
+	addFinalRun(t, &d)
 	return d
+}
+
+// subFinal is the key of the build's sub-step for the ticket's last run.
+const subFinal = "final"
+
+// addFinalRun gives the build the sub-step of its final run once a round has a
+// reviewed head: a run of the union of the slices' checks after the review is
+// time the build took and no slice's (finalrun.go).
+func addFinalRun(t *ticket, d *phase.Ticket) {
+	if runs := t.finalRuns(); runs != nil {
+		d.Phases[stepBuild].Subs = append(d.Phases[stepBuild].Subs, finalSub(runs))
+	}
 }
 
 // factsOf gathers what internal/phase derives the sub-steps from, and the

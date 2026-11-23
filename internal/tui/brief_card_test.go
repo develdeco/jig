@@ -32,7 +32,7 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Brief ─"), "\n")
 	for _, want := range []string{
-		"◐ brief drafted   drafted ── slices ── approved", "9m 00s",
+		"◐ brief drafted   drafted ── slices ── approved", "1m 00s",
 		"planner  Claude Code · Sonnet 5",
 		"now      8m 00s  · Check the brief",
 		"○ slices written  after the brief",

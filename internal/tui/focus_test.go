@@ -120,7 +120,7 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{
 		"✓ slice round  verified aaaaaaa · took 37s",
-		"◐ slice clamp  claimed ── run ── verified", "57m 30s",
+		"◐ slice clamp  claimed ── run ── verified", "20s",
 		"goal     Clamp negative quantities",
 		"held by  builder · Claude Code · Sonnet 5",
 		"commit   bbbbbbb “Clamp negative quantities”",
@@ -243,7 +243,7 @@ func TestADoneStepFoldsEverySubstep(t *testing.T) {
 	if strings.Contains(text, "now ") {
 		t.Errorf("a done step opened a sub-step:\n%s", text)
 	}
-	for _, want := range []string{"slice round  verified aaaaaaa · took 37s", "slice clamp  verified bbbbbbb · took 30s"} {
+	for _, want := range []string{"slice round  verified aaaaaaa · took 37s", "slice clamp  verified bbbbbbb · took 53s"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the block lacks %q:\n%s", want, text)
 		}

@@ -80,12 +80,12 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 			t.Errorf("the review screen lost the asks:\n%s", p)
 		}
 
-		// The window's edge: a minute old is still live, a second more is not.
-		now = rigNow.Add(30 * time.Second)
+		// The window's edge: a window old is still live, a second more is not.
+		now = rigNow.Add(liveWindow - 30*time.Second)
 		if hasGroup(ticketPage()) {
-			t.Errorf("a line exactly one minute old is not live")
+			t.Errorf("a line exactly one window old is still live")
 		}
-		now = rigNow.Add(31 * time.Second)
+		now = rigNow.Add(liveWindow - 29*time.Second)
 		if !hasGroup(ticketPage()) {
 			t.Errorf("the words did not come back once the line went quiet:\n%s", ticketPage())
 		}
