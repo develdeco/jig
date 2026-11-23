@@ -57,17 +57,11 @@ func (m *Model) subjectOf(pg page) subject {
 	return s
 }
 
-// can says whether action a can run now on what the keys act on, and when it
-// cannot, why in a short sentence. It reads the roster's digest and the status
-// already read and runs nothing: the hints list a key by it and the key handler
-// runs a verb by it, so the two cannot disagree. The digest is the same reading
-// `jig next` gives, so no phase is derived here.
-func (m *Model) can(a action) (bool, string) {
-	m.keysOn = m.subjectNow()
-	return m.canOn(m.keysOn, a)
-}
-
-// canOn is can for the subject sub.
+// canOn says whether action a can run now on what the keys act on (sub), and
+// when it cannot, why in a short sentence. It reads the roster's digest and the
+// status already read and runs nothing: the hints list a key by it and the key
+// handler runs a verb by it, so the two cannot disagree. The digest is the same
+// reading `jig next` gives, so no phase is derived here.
 func (m *Model) canOn(sub subject, a action) (bool, string) {
 	id := sub.ticket
 	t := m.w.tickets[id]

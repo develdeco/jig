@@ -300,3 +300,9 @@ func TestLandingStopHintSaysThePrompt(t *testing.T) {
 		t.Errorf("a ticket at its publish says the landing word:\n%s", hint)
 	}
 }
+
+// can is canOn for what the keys of the screen on top act on now.
+func (m *Model) can(a action) (bool, string) {
+	m.keysOn = m.subjectNow()
+	return m.canOn(m.keysOn, a)
+}
