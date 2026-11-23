@@ -253,7 +253,7 @@ func (m *Model) header(w int) []string {
 			title = t.title
 		}
 		if t != nil && e.screen == screenTicket {
-			if k := t.digest.kindWords(); k != "" {
+			if k := m.kindIn(t); k != "" {
 				crumbs += "  " + m.st.dim(k)
 			}
 		}
@@ -273,6 +273,10 @@ func (m *Model) header(w int) []string {
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
+			if isMulti(t) {
+				// A multi-task has no phase: its word is where its own pull request is.
+				state, label = m.multiLabel(t)
+			}
 			if t.awaiting {
 				state, label = StateQueued, "waiting"
 			}
@@ -371,6 +375,9 @@ func (m *Model) keyHints() []string {
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
 			keys = [][]string{back, tail, quit}
+		} else if isMulti(t) {
+			// A multi-task's tasks open; nothing else is done from its screen.
+			keys = [][]string{move, open, back, tail, quit}
 		}
 	case screenBrief:
 		keys = [][]string{move, open, back, land, tail, quit}
@@ -384,6 +391,27 @@ func (m *Model) keyHints() []string {
 		keys = [][]string{move, back, answer, land, tail, quit}
 	case screenLand:
 		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
+	}
+	// The key up to the issue, on the screens of a task that is in one's plan, and
+	// the one that shows the map, on the plan: each goes after the key back.
+	var extra []string
+	switch id := m.upFrom(); {
+	case id != "" && m.multiParent(id) != "":
+		extra = []string{"c", "multi-task"}
+	case id != "" && len(m.issuesOf(id)) > 0:
+		extra = []string{"c", "issue"}
+	case m.top().screen == screenChart:
+		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
+			extra = []string{"m", "map"}
+		}
+	}
+	if extra != nil {
+		for i, k := range keys {
+			if k[0] == "esc" {
+				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
+				break
+			}
+		}
 	}
 	flat := make([]string, 0, 2*len(keys))
 	for _, k := range keys {

@@ -131,6 +131,18 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 			t.Fatalf("%s: the roster says %s %v, jig next says %s %v", id, d.Current, d.Phases, n.Phase.Name, n.Phase.Phases)
 		}
 
+		if d.Kind == store.KindIssue {
+			// An issue's screen is its plan: the chart that plans it.
+			keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
+			screen.until(t, "Need")
+			screen.until(t, "Tasks")
+			keys.Write([]byte("q"))
+			if wait() != 0 {
+				t.Fatalf("%s: jig tui exited non-zero\n%s", id, screen.String())
+			}
+			continue
+		}
+
 		// The ticket's screen.
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
 		screen.until(t, "› "+id+"  Ticket "+id) // the roster has been read: the title is its

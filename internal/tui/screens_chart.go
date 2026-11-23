@@ -29,6 +29,9 @@ func (m *Model) chartPage(name string) page {
 		p.add(m.st.dim("no chart " + name))
 		return p
 	}
+	if c.issueID() != "" {
+		return m.planPage(c)
+	}
 	rows := m.chartRows(c)
 	tickets := m.chartTicketsPanel(c, rows)
 
@@ -96,17 +99,25 @@ func (m *Model) chartPage(name string) page {
 // stands in the chart. The note's column is sized first, so the words that say
 // what a ticket waits for are never the part cut.
 func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
-	var p page
 	total, done, _ := chartProgress(rows)
 	right := fmt.Sprintf("%d of %d published", done, total)
 	if total == 0 {
 		right = "none graduated"
 	}
-	p.boxTop("Tickets", right)
+	return m.ticketRowsPanel(c, rows, "Tickets", right, m.chartNote, nil)
+}
+
+// ticketRowsPanel is the panel of a chart's tickets as chartTicketsPanel draws
+// it, under title and with right at its edge: noteOf says the words after each
+// row's steps, and sub, when set, the lines a row has under it that the cursor
+// does not stand on.
+func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) (string, bool), sub func(chartRow) []string) page {
+	var p page
+	p.boxTop(title, right)
 
 	// The entries that have no ticket yet: fog, listed after the tickets.
 	var fog []string
-	if c.info != nil {
+	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
 				fog = append(fog, t.Title)
@@ -114,15 +125,16 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 		}
 	}
 
-	idW, titleW, noteW, ownW := 0, 0, 0, 0
+	idW, titleW, noteW, ownW, nestW := 0, 0, 0, 0, 0
 	for _, title := range fog {
 		titleW = max(titleW, width(title))
 	}
 	notes := make([]string, len(rows))
 	for i, r := range rows {
 		var own bool
-		notes[i], own = m.chartNote(r)
+		notes[i], own = noteOf(r)
 		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
+		nestW = max(nestW, 2*r.depth)
 		if own {
 			ownW = max(ownW, width(notes[i]))
 		}
@@ -130,22 +142,28 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 	// "icon id  title  ◐ ○ ○ ○  note" in the room a panel's text has. The words
 	// the chart says itself keep their whole column, the title gives way to them,
 	// and a status's own words are cut at the end of the line.
-	room := m.width - 7 - (2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
+	room := m.width - 7 - (nestW + 2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
 	noteW = max(ownW, min(noteW, room-min(titleW, 16)))
 	titleW = min(titleW, max(0, room-noteW))
 	for i, r := range rows {
-		line := m.st.icon(r.state()) + " " + pad(r.id, idW)
+		line := spaces(2*r.depth) + m.st.icon(r.state()) + " " + pad(r.id, idW)
 		if titleW > 0 {
 			line += "  " + pad(r.title, titleW)
 		}
 		line += "  " + m.chartDots(r) + "  " + notes[i]
 		p.boxRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		if sub != nil {
+			for _, l := range sub(r) {
+				p.boxAdd(l)
+			}
+		}
 	}
 
 	for _, title := range fog {
 		p.boxAdd(m.st.dim("·" + spaces(1+idW) + "  " + pad(title, titleW) + "  fog · not graduated"))
 	}
-	if n := c.listing.Ungraduated; c.info == nil && n > 0 {
+	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
+		n := c.listing.Ungraduated
 		fog = append(fog, "")
 		p.boxAdd(m.st.dim("· " + strconv.Itoa(n) + " " + plural(n, "entry", "entries") + " not graduated"))
 	}
@@ -160,7 +178,11 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 // for when its build has not begun, that it can start, or where it stands as
 // on the project's list. own says they are the chart's own words, which a
 // narrow row must not cut, and not the ticket's status.
-func (m *Model) chartNote(r chartRow) (note string, own bool) {
+func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
+
+// chartNoteIn is chartNote with or without the kind a ticket says of itself
+// ("task of <issue> · "), which a screen that is about that parent need not say.
+func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
@@ -170,7 +192,7 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	case r.behind:
 		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	case r.done:
 		return m.st.state(StatePublished, "published"), true
 	case len(r.waits) > 0:
@@ -178,7 +200,7 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
 		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
 	case r.t != nil:
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	}
 	return "", false
 }
