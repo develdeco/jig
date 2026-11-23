@@ -212,6 +212,8 @@ type hereView struct {
 	// prompt is what to ask an agent to move the ticket on (internal/phase), "" when
 	// it is published or its phase could not be told.
 	prompt string
+	// refused is the gate refusal the review stands on ("gate refused: ..."), "" when none.
+	refused string
 }
 
 type hereSlice struct {
@@ -299,6 +301,7 @@ func buildHereView(hc hereCtx) (hereView, error) {
 	// and a ticket it cannot derive still has its state to show.
 	if t, err := derivePhaseSettled(st, ticket, settlingMerges(hc.e, hc.Where, st)); err == nil {
 		v.prompt = t.Prompt
+		_, v.refused = t.Refusal()
 	}
 	return v, nil
 }
@@ -342,6 +345,7 @@ func (v hereView) blocks(hc hereCtx, sections []hereSection) ([]string, error) {
 	add("ticket", w.Ticket)
 	add("ticket_how", w.TicketHow)
 	add("title", v.title)
+	add("review", v.refused)
 	add("slice", w.Slice)
 	add("slice_how", w.SliceHow)
 	add("session", w.Session)

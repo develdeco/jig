@@ -1713,3 +1713,14 @@ func firstOf(ss ...string) string {
 	}
 	return ""
 }
+
+// Refusal is the gate refusal the ticket's review stands on: its code and the
+// words `gate refused: <summary>`, when the ticket is at the review with no
+// round open and no later line has superseded the refusal. Both are empty
+// otherwise.
+func (t Ticket) Refusal() (code, text string) {
+	if t.d == nil || t.d.refusal == nil || t.Current != Review || t.d.f.Open != nil {
+		return "", ""
+	}
+	return t.d.refusal.Code, t.d.refusalText()
+}

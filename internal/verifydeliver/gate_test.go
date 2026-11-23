@@ -418,7 +418,7 @@ func reportYAMLAt(t *testing.T, d Deps, ticket string, round int) reportYAML {
 //     pushed;
 //   - --intent and --doc are refused with INTENT_CONFLICT on a ticket that
 //     already has a brief.md;
-//   - a --branch gate refused with BRANCH_NOT_FOUND leaves the same no trace:
+//   - a --branch gate refused with BRANCH_NOT_FOUND opens no round and writes no intent.md either:
 //     --intent must not write intent.md when the branch check refuses the round
 //     after the frontier precondition already passed;
 //   - a --doc path that cannot be read is refused with INTENT_DOC_MISSING
@@ -565,8 +565,8 @@ func TestGateRefusesAnIntentMDItCannotBind(t *testing.T) {
 }
 
 // TestGateIntentNotRecordedWhenNotGreen checks that a gate refused with
-// GATE_NOT_GREEN leaves no trace: --intent must not write (or push)
-// intent.md, nor append a journal line, before the frontier precondition
+// GATE_NOT_GREEN opens no round: --intent must not write (or push)
+// intent.md, nor append a gate-open line, before the frontier precondition
 // is checked, so a plain rerun after finishing the frontier is the whole
 // recovery. The frontier is the slices' states and nothing else
 // (TestFrontierRefusalNamesThePromptItIsGiven reads the refusal's help), so
