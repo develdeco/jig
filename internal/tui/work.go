@@ -94,13 +94,15 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 	idle := map[int]time.Time{}
 	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
 		if key, ok := tailOwner(d.Phases[cur], prevKey); ok {
+			// Only a sub-step whose holder is known is at work: the time since
+			// the latest line is the holder's, until it is idle.
 			if held := windowOf(ws, cur, key); held != nil {
 				if last, gone := m.idleOf(t, *held, prev); gone {
 					idle[cur] = last
-					return clocks{w, waits, idle}
+				} else {
+					w[workRef{cur, key}] += m.now().Sub(prev)
 				}
 			}
-			w[workRef{cur, key}] += m.now().Sub(prev)
 		}
 	}
 	return clocks{w, waits, idle}

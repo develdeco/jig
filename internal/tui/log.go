@@ -272,7 +272,12 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 			continue
 		}
 		if xt, ok := x.At(); ok && xt.After(at) {
-			if s := stepOfLine(x); s >= 0 && !waitLine(d, s, t.subKey(x)) {
+			if s := stepOfLine(x); s >= 0 {
+				if waitLine(d, s, t.subKey(x)) {
+					// The line that ended a wait explains no call made while
+					// it stood.
+					return -1, ""
+				}
 				return s, ""
 			}
 		}

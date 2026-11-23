@@ -165,6 +165,52 @@ func TestAStepNobodyHoldsCountsNoTime(t *testing.T) {
 	}
 }
 
+// TestASubStepWithNoKnownHolderCountsNoTime: a slice the person claimed at a
+// terminal, and a round the person opened, name no session: nobody is known to
+// work on them, and the hour that passes is no work.
+func TestASubStepWithNoKnownHolderCountsNoTime(t *testing.T) {
+	t.Parallel()
+	status := strings.Join([]string{"ticket: SHOP-1", "state: building",
+		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
+			{"a", "building", "1", "-", "-", "Do a"},
+		}), "questions: none"}, "\n") + "\n"
+	g := newRig(t, "SHOP-1")
+	atClock(g, "2026-10-23T10:00:30Z")
+	g.r.answer("status SHOP-1 --store /s", status, 0)
+	g.feed(
+		jl(at(0, 0), "SHOP-1", "a", journal.EventClaim),
+		jl(at(0, 30), "SHOP-1", "a", journal.EventOracle, with("", sha('a'), "fail", "boom", "", "")),
+	)
+	if got := g.m.steps(g.m.w.tickets["SHOP-1"])[stepBuild].Took; got != "30s" {
+		t.Errorf("a slice no session holds took %q an hour on, want its 30s", got)
+	}
+}
+
+// TestACallWhileAWaitStoodIsNoWorkOfTheNextStep: the drafting session calls
+// while the brief waits for its approval; the line after the approval (a slice
+// claimed) explains none of those calls, and the build counts only its own.
+func TestACallWhileAWaitStoodIsNoWorkOfTheNextStep(t *testing.T) {
+	t.Parallel()
+	g := draftedRig(t)
+	g.r.answer("status SHOP-1 --store /s", strings.Replace(approvedStatus(), "queued", "building", 1), 0)
+	g.feed(
+		toolOn("SHOP-1", at(30, 0), "s-b", "go test ./...", said("Run the tests")),
+		toolOn("SHOP-1", at(34, 0), "s-b", "go test ./...", said("Run the tests")),
+		jl("2026-10-23T10:02:07Z", "SHOP-1", "", journal.EventApproval, with("", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),
+		jl("2026-10-23T10:03:00Z", "SHOP-1", "round", journal.EventClaim, with("s-c", "", "", "", "", "")),
+	)
+	atClock(g, "2026-10-23T10:03:30Z")
+	tk := g.m.w.tickets["SHOP-1"]
+	if got := g.m.steps(tk)[stepBuild].Took; got != "30s" {
+		t.Errorf("the build took %q, want the 30s since its claim", got)
+	}
+	for _, p := range g.m.placed(tk, g.m.phaseOf(tk)) {
+		if p.l.Command == "go test ./..." && p.step != -1 {
+			t.Errorf("a call made while the approval stood is placed in %s", tagOf(p.step, p.key))
+		}
+	}
+}
+
 // TestALongOracleRunIsWork: an oracle run of seven minutes is work, though no
 // line or call falls inside it: the line that ends it says how long it ran.
 func TestALongOracleRunIsWork(t *testing.T) {
