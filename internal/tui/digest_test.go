@@ -46,7 +46,7 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 	closed.Closed = "covered by develdeco/jig#82"
 	issue := &digestInfo{Kind: "issue", State: "waiting"}
 	child := task("build", true, "done|approved by Ada", "current|ready to build", pending[2], pending[3], "pending|after the publish")
-	child.Parent = "GATE-49"
+	child.Parent = "JIG-80"
 
 	for _, tc := range []struct {
 		name string
@@ -66,13 +66,13 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 		{"a landed ticket", published("done|landed", pr), "landed", "", "publish"},
 		{"a closed ticket", closed, "none · closed without a pull request", "", "publish"},
 		{"an issue", issue, "", "issue", "brief"},
-		{"a task of an issue", child, "", "task of GATE-49", "build"},
+		{"a task of an issue", child, "", "task of JIG-80", "build"},
 	} {
 		g := newRig(t, "")
-		g.m.w.setRoster([]rosterRow{{ID: "T-1", Title: "Ticket", State: "ready", Digest: tc.d}})
-		tk := g.m.w.tickets["T-1"]
+		g.m.w.setRoster([]rosterRow{{ID: "JIG-9", Title: "Ticket", State: "ready", Digest: tc.d}})
+		tk := g.m.w.tickets["JIG-9"]
 
-		st, ok := g.m.Standing("T-1")
+		st, ok := g.m.Standing("JIG-9")
 		if !ok || st.Current != tc.standing {
 			t.Errorf("%s: stands at %+v, want %s", tc.name, st, tc.standing)
 		}
@@ -87,7 +87,7 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 			}
 		}
 
-		page := pagesText(g.m.ticketPage("T-1"))
+		page := pagesText(g.m.ticketPage("JIG-9"))
 		if tc.land == "" && strings.Contains(page, "land ") {
 			t.Errorf("%s: the ticket screen has a Land line:\n%s", tc.name, page)
 		}
@@ -100,9 +100,9 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 	}
 
 	// The header of a ticket screen names the kind and the issue.
-	g := newRig(t, "T-1")
-	g.m.w.setRoster([]rosterRow{{ID: "T-1", Title: "Ticket", State: "ready", Digest: child}})
-	if head := strings.Join(g.m.header(80), "\n"); !strings.Contains(head, "task of GATE-49") {
+	g := newRig(t, "JIG-9")
+	g.m.w.setRoster([]rosterRow{{ID: "JIG-9", Title: "Ticket", State: "ready", Digest: child}})
+	if head := strings.Join(g.m.header(80), "\n"); !strings.Contains(head, "task of JIG-80") {
 		t.Errorf("the header does not name the task's issue:\n%s", head)
 	}
 }
