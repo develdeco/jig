@@ -513,6 +513,12 @@ func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, ungraduated i
 		switch {
 		case len(waits) > 0:
 			return StateQueued, m.st.dim("not opened yet · waits for " + andList(waits))
+		case st.Standing == "waiting":
+			// Nothing to name: `jig next` says it has no children yet.
+			return StateQueued, m.st.dim("not opened yet · waits for its tasks to be graduated")
+		case st.Standing != "ready":
+			// Published or landed, and the digest has no row for the pull request yet.
+			return StateQueued, m.st.dim(readingText)
 		case st.Prompt != "":
 			return StateReady, "not opened yet · say " + m.st.key(strconv.Quote(st.Prompt))
 		}

@@ -108,7 +108,7 @@ func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, m
 		runs := finalRunsOf(lines, land.JournalRepo(d, s.Repo))
 		if landed {
 			// A landed issue reads what was recorded, whatever its branch has become.
-			row := landedSuiteRow(s.Repo, runs, lines, land.JournalRepo(d, s.Repo))
+			row := landedSuiteRow(s.Repo, lines, land.JournalRepo(d, s.Repo))
 			for _, r := range earlierFailures(runs, row.Tip) {
 				out = append(out, nextSuiteRow{
 					Repo: s.Repo, Standing: land.SuiteFail, Command: r.line.Command, Tip: r.line.Commit,
@@ -156,25 +156,45 @@ func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, m
 	return out, nil
 }
 
-// landedSuiteRow is a landed issue's suite as it was recorded: the last final run
-// that judged the code, which a waiver at its tip stands over as it did before
-// the landing, else the last waiver, else none recorded.
-func landedSuiteRow(repo string, runs []finalRun, lines []journal.Line, jr string) nextSuiteRow {
-	if len(runs) > 0 {
-		r := runs[len(runs)-1].line
-		if r.Outcome != "pass" {
-			if w, ok := journal.SuiteWaivedAt(lines, jr, r.Commit); ok {
-				return nextSuiteRow{Repo: repo, Standing: land.SuiteWaived, Tip: w.Commit, Waiver: w.Summary}
+// landedSuiteRow is a landed issue's suite as it was recorded: the latest record
+// of the repo in journal order, a judged final run or a waiver, as it read before
+// the landing. A waiver stands over the failure at its tip, a pass at the same
+// tip stands over a waiver, and a waiver with no commit stands as it was given.
+func landedSuiteRow(repo string, lines []journal.Line, jr string) nextSuiteRow {
+	var last *journal.Line
+	for i := range lines {
+		l := &lines[i]
+		switch {
+		case l.Event == journal.EventSuiteWaived && l.Repo == jr:
+			last = l
+		case l.Event == journal.EventFinalOracle && l.Repo == jr:
+			if _, ok := journal.FinalRunAt(lines[i:i+1], jr, l.Commit); ok {
+				last = l
 			}
 		}
-		return nextSuiteRow{Repo: repo, Standing: map[bool]string{true: land.SuitePass, false: land.SuiteFail}[r.Outcome == "pass"], Command: r.Command, Tip: r.Commit, Seconds: r.Seconds, Signature: r.Signature}
 	}
-	for i := len(lines) - 1; i >= 0; i-- {
-		if l := lines[i]; l.Event == journal.EventSuiteWaived && l.Repo == jr {
-			return nextSuiteRow{Repo: repo, Standing: land.SuiteWaived, Tip: l.Commit, Waiver: l.Summary}
+	switch {
+	case last == nil:
+		return nextSuiteRow{Repo: repo, Standing: land.SuiteUndeclared}
+	case last.Event == journal.EventSuiteWaived:
+		if run, ok := journal.FinalRunAt(lines, jr, last.Commit); ok && run.Outcome == "pass" {
+			return passedRow(repo, run)
 		}
+		return nextSuiteRow{Repo: repo, Standing: land.SuiteWaived, Tip: last.Commit, Waiver: last.Summary}
 	}
-	return nextSuiteRow{Repo: repo, Standing: land.SuiteUndeclared}
+	run, _ := journal.FinalRunAt(lines, jr, last.Commit)
+	if run.Outcome == "pass" {
+		return passedRow(repo, run)
+	}
+	if w, ok := journal.SuiteWaivedAt(lines, jr, run.Commit); ok {
+		return nextSuiteRow{Repo: repo, Standing: land.SuiteWaived, Tip: w.Commit, Waiver: w.Summary}
+	}
+	return nextSuiteRow{Repo: repo, Standing: land.SuiteFail, Command: run.Command, Tip: run.Commit, Seconds: run.Seconds, Signature: run.Signature}
+}
+
+// passedRow is the row of a pass.
+func passedRow(repo string, run journal.Line) nextSuiteRow {
+	return nextSuiteRow{Repo: repo, Standing: land.SuitePass, Command: run.Command, Tip: run.Commit, Seconds: run.Seconds}
 }
 
 // undeclaredAtTarget says the repo's manifest at its target branch declares no

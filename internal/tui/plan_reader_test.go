@@ -66,3 +66,39 @@ func TestPlanPRWaitsForAnUngraduatedEntry(t *testing.T) {
 		t.Errorf("with nothing left to wait for: %q", row)
 	}
 }
+
+// TestAContainerWithNoChildrenNeverReadsReady: a container whose status says it
+// is waiting with nothing under it to name reads queued, never ready to open; a
+// published or landed one with no pull-request row yet reads reading.
+func TestAContainerWithNoChildrenNeverReadsReady(t *testing.T) {
+	t.Parallel()
+	waiting := &digestInfo{Kind: "issue", State: "waiting"}
+	status := func(standing string) planSpec {
+		return planSpec{issue: waiting, noSuiteTable: true, status: "ticket: SHOP-49\nstate: issue\nkind: issue\nchart: repeat\nneed: x\nstanding: " + standing + "\nchildren: none\n"}
+	}
+	pr := func(spec planSpec) string {
+		g := planRig(t, spec)
+		g.m.height, g.m.width = 40, 100
+		return issueLine(stripANSI(g.view()), "PR")
+	}
+	if row := pr(status("waiting")); !strings.Contains(row, "○ PR") || strings.Contains(row, "ready to open") || !strings.Contains(row, "waits for its tasks to be graduated") {
+		t.Errorf("a waiting issue with no children: %q", row)
+	}
+	for _, standing := range []string{"published", "landed"} {
+		if row := pr(status(standing)); !strings.Contains(row, readingText) || strings.Contains(row, "ready to open") {
+			t.Errorf("a %s issue with no pull-request row: %q", standing, row)
+		}
+	}
+
+	// The same for a multi-task.
+	kids := &digestInfo{Kind: "multi-task", Parent: "SHOP-49", State: "waiting"}
+	g := planRig(t, planSpec{multi: true, multiDigest: kids})
+	g.r.answer("status SHOP-7 --store /s", "ticket: SHOP-7\nstate: multi-task\nkind: multi-task\nbranch: 503-the-multi-task\nstanding: waiting\nneed: x\nchildren: none\n", 0)
+	g.m.height, g.m.width = 40, 100
+	g.m.w.tickets["SHOP-7"].dirty = true
+	onRow(t, g, "SHOP-7")
+	g.press("enter")
+	if row := issueLine(stripANSI(g.view()), "PR"); strings.Contains(row, "ready to open") || !strings.Contains(row, "waits for its tasks to be graduated") {
+		t.Errorf("a waiting multi-task with no children: %q", row)
+	}
+}

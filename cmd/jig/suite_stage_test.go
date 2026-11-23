@@ -180,3 +180,34 @@ func TestStatusOfAnIssueWithAnUnreadableSuite(t *testing.T) {
 		t.Errorf("the suite row is %q, want one that says why", rows)
 	}
 }
+
+// TestAWaiverAtALaterTipStandsAfterTheLanding: a suite that failed at one tip and
+// was waived at a later one reads, once the issue landed and its branch is gone,
+// as it read before: the waiver current and the failure its history. So does a
+// pass at one tip and a waiver at the next.
+func TestAWaiverAtALaterTipStandsAfterTheLanding(t *testing.T) {
+	for _, first := range []string{"fail", "pass"} {
+		s := newSuitePublishRig(t, suiteManifestYAML)
+		tip1 := s.tip()
+		s.record(journal.Line{Event: journal.EventFinalOracle, Commit: tip1, Outcome: first, Seconds: 4, Signature: "final:boom", Command: "go test ./..."})
+		tip2 := s.moveTip("")
+		s.record(journal.Line{Event: journal.EventSuiteWaived, Commit: tip2, Summary: "ci runs it", Provenance: "person"})
+		rowsOf := func() []string {
+			out, code := s.run(t, "status", "TK-1")
+			if code != 0 {
+				t.Fatalf("jig status TK-1: exit %d\n%s", code, out)
+			}
+			return suiteRowsOf(t, out)
+		}
+		before := rowsOf()
+		landIssue(t, s)
+		dropBranch(t, s)
+		after := rowsOf()
+		if len(after) == 0 || !strings.HasPrefix(after[len(after)-1], "app,waived,go test ./...,"+tip2) && !strings.HasPrefix(after[len(after)-1], "app,waived,-,"+tip2) {
+			t.Errorf("%s then a waiver: after the landing the current row is %q, want waived at %s\nbefore: %q", first, after, tip2, before)
+		}
+		if first == "fail" && (len(after) != 2 || !strings.HasPrefix(after[0], "app,fail,go test ./...,"+tip1)) {
+			t.Errorf("the failure at %s is not the history row: %q", tip1, after)
+		}
+	}
+}
