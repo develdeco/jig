@@ -148,12 +148,31 @@ func (t *ticket) played(session, role string) bool {
 	return slices.Contains(t.roleSessions()[role], session)
 }
 
-// reviewerName is how a session that reviewed the ticket is named: a reviewer
+// roundIndependent is what the status says of round n's independence: true,
+// false or unknown, "" when it has no row for the round yet.
+func (t *ticket) roundIndependent(n int) string {
+	if t.status == nil {
+		return ""
+	}
+	for _, r := range t.status.Rounds {
+		if r.N == n {
+			return r.Independent
+		}
+	}
+	return ""
+}
+
+// reviewerName is how a session that reviewed round n of the ticket is named:
+// the builder reviewing its own change when the status says the round was not
+// independent, else a reviewer
 // subagent when it also played the planner or the builder, since a subagent
 // shares its parent's session id and the first role that id played is not the
 // one it reviews in; else the reviewer, numbered when several sessions
 // reviewed. "" for a session that played none of the roles.
-func (t *ticket) reviewerName(session string) string {
+func (t *ticket) reviewerName(session string, n int) string {
+	if t.roundIndependent(n) == "false" {
+		return "builder reviewing its own change"
+	}
 	if t.played(session, rolePlanner) || t.played(session, roleBuilder) {
 		return "reviewer subagent"
 	}
@@ -193,11 +212,11 @@ func (m *Model) reviewerDesc(t *ticket, session string, n int, own string, rec *
 
 // reviewerRole names a session that reviewed by its role alone: "reviewer
 // subagent". "" for a line that names no session.
-func (m *Model) reviewerRole(t *ticket, session string) string {
+func (m *Model) reviewerRole(t *ticket, session string, n int) string {
 	if session == "" {
 		return ""
 	}
-	return firstOf(t.reviewerName(session), m.who(t, session))
+	return firstOf(t.reviewerName(session, n), m.who(t, session))
 }
 
 // reviewerWho names the session that reviewed round n with its harness and the
@@ -205,7 +224,7 @@ func (m *Model) reviewerRole(t *ticket, session string) string {
 // the line being worded names, "" for none, and rec the status's row for the
 // round, nil for none. "" for a line that names no session.
 func (m *Model) reviewerWho(t *ticket, session string, n int, own string, rec *statusRound) string {
-	name := m.reviewerRole(t, session)
+	name := m.reviewerRole(t, session, n)
 	if name == "" {
 		return ""
 	}

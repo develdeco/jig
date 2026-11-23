@@ -42,10 +42,9 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 			if detailed {
 				return m.reviewerWho(t, session, round, "", nil)
 			}
-			return m.reviewerRole(t, session)
+			return m.reviewerRole(t, session, round)
 		},
 	}
-	fixes := t.fixRounds()
 	if st := t.status; st != nil {
 		f.Adopted, f.Branch = st.Branch != "", st.Branch
 		f.Closed = st.Closed
@@ -55,7 +54,7 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 		}
 		for _, s := range st.Slices {
 			f.Slices = append(f.Slices, phase.Slice{
-				ID: s.ID, State: s.State, Goal: s.Goal, FromGate: fixes[s.ID],
+				ID: s.ID, State: s.State, Goal: s.Goal, FromGate: t.fixRound(s.ID), Fix: t.isFixSlice(s.ID) || s.FromGate > 0,
 				BlockedBy:    splitPlus(s.BlockedBy),
 				OpenQuestion: len(t.openQuestions(m.zone, s.ID)) > 0,
 			})
@@ -78,7 +77,7 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 			state = "green"
 		}
 		f.Slices = append(f.Slices, phase.Slice{
-			ID: id, State: state, FromGate: fixes[id],
+			ID: id, State: state, FromGate: t.fixRound(id), Fix: t.isFixSlice(id),
 			OpenQuestion: len(t.openQuestions(m.zone, id)) > 0,
 		})
 	}
@@ -117,12 +116,16 @@ func splitPlus(cell string) []string {
 	return strings.Split(cell, "+")
 }
 
-// fixRounds maps each fix slice to the round whose findings queued it: the
-// fix-slice line's attempt, else the round that had closed by then.
+// fixRounds maps each fix slice the journal names to the round whose findings
+// queued it, 0 when nothing places it. A fix-slice line has no attempt as jig
+// writes it, so the round is the one closed before the line, or the next one
+// when keep-queued lines follow the fix-slice lines: a kept finding of an
+// earlier round is queued by the gate that is about to open the next round, and
+// the status gives such a slice that round as its from_gate.
 func (t *ticket) fixRounds() map[string]int {
 	out := map[string]int{}
 	closed := 0
-	for _, l := range t.lines {
+	for i, l := range t.lines {
 		switch l.Event {
 		case journal.EventGateRound, journal.EventGateClean:
 			if l.Attempt > 0 {
@@ -136,12 +139,50 @@ func (t *ticket) fixRounds() map[string]int {
 			}
 			n := l.Attempt
 			if n == 0 {
-				n = max(closed, 1)
+				n = closed
+				if t.keepQueuedFollows(i) {
+					n = closed + 1
+				}
 			}
 			out[l.Slice] = n
 		}
 	}
 	return out
+}
+
+// keepQueuedFollows is whether the fix-slice line at i belongs to a run of
+// fix-slice lines that a keep-queued line closes.
+func (t *ticket) keepQueuedFollows(i int) bool {
+	for _, l := range t.lines[i+1:] {
+		switch l.Event {
+		case journal.EventFixSlice:
+		case journal.EventKeepQueued:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// isFixSlice is whether the journal names id as a fix slice, placed or not.
+func (t *ticket) isFixSlice(id string) bool {
+	_, ok := t.fixRounds()[id]
+	return ok
+}
+
+// fixRound is the round whose findings queued fix slice id: the status's
+// from_gate when it lists the slice, else the round the journal places it in,
+// 0 when neither does. Every screen that names a fix slice's round asks here.
+func (t *ticket) fixRound(id string) int {
+	if t.status != nil {
+		for _, s := range t.status.Slices {
+			if s.ID == id && s.FromGate > 0 {
+				return s.FromGate
+			}
+		}
+	}
+	return t.fixRounds()[id]
 }
 
 // Standing is where the screens put a ticket among its four phases: the first

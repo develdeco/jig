@@ -188,8 +188,12 @@ type Slice struct {
 	Goal  string
 	// BlockedBy are the slices this one waits for.
 	BlockedBy []string
-	// FromGate is the round that queued a fix slice, 0 for a planned slice.
+	// FromGate is the round that queued a fix slice, 0 for a planned slice or
+	// for a fix slice nothing places in a round (see Fix).
 	FromGate int
+	// Fix says the slice is a fix slice whose round is not known; a slice with
+	// a FromGate is one already.
+	Fix bool
 	// OpenQuestion is whether a question of the slice has no answer yet.
 	OpenQuestion bool
 }
@@ -779,7 +783,7 @@ func newDigest(f Facts, lines []journal.Line) *digest {
 	// The store shows work began where the journal does not (a slice past
 	// queued, a round on record, a fix slice a round queued).
 	for _, s := range f.Slices {
-		if s.State != sliceQueued || s.FromGate > 0 {
+		if s.State != sliceQueued || s.isFix() {
 			d.started = true
 		}
 	}
@@ -968,7 +972,7 @@ func (p *publishView) repoOf(name string) *repoView {
 func (d *digest) planned() int {
 	n := 0
 	for _, s := range d.f.Slices {
-		if s.FromGate == 0 {
+		if !s.isFix() {
 			n++
 		}
 	}
@@ -1127,7 +1131,7 @@ func (d *digest) build(prevDone bool) (Phase, bool) {
 		if s.State == sliceGreen {
 			green++
 		}
-		if s.FromGate > 0 {
+		if s.isFix() {
 			fixes++
 		}
 	}
@@ -1160,11 +1164,17 @@ func (d *digest) untouched() bool {
 	return true
 }
 
+// isFix is whether the slice is a fix slice, with its round known or not.
+func (s Slice) isFix() bool { return s.FromGate > 0 || s.Fix }
+
 // sliceLabel is how a slice is named in the sub-steps: a fix slice says which
 // round queued it.
 func sliceLabel(s Slice) string {
 	if s.FromGate > 0 {
 		return fmt.Sprintf("fix slice %s (round %d)", s.ID, s.FromGate)
+	}
+	if s.Fix {
+		return "fix slice " + s.ID
 	}
 	return "slice " + s.ID
 }
