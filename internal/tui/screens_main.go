@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// mainPage is the project: one row per ticket, with its four steps as a row
+// mainPage is the project: one row per ticket, with its five steps as a row
 // of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page
@@ -54,7 +54,7 @@ func (m *Model) mainPage() page {
 	return p
 }
 
-// stepDots are a ticket's steps as four icons, in order.
+// stepDots are a ticket's steps as icons, in order.
 func (m *Model) stepDots(steps []stepRow) string {
 	parts := make([]string, len(steps))
 	for i, s := range steps {
@@ -66,6 +66,14 @@ func (m *Model) stepDots(steps []stepRow) string {
 // ticketDetail is the words after a ticket's steps on the main screen: its
 // current step and where that stands, or what waits for a person.
 func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
+	end, atEnd := m.endOf(t)
+	kind := ""
+	if k := t.digest.kindWords(); k != "" {
+		kind = m.st.dim(k + " · ")
+	}
+	if atEnd && end.State == StateClosed {
+		return kind + m.st.state(end.State, end.Words)
+	}
 	if n := len(t.openQuestions(m.zone, "")); n > 0 {
 		return m.st.state(StateNeedsInput, strconv.Itoa(n)+" open "+plural(n, "question", "questions"))
 	}
@@ -73,13 +81,12 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 		// An issue or a multi-task has no phases: its own words say what it is.
 		return m.st.state(steps[currentStep(steps)].State, steps[currentStep(steps)].Text)
 	}
-	kind := ""
-	if k := t.digest.kindWords(); k != "" {
-		kind = m.st.dim(k + " · ")
+	if atEnd {
+		return kind + m.st.state(end.State, end.Words)
 	}
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return kind + m.st.state(cur.State, strings.TrimSpace("published "+t.publish().PR))
+		return kind + m.st.state(cur.State, cur.Text)
 	}
 	return kind + m.st.dim(stepNames[cur.Step]+": ") + m.st.state(cur.State, cur.Text)
 }

@@ -101,7 +101,7 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the eight screens is showing.
+// screenKind is which of the nine screens is showing.
 type screenKind int
 
 const (
@@ -113,6 +113,7 @@ const (
 	screenBrief                     // a ticket's brief: its approval, sections and slices
 	screenPublish                   // a ticket's publish: body, approval, pull request
 	screenChart                     // a chart: its map, tickets, run and activity
+	screenLand                      // a ticket's land: its pull requests, the merges to make and the landings
 )
 
 func (s screenKind) String() string {
@@ -133,6 +134,8 @@ func (s screenKind) String() string {
 		return "publish"
 	case screenChart:
 		return "chart"
+	case screenLand:
+		return "land"
 	}
 	return "?"
 }
@@ -178,7 +181,7 @@ type confirmation struct {
 	run    func() tea.Cmd
 }
 
-// Model is the TUI: eight screens over the event stream and the verbs. It is a
+// Model is the TUI: nine screens over the event stream and the verbs. It is a
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
@@ -837,6 +840,15 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.confirmKey(k)
 	}
 	m.notice = ""
+	if m.top().screen == screenLand {
+		// The land screen shows the landing and acts on nothing: the session
+		// merges and records it at the person's word, said to it, not here.
+		switch k.String() {
+		case "a", "k", "d", "g", "p":
+			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
+			return nil
+		}
+	}
 	switch k.String() {
 	case "q":
 		return m.quit()
@@ -868,6 +880,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.gate()
 	case "p":
 		m.beginPublish()
+	case "5":
+		return m.openLand()
 	case "r":
 		return m.refreshAll()
 	}
@@ -1001,6 +1015,8 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenReview, ticket: ref.ticket}
 	case rowPublish:
 		next = navEntry{screen: screenPublish, ticket: ref.ticket}
+	case rowLand:
+		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowQuestion:
@@ -1030,6 +1046,29 @@ func (m *Model) open() tea.Cmd {
 		cmds = append(cmds, m.loadBrief(next.ticket))
 	}
 	return tea.Batch(cmds...)
+}
+
+// openLand opens the Land screen of the ticket on the screen, whatever the
+// cursor is on: from the ticket's screen, a step's or a slice's. The land screen
+// itself, the project's list and a chart's have no ticket of their own to open
+// it for.
+func (m *Model) openLand() tea.Cmd {
+	e := m.top()
+	switch e.screen {
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish:
+	default:
+		return nil
+	}
+	t := m.w.tickets[e.ticket]
+	if t == nil || t.awaiting {
+		return nil
+	}
+	m.nav = append(m.nav, navEntry{screen: screenLand, ticket: e.ticket})
+	m.last = nil
+	if t.status == nil || t.dirty {
+		return m.refreshStatus(e.ticket)
+	}
+	return nil
 }
 
 // askRow is the position, among the rows of the review screen on top, of the

@@ -1,15 +1,15 @@
 jig  demo › JIG-2  Config loader                               ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────── step 3 of 4 · total 49m 00s ─╮
+  ╭─ Steps ────────────────────────────────────── step 3 of 5 · total 49m 00s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
   │▸ ! 3 Review   48m 30s round 1 left 2 asks · 2 wait for your decision       │
   │  ○ 4 Publish          after a clean review                                 │
+  │  ○ 5 Land             after the publish                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Review ───────────────────────────────────────────────────── 1 of 3 done ─╮
-  │  ✓ round 1  2 asks · took 30s                                              │
   │  ! asks     2 to decide                                                    │
-  │  ○ round 2  ready to open                                                  │
+  │  +2 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
@@ -21,4 +21,4 @@ jig  demo › JIG-2  Config loader                               ! review findin
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate
-  p publish · t tail · q quit
+  p publish · 5 land · t tail · q quit

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/phase"
@@ -22,8 +21,13 @@ type digestInfo struct {
 	// multi-task's own pull request (waiting, ready, published or landed).
 	PhaseProblem, State string
 	Closed              string
-	PRs                 []digestPR
-	Slices              *digestSlices
+	// LandFirst are the tickets that must land before this one may: a
+	// published ticket whose pull request waits behind them.
+	LandFirst []string
+	// Unfinished are the phases a closed ticket had not done when it closed.
+	Unfinished []string
+	PRs        []digestPR
+	Slices     *digestSlices
 }
 
 // digestPhase is one phase's state (done, current or pending) and its words.
@@ -113,41 +117,19 @@ func (dg *digestInfo) lay(d *phase.Ticket) {
 	d.Current, d.Ready = phase.Name(dg.Current), dg.Ready
 }
 
-// landLine is the words of the Land phase under a ticket's steps, with the pull
-// requests it waits on by number and target; "" until the roster has told them.
-func (m *Model) landLine(t *ticket) string {
-	dg := t.digest
-	if dg == nil {
-		return ""
+// unfinished are the phases the digest says a closed ticket had not done.
+func (d *digestInfo) unfinished() []string {
+	if d == nil {
+		return nil
 	}
-	p, ok := dg.phase(phase.Land)
-	if !ok || p.Text == "" || p.State == phase.StatePending {
-		// Until the publish there is nothing of the landing to say.
-		return ""
+	return d.Unfinished
+}
+
+// prs are the pull requests the digest recorded; none for a ticket the roster
+// has not listed.
+func (d *digestInfo) prs() []digestPR {
+	if d == nil {
+		return nil
 	}
-	var prs []string
-	for _, pr := range dg.PRs {
-		switch {
-		case pr.Number > 0 && pr.Target != "":
-			prs = append(prs, "PR #"+strconv.Itoa(pr.Number)+" into "+pr.Target)
-		case pr.Number > 0:
-			prs = append(prs, "PR #"+strconv.Itoa(pr.Number))
-		default:
-			prs = append(prs, pr.URL)
-		}
-	}
-	text := p.Text
-	if len(prs) > 0 {
-		text += " · " + strings.Join(prs, ", ")
-	}
-	state := StateQueued
-	switch {
-	case p.State == phase.StateDone:
-		state = StateOK
-	case p.State == phase.StateCurrent && strings.Contains(p.Text, "not recorded"):
-		state = StateFindings
-	case p.State == phase.StateCurrent:
-		state = StatePublishing
-	}
-	return m.st.dim("land  ") + m.st.state(state, text)
+	return d.PRs
 }

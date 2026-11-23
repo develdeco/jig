@@ -21,7 +21,7 @@ type stepRow struct {
 	took  time.Duration
 }
 
-// steps are the ticket's four steps, in order, as internal/phase derives them
+// steps are the ticket's five steps, in order, as internal/phase derives them
 // (standing.go): a step is done only when every step before it is, so a review
 // that found fixes takes the build back, and the build is not done again until
 // they are green.
@@ -29,12 +29,15 @@ func (m *Model) steps(t *ticket) []stepRow {
 	return m.stepRows(t, m.phaseOf(t))
 }
 
-// stepRows are the four rows of a ticket that stands as d says. The phase gives
+// stepRows are the five rows of a ticket that stands as d says. The phase gives
 // each row whether it is done and what it says; the screens add the state the
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
-	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
-	if t.digest == nil && t.status == nil {
+	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
+	if end, ok := m.endOf(t); ok {
+		endRows(rows, end, m.unfinished(t))
+	}
+	if t.digest == nil && (t.status == nil || t.status.Closed != "") {
 		// Nothing was read of the ticket: its steps say so, with no state and
 		// no time.
 		for i := range rows {
@@ -188,6 +191,9 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StatePublished
+		if prs := prWords(t.digest.prs(), true); prs != "" && p.Text != "" && !strings.HasPrefix(p.Text, "closed") {
+			s.Text = "published · " + prs
+		}
 	case p.State == phase.StatePending:
 		s.State = StateQueued
 	case t.digest != nil && t.digest.Behind:
@@ -196,6 +202,60 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	case hasSub(p, phase.SubDone):
 		s.State = StatePublishing
 	case cannotStart(d, p):
+		s.State = StateQueued
+	default:
+		s.State = StateReady
+	}
+	return s
+}
+
+// unfinished are the steps of a closed ticket whose work was not done when it
+// closed, as the digest says: phase.Derive marks every phase of a closed ticket
+// done, so the digest tells them apart from the ticket's own facts.
+func (m *Model) unfinished(t *ticket) [stepCount]bool {
+	var out [stepCount]bool
+	for _, name := range t.digest.unfinished() {
+		for i, step := range stepNames {
+			if strings.EqualFold(step, name) {
+				out[i] = true
+			}
+		}
+	}
+	return out
+}
+
+// endRows lay the end state of a ticket on its rows: the land step is drawn in
+// the end state's icon and colour, and a ticket closed reads closed in each step
+// it never finished (a phase not done, or one the digest calls done because the
+// ticket closed, unfinished), whatever the phase of that step says; a step it
+// finished keeps its words.
+func endRows(rows []stepRow, end endState, unfinished [stepCount]bool) {
+	rows[stepLand].State = end.State
+	if end.State != StateClosed {
+		return
+	}
+	for i := range rows {
+		switch {
+		case !rows[i].Done || (unfinished[i] && i != stepPublish):
+			rows[i].State, rows[i].Text = StateClosed, "closed"
+		case unfinished[i]:
+			// Closed before it published: its words are the reason it closed.
+			rows[i].State = StateClosed
+		}
+	}
+	rows[stepLand].State = StateClosed
+}
+
+// landRow is the land: waiting for the publish, for the person's word to merge,
+// for a merge made on the host to be recorded, or landed. A ticket with no pull
+// request to merge, or closed, has nothing to land and is past this step.
+func (m *Model) landRow(t *ticket, d phase.Ticket) stepRow {
+	p := d.Of(phase.Land)
+	s := rowOf(stepLand, rowLand, p)
+	switch {
+	case s.Done:
+		s.State = StateOK
+	case p.State == phase.StatePending:
 		s.State = StateQueued
 	default:
 		s.State = StateReady
@@ -240,10 +300,18 @@ func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
+	if end, ok := m.endOf(t); ok {
+		return end.State, end.Word
+	}
+	if t.digest == nil && t.status != nil && t.status.Closed != "" {
+		// Only the status is in: what it says of a closed ticket, nothing of
+		// its steps, which the digest tells.
+		return StateClosed, "closed"
+	}
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]
 	if cur.Done {
-		return cur.State, "published"
+		return cur.State, "landed"
 	}
 	return cur.State, stepWords(cur.Step, cur.State)
 }
@@ -279,6 +347,10 @@ var headerWords = map[stepState]string{
 	{stepPublish, StateReady}:      "ready to publish",
 	{stepPublish, StatePublishing}: "publishing",
 	{stepPublish, StatePublished}:  "published",
+	{stepLand, StateQueued}:        "waiting to land",
+	{stepLand, StateReady}:         "waits to land",
+	{stepLand, StateFindings}:      "merged, not recorded",
+	{stepLand, StateOK}:            "landed",
 }
 
 // stepWords is what the header says of step in state.
