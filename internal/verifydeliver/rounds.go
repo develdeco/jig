@@ -87,6 +87,14 @@ type RoundRecord struct {
 	KeptFixed []KeptFixed
 	// FixSlices are the fix slices the round appended.
 	FixSlices []string
+	// Probes and Skipped are the probes and skips the round recorded (ADR
+	// 0036), each carrying its Round; Unprobed is the hunks it left unprobed,
+	// and UnprobedRecorded says the round recorded that list at all (a round
+	// written before it did not, which differs from one that left none).
+	Probes           []ProbeRecord
+	Skipped          []SkipRecord
+	Unprobed         []UnprobedHunk
+	UnprobedRecorded bool
 }
 
 var (
@@ -168,6 +176,17 @@ func ReadRounds(st *store.Store, ticket string) ([]RoundRecord, error) {
 		if ff, ok, err := readFindingsYAML(st, ticket, n); err == nil && ok {
 			rec.Scope, rec.Files = ff.Scope, len(ff.ReviewedPaths)
 			rec.KeptFixed = ff.KeptFixed
+			for _, p := range ff.Probes {
+				p.Round = n
+				rec.Probes = append(rec.Probes, p)
+			}
+			for _, sk := range ff.Skipped {
+				sk.Round = n
+				rec.Skipped = append(rec.Skipped, sk)
+			}
+			if ff.Unprobed != nil {
+				rec.Unprobed, rec.UnprobedRecorded = *ff.Unprobed, true
+			}
 			for _, f := range ff.Findings {
 				if raisedIn(f, n) == n {
 					rec.Findings = append(rec.Findings, f)
