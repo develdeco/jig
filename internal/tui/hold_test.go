@@ -104,23 +104,31 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	}
 }
 
-// TestTheCountOfNewLinesNeverHidesTheCursor: a page of rows read below its top,
-// with the cursor on its last row, shows that row under the count, and with it
-// on a row in the middle too.
+// TestTheCountOfNewLinesNeverHidesTheCursor: a page of rows read below its top
+// shows the cursor's row under the count wherever the cursor stands: on the last
+// row, in the middle, at the window's last line with the window held above it,
+// and at the window's first line when the window also ends the page.
 func TestTheCountOfNewLinesNeverHidesTheCursor(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	var pg page
-	for i := 0; i < 30; i++ {
-		pg.addRow(rowRef{kind: rowSlice, id: strconv.Itoa(i)}, "row "+strconv.Itoa(i))
-	}
 	g.m.top().fresh = 2
-	for _, c := range []struct{ sel, lead int }{{29, 0}, {20, 0}, {15, 4}} { // the last has the window held above the cursor, so its row is the window's last
-		sel := c.sel
+	for name, c := range map[string]struct{ rows, plain, sel, lead int }{
+		"the last row":              {30, 0, 29, 0},
+		"a row in the middle":       {30, 0, 20, 0},
+		"the window's last line":    {30, 0, 15, 4},
+		"the first line, page ends": {21, 9, 20, 0},
+	} {
+		var pg page
+		for i := 0; i < c.rows; i++ {
+			pg.addRow(rowRef{kind: rowSlice, id: strconv.Itoa(i)}, "row "+strconv.Itoa(i))
+		}
+		for i := 0; i < c.plain; i++ {
+			pg.add("plain " + strconv.Itoa(i))
+		}
 		g.m.top().lead = c.lead
-		out := g.m.window(pg, sel, 10, 80)
+		out := g.m.window(pg, c.sel, 10, 80)
 		if !newMark.MatchString(out[0]) {
-			t.Errorf("sel %d: the first row reads %q, want the count", sel, out[0])
+			t.Errorf("%s: the first row reads %q, want the count", name, out[0])
 		}
 		marked := ""
 		for _, l := range out {
@@ -128,8 +136,8 @@ func TestTheCountOfNewLinesNeverHidesTheCursor(t *testing.T) {
 				marked = l
 			}
 		}
-		if want := "row " + strconv.Itoa(sel); !strings.Contains(marked, want) {
-			t.Errorf("sel %d: the marked row is %q, want %q in view:\n%s", sel, marked, want, strings.Join(out, "\n"))
+		if want := "row " + strconv.Itoa(c.sel); !strings.Contains(marked, want) {
+			t.Errorf("%s: the marked row is %q, want %q in view:\n%s", name, marked, want, strings.Join(out, "\n"))
 		}
 	}
 }

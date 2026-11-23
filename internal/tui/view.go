@@ -218,7 +218,7 @@ func (m *Model) window(pg page, sel, h, w int) []string {
 			}
 			n++
 		}
-		if last := start + h - 1; last < len(pg.lines)-1 && last != selLine {
+		if last := start + h - 1; last != selLine && (last < len(pg.lines)-1 || start == selLine) {
 			start--
 		}
 	}
