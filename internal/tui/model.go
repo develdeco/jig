@@ -161,6 +161,10 @@ type navEntry struct {
 	// a screen opens at its top, raised by a move up from the first row, and
 	// cleared by any move of the cursor.
 	lead int
+	// fresh is how many rows came in above the window of a page read below its
+	// top, which its first row counts; it is cleared once the window is back at
+	// the top.
+	fresh int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -251,7 +255,10 @@ type Model struct {
 	keysOn subject
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
-	started    time.Time
+	// seen is what the last frame drew of the screen on top, which the next one
+	// settles the cursor and the window against (hold.go).
+	seen    *held
+	started time.Time
 }
 
 // New builds the model for cfg.

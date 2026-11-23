@@ -226,6 +226,11 @@ func TestBuildScreenListsTheLastCommitsAndCountsTheEarlier(t *testing.T) {
 	if strings.Contains(text, "1111111") || strings.Contains(text, "2222222") || !strings.Contains(text, "3333333") || !strings.Contains(text, "5555555 “attempt 5”") {
 		t.Errorf("the screen does not list the last three commits:\n%s", text)
 	}
+	// The newest commit is on top and the count of the older ones is under the
+	// list, not above it.
+	if five, three, more := strings.Index(text, "5555555"), strings.Index(text, "3333333"), strings.Index(text, "+2 earlier commits"); !(five < three && three < more) {
+		t.Errorf("the commits are not newest first with the count of the earlier ones under them (5 at %d, 3 at %d, count at %d):\n%s", five, three, more, text)
+	}
 	// Only the output of the latest run is shown: the commit before it failed too.
 	if !strings.Contains(text, "boom 5") || strings.Contains(text, "boom 4") {
 		t.Errorf("the screen shows the output of a run that is not the latest:\n%s", text)

@@ -32,8 +32,8 @@ const claimSlack = time.Minute
 
 // chartDetailRows are the rows of the Detail panel for the ticket of r: a row
 // for each slice being built (its id, its stage, the session that holds it and
-// the agent that claimed it), then the holds that are current, the newest two
-// oldest first, and, when there is neither, the one row that says where the
+// the agent that claimed it), then the holds that are current, the newest two,
+// newest first, and, when there is neither, the one row that says where the
 // ticket stands. A hold weighs 0 so a short screen gives up slice rows before
 // it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {
@@ -188,7 +188,7 @@ func (t *ticket) claimAgent(claim events.Envelope) string {
 
 // currentHolds are the holds of the ticket that no step has moved past: the
 // machine ledger's lines that say jig held an agent at its stop (isHold), the
-// newest two, oldest first, that are stamped after the latest journal line of a
+// newest two, newest first, that are stamped after the latest journal line of a
 // step (a verification landing, a gate opening, a pull request recorded). A line
 // about the ticket as a whole (what it has cost) belongs to no step, so the
 // main session's stop does not end a hold, and the lines the screens wrote
@@ -207,12 +207,8 @@ func (t *ticket) currentHolds() []events.Envelope {
 			holds = append(holds, l)
 		}
 	}
-	slices.SortStableFunc(holds, func(a, b events.Envelope) int {
-		x, _ := a.At()
-		y, _ := b.At()
-		return x.Compare(y)
-	})
-	return holds[max(0, len(holds)-holdsMax):]
+	holds = newestFirst(holds, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	return holds[:min(len(holds), holdsMax)]
 }
 
 // claimCall is whether the shell command line cmd runs `jig claim` and does not

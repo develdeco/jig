@@ -14,10 +14,10 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
 ▸ - low   beta/b.go:9   dismissed by you  Name shadows import  r1-f2
       Name shadows import · the import is hidden in this scope
 
-  ╭─ Review activity ────────────────────────────────────────── latest 3 of 4 ─╮
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
-  │  09:11:40 + asks · you kept “Unchecked error”                              │
+  ╭─ Review activity ────────────────────────────────────────── latest 2 of 4 ─╮
   │  09:11:41 - asks · you dismissed “Name shadows import”                     │
+  │  09:11:40 + asks · you kept “Unchecked error”                              │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✖ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────

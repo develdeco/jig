@@ -14,10 +14,10 @@ jig  demo › JIG-2  Config loader                               ! review findin
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
       Name shadows import · the import is hidden in this scope
 
-  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 4 ─╮
+  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 4 ─╮
   │  09:11:30 review·r1 ! reviewer finished with findings                      │
   │  09:11:00 review·r1 ◎ opened                                               │
-  │  09:10:30 build·a   ● verified ccccccc                                     │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ↑↓ move · enter open · k keep · d dismiss · 5 land

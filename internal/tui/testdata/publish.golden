@@ -15,10 +15,10 @@ jig  demo › JIG-2  Config loader › 4 publish                     ◇ waits t
       - a: ccccccc …
   ✓ published  09:14:21
 
-  ╭─ Publish activity ───────────────────────────────────────── latest 3 of 4 ─╮
-  │  09:14:10 ▲ approval · you approved ccccccc                                │
-  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
+  ╭─ Publish activity ───────────────────────────────────────── latest 2 of 4 ─╮
   │  09:14:21 ● published · finished                                           │
+  │  09:14:20 ▲ pull request · opened https://example.test/acme/demo/pull/7    │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ↑↓ scroll · say "Land JIG-2" · 5 land · t tail

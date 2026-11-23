@@ -369,6 +369,9 @@ type roundRow struct {
 	State    string // StateReviewing, StateFindings or StateReady
 	At       string
 	Reviewer string
+	// Began is the instant the round was opened, or when it closed for a round
+	// whose opening no line records: where a list of rounds puts it.
+	Began time.Time
 	// Carried is the round whose verdict a clean round carries over, 0 for a
 	// round a reviewer read.
 	Carried int
@@ -380,7 +383,11 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 	closed := map[int]roundRow{}
 	var order []int
 	lastClosed := -1
+	var opened time.Time // the opening no round has used yet
 	for i, l := range t.lines {
+		if l.Event == journal.EventGateOpen {
+			opened, _ = l.At()
+		}
 		if l.Event != journal.EventGateRound && l.Event != journal.EventGateClean {
 			continue
 		}
@@ -392,10 +399,16 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 		if n == 0 {
 			n = len(order) + 1
 		}
-		if _, dup := closed[n]; !dup {
+		began, dup := closed[n]
+		if !dup {
 			order = append(order, n)
+			began.Began = opened
+			if began.Began.IsZero() {
+				began.Began, _ = l.At()
+			}
+			opened = time.Time{}
 		}
-		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Carried: l.Carried}
+		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Began: began.Began, Carried: l.Carried}
 		lastClosed = i
 	}
 	sort.Ints(order)
@@ -408,7 +421,8 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 		if len(order) > 0 {
 			n = order[len(order)-1] + 1
 		}
-		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone)})
+		began, _ := t.lines[open].At()
+		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone), Began: began})
 	}
 	return out
 }

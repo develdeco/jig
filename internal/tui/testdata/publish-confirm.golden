@@ -14,10 +14,10 @@ jig  demo › JIG-2  Config loader                              ◆ ready to pub
   │  ○ changelog                                                               │
   │  ✓ published     took 1s                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ──────────────────────────────────────────────── latest 3 of 12 ─╮
-  │  09:14:21 publish·done     ● finished                                      │
-  │  09:14:20 publish·pr       ▲ opened https://example.test/acme/demo/pull/7  │
-  │  09:14:10 publish·approval ▲ you approved ccccccc                          │
+  ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
+  │  09:14:21 publish·done ● finished                                          │
+  │  09:14:20 publish·pr   ▲ opened https://example.test/acme/demo/pull/7      │
+  │  ↓ 10 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   publish JIG-2: approve the reviewed head, push it and open the pull request?

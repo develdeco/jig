@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -546,21 +545,19 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	for i := len(history) - 1; i >= 0; i-- {
 		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
 	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
-	keep := max(activityFloor-2, m.bodyRows()-len(p.lines)-2)
+	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
+	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-len(p.lines)-2))
 	right := ""
-	if n := len(all); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
+	if older > 0 {
+		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
 	}
 	p.boxTop("Activity", right)
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	var shown []chartLine
 	tagW := 0
-	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(all[i].tag())))
-		shown = append(shown, all[i])
+	for _, e := range shown {
+		tagW = max(tagW, min(tagMaxW, width(e.tag())))
 	}
 	for _, e := range shown {
 		tag := pad(e.tag(), tagW)
@@ -574,6 +571,9 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 			tag = m.st.dim(tag)
 		}
 		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + pad(e.id, idW) + " " + tag + " " + m.moveText(e.t, e.l))
+	}
+	if older > 0 {
+		p.boxAdd(m.olderRow(older))
 	}
 	p.boxEnd()
 }

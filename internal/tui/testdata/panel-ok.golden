@@ -16,8 +16,8 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
       Name shadows import · the import is hidden in this scope
 
   ╭─ Review activity ──────────────────────────────────────────────────────────╮
-  │  09:11:00 ◎ round 1 · opened                                               │
   │  09:11:30 ! round 1 · reviewer finished with findings                      │
+  │  09:11:00 ◎ round 1 · opened                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────

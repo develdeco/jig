@@ -12,6 +12,12 @@
 // through a Runner (answer, triage, gate, publish). No screen reads a store. It
 // backs `jig tui`.
 //
+// On every screen every list of what happened reads newest first: activity, rounds, a slice's
+// tries and timeline, fix slices, holds, landings and the tail. The derivations
+// keep time order and newest.go turns a list at the draw; a list too long for
+// its pane ends with "↓ n older", and a line that comes in leaves the cursor on
+// its row and a page read below its top on the lines it showed (hold.go).
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on
