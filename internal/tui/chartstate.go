@@ -10,7 +10,7 @@ import (
 // What a chart's standing is (which ticket waits for which, what a run would
 // do, whether it is ready) is the verb's word: internal/phase derives it and
 // `jig next <chart>` prints it, so the chart screen only draws it. Where each
-// of the chart's tickets stands among its four steps, and what it waits for, is
+// of the chart's tickets stands among its five steps, and what it waits for, is
 // the ticket's digest (`jig next --json`): the same words its screen and the
 // project's list draw, so a row and its ticket cannot differ.
 

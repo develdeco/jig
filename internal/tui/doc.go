@@ -1,5 +1,5 @@
 // Package tui is jig's terminal screens: the project (its tickets and its
-// charts), a ticket (its four steps, the sub-steps of one, the one that matters
+// charts), a ticket (its five steps, the sub-steps of one, the one that matters
 // now opened into its stages, its fields and its latest move, and one activity
 // log of every line and call tagged with its sub-step), the ticket's brief,
 // build, review and publish, a slice, and a chart (its map, its tickets in the

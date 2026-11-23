@@ -90,8 +90,12 @@ func (m *Model) landRows(t *ticket, end endState, atEnd bool) []landRow {
 	lines := m.landedLines(t)
 	used := make([]bool, len(lines))
 	var rows []landRow
+	several := len(t.digest.prs()) > 1
 	for _, pr := range t.digest.prs() {
-		where := repoPrefix(pr.Repo)
+		where := ""
+		if several {
+			where = repoPrefix(pr.Repo)
+		}
 		name := prWords([]digestPR{{Number: pr.Number, URL: pr.URL, Target: pr.Target}}, false)
 		if i := landingOf(lines, used, pr); i >= 0 {
 			used[i] = true
@@ -121,7 +125,8 @@ func (m *Model) landRows(t *ticket, end endState, atEnd bool) []landRow {
 	return rows
 }
 
-// repoPrefix names a repo before a row's words, none for a project of one.
+// repoPrefix names a repo before a row's words; a ticket with a single pull
+// request names none.
 func repoPrefix(repo string) string {
 	if repo == "" {
 		return ""
@@ -130,10 +135,12 @@ func repoPrefix(repo string) string {
 }
 
 // landingOf is the index of the landed line, not used yet, that records pr: the
-// one of its repo that merged into the branch it goes into.
+// one of its repo that merged into the branch it goes into. A line that names no
+// repo (a project of one repo writes none, whatever name the digest gives it)
+// stands for a pull request of any, as phase.LandedIn reads it.
 func landingOf(lines []landedAt, used []bool, pr digestPR) int {
 	for i, l := range lines {
-		if !used[i] && l.Repo == pr.Repo && (l.Into == pr.Target || l.Into == "" || pr.Target == "") {
+		if !used[i] && (l.Repo == pr.Repo || l.Repo == "") && (l.Into == pr.Target || l.Into == "" || pr.Target == "") {
 			return i
 		}
 	}

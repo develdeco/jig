@@ -87,7 +87,7 @@ func (m *Model) chartPage(name string) page {
 }
 
 // chartTicketsPanel is the chart's tickets, a row each the cursor can stand on:
-// the ticket's state, id and title, its four steps, and a note on where it
+// the ticket's state, id and title, its five steps, and a note on where it
 // stands in the chart. The note's column is sized first, so the words that say
 // what a ticket waits for are never the part cut.
 func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {

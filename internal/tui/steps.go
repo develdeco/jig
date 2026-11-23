@@ -35,7 +35,7 @@ func (m *Model) steps(t *ticket) []stepRow {
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
 	if end, ok := m.endOf(t); ok {
-		endRows(rows, end)
+		endRows(rows, end, m.unfinished(t))
 	}
 	if t.digest == nil && t.status == nil {
 		// Nothing was read of the ticket: its steps say so, with no state and
@@ -209,20 +209,40 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	return s
 }
 
+// unfinished are the steps of a closed ticket whose work was not done when it
+// closed: phase.Derive marks every phase of a closed ticket done, so they are
+// told by deriving the ticket again as an open one from the status the screens
+// read. Nothing is said before the status is read.
+func (m *Model) unfinished(t *ticket) [stepCount]bool {
+	var out [stepCount]bool
+	if t.status == nil || t.status.Closed == "" {
+		return out
+	}
+	f, lines := m.factsOf(t, t.status)
+	f.Closed = ""
+	open := phase.Derive(f, lines)
+	for i := range stepLand - 1 {
+		out[i] = open.Phases[i].State != phase.StateDone
+	}
+	return out
+}
+
 // endRows lay the end state of a ticket on its rows: the land step is drawn in
 // the end state's icon and colour, and a ticket closed reads closed in each step
-// it never finished, whatever the phase of that step says; a step it finished
-// keeps its words.
-func endRows(rows []stepRow, end endState) {
+// it never finished (a phase not done, or one the digest calls done because the
+// ticket closed, unfinished), whatever the phase of that step says; a step it
+// finished keeps its words.
+func endRows(rows []stepRow, end endState, unfinished [stepCount]bool) {
 	rows[stepLand].State = end.State
 	if end.State != StateClosed {
 		return
 	}
 	for i := range rows {
-		if !rows[i].Done {
+		if !rows[i].Done || unfinished[i] {
 			rows[i].State, rows[i].Text = StateClosed, "closed"
 		}
 	}
+	rows[stepLand].State = StateClosed
 }
 
 // landRow is the land: waiting for the publish, for the person's word to merge,

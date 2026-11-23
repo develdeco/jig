@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// mainPage is the project: one row per ticket, with its four steps as a row
+// mainPage is the project: one row per ticket, with its five steps as a row
 // of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page

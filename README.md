@@ -32,7 +32,7 @@ A prompt that names several phases is a start-to-finish run: the session runs
 the phases one after another, each with its skill, without waiting for a prompt
 per phase, and still asks the person every decision; each skill starts and ends
 with `jig next`, which says where the ticket stands and what comes next. The TUI
-shows the four steps with how long each has taken and their total; under them
+shows the five steps with how long each has taken and their total; under them
 the step under way, its part under way opened with how far it has come, what it
 is and its latest move; then one activity log, newest first, each line tagged
 with its step and sub-step:
@@ -140,8 +140,8 @@ Cursor, GitHub Copilot and OpenCode are written from their documentation.
 ## The TUI
 
 `jig tui` is a view of everything in flight, built on the same stream `jig
-events --follow` prints. A ticket is four steps taken in order (brief, build,
-review, publish), each with how long it has taken (the step under way counting
+events --follow` prints. A ticket is five steps taken in order (brief, build,
+review, publish, land), each with how long it has taken (the step under way counting
 on, the steps' total in the panel's title) and its state in a few words:
 "approved by <name> (person) · 5 sections, 3 slices", "1 of 3 green ·
 slice clamp is being built", "round 2 open · reviewer 2 (Claude Code · Opus 5) is reading the

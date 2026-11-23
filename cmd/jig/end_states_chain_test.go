@@ -111,6 +111,14 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 		}
 		// A closed ticket is offered no merge and its publish keeps the words it
 		// finished with: no pull request is named for it.
+		if id == "TK-13" {
+			// Closed before its work was done: the steps it never finished read closed.
+			for _, bad := range []string{"waiting for your approval", "0 of 1 green", "ready for a fresh session"} {
+				if strings.Contains(frame, bad) {
+					t.Errorf("%s: a closed ticket's screen says %q:\n%s", id, bad, frame)
+				}
+			}
+		}
 		into := prTargets(d)
 		if w.word == "closed" {
 			into = nil
