@@ -66,8 +66,26 @@ func (m *Model) ticketPage(id string) page {
 	// next: the status's help is written for the session, which reads it
 	// itself, and the session tells the person the prompt a phase waits for.
 	var needs page
-	qs := t.openQuestions(m.zone, "")
-	asks := t.asks()
+	// The group is drawn while something still waits on the person: a question
+	// nobody answered or an ask nobody decided (the asks already decided stay
+	// beside the ones left, so a decision can be seen). When the last answer or
+	// decision is journaled the group goes. While a session is working on the
+	// ticket it is the one that answers or records what is on the screen, so
+	// the group waits for the line to go quiet; the rows stay on the screens
+	// that answer them.
+	var qs []questionRow
+	var asks []askRow
+	if !m.ticketLive(t) {
+		qs = t.openQuestions(m.zone, "")
+		asks = t.asks()
+		undecided := false
+		for _, a := range asks {
+			undecided = undecided || a.Decision == ""
+		}
+		if !undecided {
+			asks = nil
+		}
+	}
 	if len(qs)+len(asks) > 0 {
 		needs.add(m.st.bold("needs you"))
 		for _, q := range qs {

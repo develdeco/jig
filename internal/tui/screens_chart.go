@@ -52,6 +52,9 @@ func (m *Model) chartPage(name string) page {
 	var run []runRow
 	if c.info != nil {
 		run = m.runRows(c.info)
+		if age, live := c.live(m.w, m.now()); live {
+			run = m.runningRows(run, c.info, age)
+		}
 	}
 	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
 	if spare < 0 && len(run) > 1 {
@@ -228,6 +231,19 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 	if info.Spend != nil {
 		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
 	}
+	return rows
+}
+
+// runningRows are the Run panel's rows while a session is at work on the run:
+// the next row says so and how long ago it was last seen, in place of the
+// prompt that would start another run. A landing's prompt is the person's word,
+// which a session merges at, so it is never held back.
+func (m *Model) runningRows(rows []runRow, info *chartInfo, age time.Duration) []runRow {
+	if first, _ := landingsOf(info); first != nil || len(rows) == 0 {
+		return rows
+	}
+	rows = append([]runRow(nil), rows...)
+	rows[0].text = m.st.dim("running · a session worked on it " + ago(age) + " ago")
 	return rows
 }
 

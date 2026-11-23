@@ -66,7 +66,9 @@ func (m *Model) stepDots(steps []stepRow) string {
 // ticketDetail is the words after a ticket's steps on the main screen: its
 // current step and where that stands, or what waits for a person.
 func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
-	if n := len(t.openQuestions(m.zone, "")); n > 0 {
+	// A session working on the ticket answers its questions itself: the count
+	// that tells the person to act waits for the line to go quiet.
+	if n := len(t.openQuestions(m.zone, "")); n > 0 && !m.ticketLive(t) {
 		return m.st.state(StateNeedsInput, strconv.Itoa(n)+" open "+plural(n, "question", "questions"))
 	}
 	if d := t.digest; d != nil && len(d.Phases) == 0 {

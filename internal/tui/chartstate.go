@@ -135,7 +135,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			if t.digest != nil {
 				r.d = m.phaseOf(t)
 				r.steps = m.stepRows(t, r.d)
-				r.needs = needsYou(r.d) || t.digest.waitsForAnswer()
+				r.needs = (needsYou(r.d) || t.digest.waitsForAnswer()) && !m.ticketLive(t)
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
 			}
@@ -224,6 +224,11 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 		case phase.CodeChartNotGraduated:
 			return StateQueued, "not graduated"
 		}
+		if _, live := c.live(m.w, m.now()); live {
+			// A session is at work on the run: it is running, whatever else
+			// the verdict says of what comes next.
+			return StateBuilding, "running"
+		}
 		switch {
 		case c.info.Ready && c.info.Started:
 			return StateBuilding, "in progress"
@@ -235,6 +240,9 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 		return StateQueued, "not graduated"
 	case done == total:
 		return StatePublished, "done"
+	}
+	if _, live := c.live(m.w, m.now()); live {
+		return StateBuilding, "running"
 	}
 	for _, r := range rows {
 		if r.t != nil && len(r.t.lines) > 0 {
