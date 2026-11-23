@@ -30,7 +30,9 @@ func (m *Model) slicePage(id, slice string) page {
 	if g := t.goals()[slice]; g != "" {
 		p.add(m.st.bold(g))
 	}
-	if row == nil {
+	if row == nil && t.status == nil {
+		p.add(m.st.dim("reading the ticket's status"))
+	} else if row == nil {
 		p.add(m.st.dim("slice " + slice + " has no lines yet"))
 	} else {
 		facts := []string{m.st.icon(row.State) + " " + m.st.state(row.State, row.State), strconv.Itoa(row.Attempts) + " " + plural(row.Attempts, "try", "tries")}

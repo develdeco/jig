@@ -63,18 +63,11 @@ type chartSpend struct {
 }
 
 // chartTicket is one entry of a chart: a ticket, or (ID "") an entry that has
-// none yet.
+// none yet. Where the ticket stands and what it waits for is its digest's, not
+// the chart's.
 type chartTicket struct {
 	ID, Title string
-	// Phase is the phase the ticket is at (brief, build, review or publish),
-	// Steps the four phases' states (done, current or pending), and Ready whether
-	// Phase can start now.
-	Phase   string
-	Steps   []string
-	Ready   bool
-	Problem string
-	// Waits are the needs of the ticket that are not met.
-	Waits []chartWait
+	Problem   string
 }
 
 // chartWait is a need of a ticket that is not met: the ticket it is on and in
@@ -139,18 +132,9 @@ func parseChart(out string) (*chartInfo, error) {
 		Briefs      []string   `json:"briefs"`
 		Run         [][]string `json:"run"`
 		Tickets     []struct {
-			ID      string   `json:"id"`
-			Title   string   `json:"title"`
-			Phase   string   `json:"phase"`
-			Steps   []string `json:"steps"`
-			Ready   bool     `json:"ready"`
-			Problem string   `json:"problem"`
-			Waits   []struct {
-				Ticket string    `json:"ticket"`
-				Kind   string    `json:"kind"`
-				Fact   string    `json:"fact"`
-				PRs    []chartPR `json:"prs"`
-			} `json:"waits_for"`
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			Problem string `json:"problem"`
 		} `json:"tickets"`
 		Ends []struct {
 			Ticket  string    `json:"ticket"`
@@ -193,11 +177,7 @@ func parseChart(out string) (*chartInfo, error) {
 		Started: v.Started, Ungraduated: v.Ungraduated, Briefs: v.Briefs, Run: v.Run,
 	}
 	for _, t := range v.Tickets {
-		ct := chartTicket{ID: t.ID, Title: t.Title, Phase: t.Phase, Steps: t.Steps, Ready: t.Ready, Problem: t.Problem}
-		for _, w := range t.Waits {
-			ct.Waits = append(ct.Waits, chartWait{Ticket: w.Ticket, Kind: w.Kind, Fact: w.Fact, PRs: w.PRs})
-		}
-		info.Tickets = append(info.Tickets, ct)
+		info.Tickets = append(info.Tickets, chartTicket{ID: t.ID, Title: t.Title, Problem: t.Problem})
 	}
 	for _, e := range v.Ends {
 		info.Ends = append(info.Ends, chartEnd{Ticket: e.Ticket, Blocker: e.Blocker, Kind: e.Kind, Fact: e.Fact, PRs: e.PRs})

@@ -34,6 +34,14 @@ func (m *Model) steps(t *ticket) []stepRow {
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d)}
+	if t.digest == nil && t.status == nil {
+		// Nothing was read of the ticket: its steps say so, with no state and
+		// no time.
+		for i := range rows {
+			rows[i].State, rows[i].Text, rows[i].Done = StateQueued, readingText, false
+		}
+		return rows
+	}
 	for i, took := range m.stepTimes(t, d) {
 		if took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took
@@ -82,31 +90,12 @@ func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StateOK
 	case changed:
 		s.State = StateFindings
-	case t.status == nil:
-		s.State, s.Text = m.unreadBrief(t, s.Text)
+	case t.status == nil && t.digest != nil && t.digest.PhaseProblem != "" && len(t.digest.Phases) == 0:
+		s.State = StateStalled
 	default:
 		s.State = StateBuilding
 	}
 	return s
-}
-
-// unreadBrief is the brief of a ticket whose status has not been read and
-// whose journal shows no approval or work: all the screens know of it is what
-// `jig next` listed it as.
-func (m *Model) unreadBrief(t *ticket, text string) (state, said string) {
-	switch t.rosterState {
-	case "new":
-		return StateBuilding, text
-	case "ready", "blocked":
-		// It has slices that nobody has started, and the journal holds no
-		// approval (or has not been delivered yet, which the next line
-		// mends).
-		return StateBuilding, "drafted · waiting for your approval"
-	case "invalid":
-		return StateStalled, "its slices.yaml cannot be read"
-	}
-	// Started or done (its lines are on their way), or not listed yet.
-	return StateQueued, "reading"
 }
 
 // hasSub is whether any sub-step of p is in state.
@@ -124,12 +113,7 @@ func hasSub(p phase.Phase, state string) bool {
 func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Build)
 	s := rowOf(stepBuild, rowBuild, p)
-	slices := t.slices(m.zone)
-	counts := map[string]int{}
-	for _, sl := range slices {
-		counts[sl.State]++
-	}
-	n := len(slices)
+	counts, n := t.sliceCounts(m.zone)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -138,9 +122,9 @@ func (m *Model) buildRow(t *ticket, d phase.Ticket) stepRow {
 	case counts[StateGreen] == n:
 		// Every slice is green, but an earlier step is not done.
 		s.State = StateOK
-	case len(t.stepLines(stepBuild)) == 0:
+	case len(t.stepLines(stepBuild)) == 0 && counts[StateQueued] == n:
 		s.State = StateReady
-		if p.State == phase.StatePending {
+		if p.State == phase.StatePending || cannotStart(d, p) {
 			s.State = StateQueued
 		}
 	default:
@@ -165,7 +149,7 @@ func (m *Model) reviewRow(t *ticket, d phase.Ticket) stepRow {
 	p := d.Of(phase.Review)
 	s := rowOf(stepReview, rowReview, p)
 	rounds := t.rounds(m.zone)
-	pending := p.State == phase.StatePending
+	pending := p.State == phase.StatePending || cannotStart(d, p)
 	switch {
 	case s.Done:
 		s.State = StateOK
@@ -206,12 +190,23 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StatePublished
 	case p.State == phase.StatePending:
 		s.State = StateQueued
+	case t.digest != nil && t.digest.Behind:
+		// Published, and owed a merge before the publish that follows it.
+		s.State = StateReady
 	case hasSub(p, phase.SubDone):
 		s.State = StatePublishing
+	case cannotStart(d, p):
+		s.State = StateQueued
 	default:
 		s.State = StateReady
 	}
 	return s
+}
+
+// cannotStart says p is the phase the ticket stands at and the digest says it
+// cannot start now: it waits for a blocker, not for the person.
+func cannotStart(d phase.Ticket, p phase.Phase) bool {
+	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
 // stepTimes are how long each step has taken: the gaps between consecutive

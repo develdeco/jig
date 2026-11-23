@@ -113,9 +113,16 @@ func TestParseRoster(t *testing.T) {
 	if len(charts) != 0 {
 		t.Errorf("a store with no charts listed %+v", charts)
 	}
-	want := []rosterRow{{ID: "JIG-1", Title: "Greeting copy", State: "ready"}, {ID: "JIG-2", Title: "Config loader", State: "ready"}, {ID: "JIG-3", Title: "Release notes", State: "blocked"}}
-	if !reflect.DeepEqual(rows, want) {
-		t.Errorf("rows = %+v, want %+v", rows, want)
+	if len(rows) != 3 || rows[0].ID != "JIG-1" || rows[0].Title != "Greeting copy" || rows[0].State != "ready" || rows[2].State != "blocked" {
+		t.Fatalf("rows = %+v, want JIG-1 to JIG-3 as listed", rows)
+	}
+	// Each row carries the digest the verb printed for it.
+	want := &digestInfo{Kind: "task", Current: "land", Phases: []digestPhase{
+		{"brief", "done", "no brief on record"}, {"build", "done", "1 slice green, each verified by jig"}, {"review", "done", "round 2 clean · by reviewer"},
+		{"publish", "done", "pull request opened · https://example.test/acme/demo/pull/7"}, {"land", "current", "waits for a merge"},
+	}}
+	if !reflect.DeepEqual(rows[1].Digest, want) {
+		t.Errorf("JIG-2's digest = %+v, want %+v", rows[1].Digest, want)
 	}
 
 	if _, _, err := parseRoster("error: no jig store found\ncode: ERROR\n"); err == nil || !strings.Contains(err.Error(), "no jig store found") {

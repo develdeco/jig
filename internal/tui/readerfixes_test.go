@@ -58,6 +58,10 @@ func TestFixRoundFromJournalEqualsFromGate(t *testing.T) {
 func TestFixSliceUnplacedNamesNoRound(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-6")
+	g.r.answer("status JIG-6 --store /s", slicesStatus(
+		[]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"},
+		[]string{"fix-9", "building", "1", "-", "-", "Fix", "app", "unit", "-"},
+	), 0)
 	g.feed(
 		jl(at(30, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 		jl(at(30, 10), "JIG-6", "fix-9", journal.EventFixSlice),

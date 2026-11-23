@@ -102,6 +102,21 @@ func (c *PRCache) Read(url string) PRRead {
 	return PRRead{Offline: true}
 }
 
+// Cached says what the cache holds of the pull request at url, the host never
+// asked and the age of an answer no matter: this run's answer, else the kept
+// one, dated; none ("" state, offline) when it holds nothing. It is for a
+// reader that must not wait on the network for a pull request nobody asked
+// about.
+func (c *PRCache) Cached(url string) PRRead {
+	if got, ok := c.run[url]; ok {
+		return got
+	}
+	if kept, ok := c.load()[url]; ok {
+		return PRRead{State: kept.State, AsOf: kept.At, Offline: true}
+	}
+	return PRRead{Offline: true}
+}
+
 func (c *PRCache) now() time.Time {
 	if c.Now != nil {
 		return c.Now()
@@ -151,5 +166,10 @@ func (c *PRCache) remember(url string, rec prRecord) {
 	}
 	_ = store.AtomicWrite(c.Path, append(data, '\n'))
 }
+
+// cachedOnly is a PRs that answers from what a PRCache holds and asks no host.
+type cachedOnly struct{ cache *PRCache }
+
+func (c cachedOnly) Read(url string) PRRead { return c.cache.Cached(url) }
 
 var _ PRs = (*PRCache)(nil)

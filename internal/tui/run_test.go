@@ -179,8 +179,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	if len(frames) < 3 {
 		t.Fatalf("printed %d screens, want one for each change", len(frames))
 	}
-	if first := frames[0]; !strings.Contains(first, "no tickets yet") {
-		t.Errorf("the first screen is not the empty project before the stream:\n%s", first)
+	if first := frames[0]; !strings.Contains(first, "reading the store…") || strings.Contains(first, "no tickets yet") {
+		t.Errorf("the first screen is not the store being read before the roster:\n%s", first)
 	}
 	for i, f := range frames {
 		if !strings.Contains(f, "jig  demo") || !strings.Contains(f, "quit") {

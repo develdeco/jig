@@ -24,6 +24,10 @@ import (
 type Store struct {
 	Root string
 
+	// charts holds each chart's tickets.yaml as last decoded, so a command that
+	// asks about many tickets decodes a chart once (chartindex.go).
+	charts chartIndex
+
 	// checkpointNotice and checkpointBound, when set, replace the package
 	// defaults of the checkpoint lock's wait (a test shortens them).
 	checkpointNotice, checkpointBound time.Duration

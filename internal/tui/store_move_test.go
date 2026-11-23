@@ -150,7 +150,7 @@ func TestStoreMoveQuiet(t *testing.T) {
 	// and a read inside IdleAfter of the last list read waits for the floor.
 	s.err = nil
 	s.now = s.now.Add(5 * time.Second)
-	s.m.lastRoster = s.now
+	s.m.lastRoster, s.m.rosterEnded = s.now, s.now
 	s.tick(time.Second)
 	verbs("a stale mark inside IdleAfter")
 	if !s.m.rosterStale {
@@ -239,5 +239,28 @@ func TestStoreMoveIgnoresLedgerLines(t *testing.T) {
 	s.tick(5 * time.Second)
 	if got := s.r.total() - base; got != 0 {
 		t.Errorf("a ledger line started %d verbs, want none", got)
+	}
+}
+
+// TestStoreMoveSpacingCountsFromTheReadsEnd: a list read that takes longer than
+// the spacing is not followed by another at once: the spacing runs from the end
+// of the read, not from its start.
+func TestStoreMoveSpacingCountsFromTheReadsEnd(t *testing.T) {
+	t.Parallel()
+	s := newStoreRig(t, newRig(t, "").feed())
+	s.tick(10 * time.Second)
+	// A read starts and takes ten seconds; the store moved meanwhile.
+	s.m.rosterBusy, s.m.lastRoster = true, s.now
+	s.now = s.now.Add(10 * time.Second)
+	s.m.onRoster(rosterMsg{})
+	s.m.rosterStale = true
+	base := s.r.total()
+	s.tick(time.Second)
+	if got := s.r.total() - base; got != 0 {
+		t.Errorf("a list read ended a second ago and was read again: %d verbs", got)
+	}
+	s.tick(5 * time.Second)
+	if got := s.r.total() - base; got == 0 {
+		t.Errorf("a stale list was not read once the spacing had passed since the read's end")
 	}
 }
