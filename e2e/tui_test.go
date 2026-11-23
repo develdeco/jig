@@ -373,14 +373,14 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("y")
 	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
 	// The publish screen's activity reads newest first: what was finished above
-	// the pull request it opened.
+	// the changelog it wrote just before.
 	screens.press("\x1b[H")
 	for i := 0; i < 3; i++ {
 		screens.press("\x1b[B")
 	}
 	screens.press("\r")
-	publish := screens.until("Publish activity", "pull request · opened")
-	if finished, opened := strings.Index(publish, "published · finished"), strings.Index(publish, "pull request · opened"); finished < 0 || finished > opened {
+	publish := screens.until("Publish activity", "published · finished", "changelog · written")
+	if finished, written := strings.Index(publish, "published · finished"), strings.Index(publish, "changelog · written"); finished < 0 || finished > written {
 		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
 	}
 	screens.press("q")
