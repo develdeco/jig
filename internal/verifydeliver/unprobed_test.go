@@ -44,6 +44,30 @@ func TestRoundKeepsItsUnprobedHunks(t *testing.T) {
 		}
 	})
 
+	t.Run("a gate round that covered every hunk writes an empty list", func(t *testing.T) {
+		t.Parallel()
+		fx := generateBuilt(t, "rung-a")
+		d := newDeps(t, fx)
+		report := recordedRound(t, d, GateOpts{Ticket: fx.Ticket}, func(p Prepared) ReviewResult {
+			res := ReviewResult{ReviewedPaths: p.Request.MustReview, Summary: "s"}
+			seen := map[string]bool{}
+			for _, h := range p.Request.Hunks {
+				if !seen[h.File] {
+					seen[h.File] = true
+					res.Skipped = append(res.Skipped, ResultSkip{File: h.File, Why: "set aside"})
+				}
+			}
+			return res
+		})
+		ff, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
+		if err != nil || !ok {
+			t.Fatalf("round 1 findings.yaml: ok=%v err=%v", ok, err)
+		}
+		if report.Unprobed != 0 || ff.Unprobed == nil || len(*ff.Unprobed) != 0 {
+			t.Errorf("a round that left none: report counts %d, findings.yaml unprobed = %v, want 0 and a recorded empty list", report.Unprobed, ff.Unprobed)
+		}
+	})
+
 	t.Run("a round that left none writes an empty list", func(t *testing.T) {
 		t.Parallel()
 		data, err := marshalFindingsYAML("full", nil, nil, nil, nil, "", nil, nil, []UnprobedHunk{})
