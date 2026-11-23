@@ -66,9 +66,15 @@ func (m *Model) stepDots(steps []stepRow) string {
 // ticketDetail is the words after a ticket's steps on the main screen: its
 // current step and where that stands, or what waits for a person.
 func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
+	return m.ticketDetailIn(t, steps, true)
+}
+
+// ticketDetailIn is ticketDetail with or without the kind the ticket says of
+// itself.
+func (m *Model) ticketDetailIn(t *ticket, steps []stepRow, withKind bool) string {
 	end, atEnd := m.endOf(t)
 	kind := ""
-	if k := t.digest.kindWords(); k != "" {
+	if k := t.digest.kindWords(); withKind && k != "" {
 		kind = m.st.dim(k + " · ")
 	}
 	if atEnd && end.State == StateClosed {

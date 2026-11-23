@@ -27,6 +27,9 @@ func (m *Model) chartPage(name string) page {
 		p.add(m.st.dim("no chart " + name))
 		return p
 	}
+	if c.issueID() != "" {
+		return m.planPage(c)
+	}
 	rows := m.chartRows(c)
 	tickets := m.chartTicketsPanel(c, rows)
 
@@ -91,13 +94,21 @@ func (m *Model) chartPage(name string) page {
 // stands in the chart. The note's column is sized first, so the words that say
 // what a ticket waits for are never the part cut.
 func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
-	var p page
 	total, done, _ := chartProgress(rows)
 	right := fmt.Sprintf("%d of %d published", done, total)
 	if total == 0 {
 		right = "none graduated"
 	}
-	p.boxTop("Tickets", right)
+	return m.ticketRowsPanel(c, rows, "Tickets", right, m.chartNote, nil)
+}
+
+// ticketRowsPanel is the panel of a chart's tickets as chartTicketsPanel draws
+// it, under title and with right at its edge: noteOf says the words after each
+// row's steps, and sub, when set, the lines a row has under it that the cursor
+// does not stand on.
+func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) (string, bool), sub func(chartRow) []string) page {
+	var p page
+	p.boxTop(title, right)
 
 	// The entries that have no ticket yet: fog, listed after the tickets.
 	var fog []string
@@ -116,7 +127,7 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 	notes := make([]string, len(rows))
 	for i, r := range rows {
 		var own bool
-		notes[i], own = m.chartNote(r)
+		notes[i], own = noteOf(r)
 		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
 		if own {
 			ownW = max(ownW, width(notes[i]))
@@ -135,6 +146,11 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 		}
 		line += "  " + m.chartDots(r) + "  " + notes[i]
 		p.boxRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		if sub != nil {
+			for _, l := range sub(r) {
+				p.boxAdd(l)
+			}
+		}
 	}
 
 	for _, title := range fog {
@@ -155,7 +171,11 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 // for when its build has not begun, that it can start, or where it stands as
 // on the project's list. own says they are the chart's own words, which a
 // narrow row must not cut, and not the ticket's status.
-func (m *Model) chartNote(r chartRow) (note string, own bool) {
+func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
+
+// chartNoteIn is chartNote with or without the kind a ticket says of itself
+// ("task of GATE-49 · "), which a screen that is about that parent need not say.
+func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
 		return m.st.state(StateStalled, r.verb.Problem), true
@@ -165,7 +185,7 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	case r.behind:
 		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	case r.done:
 		return m.st.state(StatePublished, "published"), true
 	case len(r.waits) > 0:
@@ -173,7 +193,7 @@ func (m *Model) chartNote(r chartRow) (note string, own bool) {
 	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
 		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
 	case r.t != nil:
-		return m.ticketDetail(r.t, r.steps), false
+		return m.ticketDetailIn(r.t, r.steps, kind), false
 	}
 	return "", false
 }

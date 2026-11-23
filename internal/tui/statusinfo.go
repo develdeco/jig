@@ -38,8 +38,21 @@ type statusInfo struct {
 	Probes     []statusProbe
 	ProbeSkips []statusSkip
 	Unprobed   []statusHunk
+	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
+	// suite by repo: what the plan screen reads. Both are empty for a task.
+	Need  string
+	Suite []statusSuite
 	// Err is set when the status itself was refused.
 	Err *axiErr
+}
+
+// statusSuite is a row of an issue status's suite table: where a repo's suite
+// stands at a tip of the issue's branch, and the tasks begun after it failed.
+type statusSuite struct {
+	Repo, Standing, Command, Tip string
+	Seconds                      int
+	Signature, Waiver, Why       string
+	Fixes                        []string
 }
 
 type statusSlice struct {
@@ -162,6 +175,17 @@ func parseStatus(out string) *statusInfo {
 			info.LastRuns = map[string]statusLastRun{}
 		}
 		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
+	}
+	info.Need = doc.Scalars["need"]
+	for _, r := range doc.Tables["suite"].Maps() {
+		row := statusSuite{
+			Repo: r["repo"], Standing: r["standing"], Command: dash(r["command"]), Tip: dash(r["tip"]), Seconds: atoi(dash(r["seconds"])),
+			Signature: dash(r["signature"]), Waiver: dash(r["waiver"]), Why: dash(r["why"]),
+		}
+		if f := dash(r["fixes"]); f != "" {
+			row.Fixes = strings.Split(f, "+")
+		}
+		info.Suite = append(info.Suite, row)
 	}
 	info.FixBudget = doc.Scalars["fix_budget"]
 	if kv, ok := doc.KV["closed"]; ok {

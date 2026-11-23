@@ -1,0 +1,407 @@
+package tui
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/develdeco/jig/internal/land"
+	"github.com/develdeco/jig/internal/phase"
+)
+
+// The plan is the screen of an issue: what it is for, the tasks of its chart
+// and where each landed, and its own stages, one line each. It is the chart
+// screen of a chart that plans an issue (chartInfo.Issue), so the issue and its
+// chart are one screen; a chart that plans none draws as it always did.
+// Everything on it is read: the need and the suite from the issue's status, the
+// pull request from the issue's digest, each task's end state from its own
+// digest and landed lines. The screens run no verb for it and ask no host.
+
+// planLabelW is the width of the label column of the Issue panel.
+const planLabelW = 7
+
+// issueID is the issue the chart plans, "" for a chart that plans none.
+func (c *chart) issueID() string {
+	if c.info == nil || c.info.Issue == nil {
+		return ""
+	}
+	return c.info.Issue.Ticket
+}
+
+// refreshIssue reads the status of the issue the chart plans, which holds the
+// need and the suite the plan shows.
+func (m *Model) refreshIssue(c *chart) tea.Cmd {
+	id := c.issueID()
+	if id == "" {
+		return nil
+	}
+	m.w.ticketFor(id)
+	return m.refreshStatus(id)
+}
+
+// planPage is the plan of the issue chart c plans: Need, Tasks, Issue, then the
+// Run panel and the activity as the chart screen has them. The tasks are never
+// cut; a page longer than the window scrolls with the cursor.
+func (m *Model) planPage(c *chart) page {
+	var p page
+	is := c.info.Issue
+	issue := m.w.tickets[is.Ticket]
+	var suite []statusSuite
+	if issue != nil && issue.status != nil {
+		suite = issue.status.Suite
+	}
+	fixes := fixTasks(suite)
+	rows := m.chartRows(c)
+
+	m.needPanel(&p, is, issue)
+	landed, total := planProgress(rows)
+	right := fmt.Sprintf("%d of %d landed", landed, total)
+	if total == 0 {
+		right = "none graduated"
+	}
+	tasks := m.ticketRowsPanel(c, rows, "Tasks", right, m.planNote(is),
+		func(r chartRow) []string {
+			if tip, ok := fixes[r.id]; ok {
+				return []string{m.st.dim("    ↳ added after the failed suite" + tipWords(tip))}
+			}
+			return nil
+		})
+	p.lines = append(p.lines, tasks.lines...)
+	m.issuePanel(&p, c, issue, suite, rows)
+
+	frame := func(n int) int {
+		if n == 0 {
+			return 0
+		}
+		return 2 + n
+	}
+	run := m.runRows(c.info)
+	if spare := m.bodyRows() - len(p.lines) - frame(len(run)) - activityFloor; spare < 0 && len(run) > 1 {
+		run = trimRuns(run, len(run)-min(-spare, len(run)-1))
+	}
+	p.boxTop("Run", runWord(c.info))
+	for _, r := range run {
+		p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
+	}
+	p.boxEnd()
+	m.chartActivityPanel(&p, rows, c.info.History)
+	return p
+}
+
+// issueBranchWords stand for the issue's own branch in a task's landing: the
+// Issue panel names it once, and a row that spelled it out would be cut before
+// its time on a narrow screen.
+const issueBranchWords = "the issue's branch"
+
+// planNote is the words after a task's steps in the plan: where it landed, with
+// the issue's branch said as such, else what the chart screen says of it, less
+// the parent every row here shares.
+func (m *Model) planNote(is *chartIssue) func(chartRow) (string, bool) {
+	return func(r chartRow) (string, bool) {
+		if r.t != nil && r.atEnd && r.end.State == StateLanded {
+			lines := m.landedLines(r.t)
+			for i := range lines {
+				if is.Branch != "" && lines[i].Into == is.Branch {
+					lines[i].Into = issueBranchWords
+				}
+			}
+			own := ""
+			if p, ok := r.t.digest.phase(phase.Land); ok {
+				own = p.Text
+			}
+			return m.st.state(StateLanded, landedWords(own, lines)), false
+		}
+		return m.chartNoteIn(r, false)
+	}
+}
+
+// planProgress counts the tasks of the plan that landed and all of them: a
+// closed task landed nothing, and still counts among the tasks.
+func planProgress(rows []chartRow) (landed, total int) {
+	for _, r := range rows {
+		total++
+		if r.atEnd && r.end.State == StateLanded {
+			landed++
+		}
+	}
+	return landed, total
+}
+
+// fixTasks are the tasks the issue's status says were begun after a failed
+// suite, each with the tip of the run it follows.
+func fixTasks(suite []statusSuite) map[string]string {
+	out := map[string]string{}
+	for _, s := range suite {
+		for _, id := range s.Fixes {
+			out[id] = s.Tip
+		}
+	}
+	return out
+}
+
+// tipWords is " at <tip>" for a tip, nothing for none.
+func tipWords(tip string) string {
+	if tip == "" {
+		return ""
+	}
+	return " at " + short(tip)
+}
+
+// needPanel is what the issue is for, the body of its ticket, wrapped whole.
+func (m *Model) needPanel(p *page, is *chartIssue, issue *ticket) {
+	p.boxTop("Need", is.Ticket)
+	switch {
+	case issue == nil || issue.status == nil:
+		p.boxAdd(m.st.dim(readingText))
+	case strings.TrimSpace(issue.status.Need) == "":
+		p.boxAdd(m.st.dim("no need recorded"))
+	default:
+		for _, line := range strings.Split(issue.status.Need, "\n") {
+			if strings.TrimSpace(line) == "" {
+				p.boxAdd("")
+				continue
+			}
+			for _, l := range wrap(line, max(1, m.width-7), 1<<20) {
+				p.boxAdd(l)
+			}
+		}
+	}
+	p.boxEnd()
+}
+
+// planLine is a line of the Issue panel: the icon of its state, its label and
+// its words.
+func (m *Model) planLine(state, label, words string) string {
+	return m.st.icon(state) + " " + m.st.dim(pad(label, planLabelW)) + " " + words
+}
+
+// issuePanel is the issue's own stages, one line each: its branch, how many of
+// its tasks landed, its suite (a line for each repo), its pull request and its
+// landing. A stage not reached reads dim.
+func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite, rows []chartRow) {
+	is := c.info.Issue
+	p.boxTop("Issue", is.Ticket)
+	branch := m.st.dim("no branch yet")
+	if is.Branch != "" {
+		branch = is.Branch
+		if len(is.Stack) > 0 && is.Stack[0].StartFrom != "" {
+			branch += m.st.dim(" · from " + is.Stack[0].StartFrom)
+		}
+	}
+	p.boxAdd(m.planLine(StateOK, "branch", branch))
+
+	landed, total := planProgress(rows)
+	switch {
+	case total == 0:
+		p.boxAdd(m.planLine(StateQueued, "tasks", m.st.dim("none graduated yet")))
+	case landed == total:
+		p.boxAdd(m.planLine(StateLanded, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
+	default:
+		state := StateQueued
+		if landed > 0 {
+			state = StateBuilding
+		}
+		p.boxAdd(m.planLine(state, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
+	}
+
+	for _, l := range m.suiteLines(is, issue, suite) {
+		p.boxAdd(l)
+	}
+
+	prState, prWords := m.planPR(is, issue, suite, rows)
+	p.boxAdd(m.planLine(prState, "PR", prWords))
+	landState, landWords := m.planLanding(is, issue)
+	p.boxAdd(m.planLine(landState, "landing", landWords))
+	p.boxEnd()
+}
+
+// suiteLines are the suite of the issue in words, one line for each row of its
+// status: the standing at the tip of its branch, and a failed run at an earlier
+// tip as history. A project of several repos names each line's repo.
+func (m *Model) suiteLines(is *chartIssue, issue *ticket, suite []statusSuite) []string {
+	if issue == nil || issue.status == nil {
+		return []string{m.planLine(StateQueued, "suite", m.st.dim(readingText))}
+	}
+	if len(suite) == 0 {
+		return []string{m.planLine(StateQueued, "suite", m.st.dim("none recorded (the repo leaves it to CI)"))}
+	}
+	repos := map[string]bool{}
+	for _, s := range suite {
+		repos[s.Repo] = true
+	}
+	current := lastSuiteRows(suite)
+	var out []string
+	for i, s := range suite {
+		state, words := m.suiteWords(is, s, current[s.Repo] == i)
+		if len(repos) > 1 {
+			words = s.Repo + ": " + words
+		}
+		out = append(out, m.planLine(state, "suite", words))
+	}
+	return out
+}
+
+// lastSuiteRows is, for each repo, the position of its last row: the one that
+// stands at the tip of the issue's branch.
+func lastSuiteRows(suite []statusSuite) map[string]int {
+	out := map[string]int{}
+	for i, s := range suite {
+		out[s.Repo] = i
+	}
+	return out
+}
+
+// suiteWords is one suite row in words, with the state its line is drawn in.
+// current says the row stands at the tip of the branch, and not at an earlier
+// one.
+func (m *Model) suiteWords(is *chartIssue, s statusSuite, current bool) (state, words string) {
+	switch s.Standing {
+	case land.SuitePass:
+		return StateOK, fmt.Sprintf("passed at %s in %d s: `%s`", short(s.Tip), s.Seconds, s.Command)
+	case land.SuiteFail:
+		words = "failed at " + short(s.Tip)
+		if s.Signature != "" {
+			words += ": " + s.Signature
+		}
+		switch {
+		case len(s.Fixes) > 0:
+			words += " · fix: " + strings.Join(s.Fixes, ", ")
+		case current:
+			words += " · add a fix task for " + is.Ticket
+		}
+		if !current {
+			return StateStalled, m.st.dim(words)
+		}
+		return StateStalled, m.st.state(StateStalled, words)
+	case land.SuiteWaived:
+		if s.Waiver != "" {
+			return StateFindings, "waived: " + s.Waiver
+		}
+		return StateFindings, "waived"
+	case land.SuiteUndeclared:
+		return StateQueued, m.st.dim("none recorded (the repo leaves it to CI)")
+	}
+	// Not run, or not readable: the sentence says which.
+	if s.Tip != "" {
+		return StateQueued, m.st.dim("not run at " + short(s.Tip))
+	}
+	return StateQueued, m.st.dim(firstOf(s.Why, "not run"))
+}
+
+// suiteMet says the suite asks nothing more of the issue: every repo's row at
+// the tip passed, was waived or declares none. Before the status is read the
+// issue's own unmet list says it.
+func suiteMet(is *chartIssue, issue *ticket, suite []statusSuite) bool {
+	if issue == nil || issue.status == nil || len(suite) == 0 {
+		for _, u := range is.Unmet {
+			if u.Code == land.SuiteNotRun || u.Code == land.SuiteFailed {
+				return false
+			}
+		}
+		return true
+	}
+	for _, i := range lastSuiteRows(suite) {
+		switch suite[i].Standing {
+		case land.SuitePass, land.SuiteWaived, land.SuiteUndeclared:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// planPR is the issue's own pull request: by number, target and state once it
+// is open; before that, what it waits for, which is never its tasks not landed
+// or its suite unmet being passed over.
+func (m *Model) planPR(is *chartIssue, issue *ticket, suite []statusSuite, rows []chartRow) (state, words string) {
+	if issue == nil || issue.digest == nil {
+		return StateQueued, m.st.dim(readingText)
+	}
+	if prs := issue.digest.PRs; len(prs) > 0 {
+		state = StateOK
+		parts := make([]string, len(prs))
+		for i, pr := range prs {
+			parts[i] = prWordsOf(pr)
+			switch strings.ToLower(pr.State) {
+			case "merged":
+			case "closed":
+				state = StateStalled
+			default:
+				if state == StateOK {
+					state = StatePublishing
+				}
+			}
+		}
+		return state, strings.Join(parts, ", ")
+	}
+	var waits []string
+	unlanded := 0
+	for _, r := range rows {
+		if !(r.atEnd && (r.end.State == StateLanded || r.end.State == StateClosed)) {
+			unlanded++
+		}
+	}
+	if unlanded > 0 {
+		waits = append(waits, fmt.Sprintf("%d %s", unlanded, plural(unlanded, "task", "tasks")))
+	}
+	if !suiteMet(is, issue, suite) {
+		waits = append(waits, "the suite")
+	}
+	if len(waits) > 0 {
+		return StateQueued, m.st.dim("not opened yet · waits for " + andList(waits))
+	}
+	if is.Prompt != "" {
+		return StateReady, "not opened yet · say " + m.st.key(strconv.Quote(is.Prompt))
+	}
+	return StateReady, "not opened yet · ready to open"
+}
+
+// prWordsOf is one pull request as the plan says it: "PR #512 into main · open".
+func prWordsOf(pr digestPR) string {
+	word := strings.ToLower(pr.State)
+	switch word {
+	case "open", "merged", "closed":
+	default:
+		word = "state not read"
+	}
+	var head string
+	switch {
+	case pr.Number > 0:
+		head = "PR #" + strconv.Itoa(pr.Number)
+	default:
+		head = pr.URL
+	}
+	if pr.Target != "" {
+		head += " into " + pr.Target
+	}
+	return head + " · " + word
+}
+
+// planLanding is where the issue's own landing stands, in RUN-18's states: it
+// waits for its pull request, waits to land at the person's word, landed, or was
+// closed.
+func (m *Model) planLanding(is *chartIssue, issue *ticket) (state, words string) {
+	if issue == nil || issue.digest == nil {
+		return StateQueued, m.st.dim(readingText)
+	}
+	d := issue.digest
+	say := `say "Land ` + is.Ticket + `"`
+	switch {
+	case d.Closed != "":
+		return StateClosed, "closed · " + d.Closed
+	case d.State == land.StateLanded:
+		return StateLanded, landedWords("landed", m.landedLines(issue))
+	case d.State == land.StatePublished:
+		merged := len(d.PRs) > 0
+		for _, pr := range d.PRs {
+			merged = merged && strings.EqualFold(pr.State, "merged")
+		}
+		if merged {
+			return StateWaitsToLand, "merged on the host, not recorded · " + say
+		}
+		return StateWaitsToLand, "waits to land · " + say
+	}
+	return StateQueued, m.st.dim("waits for its pull request")
+}

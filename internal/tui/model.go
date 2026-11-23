@@ -667,6 +667,11 @@ func (m *Model) chartTouched(name string, touched map[string]bool) []tea.Cmd {
 			cmds = append(cmds, m.refreshStatus(id))
 		}
 	}
+	if issue := c.issueID(); issue != "" && touched[issue] {
+		c.dirty = true
+		m.lastEvent = m.now()
+		cmds = append(cmds, m.refreshStatus(issue))
+	}
 	return cmds
 }
 
@@ -764,7 +769,9 @@ func (m *Model) onChart(msg chartMsg) tea.Cmd {
 		// read does not stop the timer.
 		c.mergeWait = len(msg.info.Ends) > 0
 	}
-	return nil
+	// The plan of an issue reads its need and its suite from the issue's own
+	// status, read whenever the chart is.
+	return m.refreshIssue(c)
 }
 
 // retryAfter asks, after a moment, for the read of ticket (or of the ticket
@@ -1106,6 +1113,7 @@ func (m *Model) refreshAll() tea.Cmd {
 			for _, id := range c.ids() {
 				cmds = append(cmds, m.refreshStatus(id))
 			}
+			cmds = append(cmds, m.refreshIssue(c))
 		}
 	}
 	if id := m.watching(); id != "" {
