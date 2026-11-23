@@ -154,7 +154,8 @@ func (m *Model) layout() screenLayout {
 	panel := m.panel(w)
 	bodyH := h - len(head) - len(foot) - len(panel)
 	if bodyH < minBodyRows && len(panel) > 0 {
-		panel = panel[:max(0, len(panel)-(minBodyRows-bodyH))]
+		// The last command goes first: the notice says what to do.
+		panel = panel[min(len(panel), minBodyRows-bodyH):]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
@@ -486,7 +487,11 @@ func (m *Model) panel(w int) []string {
 		out = append(out, m.lastLine(m.last, w))
 	}
 	if m.notice != "" {
-		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
+		// Drawn whole, in the rows it needs: what it tells the person is the
+		// point of it, and a cut notice loses its end.
+		for _, l := range wrapWhole(m.notice, w-2) {
+			out = append(out, fit("  "+m.st.state(StateFindings, l), w))
+		}
 	}
 	return out
 }

@@ -1367,6 +1367,9 @@ func (m *Model) triage(decision string) tea.Cmd {
 	case seen:
 		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
 		return nil
+	case m.top().ticket == id:
+		m.notice = "ask " + pick.ID + " is read and decided on the review screen, which this screen does not draw it on"
+		return nil
 	default:
 		m.notice = "ask " + pick.ID + " is not shown on this screen: open " + id + " to read it"
 		return nil

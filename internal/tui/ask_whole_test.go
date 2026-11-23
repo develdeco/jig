@@ -308,6 +308,50 @@ func TestAskOnAScreenThatDoesNotDrawItIsNotShown(t *testing.T) {
 	}
 }
 
+// TestANoticeIsDrawnWhole: a notice is wrapped into the rows it needs, so the
+// frame holds all of it, the row count of the too-short prompt and the ticket a
+// refusal sends the person to included.
+func TestANoticeIsDrawnWhole(t *testing.T) {
+	t.Parallel()
+	g := sized(newRig(t, "JIG-1"), 70, 14)
+	g.feed(questionTicket()...)
+	g.press("a")
+	want := "the screen is too short to show the whole question q-001: it needs 18 rows, this has 14"
+	if g.m.notice != want {
+		t.Fatalf("notice = %q, want %q", g.m.notice, want)
+	}
+	if view := g.view(); !strings.Contains(readWords(view), readWords(want)) || len(strings.Split(view, "\n")) != 14 {
+		t.Errorf("the frame does not hold the whole notice in 14 rows:\n%s", view)
+	}
+
+	g = askRig(t, 80, 14, askOne)
+	g.press("k")
+	want = "ask r1-f1 is not drawn whole on this screen: make the screen taller, or open JIG-2 to read it"
+	if g.m.notice != want {
+		t.Fatalf("notice = %q, want %q", g.m.notice, want)
+	}
+	if view := g.view(); !strings.Contains(readWords(view), readWords(want)) {
+		t.Errorf("the frame does not hold the whole refusal:\n%s", view)
+	}
+}
+
+// TestKOnATicketWithOnlyADecidedAskNamesTheReviewScreen: on the ticket screen
+// of a ticket whose only ask is decided, nothing draws the ask, and the refusal
+// does not send the person to the ticket they are on.
+func TestKOnATicketWithOnlyADecidedAskNamesTheReviewScreen(t *testing.T) {
+	t.Parallel()
+	g := askRig(t, 80, 40, askOne)
+	g.feed(jl(at(12, 0), "JIG-2", "", journal.EventTriage, with("s-person", "", "dismiss", "", "r1-f1", "person")))
+	g.press("k")
+	if got := triaged(g); len(got) != 0 {
+		t.Errorf("k ran %q", got)
+	}
+	want := "ask r1-f1 is read and decided on the review screen, which this screen does not draw it on"
+	if g.m.notice != want {
+		t.Errorf("notice = %q, want %q", g.m.notice, want)
+	}
+}
+
 func TestAskTextJoinsWhatIsThereToJoin(t *testing.T) {
 	t.Parallel()
 	tk := &ticket{status: &statusInfo{Findings: []statusFinding{{ID: "r1-f1", Rationale: "why it matters"}}}}
