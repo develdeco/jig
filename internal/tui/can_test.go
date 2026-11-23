@@ -46,10 +46,17 @@ func quietRigAt(t *testing.T, id string, d *digestInfo) *rig {
 		phases[i] = map[string]any{"name": p.Name, "state": p.State, "text": p.Text, "needs_you": p.NeedsYou}
 	}
 	wire := map[string]any{"kind": d.Kind, "current": d.Current, "ready": d.Ready, "behind": d.Behind, "closed": d.Closed, "phases": phases}
-	out, err := json.Marshal(map[string]any{"tickets": []map[string]any{
-		{"id": "JIG-1", "title": "Greeting copy", "state": "ready"},
-		{"id": id, "title": "Config loader", "state": "ready", "digest": wire},
-	}})
+	if sl := d.Slices; sl != nil {
+		wire["slices"] = map[string]any{"total": sl.Total, "green": sl.Green, "building": sl.Building, "queued": sl.Queued, "stalled": sl.Stalled, "env_blocked": sl.EnvBlocked}
+	}
+	var listed []map[string]any
+	for _, other := range []string{"JIG-1", "JIG-2"} {
+		if other != id {
+			listed = append(listed, map[string]any{"id": other, "title": "Another ticket", "state": "ready"})
+		}
+	}
+	listed = append(listed, map[string]any{"id": id, "title": "Config loader", "state": "ready", "digest": wire})
+	out, err := json.Marshal(map[string]any{"tickets": listed})
 	if err != nil {
 		t.Fatal(err)
 	}

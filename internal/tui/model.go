@@ -973,6 +973,14 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		if m.allow(actDismiss) {
 			return m.triage("dismiss")
 		}
+	case "u":
+		if m.allow(actRequeue) {
+			return m.requeue()
+		}
+	case "v":
+		if m.allow(actApprove) {
+			m.askApprove()
+		}
 	case "t":
 		m.tail = !m.tail
 	case "g":
@@ -1379,6 +1387,57 @@ func (m *Model) triage(decision string) tea.Cmd {
 		return nil
 	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
+}
+
+// requeue puts a stalled or env-blocked slice back in the queue: the one under
+// the cursor (or the one of the slice's own screen), else the only one. It runs
+// at once: a requeue is a retry the builder's next claim takes.
+func (m *Model) requeue() tea.Cmd {
+	id := m.targetTicket()
+	t := m.w.tickets[id]
+	if t == nil || t.status == nil {
+		m.notice = readingText
+		return nil
+	}
+	var stuck []string
+	for _, s := range t.status.Slices {
+		if s.State == StateStalled || s.State == StateEnvBlocked {
+			stuck = append(stuck, s.ID)
+		}
+	}
+	slice := ""
+	if top := m.top(); top.screen == screenSlice {
+		slice = top.slice
+	} else if ref := m.selected(); ref != nil && ref.kind == rowSlice {
+		slice = ref.slice
+	}
+	switch {
+	case slice != "" && slices.Contains(stuck, slice):
+	case slice != "":
+		m.notice = "slice " + slice + " is not stalled or env-blocked"
+		return nil
+	case len(stuck) == 1:
+		slice = stuck[0]
+	case len(stuck) == 0:
+		m.notice = "no slice is stalled or env-blocked"
+		return nil
+	default:
+		m.notice = "several slices are stalled: put the cursor on the one to requeue"
+		return nil
+	}
+	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
+}
+
+// askApprove asks to approve the brief as it stands: the verb records the
+// approval as the person's, since the runner has them at the keys.
+func (m *Model) askApprove() {
+	id := m.targetTicket()
+	m.ask = &confirmation{
+		prompt: "approve the brief of " + id + " as it is now?",
+		run: func() tea.Cmd {
+			return m.exec("validate", id, m.verbArgs("validate", id))
+		},
+	}
 }
 
 // gate opens a gate round on the ticket.

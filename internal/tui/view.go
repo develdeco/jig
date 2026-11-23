@@ -386,6 +386,8 @@ func (m *Model) keyHints() []string {
 	dismiss := hint{"d", "dismiss", actDismiss}
 	gate := hint{"g", "gate", actGate}
 	publish := hint{"p", "publish", actPublish}
+	requeue := hint{"u", "requeue", actRequeue}
+	approve := hint{"v", "approve", actApprove}
 	say := hint{"say", `"Land ` + id + `"`, actLandWord}
 	land := hint{key: "5", text: "land"}
 	tail := hint{key: "t", text: "tail"}
@@ -397,7 +399,7 @@ func (m *Model) keyHints() []string {
 	case screenChart:
 		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:
-		keys = []hint{back, quit, move, open, answer, keep, dismiss, gate, publish, say, land, tail}
+		keys = []hint{back, quit, move, open, answer, keep, dismiss, requeue, approve, gate, publish, say, land, tail}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
 			keys = []hint{back, quit, tail}
@@ -406,15 +408,15 @@ func (m *Model) keyHints() []string {
 			keys = []hint{back, quit, move, open, tail}
 		}
 	case screenBrief:
-		keys = []hint{back, quit, move, open, say, land, tail}
+		keys = []hint{back, quit, move, open, approve, say, land, tail}
 	case screenBuild:
-		keys = []hint{back, quit, move, open, gate, say, land, tail}
+		keys = []hint{back, quit, move, open, requeue, gate, say, land, tail}
 	case screenReview:
 		keys = []hint{back, quit, move, keep, dismiss, gate, say, land, tail}
 	case screenPublish:
 		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, publish, say, land, tail}
 	case screenSlice:
-		keys = []hint{back, quit, move, answer, say, land, tail}
+		keys = []hint{back, quit, move, answer, requeue, say, land, tail}
 	case screenLand:
 		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
 	}
