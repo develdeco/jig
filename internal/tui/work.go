@@ -40,24 +40,27 @@ func (w workTimes) ofStep(step int) time.Duration {
 	return d
 }
 
-// work is how long the ticket's holders worked, standing as d says: the gaps
-// between consecutive lines of the log that both belong to one step (placed),
-// so a build that a review sent a fix back to counts the fix and not the review
-// between, and the time from one step to the next (a person reading the outcome
-// before prompting the next phase) counts for neither. A line of no step (a
-// spend, a call nothing held) neither starts nor ends a gap. A gap between two
-// lines of one sub-step is that sub-step's work; one between lines of two
-// sub-steps is the step's own.
+// clocks are the work of the ticket and its waits, standing as d says. Work is
+// how long the ticket's holders worked: the gaps between consecutive lines of
+// the log that both belong to one step (placed), so a build that a review sent a
+// fix back to counts the fix and not the review between, and the time from one
+// step to the next (a person reading the outcome before prompting the next
+// phase) counts for neither. A line of no step (a spend, a call nothing held)
+// neither starts nor ends a gap. A gap between two lines of one sub-step is that
+// sub-step's work; one between lines of two sub-steps is the step's own. What of
+// a gap a wait that ended covers is the wait's (wait.go), not work.
 //
 // The step under way also counts the time since its latest line, while that
 // line is the latest of the log and the step has a sub-step at work: a slice
 // being built, a brief being drafted. A step whose only open sub-steps wait for
 // a person counts none: nobody is working, and the wait is not work.
-func (m *Model) work(t *ticket, d phase.Ticket) workTimes {
+func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
+	placed, ws := m.placedIn(t, d)
+	closed, open := t.answered()
+	waits := append(closed, phaseWaits(placed, d, open)...)
 	w := workTimes{}
 	var prev time.Time
 	prevStep, prevKey := -1, ""
-	placed, ws := m.placedIn(t, d)
 	for _, p := range withStarts(placed, ws) {
 		at, ok := p.l.At()
 		if p.step < 0 || !ok {
@@ -68,7 +71,15 @@ func (m *Model) work(t *ticket, d phase.Ticket) workTimes {
 			if p.key == prevKey {
 				key = p.key
 			}
-			w[workRef{p.step, key}] += at.Sub(prev)
+			gap := at.Sub(prev)
+			for _, x := range waits {
+				if x.step == p.step && !x.standing() {
+					gap -= overlap(prev, at, x.start, x.end)
+				}
+			}
+			if gap > 0 {
+				w[workRef{p.step, key}] += gap
+			}
 		}
 		prev, prevStep, prevKey = at, p.step, p.key
 	}
@@ -77,8 +88,11 @@ func (m *Model) work(t *ticket, d phase.Ticket) workTimes {
 			w[workRef{cur, key}] += m.now().Sub(prev)
 		}
 	}
-	return w
+	return clocks{w, waits}
 }
+
+// work is the work of the ticket (clocks).
+func (m *Model) work(t *ticket, d phase.Ticket) workTimes { return m.clocks(t, d).work }
 
 // withStarts is the lines with, for each sub-step under way that no line of its
 // own opened (a brief being drafted by the session the ledger ties to it), a

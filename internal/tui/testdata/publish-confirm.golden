@@ -1,11 +1,11 @@
 jig  demo › JIG-2  Config loader                                 ◇ waits to land
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ─────────────────────────────────────── step 5 of 5 · total 3m 21s ─╮
+  ╭─ Steps ────────────────────────────────────── step 5 of 5 · worked 3m 11s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
   │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
   │  ✓ 3 Review   2m 30s  round 2 clean · by reviewer                          │
-  │  ✓ 4 Publish  21s     pull request opened · https://example.test/acme/dem… │
-  │▸ ◇ 5 Land             waits for a merge                                    │
+  │  ✓ 4 Publish  11s     pull request opened · https://example.test/acme/dem… │
+  │▸ ◇ 5 Land             waits for a merge 45m 09s                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Land ─────────────────────────────────────────────────────── 0 of 2 done ─╮
   │  ○ merge   the session merges it at the person's word                      │

@@ -19,6 +19,9 @@ type stepRow struct {
 	Took  string
 	Done  bool
 	took  time.Duration
+	// Wait is how long the sub-step the step waits on has stood, when the step
+	// waits for a person or the host; waitWords are that sub-step's words.
+	Wait, waitWords string
 }
 
 // steps are the ticket's five steps, in order, as internal/phase derives them
@@ -45,9 +48,13 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 		}
 		return rows
 	}
-	for i, took := range m.stepTimes(t, d) {
-		if took > 0 {
+	c := m.clocks(t, d)
+	for i := range rows {
+		if took := c.work.ofStep(i); took > 0 {
 			rows[i].Took, rows[i].took = ago(took), took
+		}
+		if w, ok := c.standingOf(i); ok && !rows[i].Done && rows[i].State != StateClosed {
+			rows[i].Wait, rows[i].waitWords = m.waitClock(w), w.words
 		}
 	}
 	return rows
@@ -269,17 +276,6 @@ func cannotStart(d phase.Ticket, p phase.Phase) bool {
 	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
-// stepTimes are how long each step has taken: its work (work.go), the sum of
-// what its sub-steps and the step itself counted.
-func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
-	w := m.work(t, d)
-	var took [stepCount]time.Duration
-	for i := range took {
-		took[i] = w.ofStep(i)
-	}
-	return took
-}
-
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
@@ -296,7 +292,7 @@ func (m *Model) stepLabel(t *ticket) (state, label string) {
 	if cur.Done {
 		return cur.State, "landed"
 	}
-	return cur.State, stepWords(cur.Step, cur.State)
+	return cur.State, stepWordsOf(cur)
 }
 
 // stepState is a step in a state, the key of the header's words.
@@ -334,6 +330,18 @@ var headerWords = map[stepState]string{
 	{stepLand, StateReady}:         "waits to land",
 	{stepLand, StateFindings}:      "merged, not recorded",
 	{stepLand, StateOK}:            "landed",
+}
+
+// stepWordsOf is what the header says of a step row: its state's words, except
+// where the step's open sub-step waits and the state's words would read as work
+// ("brief being drafted" for a brief that is drafted and waits for approval).
+func stepWordsOf(s stepRow) string {
+	if s.Wait != "" && (s.State == StateBuilding || s.State == StatePublishing) {
+		if w := waitHeader(s.Step, waitSpan{words: s.waitWords}); w != "" {
+			return w
+		}
+	}
+	return stepWords(s.Step, s.State)
 }
 
 // stepWords is what the header says of step in state.

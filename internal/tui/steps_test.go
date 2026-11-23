@@ -363,8 +363,8 @@ func TestEachStepCountsItsTimeAndTheStepsTheirTotal(t *testing.T) {
 			t.Errorf("%s took %q, want %q", stepNames[step], got, want)
 		}
 	}
-	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 5 · total 3m 59s") {
-		t.Errorf("the Steps panel's title does not give the total:\n%s", top)
+	if top := panelLines(strings.Split(g.view(), "\n"), "Steps")[0]; !strings.Contains(top, "step 2 of 5 · worked 3m 59s") {
+		t.Errorf("the Steps panel's title does not give the work:\n%s", top)
 	}
 }
 

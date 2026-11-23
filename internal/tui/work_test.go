@@ -57,7 +57,7 @@ func TestADraftedBriefWaitingAnHourReadsItsDraftingTime(t *testing.T) {
 		t.Errorf("the brief took %q, want the 6s of its drafting", got)
 	}
 	row, title := briefWork(g)
-	if !strings.Contains(row, "6s") || !strings.Contains(title, "total 6s") {
+	if !strings.Contains(row, "6s") || !strings.Contains(title, "worked 6s") {
 		t.Errorf("an hour after the draft the brief reads\n%s\n%s\nwant 6s in the row and in the total", title, row)
 	}
 }
@@ -77,7 +77,7 @@ func TestACallOfTheDraftingSessionAfterTheDraftIsNoBriefWork(t *testing.T) {
 	if got := g.m.steps(tk)[stepBrief].Took; got != "6s" {
 		t.Errorf("the brief took %q after the session's later calls, want 6s", got)
 	}
-	if row, title := briefWork(g); !strings.Contains(row, "6s") || !strings.Contains(title, "total 6s") {
+	if row, title := briefWork(g); !strings.Contains(row, "6s") || !strings.Contains(title, "worked 6s") {
 		t.Errorf("the screen after the later calls reads\n%s\n%s\nwant 6s in the row and in the total", title, row)
 	}
 	late := 0

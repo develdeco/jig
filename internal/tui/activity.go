@@ -691,6 +691,10 @@ func span(d time.Duration) string {
 	case d < time.Hour:
 		return strconv.Itoa(int(d/time.Minute)) + "m " + twoDigits(int(d%time.Minute/time.Second)) + "s"
 	}
+	if d >= 100*time.Hour {
+		// Hours alone: "332h 51m" does not fit the time column.
+		return strconv.Itoa(int(d/time.Hour)) + "h"
+	}
 	return strconv.Itoa(int(d/time.Hour)) + "h " + twoDigits(int(d%time.Hour/time.Minute)) + "m"
 }
 

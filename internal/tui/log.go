@@ -49,6 +49,19 @@ type moveWindow struct {
 	borrowed bool
 	// open is set for the window of a sub-step still under way.
 	open bool
+	// held are the waits the sub-step stood through that an answer ended: the
+	// window spans them, but nobody held the sub-step then.
+	held []waitSpan
+}
+
+// waitingAt says the sub-step of the window was standing in a wait at at.
+func (w moveWindow) waitingAt(at time.Time) bool {
+	for _, h := range w.held {
+		if at.After(h.start) && !at.After(h.end) {
+			return true
+		}
+	}
+	return false
 }
 
 // callAfter is how long after a sub-step's last line a call of its holder
@@ -62,6 +75,7 @@ const callAfter = 2 * time.Second
 // no work of it.
 func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 	now := m.now()
+	answered, _ := t.answered()
 	var ws []moveWindow
 	for step, p := range d.Phases {
 		for _, s := range p.Subs {
@@ -79,7 +93,13 @@ func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 				continue
 			}
 			if tr.holder != "" && !tr.start.IsZero() {
-				ws = append(ws, moveWindow{step, s.Key, tr.holder, agentOf(tr.own), tr.start, end, tr.borrowed, s.State != phase.SubDone})
+				w := moveWindow{step: step, key: s.Key, holder: tr.holder, agent: agentOf(tr.own), start: tr.start, end: end, borrowed: tr.borrowed, open: s.State != phase.SubDone}
+				for _, a := range answered {
+					if a.step == step && a.key == s.Key {
+						w.held = append(w.held, a)
+					}
+				}
+				ws = append(ws, w)
 			}
 		}
 	}
@@ -164,7 +184,7 @@ func (t *ticket) placeOf(l events.Envelope, ws []moveWindow, all []events.Envelo
 		}
 	}
 	for i, w := range ws {
-		if w.holder != l.Session || !at.After(w.start) || at.After(w.end) {
+		if w.holder != l.Session || !at.After(w.start) || at.After(w.end) || w.waitingAt(at) {
 			continue
 		}
 		if best < 0 || (ws[best].borrowed && !w.borrowed) || (ws[best].borrowed == w.borrowed && w.start.After(ws[best].start)) {

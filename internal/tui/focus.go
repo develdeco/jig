@@ -585,14 +585,16 @@ func trimFields(fs []field, n int) []field {
 // line (label, track, how long it has run), its fields, and its live line, the
 // latest move with how long ago it was made. Fields give way when rows are few;
 // the line and the live line stay.
-func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int, work workTimes) []string {
+func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int, c clocks) []string {
 	_, fs, last := m.openParts(t, step, s)
 	now := m.now()
 	state := subState(step, s)
 	w := max(20, m.width-7)
 
 	right := ""
-	if took := work.of(step, s.Key); took > 0 {
+	if w, ok := c.waitOf(step, s.Key); ok && w.standing() {
+		right = m.st.state(state, m.waitClock(w))
+	} else if took := c.work.of(step, s.Key); took > 0 {
 		right = m.st.state(state, ago(took))
 	}
 	head := m.st.icon(state) + " " + m.st.bold(pad(s.Label, labelW)) + "  "
@@ -636,12 +638,16 @@ func ago(d time.Duration) string {
 }
 
 // subSummary is what a folded sub-step that is done adds to its line: how long
-// it took (its work), when that is known.
-func subSummary(work workTimes, step int, s phase.Sub) string {
+// it took (its work), or for one that waited, how long it waited, when that is
+// known.
+func (m *Model) subSummary(c clocks, step int, s phase.Sub) string {
 	if s.State != phase.SubDone {
 		return ""
 	}
-	if took := work.of(step, s.Key); took > 0 {
+	if w, ok := c.waitOf(step, s.Key); ok && !w.standing() {
+		return "waited " + m.waitClock(w)
+	}
+	if took := c.work.of(step, s.Key); took > 0 {
 		return "took " + span(took)
 	}
 	return ""
