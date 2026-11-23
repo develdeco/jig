@@ -118,6 +118,10 @@ _Avoid_: ready queue, backlog
 One of the stages a ticket goes through: brief, build, review and publish (the TUI calls them steps), then **Land**, which runs only at the person's word. Each has a skill (`intake`, `build`, `review`, `publish`, `land`) and a prompt that asks for it: "Plan SHOP-1", "Build SHOP-1", "Review SHOP-1", "Publish SHOP-1", "Land SHOP-1". Where a ticket stands is derived from its journal lines and its status, never recorded (`internal/phase`, shown by `jig next <ticket>`, `jig status` and the TUI): a phase is done only when the ones before it are, a phase that cannot start says what it waits for, and asking again for a phase that is done is warned about, not refused.
 _Avoid_: stage, task
 
+**Roster**:
+Every ticket's row and every chart of the store, as `jig next --json --roster` prints them: the rows are those of `jig next --json`, each with the instant its journal last moved, and the cost of reading it grows with the number of tickets alone. The screens read the roster and nothing else of the store's list.
+_Avoid_: list, index
+
 **Phase digest**:
 Where one ticket stands, as the roster (`jig next --json`) gives it in each row's `digest`: its kind, the five phases with their words, the pull requests it recorded and where they go, what it waits for and its slices counted. Every TUI screen takes its words from it, so a screen cannot say what `jig next <ticket>` does not.
 _Avoid_: status, standing
