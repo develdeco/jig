@@ -135,7 +135,9 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			if t.digest != nil {
 				r.d = m.phaseOf(t)
 				r.steps = m.stepRows(t, r.d)
-				r.needs = (needsYou(r.d) || t.digest.waitsForAnswer()) && !m.ticketLive(t)
+				// A question is the person's whoever else is at work; what a live
+				// session records itself (an approval, a round's asks) waits.
+				r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t))
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
 			}

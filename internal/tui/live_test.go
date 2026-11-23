@@ -10,6 +10,14 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
+// reviewedRig is a ticket whose first round left two asks for the person.
+func reviewedRig(t *testing.T) *rig {
+	t.Helper()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...)
+	return g
+}
+
 // askedRig is a ticket with one question open on slice a and nothing else.
 func askedRig(t *testing.T, ticket string) *rig {
 	t.Helper()
@@ -51,30 +59,25 @@ func waitingOnAnswer(g *rig, id string, n int) {
 // or when the session ends.
 func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 	t.Parallel()
-	const quietMain = "1 open question"
 
 	t.Run("the ticket screen and main", func(t *testing.T) {
-		g := askedRig(t, "JIG-1")
+		g := reviewedRig(t)
 		now := rigNow
 		g.m.now = func() time.Time { return now }
-		ticketPage := func() string { return pagesText(g.m.ticketPage("JIG-1")) }
-		mainPage := func() string { return pagesText(g.m.mainPage()) }
+		ticketPage := func() string { return pagesText(g.m.ticketPage("JIG-2")) }
 
-		if !hasGroup(ticketPage()) || !strings.Contains(mainPage(), quietMain) {
-			t.Fatalf("with no session at work the screens do not ask for the person:\n%s\n%s", ticketPage(), mainPage())
+		if !hasGroup(ticketPage()) {
+			t.Fatalf("with no session at work the screen does not ask for the person:\n%s", ticketPage())
 		}
 
 		// A tool call 30 seconds ago: live.
-		g.feed(ll(at(59, 0), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
+		g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-builder", "", "", "", "", "")))
 		if p := ticketPage(); hasGroup(p) {
 			t.Errorf("the ticket screen asks for the person while a session is at work:\n%s", p)
 		}
-		if p := mainPage(); strings.Contains(p, quietMain) {
-			t.Errorf("main counts the open question while a session is at work:\n%s", p)
-		}
-		// The question itself stays a row of the screen that answers it.
-		if p := pagesText(g.m.slicePage("JIG-1", "a")); !strings.Contains(p, "q-1") {
-			t.Errorf("the slice screen lost the question:\n%s", p)
+		// The asks themselves stay rows of the screen that decides them.
+		if p := pagesText(g.m.reviewPage("JIG-2")); !strings.Contains(p, "r1-f1") {
+			t.Errorf("the review screen lost the asks:\n%s", p)
 		}
 
 		// The window's edge: a minute old is still live, a second more is not.
@@ -83,8 +86,8 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 			t.Errorf("a line exactly one minute old is not live")
 		}
 		now = rigNow.Add(31 * time.Second)
-		if !hasGroup(ticketPage()) || !strings.Contains(mainPage(), quietMain) {
-			t.Errorf("the words did not come back once the line went quiet:\n%s\n%s", ticketPage(), mainPage())
+		if !hasGroup(ticketPage()) {
+			t.Errorf("the words did not come back once the line went quiet:\n%s", ticketPage())
 		}
 
 		// A session end after the line: not live, even inside the window.
@@ -94,35 +97,33 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 			t.Errorf("a session that ended still holds the words back:\n%s", ticketPage())
 		}
 		// The same session writing again after its end is at work again.
-		g.feed(ll(at(59, 15), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
+		g.feed(ll(at(59, 15), "JIG-2", journal.EventTool, with("s-builder", "", "", "", "", "")))
 		if hasGroup(ticketPage()) {
 			t.Errorf("a session that wrote after its end does not count:\n%s", ticketPage())
 		}
 		// Another session's line is live too.
-		g.feed(ll(at(59, 20), "JIG-1", journal.EventSessionTouch, with("s-other", "", "", "", "", "")))
+		g.feed(ll(at(59, 20), "JIG-2", journal.EventSessionTouch, with("s-other", "", "", "", "", "")))
 		if hasGroup(ticketPage()) {
 			t.Errorf("a second session's touch does not count:\n%s", ticketPage())
 		}
 		// A line that is no sign of a session at work is not one.
-		g2 := askedRig(t, "JIG-1")
-		g2.feed(ll(at(59, 20), "JIG-1", journal.EventNoteDelivered, with("s-builder", "", "", "", "", "")))
-		if !hasGroup(pagesText(g2.m.ticketPage("JIG-1"))) {
+		g2 := reviewedRig(t)
+		g2.feed(ll(at(59, 20), "JIG-2", journal.EventNoteDelivered, with("s-builder", "", "", "", "", "")))
+		if !hasGroup(pagesText(g2.m.ticketPage("JIG-2"))) {
 			t.Errorf("a delivered note held the words back")
 		}
 	})
 
 	t.Run("the chart's header and Run panel", func(t *testing.T) {
 		g := chartScreenRig(t)
-		g.feed(jl(at(30, 0), "JIG-5", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-009", "agent")))
-		waitingOnAnswer(g, "JIG-5", 1)
 		g.send(tea.WindowSizeMsg{Width: 100, Height: 60})
-		if v := g.view(); !strings.Contains(v, "run needs you") || !strings.Contains(v, `say "Continue checkout"`) {
-			t.Fatalf("with no session at work the chart does not ask for the person:\n%s", v)
+		if v := g.view(); strings.Contains(v, "running") || !strings.Contains(v, `say "Continue checkout"`) {
+			t.Fatalf("with no session at work the chart says running:\n%s", v)
 		}
 
 		g.feed(ll(at(59, 0), "JIG-5", journal.EventTool, with("s-builder", "", "", "", "", "")))
 		v := g.view()
-		if strings.Contains(v, "run needs you") || !strings.Contains(v, "running") {
+		if head, _, _ := strings.Cut(v, "\n"); strings.Contains(head, "in progress") || !strings.Contains(head, "running") {
 			t.Errorf("the chart header does not say running:\n%s", v)
 		}
 		if !strings.Contains(v, "running · a session worked on it 30s ago") || strings.Contains(v, `say "Continue checkout"`) {
@@ -136,13 +137,13 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 // it worked on, so the words come back at once and not when the line ages out.
 func TestASessionEndReachesTheTicketsOfItsSession(t *testing.T) {
 	t.Parallel()
-	g := askedRig(t, "JIG-1")
-	g.feed(ll(at(59, 0), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
-	if hasGroup(pagesText(g.m.ticketPage("JIG-1"))) {
+	g := reviewedRig(t)
+	g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-builder", "", "", "", "", "")))
+	if hasGroup(pagesText(g.m.ticketPage("JIG-2"))) {
 		t.Fatalf("a live session does not hold the words back")
 	}
 	g.feed(ll(at(59, 10), "", journal.EventSessionEnd, with("s-builder", "", "", "", "", "")))
-	if p := pagesText(g.m.ticketPage("JIG-1")); !hasGroup(p) {
+	if p := pagesText(g.m.ticketPage("JIG-2")); !hasGroup(p) {
 		t.Errorf("a session that ended with a line naming no ticket still holds the words back:\n%s", p)
 	}
 }
@@ -160,6 +161,70 @@ func TestALandPromptIsNeverHeldBack(t *testing.T) {
 	}
 	if !strings.Contains(v, "landing waits for you") {
 		t.Errorf("the header does not say the landing waits for you:\n%s", v)
+	}
+}
+
+// TestAnOpenQuestionIsNeverHeldBackByALiveBuilder: a builder that asked with
+// `jig ask` and carries on keeps its ticket live, and its question is still the
+// person's to answer: the ticket screen's group, main's count and the chart's
+// header show it. What a live session records itself (the asks of a round it is
+// reviewing) is held back.
+func TestAnOpenQuestionIsNeverHeldBackByALiveBuilder(t *testing.T) {
+	t.Parallel()
+	g := askedRig(t, "JIG-1")
+	g.feed(ll(at(59, 0), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
+	if p := pagesText(g.m.ticketPage("JIG-1")); !hasGroup(p) || !strings.Contains(p, "Formal or casual?") {
+		t.Errorf("a live builder hides its own question on the ticket screen:\n%s", p)
+	}
+	if p := pagesText(g.m.mainPage()); !strings.Contains(p, "1 open question") {
+		t.Errorf("main does not count the question of a live builder:\n%s", p)
+	}
+
+	c := chartScreenRig(t)
+	c.feed(jl(at(30, 0), "JIG-5", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-009", "agent")))
+	waitingOnAnswer(c, "JIG-5", 1)
+	c.feed(ll(at(59, 0), "JIG-5", journal.EventTool, with("s-builder", "", "", "", "", "")))
+	if v := c.view(); !strings.Contains(v, "run needs you") {
+		t.Errorf("the chart header hides the question of a live builder:\n%s", v)
+	}
+
+	// The asks of a round a live session is reviewing are held back.
+	r := newRig(t, "JIG-2")
+	r.feed(jig2Mid()...)
+	r.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
+	if p := pagesText(r.m.ticketPage("JIG-2")); hasGroup(p) {
+		t.Errorf("a live session's own round holds its asks up:\n%s", p)
+	}
+}
+
+// TestHeldBackNeedsYouLeavesTheHeaderToo: while a ticket's needs-you is held back
+// its header does not say findings wait, and it does when the line is quiet.
+func TestHeldBackNeedsYouLeavesTheHeaderToo(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...)
+	header := func() string { return strings.Join(g.m.header(80), "\n") }
+	if !strings.Contains(header(), "review findings") {
+		t.Fatalf("a quiet ticket's header does not say findings wait:\n%s", header())
+	}
+	g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
+	if h := header(); strings.Contains(h, "review findings") {
+		t.Errorf("the header says findings wait while the group is held back:\n%s", h)
+	}
+}
+
+// TestEndsRowsAtALandingStopReadAsPhaseWritesThem: in an issue chart the end of
+// a run is a ticket that waits to land into the issue, in the words the verb
+// carries from internal/phase, not a wait to merge.
+func TestEndsRowsAtALandingStopReadAsPhaseWritesThem(t *testing.T) {
+	t.Parallel()
+	const fact = "JIG-7 waits for JIG-4 to land into 526-the-issue"
+	g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge")), func(v map[string]any) {
+		v["ends"] = []map[string]any{{"ticket": "JIG-7", "blocker": "JIG-4", "kind": "merged", "fact": fact, "prs": []map[string]any{pull("7", "OPEN")}}}
+	}))
+	v := g.view()
+	if !strings.Contains(v, fact) || strings.Contains(v, "to merge") {
+		t.Errorf("the ends row does not read as phase writes it:\n%s", v)
 	}
 }
 

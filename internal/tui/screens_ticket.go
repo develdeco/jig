@@ -69,14 +69,13 @@ func (m *Model) ticketPage(id string) page {
 	// The group is drawn while something still waits on the person: a question
 	// nobody answered or an ask nobody decided (the asks already decided stay
 	// beside the ones left, so a decision can be seen). When the last answer or
-	// decision is journaled the group goes. While a session is working on the
-	// ticket it is the one that answers or records what is on the screen, so
-	// the group waits for the line to go quiet; the rows stay on the screens
-	// that answer them.
-	var qs []questionRow
+	// decision is journaled the group goes. A question is the person's whoever
+	// else is at work (a builder that asked and carries on is live), so it is
+	// never held back; the asks of a round, which the session reviewing it is
+	// recording itself, wait for the line to go quiet.
+	qs := t.openQuestions(m.zone, "")
 	var asks []askRow
 	if !m.ticketLive(t) {
-		qs = t.openQuestions(m.zone, "")
 		asks = t.asks()
 		undecided := false
 		for _, a := range asks {

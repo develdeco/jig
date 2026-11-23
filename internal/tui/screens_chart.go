@@ -230,7 +230,13 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		if i == 0 {
 			label = "ends at"
 		}
-		rows = append(rows, runRow{label, endNote(e), 1})
+		note := endNote(e)
+		if len(info.Lands) > 0 && e.Kind != kindStacked && e.Fact != "" {
+			// An issue's run waits for a landing, not a merge: the verb's fact is
+			// the words internal/phase wrote for it.
+			note = e.Fact
+		}
+		rows = append(rows, runRow{label, note, 1})
 	}
 	if info.Spend != nil {
 		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
