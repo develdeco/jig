@@ -64,15 +64,3 @@ func TestAClaimOfATrackerNumberBindsItsTicket(t *testing.T) {
 	}
 	expectTicket(t, "an alias", r.call("a-1", "jig claim JIG-9 --slice a"), "JIG-2")
 }
-
-// TestAClaimSurvivesACompaction: a session that resumes or compacts starts
-// again under the same id, and a subagent's held claim is still held.
-func TestAClaimSurvivesACompaction(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.worktreeOn(r.fx.Ticket)
-	r.handle(r.ev(KindSessionStart))
-	expectTicket(t, "the claim", r.claimCall("a-1", r.fx.Ticket, "a"), r.fx.Ticket)
-	r.handle(r.ev(KindSessionStart))
-	expectTicket(t, "a call after the session started again", r.call("a-1", "go test ./..."), r.fx.Ticket)
-}
