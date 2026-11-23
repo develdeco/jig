@@ -210,7 +210,11 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
 		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
 		for _, l := range then {
-			rows = append(rows, runRow{"", m.st.dim("then " + l.Prompt + ", after " + andList(l.After)), 1})
+			words := "also " + l.Prompt
+			if len(l.After) > 0 {
+				words = "then " + l.Prompt + ", after " + andList(l.After)
+			}
+			rows = append(rows, runRow{"", m.st.dim(words), 1})
 		}
 	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
 		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})

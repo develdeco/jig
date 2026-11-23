@@ -414,7 +414,7 @@ func (g *rig) syncDigests() {
 	}
 	// The roster read that brings a digest is a message the model takes in, and a
 	// line that was about the ticket's old standing goes with it.
-	g.m.expireLast()
+	g.m.settleLast(true)
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a

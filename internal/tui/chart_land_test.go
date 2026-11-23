@@ -90,6 +90,19 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 		}
 	})
 
+	t.Run("two landings that wait for none, and one that waits for a landing", func(t *testing.T) {
+		g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-6", "waits for a merge", "JIG-5"), landRow("JIG-4", "waits for a merge"), landRow("JIG-5", "waits for a merge"))))
+		v := g.view()
+		for _, want := range []string{`say "Land JIG-4"`, "also Land JIG-5", "then Land JIG-6, after JIG-5"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("the Run panel lacks %q:\n%s", want, v)
+			}
+		}
+		if strings.Contains(v, "after \n") || strings.Contains(v, "also Land JIG-4") || strings.Contains(v, "then Land JIG-4") {
+			t.Errorf("the Run panel words a landing wrongly:\n%s", v)
+		}
+	})
+
 	t.Run("a legacy chart's merge wait keeps Continue", func(t *testing.T) {
 		g := tallChart(t, checkoutJSON(func(v map[string]any) { v["ready"], v["code"] = false, phase.CodeChartWaitsMerge }))
 		if v := g.view(); !strings.Contains(v, `say "Continue checkout"`) {

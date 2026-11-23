@@ -101,6 +101,36 @@ func TestLastCommandPanelExpiresWhenTheTicketMoves(t *testing.T) {
 	}
 }
 
+// TestACommandsOwnEffectDoesNotRemoveItsLine: the refusal a gate journals is part
+// of the standing its line is measured against, whether it arrives while the
+// command runs or after its result; only a later move of the ticket removes the
+// line.
+func TestACommandsOwnEffectDoesNotRemoveItsLine(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
+	g.feed(jig2Mid()...)
+	refusal := func(sec int) {
+		g.feed(jl(at(12, sec), "JIG-2", "", journal.EventGateRefused, func(l *journal.Line) {
+			l.Code, l.Summary = "GATE_NOT_GREEN", "slice a is queued, not green"
+		}))
+	}
+	cmd := g.m.exec("gate", "JIG-2", g.m.verbArgs("gate", "JIG-2"))
+	refusal(0) // journaled while the command runs
+	g.settle(cmd)
+	if len(lastPanel(g.view())) != 1 {
+		t.Fatalf("the refused gate's line is not drawn:\n%s", g.view())
+	}
+	refusal(5) // read again after the result
+	if len(lastPanel(g.view())) != 1 {
+		t.Errorf("the line went with the command's own refusal:\n%s", g.view())
+	}
+	g.feed(jl(at(13, 0), "JIG-2", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 2 }))
+	if got := lastPanel(g.view()); len(got) != 0 {
+		t.Errorf("the line outlived a later move of the ticket: %q", got)
+	}
+}
+
 // TestAChartCommandLineExpiresWithTheChartsStanding: a command with no ticket,
 // made on a chart's screen, is gone once the chart's verdict reads differently.
 func TestAChartCommandLineExpiresWithTheChartsStanding(t *testing.T) {
@@ -110,13 +140,13 @@ func TestAChartCommandLineExpiresWithTheChartsStanding(t *testing.T) {
 	if c == nil || c.info == nil {
 		t.Fatal("the chart screen has no chart read")
 	}
-	g.m.last = &outcome{Steps: []ranStep{{Args: []string{"next", c.info.Name}, Out: "ok\n"}}, Print: g.m.standingPrint("")}
-	g.m.expireLast()
+	g.m.last = &outcome{Steps: []ranStep{{Args: []string{"next", c.info.Name}, Out: "ok\n"}}, Print: g.m.standingPrint(""), Fixed: true}
+	g.m.settleLast(false)
 	if g.m.last == nil {
 		t.Fatal("the line went with the chart unchanged")
 	}
 	c.info.Prompt += " again"
-	g.m.expireLast()
+	g.m.settleLast(false)
 	if g.m.last != nil {
 		t.Errorf("the line outlived the chart's verdict: %+v", g.m.last)
 	}

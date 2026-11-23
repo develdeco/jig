@@ -532,8 +532,10 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	fresh := m.last
 	next, cmd := m.update(msg)
-	m.expireLast()
+	// A result that arrived in this message is not yet a read of what it did.
+	m.settleLast(isRead(msg) && m.last == fresh)
 	return next, cmd
 }
 
@@ -810,12 +812,33 @@ func (m *Model) standingPrint(ticket string) string {
 	return strings.Join(parts, "\x1e")
 }
 
-// expireLast removes the last command's line once what it was about has moved
-// on: the ticket's phases read differently, or the chart's verdict does.
-func (m *Model) expireLast() {
-	if m.last != nil && m.standingPrint(m.last.Ticket) != m.last.Print {
+// settleLast keeps the last command's line against what it was about. The first
+// read after the result arrived takes the standing as the command left it; each
+// later message removes the line once the ticket's phases read differently, or
+// the chart's verdict does.
+func (m *Model) settleLast(read bool) {
+	if m.last == nil {
+		return
+	}
+	if !m.last.Fixed {
+		if read {
+			m.last.Print, m.last.Fixed = m.standingPrint(m.last.Ticket), true
+		}
+		return
+	}
+	if m.standingPrint(m.last.Ticket) != m.last.Print {
 		m.last = nil
 	}
+}
+
+// isRead is whether msg is a read of the store: a ticket's status, the roster or
+// a chart.
+func isRead(msg tea.Msg) bool {
+	switch msg.(type) {
+	case statusMsg, rosterMsg, chartMsg:
+		return true
+	}
+	return false
 }
 
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
