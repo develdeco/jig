@@ -497,6 +497,27 @@ func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, ungraduated i
 		}
 		return state, strings.Join(parts, ", ")
 	}
+	if st := issue.status; st != nil && st.Standing != "" {
+		// What the container waits for is what `jig next` says it does, read from
+		// the status that derives it, not counted again from the rows.
+		var waits []string
+		if n := len(st.Waits); n > 0 {
+			waits = append(waits, fmt.Sprintf("%d %s", n, plural(n, "task", "tasks")))
+		}
+		for _, u := range st.Unmet {
+			if u.Code == land.SuiteNotRun || u.Code == land.SuiteFailed {
+				waits = append(waits, "the suite")
+				break
+			}
+		}
+		switch {
+		case len(waits) > 0:
+			return StateQueued, m.st.dim("not opened yet · waits for " + andList(waits))
+		case st.Prompt != "":
+			return StateReady, "not opened yet · say " + m.st.key(strconv.Quote(st.Prompt))
+		}
+		return StateReady, "not opened yet · ready to open"
+	}
 	var waits []string
 	unlanded := 0
 	for _, r := range rows {

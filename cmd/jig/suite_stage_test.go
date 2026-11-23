@@ -75,21 +75,42 @@ func TestSuiteLineOfALandedIssueWithNoRecordedRun(t *testing.T) {
 	}
 }
 
-// TestSuiteLineOfAnIssueWithNoPushedBranch: an issue whose branch is not in the
-// clone waits for it, and is never told to fetch it and run the suite.
+// addOpenTask lists a second task of the issue that has not landed, so the issue
+// waits for its tasks.
+func addOpenTask(t *testing.T, s *suitePublishRig) {
+	t.Helper()
+	s.ticket(t, "TK-3", "", true)
+	s.chart(t, "plan", "issue: TK-1\ntickets:\n  - id: TK-2\n    title: Two\n  - id: TK-3\n    title: Three\n", "")
+}
+
+// TestSuiteLineOfAnIssueWithNoPushedBranch: the suite line is the standing `jig
+// next` derives. With a task not landed the issue waits for its tasks; once every
+// task landed and its branch is not in the clone, jig next says to fetch it and
+// run the suite, and so does the status.
 func TestSuiteLineOfAnIssueWithNoPushedBranch(t *testing.T) {
 	s := newSuitePublishRig(t, suiteManifestYAML)
+	addOpenTask(t, s)
 	dropBranch(t, s)
 	row := suiteRowOf(t, s)
-	if !strings.HasPrefix(row, "app,unrun,") || !strings.Contains(row, "waits for its branch") || strings.Contains(row, "fetch") {
-		t.Errorf("an unpushed issue's suite row is %q", row)
+	if !strings.HasPrefix(row, "app,unrun,") || !strings.Contains(row, "waits for its tasks") {
+		t.Errorf("an issue with a task not landed reads %q, want it waiting for its tasks", row)
+	}
+
+	all := newSuitePublishRig(t, suiteManifestYAML)
+	dropBranch(t, all)
+	row = suiteRowOf(t, all)
+	_, codes, text := all.next()
+	if !strings.HasPrefix(row, "app,unrun,") || !strings.Contains(row, "git fetch") || len(codes) != 1 || !strings.Contains(text, "git fetch") {
+		t.Errorf("an issue whose tasks landed and whose branch is not fetched reads %q beside jig next %v\n%s", row, codes, text)
 	}
 }
 
 // TestSuiteLineOfARepoWithNoSuite: a repo whose target declares no suite reads
-// none recorded whether or not the issue's branch is pushed.
+// none recorded while the issue waits for its tasks, pushed or not, and at its
+// tip once pushed.
 func TestSuiteLineOfARepoWithNoSuite(t *testing.T) {
 	s := newSuitePublishRig(t, "")
+	addOpenTask(t, s)
 	if _, err := gitx.Run(s.clone, "update-ref", "refs/remotes/origin/main", "HEAD"); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +121,35 @@ func TestSuiteLineOfARepoWithNoSuite(t *testing.T) {
 	s.moveTip("")
 	if row := suiteRowOf(t, s); !strings.HasPrefix(row, "app,undeclared,") {
 		t.Errorf("a pushed issue of a repo with no suite reads %q", row)
+	}
+}
+
+// TestAWaivedSuiteReadsWaivedAfterTheLanding: a suite that failed and was waived
+// reads waived at the tip, and still waived once the issue landed and its branch
+// is gone, one row and not the failure beside it.
+func TestAWaivedSuiteReadsWaivedAfterTheLanding(t *testing.T) {
+	s := newSuitePublishRig(t, suiteManifestYAML)
+	tip := s.tip()
+	s.record(journal.Line{Event: journal.EventFinalOracle, Commit: tip, Outcome: "fail", Seconds: 4, Signature: "final:boom", Command: "go test ./..."})
+	s.record(journal.Line{Event: journal.EventSuiteWaived, Commit: tip, Summary: "ci runs it", Provenance: "person"})
+	if row := suiteRowOf(t, s); !strings.HasPrefix(row, "app,waived,") {
+		t.Fatalf("before the landing the suite reads %q", row)
+	}
+	landIssue(t, s)
+	dropBranch(t, s)
+	if row := suiteRowOf(t, s); !strings.HasPrefix(row, "app,waived,") || !strings.Contains(row, "ci runs it") {
+		t.Errorf("after the landing the suite reads %q, want waived", row)
+	}
+}
+
+// TestStatusOfAContainerSaysWhatJigNextSays: the standing and the waits of a
+// container's status are the ones jig next derives.
+func TestStatusOfAContainerSaysWhatJigNextSays(t *testing.T) {
+	s := newSuitePublishRig(t, suiteManifestYAML)
+	addOpenTask(t, s)
+	out, code := s.run(t, "status", "TK-1")
+	if code != 0 || !strings.Contains(out, "standing: waiting") || !strings.Contains(out, "waits[") || !strings.Contains(out, "TK-3,building") {
+		t.Errorf("jig status TK-1: exit %d\n%s", code, out)
 	}
 }
 

@@ -246,8 +246,12 @@ type nextTicket struct {
 	// Need is the body of an issue or a multi-task and Suite an issue's suite
 	// history by repo: what `jig status` adds for the plan screen. `jig next`
 	// leaves both out.
-	Need  string         `json:"need,omitempty"`
-	Suite []nextSuiteRow `json:"suite,omitempty"`
+	Need string `json:"need,omitempty"`
+	// Standing is a container's own pull request as `jig next` derives it
+	// (waiting, ready, published or landed): `jig status` prints it with the
+	// waits, the unmet and the prompt of the same derivation.
+	Standing string         `json:"standing,omitempty"`
+	Suite    []nextSuiteRow `json:"suite,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -389,6 +393,12 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		}
 		if n.Branch != "" {
 			blocks = append(blocks, "branch: "+axi.Quote(n.Branch))
+		}
+		if n.Standing != "" {
+			blocks = append(blocks, "standing: "+n.Standing)
+		}
+		if n.Prompt != "" {
+			blocks = append(blocks, "prompt: "+axi.Quote(n.Prompt))
 		}
 		if n.Need != "" {
 			blocks = append(blocks, "need: "+axi.Quote(n.Need))

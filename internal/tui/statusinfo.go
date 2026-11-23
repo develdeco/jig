@@ -49,9 +49,21 @@ type statusInfo struct {
 	// suite by repo: what the plan screen reads. Both are empty for a task.
 	Need  string
 	Suite []statusSuite
+	// Standing, Prompt, Waits and Unmet are an issue's or multi-task's own pull
+	// request as `jig next` derives it: waiting, ready, published or landed, what
+	// to say next, the children not landed and what else is unmet.
+	Standing, Prompt string
+	Waits            []statusWait
+	Unmet            []statusUnmet
 	// Err is set when the status itself was refused.
 	Err *axiErr
 }
+
+// statusWait is a child of a container that has not landed, with its standing.
+type statusWait struct{ Ticket, Standing string }
+
+// statusUnmet is a precondition of a container's publish that is not met.
+type statusUnmet struct{ Code, Why, Prompt string }
 
 // statusSuite is a row of an issue status's suite table: where a repo's suite
 // stands at a tip of the issue's branch, and the tasks begun after it failed.
@@ -225,6 +237,13 @@ func parseStatus(out string) *statusInfo {
 		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
 	}
 	info.Need = doc.Scalars["need"]
+	info.Standing, info.Prompt = doc.Scalars["standing"], doc.Scalars["prompt"]
+	for _, r := range doc.Tables["waits"].Maps() {
+		info.Waits = append(info.Waits, statusWait{Ticket: r["ticket"], Standing: r["standing"]})
+	}
+	for _, r := range doc.Tables["unmet"].Maps() {
+		info.Unmet = append(info.Unmet, statusUnmet{Code: r["code"], Why: r["why"], Prompt: r["prompt"]})
+	}
 	for _, r := range doc.Tables["suite"].Maps() {
 		row := statusSuite{
 			Repo: r["repo"], Standing: r["standing"], Command: dash(r["command"]), Tip: dash(r["tip"]), Seconds: atoi(dash(r["seconds"])),

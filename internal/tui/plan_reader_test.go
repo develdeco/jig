@@ -30,6 +30,24 @@ func TestAnIssuesPlanIsDrawnBeforeItsChartIsRead(t *testing.T) {
 	}
 }
 
+// TestAMultiTaskWaitsForAnUngraduatedEntryAsItsStatusSays: the multi-task's
+// pull-request line takes its waits from the status that derives them, so an
+// entry under it with no ticket yet is waited for and no prompt to publish shows.
+func TestAMultiTaskWaitsForAnUngraduatedEntryAsItsStatusSays(t *testing.T) {
+	t.Parallel()
+	kids := &digestInfo{Kind: "multi-task", Parent: "SHOP-49", State: "waiting", Children: []digestChild{{ID: "SHOP-5"}, {ID: "SHOP-6"}}}
+	g := planRig(t, planSpec{multi: true, kidsLanded: true, multiDigest: kids})
+	g.r.answer("status SHOP-7 --store /s", "ticket: SHOP-7\nstate: multi-task\nkind: multi-task\nbranch: 503-the-multi-task\nstanding: waiting\nprompt: \"\"\nwaits[1]{ticket,standing}:\n  \"3 Entry\",not graduated\nneed: x\n", 0)
+	g.m.height, g.m.width = 40, 100
+	g.m.w.tickets["SHOP-7"].dirty = true
+	onRow(t, g, "SHOP-7")
+	g.press("enter")
+	row := issueLine(stripANSI(g.view()), "PR")
+	if !strings.Contains(row, "waits for 1 task") || strings.Contains(row, "Publish") {
+		t.Errorf("the multi-task's pull request line: %q", row)
+	}
+}
+
 // TestPlanPRWaitsForAnUngraduatedEntry: an entry of the chart with no ticket yet
 // is waited for by the issue's pull request, which never reads ready to open
 // before `jig next` says the issue is ready.
