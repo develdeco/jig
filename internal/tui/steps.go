@@ -106,7 +106,7 @@ func (m *Model) briefRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StateOK
 	case changed:
 		s.State = StateFindings
-	case t.status == nil && t.digest != nil && t.digest.PhaseProblem != "" && len(t.digest.Phases) == 0:
+	case t.digest != nil && t.digest.PhaseProblem != "" && len(t.digest.Phases) == 0:
 		s.State = StateStalled
 	default:
 		s.State = StateBuilding

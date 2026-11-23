@@ -75,7 +75,8 @@ type nextDigestPR struct {
 // nextSliceCounts is how many of a ticket's slices are in each state. Failed
 // and Stopped are slices the store holds building whose last covering run
 // failed and judged the code (failed), or was ended before it could (stopped);
-// Building counts the rest.
+// Building counts the rest. Stalled and EnvBlocked are slices the store holds in
+// those states, which a screen draws as such.
 type nextSliceCounts struct {
 	Total      int `json:"total"`
 	Green      int `json:"green"`
@@ -84,6 +85,8 @@ type nextSliceCounts struct {
 	NeedsInput int `json:"needs_input"`
 	Failed     int `json:"failed"`
 	Stopped    int `json:"stopped"`
+	Stalled    int `json:"stalled"`
+	EnvBlocked int `json:"env_blocked"`
 }
 
 // parentOf is the ticket a ticket's pull request goes into: its multi-task, or
@@ -268,6 +271,10 @@ func sliceCounts(data ticketData, lines []journal.Line) *nextSliceCounts {
 			c.Queued++
 		case "needs-input":
 			c.NeedsInput++
+		case "stalled":
+			c.Stalled++
+		case "env-blocked":
+			c.EnvBlocked++
 		case "building":
 			switch lastRun(lines, s.ID) {
 			case runFailed:

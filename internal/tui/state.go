@@ -580,24 +580,26 @@ func (t *ticket) slices(zone *time.Location) []sliceRow {
 }
 
 // sliceCounts is how many of the ticket's slices are in each state, and how
-// many it has: the status's list once it has been read, else the digest's
-// counts, which come from the same facts. A slice the store holds building
+// many it has: the digest's counts when the roster listed the ticket, so the
+// build step's mark is the same before the status is read and after, else the
+// status's list. A slice the store holds building
 // counts as failed when its last covering run judged the code and failed it; one
 // whose run was stopped before it could judge is still being built.
 func (t *ticket) sliceCounts(zone *time.Location) (counts map[string]int, n int) {
 	counts = map[string]int{}
+	if d := t.digest; d != nil && d.Slices != nil {
+		s := d.Slices
+		counts[StateGreen], counts[StateQueued], counts[StateNeedsInput], counts[StateFail] = s.Green, s.Queued, s.NeedsInput, s.Failed
+		counts[StateStalled], counts[StateEnvBlocked] = s.Stalled, s.EnvBlocked
+		counts[StateBuilding] = s.Building + s.Stopped
+		return counts, s.Total
+	}
 	if t.status != nil {
 		rows := t.slices(zone)
 		for _, r := range rows {
 			counts[r.State]++
 		}
 		return counts, len(rows)
-	}
-	if d := t.digest; d != nil && d.Slices != nil {
-		s := d.Slices
-		counts[StateGreen], counts[StateQueued], counts[StateNeedsInput], counts[StateFail] = s.Green, s.Queued, s.NeedsInput, s.Failed
-		counts[StateBuilding] = s.Building + s.Stopped
-		return counts, s.Total
 	}
 	return counts, 0
 }

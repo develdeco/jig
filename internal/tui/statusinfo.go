@@ -408,6 +408,8 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 					NeedsInput int `json:"needs_input"`
 					Failed     int `json:"failed"`
 					Stopped    int `json:"stopped"`
+					Stalled    int `json:"stalled"`
+					EnvBlocked int `json:"env_blocked"`
 				} `json:"slices"`
 			} `json:"digest"`
 		} `json:"tickets"`
@@ -440,7 +442,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})
 			}
 			if s := g.Slices; s != nil {
-				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped}
+				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped, Stalled: s.Stalled, EnvBlocked: s.EnvBlocked}
 			}
 			row.Digest = d
 		}

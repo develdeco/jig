@@ -78,7 +78,7 @@ type digestPR struct {
 
 // digestSlices counts a ticket's slices by state.
 type digestSlices struct {
-	Total, Green, Building, Queued, NeedsInput, Failed, Stopped int
+	Total, Green, Building, Queued, NeedsInput, Failed, Stopped, Stalled, EnvBlocked int
 }
 
 // kindWords is how a ticket's kind is said beside it: the kind of an issue or a

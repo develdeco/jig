@@ -228,3 +228,28 @@ func TestParseStatusReadsTheClosureOfAClosedTicket(t *testing.T) {
 		t.Errorf("an open ticket reads as closed: %q", open.Closed)
 	}
 }
+
+// TestParseRosterReadsWhatAStepsMarkReads: the fields of the roster's digest a
+// step's mark is drawn from (a phase's needs_you, sub_done and changed, and the
+// counts of stalled and env-blocked slices) arrive in the digest the screens
+// hold, under the names `jig next --json` prints them by.
+func TestParseRosterReadsWhatAStepsMarkReads(t *testing.T) {
+	t.Parallel()
+	const roster = `{"tickets":[{"id":"JIG-4","title":"T","state":"ready","digest":{"kind":"task","current":"build","ready":true,` +
+		`"phases":[{"name":"brief","state":"done","text":"never approved","needs_you":true,"changed":true},` +
+		`{"name":"build","state":"current","text":"building"},` +
+		`{"name":"publish","state":"pending","text":"later","sub_done":true}],` +
+		`"slices":{"total":3,"stalled":1,"env_blocked":2}}}]}`
+	rows, _, err := parseRoster(roster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &digestInfo{Kind: "task", Current: "build", Ready: true, Phases: []digestPhase{
+		{Name: "brief", State: "done", Text: "never approved", NeedsYou: true, Changed: true},
+		{Name: "build", State: "current", Text: "building"},
+		{Name: "publish", State: "pending", Text: "later", SubDone: true},
+	}, Slices: &digestSlices{Total: 3, Stalled: 1, EnvBlocked: 2}}
+	if !reflect.DeepEqual(rows[0].Digest, want) {
+		t.Errorf("digest = %+v, want %+v", rows[0].Digest, want)
+	}
+}

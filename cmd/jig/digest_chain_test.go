@@ -130,6 +130,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 	list := frames[len(frames)-1]
 	icons := regexp.MustCompile(`[^\s] [^\s] [^\s] [^\s]`)
 
+	started := 0
 	for _, row := range roster.Tickets {
 		id, d := row.ID, row.Digest
 		var n nextTicket
@@ -229,7 +230,18 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 			t.Errorf("%s: the project's list has no row for it:\n%s", id, list)
 		} else if n.Phase != nil && icons.FindString(rowLine) == "" {
 			t.Errorf("%s: its row has no steps: %q", id, rowLine)
+		} else if d.Closed == "" && len(d.Phases) > 0 && d.Phases[0].State == "done" && d.Phases[0].NeedsYou {
+			// A done brief the work started without an approval is marked so on
+			// the list, which reads no status: the field crossed from `jig next`.
+			started++
+			if !strings.HasPrefix(icons.FindString(rowLine), "!") {
+				t.Errorf("%s: its brief was never approved and the list marks it %q", id, icons.FindString(rowLine))
+			}
 		}
+	}
+
+	if started == 0 {
+		t.Errorf("no ticket of the store has a done brief the work started without an approval")
 	}
 
 	// A chart's rows are the ticket rows of the project's list: the same steps,

@@ -230,9 +230,31 @@ func TestAStepMarkIsTheSameBeforeAndAfterTheStatusIsRead(t *testing.T) {
 	if read == nil {
 		t.Fatal("the status was not read")
 	}
-	// The digest counts the slices the status lists: both come from the same facts.
-	counts, n := tk.sliceCounts(g.m.zone)
-	slices := &digestSlices{Total: n, Green: counts[StateGreen], Building: counts[StateBuilding], Queued: counts[StateQueued], NeedsInput: counts[StateNeedsInput], Failed: counts[StateFail]}
+	if len(read.Slices) == 0 {
+		t.Fatal("the status lists no slice")
+	}
+	// The digest counts the slices the status lists, as `jig next` does: both
+	// come from the same facts.
+	countsOf := func(st *statusInfo) *digestSlices {
+		c := &digestSlices{Total: len(st.Slices)}
+		for _, sl := range st.Slices {
+			switch sl.State {
+			case StateGreen:
+				c.Green++
+			case StateQueued:
+				c.Queued++
+			case StateNeedsInput:
+				c.NeedsInput++
+			case StateStalled:
+				c.Stalled++
+			case StateEnvBlocked:
+				c.EnvBlocked++
+			default:
+				c.Building++
+			}
+		}
+		return c
+	}
 	marks := func() []string {
 		var out []string
 		for _, s := range g.m.steps(tk) {
@@ -241,18 +263,26 @@ func TestAStepMarkIsTheSameBeforeAndAfterTheStatusIsRead(t *testing.T) {
 		return out
 	}
 	for name, tc := range map[string]struct {
-		d    *digestInfo
-		want map[int]string
+		d     *digestInfo
+		slice string // the state the status lists the first slice in
+		want  map[int]string
 	}{
-		"a brief the work started without": {started, map[int]string{stepBrief: StateFindings}},
-		"a brief changed after approval":   {changed, map[int]string{stepBrief: StateFindings}},
-		"a publish that has begun":         {publishing, map[int]string{stepPublish: StatePublishing}},
-		"a ticket with nothing to mark":    {plain, map[int]string{stepBrief: StateOK}},
+		"a brief the work started without": {started, StateBuilding, map[int]string{stepBrief: StateFindings}},
+		"a brief changed after approval":   {changed, StateBuilding, map[int]string{stepBrief: StateFindings}},
+		"a publish that has begun":         {publishing, StateGreen, map[int]string{stepPublish: StatePublishing}},
+		"a ticket with nothing to mark":    {plain, StateBuilding, map[int]string{stepBrief: StateOK}},
+		"a slice stalled":                  {plain, StateStalled, map[int]string{stepBuild: StateStalled}},
+		"a slice env-blocked":              {plain, StateEnvBlocked, map[int]string{stepBuild: StateEnvBlocked}},
+		"a slice needing an answer":        {plain, StateNeedsInput, map[int]string{stepBuild: StateNeedsInput}},
 	} {
-		tk.digest, tc.d.Slices = tc.d, slices
+		st := *read
+		st.Slices = append([]statusSlice(nil), read.Slices...)
+		st.Slices[0].State = tc.slice
+		tc.d.Slices = countsOf(&st)
+		tk.digest = tc.d
 		tk.status = nil
 		before := marks()
-		tk.status = read
+		tk.status = &st
 		after := marks()
 		if strings.Join(before, " ") != strings.Join(after, " ") {
 			t.Errorf("%s: the marks are %v before the status is read and %v after", name, before, after)
