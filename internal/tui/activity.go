@@ -456,6 +456,9 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return text
 	case journal.EventFixSlice:
 		text := "sent back " + l.Slice
+		if n := t.fixRound(l.Slice); n > 0 {
+			text += " from round " + strconv.Itoa(n)
+		}
 		if f := t.goals()[l.Slice]; f != "" {
 			text += ": " + f
 		}

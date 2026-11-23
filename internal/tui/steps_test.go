@@ -125,7 +125,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	)
 	g.press("down", "enter") // from the build, the current step, to the review
 	v := g.view()
-	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1: alpha/a.go:3 Unchecked error"} {
+	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
