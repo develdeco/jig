@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,15 +66,7 @@ type ChartFile struct {
 
 // readChartFile reads and decodes charts/<name>/tickets.yaml whole.
 func (s *Store) readChartFile(name string) (ChartFile, error) {
-	data, err := ReadFile(s.ChartFile(name))
-	if err != nil {
-		return ChartFile{}, err
-	}
-	var cf ChartFile
-	if err := yaml.Unmarshal(data, &cf); err != nil {
-		return ChartFile{}, err
-	}
-	return cf, nil
+	return s.charts.read(s, name)
 }
 
 // ChartIssue is the id of the issue chart name plans, empty for a chart with
@@ -134,7 +125,7 @@ type Listing struct {
 // ChartsListing is every model chart (one that names an issue) that lists
 // ticket as an entry's id, in chart-name order; a chart with no issue is a
 // legacy chart and does not count. Like IssuesOf it decodes a chart's
-// tickets.yaml only when it names the ticket's id at all, and skips one that
+// tickets.yaml once for as long as the file stands as it was, and skips one that
 // cannot be read.
 func (s *Store) ChartsListing(ticket string) ([]Listing, error) {
 	if ticket == "" {
@@ -146,12 +137,8 @@ func (s *Store) ChartsListing(ticket string) ([]Listing, error) {
 	}
 	var out []Listing
 	for _, name := range names {
-		data, err := ReadFile(s.ChartFile(name))
-		if err != nil || !bytes.Contains(data, []byte(ticket)) {
-			continue
-		}
-		var cf ChartFile
-		if err := yaml.Unmarshal(data, &cf); err != nil || cf.Issue == "" {
+		cf, err := s.readChartFile(name)
+		if err != nil || cf.Issue == "" {
 			continue
 		}
 		for i, e := range cf.Tickets {

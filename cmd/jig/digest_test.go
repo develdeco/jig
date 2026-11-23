@@ -341,13 +341,13 @@ func TestADigestIsBehindByTheRuleOfJigNext(t *testing.T) {
 	}
 	facts.Slices = facts.Slices[:1]
 	owingNow := phase.Derive(facts, lines[:7])
-	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil); !d.Behind {
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil, nil); !d.Behind {
 		t.Errorf("the digest of a published ticket owed a merge is not behind: %+v", d)
 	}
-	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateReady, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil); d.Behind {
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateReady, &owingNow, "", stack.Plan{Ticket: "TK-2"}, nil, nil, nil); d.Behind {
 		t.Errorf("the digest of a ticket whose state is ready is behind")
 	}
-	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, nil, "its slices.yaml cannot be read", stack.Plan{Ticket: "TK-2"}, nil, nil); d.Behind || d.PhaseProblem == "" {
+	if d := taskDigest(r.st, project.Config{}, nil, "TK-2", data, ready.StateDone, nil, "its slices.yaml cannot be read", stack.Plan{Ticket: "TK-2"}, nil, nil, nil); d.Behind || d.PhaseProblem == "" {
 		t.Errorf("the digest of a ticket whose phase could not be derived is behind, or lost its problem: %+v", d)
 	}
 }

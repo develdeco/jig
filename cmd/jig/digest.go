@@ -9,7 +9,6 @@ import (
 	"github.com/develdeco/jig/internal/repohost"
 	"github.com/develdeco/jig/internal/stack"
 	"github.com/develdeco/jig/internal/store"
-	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
 // nextDigest is where one ticket stands, in the words every screen shows: the
@@ -95,10 +94,12 @@ func phaseRows(t phase.Ticket) []nextPhaseRow {
 }
 
 // taskPlan is the stack plan of a task and the rows of a shared one, which say
-// what its pull requests go into. A task that is stacked on nothing and has no
-// pull request is read without a plan: it can be owed no merge.
+// what its pull requests go into. Only a ticket stacked on another, or shared by
+// two issues, has a plan worth the git it costs: any other can be owed no merge,
+// and its pull request goes into its container's branch (digestPRs).
 func taskPlan(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, id string, rec store.Ticket) (stack.Plan, []nextIssueRow, error) {
-	if !mayBeBehind(st, id, rec, "") && !recordsPR(st, id) {
+	containers, _ := st.ContainersOf(id, rec)
+	if !stack.StackedOnAny(rec) && len(containers) < 2 {
 		return stack.Plan{Ticket: id}, nil, nil
 	}
 	plan, err := stack.Read(stackInput(st, cfg, mp, merges), id)
@@ -109,24 +110,28 @@ func taskPlan(st *store.Store, cfg project.Config, mp project.MachineProject, me
 	return plan, shared, err
 }
 
-// recordsPR says the ticket's journal holds a pull request.
-func recordsPR(st *store.Store, id string) bool {
-	lines, err := journal.Read(st, id)
-	if err != nil {
-		return false
-	}
+// linePRs are the pull requests a journal records: the latest, and the latest
+// in each repo that names one.
+func linePRs(lines []journal.Line) (latest string, byRepo map[string]string) {
 	for _, l := range lines {
-		if l.Event == journal.EventPr && l.URL != "" {
-			return true
+		if l.Event != journal.EventPr || l.URL == "" {
+			continue
+		}
+		latest = l.URL
+		if l.Repo != "" {
+			if byRepo == nil {
+				byRepo = map[string]string{}
+			}
+			byRepo[l.Repo] = l.URL
 		}
 	}
-	return false
+	return latest, byRepo
 }
 
 // taskDigest is where a task stands: the phases derived with its stack plan
 // laid on them (derived, nil with problem when they could not be) and the rest
 // read beside them. blocked is what the ticket waits for, as the caller read it.
-func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id string, data ticketData, state string, derived *phase.Ticket, problem string, plan stack.Plan, shared []nextIssueRow, blocked []nextBlocker) nextDigest {
+func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id string, data ticketData, state string, derived *phase.Ticket, problem string, plan stack.Plan, shared []nextIssueRow, lines []journal.Line, blocked []nextBlocker) nextDigest {
 	d := nextDigest{Kind: store.KindTask, Parent: parentOf(st, id, data.rec), BlockedBy: blocked, PhaseProblem: problem}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
@@ -135,14 +140,14 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 		d.Current, d.Ready, d.Phases = string(derived.Current), derived.Ready, phaseRows(*derived)
 		d.Behind = isBehind(*derived, state)
 	}
-	d.PRs = digestPRs(st, cfg, merges, id, plan, shared)
-	d.Slices = sliceCounts(st, id, data)
+	d.PRs = digestPRs(st, cfg, merges, id, data.rec, plan, shared, lines)
+	d.Slices = sliceCounts(data, lines)
 	return d
 }
 
 // digestPRs are the pull requests a task recorded: a shared task's from its
 // rows, one for each issue and repo, any other's from its journal and plan.
-func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id string, plan stack.Plan, shared []nextIssueRow) []nextDigestPR {
+func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id string, rec store.Ticket, plan stack.Plan, shared []nextIssueRow, lines []journal.Line) []nextDigestPR {
 	out := []nextDigestPR{}
 	if len(shared) > 0 {
 		for _, r := range shared {
@@ -153,8 +158,8 @@ func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id strin
 		}
 		return out
 	}
-	status, err := verifydeliver.ReadStatusFor(st, id, "")
-	if err != nil || status.PR == "" {
+	latest, byRepo := linePRs(lines)
+	if latest == "" {
 		return out
 	}
 	var merge ready.Merge
@@ -164,18 +169,18 @@ func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id strin
 	repos := plan.Repos
 	if len(repos) == 0 {
 		// A ticket stacked on nothing has no plan row: its pull request goes
-		// into the target of each repo of the project.
+		// into its container's branch, else the target of each repo.
 		for _, r := range cfg.Repos {
-			repos = append(repos, stack.Repo{Repo: r.Name(), PRTarget: r.TargetBranch()})
+			repos = append(repos, stack.Repo{Repo: r.Name(), PRTarget: containerTarget(st, id, rec, r.TargetBranch())})
 		}
 	}
 	if len(repos) == 0 {
-		repos = []stack.Repo{{PRTarget: project.Repo{}.TargetBranch()}}
+		repos = []stack.Repo{{PRTarget: containerTarget(st, id, rec, project.Repo{}.TargetBranch())}}
 	}
 	for _, r := range repos {
-		url := status.PRs[r.Repo]
+		url := byRepo[r.Repo]
 		if url == "" && len(repos) == 1 {
-			url = status.PR
+			url = latest
 		}
 		if url == "" {
 			continue
@@ -183,6 +188,24 @@ func digestPRs(st *store.Store, cfg project.Config, merges mergeSource, id strin
 		out = append(out, nextDigestPR{Repo: r.Repo, Number: prNumber(url), URL: url, State: prState(merge, r.Repo, len(repos) > 1), Target: r.PRTarget})
 	}
 	return out
+}
+
+// containerTarget is the branch a ticket's pull request goes into when it is
+// stacked on nothing: its container's branch (the issue's, or the multi-task's),
+// else target.
+func containerTarget(st *store.Store, id string, rec store.Ticket, target string) string {
+	container, ok, err := st.ContainerOf(id, rec)
+	if err != nil || !ok {
+		return target
+	}
+	crec, err := st.ReadTicket(container)
+	if err != nil {
+		return target
+	}
+	if branch, err := st.ResolveTicketBranch(container, crec, target); err == nil {
+		return branch
+	}
+	return target
 }
 
 // prNumber is the number of a pull request URL, 0 when it names none.
@@ -194,19 +217,12 @@ func prNumber(url string) int {
 	return ref.Number
 }
 
-// sliceCounts counts a task's slices by the state the store holds, and
+// sliceCounts counts a task's slices (lines are its journal) by the state the store holds, and
 // separates, among those it holds building, the ones whose last covering run
 // failed or was stopped: the store sets a failed slice back to building, and
 // the run says it failed.
-func sliceCounts(st *store.Store, id string, data ticketData) *nextSliceCounts {
+func sliceCounts(data ticketData, lines []journal.Line) *nextSliceCounts {
 	c := &nextSliceCounts{Total: len(data.in.Slices)}
-	var lines []journal.Line
-	for _, s := range data.in.Slices {
-		if data.in.States[s.ID].State == "building" {
-			lines, _ = journal.Read(st, id)
-			break
-		}
-	}
 	for _, s := range data.in.Slices {
 		switch data.in.States[s.ID].State {
 		case "green":
@@ -305,11 +321,11 @@ func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject
 	id := data.in.ID
 	plan, shared, err := taskPlan(st, cfg, mp, merges, id, data.rec)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), stack.Plan{Ticket: id}, nil, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), stack.Plan{Ticket: id}, nil, nil, blocked)
 	}
-	t, err := derivePhaseStacked(st, id, merges, plan)
+	t, lines, err := derivePhaseStackedLines(st, id, merges, plan)
 	if err != nil {
-		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, blocked)
+		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, nil, blocked)
 	}
-	return taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, blocked)
+	return taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, lines, blocked)
 }
