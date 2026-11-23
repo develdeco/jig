@@ -170,7 +170,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if res := h.Jig("ask", fx.Ticket, "--slice", "c", "Formal or casual?"); res.Code != 0 {
 		t.Fatalf("jig ask exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	screens.until("Formal or casual?")
+	screens.until("Formal or casual?", "a answer") // the key is listed once the roster has read the ticket
 	screens.press("a")
 	screens.until("answer q-001")
 	screens.press("Casual, please.")
