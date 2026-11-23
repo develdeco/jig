@@ -151,6 +151,7 @@ func TestParseStatusReadsTheRecordsOfTheSections(t *testing.T) {
 	want := statusRound{
 		N: 1, Verdict: "findings", Reviewer: "s-reviewer", Harness: "claude", Model: "claude-opus-5", Independent: "true",
 		Fix: 1, Ask: 2, Note: 1, Scope: "full", Base: sha('0'), Head: sha('c'), Files: 4,
+		Probes: -1, Survived: -1, Skipped: -1, Unprobed: -1,
 	}
 	if info.Rounds[0] != want {
 		t.Errorf("round 1 = %+v, want %+v", info.Rounds[0], want)

@@ -468,14 +468,14 @@ func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 }
 
 // writeReviewerRound writes a reviewer round's files: findings.yaml (with the
-// round's probes and skips), findings.md rendered from it, report.yaml (with
+// round's probes, skips and unprobed hunks), findings.md rendered from it, report.yaml (with
 // ReviewedSHA), and diff-changelog.md.
-func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord) error {
+func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord, unprobed []UnprobedHunk) error {
 	dir := gateRoundDir(d.Store, ticket, n)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
 	}
-	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, report.KeptFixed, summary, probes, skips)
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, report.KeptFixed, summary, probes, skips, unprobed)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
 	}

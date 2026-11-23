@@ -234,7 +234,7 @@ func TestReadInterleavesJournalsAndLedger(t *testing.T) {
 	)
 	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:00Z", Ticket: "T-1", Event: "session-start", Session: "s1"})
 	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:02Z", Ticket: "T-1", Event: "verify-spawned", Session: "s1", PID: 7})
-	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:09Z", Event: "tool", Session: "s1", Tool: "Bash"})
+	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:09Z", Event: "tool", Session: "s1", Tool: "Bash", Ticket: "T-1"})
 
 	envs, err := Read(r.scope(false, "T-1"), time.Time{})
 	if err != nil {
@@ -341,65 +341,6 @@ func TestReadFailsWhenAJournalCannotBeRead(t *testing.T) {
 	}
 	if _, err := rd.Poll(); err == nil {
 		t.Errorf("a second Poll did not try T-2 again")
-	}
-}
-
-// TestLedgerLinesInScope: with no AllLedger a ledger line is in the stream
-// when it names a ticket of the scope, or names none and its session was last
-// on one; AllLedger takes every line.
-func TestLedgerLinesInScope(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.writeJournal("T-1", jline("2026-10-23T09:00:00Z", "T-1", "claim", ""))
-	at := func(n int) string { return fmt.Sprintf("2026-10-23T09:01:%02dZ", n) }
-	// In: names the ticket.
-	r.ledgerAppend(journal.Line{TS: at(0), Event: "session-start", Session: "s1", Ticket: "T-1"})
-	// In: s1 is on T-1.
-	r.ledgerAppend(journal.Line{TS: at(1), Event: "tool", Session: "s1", Tool: "Edit"})
-	// Out: s2 is on nothing.
-	r.ledgerAppend(journal.Line{TS: at(2), Event: "tool", Session: "s2", Tool: "Edit"})
-	// Out: another ticket, and its session's tool line.
-	r.ledgerAppend(journal.Line{TS: at(3), Event: "session-start", Session: "s3", Ticket: "X-9"})
-	r.ledgerAppend(journal.Line{TS: at(4), Event: "tool", Session: "s3", Tool: "Bash"})
-	// Out: no ticket and no session.
-	r.ledgerAppend(journal.Line{TS: at(5), Event: "hook"})
-	// In: s2 moves to T-1, and its tool line after.
-	r.ledgerAppend(journal.Line{TS: at(6), Event: "session-touch", Session: "s2", Ticket: "T-1"})
-	r.ledgerAppend(journal.Line{TS: at(7), Event: "tool", Session: "s2", Tool: "Bash"})
-	// Out: s1 moves away, and its tool line after.
-	r.ledgerAppend(journal.Line{TS: at(8), Event: "session-touch", Session: "s1", Ticket: "X-9"})
-	r.ledgerAppend(journal.Line{TS: at(9), Event: "tool", Session: "s1", Tool: "Read"})
-
-	envs, err := Read(r.scope(false, "T-1"), time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, e := range envs {
-		if e.Src == SrcLedger {
-			got = append(got, e.Event+"/"+e.Session+"/"+e.Tool)
-		}
-	}
-	want := []string{"session-start/s1/", "tool/s1/Edit", "session-touch/s2/", "tool/s2/Bash"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ledger lines in scope = %v, want %v", got, want)
-	}
-
-	// The bindings come from the whole ledger, lines before since included.
-	envs, err = Read(r.scope(false, "T-1"), mustParse(t, at(7)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := summary(envs); !reflect.DeepEqual(got, []string{"ledger:tool"}) || envs[0].Session != "s2" {
-		t.Fatalf("since %s = %v, want only s2's tool line", at(7), got)
-	}
-
-	all, err := Read(r.scope(true, "T-1"), time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := len(all); n != 11 { // the journal line and the ten ledger lines
-		t.Fatalf("AllLedger gave %d lines, want 11", n)
 	}
 }
 

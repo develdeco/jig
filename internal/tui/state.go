@@ -30,10 +30,10 @@ type world struct {
 	order   []string
 	// feed is the latest lines of the whole stream, newest last.
 	feed []events.Envelope
-	// sessions binds a session to the ticket its lines last named, so a
-	// ledger line that carries a session and no ticket (a tool call) can be
-	// shown with the ticket's.
-	sessions map[string]string
+	// binder places the ledger lines: a line is on the ticket it names, the
+	// early calls of a subagent join its first bound line's ticket, and a call
+	// heard twice is one (events.Binder, the rule `jig events` reads by).
+	binder *events.Binder
 	// sessionInfo is what each session's session-start line in the ledger
 	// said of it (people.go), whatever ticket the line named.
 	sessionInfo map[string]sessionInfo
@@ -46,7 +46,7 @@ type world struct {
 }
 
 func newWorld() *world {
-	return &world{tickets: map[string]*ticket{}, sessions: map[string]string{}, sessionInfo: map[string]sessionInfo{}, charts: map[string]*chart{}}
+	return &world{tickets: map[string]*ticket{}, binder: events.NewBinder(true), sessionInfo: map[string]sessionInfo{}, charts: map[string]*chart{}}
 }
 
 // chart is what is known of one chart: how the store listing names it, and
@@ -140,43 +140,59 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 // touched, and whether any of them was new to the screens.
 func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bool) {
 	touched = map[string]bool{}
-	for _, e := range envs {
-		w.feed = append(w.feed, e)
-		if len(w.feed) > feedCap {
-			w.feed = w.feed[len(w.feed)-feedCap:]
-		}
-		if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
-			info := w.sessionInfo[e.Session]
-			info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
-			w.sessionInfo[e.Session] = info
-		}
-		id := e.Ticket
-		if e.Session != "" && id != "" {
-			w.sessions[e.Session] = id
-		}
-		if id == "" && e.Src == events.SrcLedger {
-			id = w.sessions[e.Session]
-		}
-		if id == "" {
-			continue
-		}
-		t, isNew := w.ticketFor(id)
-		if isNew {
-			t.firstAt, _ = e.At()
-		}
-		fresh = fresh || isNew
-		t.awaiting = false
-		touched[id] = true
-		if e.Src == events.SrcJournal {
-			t.lines = insertSorted(t.lines, e)
-			continue
-		}
-		t.ledger = append(t.ledger, e)
-		if len(t.ledger) > ledgerCap {
-			t.ledger = t.ledger[len(t.ledger)-ledgerCap:]
+	for _, in := range envs {
+		for _, e := range w.place(in) {
+			w.take(e, touched, &fresh)
 		}
 	}
 	return touched, fresh
+}
+
+// place is the lines of the stream that line in is, placed: a journal line as
+// it is, a ledger line as the binder places it (none while it is an early call
+// held for its agent's first bound line, several when it is that line).
+func (w *world) place(in events.Envelope) []events.Envelope {
+	if in.Src != events.SrcLedger {
+		return []events.Envelope{in}
+	}
+	placed := w.binder.Bind(in.Line)
+	out := make([]events.Envelope, len(placed))
+	for i, l := range placed {
+		out[i] = events.Envelope{Src: in.Src, Store: in.Store, Line: l}
+	}
+	return out
+}
+
+// take puts one placed line in the feed and on its ticket.
+func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
+	w.feed = append(w.feed, e)
+	if len(w.feed) > feedCap {
+		w.feed = w.feed[len(w.feed)-feedCap:]
+	}
+	if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
+		info := w.sessionInfo[e.Session]
+		info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
+		w.sessionInfo[e.Session] = info
+	}
+	id := e.Ticket
+	if id == "" {
+		return
+	}
+	t, isNew := w.ticketFor(id)
+	if isNew {
+		t.firstAt, _ = e.At()
+	}
+	*fresh = *fresh || isNew
+	t.awaiting = false
+	touched[id] = true
+	if e.Src == events.SrcJournal {
+		t.lines = insertSorted(t.lines, e)
+		return
+	}
+	t.ledger = append(t.ledger, e)
+	if len(t.ledger) > ledgerCap {
+		t.ledger = t.ledger[len(t.ledger)-ledgerCap:]
+	}
 }
 
 // setRoster takes the tickets `jig next` listed: their titles and states, and

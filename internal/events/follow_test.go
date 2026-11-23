@@ -103,7 +103,7 @@ func TestFollowEmitsTheStreamThenWhatIsAdded(t *testing.T) {
 	if e := f.next(); e.Event != "verified" || e.Src != SrcJournal || e.Store != "proj" {
 		t.Fatalf("after an append: %+v, want the journal's verified line", e)
 	}
-	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:10Z", Event: "tool", Session: "s1", Tool: "Bash"})
+	r.ledgerAppend(journal.Line{TS: "2026-10-23T09:00:10Z", Event: "tool", Session: "s1", Tool: "Bash", Ticket: "T-1"})
 	if e := f.next(); e.Event != "tool" || e.Src != SrcLedger {
 		t.Fatalf("after a ledger append: %+v, want the tool line", e)
 	}
