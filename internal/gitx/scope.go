@@ -213,14 +213,6 @@ func KeptFor(dir string) *Kept {
 	return nil
 }
 
-// CommitOf is the commit the full branch name ref (refs/heads/x or
-// refs/remotes/o/x) names in dir, from the scope's listing; false when no scope
-// is open for dir or it cannot say.
-func CommitOf(dir, ref string) (string, bool) {
-	sha, found, answered := listedCommit(dir, ref)
-	return sha, answered && found && isCommitID(sha)
-}
-
 // loadLocked reads the file once; the caller holds k.mu.
 func (k *Kept) loadLocked() {
 	if k.loaded {
