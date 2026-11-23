@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,10 @@ import (
 // planLabelW is the width of the label column of the Issue panel.
 const planLabelW = 7
 
+// planMapRows are the rows the Map panel of the plan has when m shows it: the
+// plan is a page that scrolls, so the map takes what it needs.
+const planMapRows = 12
+
 // issueID is the issue the chart plans, "" for a chart that plans none.
 func (c *chart) issueID() string {
 	if c.info == nil || c.info.Issue == nil {
@@ -41,6 +46,102 @@ func (m *Model) refreshIssue(c *chart) tea.Cmd {
 	return m.refreshStatus(id)
 }
 
+// planOf is the name of the chart that plans issue, "" when no chart does: the
+// screen an issue opens on.
+func (m *Model) planOf(issue string) string {
+	for _, name := range m.w.chartOrder {
+		if c := m.w.charts[name]; c != nil && c.listing.Issue == issue {
+			return name
+		}
+	}
+	return ""
+}
+
+// issuesOf are the issues whose chart lists the ticket id, in the order the
+// store lists the charts.
+func (m *Model) issuesOf(id string) []string {
+	var out []string
+	for _, name := range m.w.chartOrder {
+		c := m.w.charts[name]
+		if c == nil || c.listing.Issue == "" {
+			continue
+		}
+		if slices.Contains(c.listing.Tickets, id) {
+			out = append(out, c.listing.Issue)
+		}
+	}
+	return out
+}
+
+// upFrom is the ticket whose screen is on top when it is a task's (or a step's
+// of one), "" on any other: the screens `c` goes up from.
+func (m *Model) upFrom() string {
+	e := m.top()
+	switch e.screen {
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand:
+		if t := m.w.tickets[e.ticket]; t != nil && !t.awaiting {
+			return e.ticket
+		}
+	}
+	return ""
+}
+
+// upIssue is the issue `c` opens from the ticket id: the one the person reached
+// it through, else the first that lists it; "" when none does.
+func (m *Model) upIssue(id string) string {
+	issues := m.issuesOf(id)
+	if len(issues) == 0 {
+		return ""
+	}
+	for i := len(m.nav) - 1; i >= 0; i-- {
+		if m.nav[i].screen != screenChart {
+			continue
+		}
+		if c := m.w.charts[m.nav[i].chart]; c != nil && slices.Contains(issues, c.listing.Issue) {
+			return c.listing.Issue
+		}
+	}
+	return issues[0]
+}
+
+// openIssue is `c`: the plan of the issue the ticket on the screen belongs to.
+func (m *Model) openIssue() tea.Cmd {
+	id := m.upFrom()
+	if id == "" {
+		return nil
+	}
+	issue := m.upIssue(id)
+	if issue == "" {
+		m.notice = id + " is in no issue's plan"
+		return nil
+	}
+	m.nav = append(m.nav, navEntry{screen: screenChart, chart: m.planOf(issue), follow: true})
+	m.last = nil
+	return tea.Batch(m.enterChart(m.top())...)
+}
+
+// toggleMap is `m`: the plan's map shows and hides in place.
+func (m *Model) toggleMap() {
+	e := m.top()
+	if e.screen != screenChart {
+		return
+	}
+	if c := m.w.charts[e.chart]; c != nil && c.issueID() != "" {
+		e.showMap = !e.showMap
+	}
+}
+
+// kindIn is how a ticket's kind is said beside it on its screen: a task two
+// issues list names both.
+func (m *Model) kindIn(t *ticket) string {
+	if d := t.digest; d != nil && d.Kind == "task" && d.Parent == "" {
+		if issues := m.issuesOf(t.id); len(issues) > 1 {
+			return "task of " + andList(issues)
+		}
+	}
+	return t.digest.kindWords()
+}
+
 // planPage is the plan of the issue chart c plans: Need, Tasks, Issue, then the
 // Run panel and the activity as the chart screen has them. The tasks are never
 // cut; a page longer than the window scrolls with the cursor.
@@ -55,6 +156,9 @@ func (m *Model) planPage(c *chart) page {
 	fixes := fixTasks(suite)
 	rows := m.chartRows(c)
 
+	if e := m.top(); e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
+		m.mapPanel(&p, c, planMapRows)
+	}
 	m.needPanel(&p, is, issue)
 	landed, total := planProgress(rows)
 	right := fmt.Sprintf("%d of %d landed", landed, total)

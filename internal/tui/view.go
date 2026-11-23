@@ -253,7 +253,7 @@ func (m *Model) header(w int) []string {
 			title = t.title
 		}
 		if t != nil && e.screen == screenTicket {
-			if k := t.digest.kindWords(); k != "" {
+			if k := m.kindIn(t); k != "" {
 				crumbs += "  " + m.st.dim(k)
 			}
 		}
@@ -384,6 +384,25 @@ func (m *Model) keyHints() []string {
 		keys = [][]string{move, back, answer, land, tail, quit}
 	case screenLand:
 		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
+	}
+	// The key up to the issue, on the screens of a task that is in one's plan, and
+	// the one that shows the map, on the plan: each goes after the key back.
+	var extra []string
+	switch id := m.upFrom(); {
+	case id != "" && len(m.issuesOf(id)) > 0:
+		extra = []string{"c", "issue"}
+	case m.top().screen == screenChart:
+		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
+			extra = []string{"m", "map"}
+		}
+	}
+	if extra != nil {
+		for i, k := range keys {
+			if k[0] == "esc" {
+				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
+				break
+			}
+		}
 	}
 	flat := make([]string, 0, 2*len(keys))
 	for _, k := range keys {

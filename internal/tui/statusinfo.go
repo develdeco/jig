@@ -339,6 +339,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			Title       string   `json:"title"`
 			Tickets     []string `json:"tickets"`
 			Ungraduated int      `json:"ungraduated"`
+			Issue       string   `json:"issue"`
 		} `json:"charts"`
 	}
 	if err := json.Unmarshal([]byte(obj), &next); err != nil {
@@ -367,7 +368,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	}
 	var charts []chartListing
 	for _, c := range next.Charts {
-		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated})
+		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated, Issue: c.Issue})
 	}
 	return rows, charts, nil
 }

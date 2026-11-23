@@ -112,6 +112,12 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 			return renderErr(stdout, err)
 		}
 		ticket = id
+		// An issue's screen is its plan, the screen of the chart that plans it.
+		if rec, err := st.ReadTicket(id); err == nil && rec.KindOrDefault() == store.KindIssue {
+			if name, _ := st.ChartOfIssue(id); name != "" {
+				chart, ticket = name, ""
+			}
+		}
 	}
 
 	scope := events.Scope{

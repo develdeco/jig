@@ -22,6 +22,8 @@ type chartListing struct {
 	// order; Ungraduated counts the ones that have none yet.
 	Tickets     []string
 	Ungraduated int
+	// Issue is the issue the chart plans, "" for none.
+	Issue string
 }
 
 // chartInfo is `jig next <chart> --json`, read.

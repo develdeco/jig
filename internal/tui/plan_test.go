@@ -37,6 +37,9 @@ type planSpec struct {
 	prompt       string
 	// closed are the tasks closed without landing, each with its reason.
 	closed map[string]string
+	// second adds an issue GATE-50 whose chart lists T-1 too, and loose a task
+	// T-9 that no chart lists.
+	second, loose bool
 }
 
 func (s planSpec) taskIDs() []string {
@@ -54,10 +57,10 @@ func landedIssue() *digestInfo {
 	return &digestInfo{Kind: "issue", State: "landed", PRs: []digestPR{{Repo: "demo", Number: 512, URL: "https://example.test/acme/demo/pull/512", State: "merged", Target: "main"}}}
 }
 
-// planRig is the plan of GATE-49 on the screen: the store's list, the chart's
+// planMain is the project of the plan fixtures on the main screen: the store's list, the chart's
 // verb and the issue's status are answered as spec says, the tasks' digests are
-// pinned, and the chart screen is open.
-func planRig(t *testing.T, spec planSpec) *rig {
+// pinned, and the screen is the project's.
+func planMain(t *testing.T, spec planSpec) *rig {
 	t.Helper()
 	g := newRig(t, "")
 	ids := spec.taskIDs()
@@ -67,10 +70,16 @@ func planRig(t *testing.T, spec planSpec) *rig {
 		tickets = append(tickets, map[string]any{"id": id, "title": "Task " + id, "state": "done"})
 		entries = append(entries, entry(id, "Task "+id, "publish", []string{"done", "done", "done", "done"}, false))
 	}
-	roster := jsonLine(map[string]any{
-		"tickets": tickets,
-		"charts":  []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0}},
-	})
+	charts := []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0, "issue": "GATE-49"}}
+	if spec.loose {
+		tickets = append(tickets, map[string]any{"id": "T-9", "title": "Task T-9", "state": "done"})
+	}
+	if spec.second {
+		// T-1 is listed by a second issue's chart too: a shared task.
+		tickets = append(tickets, map[string]any{"id": "GATE-50", "title": "Another issue", "state": "issue"})
+		charts = append(charts, map[string]any{"name": "second", "title": "Second plan", "tickets": []string{"T-1"}, "ungraduated": 0, "issue": "GATE-50"})
+	}
+	roster := jsonLine(map[string]any{"tickets": tickets, "charts": charts})
 	issueBlock := map[string]any{
 		"ticket": "GATE-49", "stage": "landing", "state": "waiting", "branch": planBranch, "prompt": spec.prompt,
 		"stack": []map[string]any{{"repo": "demo", "start_from": "origin/main", "pr_target": "main"}},
@@ -89,6 +98,21 @@ func planRig(t *testing.T, spec planSpec) *rig {
 		status[id] = untouchedStatus(id)
 	}
 	answerChart(g, roster, "repeat", verb, status)
+	if spec.second {
+		second := jsonLine(map[string]any{
+			"chart": "second", "title": "Second plan", "ready": false, "code": "CHART_DONE", "started": true, "ungraduated": 0,
+			"briefs": []string{}, "run": [][]string{}, "tickets": []map[string]any{entries[0]},
+			"map":   map[string]any{"destination": []string{"Plans issue GATE-50."}},
+			"issue": map[string]any{"ticket": "GATE-50", "stage": "landing", "state": "waiting", "branch": "502-another", "stack": []map[string]any{{"repo": "demo", "start_from": "origin/main", "pr_target": "main"}}},
+		})
+		g.r.answer("next second --json --store /s", second, 0)
+		g.r.answer("status GATE-50 --store /s", strings.ReplaceAll(planStatus(spec), "GATE-49", "GATE-50"), 0)
+		g.pin("GATE-50", &digestInfo{Kind: "issue", State: "waiting"})
+	}
+	if spec.loose {
+		g.r.answer("status T-9 --store /s", untouchedStatus("T-9"), 0)
+		g.pin("T-9", task("build", true, "done|no brief on record", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish"))
+	}
 
 	for _, id := range ids {
 		d := task("land", false, "done|no brief on record", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "current|waits for a merge")
@@ -99,6 +123,10 @@ func planRig(t *testing.T, spec planSpec) *rig {
 		if reason, ok := spec.closed[id]; ok {
 			d = task("publish", false, "done|closed", "done|closed", "done|closed", "done|closed", "done|none · closed without a pull request")
 			d.Parent, d.Closed = "GATE-49", reason
+		}
+		if spec.second && id == "T-1" {
+			// A task two issues list has no one parent.
+			d.Parent = ""
 		}
 		g.pin(id, d)
 	}
@@ -119,8 +147,16 @@ func planRig(t *testing.T, spec planSpec) *rig {
 		lines = append(lines, jl(at(30, 0), "GATE-49", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
 	}
 	g.feed(lines...)
+	return g
+}
+
+// planRig is planMain with the chart screen of the issue's chart open, which is
+// the issue's plan.
+func planRig(t *testing.T, spec planSpec) *rig {
+	t.Helper()
+	g := planMain(t, spec)
 	g.press("end", "enter")
-	if g.m.Screen() != "chart" {
+	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" {
 		t.Fatalf("on %s, want the chart screen:\n%s", g.m.Screen(), g.view())
 	}
 	return g

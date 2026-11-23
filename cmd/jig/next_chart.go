@@ -490,6 +490,9 @@ type nextChartRow struct {
 	Title       string   `json:"title"`
 	Tickets     []string `json:"tickets"`
 	Ungraduated int      `json:"ungraduated"`
+	// Issue is the issue the chart plans, "" for a chart that plans none: what
+	// the screens read to open an issue on its plan.
+	Issue string `json:"issue,omitempty"`
 }
 
 // chartRows lists the store's charts. A chart whose tickets.yaml cannot be read
@@ -505,6 +508,7 @@ func chartRows(st *store.Store) []nextChartRow {
 		if data, err := os.ReadFile(st.ChartMapFile(name)); err == nil {
 			row.Title = recall.MapTitle(string(data))
 		}
+		row.Issue, _ = st.ChartIssue(name)
 		if entries, err := st.ReadChart(name); err == nil {
 			for _, e := range entries {
 				if e.ID == "" {

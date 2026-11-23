@@ -150,6 +150,8 @@ type navEntry struct {
 	sel    int
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
+	// showMap shows the Map panel on the plan of an issue, which hides it.
+	showMap bool
 	// scroll is how many lines a page with no row to stand on is moved up, so a
 	// screen longer than its window can be read to its end.
 	scroll int
@@ -889,6 +891,10 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		m.beginPublish()
 	case "5":
 		return m.openLand()
+	case "c":
+		return m.openIssue()
+	case "m":
+		m.toggleMap()
 	case "r":
 		return m.refreshAll()
 	}
@@ -1014,6 +1020,10 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:
 		next = navEntry{screen: screenTicket, ticket: ref.id, follow: true}
+		if chart := m.planOf(ref.id); chart != "" {
+			// An issue's screen is its plan, the screen of the chart that plans it.
+			next = navEntry{screen: screenChart, chart: chart, follow: true}
+		}
 	case rowBrief:
 		next = navEntry{screen: screenBrief, ticket: ref.ticket}
 	case rowBuild:
