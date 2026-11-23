@@ -30,9 +30,19 @@ type claimCall struct {
 	// word is the ticket the command names, ticket the one the line was
 	// written on, slice the slice the command names; each may be empty.
 	word, ticket, slice string
-	// ended is true when the agent stopped after the call.
+	// kind is the role the call took: a claim of a slice (the zero value), a
+	// review round opened, or a brief begun.
+	kind string
+	// ended is true when the agent stopped after the call, or, for a review
+	// round, when it closed the round.
 	ended bool
 }
+
+// The roles besides a claim that an agent holds on a ticket.
+const (
+	roleReview = "review"
+	roleBrief  = "brief"
+)
 
 // claimCallOf reads a tool line as the claim of a slice, false for any other
 // line, and for a release.
@@ -41,6 +51,84 @@ func claimCallOf(l journal.Line) (claimCall, bool) {
 		return claimCall{}, false
 	}
 	return claimCall{word: claimWord(l.Command), ticket: l.Ticket, slice: claimSlice(l.Command)}, true
+}
+
+// jigTicketWord is the first word of a jig command line, after the verb, that
+// is a ticket id, "" when there is none. A word is only looked up in the
+// store when it is shaped like an id.
+func (h *handler) jigTicketWord(cmd string) string {
+	words := strings.Fields(cmd)
+	for i, w := range words {
+		if !isJig(w) {
+			continue
+		}
+		for _, a := range words[i+1:] {
+			switch a {
+			case "&&", "||", ";", "|":
+				return ""
+			}
+			a = strings.Trim(a, `"'`)
+			if strings.HasPrefix(a, "-") || !idShaped(a) {
+				continue
+			}
+			if t := h.ticketNamed(a); t != "" && h.st.TicketExists(t) {
+				return t
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// idShaped reports whether s reads like a ticket id: letters, a dash, digits.
+func idShaped(s string) bool {
+	i := strings.IndexByte(s, '-')
+	if i <= 0 || i == len(s)-1 {
+		return false
+	}
+	for _, c := range s[i+1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// roleCallOf reads a tool line as the start of a review round or a brief, and
+// whether it is one; touch is the ticket the session was tied to just after
+// it, which a brief's start does not name.
+func roleCallOf(l journal.Line, touch string) (claimCall, bool) {
+	if l.Event != journal.EventTool {
+		return claimCall{}, false
+	}
+	switch {
+	case ledger.RunsJig(l.Command, "", "review", "context"):
+		return claimCall{kind: roleReview, word: reviewWord(l.Command)}, true
+	case (ledger.RunsJig(l.Command, "", "ticket", "new") || ledger.RunsJig(l.Command, "", "graduate")) && touch != "":
+		return claimCall{kind: roleBrief, ticket: touch}, true
+	}
+	return claimCall{}, false
+}
+
+// reviewWord is the ticket word of a `jig review context` or `jig review
+// done` command line.
+func reviewWord(cmd string) string {
+	words := strings.Fields(cmd)
+	for i, w := range words {
+		if !isJig(w) || i+3 >= len(words) || words[i+1] != "review" {
+			continue
+		}
+		for _, a := range words[i+3:] {
+			switch a {
+			case "&&", "||", ";", "|":
+				return ""
+			}
+			if a = strings.Trim(a, `"'`); !strings.HasPrefix(a, "-") && idShaped(a) {
+				return a
+			}
+		}
+	}
+	return ""
 }
 
 // madeClaim reports whether the shell command line claims a slice: a
@@ -119,12 +207,15 @@ func (h *handler) bindTool() (ticket, slice string) {
 }
 
 func (h *handler) bindTicket() (ticket, slice string) {
+	// A jig call binds by the ticket it names. The claim's own line is not in
+	// the ledger yet when the hook asks, nor is a release's or a review's.
 	if ledger.RunsJig(h.ev.Command, "", "claim") {
-		// The claim's own line is not in the ledger yet when the hook asks,
-		// nor is a release's: the call binds by what it names.
 		if t := h.ticketNamed(claimWord(h.ev.Command)); t != "" {
 			return t, claimSlice(h.ev.Command)
 		}
+	}
+	if t := h.jigTicketWord(h.ev.Command); t != "" {
+		return t, ""
 	}
 	if t, s := h.claimBinding(false); t != "" {
 		return t, s
@@ -160,7 +251,7 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 	read := map[string]bool{}
 	for _, c := range mem.claims {
 		if c.ended && !afterStop {
-			return "", ""
+			continue
 		}
 		t := h.ticketNamed(c.word)
 		if t == "" {
@@ -169,12 +260,37 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 		if t == "" || read[t+"\x00"+c.slice] {
 			continue
 		}
+		switch c.kind {
+		case roleReview:
+			return t, ""
+		case roleBrief:
+			if !h.approved(t) {
+				return t, ""
+			}
+			continue
+		}
 		read[t+"\x00"+c.slice] = true
 		if s, held := h.holds(t, c.slice); held {
 			return t, s
 		}
 	}
 	return "", ""
+}
+
+// approved reports whether the ticket's journal holds an approval of its
+// brief: a brief is drafted until then.
+func (h *handler) approved(ticket string) bool {
+	lines, err := journal.Read(h.st, ticket)
+	if err != nil {
+		h.fail(err)
+		return true
+	}
+	for _, l := range lines {
+		if l.Event == journal.EventApproval {
+			return true
+		}
+	}
+	return false
 }
 
 // holds reports whether the session holds a claim on ticket that the event's
