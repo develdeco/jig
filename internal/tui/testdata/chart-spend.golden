@@ -15,7 +15,7 @@ jig  demo › checkout  Coupons at checkout                        ? run needs y
   │  next     say "Continue checkout"                                          │
   │  wave 1   JIG-8                                                            │
   │  wave 2   JIG-6                                                            │
-  │  ends at  JIG-7 waits for JIG-4 merged · https://example.test/acme/shop/p… │
+  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                      │
   │  spend    31.2M tokens · $12.34 · 3 tickets · 2 subagents                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────── latest 2 of 18 ─╮

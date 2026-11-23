@@ -1,5 +1,11 @@
 jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
+      reviewer (Claude Code · Opus 5) · independent · s-review
+      full 0000000..ccccccc · 4 files read
+
+  round 1 findings
+  ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
+      a leaked handle fails the next open
   ○ low     beta/b.go:2    noted   Rename the helper  r1-f4
       a clearer name, whenever the file is next touched
 
@@ -13,12 +19,6 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
   │  09:11:00 ◎ round 1 · opened                                               │
   │  09:11:30 ! round 1 · reviewer finished with findings                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ✓ jig triage JIG-2 r1-f2 dismiss
-    triage:
-      ticket: JIG-2
-      finding: r1-f2
-      decision: dismiss
-      provenance: person
-    …
+  ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move · esc back · k keep · d dismiss · g gate · 5 land · t tail · q quit

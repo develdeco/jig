@@ -397,7 +397,10 @@ func (g *rig) syncDigests() {
 	if g.synced == nil {
 		g.synced = map[string]syncedFrom{}
 	}
-	for id, t := range g.m.w.tickets {
+	moved := map[string]*digestInfo{}
+	order := append([]string(nil), g.m.w.order...)
+	for _, id := range order {
+		t := g.m.w.tickets[id]
 		if d, ok := g.pinned[id]; ok {
 			t.digest = d
 			continue
@@ -410,8 +413,31 @@ func (g *rig) syncDigests() {
 			continue
 		}
 		g.synced[id] = from
-		t.digest = fakeDigest(g.m, t)
+		moved[id] = fakeDigest(g.m, t)
 	}
+	if len(moved) == 0 {
+		return
+	}
+	// A digest reaches the model in a roster read, which Update takes in like
+	// any message: a read that began after what is on screen, listing the
+	// tickets in their order with the digests that moved, and the charts as
+	// they are.
+	changed := make([]rosterRow, 0, len(order))
+	for _, id := range order {
+		t := g.m.w.tickets[id]
+		d := t.digest
+		if m, ok := moved[id]; ok {
+			d = m
+		}
+		changed = append(changed, rosterRow{ID: id, Title: t.title, Blockers: t.blockers, Digest: d})
+	}
+	var charts []chartListing
+	for _, name := range g.m.w.chartOrder {
+		charts = append(charts, g.m.w.charts[name].listing)
+	}
+	g.m.rosterStarted++
+	_, cmd := g.m.Update(rosterMsg{rows: changed, charts: charts, seq: g.m.rosterStarted})
+	g.settle(cmd)
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a
@@ -430,6 +456,17 @@ func newRig(t *testing.T, ticket string) *rig {
 	m := New(Config{RetryDelay: time.Millisecond, IdleTick: -1, MergeEvery: -1, Run: r.run, Ticket: ticket, Scope: []string{"--store", "/s"}, Project: "demo", Zone: time.UTC, Width: 80, Height: 24,
 		Now: func() time.Time { return rigNow }, Home: rigHome})
 	return &rig{t: t, m: m, r: r}
+}
+
+// newQuietRig is newRig over a store whose roster lists nothing new: a roster
+// read leaves each ticket's digest as the rig derived it from the lines, as a
+// store that a command did not move would (titles, and no digest of its own). A test of the line a command leaves
+// uses it, since the canned roster describes other tickets' standing.
+func newQuietRig(t *testing.T, ticket string) *rig {
+	t.Helper()
+	g := newRig(t, ticket)
+	g.r.answer("next --json --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
+	return g
 }
 
 // feed delivers a batch of the stream and settles what it starts.

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -156,7 +157,9 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 		if t.digest != nil {
 			r.d = m.phaseOf(t)
 			r.steps = m.stepRows(t, r.d)
-			r.needs = needsYou(r.d) || t.digest.waitsForAnswer() || m.landingNeedsYou(t)
+			// A question and a landing are the person's whoever else is at work; what a
+			// live session records itself (an approval, a round's asks) waits.
+			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
 			r.waits = t.blockers
 			r.behind = t.digest.Behind
 			r.end, r.atEnd = m.endOf(t)
@@ -227,6 +230,11 @@ func chartProgress(rows []chartRow) (total, done, needs int) {
 func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 	total, done, needs := chartProgress(rows)
 	switch {
+	case c.info != nil && c.info.Code == phase.CodeChartWaitsLand:
+		// The run stops at a landing, which is the person's word: it says so
+		// before it says that a ticket needs them, since the landing is what
+		// they are asked for.
+		return StateNeedsInput, "landing waits for you"
 	case needs > 0:
 		return StateNeedsInput, "run needs you"
 	case c.info != nil:
@@ -235,10 +243,18 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 			return StatePublished, "done"
 		case phase.CodeChartWaitsMerge:
 			return StateQueued, "waits for a merge"
+		case phase.CodeChartWaitsLand:
+			// The run stops at a landing, which is the person's word.
+			return StateNeedsInput, "landing waits for you"
 		case phase.CodeChartBlocked:
 			return StateStalled, "blocked"
 		case phase.CodeChartNotGraduated:
 			return StateQueued, "not graduated"
+		}
+		if _, live := c.live(m.w, m.now()); live {
+			// A session is at work on the run: it is running, whatever else
+			// the verdict says of what comes next.
+			return StateBuilding, "running"
 		}
 		switch {
 		case c.info.Ready && c.info.Started:
@@ -251,6 +267,9 @@ func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 		return StateQueued, "not graduated"
 	case done == total:
 		return StatePublished, "done"
+	}
+	if _, live := c.live(m.w, m.now()); live {
+		return StateBuilding, "running"
 	}
 	for _, r := range rows {
 		if r.t != nil && len(r.t.lines) > 0 {
@@ -275,25 +294,41 @@ func waitNote(w chartWait) string {
 	return note
 }
 
-// endNote is where a run stops, in words: "SHOP-5 waits for SHOP-2 merged ·
-// <pr> is open", or for a published ticket stacked on a parent whose pull
-// request is open, "SHOP-5 retargets when SHOP-2 merges · <pr> is open".
+// endNote is where a run stops, in words, naming the pull request to merge
+// once: "SHOP-5 waits for SHOP-2 to merge · PR #7 open", or for a published
+// ticket stacked on a parent whose pull request is open, "SHOP-5 retargets
+// when SHOP-2 merges · PR #7 open". The verb's own fact is said only when the
+// blocker has no pull request, since it says the same of the one it has.
 func endNote(e chartEnd) string {
-	text := e.Ticket + " waits for " + e.Blocker + " " + firstOf(e.Kind, "merged")
+	text := e.Ticket + " waits for " + e.Blocker + " to merge"
 	if e.Kind == kindStacked {
 		// A published ticket on a parent whose pull request is open: it is done,
 		// and the parent's merge owes it a retarget (ADR 0038).
 		text = e.Ticket + " retargets when " + e.Blocker + " merges"
 	}
 	switch {
-	case len(e.PRs) > 0 && e.PRs[0].State != "":
-		return text + " · " + e.PRs[0].URL + " is " + strings.ToLower(e.PRs[0].State)
 	case len(e.PRs) > 0:
-		return text + " · " + e.PRs[0].URL
+		return text + " · " + chartPRWords(e.PRs[0])
 	case e.Fact != "":
 		return text + " · " + e.Fact
 	}
 	return text
+}
+
+// prNumber matches the number a pull request's address ends in.
+var prNumber = regexp.MustCompile(`/(?:pull|pulls|merge_requests)/(\d+)`)
+
+// chartPRWords names a pull request and its state: "PR #7 open", or its address when
+// no number can be read from it.
+func chartPRWords(pr chartPR) string {
+	name := pr.URL
+	if m := prNumber.FindStringSubmatch(pr.URL); m != nil {
+		name = "PR #" + m[1]
+	}
+	if pr.State != "" {
+		name += " " + strings.ToLower(pr.State)
+	}
+	return name
 }
 
 // runWord is where the chart's run stands, for the Run panel's edge.

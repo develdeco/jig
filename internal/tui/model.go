@@ -202,15 +202,18 @@ type Model struct {
 	notice string
 	tail   bool
 
-	ctx         context.Context
-	cancel      context.CancelFunc
-	stream      chan events.Envelope
-	streamErr   chan error
-	rosterBusy  bool
-	rosterFails int
-	retryDelay  time.Duration
-	awaitEvery  time.Duration
-	quitting    bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	stream     chan events.Envelope
+	streamErr  chan error
+	rosterBusy bool
+	// rosterStarted counts the roster reads begun, so a read can be told from one
+	// that was already out when something happened.
+	rosterStarted int
+	rosterFails   int
+	retryDelay    time.Duration
+	awaitEvery    time.Duration
+	quitting      bool
 
 	// The idle read: when the screen last took an event of the ticket it shows
 	// and when it last started to read that ticket's status, by now.
@@ -542,6 +545,12 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	m.settleLast(msg)
+	return next, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -711,6 +720,16 @@ func (m *Model) onStatus(msg statusMsg) tea.Cmd {
 }
 
 func (m *Model) onRoster(msg rosterMsg) tea.Cmd {
+	cmd := m.takeRoster(msg)
+	if m.last != nil && !m.last.Fixed && m.last.Ticket != "" && msg.seq <= m.last.After {
+		// The read was already out when the command's result arrived: it may
+		// not say what the command did, so one that starts now does.
+		return tea.Batch(cmd, m.loadRoster())
+	}
+	return cmd
+}
+
+func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	m.rosterBusy = false
 	m.rosterEnded = m.now()
 	if msg.err != nil {
@@ -797,8 +816,66 @@ func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 	return cmds
 }
 
+// standingPrint is where the ticket stands, as its phases' states and words:
+// what the panel's line is made against, so the line goes when it changes. A
+// command with no ticket is about the chart on show, whose verdict is its
+// standing; one made elsewhere has none and stays until the screen changes.
+func (m *Model) standingPrint(ticket string) string {
+	if ticket == "" {
+		if e := m.top(); e.screen == screenChart {
+			if c := m.w.charts[e.chart]; c != nil && c.info != nil {
+				return strings.Join([]string{c.info.Code, c.info.Reason, c.info.Prompt}, "\x1f")
+			}
+		}
+		return ""
+	}
+	t := m.w.tickets[ticket]
+	if t == nil {
+		return ""
+	}
+	var parts []string
+	for _, p := range m.phaseOf(t).Phases {
+		parts = append(parts, string(p.Name)+"\x1f"+p.State+"\x1f"+p.Text)
+	}
+	return strings.Join(parts, "\x1e")
+}
+
+// settleLast keeps the last command's line against what it was about. The
+// ticket's phases are the roster's digest, so the first roster read that began
+// after the result arrived (the chart's read, for a line with no ticket) takes
+// the standing as the command left it, and a status read or a read that was
+// already out does not; each later message removes the line once the ticket's
+// phases read differently, or the chart's verdict does.
+func (m *Model) settleLast(msg tea.Msg) {
+	if m.last == nil {
+		return
+	}
+	if !m.last.Fixed {
+		switch r := msg.(type) {
+		case rosterMsg:
+			if m.last.Ticket != "" && r.err == nil && r.seq > m.last.After {
+				m.last.Print, m.last.Fixed = m.standingPrint(m.last.Ticket), true
+			}
+		case chartMsg:
+			if m.last.Ticket == "" && r.err == nil {
+				m.last.Print, m.last.Fixed = m.standingPrint(""), true
+			}
+		}
+		return
+	}
+	if m.standingPrint(m.last.Ticket) != m.last.Print {
+		m.last = nil
+	}
+}
+
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
+	m.last.After = m.rosterStarted
+	var cmds []tea.Cmd
+	if msg.result.Ticket != "" {
+		// The roster read that follows is the one that says what the command did.
+		cmds = append(cmds, m.loadRoster())
+	}
 	if e := m.top(); e.screen == screenChart {
 		// What a key did to one of the chart's tickets is read once things are quiet.
 		if c := m.w.charts[e.chart]; c != nil && c.has(msg.result.Ticket) {
@@ -808,10 +885,10 @@ func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	if id := msg.result.Ticket; id != "" && m.w.tickets[id] != nil {
 		m.w.tickets[id].dirty = true
 		if m.watching() == id {
-			return m.refreshStatus(id)
+			cmds = append(cmds, m.refreshStatus(id))
 		}
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 // quit ends the stream and the program.

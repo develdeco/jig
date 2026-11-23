@@ -116,6 +116,12 @@ func oracleWords(l events.Envelope) string {
 		word = "passed"
 	case "fail":
 		word = "failed"
+		switch l.Cause {
+		case journal.CauseStopped:
+			word = "stopped, not counted"
+		case journal.CauseTimeout:
+			word = "timed out, not counted"
+		}
 	case "":
 		word = "ran"
 	}
