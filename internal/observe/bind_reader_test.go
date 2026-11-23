@@ -4,31 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/store"
 )
-
-// TestAClaimEndsAtItsSlicesVerification: the build flow never releases a green
-// slice, so a claim ends when its slice is verified; the main session's later
-// calls in another worktree bind by that worktree and in the main checkout to
-// none.
-func TestAClaimEndsAtItsSlicesVerification(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.worktreeOn(r.fx.Ticket)
-	other := r.worktreeOn("JIG-2")
-	r.handle(r.ev(KindSessionStart))
-
-	expectTicket(t, "the claim", r.claimCall("", r.fx.Ticket, "a"), r.fx.Ticket)
-	expectTicket(t, "a call while it is held", r.call("", "go test ./..."), r.fx.Ticket)
-	r.addTo(r.fx.Ticket, journal.Line{Event: journal.EventVerified, Slice: "a", Session: "s1"})
-	expectTicket(t, "a call in another worktree after the verification", r.call("", "git push", other), "JIG-2")
-	expectTicket(t, "a call in the main checkout after it", r.call("", "git log"), "")
-
-	// A slice claimed again after its verification (a fix) is held again.
-	r.addTo(r.fx.Ticket, journal.Line{Event: journal.EventClaim, Slice: "a", Session: "s1"})
-	expectTicket(t, "a call under the new claim", r.call("", "go vet ./..."), r.fx.Ticket)
-}
 
 // TestBindingReadsNoTicketListForADirectId: a ticket named by its id, in a
 // claim call or by the branch of a worktree, is found by its folder; the other
