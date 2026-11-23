@@ -157,7 +157,12 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 	}
 	t := &ticket{id: id, w: w}
 	w.tickets[id] = t
-	w.order = append(w.order, id)
+	// Once the roster is read the list is its own: a ticket the stream names
+	// first gets a row when a later roster lists it, so an id an old journal
+	// names never shows or counts.
+	if !w.rosterRead {
+		w.order = append(w.order, id)
+	}
 	return t, true
 }
 
