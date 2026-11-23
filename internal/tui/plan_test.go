@@ -27,6 +27,8 @@ type planSpec struct {
 	// which of them landed into the branch (all when nil).
 	tasks  []string
 	landed map[string]bool
+	// titles are the tasks' titles where they are not "Task" and the id.
+	titles map[string]string
 	// suite are the rows of the status's suite table, comma separated.
 	suite []string
 	// noSuiteTable leaves the table out, as an older jig's status does.
@@ -59,6 +61,14 @@ func (s planSpec) taskIDs() []string {
 	return s.tasks
 }
 
+// titleOf is a task's title: the spec's own, else "Task" and its id.
+func (s planSpec) titleOf(id string) string {
+	if t, ok := s.titles[id]; ok {
+		return t
+	}
+	return "Task " + id
+}
+
 func (s planSpec) isLanded(id string) bool { return s.landed == nil || s.landed[id] }
 
 // landedIssue is the digest of an issue whose pull request merged into main and
@@ -81,8 +91,8 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	tickets := []map[string]any{{"id": "SHOP-49", "title": "Review rounds stop repeating work", "state": "issue"}}
 	entries := []map[string]any{}
 	for _, id := range ids {
-		tickets = append(tickets, map[string]any{"id": id, "title": "Task " + id, "state": "done"})
-		entries = append(entries, entry(id, "Task "+id, "publish", []string{"done", "done", "done", "done"}, false))
+		tickets = append(tickets, map[string]any{"id": id, "title": spec.titleOf(id), "state": "done"})
+		entries = append(entries, entry(id, spec.titleOf(id), "publish", []string{"done", "done", "done", "done"}, false))
 	}
 	charts := []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0, "issue": "SHOP-49"}}
 	if spec.loose {
