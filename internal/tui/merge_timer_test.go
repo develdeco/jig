@@ -85,17 +85,6 @@ func TestAChartThatWaitsOnNothingIsNotReadOnTheTimer(t *testing.T) {
 	if n := g.r.total() - calls; n != 0 {
 		t.Errorf("a chart with no end was read %d times on the timer, want 0", n)
 	}
-
-	g = chartScreenRig(t)
-	g.press("esc")
-	if g.m.Screen() != "main" {
-		t.Fatalf("on %s, want main", g.m.Screen())
-	}
-	calls = g.r.total()
-	g.send(mergeMsg{})
-	if n := g.r.total() - calls; n != 0 {
-		t.Errorf("the project's list was read %d times on the timer, want 0", n)
-	}
 }
 
 // TestAReadThatPrintsNoChartKeepsTheTimerGoing: one blank read (the store file
@@ -187,7 +176,6 @@ func TestATicketThatWaitsOnNoMergeIsNotReadOnTheTimer(t *testing.T) {
 		{"unpublished", "JIG-1", jig1(), statusJIG1()},
 		{"no pull request on record", "JIG-2", noPR, statusJIG2Done()},
 		{"closed", "JIG-2", published, closedStatus(statusJIG2Done())},
-		{"the project's list", "", published, statusJIG2Done()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

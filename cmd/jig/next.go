@@ -37,6 +37,7 @@ func init() {
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
 			{"roster", "with --json: print only every ticket's row and the charts, the host never asked", false},
+			{"refresh-merges", "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else", false},
 		}, false},
 		Order: 301,
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
@@ -73,6 +74,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
 	rosterFlag := fs.Bool("roster", false, "with --json: print only every ticket's row and the charts, the host never asked")
+	refreshFlag := fs.Bool("refresh-merges", false, "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
 		return 0
@@ -89,6 +91,11 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			ticketsSet = true
 		}
 	})
+	if *refreshFlag {
+		if ticket != "" || *forFlag != "" || *topology || ticketsSet || *rosterFlag {
+			return renderErr(stdout, &axi.Error{Msg: "--refresh-merges refreshes the whole store's kept pull request states: it takes no ticket, chart, --for, --topology, --tickets or --roster", Code: "VALIDATION_ERROR"})
+		}
+	}
 	if *rosterFlag {
 		if err := rosterRefusal(ticket, *forFlag != "", *topology, ticketsSet, *jsonOut); err != nil {
 			return renderErr(stdout, err)
@@ -131,6 +138,11 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if asked, err = checkAsked(); err != nil {
 			return renderErr(stdout, err)
 		}
+	}
+	if *refreshFlag {
+		n := refreshMerges(st, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
+		fmt.Fprintf(stdout, "refreshed: %d\n", n)
+		return 0
 	}
 	if *rosterFlag {
 		defer readScope(st, mp, jigHome)()

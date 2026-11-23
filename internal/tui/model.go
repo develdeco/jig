@@ -209,6 +209,9 @@ type Model struct {
 	stream     chan events.Envelope
 	streamErr  chan error
 	rosterBusy bool
+	// mergeRefreshing is set while the read that asks the host for the kept
+	// pull request states is out (mergerefresh.go).
+	mergeRefreshing bool
 	// clockRuns counts the work clocks computed (work.go): the screens that
 	// show no time compute none.
 	clockRuns int
@@ -389,6 +392,12 @@ func (m *Model) mergeAfterTick() tea.Cmd {
 // its status. Every other screen, the project's list included, reads nothing.
 // A read already out is not doubled: the loads refuse a second one.
 func (m *Model) onMerge() tea.Cmd {
+	if e := m.top(); e.screen == screenMain {
+		if m.mainWaitsOnMerge() {
+			return m.refreshMergesThenRoster()
+		}
+		return nil
+	}
 	if e := m.top(); e.screen == screenChart {
 		if c := m.w.charts[e.chart]; c != nil && c.waitsOnMerge() {
 			return tea.Batch(m.loadRoster(), m.loadChart(e.chart))
@@ -580,6 +589,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case idleMsg:
 		return m, tea.Batch(m.onIdle(), m.idleAfterTick())
+	case mergeRefreshedMsg:
+		m.mergeRefreshing = false
+		return m, m.loadRoster()
 	case mergeMsg:
 		return m, tea.Batch(m.onMerge(), m.mergeAfterTick())
 	case statusMsg:
@@ -1232,7 +1244,14 @@ func (m *Model) back() {
 
 // refreshAll reads the ticket list and the open ticket's status again.
 func (m *Model) refreshAll() tea.Cmd {
-	cmds := []tea.Cmd{m.loadRoster()}
+	var cmds []tea.Cmd
+	if m.top().screen == screenMain && m.run != nil {
+		// What merged on the host is asked in the background first; the roster
+		// follows it.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	} else {
+		cmds = append(cmds, m.loadRoster())
+	}
 	if e := m.top(); e.screen == screenChart {
 		cmds = append(cmds, m.loadChart(e.chart))
 		if c := m.w.charts[e.chart]; c != nil {
