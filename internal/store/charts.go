@@ -678,11 +678,32 @@ func (s *Store) ChartMapFile(name string) string {
 // ChartHistory returns the limit newest commits of the store's HEAD that
 // changed anything under charts/<name>/, newest first: the chart's own
 // history, which nothing records apart from git. A commit that touched only
-// another chart, or only a ticket, is not in it. The store must be a git
+// another chart, or only a ticket, is not in it, nor is one of the store's own
+// housekeeping (isHousekeeping), and the limit counts the commits kept. The store must be a git
 // repository with a commit; otherwise it is an error.
 func (s *Store) ChartHistory(name string, limit int) ([]gitx.LogEntry, error) {
 	// A pathspec takes forward slashes on every system.
-	return gitx.PathLog(s.Root, "HEAD", limit, filepath.ToSlash(s.ChartRelDir(name)))
+	path := filepath.ToSlash(s.ChartRelDir(name))
+	// The housekeeping commits are left out after the read, so the window
+	// grows until limit real commits are kept or the history ends.
+	for window := limit; ; window *= 2 {
+		all, err := gitx.PathLog(s.Root, "HEAD", window, path)
+		if err != nil {
+			return nil, err
+		}
+		var kept []gitx.LogEntry
+		for _, e := range all {
+			if !isHousekeeping(e.Subject) {
+				kept = append(kept, e)
+			}
+		}
+		if len(kept) >= limit {
+			return kept[:limit], nil
+		}
+		if len(all) < window {
+			return kept, nil
+		}
+	}
 }
 
 // ChartFolderTaken reports whether charts/<name> is taken: something of that

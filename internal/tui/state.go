@@ -670,10 +670,8 @@ func eventState(l events.Envelope) string {
 		return StateStalled
 	case journal.EventQuestion:
 		return StateNeedsInput
-	case journal.EventAnswer, journal.EventCall, journal.EventApproval, journal.EventRevalidate:
+	case journal.EventAnswer, journal.EventCall, journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return StateOK
-	case eventBriefSeen, eventSlicesSeen:
-		return StateBuilding
 	case journal.EventGateOpen, journal.EventGateRefused, journal.EventGateReviewer:
 		return StateReviewing
 	case journal.EventGateRound:

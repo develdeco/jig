@@ -661,16 +661,15 @@ func journalFacts(m *Model, t *ticket) (phase.Facts, []journal.Line) {
 			if detailed {
 				return m.reviewerWho(t, session, round, "", nil)
 			}
-			return m.reviewerRole(t, session)
+			return m.reviewerRole(t, session, round)
 		},
 	}
-	fixes := t.fixRounds()
 	for _, id := range t.sliceIDsFromLines() {
 		state := t.guessSliceState(id)
 		if f.Published && !touchedSincePublish(t, id) {
 			state = "green"
 		}
-		f.Slices = append(f.Slices, phase.Slice{ID: id, State: state, FromGate: fixes[id], OpenQuestion: len(t.openQuestions(m.zone, id)) > 0})
+		f.Slices = append(f.Slices, phase.Slice{ID: id, State: state, FromGate: t.fixRound(id), Fix: t.isFixSlice(id), OpenQuestion: len(t.openQuestions(m.zone, id)) > 0})
 	}
 	if i := t.latest("", journal.EventApproval); i >= 0 {
 		f.BriefExists, f.Approval = true, phase.ApprovalCurrent

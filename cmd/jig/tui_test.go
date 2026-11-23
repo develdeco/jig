@@ -248,3 +248,97 @@ func TestTUIWaitsForATicketToBeCreated(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
 }
+
+// withSessionEnv returns e whose environment names a harness session by the
+// given variables, as a terminal inside a harness session does.
+func withSessionEnv(e env, vars map[string]string) env {
+	inner := e.getenv
+	e.getenv = func(k string) string {
+		if v, ok := vars[k]; ok {
+			return v
+		}
+		return inner(k)
+	}
+	return e
+}
+
+// TestTUIRunnerCarriesNoHarnessSession: a person launching the screens from a
+// harness session's terminal is not that session, so what the screens run
+// journals no session whichever variable names it; a script's run of the same
+// verb in that environment still records it, and an explicit --session is the
+// person's own word and stays.
+func TestTUIRunnerCarriesNoHarnessSession(t *testing.T) {
+	t.Parallel()
+	fx, st, e := workFixture(t)
+	T := fx.Ticket
+	for _, q := range []string{"one?", "two?", "three?", "four?", "five?"} {
+		runMain(t, e, "", "ask", T, "--slice", "c", "--session", "s-1", q)
+	}
+	both := map[string]string{"JIG_SESSION": "launch-jig", "CLAUDE_CODE_SESSION_ID": "launch-harness"}
+
+	if out, code := tuiRunner(withSessionEnv(e, both))([]string{"answer", T, "q-001", "Casual."}); code != 0 {
+		t.Fatalf("answer through the runner: exit %d\n%s", code, out)
+	}
+	if out, code := tuiRunner(withSessionEnv(e, map[string]string{"JIG_SESSION": "launch-jig"}))([]string{"answer", T, "q-002", "Casual."}); code != 0 {
+		t.Fatalf("answer through the runner: exit %d\n%s", code, out)
+	}
+	if out, code := tuiRunner(withSessionEnv(e, map[string]string{"CLAUDE_CODE_SESSION_ID": "launch-harness"}))([]string{"answer", T, "q-003", "Casual."}); code != 0 {
+		t.Fatalf("answer through the runner: exit %d\n%s", code, out)
+	}
+	if out, code := tuiRunner(withSessionEnv(e, both))([]string{"ask", T, "--slice", "c", "--session", "typed", "six?"}); code != 0 {
+		t.Fatalf("ask with --session through the runner: exit %d\n%s", code, out)
+	}
+	answers := linesOf(t, st, T, journal.EventAnswer)
+	if len(answers) != 3 {
+		t.Fatalf("answer lines = %+v, want 3", answers)
+	}
+	for _, l := range answers {
+		if l.Provenance != "person" || l.Session != "" {
+			t.Errorf("%s answered through the runner: provenance %q session %q, want the person's and no session", l.Ref, l.Provenance, l.Session)
+		}
+	}
+	asks := linesOf(t, st, T, journal.EventQuestion)
+	if got := asks[len(asks)-1].Session; got != "typed" {
+		t.Errorf("ask with --session through the runner: session %q, want typed", got)
+	}
+
+	// The same environment through run is a script or an agent: its session.
+	var buf bytes.Buffer
+	if code := run(withSessionEnv(e, both), []string{"answer", T, "q-005", "Scripted."}, &buf, strings.NewReader("")); code != 0 {
+		t.Fatalf("answer through run: exit %d\n%s", code, buf.String())
+	}
+	answers = linesOf(t, st, T, journal.EventAnswer)
+	if got := answers[len(answers)-1].Session; got != "launch-jig" {
+		t.Errorf("answer through run: session %q, want launch-jig", got)
+	}
+}
+
+// TestTUIFramesNameNoLaunchingSession: screens opened from a harness session's
+// terminal show no id of it after the person answers, and the line the answer
+// wrote names none: the frames alone cannot show a session, the line can.
+func TestTUIFramesNameNoLaunchingSession(t *testing.T) {
+	t.Parallel()
+	fx, st, e := workFixture(t)
+	runMain(t, e, "", "ask", fx.Ticket, "--slice", "c", "--session", "s-1", "which?")
+	e = withSessionEnv(e, map[string]string{"JIG_SESSION": "launch-jig", "CLAUDE_CODE_SESSION_ID": "launch-harness"})
+
+	keys, screen, wait := startTUI(t, e, fx.Ticket)
+	screen.until(t, "q-001")
+	keys.Write([]byte("a"))
+	screen.until(t, "answer q-001")
+	keys.Write([]byte("Casual\r"))
+	screen.until(t, "jig answer --as person "+fx.Ticket+" q-001 -- Casual")
+	keys.Write([]byte("q"))
+	if code := wait(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, screen.String())
+	}
+	for _, id := range []string{"launch-jig", "launch-harness"} {
+		if strings.Contains(screen.String(), id) {
+			t.Errorf("the frames name the launching session %q:\n%s", id, screen.String())
+		}
+	}
+	answers := linesOf(t, st, fx.Ticket, journal.EventAnswer)
+	if len(answers) != 1 || answers[0].Session != "" {
+		t.Errorf("answer lines = %+v, want the screens' one answer with no session", answers)
+	}
+}

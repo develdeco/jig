@@ -406,7 +406,14 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventEnvDown:
 		return "its environment went down"
 	case journal.EventEnvUnavailable:
-		return strings.TrimSpace("its environment is unavailable: " + l.Summary)
+		text := "its environment is unavailable"
+		if l.Outcome != "" {
+			text += " (policy: " + l.Outcome + ")"
+		}
+		if l.Summary != "" {
+			text += ": " + l.Summary
+		}
+		return text
 	case journal.EventDriver:
 		return strings.TrimSpace("jig's driver: " + firstOf(l.Summary, l.Outcome))
 	case journal.EventReconcile:
@@ -418,11 +425,13 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventSpend:
 		return spendText(l)
 	case journal.EventApproval:
-		text := "by " + firstOf(personName(l.Summary), "someone")
-		if l.Provenance == "agent" && l.Session != "" {
-			text += ", recorded by " + who
+		if l.Provenance == "agent" {
+			if name := m.whoAs(t, l.Session, roleOf(l.Event)); name != "" {
+				return "by the " + name + " (an agent)"
+			}
+			return "by an agent"
 		}
-		return text
+		return "by " + firstOf(personName(l.Summary), "someone")
 	case journal.EventRevalidate:
 		return "the brief was checked again"
 	case eventBriefSeen, eventSlicesSeen:
@@ -456,6 +465,9 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return text
 	case journal.EventFixSlice:
 		text := "sent back " + l.Slice
+		if n := t.fixRound(l.Slice); n > 0 {
+			text += " from round " + strconv.Itoa(n)
+		}
 		if f := t.goals()[l.Slice]; f != "" {
 			text += ": " + f
 		}
