@@ -307,7 +307,7 @@ A file, or lines of it, a gate reviewer sets aside as holding no term on a criti
 _Avoid_: waiver, exclusion
 
 **Unprobed hunk**:
-A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed.
+A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed. The round keeps the list it left in its `findings.yaml`, and `jig status` and the review screen show it.
 _Avoid_: uncovered line, coverage gap
 
 **Repo-qualified file**:
