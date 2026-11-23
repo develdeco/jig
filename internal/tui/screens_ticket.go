@@ -202,6 +202,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
+	work := m.work(t, m.phaseOf(t))
 	focus, openRows := focusIndex(subs), 0
 	if focus >= 0 {
 		// The open sub-step takes what the other lines leave; with too many
@@ -218,7 +219,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	if openRows == 0 {
 		shown := pickSubs(subs, room)
 		for _, i := range shown {
-			p.boxAdd(m.foldedLine(t, step, subs[i], labelW))
+			p.boxAdd(m.foldedLine(t, step, subs[i], labelW, work))
 		}
 		if more := len(subs) - len(shown); more > 0 && room >= 2 {
 			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
@@ -242,11 +243,11 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	for i, s := range subs {
 		switch {
 		case i == focus:
-			for _, line := range m.openLines(t, step, s, subs, labelW, openRows) {
+			for _, line := range m.openLines(t, step, s, subs, labelW, openRows, work) {
 				p.boxAdd(line)
 			}
 		case shownAt[i]:
-			p.boxAdd(m.foldedLine(t, step, s, labelW))
+			p.boxAdd(m.foldedLine(t, step, s, labelW, work))
 		}
 	}
 	if more := len(others) - len(picked); more > 0 {
@@ -261,8 +262,8 @@ const labelMaxW = 16
 
 // foldedLine is a sub-step on one line: subLine with what the status adds to
 // its detail (subDetail), and how long it took once it is done.
-func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int) string {
-	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), t.subSummary(step, s)), " · ")
+func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int, work workTimes) string {
+	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), subSummary(work, step, s)), " · ")
 	return m.subLine(step, s, labelW)
 }
 

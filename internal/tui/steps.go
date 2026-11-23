@@ -269,30 +269,13 @@ func cannotStart(d phase.Ticket, p phase.Phase) bool {
 	return p.Name == d.Current && p.State == phase.StateCurrent && !d.Ready
 }
 
-// stepTimes are how long each step has taken: the gaps between consecutive
-// lines of the log that both belong to the step (placed), so a build that a
-// review sent a fix back to counts the fix and not the review between, and the
-// time from one step to the next (a person reading the outcome before prompting
-// the next phase) counts for neither. A line of no step (a spend) neither
-// starts nor ends a gap. The step under way also counts the time since its
-// latest line, while that line is the latest of the log: the brief waiting on
-// the person's answer, a slice being built.
+// stepTimes are how long each step has taken: its work (work.go), the sum of
+// what its sub-steps and the step itself counted.
 func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
+	w := m.work(t, d)
 	var took [stepCount]time.Duration
-	var prev time.Time
-	prevStep := -1
-	for _, p := range m.placed(t, d) {
-		at, ok := p.l.At()
-		if p.step < 0 || !ok {
-			continue
-		}
-		if p.step == prevStep && at.After(prev) {
-			took[p.step] += at.Sub(prev)
-		}
-		prev, prevStep = at, p.step
-	}
-	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
-		took[cur] += m.now().Sub(prev)
+	for i := range took {
+		took[i] = w.ofStep(i)
 	}
 	return took
 }
