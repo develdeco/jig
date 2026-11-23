@@ -162,6 +162,45 @@ func TestTheFinalRunReadsTheRunAtTheReviewedHead(t *testing.T) {
 	}
 }
 
+// TestTheFinalRunOfAProjectOfSeveralRepos: the screens read the final run as
+// publish does, by the same function. A ticket that builds in one repo of a
+// project of several has a bare head in its status and a repo on its final-run
+// line; a ticket built in two reads the run of each, and a failure in one is
+// not hidden by a pass in the other.
+func TestTheFinalRunOfAProjectOfSeveralRepos(t *testing.T) {
+	t.Parallel()
+	finalIn := func(ts, repo string, commit byte, outcome string, secs int) events.Envelope {
+		return jl(ts, "JIG-2", "", journal.EventFinalOracle, with("", sha(commit), outcome, "", "", ""), func(l *journal.Line) { l.Repo, l.Seconds = repo, secs })
+	}
+	read := func(status string, lines []events.Envelope) (phase.Sub, time.Duration) {
+		g := newRig(t, "JIG-2")
+		atClock(g, "2026-10-23T09:30:00Z")
+		g.r.answer("status JIG-2 --store /s", status, 0)
+		g.feed(lines...)
+		tk := g.m.w.tickets["JIG-2"]
+		d := g.m.phaseOf(tk)
+		subs := d.Of(phase.Build).Subs
+		return subs[len(subs)-1], g.m.clocks(tk, d).work.of(stepBuild, "final")
+	}
+
+	// One repo of several: a bare head, a run that names its repo.
+	sub, took := read(statusJIG2Done(), append(jig2(), finalIn(at(13, 35), "api", 'd', "pass", 240)))
+	if sub.Key != "final" || sub.State != phase.SubDone || sub.Detail != "passed" || took != 4*time.Minute {
+		t.Errorf("a ticket built in one repo of several reads %+v and %v, want its run passed in 4m", sub, took)
+	}
+
+	// Two repos: api's head ccc..., web's ddd...
+	lines := append(jig2Repos(), finalIn(at(13, 40), "api", 'c', "fail", 30), finalIn(at(13, 45), "web", 'd', "pass", 90))
+	sub, took = read(statusJIG2Repos(), lines)
+	if sub.State != phase.SubDone || sub.Detail != "failed" || took != 2*time.Minute {
+		t.Errorf("a ticket built in two repos reads %+v and %v, want failed in 2m (30s and 90s)", sub, took)
+	}
+	sub, _ = read(statusJIG2Repos(), append(jig2Repos(), finalIn(at(13, 45), "web", 'd', "pass", 90)))
+	if sub.State != phase.SubPending || !strings.Contains(sub.Detail, "none at the reviewed head ccccccc") {
+		t.Errorf("a ticket whose api head has no run reads %+v, want none at ccccccc", sub)
+	}
+}
+
 // TestTheAsksWaitIsNeverReviewWork: the asks a round left wait for the person
 // from the round's close to the decision of the last of them, and nothing in it
 // is work: not a call of a session in between, not the time before one of
