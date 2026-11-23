@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -36,27 +35,13 @@ func (m *Model) phaseOf(t *ticket) phase.Ticket {
 // subFinal is the key of the build's sub-step for the ticket's last run.
 const subFinal = "final"
 
-// addFinalRun gives the build the sub-step of its final run when the journal
-// records one: a run of the union of the slices' checks after the review, which
-// is time the build took and no slice's. It says how the latest ended.
+// addFinalRun gives the build the sub-step of its final run once a round has a
+// reviewed head: a run of the union of the slices' checks after the review is
+// time the build took and no slice's (finalrun.go).
 func addFinalRun(t *ticket, d *phase.Ticket) {
-	var last *events.Envelope
-	for i := range t.lines {
-		if t.lines[i].Event == journal.EventFinalOracle {
-			last = &t.lines[i]
-		}
+	if runs := t.finalRuns(); runs != nil {
+		d.Phases[stepBuild].Subs = append(d.Phases[stepBuild].Subs, finalSub(runs))
 	}
-	if last == nil {
-		return
-	}
-	detail := last.Outcome
-	if detail == "pass" {
-		detail = "passed"
-	} else if detail == "fail" {
-		detail = "failed"
-	}
-	build := &d.Phases[stepBuild]
-	build.Subs = append(build.Subs, phase.Sub{Key: subFinal, Label: "final run", State: phase.SubDone, Detail: detail})
 }
 
 // factsOf gathers what internal/phase derives the sub-steps from, and the

@@ -96,27 +96,69 @@ func TestAStepRowIsTheSumOfItsSubSteps(t *testing.T) {
 	}
 
 	// The ticket's last run, after the review, is a sub-step of the build of
-	// its own, and no time goes to the step's own key.
+	// its own: the run jig recorded for the reviewed head, in the seconds it
+	// recorded, whatever the harness recorded around it.
 	f := newRig(t, "JIG-2")
 	atClock(f, "2026-10-23T09:30:00Z")
 	f.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
 	f.feed(jig2()...)
 	f.feed(
-		toolOn("JIG-2", at(13, 31), "s-main", "jig verify JIG-2 --final", said("Run the final check")),
-		jl(at(13, 35), "JIG-2", "", journal.EventFinalOracle, with("", sha('c'), "pass", "", "", ""), func(l *journal.Line) { l.Seconds = 240 }),
-		jl(at(13, 36), "JIG-2", "", journal.EventEnvDown),
+		jl(at(13, 35), "JIG-2", "", journal.EventFinalOracle, with("", sha('d'), "pass", "", "", ""), func(l *journal.Line) { l.Seconds = 240 }),
+		toolOn("JIG-2", at(13, 36), "s-main", "jig verify JIG-2 --final", said("Run the final check")),
+		jl(at(13, 37), "JIG-2", "", journal.EventEnvDown),
 	)
 	tk := f.m.w.tickets["JIG-2"]
 	d := f.m.phaseOf(tk)
 	c := f.m.clocks(tk, d)
 	var sum time.Duration
-	final := false
 	for _, s := range d.Of(phase.Build).Subs {
 		sum += c.work.of(stepBuild, s.Key)
-		final = final || (s.Key == "final" && s.Label == "final run" && s.Detail == "passed" && c.work.of(stepBuild, s.Key) > 0)
 	}
-	if !final || c.work.of(stepBuild, "") != 0 || sum != f.m.steps(tk)[stepBuild].took {
-		t.Errorf("the build: final run present %v, the step's own time %v, sub-steps add up to %v, row says %v", final, c.work.of(stepBuild, ""), sum, f.m.steps(tk)[stepBuild].took)
+	if c.work.of(stepBuild, "final") != 4*time.Minute || c.work.of(stepBuild, "") != 0 || sum != f.m.steps(tk)[stepBuild].took {
+		t.Errorf("the build: final run %v, the step's own time %v, sub-steps add up to %v, row says %v", c.work.of(stepBuild, "final"), c.work.of(stepBuild, ""), sum, f.m.steps(tk)[stepBuild].took)
+	}
+}
+
+// TestTheFinalRunReadsTheRunAtTheReviewedHead: the build's final run is the one
+// jig recorded for the head the latest round reviewed (ddd...): its word is that
+// run's outcome and its time the seconds it recorded; a run at another commit or
+// one that covers nothing is none.
+func TestTheFinalRunReadsTheRunAtTheReviewedHead(t *testing.T) {
+	t.Parallel()
+	run := func(ts string, commit byte, outcome string, secs int, mod ...func(*journal.Line)) events.Envelope {
+		return jl(ts, "JIG-2", "", journal.EventFinalOracle, append([]func(*journal.Line){with("", sha(commit), outcome, "", "", ""), func(l *journal.Line) { l.Seconds = secs }}, mod...)...)
+	}
+	read := func(lines ...events.Envelope) (phase.Sub, time.Duration) {
+		g := newRig(t, "JIG-2")
+		atClock(g, "2026-10-23T09:30:00Z")
+		g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
+		g.feed(jig2()...)
+		g.feed(lines...)
+		if len(lines) > 0 {
+			g.feed(jl(at(13, 36), "JIG-2", "", journal.EventEnvDown)) // closes into the sub-step before it
+		}
+		tk := g.m.w.tickets["JIG-2"]
+		d := g.m.phaseOf(tk)
+		subs := d.Of(phase.Build).Subs
+		return subs[len(subs)-1], g.m.clocks(tk, d).work.of(stepBuild, "final")
+	}
+	none := "none at the reviewed head " + strings.Repeat("d", 7)
+	for name, c := range map[string]struct {
+		lines  []events.Envelope
+		state  string
+		detail string
+		took   time.Duration
+	}{
+		"no run":                    {nil, phase.SubPending, none, 0},
+		"a run at an older head":    {[]events.Envelope{run(at(13, 35), 'c', "pass", 240)}, phase.SubPending, none, 0},
+		"a run that covers nothing": {[]events.Envelope{run(at(13, 35), 'd', "pass", 240, func(l *journal.Line) { l.Uncovered = "dirty" })}, phase.SubPending, none, 0},
+		"a failure then a pass":     {[]events.Envelope{run(at(13, 35), 'd', "fail", 60), run(at(13, 40), 'd', "pass", 240)}, phase.SubDone, "passed", 4 * time.Minute},
+		"a pass then a failure":     {[]events.Envelope{run(at(13, 35), 'd', "pass", 240), run(at(13, 50), 'd', "fail", 90)}, phase.SubDone, "failed", 90 * time.Second},
+	} {
+		sub, took := read(c.lines...)
+		if sub.Key != "final" || sub.State != c.state || sub.Detail != c.detail || took != c.took {
+			t.Errorf("%s: the final run reads %+v and %v, want %s %q and %v", name, sub, took, c.state, c.detail, c.took)
+		}
 	}
 }
 

@@ -97,6 +97,12 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 		}
 		prev, prevStep, prevKey = at, p.step, p.key
 	}
+	// The final run is what jig recorded of it, not the gaps between lines.
+	if secs := finalSeconds(t.finalRuns()); secs > 0 {
+		w[workRef{stepBuild, subFinal}] = secs
+	} else {
+		delete(w, workRef{stepBuild, subFinal})
+	}
 	idle := map[int]time.Time{}
 	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
 		if key, ok := tailOwner(d.Phases[cur], prevKey); ok {
