@@ -158,7 +158,14 @@ func (m *Model) stepLine(s stepRow, current bool) string {
 		text = fit(text, m.width-7-21-width(s.Wait)-1) + " " + s.Wait
 	}
 	took := m.st.dim(pad(s.Took, 7))
+	if s.Idle != "" {
+		text = fit(text, m.width-7-21-width(s.Idle)-3) + " · " + s.Idle
+	}
 	switch {
+	case s.Idle != "":
+		// A step nobody is working on is drawn back, its time stopped.
+		name, text = m.st.bold(name), m.st.dim(text)
+		took = m.st.dim(pad(s.Took, 7))
 	case s.Wait != "":
 		// A step that waits for a person or the host reads it in the colour of
 		// a turn that is not the builder's, current or not.

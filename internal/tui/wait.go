@@ -31,6 +31,9 @@ func (w waitSpan) standing() bool { return w.end.IsZero() }
 type clocks struct {
 	work  workTimes
 	waits []waitSpan
+	// idle is, for the step under way when its holder is gone or quiet, when
+	// the holder last worked (idle.go).
+	idle map[int]time.Time
 }
 
 // waitOf is the wait of the sub-step key of step, done or standing: the latest

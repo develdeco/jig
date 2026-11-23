@@ -120,7 +120,7 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{
 		"✓ slice round  verified aaaaaaa · took 37s",
-		"◐ slice clamp  claimed ── run ── verified", "57m 30s",
+		"◐ slice clamp  claimed ── run ── verified", "10s",
 		"goal     Clamp negative quantities",
 		"held by  builder · Claude Code · Sonnet 5",
 		"commit   bbbbbbb “Clamp negative quantities”",

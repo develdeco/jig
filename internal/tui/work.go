@@ -77,22 +77,40 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 					gap -= overlap(prev, at, x.start, x.end)
 				}
 			}
-			if gap > 0 {
+			if gap > 0 && gap <= liveWindow {
 				w[workRef{p.step, key}] += gap
 			}
 		}
 		prev, prevStep, prevKey = at, p.step, p.key
 	}
+	idle := map[int]time.Time{}
 	if cur := currentOf(d); prevStep == cur && d.Phases[cur].State != phase.StateDone && m.now().After(prev) {
 		if key, ok := tailOwner(d.Phases[cur], prevKey); ok {
+			if held := windowOf(ws, cur, key); held != nil {
+				if last, gone := m.idleOf(t, *held, prev); gone {
+					idle[cur] = last
+					return clocks{w, waits, idle}
+				}
+			}
 			w[workRef{cur, key}] += m.now().Sub(prev)
 		}
 	}
-	return clocks{w, waits}
+	return clocks{w, waits, idle}
 }
 
 // work is the work of the ticket (clocks).
 func (m *Model) work(t *ticket, d phase.Ticket) workTimes { return m.clocks(t, d).work }
+
+// windowOf is the window of the sub-step key of step that is under way, nil
+// when its holder is not known.
+func windowOf(ws []moveWindow, step int, key string) *moveWindow {
+	for i := range ws {
+		if ws[i].step == step && ws[i].key == key && ws[i].open {
+			return &ws[i]
+		}
+	}
+	return nil
+}
 
 // withStarts is the lines with, for each sub-step under way that no line of its
 // own opened (a brief being drafted by the session the ledger ties to it), a

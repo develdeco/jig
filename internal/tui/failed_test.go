@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -42,6 +44,7 @@ func TestAFailedSliceReadsFailedNotBeingBuilt(t *testing.T) {
 
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 24})
 	g.feed(
 		jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 		jl(at(0, 5), "JIG-1", "a", journal.EventOracle, with("s-builder", sha('a'), "fail", "boom", "", "")),

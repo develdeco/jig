@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
@@ -187,18 +188,10 @@ func TestATimePastAHundredHoursFitsItsColumn(t *testing.T) {
 	if got := span(99*time.Hour + 59*time.Minute); got != "99h 59m" {
 		t.Errorf("span(99h59m) = %q, want 99h 59m", got)
 	}
-	status := strings.Join([]string{"ticket: SHOP-1", "state: building",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
-			{"round", "building", "1", "-", "-", "Round to the cent"},
-		}), "questions: none"}, "\n") + "\n"
 	g := newRig(t, "SHOP-1")
-	atClock(g, "2026-11-06T05:51:00Z")
-	g.r.answer("status SHOP-1 --store /s", status, 0)
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
-	g.feed(jl("2026-10-23T09:00:00Z", "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")))
-	row := stepsRow(g, stepBuild)
-	if !strings.Contains(row, " 332h ") || strings.Contains(row, "…") {
-		t.Errorf("the build row reads\n%s\nwant 332h in its column", row)
+	row := ansi.Strip(g.m.stepLine(stepRow{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}, true))
+	if !strings.Contains(row, " 332h    slice round") || strings.Contains(row, "…") {
+		t.Errorf("the build row reads %q, want 332h in its seven cells", row)
 	}
 }
 

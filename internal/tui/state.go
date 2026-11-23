@@ -37,6 +37,9 @@ type world struct {
 	// sessionInfo is what each session's session-start line in the ledger
 	// said of it (people.go), whatever ticket the line named.
 	sessionInfo map[string]sessionInfo
+	// sessionEnd is when each session's session-end line in the ledger said it
+	// ended, whatever ticket the line named.
+	sessionEnd map[string]time.Time
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart
 	chartOrder []string
@@ -46,7 +49,7 @@ type world struct {
 }
 
 func newWorld() *world {
-	return &world{tickets: map[string]*ticket{}, binder: events.NewBinder(true), sessionInfo: map[string]sessionInfo{}, charts: map[string]*chart{}}
+	return &world{tickets: map[string]*ticket{}, binder: events.NewBinder(true), sessionInfo: map[string]sessionInfo{}, sessionEnd: map[string]time.Time{}, charts: map[string]*chart{}}
 }
 
 // chart is what is known of one chart: how the store listing names it, and
@@ -173,6 +176,11 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 		info := w.sessionInfo[e.Session]
 		info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
 		w.sessionInfo[e.Session] = info
+	}
+	if e.Src == events.SrcLedger && e.Session != "" && e.Event == journal.EventSessionEnd {
+		if at, ok := e.At(); ok && at.After(w.sessionEnd[e.Session]) {
+			w.sessionEnd[e.Session] = at
+		}
 	}
 	id := e.Ticket
 	if id == "" {

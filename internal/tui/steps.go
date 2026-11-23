@@ -22,6 +22,9 @@ type stepRow struct {
 	// Wait is how long the sub-step the step waits on has stood, when the step
 	// waits for a person or the host; waitWords are that sub-step's words.
 	Wait, waitWords string
+	// Idle is "idle since 17:30" for a step under way whose holder is gone or
+	// quiet, "" otherwise.
+	Idle string
 }
 
 // steps are the ticket's five steps, in order, as internal/phase derives them
@@ -55,6 +58,9 @@ func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 		}
 		if w, ok := c.standingOf(i); ok && !rows[i].Done && rows[i].State != StateClosed {
 			rows[i].Wait, rows[i].waitWords = m.waitClock(w), w.words
+		}
+		if at, ok := c.idle[i]; ok && !rows[i].Done && rows[i].State != StateClosed && rows[i].Wait == "" {
+			rows[i].Idle = m.idleWords(at)
 		}
 	}
 	return rows

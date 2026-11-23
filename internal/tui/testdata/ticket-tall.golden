@@ -1,8 +1,8 @@
 jig  demo › BIG-1                                                                ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ───────────────────────────────────────────────────────── step 2 of 5 · worked 58m 30s ─╮
+  ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 8m 20s ─╮
   │  ✓ 1 Brief            no brief on record                                                       │
-  │▸ ◐ 2 Build    58m 30s 8 of 12 green · slice s9 is being built                                  │
+  │▸ ◐ 2 Build    8m 20s  8 of 12 green · slice s9 is being built · idle since 09:09               │
   │  ○ 3 Review           after the build                                                          │
   │  ○ 4 Publish          after a clean review                                                     │
   │  ○ 5 Land             after the publish                                                        │
@@ -16,7 +16,7 @@ jig  demo › BIG-1                                                             
   │  ✓ slice s6   verified 6666666 · took 40s                                                      │
   │  ✓ slice s7   verified 7777777 · took 40s                                                      │
   │  ✓ slice s8   verified 8888888 · took 40s                                                      │
-  │  ◐ slice s9   claimed ── run ── verified                                               50m 30s │
+  │  ◐ slice s9   claimed ── run ── verified                                                   20s │
   │      goal     Slice s9                                                                         │
   │      held by  builder                                                                          │
   │      commit   9999999 “Slice s9”                                                               │
