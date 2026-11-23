@@ -73,7 +73,7 @@ func TestStatusOfAContainerCarriesItsNeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := nextNotATask(r.st, data, store.KindIssue).withPlanFacts(r.st, cfg, project.MachineProject{}, data)
+	n, err := nextNotATask(r.st, data, store.KindIssue).withPlanFacts(r.st, cfg, project.MachineProject{}, nil, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestSuiteRowNamesTheTasksAddedAfterAFailedRun(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := suiteRows(s.st, cfg, project.MachineProject{Clones: map[string]string{"app": s.clone}}, "TK-1", rec)
+		got, err := suiteRows(s.st, cfg, project.MachineProject{Clones: map[string]string{"app": s.clone}}, nil, "TK-1", rec)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -35,6 +35,7 @@ type planSpec struct {
 	issue        *digestInfo
 	issueLines   []events.Envelope
 	unmet        []map[string]any
+	waits        []map[string]any
 	prompt       string
 	// closed are the tasks closed without landing, each with its reason.
 	closed map[string]string
@@ -98,6 +99,9 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	}
 	if spec.unmet != nil {
 		issueBlock["unmet"] = spec.unmet
+	}
+	if spec.waits != nil {
+		issueBlock["waits"] = spec.waits
 	}
 	verb := jsonLine(map[string]any{
 		"chart": "repeat", "title": "Repeat rounds", "ready": false, "code": "CHART_DONE", "started": true, "ungraduated": 0,

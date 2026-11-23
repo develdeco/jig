@@ -85,7 +85,7 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 			if err != nil {
 				return renderErr(stdout, err)
 			}
-			n, err := nextNotATask(st, data, k).withPlanFacts(st, cfg, mp, data)
+			n, err := nextNotATask(st, data, k).withPlanFacts(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge), data)
 			if err != nil {
 				return renderErr(stdout, err)
 			}

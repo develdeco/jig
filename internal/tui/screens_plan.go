@@ -28,10 +28,21 @@ const planMapRows = 12
 
 // issueID is the issue the chart plans, "" for a chart that plans none.
 func (c *chart) issueID() string {
-	if c.info == nil || c.info.Issue == nil {
-		return ""
+	if c.info != nil && c.info.Issue != nil {
+		return c.info.Issue.Ticket
 	}
-	return c.info.Issue.Ticket
+	// The store listing names the issue before the chart is read: the screen is
+	// the plan from its first frame.
+	return c.listing.Issue
+}
+
+// planIssue is the issue block of the chart that plans an issue: the verb's,
+// else what the listing names of it before the chart is read.
+func (c *chart) planIssue() *chartIssue {
+	if c.info != nil && c.info.Issue != nil {
+		return c.info.Issue
+	}
+	return &chartIssue{Ticket: c.listing.Issue}
 }
 
 // refreshIssue reads the status of the issue the chart plans, which holds the
@@ -43,6 +54,18 @@ func (m *Model) refreshIssue(c *chart) tea.Cmd {
 	}
 	m.w.ticketFor(id)
 	return m.refreshStatus(id)
+}
+
+// ungraduated counts the entries of the chart that have no ticket yet, which the
+// issue's own `jig next` lists among what it waits for.
+func (is *chartIssue) ungraduated() int {
+	n := 0
+	for _, w := range is.Waits {
+		if w.Why == "not graduated" {
+			n++
+		}
+	}
+	return n
 }
 
 // planOf is the name of the chart that plans issue, "" when no chart does: the
@@ -152,7 +175,7 @@ func (m *Model) kindIn(t *ticket) string {
 // cut; a page longer than the window scrolls with the cursor.
 func (m *Model) planPage(c *chart) page {
 	var p page
-	is := c.info.Issue
+	is := c.planIssue()
 	issue := m.w.tickets[is.Ticket]
 	var suite []statusSuite
 	if issue != nil && issue.status != nil {
@@ -161,7 +184,7 @@ func (m *Model) planPage(c *chart) page {
 	fixes := fixTasks(suite)
 	rows := m.planRows(m.chartRows(c), is.Ticket, is.Branch)
 
-	if e := m.top(); e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
+	if e := m.top(); c.info != nil && e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
 		m.mapPanel(&p, c, planMapRows)
 	}
 	m.needPanel(&p, is.Ticket, issue)
@@ -179,6 +202,11 @@ func (m *Model) planPage(c *chart) page {
 		})
 	p.lines = append(p.lines, tasks.lines...)
 	m.issuePanel(&p, c, issue, suite, rows)
+	if c.info == nil {
+		// The chart is not read yet: the plan is drawn from what is known, and
+		// says it is reading.
+		return p
+	}
 
 	frame := func(n int) int {
 		if n == 0 {
@@ -305,16 +333,19 @@ func (m *Model) planLine(state, label, words string) string {
 // its tasks landed, its suite (a line for each repo), its pull request and its
 // landing. A stage not reached reads dim.
 func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite, rows []chartRow) {
-	is := c.info.Issue
+	is := c.planIssue()
 	p.boxTop("Issue", is.Ticket)
 	branch := m.st.dim("no branch yet")
+	if c.info == nil {
+		branch = m.st.dim(readingText)
+	}
 	if is.Branch != "" {
 		branch = is.Branch
 		if len(is.Stack) > 0 && is.Stack[0].StartFrom != "" {
 			branch += m.st.dim(" · from " + is.Stack[0].StartFrom)
 		}
 	}
-	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), is.Prompt, suiteMet(is, issue, suite))
+	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), is.Prompt, suiteMet(is, issue, suite), is.ungraduated())
 	p.boxEnd()
 }
 
@@ -322,7 +353,7 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 // tasks landed, the suite lines it has (none for a multi-task), its own pull
 // request and its landing. prompt is what opens the pull request, and suiteOK
 // says no suite holds it back.
-func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite []string, prompt string, suiteOK bool) {
+func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite []string, prompt string, suiteOK bool, ungraduated int) {
 	p.boxAdd(m.planLine(StateOK, "branch", branch))
 
 	landed, total := planProgress(rows)
@@ -341,7 +372,7 @@ func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []
 	for _, l := range suite {
 		p.boxAdd(l)
 	}
-	prState, prWords := m.planPR(prompt, t, suiteOK, rows)
+	prState, prWords := m.planPR(prompt, t, suiteOK, ungraduated, rows)
 	p.boxAdd(m.planLine(prState, "PR", prWords))
 	landState, landWords := m.planLanding(id, t)
 	p.boxAdd(m.planLine(landState, "landing", landWords))
@@ -445,7 +476,7 @@ func suiteMet(is *chartIssue, issue *ticket, suite []statusSuite) bool {
 // planPR is the issue's own pull request: by number, target and state once it
 // is open; before that, what it waits for, which is never its tasks not landed
 // or its suite unmet being passed over.
-func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, rows []chartRow) (state, words string) {
+func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, ungraduated int, rows []chartRow) (state, words string) {
 	if issue == nil || issue.digest == nil {
 		return StateQueued, m.st.dim(readingText)
 	}
@@ -473,6 +504,8 @@ func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, rows []chartR
 			unlanded++
 		}
 	}
+	// An entry of the chart with no ticket yet is waited for too.
+	unlanded += ungraduated
 	if unlanded > 0 {
 		waits = append(waits, fmt.Sprintf("%d %s", unlanded, plural(unlanded, "task", "tasks")))
 	}

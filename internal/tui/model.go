@@ -807,7 +807,7 @@ func (m *Model) retryAfter(ticket string) tea.Cmd {
 func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 	c := m.w.charts[e.chart]
 	e.entered = true
-	cmds := []tea.Cmd{m.loadChart(e.chart)}
+	cmds := []tea.Cmd{m.loadChart(e.chart), m.refreshIssue(c)}
 	for _, id := range c.ids() {
 		if t := m.w.tickets[id]; t != nil && t.status == nil {
 			cmds = append(cmds, m.refreshStatus(id))

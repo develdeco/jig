@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/land"
+	"github.com/develdeco/jig/internal/manifest"
 	"github.com/develdeco/jig/internal/project"
 	"github.com/develdeco/jig/internal/store"
 )
@@ -33,7 +35,7 @@ type nextSuiteRow struct {
 // withPlanFacts adds to n, the status of an issue or a multi-task, what the
 // plan screen reads and the roster does not: the ticket's body whole and, for
 // an issue, its suite rows. A multi-task has no suite.
-func (n nextTicket) withPlanFacts(st *store.Store, cfg project.Config, mp project.MachineProject, data ticketData) (nextTicket, error) {
+func (n nextTicket) withPlanFacts(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData) (nextTicket, error) {
 	n.Need = strings.TrimSpace(data.rec.Body)
 	// Its branch is a name the store makes, so the plan of a multi-task, which
 	// has no chart verb of its own, reads it here.
@@ -43,9 +45,17 @@ func (n nextTicket) withPlanFacts(st *store.Store, cfg project.Config, mp projec
 	if n.Kind != store.KindIssue {
 		return n, nil
 	}
-	rows, err := suiteRows(st, cfg, mp, n.Ticket, data.rec)
+	rows, err := suiteRows(st, cfg, mp, merges, n.Ticket, data.rec)
 	if err != nil {
-		return nextTicket{}, err
+		// A suite that cannot be read is a row that says why, not a refusal of
+		// the whole status: the kind, chart and children stand.
+		rows = nil
+		for _, r := range cfg.Repos {
+			rows = append(rows, nextSuiteRow{Repo: r.Name(), Standing: land.SuiteUnrun, Why: err.Error()})
+		}
+		if len(rows) == 0 {
+			rows = []nextSuiteRow{{Standing: land.SuiteUnrun, Why: err.Error()}}
+		}
 	}
 	n.Suite = rows
 	return n, nil
@@ -53,9 +63,19 @@ func (n nextTicket) withPlanFacts(st *store.Store, cfg project.Config, mp projec
 
 // suiteRows are the suite rows of issue id: for each repo it builds in, one row
 // for every earlier tip whose latest final run failed, oldest first, then the
-// row of the tip of its branch as land.SuiteOf reads it.
-func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, id string, rec store.Ticket) ([]nextSuiteRow, error) {
+// row of the issue's own standing. Only a pushed issue at its suite stage reads
+// land.SuiteOf at its tip; a landed issue reads what was recorded, a repo that
+// declares no suite reads none recorded at every stage, and an issue whose tasks
+// have not landed or whose branch is not pushed says what it waits for. merges
+// nil asks nothing of the stage.
+func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, id string, rec store.Ticket) ([]nextSuiteRow, error) {
 	d := land.Deps{Store: st, Cfg: cfg, Clones: mp.Clones}
+	landed, waiting := false, false
+	if merges != nil {
+		if r, err := containerReadiness(st, cfg, mp, merges, id); err == nil {
+			landed, waiting = r.State == land.StateLanded, len(r.Waits) > 0
+		}
+	}
 	c, err := land.ContainerOf(d, id)
 	if err != nil {
 		return nil, err
@@ -78,6 +98,18 @@ func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, i
 				Seconds: r.line.Seconds, Signature: r.line.Signature, Fixes: fixesAfter(begun, runs, r),
 			})
 		}
+		if landed {
+			out = append(out, landedSuiteRow(s.Repo, runs, lines, land.JournalRepo(d, s.Repo)))
+			continue
+		}
+		if s.Tip == "" && mp.Clones[s.Repo] != "" && s.Standing == land.SuiteUnrun {
+			out = append(out, unpushedSuiteRow(cfg, mp.Clones[s.Repo], s.Repo, c.Branch))
+			continue
+		}
+		if waiting && s.Standing == land.SuiteUnrun && s.Tip != "" {
+			out = append(out, nextSuiteRow{Repo: s.Repo, Standing: land.SuiteUnrun, Command: s.Command, Why: "waits for its tasks to land before the suite is run"})
+			continue
+		}
 		row := nextSuiteRow{Repo: s.Repo, Standing: s.Standing, Command: s.Command, Tip: s.Tip}
 		switch s.Standing {
 		case land.SuitePass, land.SuiteFail:
@@ -97,6 +129,40 @@ func suiteRows(st *store.Store, cfg project.Config, mp project.MachineProject, i
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// landedSuiteRow is a landed issue's suite as it was recorded: the last final run
+// that judged the code, else the last waiver, else none recorded.
+func landedSuiteRow(repo string, runs []finalRun, lines []journal.Line, jr string) nextSuiteRow {
+	if len(runs) > 0 {
+		r := runs[len(runs)-1].line
+		return nextSuiteRow{Repo: repo, Standing: map[bool]string{true: land.SuitePass, false: land.SuiteFail}[r.Outcome == "pass"], Command: r.Command, Tip: r.Commit, Seconds: r.Seconds, Signature: r.Signature}
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := lines[i]; l.Event == journal.EventSuiteWaived && l.Repo == jr {
+			return nextSuiteRow{Repo: repo, Standing: land.SuiteWaived, Tip: l.Commit, Waiver: l.Summary}
+		}
+	}
+	return nextSuiteRow{Repo: repo, Standing: land.SuiteUndeclared}
+}
+
+// unpushedSuiteRow is the suite of an issue whose branch is not pushed: none
+// recorded when the repo declares no suite at its target, else a wait for the
+// branch, never a prompt to fetch it.
+func unpushedSuiteRow(cfg project.Config, dir, repo, branch string) nextSuiteRow {
+	for _, r := range cfg.Repos {
+		if r.Name() != repo {
+			continue
+		}
+		if tip, err := gitx.RevParse(dir, "origin/"+r.TargetBranch()); err == nil && tip != "" {
+			if m, err := manifest.ResolveAt(dir, tip); err == nil {
+				if _, ok := m.Oracles["suite"]; !ok {
+					return nextSuiteRow{Repo: repo, Standing: land.SuiteUndeclared}
+				}
+			}
+		}
+	}
+	return nextSuiteRow{Repo: repo, Standing: land.SuiteUnrun, Why: "waits for its branch " + branch + " to be pushed"}
 }
 
 // finalRun is a final run that judged the code, with when it was made.

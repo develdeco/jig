@@ -69,6 +69,10 @@ type chartIssue struct {
 	Ticket, Stage, State, Prompt, Branch string
 	Stack                                []chartStack
 	Unmet                                []chartUnmet
+	// Waits are the entries and tickets of the chart the issue's pull request
+	// waits for: Code is the ticket (empty for an entry with none yet) and Why its
+	// standing.
+	Waits []chartUnmet
 }
 
 // chartStack is where the issue's branch starts and its pull request goes in one
@@ -218,6 +222,10 @@ func parseChart(out string) (*chartInfo, error) {
 				Code string `json:"code"`
 				Why  string `json:"why"`
 			} `json:"unmet"`
+			Waits []struct {
+				Ticket   string `json:"ticket"`
+				Standing string `json:"standing"`
+			} `json:"waits"`
 		} `json:"issue"`
 	}
 	if err := json.Unmarshal([]byte(obj), &v); err != nil {
@@ -260,6 +268,9 @@ func parseChart(out string) (*chartInfo, error) {
 		info.Issue = &chartIssue{Ticket: is.Ticket, Stage: is.Stage, State: is.State, Prompt: is.Prompt, Branch: is.Branch}
 		for _, r := range is.Stack {
 			info.Issue.Stack = append(info.Issue.Stack, chartStack{Repo: r.Repo, StartFrom: r.StartFrom, PRTarget: r.PRTarget})
+		}
+		for _, w := range is.Waits {
+			info.Issue.Waits = append(info.Issue.Waits, chartUnmet{Code: w.Ticket, Why: w.Standing})
 		}
 		for _, u := range is.Unmet {
 			info.Issue.Unmet = append(info.Issue.Unmet, chartUnmet{Code: u.Code, Why: u.Why})
