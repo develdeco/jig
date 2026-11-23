@@ -67,6 +67,10 @@ type Reader struct {
 	ledgerOff int64
 	// binder places the ledger lines on tickets (binder.go).
 	binder *Binder
+	// placed are the sessions a scoped reader has handed back a ledger line of:
+	// the end of one names no ticket, and is handed back for the tickets its
+	// lines were on.
+	placed map[string]bool
 }
 
 // fileState is what a Reader remembers of one journal file.
@@ -230,8 +234,20 @@ func (r *Reader) readLedger(tickets map[string]bool) ([]item, error) {
 	var out []item
 	for _, raw := range lines {
 		for _, l := range r.binder.Bind(raw) {
-			if !r.scope.AllLedger && (l.Ticket == "" || !tickets[l.Ticket]) {
-				continue
+			if !r.scope.AllLedger {
+				inScope := l.Ticket != "" && tickets[l.Ticket]
+				// A session's end names no ticket, and is on none; it is the
+				// end of every session whose lines the reader handed back.
+				ends := l.Event == journal.EventSessionEnd && l.Ticket == "" && r.placed[l.Session]
+				if !inScope && !ends {
+					continue
+				}
+				if inScope && l.Session != "" {
+					if r.placed == nil {
+						r.placed = map[string]bool{}
+					}
+					r.placed[l.Session] = true
+				}
 			}
 			env := Envelope{Src: SrcLedger, Line: l}
 			at, _ := env.At()

@@ -16,16 +16,7 @@ const liveWindow = time.Minute
 // call, a session start or touch) within liveWindow of now, from a session that
 // has not written a later session end. The store says nothing of a session at
 // work, so this is read from the ledger's recency and from nothing else.
-func (t *ticket) live(now time.Time) (time.Duration, bool) {
-	ended := map[string]time.Time{}
-	for _, l := range t.ledger {
-		if l.Event != journal.EventSessionEnd {
-			continue
-		}
-		if at, ok := l.At(); ok && at.After(ended[l.Session]) {
-			ended[l.Session] = at
-		}
-	}
+func (t *ticket) live(now time.Time, ended map[string]time.Time) (time.Duration, bool) {
 	best, found := time.Duration(0), false
 	for _, l := range t.ledger {
 		switch l.Event {
@@ -60,7 +51,7 @@ func (c *chart) live(w *world, now time.Time) (time.Duration, bool) {
 		if t == nil {
 			continue
 		}
-		if age, ok := t.live(now); ok && (!found || age < best) {
+		if age, ok := t.live(now, w.sessionEnd); ok && (!found || age < best) {
 			best, found = age, true
 		}
 	}
@@ -73,6 +64,6 @@ func (m *Model) ticketLive(t *ticket) bool {
 	if t == nil {
 		return false
 	}
-	_, ok := t.live(m.now())
+	_, ok := t.live(m.now(), m.w.sessionEnd)
 	return ok
 }

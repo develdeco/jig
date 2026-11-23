@@ -89,7 +89,7 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 
 		// A session end after the line: not live, even inside the window.
 		now = rigNow
-		g.feed(ll(at(59, 10), "JIG-1", journal.EventSessionEnd, with("s-builder", "", "", "", "", "")))
+		g.feed(ll(at(59, 10), "", journal.EventSessionEnd, with("s-builder", "", "", "", "", "")))
 		if !hasGroup(ticketPage()) {
 			t.Errorf("a session that ended still holds the words back:\n%s", ticketPage())
 		}
@@ -129,6 +129,22 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 			t.Errorf("the Run panel does not say a session is at work:\n%s", v)
 		}
 	})
+}
+
+// TestASessionEndReachesTheTicketsOfItsSession: the end of a session names no
+// ticket, as the writers record it, and still ends the sessions of every ticket
+// it worked on, so the words come back at once and not when the line ages out.
+func TestASessionEndReachesTheTicketsOfItsSession(t *testing.T) {
+	t.Parallel()
+	g := askedRig(t, "JIG-1")
+	g.feed(ll(at(59, 0), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
+	if hasGroup(pagesText(g.m.ticketPage("JIG-1"))) {
+		t.Fatalf("a live session does not hold the words back")
+	}
+	g.feed(ll(at(59, 10), "", journal.EventSessionEnd, with("s-builder", "", "", "", "", "")))
+	if p := pagesText(g.m.ticketPage("JIG-1")); !hasGroup(p) {
+		t.Errorf("a session that ended with a line naming no ticket still holds the words back:\n%s", p)
+	}
 }
 
 // TestALandPromptIsNeverHeldBack: a landing's prompt is the person's word and a
