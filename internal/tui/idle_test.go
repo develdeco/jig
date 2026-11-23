@@ -85,7 +85,7 @@ func TestAQuietTicketScreenReadsItsStatusAgainAndSaysWhatAppeared(t *testing.T) 
 		t.Fatalf("the status was read %d times after 3.5s of quiet, want 2", n)
 	}
 	v = g.view()
-	for _, want := range []string{"✓ brief drafted   6 sections", "◐ slices written", "brief·drafted ◐ 6 sections written"} {
+	for _, want := range []string{"✓ brief drafted   6 sections", "◐ slices written", "brief·drafted ✓ 6 sections written"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("after the brief was written the screen lacks %q:\n%s", want, v)
 		}
@@ -99,7 +99,7 @@ func TestAQuietTicketScreenReadsItsStatusAgainAndSaysWhatAppeared(t *testing.T) 
 	advance(3 * time.Second)
 	g.send(idleMsg{})
 	v = g.view()
-	for _, want := range []string{"✓ slices written  2 slices", "brief·slices  ◐ 2 slices written", "brief·drafted ◐ 6 sections written"} {
+	for _, want := range []string{"✓ slices written  2 slices", "brief·slices  ✓ 2 slices written", "brief·drafted ✓ 6 sections written"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("after the slices were written the screen lacks %q:\n%s", want, v)
 		}
