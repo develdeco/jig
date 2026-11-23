@@ -48,7 +48,7 @@ func TestReviewScreenSaysWhoReviewedEachRoundAndHowFarTheyStood(t *testing.T) {
 	)...).press("enter")
 	text := pageText(g)
 	for _, want := range []string{
-		"✖ round 1  not clean  raised 1 ask",
+		"✗ round 1  not clean  raised 1 ask",
 		"builder reviewing its own change (Codex · Gpt 5)",
 		"full 0000000..ccccccc · 4 files read",
 		"reviewer · independence unknown · s-review", // round 2: nothing known of its model

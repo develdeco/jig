@@ -270,7 +270,7 @@ func TestBuildScreenShowsAVerificationThatCouldNotRun(t *testing.T) {
 		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventVerifyError, with("", sha('a'), "", "no worktree", "", "")),
 	).press("enter")
-	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✖ aaaaaaa “first”") {
+	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✗ aaaaaaa “first”") {
 		t.Errorf("the screen does not show the commit that could not be verified:\n%s", text)
 	}
 }

@@ -290,7 +290,7 @@ func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 		t.Fatalf("commands run = %q, want only the refused approval: nothing is pushed on a refusal", got)
 	}
 	v := g.view()
-	for _, w := range []string{"✖ jig publish JIG-2 --approve", "the latest round is not clean"} {
+	for _, w := range []string{"✗ jig publish JIG-2 --approve", "the latest round is not clean"} {
 		if !strings.Contains(v, w) {
 			t.Errorf("the screen lacks %q:\n%s", w, v)
 		}

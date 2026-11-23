@@ -308,7 +308,7 @@ func TestIssuePlanStagesNameBranchSuitePullRequestAndLanding(t *testing.T) {
 	}
 	closedPR := planRig(t, planSpec{issue: &digestInfo{Kind: "issue", State: "published", PRs: []digestPR{{Number: 512, State: "closed", Target: "main"}}}})
 	closedPR.m.height = 40
-	if row := issueLine(stripANSI(closedPR.view()), "PR"); !strings.Contains(row, "✖ PR") || !strings.Contains(row, "PR #512 into main · closed") {
+	if row := issueLine(stripANSI(closedPR.view()), "PR"); !strings.Contains(row, "✗ PR") || !strings.Contains(row, "PR #512 into main · closed") {
 		t.Errorf("a pull request closed on the host: %q", row)
 	}
 	for label, want := range map[string]string{

@@ -195,7 +195,7 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 	closedPR.PRs = []digestPR{{Repo: "api", Number: 9, URL: "https://x/9", State: "closed", Target: "main"}}
 	g = landTicket(t, closedPR)
 	g.press("5")
-	if view := g.view(); !strings.Contains(view, "✖ merge PR #9 into main · closed on the host, not merged") {
+	if view := g.view(); !strings.Contains(view, "✗ merge PR #9 into main · closed on the host, not merged") {
 		t.Errorf("a closed pull request:\n%s", view)
 	}
 

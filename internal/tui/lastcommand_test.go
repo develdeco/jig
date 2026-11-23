@@ -14,7 +14,7 @@ import (
 func lastPanel(view string) []string {
 	var out []string
 	for _, l := range strings.Split(view, "\n") {
-		if strings.HasPrefix(l, "  ✓ jig") || strings.HasPrefix(l, "  ✖ jig") {
+		if strings.HasPrefix(l, "  ✓ jig") || strings.HasPrefix(l, "  ✗ jig") {
 			out = append(out, l)
 		}
 	}
@@ -45,7 +45,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 		g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
 		g.feed(jig2Mid()...).press("enter", "g")
 		got := lastPanel(g.view())
-		if len(got) != 1 || got[0] != "  ✖ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)" {
+		if len(got) != 1 || got[0] != "  ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)" {
 			t.Errorf("panel = %q", got)
 		}
 	})
@@ -55,7 +55,7 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 		g.r.answer("publish JIG-2 --yes --store /s", "error: the head moved\ncode: PUBLISH_STALE\n", 1)
 		g.feed(jig2Mid()...).press("p", "y")
 		got := lastPanel(g.view())
-		if len(got) != 1 || got[0] != "  ✖ jig publish JIG-2 --yes  the head moved (PUBLISH_STALE)" {
+		if len(got) != 1 || got[0] != "  ✗ jig publish JIG-2 --yes  the head moved (PUBLISH_STALE)" {
 			t.Errorf("panel = %q, want only the failed step", got)
 		}
 	})

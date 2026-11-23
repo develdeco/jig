@@ -193,7 +193,7 @@ func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 	shared := map[string][]string{
 		"!": {StateFindings, StateAsk},
 		"✓": {StatePublished, StateOK},
-		"✖": {StateStalled, StateFail},
+		"✗": {StateStalled, StateFail},
 	}
 	for icon, who := range icons {
 		if len(who) > 1 && !reflect.DeepEqual(who, shared[icon]) {
