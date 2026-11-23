@@ -38,7 +38,7 @@ func init() {
 }
 
 // cmdTUI implements `jig tui [T|C] [--store P] [--project N] [--merge-every D]`: nine screens
-// (the project, a ticket, its brief, build, review and publish, a slice, a
+// (the project, a ticket, its brief, build, review, publish and land, a slice, a
 // chart) over the event stream `jig events` prints, acting only by running
 // verbs (internal/tui). With a ticket the screens open on it, with a chart (a
 // word that is no ticket of the store) on the chart's screen. It reads and

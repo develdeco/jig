@@ -24,8 +24,10 @@ type digestInfo struct {
 	// LandFirst are the tickets that must land before this one may: a
 	// published ticket whose pull request waits behind them.
 	LandFirst []string
-	PRs       []digestPR
-	Slices    *digestSlices
+	// Unfinished are the phases a closed ticket had not done when it closed.
+	Unfinished []string
+	PRs        []digestPR
+	Slices     *digestSlices
 }
 
 // digestPhase is one phase's state (done, current or pending) and its words.
@@ -113,6 +115,14 @@ func (dg *digestInfo) lay(d *phase.Ticket) {
 		}
 	}
 	d.Current, d.Ready = phase.Name(dg.Current), dg.Ready
+}
+
+// unfinished are the phases the digest says a closed ticket had not done.
+func (d *digestInfo) unfinished() []string {
+	if d == nil {
+		return nil
+	}
+	return d.Unfinished
 }
 
 // prs are the pull requests the digest recorded; none for a ticket the roster

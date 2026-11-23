@@ -137,7 +137,7 @@ func repoPrefix(repo string) string {
 // landingOf is the index of the landed line, not used yet, that records pr: the
 // one of its repo that merged into the branch it goes into. A line that names no
 // repo (a project of one repo writes none, whatever name the digest gives it)
-// stands for a pull request of any, as phase.LandedIn reads it.
+// stands for a pull request of any, where phase.LandedIn reads the same for the journal's own lines.
 func landingOf(lines []landedAt, used []bool, pr digestPR) int {
 	for i, l := range lines {
 		if !used[i] && (l.Repo == pr.Repo || l.Repo == "") && (l.Into == pr.Target || l.Into == "" || pr.Target == "") {

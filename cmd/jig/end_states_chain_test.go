@@ -94,6 +94,9 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 				row = l
 			}
 		}
+		if id == "TK-13" && !strings.Contains(row, "⊖ ⊖ ⊖ ⊖ ⊖") {
+			t.Errorf("%s: closed before its work was done, its dots on the project's list are not all closed:\n%s", id, row)
+		}
 		if !strings.Contains(row, w.icon+" "+id) || !strings.Contains(row, head(w.words, 28)) {
 			t.Errorf("%s: its row on the project's list is not %s with %q:\n%s", id, w.icon, w.words, row)
 		}

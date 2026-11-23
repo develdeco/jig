@@ -4,69 +4,59 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// closedStatus is `jig status SHOP-1` of a ticket closed before its work was done
-// (approved says whether its brief was approved, green whether its slice is).
-func unfinishedClosedStatus(approved, green bool) string {
-	approval, slice := "none", "queued"
-	if approved {
-		approval = "current"
-	}
-	if green {
-		slice = "green"
-	}
-	return strings.Join([]string{
-		"ticket: SHOP-1", "state: closed",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{{"round", slice, "1", "-", "-", "Round"}}),
-		"questions: none",
-		axi.KV("brief", [][2]string{{"approval", approval}, {"approved_by", "Dana <d@example.invalid>"}, {"provenance", "person"}}),
-		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{{"Goal", "round"}}),
-		axi.KV("closed", [][2]string{{"reason", "not-planned"}}),
-	}, "\n") + "\n"
-}
-
 // TestClosedTicketTellsUnfinishedStepsFromThePhasesDoneMarks: phase.Derive marks
-// every phase of a closed ticket done, so the steps it never finished are told
-// from its status: a brief nobody approved, a slice that is not green and a
-// review with no round read closed, and a step it finished keeps its words.
+// every phase of a closed ticket done, so the digest names the phases it had not
+// done when it closed, and every screen (the project's list, the chart's row and
+// the ticket's screen, from the first frame, with no status read) draws them
+// closed; a step it finished keeps its words, and a publish it never made keeps
+// the reason it closed in its words under the closed mark.
 func TestClosedTicketTellsUnfinishedStepsFromThePhasesDoneMarks(t *testing.T) {
 	t.Parallel()
-	done := task("publish", false, "done|drafted · waiting for your approval", "done|0 of 1 green", "done|ready for a fresh session to review the change", "done|closed · not planned", "done|none · closed without a pull request")
-	done.Closed = "not planned"
 	for name, tc := range map[string]struct {
-		approved, green bool
-		closed          []int
+		unfinished []string
+		closed     []int
+		dots       string
 	}{
-		"nothing finished": {false, false, []int{stepBrief, stepBuild, stepReview}},
-		"brief and build":  {true, true, []int{stepReview}},
+		"nothing finished": {[]string{"brief", "build", "review", "publish"}, []int{stepBrief, stepBuild, stepReview, stepPublish}, "⊖ ⊖ ⊖ ⊖ ⊖"},
+		"brief and build":  {[]string{"review", "publish"}, []int{stepReview, stepPublish}, "✓ ✓ ⊖ ⊖ ⊖"},
+		"closed published": {[]string{"review"}, []int{stepReview}, "✓ ✓ ⊖ ✓ ⊖"},
 	} {
-		g := newRig(t, "SHOP-1")
-		g.r.answer("status SHOP-1 --store /s", unfinishedClosedStatus(tc.approved, tc.green), 0)
-		g.feed(jl(at(0, 0), "SHOP-1", "", journal.EventNote))
-		g.pin("SHOP-1", done)
-		g.syncDigests()
-		tk := g.m.w.tickets["SHOP-1"]
-		if tk.status == nil || tk.status.Closed == "" {
-			t.Fatalf("%s: the status was not read as closed: %+v", name, tk.status)
-		}
+		done := task("publish", false, "done|approved by Ada", "done|1 slice green", "done|ready for a fresh session to review the change", "done|closed · not planned", "done|none · closed without a pull request")
+		done.Closed, done.Unfinished = "not planned", tc.unfinished
+		g := newRig(t, "")
+		g.m.w.setRoster([]rosterRow{{ID: "JIG-9", Title: "Ticket", State: "ready", Digest: done}})
+		tk := g.m.w.tickets["JIG-9"]
 		steps := g.m.steps(tk)
 		isClosed := map[int]bool{}
 		for _, i := range tc.closed {
 			isClosed[i] = true
 		}
-		for i := stepBrief; i <= stepReview; i++ {
-			if got := steps[i].State == StateClosed && steps[i].Text == "closed"; got != isClosed[i] {
+		for i := stepBrief; i <= stepPublish; i++ {
+			if got := steps[i].State == StateClosed; got != isClosed[i] {
 				t.Errorf("%s: step %d is %s %q, closed should be %v", name, i+1, steps[i].State, steps[i].Text, isClosed[i])
 			}
-			if !isClosed[i] && steps[i].Text != done.Phases[i].Text {
+			switch {
+			case i == stepPublish && isClosed[i]:
+				if steps[i].Text != "closed · not planned" {
+					t.Errorf("%s: the publish never made lost the reason: %q", name, steps[i].Text)
+				}
+			case isClosed[i]:
+				if steps[i].Text != "closed" {
+					t.Errorf("%s: step %d says %q, want closed", name, i+1, steps[i].Text)
+				}
+			case steps[i].Text != done.Phases[i].Text:
 				t.Errorf("%s: the finished step %d lost its words: %q", name, i+1, steps[i].Text)
 			}
 		}
 		if steps[stepLand].State != StateClosed || steps[stepLand].Text != "none · closed without a pull request" {
 			t.Errorf("%s: the land step is %+v", name, steps[stepLand])
+		}
+		// The same dots on the project's list, with no status read.
+		if row := lineWith(pagesText(g.m.mainPage()), "JIG-9"); !strings.Contains(row, tc.dots) {
+			t.Errorf("%s: main's row does not draw %s:\n%s", name, tc.dots, row)
 		}
 	}
 }

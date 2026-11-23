@@ -210,19 +210,16 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 }
 
 // unfinished are the steps of a closed ticket whose work was not done when it
-// closed: phase.Derive marks every phase of a closed ticket done, so they are
-// told by deriving the ticket again as an open one from the status the screens
-// read. Nothing is said before the status is read.
+// closed, as the digest says: phase.Derive marks every phase of a closed ticket
+// done, so the digest tells them apart from the ticket's own facts.
 func (m *Model) unfinished(t *ticket) [stepCount]bool {
 	var out [stepCount]bool
-	if t.status == nil || t.status.Closed == "" {
-		return out
-	}
-	f, lines := m.factsOf(t, t.status)
-	f.Closed = ""
-	open := phase.Derive(f, lines)
-	for i := range stepLand - 1 {
-		out[i] = open.Phases[i].State != phase.StateDone
+	for _, name := range t.digest.unfinished() {
+		for i, step := range stepNames {
+			if strings.EqualFold(step, name) {
+				out[i] = true
+			}
+		}
 	}
 	return out
 }
@@ -238,8 +235,12 @@ func endRows(rows []stepRow, end endState, unfinished [stepCount]bool) {
 		return
 	}
 	for i := range rows {
-		if !rows[i].Done || unfinished[i] {
+		switch {
+		case !rows[i].Done || (unfinished[i] && i != stepPublish):
 			rows[i].State, rows[i].Text = StateClosed, "closed"
+		case unfinished[i]:
+			// Closed before it published: its words are the reason it closed.
+			rows[i].State = StateClosed
 		}
 	}
 	rows[stepLand].State = StateClosed

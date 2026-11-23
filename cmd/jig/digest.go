@@ -46,6 +46,11 @@ type nextDigest struct {
 	// not landed and is open. Empty says nothing must land first, and so does
 	// absent, which is also any other ticket.
 	LandFirst []string `json:"land_first,omitempty"`
+	// Unfinished are the phases of a closed task that were not done when it
+	// closed (brief, build, review, publish): phase.Derive marks every phase of
+	// a closed ticket done, so they are told by deriving it again as an open one.
+	// Absent for a ticket that is open.
+	Unfinished []string `json:"unfinished,omitempty"`
 	// PRs is one row for each recorded pull request.
 	PRs       []nextDigestPR `json:"prs"`
 	BlockedBy []nextBlocker  `json:"blocked_by,omitempty"`
@@ -143,6 +148,7 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 	d := nextDigest{Kind: store.KindTask, Parent: parentOf(st, id, data.rec), BlockedBy: blocked, PhaseProblem: problem}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
+		d.Unfinished = unfinishedOf(st, id, merges)
 	}
 	if derived != nil {
 		d.Current, d.Ready, d.Phases = string(derived.Current), derived.Ready, phaseRows(*derived)
@@ -151,6 +157,24 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 	d.PRs = digestPRs(st, cfg, merges, id, data.rec, plan, shared, lines)
 	d.Slices = sliceCounts(data, lines)
 	return d
+}
+
+// unfinishedOf are the phases from brief to publish that a closed task had not
+// done when it closed: its facts read again with the closing left out.
+func unfinishedOf(st *store.Store, id string, merges mergeSource) []string {
+	f, lines, err := phaseFactsWith(st, id, merges, "")
+	if err != nil {
+		return nil
+	}
+	f.Closed = ""
+	open := phase.Derive(f, lines)
+	var out []string
+	for _, p := range open.Phases[:phase.Work] {
+		if p.State != phase.StateDone {
+			out = append(out, string(p.Name))
+		}
+	}
+	return out
 }
 
 // digestPRs are the pull requests a task recorded: a shared task's from its
