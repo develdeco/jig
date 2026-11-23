@@ -81,7 +81,7 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 				want := tc.d.Phases[i]
 				if i == stepPublish && len(tc.d.PRs) > 0 && !strings.HasPrefix(want.Text, "closed") {
 					// A published ticket's pull requests read by number and target.
-					want.Text = "published · PR #503 into " + target
+					want.Text = "published · PR #503 open into " + target
 				}
 				if row.Text != want.Text || row.Done != (want.State == phase.StateDone) {
 					t.Errorf("%s: step %d is %+v, the digest says %+v", tc.name, i+1, row, want)

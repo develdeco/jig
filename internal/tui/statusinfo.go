@@ -225,14 +225,15 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				PRs    []chartPR `json:"prs"`
 			} `json:"blocked_by"`
 			Digest *struct {
-				Kind         string `json:"kind"`
-				Parent       string `json:"parent"`
-				Current      string `json:"current"`
-				Ready        bool   `json:"ready"`
-				Behind       bool   `json:"behind"`
-				PhaseProblem string `json:"phase_problem"`
-				State        string `json:"state"`
-				Closed       string `json:"closed"`
+				Kind         string   `json:"kind"`
+				Parent       string   `json:"parent"`
+				Current      string   `json:"current"`
+				Ready        bool     `json:"ready"`
+				Behind       bool     `json:"behind"`
+				PhaseProblem string   `json:"phase_problem"`
+				State        string   `json:"state"`
+				Closed       string   `json:"closed"`
+				LandFirst    []string `json:"land_first"`
 				Phases       []struct {
 					Name  string `json:"name"`
 					State string `json:"state"`
@@ -273,7 +274,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}
 		if g := t.Digest; g != nil {
-			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed}
+			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, LandFirst: g.LandFirst}
 			for _, p := range g.Phases {
 				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text})
 			}

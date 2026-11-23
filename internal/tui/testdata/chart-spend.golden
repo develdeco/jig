@@ -1,7 +1,7 @@
 jig  demo › checkout  Coupons at checkout                          ◐ in progress
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 5 published ─╮
-  │  ◆ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◆  Land: waits for a merge                 │
+  │  ◇ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"        │
   │▸ ◐ JIG-5  Apply a cou…  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is bein… │
   │  ◐ JIG-8  Show the di…  ◐ ○ ○ ○ ○  ready · brief next                      │
   │  ◐ JIG-6  Remove a co…  ◐ ○ ○ ○ ○  stacked on JIG-5                        │

@@ -74,6 +74,9 @@ func chartStateWord(r chartRow) string {
 	if r.behind {
 		return behindText
 	}
+	if r.atEnd {
+		return r.end.Word
+	}
 	cur := r.steps[currentStep(r.steps)]
 	if cur.Done {
 		return "published"

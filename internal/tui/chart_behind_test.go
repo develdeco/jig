@@ -101,7 +101,7 @@ func TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords(t *testing.T) {
 	g := chartScreenRig(t)
 	c := g.m.w.charts["checkout"]
 	row := g.m.chartRows(c)[0]
-	if !row.done || row.behind || row.state() != StateReady {
+	if !row.done || row.behind || row.state() != StateWaitsToLand {
 		t.Errorf("JIG-4 = done %v behind %v state %s, want it waiting to land", row.done, row.behind, row.state())
 	}
 	if got := g.m.chartFirstOpen(c); got != 1 {

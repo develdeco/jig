@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/phase"
@@ -22,8 +21,11 @@ type digestInfo struct {
 	// multi-task's own pull request (waiting, ready, published or landed).
 	PhaseProblem, State string
 	Closed              string
-	PRs                 []digestPR
-	Slices              *digestSlices
+	// LandFirst are the tickets that must land before this one may: a
+	// published ticket whose pull request waits behind them.
+	LandFirst []string
+	PRs       []digestPR
+	Slices    *digestSlices
 }
 
 // digestPhase is one phase's state (done, current or pending) and its words.
@@ -120,22 +122,4 @@ func (d *digestInfo) prs() []digestPR {
 		return nil
 	}
 	return d.PRs
-}
-
-// prWords are the pull requests by number and target ("PR #503 into
-// 501-review-rounds-stop-repeating-work"), the URL of one with no number, "" for
-// none.
-func prWords(prs []digestPR) string {
-	var out []string
-	for _, pr := range prs {
-		switch {
-		case pr.Number > 0 && pr.Target != "":
-			out = append(out, "PR #"+strconv.Itoa(pr.Number)+" into "+pr.Target)
-		case pr.Number > 0:
-			out = append(out, "PR #"+strconv.Itoa(pr.Number))
-		default:
-			out = append(out, pr.URL)
-		}
-	}
-	return strings.Join(out, ", ")
 }

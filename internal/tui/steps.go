@@ -34,6 +34,9 @@ func (m *Model) steps(t *ticket) []stepRow {
 // row is drawn in, and how long the step has taken (stepTimes).
 func (m *Model) stepRows(t *ticket, d phase.Ticket) []stepRow {
 	rows := []stepRow{m.briefRow(t, d), m.buildRow(t, d), m.reviewRow(t, d), m.publishRow(t, d), m.landRow(t, d)}
+	if end, ok := m.endOf(t); ok {
+		endRows(rows, end)
+	}
 	if t.digest == nil && t.status == nil {
 		// Nothing was read of the ticket: its steps say so, with no state and
 		// no time.
@@ -188,7 +191,7 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	switch {
 	case s.Done:
 		s.State = StatePublished
-		if prs := prWords(t.digest.prs()); prs != "" && p.Text != "" && !strings.HasPrefix(p.Text, "closed") {
+		if prs := prWords(t.digest.prs(), true); prs != "" && p.Text != "" && !strings.HasPrefix(p.Text, "closed") {
 			s.Text = "published · " + prs
 		}
 	case p.State == phase.StatePending:
@@ -206,6 +209,22 @@ func (m *Model) publishRow(t *ticket, d phase.Ticket) stepRow {
 	return s
 }
 
+// endRows lay the end state of a ticket on its rows: the land step is drawn in
+// the end state's icon and colour, and a ticket closed reads closed in each step
+// it never finished, whatever the phase of that step says; a step it finished
+// keeps its words.
+func endRows(rows []stepRow, end endState) {
+	rows[stepLand].State = end.State
+	if end.State != StateClosed {
+		return
+	}
+	for i := range rows {
+		if !rows[i].Done {
+			rows[i].State, rows[i].Text = StateClosed, "closed"
+		}
+	}
+}
+
 // landRow is the land: waiting for the publish, for the person's word to merge,
 // for a merge made on the host to be recorded, or landed. A ticket with no pull
 // request to merge, or closed, has nothing to land and is past this step.
@@ -217,8 +236,6 @@ func (m *Model) landRow(t *ticket, d phase.Ticket) stepRow {
 		s.State = StateOK
 	case p.State == phase.StatePending:
 		s.State = StateQueued
-	case strings.Contains(p.Text, "not recorded"):
-		s.State = StateFindings
 	default:
 		s.State = StateReady
 	}
@@ -262,6 +279,9 @@ func (m *Model) stepTimes(t *ticket, d phase.Ticket) [stepCount]time.Duration {
 // stepLabel is where a ticket stands, for a header: the state of its current
 // step and the words that say it.
 func (m *Model) stepLabel(t *ticket) (state, label string) {
+	if end, ok := m.endOf(t); ok {
+		return end.State, end.Word
+	}
 	steps := m.steps(t)
 	cur := steps[currentStep(steps)]
 	if cur.Done {

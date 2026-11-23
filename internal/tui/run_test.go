@@ -165,7 +165,7 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	src := newLiveSource(append(jig1(), jig2()...)...)
 	s := startRun(t, plainConfig(src, r))
 
-	s.out.until(t, "waits for a merge")
+	s.out.until(t, "waits to land")
 	s.keys("\r") // open JIG-1
 	s.out.until(t, "needs you")
 	s.keys("g")

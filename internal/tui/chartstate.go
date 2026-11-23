@@ -116,6 +116,9 @@ type chartRow struct {
 	// person; behind, whether the ticket published and owes a merge, then a
 	// publish again.
 	done, needs, behind bool
+	// end is where the ticket stands at its end, when atEnd says it does.
+	end   endState
+	atEnd bool
 }
 
 // chartRows are the chart's tickets that have a ticket, in the verb's order (the
@@ -137,6 +140,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 				r.needs = needsYou(r.d) || t.digest.waitsForAnswer()
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
+				r.end, r.atEnd = m.endOf(t)
 			}
 			r.done = t.digest != nil && r.steps[stepPublish].Done
 		}

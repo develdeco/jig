@@ -35,11 +35,11 @@ func TestLandIsTheFifthStep(t *testing.T) {
 		icon  string
 	}{
 		{"before the publish", unpublished, "after the publish", "○"},
-		{"waiting for the person's word", waits, "waits for a merge", "◆"},
-		{"merged on the host and not recorded", merged, "merged on the host, not recorded", "!"},
+		{"waiting for the person's word", waits, "waits for a merge", "◇"},
+		{"merged on the host and not recorded", merged, "merged on the host, not recorded", "◇"},
 		{"landed", landed, "landed", "✓"},
 		{"nothing to merge", none, "none · no pull request to merge", "✓"},
-		{"closed", closed, "none · closed without a pull request", "✓"},
+		{"closed", closed, "none · closed without a pull request", "⊖"},
 	} {
 		g := newRig(t, "")
 		g.m.w.setRoster([]rosterRow{{ID: "JIG-9", Title: "Ticket", State: "ready", Digest: tc.d}})
@@ -147,11 +147,11 @@ func TestPublishRowNamesItsPullRequestTarget(t *testing.T) {
 		prs  []digestPR
 		want string
 	}{
-		{"one pull request", []digestPR{{Repo: "demo", Number: 503, URL: "https://x/503", Target: target}}, "published · PR #503 into " + target},
+		{"one pull request", []digestPR{{Repo: "demo", Number: 503, URL: "https://x/503", State: "open", Target: target}}, "published · PR #503 open into " + target},
 		{"two repos", []digestPR{
-			{Repo: "api", Number: 7, URL: "https://x/7", Target: "main"}, {Repo: "web", Number: 3, URL: "https://x/3", Target: "main"},
-		}, "published · PR #7 into main, PR #3 into main"},
-		{"a pull request with no number", []digestPR{{URL: "https://git.example/review/9", Target: "main"}}, "published · https://git.example/review/9"},
+			{Repo: "api", Number: 7, URL: "https://x/7", State: "open", Target: "main"}, {Repo: "web", Number: 3, URL: "https://x/3", State: "merged", Target: "main"},
+		}, "published · PR #7 open into main, PR #3 merged into main"},
+		{"a pull request with no number", []digestPR{{URL: "https://git.example/review/9", State: "open", Target: "main"}}, "published · https://git.example/review/9 open"},
 		{"none recorded", nil, "pull request opened · https://example.test/acme/demo/pull/503"},
 	} {
 		g := newRig(t, "")

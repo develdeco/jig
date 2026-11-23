@@ -138,7 +138,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 				want := p.Text
 				if i == 3 && len(d.PRs) > 0 && !strings.HasPrefix(p.Text, "closed") {
 					// A published ticket's Publish row names its pull request.
-					want = "published · PR #" + strconv.Itoa(d.PRs[0].Number) + " into " + d.PRs[0].Target
+					want = "published · PR #" + strconv.Itoa(d.PRs[0].Number)
 				}
 				screen.until(t, head(want, 24))
 			}
@@ -164,7 +164,12 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 		}
 		// Where its pull requests go.
 		for _, pr := range d.PRs {
-			into := "PR #" + strconv.Itoa(pr.Number) + " into " + pr.Target
+			// The host's word on it, as the screen says it: "state not read" when
+			// the digest has none.
+			into := "PR #" + strconv.Itoa(pr.Number) + " " + pr.State + " into " + pr.Target
+			if pr.State != "open" && pr.State != "merged" && pr.State != "closed" {
+				into = "PR #" + strconv.Itoa(pr.Number) + " into " + pr.Target + " (state not read)"
+			}
 			for _, s := range n.Stack {
 				if pr.Target != s.PRTarget {
 					t.Errorf("%s: the digest's pull request goes into %s, jig next says %s", id, pr.Target, s.PRTarget)

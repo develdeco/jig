@@ -64,6 +64,14 @@ func lookOf(state string) Look {
 		return Look{"▲", "6"}
 	case StatePublished:
 		return Look{"✓", "2"}
+	case StateOnLand:
+		return Look{"▲", "6"}
+	case StateWaitsToLand:
+		return Look{"◇", "3"}
+	case StateLanded:
+		return Look{"✓", "2"}
+	case StateClosed:
+		return Look{"⊖", "8"}
 	case StateAsk:
 		return Look{"!", "3"}
 	case StateKept:
