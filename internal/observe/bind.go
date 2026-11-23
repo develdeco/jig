@@ -12,10 +12,11 @@ import (
 
 // A tool call is written on the ticket it belongs to, by the first of:
 //
-//  1. the ticket a `jig` call names (`jig status T`), as a claim call does.
+//  1. the ticket the call names: a `jig` verb's ticket word (`jig status T`),
+//     as a claim call does, or a path under the store's tickets/<T>/ folder
+//     (a drafter's write of the brief).
 //  2. the ticket whose role the call's own agent holds: a claim until its
-//     release, a review round from `jig review context` to `jig review done`,
-//     a brief from `jig ticket new` or `jig graduate` to its approval. A
+//     release, a review round from `jig review context` to `jig review done`. A
 //     harness reports the session's directory for a subagent that works in a
 //     worktree of its own, so the directory says nothing of what the agent is
 //     on; its role does.
@@ -34,7 +35,7 @@ type claimCall struct {
 	// written on, slice the slice the command names; each may be empty.
 	word, ticket, slice string
 	// kind is the role the call took: a claim of a slice (the zero value), a
-	// review round opened, or a brief begun.
+	// review round opened.
 	kind string
 	// ended is true when the agent stopped after the call, or, for a review
 	// round, when it closed the round.
@@ -44,7 +45,6 @@ type claimCall struct {
 // The roles besides a claim that an agent holds on a ticket.
 const (
 	roleReview = "review"
-	roleBrief  = "brief"
 )
 
 // claimCallOf reads a tool line as the claim of a slice, false for any other
@@ -97,9 +97,35 @@ func idShaped(s string) bool {
 	return true
 }
 
-// roleCallOf reads a tool line as the start of a review round or a brief, and
-// whether it is one; a brief's ticket is the one the session was tied to just
-// before it (memory.go).
+// pathTicket is the ticket a path in the call names: one under the store's
+// tickets/<T>/ folder, among the files the tool touched or the words of the
+// command. A drafter writes the brief and the slices there, and nothing else
+// of its work names the ticket.
+func (h *handler) pathTicket() string {
+	if h.st == nil || h.st.Root == "" {
+		return ""
+	}
+	prefix := strings.ToLower(strings.TrimRight(filepath.ToSlash(h.st.Root), "/")) + "/tickets/"
+	paths := append([]string(nil), h.ev.Files...)
+	for _, w := range strings.Fields(h.ev.Command) {
+		paths = append(paths, strings.Trim(w, `"'`))
+	}
+	for _, p := range paths {
+		rest, ok := strings.CutPrefix(strings.ToLower(filepath.ToSlash(p)), prefix)
+		if !ok {
+			continue
+		}
+		id, _, _ := strings.Cut(rest, "/")
+		if t := h.ticketNamed(strings.ToUpper(id)); t != "" && h.st.TicketExists(t) {
+			return t
+		}
+	}
+	return ""
+}
+
+// roleCallOf reads a tool line as the opening of a review round, and whether it
+// is one. A session touch starts no role: a verb that ties a session to a
+// ticket says nothing of what the session does next.
 func roleCallOf(l journal.Line) (claimCall, bool) {
 	if l.Event != journal.EventTool {
 		return claimCall{}, false
@@ -107,8 +133,6 @@ func roleCallOf(l journal.Line) (claimCall, bool) {
 	switch {
 	case ledger.RunsJig(l.Command, "", "review", "context"):
 		return claimCall{kind: roleReview, word: reviewWord(l.Command)}, true
-	case ledger.RunsJig(l.Command, "", "ticket", "new") || ledger.RunsJig(l.Command, "", "graduate"):
-		return claimCall{kind: roleBrief}, true
 	}
 	return claimCall{}, false
 }
@@ -220,12 +244,8 @@ func (h *handler) bindTicket() (ticket, slice string) {
 	if t := h.jigTicketWord(h.ev.Command); t != "" {
 		return t, ""
 	}
-	if ledger.RunsJig(h.ev.Command, "", "ticket", "new") || ledger.RunsJig(h.ev.Command, "", "graduate") {
-		// The verb tied the session to the ticket while it ran, before the
-		// hook heard the call.
-		if t := h.memory().ticket; t != "" {
-			return t, ""
-		}
+	if t := h.pathTicket(); t != "" {
+		return t, ""
 	}
 	if t, s := h.claimBinding(false); t != "" {
 		return t, s
@@ -273,11 +293,6 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 		switch c.kind {
 		case roleReview:
 			return t, ""
-		case roleBrief:
-			if !h.approved(t) {
-				return t, ""
-			}
-			continue
 		}
 		read[t+"\x00"+c.slice] = true
 		if s, held := h.holds(t, c.slice); held {
@@ -285,22 +300,6 @@ func (h *handler) claimBinding(afterStop bool) (ticket, slice string) {
 		}
 	}
 	return "", ""
-}
-
-// approved reports whether the ticket's journal holds an approval of its
-// brief: a brief is drafted until then.
-func (h *handler) approved(ticket string) bool {
-	lines, err := journal.Read(h.st, ticket)
-	if err != nil {
-		h.fail(err)
-		return true
-	}
-	for _, l := range lines {
-		if l.Event == journal.EventApproval {
-			return true
-		}
-	}
-	return false
 }
 
 // holds reports whether the session holds a claim on ticket that the event's

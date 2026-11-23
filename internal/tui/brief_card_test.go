@@ -25,15 +25,16 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 		ll(at(20, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-p", "claude", "claude-sonnet-5" }),
 		tool(at(20, 30), "s-p", "go test ./...", said("Run the tests to see the bug")),
 		ll(at(21, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-p" }),
-		toolOn("SHOP-1", at(21, 1), "s-p", `jig ticket new --title "Cart totals"`, said("Mint a ticket for the bug")),
-		toolOn("SHOP-1", at(22, 0), "s-p", "jig skill intake", said("Read the intake skill")),
+		tool(at(21, 1), "s-p", `jig ticket new --title "Cart totals"`, said("Mint a ticket for the bug")),
+		tool(at(21, 30), "s-p", "jig skill intake", said("Read the intake skill")),
+		toolOn("SHOP-1", at(22, 0), "s-p", "jig validate SHOP-1 --check", said("Check the brief")),
 	)
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Brief ─"), "\n")
 	for _, want := range []string{
 		"◐ brief drafted   drafted ── slices ── approved", "9m 00s",
 		"planner  Claude Code · Sonnet 5",
-		"now      8m 00s  · Read the intake skill",
+		"now      8m 00s  · Check the brief",
 		"○ slices written  after the brief",
 		"○ brief approved  after the slices",
 	} {
@@ -42,12 +43,12 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 		}
 	}
 	act := strings.Join(panelLines(rows, "Activity"), "\n")
-	for _, want := range []string{"09:22:00 brief·drafted · Read the intake skill", "09:21:01 brief·drafted · Mint a ticket for the bug"} {
+	for _, want := range []string{"09:22:00 brief·drafted · Check the brief"} {
 		if !strings.Contains(act, want) {
 			t.Errorf("the activity lacks %q:\n%s", want, act)
 		}
 	}
-	if strings.Contains(act, "Run the tests to see the bug") {
+	if strings.Contains(act, "Run the tests to see the bug") || strings.Contains(act, "Mint a ticket for the bug") {
 		t.Errorf("the activity shows a call the session made before it minted the ticket:\n%s", act)
 	}
 
