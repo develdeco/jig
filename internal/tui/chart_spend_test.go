@@ -60,7 +60,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 func TestChartScreenShowsItsSpend(t *testing.T) {
 	t.Parallel()
 	v := chartWithSpendRig(t, spendObject()).view()
-	if want := "spend    31.2M tokens · $12.34 · 3 tickets · 2 subagents"; !strings.Contains(v, want) {
+	if want := "spend   31.2M tokens · $12.34 · 3 tickets · 2 subagents"; !strings.Contains(v, want) {
 		t.Errorf("the chart screen has no row %q:\n%s", want, v)
 	}
 	golden(t, "chart-spend", v)

@@ -14,16 +14,16 @@ jig  demo › checkout  Coupons at checkout                                     
   │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                   │
   │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                     │
   │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open              │
-  │  ·        Stack two coupons    fog · not graduated                                             │
+  │  ·        Stack two coupons               fog · not graduated                                  │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-4 ─╮
-  │  state    behind · owes a merge, then a publish                                                │
+  │  state behind · owes a merge, then a publish                                                   │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
-  │  next     say "Continue checkout"                                                              │
-  │  wave 1   JIG-4, JIG-8                                                                         │
-  │  wave 2   JIG-6                                                                                │
-  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                                          │
+  │  next    say "Continue checkout"                                                               │
+  │  wave 1  JIG-4, JIG-8                                                                          │
+  │  wave 2  JIG-6                                                                                 │
+  │  ends at JIG-7 waits for JIG-4 to merge · PR #7 open                                           │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────────────────────────── latest 5 of 18 ─╮
   │  09:14:21 JIG-4 publish·done     ● finished                                                    │

@@ -239,8 +239,6 @@ func claimedSlices(cmd string) []string {
 // change what its index means.
 func (m *Model) detailPanel(p *page, id string, rows []runRow) {
 	p.boxTop("Detail", id)
-	for _, r := range rows {
-		p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
-	}
+	m.runBoxRows(p, rows)
 	p.boxEnd()
 }

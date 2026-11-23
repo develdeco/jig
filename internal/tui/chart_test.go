@@ -466,8 +466,8 @@ func TestTheChartRowsAreWhatTheTicketsListSaysUntilTheVerbIsRead(t *testing.T) {
 	if want := []string{"JIG-4", "JIG-5", "JIG-6", "JIG-7", "JIG-8"}; !reflect.DeepEqual(ids, want) {
 		t.Errorf("ids = %v, want the listing's %v", ids, want)
 	}
-	if note, own := g.m.chartNote(rows[2]); stripANSI(note) != "stacked on JIG-5" || !own {
-		t.Errorf("JIG-6's note = %q, %v", note, own)
+	if note := g.m.chartNote(rows[2]); stripANSI(note) != "stacked on JIG-5" {
+		t.Errorf("JIG-6's note = %q", note)
 	}
 	// With the verb read, its order is the screen's: what can start comes before what waits.
 	g.press("end", "enter")
@@ -491,12 +491,12 @@ func TestChartRowReadsReadingUntilTheRosterIsThere(t *testing.T) {
 	answerChart(g, roster, "checkout", checkoutJSON(), nil)
 	g.feed().press("enter")
 	v := g.view()
-	for _, want := range []string{"○ JIG-4  Coupon model", "○ ○ ○ ○", "reading…", "state    reading…"} {
+	for _, want := range []string{"○ JIG-4  Coupon model", "○ ○ ○ ○", "reading…", "state reading…"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, v)
 		}
 	}
-	for _, guess := range []string{"ready · brief next", "stacked on JIG-5", "✓ ✓ ✓ ✓", "published https", "state    published"} {
+	for _, guess := range []string{"ready · brief next", "stacked on JIG-5", "✓ ✓ ✓ ✓", "published https", "state published"} {
 		if strings.Contains(v, guess) {
 			t.Errorf("the screen says %q of a ticket the roster has not listed:\n%s", guess, v)
 		}

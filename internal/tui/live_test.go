@@ -265,7 +265,7 @@ func TestAnIssuesEndsReadAsPhaseWritesThemWhateverTheLandings(t *testing.T) {
 
 	g := tallChart(t, checkoutJSON(model, end("merged")))
 	v := g.view()
-	if !strings.Contains(v, "ends at  "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
+	if !strings.Contains(v, "ends at "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
 		t.Errorf("an issue's run with no landing open does not say its end once, as phase writes it:\n%s", v)
 	}
 	g = tallChart(t, checkoutJSON(model, end("stacked")))

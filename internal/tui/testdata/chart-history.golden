@@ -14,16 +14,16 @@ jig  demo › checkout  Coupons at checkout                                     
   │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                   │
   │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                     │
   │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open              │
-  │  ·        Stack two coupons    fog · not graduated                                             │
+  │  ·        Stack two coupons               fog · not graduated                                  │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
-  │  slice    s2 · claimed · builder                                                               │
+  │  slice s2 · claimed · builder                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────────────────────────── in progress ─╮
-  │  next     say "Continue checkout"                                                              │
-  │  wave 1   JIG-8                                                                                │
-  │  wave 2   JIG-6                                                                                │
-  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                                          │
+  │  next    say "Continue checkout"                                                               │
+  │  wave 1  JIG-8                                                                                 │
+  │  wave 2  JIG-6                                                                                 │
+  │  ends at JIG-7 waits for JIG-4 to merge · PR #7 open                                           │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 12 of 23 ─╮
   │  09:14:25 chart store            · aaaaaaa chart checkout: tighten the destination             │

@@ -35,7 +35,7 @@ func TestChartRowAndDetailAgreeWithTheDigest(t *testing.T) {
 	if row := lineWith(view, "JIG-4"); !strings.Contains(row, "✓ ✓ ✓ ✓ ◇") || !strings.Contains(row, "waits to land") {
 		t.Errorf("JIG-4's row does not say it published:\n%s", row)
 	}
-	if panel := strings.Join(detailPanelOf(t, view), "\n"); !strings.Contains(panel, "state    waits to land") {
+	if panel := strings.Join(detailPanelOf(t, view), "\n"); !strings.Contains(panel, "state waits to land") {
 		t.Errorf("JIG-4's Detail does not say it published:\n%s", panel)
 	}
 	g.press("enter")

@@ -69,7 +69,7 @@ func TestEndStatesReadApart(t *testing.T) {
 		// The chart's row and its Detail.
 		c := g.m.w.charts["checkout"]
 		cr := g.m.chartRows(c)[0]
-		if note, _ := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
+		if note := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
 			t.Errorf("%s: the chart's row is %s saying %q, want %q", state, cr.state(), note, words[state])
 		}
 		if got := chartStateWord(cr); got != header[state] {
