@@ -125,7 +125,8 @@ func (m *Model) refreshStatus(id string) tea.Cmd {
 	}
 }
 
-// loadRoster reads the store's ticket list, one read at a time.
+// loadRoster reads the store's ticket list, one read at a time: the roster, the
+// rows of every ticket and the charts, which is all a screen reads of the store.
 func (m *Model) loadRoster() tea.Cmd {
 	if m.rosterBusy || m.run == nil {
 		return nil
@@ -133,7 +134,7 @@ func (m *Model) loadRoster() tea.Cmd {
 	m.rosterBusy, m.rosterStale, m.lastRoster = true, false, m.now()
 	m.rosterStarted++
 	seq := m.rosterStarted
-	args := m.verbArgs("next", "--json")
+	args := m.verbArgs("next", "--json", "--roster")
 	run := m.run
 	return func() tea.Msg {
 		out, _ := run(args)

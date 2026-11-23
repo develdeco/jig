@@ -16,7 +16,7 @@ import (
 
 const (
 	mergeChartVerb  = "next checkout --json --store /s"
-	mergeRosterVerb = "next --json --store /s"
+	mergeRosterVerb = "next --json --roster --store /s"
 	mergeWaitText   = "waits for JIG-4 merged"
 )
 

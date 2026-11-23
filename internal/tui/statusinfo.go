@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -341,7 +342,7 @@ func closedPhrase(reason, by string) string {
 	return reason
 }
 
-// parseRoster reads `jig next --json` for the store: the tickets, in the order
+// parseRoster reads `jig next --json --roster` for the store: the tickets, in the order
 // the verb lists them, each with the blockers that are not met, and the charts
 // the store has. The verb may print a note before the object (a checkpoint
 // line); the object is the first line that starts with a brace.
@@ -364,6 +365,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			ID        string `json:"id"`
 			Title     string `json:"title"`
 			State     string `json:"state"`
+			Updated   string `json:"updated"`
 			BlockedBy []struct {
 				Ticket string    `json:"ticket"`
 				Kind   string    `json:"kind"`
@@ -427,6 +429,9 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	rows := make([]rosterRow, 0, len(next.Tickets))
 	for _, t := range next.Tickets {
 		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
+		if at, err := time.Parse(time.RFC3339, t.Updated); err == nil {
+			row.Updated = at
+		}
 		for _, b := range t.BlockedBy {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}

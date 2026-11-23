@@ -153,10 +153,10 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 	if t := m.w.tickets[id]; t != nil {
 		r.t, r.title = t, firstOf(title, t.title)
 		r.d = readingPhases()
-		r.steps = m.stepRows(t, r.d)
+		r.steps, _ = m.rowSteps(t, r.d)
 		if t.digest != nil {
 			r.d = m.phaseOf(t)
-			r.steps = m.stepRows(t, r.d)
+			r.steps, _ = m.rowSteps(t, r.d)
 			// A question and a landing are the person's whoever else is at work; what a
 			// live session records itself (an approval, a round's asks) waits.
 			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(t, r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)

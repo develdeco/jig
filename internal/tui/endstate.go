@@ -148,6 +148,17 @@ func prWords(prs []digestPR, state bool) string {
 // landedLines are the landed lines of the ticket, the latest of each repo and
 // container, oldest first, with the time of each as the screens show it.
 func (m *Model) landedLines(t *ticket) []landedAt {
+	memo := t.memoFor()
+	if memo.landed == nil || memo.zone != m.zone {
+		t.scanned += len(t.lines)
+		rows := m.readLandedLines(t)
+		memo.landed, memo.zone = &rows, m.zone
+	}
+	return *memo.landed
+}
+
+// readLandedLines is landedLines, read from the lines.
+func (m *Model) readLandedLines(t *ticket) []landedAt {
 	type key struct{ repo, into string }
 	var order []key
 	latest := map[key]landedAt{}

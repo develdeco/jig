@@ -246,7 +246,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
-	c := m.clocks(t, m.phaseOf(t))
+	c := m.clocksOf(t)
 	focus, openRows := focusIndex(subs), 0
 	if focus >= 0 {
 		// The open sub-step takes what the other lines leave; with too many

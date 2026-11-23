@@ -207,6 +207,9 @@ type Model struct {
 	stream     chan events.Envelope
 	streamErr  chan error
 	rosterBusy bool
+	// clockRuns counts the work clocks computed (work.go): the screens that
+	// show no time compute none.
+	clockRuns int
 	// rosterStarted counts the roster reads begun, so a read can be told from one
 	// that was already out when something happened.
 	rosterStarted int
@@ -746,8 +749,10 @@ func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	if e := m.top(); e.screen == screenChart && m.w.charts[e.chart] != nil {
 		shown = m.w.charts[e.chart].listing.Tickets
 	}
+	under, onRow := m.rowUnderCursor()
 	m.w.setRoster(msg.rows)
 	m.w.setCharts(msg.charts)
+	m.putCursorOn(under, onRow)
 	var cmds []tea.Cmd
 	if was && !m.awaitingTicket() {
 		// The awaited ticket is listed: read it.
@@ -1025,6 +1030,35 @@ func (m *Model) move(delta int) {
 	}
 }
 
+// rowUnderCursor is the row the cursor stands on, false when the screen has no
+// row or none is under it.
+func (m *Model) rowUnderCursor() (rowRef, bool) {
+	e := m.top()
+	if e.follow {
+		return rowRef{}, false
+	}
+	refs := m.page().refs()
+	if e.sel < 0 || e.sel >= len(refs) {
+		return rowRef{}, false
+	}
+	return refs[e.sel], true
+}
+
+// putCursorOn moves the cursor to the row ref names, which a new list of rows
+// may have put elsewhere: the person's place is the ticket, not its number in
+// the list. A row the list no longer has leaves the cursor where it was.
+func (m *Model) putCursorOn(ref rowRef, ok bool) {
+	if !ok {
+		return
+	}
+	for i, r := range m.page().refs() {
+		if r == ref {
+			m.top().sel = i
+			return
+		}
+	}
+}
+
 // followSel puts a following cursor on the ticket's current step, and moves
 // a cursor the person left on the current step on to the next one when the
 // step is done.
@@ -1043,7 +1077,7 @@ func (m *Model) followSel() {
 	if t == nil || isMulti(t) {
 		return
 	}
-	cur := currentStep(m.steps(t))
+	cur := currentStep(m.stepWords(t))
 	if e.follow || (e.sel == e.lastCur && cur != e.lastCur) {
 		e.sel = cur
 	}
