@@ -24,8 +24,8 @@ const (
 // FogItems returns the items of the fog section of a chart's map.md: the
 // first heading (at any level) that reads "Not yet specified ..." or names the
 // fog, up to the next heading of the same or a higher level. A list item, or
-// a paragraph that is not a list, is one item; a heading inside a code fence
-// is not a heading. A map with no such section has no fog.
+// a paragraph that is not a list, is one item; a table row and an item that
+// only says "none" are no item; a heading inside a code fence is not a heading. A map with no such section has no fog.
 func FogItems(mapMD string) []string {
 	return SectionItems(mapMD, isFogHeading)
 }
@@ -33,7 +33,7 @@ func FogItems(mapMD string) []string {
 // SectionItems returns the items of the first section of mapMD whose heading
 // text match accepts, read as FogItems reads the fog: up to the next heading of
 // the same or a higher level, a list item or a paragraph one item, headings
-// and code inside a fence skipped. A map with no such section has none.
+// and code inside a fence, table rows and "none" items skipped. A map with no such section has none.
 func SectionItems(mapMD string, match func(heading string) bool) []string {
 	lines := strings.Split(strings.ReplaceAll(mapMD, "\r\n", "\n"), "\n")
 	start, level, end := -1, 0, len(lines)

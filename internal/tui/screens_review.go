@@ -175,7 +175,10 @@ func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
 		case "true":
 			who = append(who, "independent")
 		case "false":
-			who = append(who, "NOT independent: it built what it reviewed")
+			// A named reviewer already reads "builder reviewing its own change".
+			if reviewer == "" {
+				who = append(who, "NOT independent: it built what it reviewed")
+			}
 		case "unknown":
 			who = append(who, "independence unknown")
 		}

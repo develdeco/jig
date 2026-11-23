@@ -122,7 +122,8 @@ type nextChartCommit struct {
 const chartHistoryLimit = 20
 
 // chartHistory is the chart's store history for --json: the newest commits that
-// touched charts/<name>/, newest first. It is never nil, and it is empty when
+// touched charts/<name>/, newest first, without the store's own housekeeping
+// commits (Store.ChartHistory). It is never nil, and it is empty when
 // the history cannot be read (the store is not a git repository, it has no
 // commit yet, git fails): a problem is an empty list, never a reason to hide
 // the chart, and nothing is printed for it.
