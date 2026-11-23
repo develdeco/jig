@@ -99,15 +99,19 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 	case m.shared(r.t):
 		r.end, r.atEnd = m.endInIssue(r.t, container, branch)
 		r.done = r.atEnd
-		// The icon and the last step are this issue's, not another's landing.
+		// The icon and the last two steps are this issue's, not another's: a task
+		// with no pull request into it has published nothing here, whatever it did
+		// into the other, and stands where its own earlier steps put it.
 		r.steps = slices.Clone(r.steps)
-		r.mark = StateQueued
 		if r.atEnd {
 			r.mark = r.end.State
+			r.steps[stepPublish].State, r.steps[stepPublish].Done = StateOK, true
 			r.steps[stepLand].State = r.end.State
 			r.steps[stepLand].Done = r.end.State == StateLanded
 		} else {
-			r.steps[stepLand].State, r.steps[stepLand].Done = StateQueued, false
+			for _, i := range []int{stepPublish, stepLand} {
+				r.steps[i].State, r.steps[i].Done = StateQueued, false
+			}
 		}
 	}
 	return r

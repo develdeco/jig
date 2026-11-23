@@ -167,6 +167,16 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 		t.Errorf("SHOP-50's tasks line: %q", row)
 	}
 
+	// With no pull request into this issue the task has published nothing here,
+	// whatever it did into the other: its Publish and Land dots are not done.
+	d := *g.m.w.tickets["SHOP-1"].digest
+	d.PRs = []digestPR{{Repo: "demo", Number: 3, State: "merged", Target: planBranch}}
+	g.pin("SHOP-1", &d)
+	g.syncDigests()
+	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "not published into SHOP-50 yet") || strings.Contains(row, "✓ ✓ ✓ ✓ ✓") || !strings.Contains(row, "✓ ✓ ✓ ○ ○") {
+		t.Errorf("a task with no pull request into SHOP-50 reads %q", row)
+	}
+
 	g.press("esc", "home")
 	onRow(t, g, "SHOP-49")
 	g.press("enter")
