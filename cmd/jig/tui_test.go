@@ -314,10 +314,11 @@ func TestTUIRunnerCarriesNoHarnessSession(t *testing.T) {
 }
 
 // TestTUIFramesNameNoLaunchingSession: screens opened from a harness session's
-// terminal show no id of it after the person answers.
+// terminal show no id of it after the person answers, and the line the answer
+// wrote names none: the frames alone cannot show a session, the line can.
 func TestTUIFramesNameNoLaunchingSession(t *testing.T) {
 	t.Parallel()
-	fx, _, e := workFixture(t)
+	fx, st, e := workFixture(t)
 	runMain(t, e, "", "ask", fx.Ticket, "--slice", "c", "--session", "s-1", "which?")
 	e = withSessionEnv(e, map[string]string{"JIG_SESSION": "launch-jig", "CLAUDE_CODE_SESSION_ID": "launch-harness"})
 
@@ -335,5 +336,9 @@ func TestTUIFramesNameNoLaunchingSession(t *testing.T) {
 		if strings.Contains(screen.String(), id) {
 			t.Errorf("the frames name the launching session %q:\n%s", id, screen.String())
 		}
+	}
+	answers := linesOf(t, st, fx.Ticket, journal.EventAnswer)
+	if len(answers) != 1 || answers[0].Session != "" {
+		t.Errorf("answer lines = %+v, want the screens' one answer with no session", answers)
 	}
 }
