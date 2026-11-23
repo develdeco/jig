@@ -53,7 +53,7 @@ func newEventsRig(t *testing.T) *eventsRig {
 	r.ledger(journal.Line{TS: eventsAt(2), Ticket: "JIG-1", Event: journal.EventVerifySpawned, Session: "s-1", PID: 11})
 	r.journal("JIG-2", eventsAt(3), "claim", "x")
 	r.journal("JIG-1", eventsAt(4), "oracle", "a")
-	r.ledger(journal.Line{TS: eventsAt(5), Event: journal.EventTool, Session: "s-1", Tool: "Bash"})
+	r.ledger(journal.Line{TS: eventsAt(5), Ticket: "JIG-1", Event: journal.EventTool, Session: "s-1", Tool: "Bash"})
 	r.ledger(journal.Line{TS: eventsAt(6), Event: journal.EventTool, Session: "s-other", Tool: "Bash"})
 	r.ledger(journal.Line{TS: eventsAt(7), Ticket: "JIG-2", Event: journal.EventSessionStart, Session: "s-2"})
 	r.journal("JIG-1", eventsAt(8), "verified", "a")
@@ -140,7 +140,7 @@ func TestEventsStreamsTheStoreAndTheLedgerInTimeOrder(t *testing.T) {
 		"ledger:JIG-1:verify-spawned",
 		"journal:JIG-2:claim",
 		"journal:JIG-1:oracle",
-		"ledger::tool", // s-1 is on JIG-1, since its verify-spawned line
+		"ledger:JIG-1:tool", // s-1 is on JIG-1, since its verify-spawned line
 		"ledger:JIG-2:session-start",
 		"journal:JIG-1:verified",
 	}
@@ -175,7 +175,7 @@ func TestEventsNarrowsToATicket(t *testing.T) {
 	t.Parallel()
 	r := newEventsRig(t)
 
-	want := []string{"journal:JIG-1:verify-pending", "ledger:JIG-1:verify-spawned", "journal:JIG-1:oracle", "ledger::tool", "journal:JIG-1:verified"}
+	want := []string{"journal:JIG-1:verify-pending", "ledger:JIG-1:verify-spawned", "journal:JIG-1:oracle", "ledger:JIG-1:tool", "journal:JIG-1:verified"}
 	if got := shape(r.run(0, "events", "JIG-1")); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events JIG-1 = %v, want %v", got, want)
 	}
@@ -228,9 +228,9 @@ func TestEventsSince(t *testing.T) {
 		since string
 		want  []string
 	}{
-		{eventsAt(5), []string{"ledger::tool", "ledger:JIG-2:session-start", "journal:JIG-1:verified"}},
+		{eventsAt(5), []string{"ledger:JIG-1:tool", "ledger:JIG-2:session-start", "journal:JIG-1:verified"}},
 		{"2026-10-23T09:00:08.0000001Z", nil},
-		{"25s", []string{"ledger::tool", "ledger:JIG-2:session-start", "journal:JIG-1:verified"}},
+		{"25s", []string{"ledger:JIG-1:tool", "ledger:JIG-2:session-start", "journal:JIG-1:verified"}},
 		{"0s", nil},
 		{"now", nil},
 		{"1h", nil}, // everything: filled below
@@ -368,10 +368,10 @@ func TestEventsFollowPrintsWhatIsWrittenUntilInterrupted(t *testing.T) {
 	}
 
 	r.journal("JIG-1", eventsAt(20), "gate-open", "")
-	r.ledger(journal.Line{TS: eventsAt(21), Event: journal.EventTool, Session: "s-1", Tool: "Edit"})
+	r.ledger(journal.Line{TS: eventsAt(21), Ticket: "JIG-1", Event: journal.EventTool, Session: "s-1", Tool: "Edit"})
 	r.ledger(journal.Line{TS: eventsAt(22), Event: journal.EventTool, Session: "s-other", Tool: "Edit"}) // not about JIG-1
 	got := shape(waitLines(7))
-	if want := []string{"journal:JIG-1:gate-open", "ledger::tool"}; !reflect.DeepEqual(got[5:], want) {
+	if want := []string{"journal:JIG-1:gate-open", "ledger:JIG-1:tool"}; !reflect.DeepEqual(got[5:], want) {
 		t.Fatalf("followed lines = %v, want %v", got[5:], want)
 	}
 

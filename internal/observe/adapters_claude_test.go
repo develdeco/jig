@@ -9,7 +9,7 @@ func TestClaudeAdapterParsesEveryEvent(t *testing.T) {
 	with := func(f func(*Event)) Event { e := base; f(&e); return e }
 	runParseCases(t, "claude", []parseCase{
 		{"session start", `{` + common + `,"hook_event_name":"SessionStart","source":"startup","model":"claude-x"}`,
-			with(func(e *Event) { e.Kind, e.Model = KindSessionStart, "claude-x" })},
+			with(func(e *Event) { e.Kind, e.Model, e.Source = KindSessionStart, "claude-x", "startup" })},
 		{"prompt", `{` + common + `,"hook_event_name":"UserPromptSubmit","prompt":"do it"}`,
 			with(func(e *Event) { e.Kind, e.Prompt = KindPrompt, "do it" })},
 		{"bash tool", `{` + common + `,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m x"},"tool_response":{"stdout":"ok","stderr":"","interrupted":false}}`,

@@ -77,7 +77,7 @@ func listed(items []string, max int) string {
 // agent.
 func (h *handler) stop() Result {
 	located := h.locate()
-	if h.ev.IsSubagent() && !(located && h.w.Ticket != "") {
+	if h.ev.IsSubagent() && !(located && h.placeByClaim()) && !(located && h.w.Ticket != "") {
 		located = h.locateAgent() || located
 	}
 	if !located {
@@ -132,6 +132,44 @@ func (h *handler) holdReason() string {
 		return "jig: this agent's claim is unattended, so it is held back from stopping until this is dealt with:\n"
 	}
 	return "jig: this session is unattended, so it is held back from stopping until this is dealt with:\n"
+}
+
+// placeByClaim places a subagent on the ticket whose slice it holds, the
+// binding of its calls, and reports whether it did. The directory is the one
+// its own lines say it works in when they are on that ticket, else the
+// event's. The stop of a subagent that holds no claim is placed as before.
+//
+// The directory is a worktree on that ticket's branch: one its calls moved to
+// with a cd, or the directory its own lines name. With none, the stop is on
+// the ticket and reads no directory finding, since the session's checkout is
+// not the agent's work.
+func (h *handler) placeByClaim() bool {
+	ticket, _ := h.claimBinding(true)
+	if ticket == "" {
+		return false
+	}
+	if ticket == h.w.Ticket {
+		return true
+	}
+	mem := h.memory()
+	dirs := append(append([]string(nil), mem.agentDirs...), mem.agentCwd)
+	was, st, cfg := h.w, h.st, h.cfg
+	for _, dir := range dirs {
+		if dir != "" && h.ticketAt(dir) == ticket && h.locateAt(dir) && h.w.Ticket == ticket {
+			return true
+		}
+		h.w, h.st, h.cfg = was, st, cfg
+	}
+	cwd := h.ev.Cwd
+	if cwd == "" {
+		cwd = h.d.Cwd
+	}
+	if h.locateOn(cwd, ticket) && h.w.Ticket == ticket {
+		h.noDir = true
+		return true
+	}
+	h.w, h.st, h.cfg = was, st, cfg
+	return false
 }
 
 // locateAgent places a subagent where its own earlier lines in the ledger say

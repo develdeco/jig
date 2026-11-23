@@ -55,9 +55,16 @@ func TestFocusIndexOpensAPersonsTurnThenTheWorkUnderWay(t *testing.T) {
 // exit sets a ledger tool line's exit status.
 func exit(code int) func(*journal.Line) { return func(l *journal.Line) { l.Exit = &code } }
 
-// tool is a ledger tool line of session running command.
+// tool is a ledger tool line of session running command, written on no
+// ticket.
 func tool(ts, session, command string, mod ...func(*journal.Line)) events.Envelope {
-	return ll(ts, "", journal.EventTool, append([]func(*journal.Line){func(l *journal.Line) {
+	return toolOn("", ts, session, command, mod...)
+}
+
+// toolOn is a ledger tool line of session running command, written on ticket:
+// the hook binds a call as it writes it.
+func toolOn(ticket, ts, session, command string, mod ...func(*journal.Line)) events.Envelope {
+	return ll(ts, ticket, journal.EventTool, append([]func(*journal.Line){func(l *journal.Line) {
 		l.Session, l.Tool, l.Command = session, "Bash", command
 	}}, mod...)...)
 }
@@ -86,10 +93,10 @@ func cardRig(t *testing.T, width, height int) *rig {
 		jl(at(1, 0), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
 		jl(at(1, 30), "SHOP-1", "round", journal.EventVerifyPending, with("s-b", sha('a'), "", "Round to the cent", "", "")),
 		jl(at(1, 37), "SHOP-1", "round", journal.EventVerified, with("", sha('a'), "", "", "", "")),
-		tool(at(1, 50), "s-b", "go test ./...", exit(0)),
+		toolOn("SHOP-1", at(1, 50), "s-b", "go test ./...", exit(0)),
 		jl(at(2, 0), "SHOP-1", "clamp", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(2, 5), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(1), said("Run the cart tests")),
-		tool(at(2, 8), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(0)),
+		toolOn("SHOP-1", at(2, 5), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(1), said("Run the cart tests")),
+		toolOn("SHOP-1", at(2, 8), "s-b", `cd "D:\work\shop" && go test ./cart/...`, exit(0)),
 		tool(at(2, 9), "s-other", "ls"),
 		jl(at(2, 10), "SHOP-1", "clamp", journal.EventVerifyPending, with("s-b", sha('b'), "", "Clamp negative quantities", "", "")),
 	)
@@ -182,12 +189,12 @@ func TestAReviewRoundOpensWithItsReviewer(t *testing.T) {
 	g.feed(
 		ll(at(0, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-b", "claude", "claude-sonnet-5" }),
 		jl(at(1, 0), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(1, 20), "s-b", "git commit -m round"),
+		toolOn("SHOP-1", at(1, 20), "s-b", "git commit -m round"),
 		jl(at(1, 30), "SHOP-1", "round", journal.EventVerified, with("", sha('a'), "", "", "", "")),
 		jl(at(3, 0), "SHOP-1", "", journal.EventGateOpen, func(l *journal.Line) { l.Attempt = 1 }),
 		jl(at(3, 10), "SHOP-1", "", journal.EventGateReviewer, func(l *journal.Line) { l.Attempt, l.Session, l.Model = 1, "s-b", "claude-opus-5" }),
-		tool(at(3, 20), "s-b", "jig review context SHOP-1 --model claude-opus-5"),
-		tool(at(4, 0), "s-b", `cd /w/pool/SHOP-1-gate && go test ./cart/...`, exit(1)),
+		toolOn("SHOP-1", at(3, 20), "s-b", "jig review context SHOP-1 --model claude-opus-5"),
+		toolOn("SHOP-1", at(4, 0), "s-b", `cd /w/pool/SHOP-1-gate && go test ./cart/...`, exit(1)),
 	)
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Review ─"), "\n")
@@ -273,8 +280,8 @@ func prOpeningRig(t *testing.T, extra ...events.Envelope) *rig {
 func TestAPullRequestBeingOpenedShowsTheSessionsLatestMove(t *testing.T) {
 	t.Parallel()
 	g := prOpeningRig(t,
-		tool(at(5, 10), "s-b", "git push origin SHOP-1-round"),
-		tool(at(5, 20), "s-b", `cd /w && gh pr create --head SHOP-1-round 2>&1`),
+		toolOn("SHOP-1", at(5, 10), "s-b", "git push origin SHOP-1-round"),
+		toolOn("SHOP-1", at(5, 20), "s-b", `cd /w && gh pr create --head SHOP-1-round 2>&1`),
 	)
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Publish ─"), "\n")

@@ -97,6 +97,9 @@ type Registration struct {
 	// reader that asks later whether HEAD has moved since (the observe hook
 	// does). The session fold ignores it.
 	Commit string
+	// Source is how a session start began (startup, resume, clear or compact),
+	// for a harness that says; it is written on the start line's outcome.
+	Source string
 }
 
 // MintID returns a fresh session id, "s-" and twelve hex digits, for a
@@ -153,6 +156,7 @@ func appendSession(root, event string, at time.Time, r Registration) error {
 			Model:   r.Model,
 			Effort:  r.Effort,
 			Commit:  r.Commit,
+			Outcome: r.Source,
 		},
 		Clone:      r.Clone,
 		Transcript: r.Transcript,
