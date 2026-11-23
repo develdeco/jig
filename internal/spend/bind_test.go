@@ -78,8 +78,8 @@ func TestSubagentSpendLineIsWrittenOnItsClaimedTicket(t *testing.T) {
 	}
 	handle(observe.Event{Kind: observe.KindTool, Agent: "a-1", Tool: "Bash", Command: "jig claim " + fx.Ticket + " --slice a"})
 	handle(observe.Event{Kind: observe.KindTool, Agent: "a-1", Tool: "Bash", Command: "go test ./..."})
-	// The builder verifies its slice, as every builder does before it stops.
-	if err := journal.Append(st, fx.Ticket, journal.Line{TS: ledger.Stamp(now), Event: journal.EventVerified, Slice: "a", Session: "s1"}); err != nil {
+	// The builder verifies its slice and publishes, as a start-to-finish builder does before it stops.
+	if err := journal.Append(st, fx.Ticket, journal.Line{TS: ledger.Stamp(now), Event: journal.EventPr, Session: "s1"}); err != nil {
 		t.Fatal(err)
 	}
 
