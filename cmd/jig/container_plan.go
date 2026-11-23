@@ -35,6 +35,11 @@ type nextSuiteRow struct {
 // an issue, its suite rows. A multi-task has no suite.
 func (n nextTicket) withPlanFacts(st *store.Store, cfg project.Config, mp project.MachineProject, data ticketData) (nextTicket, error) {
 	n.Need = strings.TrimSpace(data.rec.Body)
+	// Its branch is a name the store makes, so the plan of a multi-task, which
+	// has no chart verb of its own, reads it here.
+	if branch, err := ticketBranch(st, cfg, n.Ticket, data.rec); err == nil {
+		n.Branch = branch
+	}
 	if n.Kind != store.KindIssue {
 		return n, nil
 	}

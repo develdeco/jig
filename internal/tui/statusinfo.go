@@ -311,7 +311,11 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				Closed       string   `json:"closed"`
 				LandFirst    []string `json:"land_first"`
 				Unfinished   []string `json:"unfinished"`
-				Phases       []struct {
+				Children     []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"children"`
+				Phases []struct {
 					Name  string `json:"name"`
 					State string `json:"state"`
 					Text  string `json:"text"`
@@ -358,6 +362,9 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			}
 			for _, p := range g.PRs {
 				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
+			}
+			for _, c := range g.Children {
+				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})
 			}
 			if s := g.Slices; s != nil {
 				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped}

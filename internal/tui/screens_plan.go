@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/develdeco/jig/internal/land"
-	"github.com/develdeco/jig/internal/phase"
 )
 
 // The plan is the screen of an issue: what it is for, the tasks of its chart
@@ -110,6 +109,12 @@ func (m *Model) openIssue() tea.Cmd {
 	if id == "" {
 		return nil
 	}
+	if parent := m.multiParent(id); parent != "" {
+		// A task of a multi-task goes up to it, and it goes up to the issue.
+		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: parent})
+		m.last = nil
+		return m.refreshStatus(parent)
+	}
 	issue := m.upIssue(id)
 	if issue == "" {
 		m.notice = id + " is in no issue's plan"
@@ -154,18 +159,18 @@ func (m *Model) planPage(c *chart) page {
 		suite = issue.status.Suite
 	}
 	fixes := fixTasks(suite)
-	rows := m.chartRows(c)
+	rows := m.planRows(m.chartRows(c), is.Ticket, is.Branch)
 
 	if e := m.top(); e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
 		m.mapPanel(&p, c, planMapRows)
 	}
-	m.needPanel(&p, is, issue)
+	m.needPanel(&p, is.Ticket, issue)
 	landed, total := planProgress(rows)
 	right := fmt.Sprintf("%d of %d landed", landed, total)
 	if total == 0 {
 		right = "none graduated"
 	}
-	tasks := m.ticketRowsPanel(c, rows, "Tasks", right, m.planNote(is),
+	tasks := m.ticketRowsPanel(c, rows, "Tasks", right, m.planNote(is.Ticket, is.Branch),
 		func(r chartRow) []string {
 			if tip, ok := fixes[r.id]; ok {
 				return []string{m.st.dim("    ↳ added after the failed suite" + tipWords(tip))}
@@ -199,25 +204,37 @@ func (m *Model) planPage(c *chart) page {
 // its time on a narrow screen.
 const issueBranchWords = "the issue's branch"
 
-// planNote is the words after a task's steps in the plan: where it landed, with
-// the issue's branch said as such, else what the chart screen says of it, less
-// the parent every row here shares.
-func (m *Model) planNote(is *chartIssue) func(chartRow) (string, bool) {
+// planNote is the words after a task's steps in the plan of container, whose
+// branch is branch: where it landed, with the branch said as such, else what the
+// chart screen says of it, less the parent every row here shares. A
+// multi-task's are its own, and a task two issues list says what its pull
+// request into this issue and its landing there say, and nothing of the other's.
+func (m *Model) planNote(container, branch string) func(chartRow) (string, bool) {
 	return func(r chartRow) (string, bool) {
-		if r.t != nil && r.atEnd && r.end.State == StateLanded {
-			lines := m.landedLines(r.t)
-			for i := range lines {
-				if is.Branch != "" && lines[i].Into == is.Branch {
-					lines[i].Into = issueBranchWords
+		switch t := r.t; {
+		case t == nil || t.digest == nil:
+		case isMulti(t):
+			return m.multiNote(r, branch), false
+		case m.shared(t):
+			if r.atEnd {
+				note := m.st.state(r.end.State, inBranch(r.end.Words, branch))
+				if r.end.State == StateWaitsToLand {
+					// Not landed here yet: the pull request into this issue is the
+					// one that waits, and no other issue's is named.
+					var mine []digestPR
+					for _, pr := range t.digest.PRs {
+						if pr.Target == branch {
+							mine = append(mine, pr)
+						}
+					}
+					note += m.st.dim(" · " + prShort(mine))
 				}
+				return note, false
 			}
-			own := ""
-			if p, ok := r.t.digest.phase(phase.Land); ok {
-				own = p.Text
-			}
-			return m.st.state(StateLanded, landedWords(own, lines)), false
+			return m.st.dim("not published into " + container + " yet"), false
 		}
-		return m.chartNoteIn(r, false)
+		note, own := m.chartNoteIn(r, false)
+		return inBranch(note, branch), own
 	}
 }
 
@@ -225,6 +242,9 @@ func (m *Model) planNote(is *chartIssue) func(chartRow) (string, bool) {
 // closed task landed nothing, and still counts among the tasks.
 func planProgress(rows []chartRow) (landed, total int) {
 	for _, r := range rows {
+		if r.depth > 0 {
+			continue
+		}
 		total++
 		if r.atEnd && r.end.State == StateLanded {
 			landed++
@@ -254,8 +274,8 @@ func tipWords(tip string) string {
 }
 
 // needPanel is what the issue is for, the body of its ticket, wrapped whole.
-func (m *Model) needPanel(p *page, is *chartIssue, issue *ticket) {
-	p.boxTop("Need", is.Ticket)
+func (m *Model) needPanel(p *page, id string, issue *ticket) {
+	p.boxTop("Need", id)
 	switch {
 	case issue == nil || issue.status == nil:
 		p.boxAdd(m.st.dim(readingText))
@@ -294,6 +314,15 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 			branch += m.st.dim(" · from " + is.Stack[0].StartFrom)
 		}
 	}
+	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), is.Prompt, suiteMet(is, issue, suite))
+	p.boxEnd()
+}
+
+// stageLines are the lines of a container's panel: its branch (in words), its
+// tasks landed, the suite lines it has (none for a multi-task), its own pull
+// request and its landing. prompt is what opens the pull request, and suiteOK
+// says no suite holds it back.
+func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite []string, prompt string, suiteOK bool) {
 	p.boxAdd(m.planLine(StateOK, "branch", branch))
 
 	landed, total := planProgress(rows)
@@ -309,16 +338,13 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 		}
 		p.boxAdd(m.planLine(state, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
 	}
-
-	for _, l := range m.suiteLines(is, issue, suite) {
+	for _, l := range suite {
 		p.boxAdd(l)
 	}
-
-	prState, prWords := m.planPR(is, issue, suite, rows)
+	prState, prWords := m.planPR(prompt, t, suiteOK, rows)
 	p.boxAdd(m.planLine(prState, "PR", prWords))
-	landState, landWords := m.planLanding(is, issue)
+	landState, landWords := m.planLanding(id, t)
 	p.boxAdd(m.planLine(landState, "landing", landWords))
-	p.boxEnd()
 }
 
 // suiteLines are the suite of the issue in words, one line for each row of its
@@ -419,7 +445,7 @@ func suiteMet(is *chartIssue, issue *ticket, suite []statusSuite) bool {
 // planPR is the issue's own pull request: by number, target and state once it
 // is open; before that, what it waits for, which is never its tasks not landed
 // or its suite unmet being passed over.
-func (m *Model) planPR(is *chartIssue, issue *ticket, suite []statusSuite, rows []chartRow) (state, words string) {
+func (m *Model) planPR(prompt string, issue *ticket, suiteOK bool, rows []chartRow) (state, words string) {
 	if issue == nil || issue.digest == nil {
 		return StateQueued, m.st.dim(readingText)
 	}
@@ -443,21 +469,21 @@ func (m *Model) planPR(is *chartIssue, issue *ticket, suite []statusSuite, rows 
 	var waits []string
 	unlanded := 0
 	for _, r := range rows {
-		if !(r.atEnd && (r.end.State == StateLanded || r.end.State == StateClosed)) {
+		if r.depth == 0 && !(r.atEnd && (r.end.State == StateLanded || r.end.State == StateClosed)) {
 			unlanded++
 		}
 	}
 	if unlanded > 0 {
 		waits = append(waits, fmt.Sprintf("%d %s", unlanded, plural(unlanded, "task", "tasks")))
 	}
-	if !suiteMet(is, issue, suite) {
+	if !suiteOK {
 		waits = append(waits, "the suite")
 	}
 	if len(waits) > 0 {
 		return StateQueued, m.st.dim("not opened yet · waits for " + andList(waits))
 	}
-	if is.Prompt != "" {
-		return StateReady, "not opened yet · say " + m.st.key(strconv.Quote(is.Prompt))
+	if prompt != "" {
+		return StateReady, "not opened yet · say " + m.st.key(strconv.Quote(prompt))
 	}
 	return StateReady, "not opened yet · ready to open"
 }
@@ -486,12 +512,12 @@ func prWordsOf(pr digestPR) string {
 // planLanding is where the issue's own landing stands, in RUN-18's states: it
 // waits for its pull request, waits to land at the person's word, landed, or was
 // closed.
-func (m *Model) planLanding(is *chartIssue, issue *ticket) (state, words string) {
+func (m *Model) planLanding(id string, issue *ticket) (state, words string) {
 	if issue == nil || issue.digest == nil {
 		return StateQueued, m.st.dim(readingText)
 	}
 	d := issue.digest
-	say := `say "Land ` + is.Ticket + `"`
+	say := `say "Land ` + id + `"`
 	switch {
 	case d.Closed != "":
 		return StateClosed, "closed · " + d.Closed

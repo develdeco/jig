@@ -112,7 +112,7 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 
 	// The entries that have no ticket yet: fog, listed after the tickets.
 	var fog []string
-	if c.info != nil {
+	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
 				fog = append(fog, t.Title)
@@ -120,7 +120,7 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 		}
 	}
 
-	idW, titleW, noteW, ownW := 0, 0, 0, 0
+	idW, titleW, noteW, ownW, nestW := 0, 0, 0, 0, 0
 	for _, title := range fog {
 		titleW = max(titleW, width(title))
 	}
@@ -129,6 +129,7 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 		var own bool
 		notes[i], own = noteOf(r)
 		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
+		nestW = max(nestW, 2*r.depth)
 		if own {
 			ownW = max(ownW, width(notes[i]))
 		}
@@ -136,11 +137,11 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 	// "icon id  title  ◐ ○ ○ ○  note" in the room a panel's text has. The words
 	// the chart says itself keep their whole column, the title gives way to them,
 	// and a status's own words are cut at the end of the line.
-	room := m.width - 7 - (2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
+	room := m.width - 7 - (nestW + 2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
 	noteW = max(ownW, min(noteW, room-min(titleW, 16)))
 	titleW = min(titleW, max(0, room-noteW))
 	for i, r := range rows {
-		line := m.st.icon(r.state()) + " " + pad(r.id, idW)
+		line := spaces(2*r.depth) + m.st.icon(r.state()) + " " + pad(r.id, idW)
 		if titleW > 0 {
 			line += "  " + pad(r.title, titleW)
 		}
@@ -156,7 +157,8 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 	for _, title := range fog {
 		p.boxAdd(m.st.dim("·" + spaces(1+idW) + "  " + pad(title, titleW) + "  fog · not graduated"))
 	}
-	if n := c.listing.Ungraduated; c.info == nil && n > 0 {
+	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
+		n := c.listing.Ungraduated
 		fog = append(fog, "")
 		p.boxAdd(m.st.dim("· " + strconv.Itoa(n) + " " + plural(n, "entry", "entries") + " not graduated"))
 	}

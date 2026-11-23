@@ -28,7 +28,13 @@ type digestInfo struct {
 	Unfinished []string
 	PRs        []digestPR
 	Slices     *digestSlices
+	// Children are an issue's chart entries (an empty ID before one graduates) or
+	// a multi-task's tasks.
+	Children []digestChild
 }
+
+// digestChild is one entry under an issue or a multi-task.
+type digestChild struct{ ID, Title string }
 
 // digestPhase is one phase's state (done, current or pending) and its words.
 type digestPhase struct{ Name, State, Text string }

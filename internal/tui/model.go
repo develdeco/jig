@@ -963,7 +963,7 @@ func (m *Model) followSel() {
 		return
 	}
 	t := m.w.tickets[e.ticket]
-	if t == nil {
+	if t == nil || isMulti(t) {
 		return
 	}
 	cur := currentStep(m.steps(t))

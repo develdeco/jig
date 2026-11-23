@@ -42,6 +42,10 @@ func (m *Model) ticketPage(id string) page {
 	if t.awaiting {
 		return m.waitingPage(id)
 	}
+	if isMulti(t) {
+		// A multi-task has no five steps: its screen is the plan one level down.
+		return m.multiPage(t)
+	}
 	d := m.phaseOf(t)
 	steps := m.stepRows(t, d)
 	cur := currentStep(steps)

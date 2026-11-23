@@ -50,6 +50,13 @@ func TestStatusOfAContainerCarriesItsNeed(t *testing.T) {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Errorf("jig status %s: exit %d, want the line %q\n%s", id, code, want, out)
 		}
+		// A container's branch is on its status: a multi-task has no chart verb
+		// to say it.
+		if rec, err := r.st.ReadTicket(id); err != nil {
+			t.Fatal(err)
+		} else if branch, err := r.st.ResolveTicketBranch(id, rec, "main"); err != nil || !strings.Contains(out, "\nbranch: "+branch+"\n") {
+			t.Errorf("jig status %s lacks its branch %q (%v):\n%s", id, branch, err, out)
+		}
 	}
 	if out, _ := r.run(t, "status", "TK-4"); strings.Contains(out, "suite[") {
 		t.Errorf("a multi-task prints a suite:\n%s", out)

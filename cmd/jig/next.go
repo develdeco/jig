@@ -387,6 +387,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		if len(n.Issues) > 0 {
 			blocks = append(blocks, "issue: "+strings.Join(n.Issues, ", "))
 		}
+		if n.Branch != "" {
+			blocks = append(blocks, "branch: "+axi.Quote(n.Branch))
+		}
 		if n.Need != "" {
 			blocks = append(blocks, "need: "+axi.Quote(n.Need))
 		}

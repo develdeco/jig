@@ -371,6 +371,9 @@ func (m *Model) keyHints() []string {
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
 			keys = [][]string{back, tail, quit}
+		} else if isMulti(t) {
+			// A multi-task's tasks open; nothing else is done from its screen.
+			keys = [][]string{move, open, back, tail, quit}
 		}
 	case screenBrief:
 		keys = [][]string{move, open, back, land, tail, quit}
@@ -389,6 +392,8 @@ func (m *Model) keyHints() []string {
 	// the one that shows the map, on the plan: each goes after the key back.
 	var extra []string
 	switch id := m.upFrom(); {
+	case id != "" && m.multiParent(id) != "":
+		extra = []string{"c", "multi-task"}
 	case id != "" && len(m.issuesOf(id)) > 0:
 		extra = []string{"c", "issue"}
 	case m.top().screen == screenChart:

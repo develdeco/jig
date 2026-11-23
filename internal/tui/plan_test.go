@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,6 +41,13 @@ type planSpec struct {
 	// second adds an issue GATE-50 whose chart lists T-1 too, and loose a task
 	// T-9 that no chart lists.
 	second, loose bool
+	// multi adds the multi-task MT-1 to the chart with its tasks T-5, landed into
+	// it, and T-6, not.
+	multi bool
+	// multiDigest replaces the multi-task's digest (published, its pull request
+	// open) and kidsLanded lands T-6 too.
+	multiDigest *digestInfo
+	kidsLanded  bool
 }
 
 func (s planSpec) taskIDs() []string {
@@ -64,6 +72,10 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	t.Helper()
 	g := newRig(t, "")
 	ids := spec.taskIDs()
+	if spec.multi {
+		// A multi-task of the chart and its two tasks, listed after the others.
+		ids = append(slices.Clone(ids), "MT-1", "T-5", "T-6")
+	}
 	tickets := []map[string]any{{"id": "GATE-49", "title": "Review rounds stop repeating work", "state": "issue"}}
 	entries := []map[string]any{}
 	for _, id := range ids {
@@ -125,10 +137,31 @@ func planMain(t *testing.T, spec planSpec) *rig {
 			d.Parent, d.Closed = "GATE-49", reason
 		}
 		if spec.second && id == "T-1" {
-			// A task two issues list has no one parent.
+			// A task two issues list has no one parent, and one pull request into
+			// each issue's branch.
 			d.Parent = ""
+			d.PRs = []digestPR{
+				{Repo: "demo", Number: 3, State: "merged", Target: planBranch},
+				{Repo: "demo", Number: 4, State: "open", Target: "502-another"},
+			}
+		}
+		switch id {
+		case "MT-1":
+			d = &digestInfo{Kind: "multi-task", Parent: "GATE-49", State: "published", Children: []digestChild{{ID: "T-5", Title: "Task T-5"}, {ID: "T-6", Title: "Task T-6"}},
+				PRs: []digestPR{{Repo: "demo", Number: 7, State: "open", Target: planBranch}}}
+			if spec.multiDigest != nil {
+				d = spec.multiDigest
+			}
+		case "T-5", "T-6":
+			d.Parent = "MT-1"
+			if id == "T-6" && !spec.kidsLanded {
+				d.Phases[4] = digestPhase{Name: "land", State: "current", Text: "waits for a merge"}
+			}
 		}
 		g.pin(id, d)
+	}
+	if spec.multi {
+		g.r.answer("status MT-1 --store /s", "ticket: MT-1\nstate: multi-task\nkind: multi-task\nbranch: 503-the-multi-task\nneed: \"What the multi-task is for.\"\n", 0)
 	}
 	issue := spec.issue
 	if issue == nil {
@@ -138,7 +171,15 @@ func planMain(t *testing.T, spec planSpec) *rig {
 
 	var lines []events.Envelope
 	for i, id := range ids {
-		if spec.isLanded(id) {
+		switch {
+		case id == "T-5":
+			lines = append(lines, jl(at(20, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "MT-1" }))
+		case id == "T-6" && spec.kidsLanded:
+			lines = append(lines, jl(at(21, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = "503-the-multi-task", "MT-1" }))
+		case id == "MT-1" && spec.multiDigest != nil && spec.multiDigest.State == "landed":
+			lines = append(lines, jl(at(25, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "GATE-49" }))
+		case id == "MT-1" || id == "T-6":
+		case spec.isLanded(id):
 			lines = append(lines, jl(at(10+i, 0), id, "", journal.EventLanded, func(l *journal.Line) { l.Base, l.Into = planBranch, "GATE-49" }))
 		}
 	}

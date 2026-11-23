@@ -45,6 +45,10 @@ type endState struct {
 // (its provenance, and the session that wrote it).
 type landedAt struct {
 	Repo, Into, At, Provenance, Session string
+	// Container is the issue or multi-task the landing was into, by id, when the
+	// line names one: the one thing that tells the landings of a task two issues
+	// list apart.
+	Container string
 }
 
 // endStateOf is the end state of ticket id as its digest says it stands and its
@@ -155,7 +159,7 @@ func (m *Model) landedLines(t *ticket) []landedAt {
 		if _, ok := latest[k]; !ok {
 			order = append(order, k)
 		}
-		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone), Provenance: l.Provenance, Session: l.Session}
+		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone), Provenance: l.Provenance, Session: l.Session, Container: l.Into}
 	}
 	out := make([]landedAt, len(order))
 	for i, k := range order {
