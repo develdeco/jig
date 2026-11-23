@@ -18,7 +18,7 @@ import (
 //     as a claim call does, or a path under the store's tickets/<T>/ folder
 //     (a drafter's write of the brief).
 //  2. the ticket whose role the call's own agent holds: a claim until its
-//     release, a review round from `jig review context` to `jig review done`. A
+//     release or its slice's verification, a review round from `jig review context` to `jig review done`. A
 //     harness reports the session's directory for a subagent that works in a
 //     worktree of its own, so the directory says nothing of what the agent is
 //     on; its role does.

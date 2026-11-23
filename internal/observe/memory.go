@@ -71,6 +71,13 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 	stopped := false            // the walk has passed the agent's own stop
 	closed := map[string]bool{} // the tickets whose review round the agent closed, after the walk's place
 	err := ledger.ReadBackward(root, memoryWindow, func(l journal.Line) bool {
+		if past {
+			// Back from a resume or a compact the walk goes only as far as a
+			// long run, whoever wrote the line.
+			if at, err := time.Parse(time.RFC3339Nano, l.TS); err != nil || at.Before(cutoff) {
+				return false
+			}
+		}
 		if l.Session != session {
 			return true
 		}
@@ -94,10 +101,8 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 			}
 		}
 		if past {
-			// Before the session's latest start only the claims are read, and
-			// only as far back as a long run goes.
-			at, err := time.Parse(time.RFC3339Nano, l.TS)
-			return err != nil || !at.Before(cutoff)
+			// Before the session's latest start only the claims are read.
+			return true
 		}
 		if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
 			m.started = at // the walk goes back in time: the last one set is the earliest
@@ -133,12 +138,13 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 		// came before belongs to an earlier life. The claims its agents hold
 		// are not: they are read on, back a claimWindow from the start.
 		if l.Event == journal.EventSessionStart {
-			past = true
-			if at, err := time.Parse(time.RFC3339Nano, l.TS); err == nil {
-				cutoff = at.Add(-claimWindow)
-			} else {
+			// Only a resume or a compact starts the session again with its
+			// agents still working; a fresh start ends the walk.
+			at, err := time.Parse(time.RFC3339Nano, l.TS)
+			if err != nil || (l.Outcome != "resume" && l.Outcome != "compact") {
 				return false
 			}
+			past, cutoff = true, at.Add(-claimWindow)
 		}
 		return true
 	})

@@ -32,6 +32,7 @@ func (h *handler) sessionStart() Result {
 			Model:      h.ev.Model,
 			Transcript: h.transcript(),
 			Commit:     h.head(),
+			Source:     h.ev.Source,
 		}))
 	}
 	h.hook("")
