@@ -263,7 +263,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 
 	// The person dismisses the ask from the screens, and opens the next round.
 	screens.press("d")
-	screens.until("dismissed by you", "✓ jig triage "+fx.Ticket+" r1-f1 dismiss")
+	screens.until("asks are decided", "✓ jig triage "+fx.Ticket+" r1-f1 dismiss")
 	triage := waitJournal(t, fx, fx.Ticket, tuiWait, func(l journal.Line) bool { return l.Event == journal.EventTriage })
 	if triage.Ref != "r1-f1" || triage.Outcome != "dismiss" || triage.Provenance != "person" {
 		t.Errorf("triage line = %+v, want r1-f1 dismissed by a person", triage)
@@ -339,7 +339,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("p")
 	screens.until("approve the reviewed head")
 	screens.press("y")
-	screens.until("✓ jig publish "+fx.Ticket+" --approve", "✓ jig publish "+fx.Ticket+" --yes", "✓ published")
+	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)

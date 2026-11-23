@@ -70,27 +70,30 @@ func (m *Model) ticketPage(id string) page {
 	// The group is drawn while something still waits on the person: a question
 	// nobody answered or an ask nobody decided (the asks already decided stay
 	// beside the ones left, so a decision can be seen). When the last answer or
-	// decision is journaled the group goes. A question is the person's whoever
-	// else is at work (a builder that asked and carries on is live), so it is
-	// never held back; the asks of a round, which the session reviewing it is
-	// recording itself, wait for the line to go quiet.
+	// decision is journaled the group goes. The asks of a round stay with their
+	// controls whether or not a session is live, since the person decides them
+	// from here whoever else is at work; only the words that tell the person to
+	// act wait for the line to go quiet.
 	qs := t.openQuestions(m.zone, "")
-	var asks []askRow
-	if !m.ticketLive(t) {
-		asks = t.asks()
-		undecided := false
-		for _, a := range asks {
-			undecided = undecided || a.Decision == ""
-		}
-		if !undecided {
-			asks = nil
-		}
+	asks := t.asks()
+	undecided := false
+	for _, a := range asks {
+		undecided = undecided || a.Decision == ""
+	}
+	if !undecided {
+		asks = nil
 	}
 	// The landing is the person's word, which a session merges at: never held
 	// back.
 	landing := m.landingNeedsYou(t)
 	if len(qs)+len(asks) > 0 || landing {
-		needs.add(m.st.bold("needs you"))
+		// A live session holds back the call to act, not the asks: the group
+		// reads asks while one is at work and only asks wait.
+		heading := "needs you"
+		if len(qs) == 0 && !landing && m.ticketLive(t) {
+			heading = "asks"
+		}
+		needs.add(m.st.bold(heading))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
 		}
