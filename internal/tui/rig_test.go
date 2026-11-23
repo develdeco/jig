@@ -397,7 +397,10 @@ func (g *rig) syncDigests() {
 	if g.synced == nil {
 		g.synced = map[string]syncedFrom{}
 	}
-	for id, t := range g.m.w.tickets {
+	moved := map[string]*digestInfo{}
+	order := append([]string(nil), g.m.w.order...)
+	for _, id := range order {
+		t := g.m.w.tickets[id]
 		if d, ok := g.pinned[id]; ok {
 			t.digest = d
 			continue
@@ -410,11 +413,31 @@ func (g *rig) syncDigests() {
 			continue
 		}
 		g.synced[id] = from
-		t.digest = fakeDigest(g.m, t)
+		moved[id] = fakeDigest(g.m, t)
 	}
-	// The roster read that brings a digest is a message the model takes in, and a
-	// line that was about the ticket's old standing goes with it.
-	g.m.settleLast(rosterMsg{seq: 1 << 30})
+	if len(moved) == 0 {
+		return
+	}
+	// A digest reaches the model in a roster read, which Update takes in like
+	// any message: a read that began after what is on screen, listing the
+	// tickets in their order with the digests that moved, and the charts as
+	// they are.
+	changed := make([]rosterRow, 0, len(order))
+	for _, id := range order {
+		t := g.m.w.tickets[id]
+		d := t.digest
+		if m, ok := moved[id]; ok {
+			d = m
+		}
+		changed = append(changed, rosterRow{ID: id, Title: t.title, Blockers: t.blockers, Digest: d})
+	}
+	var charts []chartListing
+	for _, name := range g.m.w.chartOrder {
+		charts = append(charts, g.m.w.charts[name].listing)
+	}
+	g.m.rosterStarted++
+	_, cmd := g.m.Update(rosterMsg{rows: changed, charts: charts, seq: g.m.rosterStarted})
+	g.settle(cmd)
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a

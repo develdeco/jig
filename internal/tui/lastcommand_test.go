@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -193,6 +195,60 @@ func TestTheLineIsFixedByTheFirstRosterReadAfterTheResult(t *testing.T) {
 			t.Errorf("the read after the result did not fix the line: %+v", g.m.last)
 		}
 	})
+}
+
+// TestTheReadsAResultAsksForAreTheOnesThatFixTheLine: the reads run through the
+// fake runner as the program runs them. A roster read already out when the
+// result arrives does not fix the line and asks for another; the result asks for
+// the ticket's status and the roster; the roster read that begins after fixes the
+// line and frees the reader. A failed read, or a chart's, fixes no ticket's line.
+func TestTheReadsAResultAsksForAreTheOnesThatFixTheLine(t *testing.T) {
+	t.Parallel()
+	g := newQuietRig(t, "JIG-2")
+	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
+	g.feed(jig2Mid()...)
+
+	out := g.m.loadRoster() // a read begun before the gate ran
+	if out == nil {
+		t.Fatal("no roster read began")
+	}
+	ran := g.m.exec("gate", "JIG-2", g.m.verbArgs("gate", "JIG-2"))().(ranMsg)
+	_, asked := g.m.Update(ran)
+	if g.m.last == nil || g.m.last.Fixed || g.m.last.After != g.m.rosterStarted {
+		t.Fatalf("the result's line = %+v, want it unfixed after read %d", g.m.last, g.m.rosterStarted)
+	}
+	if !g.m.rosterBusy {
+		t.Fatalf("the read out before the result is not the one in flight")
+	}
+
+	// A chart's read and a failed roster read fix no ticket's line.
+	g.m.Update(chartMsg{name: "elsewhere"})
+	g.m.Update(rosterMsg{err: errors.New("no store"), seq: g.m.rosterStarted + 5})
+	if g.m.last.Fixed {
+		t.Fatalf("a chart read or a failed roster read fixed a ticket's line")
+	}
+
+	// The read from before the result lands: it does not fix the line, and
+	// another begins.
+	_, again := g.m.Update(out().(rosterMsg))
+	if g.m.last.Fixed || again == nil || !g.m.rosterBusy {
+		t.Fatalf("the read from before the result fixed the line or asked for no other: fixed %v, busy %v", g.m.last.Fixed, g.m.rosterBusy)
+	}
+
+	// The reads the result asked for, and then the new roster read, run.
+	before := len(g.r.calls)
+	g.settle(asked)
+	g.settle(again)
+	var ran2 []string
+	for _, c := range g.r.calls[before:] {
+		ran2 = append(ran2, c.Line)
+	}
+	if !slices.Contains(ran2, "status JIG-2 --store /s") || !slices.Contains(ran2, "next --json --store /s") {
+		t.Errorf("the reads run after the gate = %q, want the ticket's status and the roster", ran2)
+	}
+	if g.m.last == nil || !g.m.last.Fixed || g.m.rosterBusy {
+		t.Errorf("the roster read that began after the result did not fix the line: %+v, busy %v", g.m.last, g.m.rosterBusy)
+	}
 }
 
 // TestAChartCommandLineExpiresWithTheChartsStanding: a command with no ticket,

@@ -38,7 +38,8 @@ type Scope struct {
 	// AllLedger puts every ledger line in scope. Otherwise a ledger line is
 	// in scope when it is about a ticket of the journals: it names that
 	// ticket, or it is an early call of a subagent whose first bound line
-	// names it (Binder). A line that names none is on none.
+	// names it (Binder), or it is the end of a session whose lines were. Any
+	// other line that names none is on none.
 	AllLedger bool
 }
 
@@ -67,7 +68,7 @@ type Reader struct {
 	ledgerOff int64
 	// binder places the ledger lines on tickets (binder.go).
 	binder *Binder
-	// placed are the sessions a scoped reader has handed back a ledger line of:
+	// placed are the sessions a scoped reader found a ledger line in scope for:
 	// the end of one names no ticket, and is handed back for the tickets its
 	// lines were on.
 	placed map[string]bool
