@@ -262,23 +262,42 @@ func TestAStepMarkIsTheSameBeforeAndAfterTheStatusIsRead(t *testing.T) {
 		}
 		return out
 	}
+	// A ticket whose phase `jig next` could not tell says so and tells no phases.
+	untold := &digestInfo{Kind: "task", PhaseProblem: "its stack plan cannot be read"}
 	for name, tc := range map[string]struct {
 		d     *digestInfo
 		slice string // the state the status lists the first slice in
-		want  map[int]string
+		// counted is the state the digest counts it in, when the roster was read
+		// before the slice moved; "" is the same as slice.
+		counted string
+		want    map[int]string
 	}{
-		"a brief the work started without": {started, StateBuilding, map[int]string{stepBrief: StateFindings}},
-		"a brief changed after approval":   {changed, StateBuilding, map[int]string{stepBrief: StateFindings}},
-		"a publish that has begun":         {publishing, StateGreen, map[int]string{stepPublish: StatePublishing}},
-		"a ticket with nothing to mark":    {plain, StateBuilding, map[int]string{stepBrief: StateOK}},
-		"a slice stalled":                  {plain, StateStalled, map[int]string{stepBuild: StateStalled}},
-		"a slice env-blocked":              {plain, StateEnvBlocked, map[int]string{stepBuild: StateEnvBlocked}},
-		"a slice needing an answer":        {plain, StateNeedsInput, map[int]string{stepBuild: StateNeedsInput}},
+		"a brief the work started without": {started, StateBuilding, "", map[int]string{stepBrief: StateFindings}},
+		"a brief changed after approval":   {changed, StateBuilding, "", map[int]string{stepBrief: StateFindings}},
+		"a publish that has begun":         {publishing, StateGreen, "", map[int]string{stepPublish: StatePublishing}},
+		"a ticket with nothing to mark":    {plain, StateBuilding, "", map[int]string{stepBrief: StateOK}},
+		"a slice stalled":                  {plain, StateStalled, "", map[int]string{stepBuild: StateStalled}},
+		"a slice env-blocked":              {plain, StateEnvBlocked, "", map[int]string{stepBuild: StateEnvBlocked}},
+		"a slice needing an answer":        {plain, StateNeedsInput, "", map[int]string{stepBuild: StateNeedsInput}},
+		// The status is read again every few seconds and the roster only when the
+		// store moves: the mark stays the roster's until it is.
+		"a slice that stalled since the roster": {plain, StateStalled, StateBuilding, map[int]string{stepBuild: StateNeedsInput}},
+		"a phase that could not be told":        {untold, StateBuilding, "", map[int]string{stepBrief: StateStalled}},
 	} {
 		st := *read
 		st.Slices = append([]statusSlice(nil), read.Slices...)
 		st.Slices[0].State = tc.slice
-		tc.d.Slices = countsOf(&st)
+		if tc.d == untold {
+			// The status says the brief changed after its approval; the roster
+			// that could not tell the phase says nothing of it.
+			st.Brief = &statusBrief{Approval: phase.ApprovalChanged}
+		}
+		listed := st
+		if tc.counted != "" {
+			listed.Slices = append([]statusSlice(nil), st.Slices...)
+			listed.Slices[0].State = tc.counted
+		}
+		tc.d.Slices = countsOf(&listed)
 		tk.digest = tc.d
 		tk.status = nil
 		before := marks()

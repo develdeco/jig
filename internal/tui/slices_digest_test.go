@@ -7,11 +7,12 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// TestSliceCountsComeFromTheDigestThenTheStatus: a ticket with a failed slice, a
+// TestSliceCountsStayTheDigestsAfterTheStatusIsRead: a ticket with a failed slice, a
 // stopped one and a green one is read from the digest's counts until its status
 // is read: main's row and the Build step show it failing, with the digest's
-// words. The status's list takes over after, and the two agree.
-func TestSliceCountsComeFromTheDigestThenTheStatus(t *testing.T) {
+// words. The status lists the same slices after, and the counts and the mark stay
+// the digest's.
+func TestSliceCountsStayTheDigestsAfterTheStatusIsRead(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
 	d := task("build", false, "done|approved by Ada", "current|1 of 4 green · slice b failed its last run", "pending|after the build", "pending|after a clean review", "pending|after the publish")
