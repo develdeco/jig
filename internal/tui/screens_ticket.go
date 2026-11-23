@@ -65,13 +65,17 @@ func (m *Model) ticketPage(id string) page {
 	var needs page
 	qs := t.openQuestions(m.zone, "")
 	asks := t.asks()
-	if len(qs)+len(asks) > 0 {
+	landing := m.landingNeedsYou(t)
+	if len(qs)+len(asks) > 0 || landing {
 		needs.add(m.st.bold("needs you"))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
+		}
+		if landing {
+			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
 		}
 	}
 
@@ -80,7 +84,7 @@ func (m *Model) ticketPage(id string) page {
 	// first, the sub-steps block takes what is left up to its own most, and
 	// the blank lines that set text apart from text come out of what remains
 	// of that. The activity panel gets the rest.
-	focus := m.ticketFocus(steps, len(qs))
+	focus := m.ticketFocus(steps, len(qs), len(asks))
 	body := m.bodyRows()
 	var groups []page
 	for _, g := range []page{needs} {
@@ -164,7 +168,7 @@ func (m *Model) stepLine(s stepRow, current bool) string {
 // ask, and the current step while the cursor follows it. The screen's rows are
 // the steps, then the open questions, then the asks, so the cursor's place says
 // which.
-func (m *Model) ticketFocus(steps []stepRow, questions int) int {
+func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 	e := m.top()
 	switch {
 	case e.follow:
@@ -173,8 +177,10 @@ func (m *Model) ticketFocus(steps []stepRow, questions int) int {
 		return max(0, e.sel)
 	case e.sel < len(steps)+questions:
 		return stepBuild
+	case e.sel < len(steps)+questions+asks:
+		return stepReview
 	}
-	return stepReview
+	return stepLand
 }
 
 // substepsPanel is a panel of the sub-steps of step, height lines tall with its

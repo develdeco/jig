@@ -151,7 +151,7 @@ func TestLandedLinesAreTheLatestOfEachRepoAndContainer(t *testing.T) {
 	land(at(15, 10), "web", "main")
 	land(at(15, 20), "api", "release")
 	got := g.m.landedLines(g.m.w.tickets["JIG-4"])
-	want := []landedAt{{"api", "release", "09:15:20"}, {"web", "main", "09:15:10"}}
+	want := []landedAt{{Repo: "api", Into: "release", At: "09:15:20"}, {Repo: "web", Into: "main", At: "09:15:10"}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("landed lines = %+v, want %+v", got, want)
 	}

@@ -137,7 +137,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			if t.digest != nil {
 				r.d = m.phaseOf(t)
 				r.steps = m.stepRows(t, r.d)
-				r.needs = needsYou(r.d) || t.digest.waitsForAnswer()
+				r.needs = needsYou(r.d) || t.digest.waitsForAnswer() || m.landingNeedsYou(t)
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
 				r.end, r.atEnd = m.endOf(t)

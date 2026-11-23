@@ -40,10 +40,11 @@ type endState struct {
 	Words string
 }
 
-// landedAt is one landed line of a ticket: the repo, the branch it merged into
-// and when the line was written, as the screens show the time.
+// landedAt is one landed line of a ticket: the repo, the branch it merged into,
+// when the line was written (as the screens show the time) and who recorded it
+// (its provenance, and the session that wrote it).
 type landedAt struct {
-	Repo, Into, At string
+	Repo, Into, At, Provenance, Session string
 }
 
 // endStateOf is the end state of ticket id as its digest says it stands and its
@@ -154,7 +155,7 @@ func (m *Model) landedLines(t *ticket) []landedAt {
 		if _, ok := latest[k]; !ok {
 			order = append(order, k)
 		}
-		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone)}
+		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone), Provenance: l.Provenance, Session: l.Session}
 	}
 	out := make([]landedAt, len(order))
 	for i, k := range order {

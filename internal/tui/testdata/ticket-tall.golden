@@ -46,5 +46,5 @@ jig  demo › BIG-1                                                             
   │  09:05:20 build·s5 · verification requested for 5555555 “Slice s5”                             │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate · p publish · t tail
-  q quit
+  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate · p publish · 5 land
+  t tail · q quit
