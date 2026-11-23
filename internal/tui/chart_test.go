@@ -507,6 +507,11 @@ func TestChartRowReadsReadingUntilTheRosterIsThere(t *testing.T) {
 func TestChartStatusWords(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
+	// JIG-4 has landed: a ticket that waits for the person's "Land" has the
+	// chart say it needs you before the verb's word, as a question does.
+	landed := task("land", false, "done|a", "done|b", "done|c", "done|pull request opened", "done|landed")
+	g.pin("JIG-4", landed)
+	g.syncDigests()
 	c := g.m.w.charts["checkout"]
 	status := func() (string, string) { return g.m.chartStatus(c, g.m.chartRows(c)) }
 

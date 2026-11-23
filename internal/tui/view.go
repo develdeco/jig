@@ -16,6 +16,7 @@ const (
 	rowBuild    = "build"
 	rowReview   = "review"
 	rowPublish  = "publish"
+	rowLand     = "land"
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
@@ -82,6 +83,8 @@ func (m *Model) page() page {
 		return m.briefPage(e.ticket)
 	case screenPublish:
 		return m.publishPage(e.ticket)
+	case screenLand:
+		return m.landPage(e.ticket)
 	case screenChart:
 		return m.chartPage(e.chart)
 	}
@@ -263,6 +266,8 @@ func (m *Model) header(w int) []string {
 			crumbs += " › 3 review"
 		case screenPublish:
 			crumbs += " › 4 publish"
+		case screenLand:
+			crumbs += " › 5 land"
 		case screenSlice:
 			crumbs += " › 2 build › slice " + m.st.bold(e.slice)
 		}
@@ -352,6 +357,7 @@ func (m *Model) keyHints() []string {
 	dismiss := []string{"d", "dismiss"}
 	gate := []string{"g", "gate"}
 	publish := []string{"p", "publish"}
+	land := []string{"5", "land"}
 	tail := []string{"t", "tail"}
 	quit := []string{"q", "quit"}
 	var keys [][]string
@@ -361,21 +367,23 @@ func (m *Model) keyHints() []string {
 	case screenChart:
 		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
 	case screenTicket:
-		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, tail, quit}
+		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, land, tail, quit}
 		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
 			// Nothing to move on or act on until the ticket exists.
 			keys = [][]string{back, tail, quit}
 		}
 	case screenBrief:
-		keys = [][]string{move, open, back, tail, quit}
+		keys = [][]string{move, open, back, land, tail, quit}
 	case screenBuild:
-		keys = [][]string{move, open, back, gate, tail, quit}
+		keys = [][]string{move, open, back, gate, land, tail, quit}
 	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, tail, quit}
+		keys = [][]string{move, back, keep, dismiss, gate, land, tail, quit}
 	case screenPublish:
-		keys = [][]string{{"↑↓", "scroll"}, back, publish, tail, quit}
+		keys = [][]string{{"↑↓", "scroll"}, back, publish, land, tail, quit}
 	case screenSlice:
-		keys = [][]string{move, back, answer, tail, quit}
+		keys = [][]string{move, back, answer, land, tail, quit}
+	case screenLand:
+		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
 	}
 	flat := make([]string, 0, 2*len(keys))
 	for _, k := range keys {

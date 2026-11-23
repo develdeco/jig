@@ -149,16 +149,16 @@ func (t *ticket) fixRound(id string) int {
 	return t.fixRounds()[id]
 }
 
-// Standing is where the screens put a ticket among its four phases: the first
+// Standing is where the screens put a ticket among its five phases: the first
 // that is not done, whether it can start, and each phase's state.
 type Standing struct {
-	// Current is brief, build, review or publish: the phase the Steps panel
-	// marks current (the last when the ticket is published).
+	// Current is brief, build, review, publish or land: the phase the ticket
+	// stands at, as internal/phase says it (publish once every phase is done).
 	Current string
 	// Ready is whether Current can start now.
 	Ready bool
-	// States are the four phases' states in order: done, current or pending.
-	States [4]string
+	// States are the five phases' states in order: done, current or pending.
+	States [stepCount]string
 }
 
 // Standing is where the screens put ticket, false when they know no such
@@ -172,7 +172,7 @@ func (m *Model) Standing(ticket string) (Standing, bool) {
 	d := m.phaseOf(t)
 	steps := m.stepRows(t, d)
 	cur := currentStep(steps)
-	s := Standing{Current: strings.ToLower(stepNames[cur]), Ready: d.Ready}
+	s := Standing{Current: string(d.Current), Ready: d.Ready}
 	for i, row := range steps {
 		switch {
 		case row.Done:

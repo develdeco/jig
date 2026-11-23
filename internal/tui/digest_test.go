@@ -29,9 +29,9 @@ func task(current string, ready bool, phases ...string) *digestInfo {
 	return d
 }
 
-// TestStepsTakeTheDigestsWords: a ticket's steps, where the main and ticket
-// screens stand it, and the Land line under its steps are the words of the
-// digest `jig next` gave, for a ticket in each of the states the audit found.
+// TestStepsTakeTheDigestsWords: a ticket's five steps, where the main and ticket
+// screens stand it, and the words of its Land step are the digest `jig next`
+// gave, for a ticket in each of the states the audit found.
 func TestStepsTakeTheDigestsWords(t *testing.T) {
 	t.Parallel()
 	const target = "501-review-rounds-stop-repeating-work"
@@ -51,22 +51,22 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		d    *digestInfo
-		// land is the words the Land line must hold; "" says it has none.
+		// land is the words the Land step must hold.
 		land string
 		kind string
 		// standing is the work phase the steps stand at.
 		standing string
 	}{
-		{"a new ticket", task("brief", false, "current|being drafted", pending[0], pending[1], pending[2], "pending|after the publish"), "", "", "brief"},
-		{"a drafted brief", task("brief", false, "current|drafted · waiting for your approval", pending[0], pending[1], pending[2], "pending|after the publish"), "", "", "brief"},
-		{"a build with a failed slice", task("build", false, "done|approved by Ada", "current|1 of 2 green · slice s2 failed its last run", pending[1], pending[2], "pending|after the publish"), "", "", "build"},
-		{"a review under way", task("review", true, "done|approved by Ada", "done|2 slices green", "current|round 1 open", pending[2], "pending|after the publish"), "", "", "review"},
-		{"a published ticket with an open pull request", published("current|waits for a merge", pr), "waits for a merge · PR #503 into " + target, "", "publish"},
-		{"a merge the host made and nobody recorded", published("current|merged on the host, not recorded", pr), "merged on the host, not recorded", "", "publish"},
-		{"a landed ticket", published("done|landed", pr), "landed", "", "publish"},
+		{"a new ticket", task("brief", false, "current|being drafted", pending[0], pending[1], pending[2], "pending|after the publish"), "after the publish", "", "brief"},
+		{"a drafted brief", task("brief", false, "current|drafted · waiting for your approval", pending[0], pending[1], pending[2], "pending|after the publish"), "after the publish", "", "brief"},
+		{"a build with a failed slice", task("build", false, "done|approved by Ada", "current|1 of 2 green · slice s2 failed its last run", pending[1], pending[2], "pending|after the publish"), "after the publish", "", "build"},
+		{"a review under way", task("review", true, "done|approved by Ada", "done|2 slices green", "current|round 1 open", pending[2], "pending|after the publish"), "after the publish", "", "review"},
+		{"a published ticket with an open pull request", published("current|waits for a merge", pr), "waits for a merge", "", "land"},
+		{"a merge the host made and nobody recorded", published("current|merged on the host, not recorded", pr), "merged on the host, not recorded", "", "land"},
+		{"a landed ticket", published("done|landed", pr), "landed", "", "land"},
 		{"a closed ticket", closed, "none · closed without a pull request", "", "publish"},
 		{"an issue", issue, "", "issue", "brief"},
-		{"a task of an issue", child, "", "task of JIG-80", "build"},
+		{"a task of an issue", child, "after the publish", "task of JIG-80", "build"},
 	} {
 		g := newRig(t, "")
 		g.m.w.setRoster([]rosterRow{{ID: "JIG-9", Title: "Ticket", State: "ready", Digest: tc.d}})
@@ -78,7 +78,12 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 		}
 		if len(tc.d.Phases) > 0 {
 			for i, row := range g.m.steps(tk) {
-				if want := tc.d.Phases[i]; row.Text != want.Text || row.Done != (want.State == phase.StateDone) {
+				want := tc.d.Phases[i]
+				if i == stepPublish && len(tc.d.PRs) > 0 && !strings.HasPrefix(want.Text, "closed") {
+					// A published ticket's pull requests read by number and target.
+					want.Text = "published · PR #503 open into " + target
+				}
+				if row.Text != want.Text || row.Done != (want.State == phase.StateDone) {
 					t.Errorf("%s: step %d is %+v, the digest says %+v", tc.name, i+1, row, want)
 				}
 			}
@@ -88,11 +93,8 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 		}
 
 		page := pagesText(g.m.ticketPage("JIG-9"))
-		if tc.land == "" && strings.Contains(page, "land ") {
-			t.Errorf("%s: the ticket screen has a Land line:\n%s", tc.name, page)
-		}
-		if tc.land != "" && !strings.Contains(page, "land  "+tc.land) {
-			t.Errorf("%s: the ticket screen has no Land line %q:\n%s", tc.name, tc.land, page)
+		if tc.d.Kind == "task" && (!strings.Contains(page, "5 Land") || !strings.Contains(page, tc.land)) {
+			t.Errorf("%s: the ticket screen has no fifth step saying %q:\n%s", tc.name, tc.land, page)
 		}
 		if row := pagesText(g.m.mainPage()); tc.kind != "" && !strings.Contains(row, tc.kind) {
 			t.Errorf("%s: the main screen's row does not name %q:\n%s", tc.name, tc.kind, row)

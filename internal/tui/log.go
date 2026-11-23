@@ -25,7 +25,7 @@ func (t *ticket) logLines() []events.Envelope {
 		out = insertSorted(out, s)
 	}
 	for _, l := range t.ledger {
-		if isMove(l) || isHold(l) {
+		if isMove(l) || isHold(l) || isLandNamed(l) {
 			out = insertSorted(out, l)
 		}
 	}
@@ -59,7 +59,7 @@ const callAfter = 2 * time.Second
 func (m *Model) moveWindows(t *ticket, d phase.Ticket) []moveWindow {
 	now := m.now()
 	var ws []moveWindow
-	for step, p := range d.Work() {
+	for step, p := range d.Phases {
 		for _, s := range p.Subs {
 			var tr subTrack
 			end := now
@@ -206,12 +206,12 @@ func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
 // currentOf is the step under way in d: the first not done, the last when all
 // are.
 func currentOf(d phase.Ticket) int {
-	for i, p := range d.Work() {
+	for i, p := range d.Phases {
 		if p.State != phase.StateDone {
 			return i
 		}
 	}
-	return len(d.Work()) - 1
+	return len(d.Phases) - 1
 }
 
 // wroteLine is the place of the line call l wrote, when it wrote one: the
@@ -298,7 +298,7 @@ func tagOf(step int, key string) string {
 }
 
 // stepTagState is the state whose color tags a step's lines.
-var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing}
+var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing, StatePublishing}
 
 // tagMaxW is the most cells a tag takes.
 const tagMaxW = 18

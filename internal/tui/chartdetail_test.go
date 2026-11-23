@@ -124,7 +124,7 @@ func TestChartDetailOfATicketWithNothingBuilding(t *testing.T) {
 	g := chartScreenRig(t)
 	g.press("up")
 	panel := detailPanelOf(t, g.view())
-	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state    published") {
+	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state    waits to land") {
 		t.Errorf("the panel of a published ticket does not say so in its one row:\n%s", strings.Join(panel, "\n"))
 	}
 	g.press("down", "down")

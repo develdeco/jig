@@ -116,6 +116,8 @@ func TestNeedsYouIsHeldBackWhileASessionIsLive(t *testing.T) {
 
 	t.Run("the chart's header and Run panel", func(t *testing.T) {
 		g := chartScreenRig(t)
+		// The published ticket has landed, so no landing waits for the person.
+		g.pin("JIG-4", task("land", false, "done|approved by Ada", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "done|landed"))
 		g.send(tea.WindowSizeMsg{Width: 100, Height: 60})
 		if v := g.view(); strings.Contains(v, "running") || !strings.Contains(v, `say "Continue checkout"`) {
 			t.Fatalf("with no session at work the chart says running:\n%s", v)
@@ -153,7 +155,7 @@ func TestASessionEndReachesTheTicketsOfItsSession(t *testing.T) {
 // says the landing waits for the person.
 func TestALandPromptIsNeverHeldBack(t *testing.T) {
 	t.Parallel()
-	g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge"))))
+	g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", "waits for a merge"))))
 	g.feed(ll(at(59, 0), "JIG-5", journal.EventTool, with("s-builder", "", "", "", "", "")))
 	v := g.view()
 	if !strings.Contains(v, `say "Land JIG-4"`) || strings.Contains(v, "a session worked on it") {
@@ -219,7 +221,7 @@ func TestHeldBackNeedsYouLeavesTheHeaderToo(t *testing.T) {
 func TestEndsRowsAtALandingStopReadAsPhaseWritesThem(t *testing.T) {
 	t.Parallel()
 	const fact = "JIG-7 waits for JIG-4 to land into 526-the-issue"
-	g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge")), func(v map[string]any) {
+	g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", "waits for a merge")), func(v map[string]any) {
 		v["ends"] = []map[string]any{{"ticket": "JIG-7", "blocker": "JIG-4", "kind": "merged", "fact": fact, "prs": []map[string]any{pull("7", "OPEN")}}}
 	}))
 	v := g.view()
@@ -267,13 +269,21 @@ func TestNeedsYouEndsWithItsCause(t *testing.T) {
 		g := chartScreenRig(t)
 		g.feed(jl(at(30, 0), "JIG-5", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-009", "agent")))
 		waitingOnAnswer(g, "JIG-5", 1)
-		if v := g.view(); !strings.Contains(v, "run needs you") {
-			t.Fatalf("the chart does not ask for the person:\n%s", v)
+		needsOf := func(id string) bool {
+			for _, r := range g.m.chartRows(g.m.w.charts[g.m.top().chart]) {
+				if r.id == id {
+					return r.needs
+				}
+			}
+			return false
+		}
+		if !needsOf("JIG-5") {
+			t.Fatalf("the chart does not ask for the person:\n%s", g.view())
 		}
 		g.feed(jl(at(30, 20), "JIG-5", "c", journal.EventAnswer, with("s-person", "", "", "Casual.", "q-009", "person")))
 		waitingOnAnswer(g, "JIG-5", 0)
-		if v := g.view(); strings.Contains(v, "run needs you") {
-			t.Errorf("the chart header still says run needs you after the answer:\n%s", v)
+		if needsOf("JIG-5") {
+			t.Errorf("the chart still counts the answered ticket as needing the person:\n%s", g.view())
 		}
 	})
 }

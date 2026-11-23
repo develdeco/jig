@@ -215,12 +215,15 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 // closed (`jig close`), such as "covered by develdeco/jig#82" or "not planned",
 // when it was.
 type nextTicket struct {
-	Ticket       string `json:"ticket"`
-	Title        string `json:"title,omitempty"`
-	State        string `json:"state"`
-	Closed       string `json:"closed,omitempty"`
-	Branch       string `json:"branch"`
-	Distribution string `json:"distribution,omitempty"`
+	Ticket string `json:"ticket"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state"`
+	Closed string `json:"closed,omitempty"`
+	// LandFirst are the tickets that must land before this one (the digest's
+	// land_first, built by the same function).
+	LandFirst    []string `json:"land_first,omitempty"`
+	Branch       string   `json:"branch"`
+	Distribution string   `json:"distribution,omitempty"`
 	// Kind is named for a ticket that is not a task (an issue or a multi-task),
 	// which is not briefed or built: Chart (an issue's), Issues (a multi-task's)
 	// and Children say where it stands. Parent is the one ticket its pull
@@ -821,6 +824,7 @@ func nextForTicket(st *store.Store, cfg project.Config, mp project.MachineProjec
 	}
 	n.Advice = distributionAdvice(n.Ready)
 	n.setPhase(st, id, asked, merges, plan)
+	n.LandFirst = landFirstOf(st, cfg, mp, merges, id, data.rec, n.derived)
 	n.Worktrees = newWorktreeSource(st, cfg, mp, merges).rows(worktreeFacts{
 		Ticket: id, Branch: branch, Slices: data.in.Slices, Plan: plan,
 		Closed: data.rec.Closed != nil, Published: data.in.Published && !data.in.Rebuilding, Wanted: n.worktreeWanted(),

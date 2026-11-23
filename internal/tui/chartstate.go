@@ -11,7 +11,7 @@ import (
 // What a chart's standing is (which ticket waits for which, what a run would
 // do, whether it is ready) is the verb's word: internal/phase derives it and
 // `jig next <chart>` prints it, so the chart screen only draws it. Where each
-// of the chart's tickets stands among its four steps, and what it waits for, is
+// of the chart's tickets stands among its five steps, and what it waits for, is
 // the ticket's digest (`jig next --json`): the same words its screen and the
 // project's list draw, so a row and its ticket cannot differ.
 
@@ -103,7 +103,7 @@ func (c *chart) title() string {
 type chartRow struct {
 	id, title string
 	// t and d are the ticket and where its digest says it stands, nil and zero
-	// when the screens know no such ticket yet; steps are its four rows, saying
+	// when the screens know no such ticket yet; steps are its rows, saying
 	// "reading" until the roster has listed the ticket.
 	t     *ticket
 	d     phase.Ticket
@@ -117,6 +117,9 @@ type chartRow struct {
 	// person; behind, whether the ticket published and owes a merge, then a
 	// publish again.
 	done, needs, behind bool
+	// end is where the ticket stands at its end, when atEnd says it does.
+	end   endState
+	atEnd bool
 }
 
 // chartRows are the chart's tickets that have a ticket, in the verb's order (the
@@ -135,13 +138,15 @@ func (m *Model) chartRows(c *chart) []chartRow {
 			if t.digest != nil {
 				r.d = m.phaseOf(t)
 				r.steps = m.stepRows(t, r.d)
-				// A question is the person's whoever else is at work; what a live
-				// session records itself (an approval, a round's asks) waits.
-				r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t))
+				// A question and a landing are the person's whoever else is at
+				// work; what a live session records itself (an approval, a
+				// round's asks) waits.
+				r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
 				r.waits = t.blockers
 				r.behind = t.digest.Behind
+				r.end, r.atEnd = m.endOf(t)
 			}
-			r.done = t.digest != nil && r.steps[len(r.steps)-1].Done
+			r.done = t.digest != nil && r.steps[stepPublish].Done
 		}
 		rows = append(rows, r)
 	}
@@ -159,7 +164,7 @@ func (m *Model) chartRows(c *chart) []chartRow {
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.
 func needsYou(d phase.Ticket) bool {
-	for _, p := range d.Work() {
+	for _, p := range d.Phases {
 		if p.State == phase.StateCurrent && hasSub(p, phase.SubNeedsYou) {
 			return true
 		}
@@ -176,7 +181,7 @@ func (r chartRow) state() string {
 	return StateQueued
 }
 
-// chartDots are the ticket's four steps as icons; queued ones for a ticket the
+// chartDots are the ticket's steps as icons; queued ones for a ticket the
 // screens know nothing of.
 func (m *Model) chartDots(r chartRow) string {
 	if r.steps != nil {
@@ -210,6 +215,11 @@ func chartProgress(rows []chartRow) (total, done, needs int) {
 func (m *Model) chartStatus(c *chart, rows []chartRow) (state, label string) {
 	total, done, needs := chartProgress(rows)
 	switch {
+	case c.info != nil && c.info.Code == phase.CodeChartWaitsLand:
+		// The run stops at a landing, which is the person's word: it says so
+		// before it says that a ticket needs them, since the landing is what
+		// they are asked for.
+		return StateNeedsInput, "landing waits for you"
 	case needs > 0:
 		return StateNeedsInput, "run needs you"
 	case c.info != nil:
@@ -283,7 +293,7 @@ func endNote(e chartEnd) string {
 	}
 	switch {
 	case len(e.PRs) > 0:
-		return text + " · " + prWords(e.PRs[0])
+		return text + " · " + chartPRWords(e.PRs[0])
 	case e.Fact != "":
 		return text + " · " + e.Fact
 	}
@@ -293,9 +303,9 @@ func endNote(e chartEnd) string {
 // prNumber matches the number a pull request's address ends in.
 var prNumber = regexp.MustCompile(`/(?:pull|pulls|merge_requests)/(\d+)`)
 
-// prWords names a pull request and its state: "PR #7 open", or its address when
+// chartPRWords names a pull request and its state: "PR #7 open", or its address when
 // no number can be read from it.
-func prWords(pr chartPR) string {
+func chartPRWords(pr chartPR) string {
 	name := pr.URL
 	if m := prNumber.FindStringSubmatch(pr.URL); m != nil {
 		name = "PR #" + m[1]

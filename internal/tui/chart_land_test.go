@@ -10,8 +10,8 @@ import (
 	"github.com/develdeco/jig/internal/phase"
 )
 
-// landRow is a landing of the verb's lands table, as JSON.
-func landRow(ticket string, state string, after ...string) map[string]any {
+// landingRow is a landing of the verb's lands table, as JSON.
+func landingRow(ticket string, state string, after ...string) map[string]any {
 	if after == nil {
 		after = []string{}
 	}
@@ -65,7 +65,7 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 	t.Parallel()
 
 	t.Run("the first landing", func(t *testing.T) {
-		g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge"))))
+		g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", "waits for a merge"))))
 		v := g.view()
 		for _, want := range []string{`say "Land JIG-4"`, "waits for a merge"} {
 			if !strings.Contains(v, want) {
@@ -78,7 +78,7 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 	})
 
 	t.Run("a landing behind another", func(t *testing.T) {
-		g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge"), landRow("JIG-5", "waits for a merge", "JIG-4"))))
+		g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", "waits for a merge"), landingRow("JIG-5", "waits for a merge", "JIG-4"))))
 		v := g.view()
 		for _, want := range []string{`say "Land JIG-4"`, "then Land JIG-5, after JIG-4"} {
 			if !strings.Contains(v, want) {
@@ -91,7 +91,7 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 	})
 
 	t.Run("two landings that wait for none, and one that waits for a landing", func(t *testing.T) {
-		g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-6", "waits for a merge", "JIG-5"), landRow("JIG-4", "waits for a merge"), landRow("JIG-5", "waits for a merge"))))
+		g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-6", "waits for a merge", "JIG-5"), landingRow("JIG-4", "waits for a merge"), landingRow("JIG-5", "waits for a merge"))))
 		v := g.view()
 		for _, want := range []string{`say "Land JIG-4"`, "also Land JIG-5", "then Land JIG-6, after JIG-5"} {
 			if !strings.Contains(v, want) {
@@ -115,7 +115,7 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 			v["code"], v["lands"] = "", []map[string]any{}
 		}))
 		v := g.view()
-		if !strings.Contains(v, `say "Continue checkout"`) || strings.Contains(v, "Land JIG") {
+		if !strings.Contains(v, `say "Continue checkout"`) || strings.Contains(v, "next     say \"Land") {
 			t.Errorf("with no landing left the Run panel does not say Continue:\n%s", v)
 		}
 	})
@@ -125,7 +125,7 @@ func TestRunPanelAtALandingStopSaysLand(t *testing.T) {
 // the person, in the needs-you state, and not "waiting".
 func TestChartHeaderAtALandingStop(t *testing.T) {
 	t.Parallel()
-	g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", "waits for a merge"))))
+	g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", "waits for a merge"))))
 	c := g.m.w.charts[g.m.top().chart]
 	state, label := g.m.chartStatus(c, nil)
 	if state != StateNeedsInput || label != "landing waits for you" {
@@ -173,7 +173,7 @@ func TestLandStatesReadAsPhaseWritesThem(t *testing.T) {
 		if text == "" {
 			t.Fatalf("phase has no words for %s", name)
 		}
-		g := tallChart(t, checkoutJSON(atLanding(landRow("JIG-4", text))))
+		g := tallChart(t, checkoutJSON(atLanding(landingRow("JIG-4", text))))
 		if v := g.view(); !strings.Contains(v, text) {
 			t.Errorf("the chart screen does not carry phase's %q whole:\n%s", text, v)
 		}

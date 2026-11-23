@@ -1,7 +1,10 @@
 package main
 
 import (
+	"slices"
+
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/land"
 	"github.com/develdeco/jig/internal/mergefacts"
 	"github.com/develdeco/jig/internal/phase"
 	"github.com/develdeco/jig/internal/project"
@@ -38,6 +41,16 @@ type nextDigest struct {
 	// published or landed.
 	State  string `json:"state,omitempty"`
 	Closed string `json:"closed,omitempty"`
+	// LandFirst are the tickets that must land before this one may, by the
+	// rules `jig land` reads (land.LandFirst), for a task that published, has
+	// not landed and is open. Empty says nothing must land first, and so does
+	// absent, which is also any other ticket.
+	LandFirst []string `json:"land_first,omitempty"`
+	// Unfinished are the phases of a closed task that were not done when it
+	// closed (brief, build, review, publish): phase.Derive marks every phase of
+	// a closed ticket done, so they are told by deriving it again as an open one.
+	// Absent for a ticket that is open.
+	Unfinished []string `json:"unfinished,omitempty"`
 	// PRs is one row for each recorded pull request.
 	PRs       []nextDigestPR `json:"prs"`
 	BlockedBy []nextBlocker  `json:"blocked_by,omitempty"`
@@ -135,6 +148,7 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 	d := nextDigest{Kind: store.KindTask, Parent: parentOf(st, id, data.rec), BlockedBy: blocked, PhaseProblem: problem}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
+		d.Unfinished = unfinishedOf(st, id, merges)
 	}
 	if derived != nil {
 		d.Current, d.Ready, d.Phases = string(derived.Current), derived.Ready, phaseRows(*derived)
@@ -143,6 +157,24 @@ func taskDigest(st *store.Store, cfg project.Config, merges mergeSource, id stri
 	d.PRs = digestPRs(st, cfg, merges, id, data.rec, plan, shared, lines)
 	d.Slices = sliceCounts(data, lines)
 	return d
+}
+
+// unfinishedOf are the phases from brief to publish that a closed task had not
+// done when it closed: its facts read again with the closing left out.
+func unfinishedOf(st *store.Store, id string, merges mergeSource) []string {
+	f, lines, err := phaseFactsWith(st, id, merges, "")
+	if err != nil {
+		return nil
+	}
+	f.Closed = ""
+	open := phase.Derive(f, lines)
+	var out []string
+	for _, p := range open.Phases[:phase.Work] {
+		if p.State != phase.StateDone {
+			out = append(out, string(p.Name))
+		}
+	}
+	return out
 }
 
 // digestPRs are the pull requests a task recorded: a shared task's from its
@@ -327,5 +359,44 @@ func rosterDigest(st *store.Store, cfg project.Config, mp project.MachineProject
 	if err != nil {
 		return taskDigest(st, cfg, merges, id, data, state, nil, err.Error(), plan, shared, nil, blocked)
 	}
-	return taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, lines, blocked)
+	d := taskDigest(st, cfg, merges, id, data, state, &t, "", plan, shared, lines, blocked)
+	d.LandFirst = landFirstOf(st, cfg, mp, merges, id, data.rec, &t)
+	return d
+}
+
+// landFirstOf are the tickets that must land before task id, from the merge
+// facts merges holds and no host call of its own: a predecessor whose fact has
+// no answer there stays in the list. Only a task that published, has not landed
+// (a closed one has its Land done) has any (t is its derived phases, nil when they could not be
+// derived); a shared task lists those of each issue it goes into. A rule that
+// cannot be read lists none: the landing itself says why when it is tried.
+func landFirstOf(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, id string, rec store.Ticket, t *phase.Ticket) []string {
+	if t == nil || len(t.Phases) != phase.Work+1 || t.Phases[phase.Work-1].State != phase.StateDone || t.Phases[phase.Work].State == phase.StateDone {
+		return nil
+	}
+	lm, ok := merges.(land.Merges)
+	if !ok {
+		lm = ofForOf{merges}
+	}
+	d := land.Deps{Store: st, Cfg: cfg, Clones: mp.Clones, Merges: lm}
+	issues, err := st.ContainersOf(id, rec)
+	if err != nil {
+		return nil
+	}
+	if len(issues) < 2 {
+		issues = []string{""}
+	}
+	var out []string
+	for _, issue := range issues {
+		first, err := land.LandFirst(d, id, issue)
+		if err != nil {
+			continue
+		}
+		for _, f := range first {
+			if !slices.Contains(out, f) {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
 }
