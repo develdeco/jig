@@ -188,7 +188,10 @@ type Phase struct {
 	State string
 	// Text is where the phase stands, in a few words.
 	Text string
-	Subs []Sub
+	// Changed says the brief was edited after its approval; set for the brief
+	// phase alone.
+	Changed bool
+	Subs    []Sub
 }
 
 // Slice is a slice as Derive reads it.
@@ -1071,7 +1074,7 @@ func (d *digest) brief() (Phase, bool) {
 		p.Subs = d.briefSubs(planned, "")
 		return p, true
 	case f.BriefExists && f.Approval == ApprovalChanged:
-		p.Text = "brief changed after approval: approve again"
+		p.Text, p.Changed = "brief changed after approval: approve again", true
 		p.Subs = d.briefSubs(planned, "changed")
 		return p, false
 	case f.BriefExists && d.started:

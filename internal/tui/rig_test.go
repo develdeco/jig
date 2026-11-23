@@ -663,7 +663,7 @@ func fakeDigest(m *Model, t *ticket) *digestInfo {
 	d := phase.Derive(f, lines)
 	dg := &digestInfo{Kind: "task", Current: string(d.Current), Ready: d.Ready}
 	for _, p := range d.Phases {
-		dg.Phases = append(dg.Phases, digestPhase{Name: string(p.Name), State: p.State, Text: p.Text})
+		dg.Phases = append(dg.Phases, digestPhaseOf(p))
 	}
 	dg.Slices = &digestSlices{Total: len(f.Slices)}
 	for _, sl := range f.Slices {
@@ -673,9 +673,19 @@ func fakeDigest(m *Model, t *ticket) *digestInfo {
 		case sl.State == StateGreen:
 			dg.Slices.Green++
 		case sl.State == StateBuilding:
-			dg.Slices.Building++
+			// As `jig next` counts: a building slice whose last run judged the
+			// code and failed it is failed.
+			if run, failed := t.lastRunFailed(sl.ID); failed && run.Cause == "" {
+				dg.Slices.Failed++
+			} else {
+				dg.Slices.Building++
+			}
 		case sl.State == StateQueued:
 			dg.Slices.Queued++
+		case sl.State == StateStalled:
+			dg.Slices.Stalled++
+		case sl.State == StateEnvBlocked:
+			dg.Slices.EnvBlocked++
 		}
 	}
 	return dg

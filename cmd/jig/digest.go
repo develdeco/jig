@@ -75,7 +75,8 @@ type nextDigestPR struct {
 // nextSliceCounts is how many of a ticket's slices are in each state. Failed
 // and Stopped are slices the store holds building whose last covering run
 // failed and judged the code (failed), or was ended before it could (stopped);
-// Building counts the rest.
+// Building counts the rest. Stalled and EnvBlocked are slices the store holds in
+// those states, which a screen draws as such.
 type nextSliceCounts struct {
 	Total      int `json:"total"`
 	Green      int `json:"green"`
@@ -84,6 +85,8 @@ type nextSliceCounts struct {
 	NeedsInput int `json:"needs_input"`
 	Failed     int `json:"failed"`
 	Stopped    int `json:"stopped"`
+	Stalled    int `json:"stalled"`
+	EnvBlocked int `json:"env_blocked"`
 }
 
 // parentOf is the ticket a ticket's pull request goes into: its multi-task, or
@@ -101,7 +104,12 @@ func parentOf(st *store.Store, id string, rec store.Ticket) string {
 func phaseRows(t phase.Ticket) []nextPhaseRow {
 	rows := make([]nextPhaseRow, 0, len(t.Phases))
 	for _, ph := range t.Phases {
-		rows = append(rows, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
+		row := nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text, Changed: ph.Changed}
+		for _, s := range ph.Subs {
+			row.NeedsYou = row.NeedsYou || s.State == phase.SubNeedsYou
+			row.SubDone = row.SubDone || s.State == phase.SubDone
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -263,6 +271,10 @@ func sliceCounts(data ticketData, lines []journal.Line) *nextSliceCounts {
 			c.Queued++
 		case "needs-input":
 			c.NeedsInput++
+		case "stalled":
+			c.Stalled++
+		case "env-blocked":
+			c.EnvBlocked++
 		case "building":
 			switch lastRun(lines, s.ID) {
 			case runFailed:

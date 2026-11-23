@@ -368,3 +368,58 @@ func TestASharedTaskHasNoParentAndATaskOfAnIssueHasIt(t *testing.T) {
 		}
 	}
 }
+
+// TestPhaseRowsCarryWhatAStepsMarkReadsOfItsSubSteps: a phase with a sub-step
+// that needs the person, or one that is done, or a brief changed after its
+// approval, says so in its row, and one with none says none.
+func TestPhaseRowsCarryWhatAStepsMarkReadsOfItsSubSteps(t *testing.T) {
+	t.Parallel()
+	var d phase.Ticket
+	d.Phases[0] = phase.Phase{Name: phase.Brief, Changed: true, Subs: []phase.Sub{{State: phase.SubPending}, {State: phase.SubNeedsYou}, {State: phase.SubPending}}}
+	d.Phases[1] = phase.Phase{Name: phase.Build, Subs: []phase.Sub{{State: phase.SubActive}}}
+	d.Phases[3] = phase.Phase{Name: phase.Publish, Subs: []phase.Sub{{State: phase.SubActive}, {State: phase.SubDone}, {State: phase.SubPending}}}
+	rows := phaseRows(d)
+	for i, want := range []struct{ needsYou, subDone, changed bool }{
+		{true, false, true}, {false, false, false}, {false, false, false}, {false, true, false}, {false, false, false},
+	} {
+		if got := (struct{ needsYou, subDone, changed bool }{rows[i].NeedsYou, rows[i].SubDone, rows[i].Changed}); got != want {
+			t.Errorf("row %d carries %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+// TestSliceCountsCountStalledAndEnvBlockedSlices: a slice the store holds
+// stalled or env-blocked is counted as such, so a screen that has not read the
+// ticket's status draws the build as the one that has.
+func TestSliceCountsCountStalledAndEnvBlockedSlices(t *testing.T) {
+	t.Parallel()
+	var data ticketData
+	data.in.States = map[string]store.SliceState{}
+	for id, state := range map[string]string{"a": "green", "b": "stalled", "c": "env-blocked", "d": "queued", "e": "needs-input"} {
+		data.in.Slices = append(data.in.Slices, store.Slice{ID: id})
+		data.in.States[id] = store.SliceState{State: state}
+	}
+	if got, want := *sliceCounts(data, nil), (nextSliceCounts{Total: 5, Green: 1, Queued: 1, NeedsInput: 1, Stalled: 1, EnvBlocked: 1}); got != want {
+		t.Errorf("counts = %+v, want %+v", got, want)
+	}
+}
+
+// TestTheRostersDigestNamesWhatAStepsMarkReads: the digest prints the fields a
+// screen draws a step's mark from under the names the screens read them by, so
+// a rename on either side breaks a test, not every screen's mark at once.
+func TestTheRostersDigestNamesWhatAStepsMarkReads(t *testing.T) {
+	t.Parallel()
+	row, err := json.Marshal(nextPhaseRow{NeedsYou: true, SubDone: true, Changed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts, err := json.Marshal(nextSliceCounts{Stalled: 1, EnvBlocked: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"needs_you":true`, `"sub_done":true`, `"changed":true`, `"stalled":1`, `"env_blocked":1`} {
+		if !strings.Contains(string(row)+string(counts), want) {
+			t.Errorf("the digest prints %s %s, want %s", row, counts, want)
+		}
+	}
+}

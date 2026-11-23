@@ -159,7 +159,7 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 			r.steps = m.stepRows(t, r.d)
 			// A question and a landing are the person's whoever else is at work; what a
 			// live session records itself (an approval, a round's asks) waits.
-			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
+			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(t, r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
 			r.waits = t.blockers
 			r.behind = t.digest.Behind
 			r.end, r.atEnd = m.endOf(t)
@@ -171,9 +171,9 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 
 // needsYou is whether a phase that is under way waits for the person: an open
 // question, an ask nobody decided, a brief nobody approved.
-func needsYou(d phase.Ticket) bool {
+func needsYou(t *ticket, d phase.Ticket) bool {
 	for _, p := range d.Phases {
-		if p.State == phase.StateCurrent && hasSub(p, phase.SubNeedsYou) {
+		if p.State == phase.StateCurrent && t.subIs(p, phase.SubNeedsYou) {
 			return true
 		}
 	}

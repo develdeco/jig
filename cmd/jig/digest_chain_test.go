@@ -98,6 +98,23 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 		t.Fatalf("the roster has %d tickets, want 13", len(roster.Tickets))
 	}
 
+	// The roster's digest carries what a step's mark reads of the sub-steps, so a
+	// screen that never read a status marks a step as one that did.
+	waiting := 0
+	for _, row := range roster.Tickets {
+		for _, p := range row.Digest.Phases {
+			if row.Digest.Closed == "" && strings.Contains(p.Text, "waiting for your approval") {
+				waiting++
+				if !p.NeedsYou {
+					t.Errorf("%s: its brief waits for the person's approval, and the digest does not say a sub-step needs them", row.ID)
+				}
+			}
+		}
+	}
+	if waiting == 0 {
+		t.Errorf("no ticket of the store has a brief waiting for approval")
+	}
+
 	// The project's list, on the screens, from the first screen to the one that
 	// has read the roster.
 	keys, main, wait := startTUI(t, e, scope...)
@@ -113,6 +130,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 	list := frames[len(frames)-1]
 	icons := regexp.MustCompile(`[^\s] [^\s] [^\s] [^\s]`)
 
+	started := 0
 	for _, row := range roster.Tickets {
 		id, d := row.ID, row.Digest
 		var n nextTicket
@@ -212,32 +230,63 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 			t.Errorf("%s: the project's list has no row for it:\n%s", id, list)
 		} else if n.Phase != nil && icons.FindString(rowLine) == "" {
 			t.Errorf("%s: its row has no steps: %q", id, rowLine)
+		} else if d.Closed == "" && len(d.Phases) > 0 && d.Phases[0].State == "done" && d.Phases[0].NeedsYou {
+			// A done brief the work started without an approval is marked so on
+			// the list, which reads no status: the field crossed from `jig next`.
+			started++
+			if !strings.HasPrefix(icons.FindString(rowLine), "!") {
+				t.Errorf("%s: its brief was never approved and the list marks it %q", id, icons.FindString(rowLine))
+			}
 		}
 	}
 
-	// A chart's rows are the ticket rows of the project's list: the same steps.
+	if started == 0 {
+		t.Errorf("no ticket of the store has a done brief the work started without an approval")
+	}
+
+	// A chart's rows are the ticket rows of the project's list: the same steps,
+	// in every frame the chart draws, from the one before its tickets' statuses
+	// were read to the one after the last was: a step's mark does not wait on
+	// the status.
 	keys, chart, wait := startTUI(t, e, append([]string{"plan"}, scope...)...)
 	chart.until(t, "› plan")
 	chart.until(t, "TK-2")
-	cframe := lastScreen(chart.String())
+	// The chart reads each ticket's status as it opens; let the reads land.
+	for last, still := "", 0; still < 30; time.Sleep(10 * time.Millisecond) {
+		if now := chart.String(); now != last {
+			last, still = now, 0
+		} else {
+			still++
+		}
+	}
+	cframes := screensOf(chart.String())
 	keys.Write([]byte("q"))
 	if wait() != 0 {
 		t.Fatalf("jig tui plan exited non-zero\n%s", chart.String())
 	}
+	marksOf := func(frame, id string) string {
+		for _, l := range strings.Split(frame, "\n") {
+			if strings.Contains(l, "Ticket "+id+" ") {
+				return icons.FindString(l)
+			}
+		}
+		return ""
+	}
 	for _, id := range []string{"TK-2", "TK-3"} {
-		var rowOf, listOf string
-		for _, l := range strings.Split(cframe, "\n") {
-			if strings.Contains(l, "Ticket "+id+" ") {
-				rowOf = icons.FindString(l)
+		want := marksOf(list, id)
+		seen := 0
+		for _, frame := range cframes {
+			got := marksOf(frame, id)
+			if got == "" {
+				continue // before the roster named the ticket
+			}
+			seen++
+			if got != want {
+				t.Errorf("%s: a chart frame has the steps %q, the project's list %q\n%s", id, got, want, frame)
 			}
 		}
-		for _, l := range strings.Split(list, "\n") {
-			if strings.Contains(l, "Ticket "+id+" ") {
-				listOf = icons.FindString(l)
-			}
-		}
-		if rowOf == "" || rowOf != listOf {
-			t.Errorf("%s: the chart's row has the steps %q, the project's list %q\n%s", id, rowOf, listOf, cframe)
+		if seen == 0 || want == "" {
+			t.Errorf("%s: the chart drew its row in %d frames, the list's row has the steps %q", id, seen, want)
 		}
 	}
 }

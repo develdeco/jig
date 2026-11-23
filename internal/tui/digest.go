@@ -36,8 +36,36 @@ type digestInfo struct {
 // digestChild is one entry under an issue or a multi-task.
 type digestChild struct{ ID, Title string }
 
-// digestPhase is one phase's state (done, current or pending) and its words.
-type digestPhase struct{ Name, State, Text string }
+// digestPhase is one phase's state (done, current or pending) and its words,
+// and whether a sub-step of it needs the person or is done: what a step's mark
+// reads of the sub-steps, so it is the same before a status is read and after.
+type digestPhase struct {
+	Name, State, Text          string
+	NeedsYou, SubDone, Changed bool
+}
+
+// digestPhaseChanged is whether the brief phase p was edited after its
+// approval, as the digest says; only a ticket the roster did not list falls
+// back to the status it read.
+func (t *ticket) digestPhaseChanged(p phase.Phase) bool {
+	if t.digest != nil {
+		dp, _ := t.digest.phase(p.Name)
+		return dp.Changed
+	}
+	return t.status != nil && t.status.Brief != nil && t.status.Brief.Approval == phase.ApprovalChanged
+}
+
+// subIs is whether the phase p of the ticket has a sub-step in state (needs-you
+// or done), as the roster's digest says, so that the answer does not change
+// when the ticket's status is read. Only a ticket the roster did not list falls
+// back to the sub-steps it has.
+func (t *ticket) subIs(p phase.Phase, state string) bool {
+	if t.digest != nil {
+		dp, _ := t.digest.phase(p.Name)
+		return state == phase.SubNeedsYou && dp.NeedsYou || state == phase.SubDone && dp.SubDone
+	}
+	return hasSub(p, state)
+}
 
 // digestPR is a pull request a ticket recorded, and where it goes.
 type digestPR struct {
@@ -50,7 +78,7 @@ type digestPR struct {
 
 // digestSlices counts a ticket's slices by state.
 type digestSlices struct {
-	Total, Green, Building, Queued, NeedsInput, Failed, Stopped int
+	Total, Green, Building, Queued, NeedsInput, Failed, Stopped, Stalled, EnvBlocked int
 }
 
 // kindWords is how a ticket's kind is said beside it: the kind of an issue or a
@@ -103,7 +131,8 @@ func readingPhases() phase.Ticket {
 // ticket stands at and whether it can start. What d holds beside them (the
 // sub-steps, from the status and the journal) stays. A digest that told no
 // phases (a ticket that is not a task, or whose phase could not be derived)
-// puts what it does say in the place of the words.
+// puts what it does say in the place of the words and leaves every phase
+// pending, so no state is taken from a status the roster did not corroborate.
 func (dg *digestInfo) lay(d *phase.Ticket) {
 	if len(dg.Phases) == 0 {
 		said := dg.PhaseProblem
@@ -111,7 +140,7 @@ func (dg *digestInfo) lay(d *phase.Ticket) {
 			said = strings.TrimSpace(dg.Kind + " · " + dg.State)
 		}
 		for i := range d.Phases {
-			d.Phases[i].Text = said
+			d.Phases[i].State, d.Phases[i].Text = phase.StatePending, said
 		}
 		return
 	}

@@ -56,6 +56,9 @@ func TestChangedBriefSentenceSaysApproveAgain(t *testing.T) {
 	if got.Text != "brief changed after approval: approve again" {
 		t.Errorf("text = %q", got.Text)
 	}
+	if !got.Changed || Derive(approved(), nil).Of(Brief).Changed {
+		t.Errorf("Changed is %v for the changed brief and %v for an approved one", got.Changed, Derive(approved(), nil).Of(Brief).Changed)
+	}
 	if s := sub(t, got, "approved"); s.Detail != "changed after Dana (person) approved it" {
 		t.Errorf("approved sub = %+v, want the approver named", s)
 	}

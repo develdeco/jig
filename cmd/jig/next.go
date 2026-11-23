@@ -502,6 +502,15 @@ type nextPhaseRow struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
 	Text  string `json:"text"`
+	// NeedsYou says a sub-step of the phase waits on the person (a brief the
+	// work started without an approval, an ask nobody decided), and SubDone that
+	// one of its sub-steps is done. A screen draws a step's mark from them, so a
+	// reader that has the phases and not the sub-steps marks the step as one
+	// that has them.
+	NeedsYou bool `json:"needs_you,omitempty"`
+	SubDone  bool `json:"sub_done,omitempty"`
+	// Changed says the brief was edited after its approval.
+	Changed bool `json:"changed,omitempty"`
 }
 
 // nextPhaseAsked is the answer to --for: whether that phase can run now, what

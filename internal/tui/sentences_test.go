@@ -13,7 +13,7 @@ import (
 func digestOfFacts(f phase.Facts, lines []journal.Line) *digestInfo {
 	d := &digestInfo{Kind: "task"}
 	for _, p := range phase.Derive(f, lines).Phases {
-		d.Phases = append(d.Phases, digestPhase{Name: string(p.Name), State: p.State, Text: p.Text})
+		d.Phases = append(d.Phases, digestPhaseOf(p))
 	}
 	return d
 }
