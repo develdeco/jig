@@ -2,6 +2,7 @@ package mergefacts
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/develdeco/jig/internal/fileshare"
@@ -42,8 +43,8 @@ type PRs interface {
 //     command that long and no more.
 //
 // The file is this machine's, never the store's: it is the host's word as of a
-// time, and deleting it costs only the next reads. Not safe for concurrent
-// use.
+// time, and deleting it costs only the next reads. Reads are safe for
+// concurrent use; they wait for one another.
 type PRCache struct {
 	// Ask reads one state from the host: repohost.PRState with the gh program
 	// and environment of the command.
@@ -54,9 +55,16 @@ type PRCache struct {
 	MaxAge time.Duration
 	// Now is the clock, time.Now when nil.
 	Now func() time.Time
+	// ReadOnce says the file is read once for the life of the cache, not for
+	// each question: for a command that reads many pull requests and asks the
+	// host none, so the cost of a state does not grow with the file.
+	ReadOnce bool
 
+	mu     sync.Mutex
 	run    map[string]PRRead
 	failed time.Duration
+	kept   map[string]prRecord
+	loaded bool
 }
 
 // slowFailures is how long asks that failed may take in all, in one run, before
@@ -76,6 +84,8 @@ type prFile struct {
 
 // Read says what state the pull request at url is in, by the rules of PRCache.
 func (c *PRCache) Read(url string) PRRead {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if got, ok := c.run[url]; ok {
 		return got
 	}
@@ -108,6 +118,8 @@ func (c *PRCache) Read(url string) PRRead {
 // reader that must not wait on the network for a pull request nobody asked
 // about.
 func (c *PRCache) Cached(url string) PRRead {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if got, ok := c.run[url]; ok {
 		return got
 	}
@@ -137,6 +149,17 @@ func (c *PRCache) load() map[string]prRecord {
 	if c.Path == "" {
 		return nil
 	}
+	if c.ReadOnce {
+		if !c.loaded {
+			c.kept, c.loaded = c.read(), true
+		}
+		return c.kept
+	}
+	return c.read()
+}
+
+// read is the file as it stands.
+func (c *PRCache) read() map[string]prRecord {
 	data, err := fileshare.ReadFile(c.Path)
 	if err != nil {
 		return nil
@@ -155,11 +178,14 @@ func (c *PRCache) remember(url string, rec prRecord) {
 	if c.Path == "" {
 		return
 	}
-	kept := c.load()
+	kept := c.read()
 	if kept == nil {
 		kept = map[string]prRecord{}
 	}
 	kept[url] = rec
+	if c.ReadOnce {
+		c.kept, c.loaded = kept, true
+	}
 	data, err := json.MarshalIndent(prFile{PullRequests: kept}, "", "  ")
 	if err != nil {
 		return

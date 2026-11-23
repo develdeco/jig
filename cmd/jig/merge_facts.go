@@ -39,6 +39,20 @@ func newMergeReader(e env, st *store.Store, cfg project.Config, mp project.Machi
 	return &mergefacts.Reader{Store: st, Cfg: cfg, Clones: mp.Clones, PRs: cache}
 }
 
+// newKeptMergeReader is a merge reader that asks the host nothing: a pull
+// request is in the last state this machine kept of it, dated (one kept within
+// the listing's age is no older than the full listing would take it), or in
+// none (it reads unknown). The roster is read with it, so a list of many tickets never
+// waits on the network; the host is asked by the background refresh of the
+// merge timer and by `jig next <ticket>`.
+func newKeptMergeReader(e env, st *store.Store, cfg project.Config, mp project.MachineProject, jigHome string) *mergefacts.Reader {
+	cache := &mergefacts.PRCache{Now: e.now, ReadOnce: true, MaxAge: listingMergeAge}
+	if jigHome != "" {
+		cache.Path = home.PullRequestStatesPath(jigHome)
+	}
+	return &mergefacts.Reader{Store: st, Cfg: cfg, Clones: mp.Clones, PRs: cache}
+}
+
 // readMerges reads, for the tickets of inputs that have not published and are
 // not closed, the merge fact of each blocker that is a ticket of inputs, has
 // published, is not closed and is not stacked (a stacked blocker is met by

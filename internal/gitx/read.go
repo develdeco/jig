@@ -259,6 +259,9 @@ func resolve(dir, rev string, trusted bool) (string, bool, error) {
 // resolveWith is resolve with r, a reader to reuse across questions about
 // one repository (nil when discovery found none).
 func resolveWith(dir, rev string, r *reader, trusted bool) (string, bool, error) {
+	if sha, found, answered := listedCommit(dir, rev); answered {
+		return sha, found, nil
+	}
 	if spec, ok := parseRev(rev); ok {
 		switch sha, res := r.rev(spec); res {
 		case resFound:

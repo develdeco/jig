@@ -36,6 +36,7 @@ func init() {
 			{"for", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already", false},
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
+			{"roster", "with --json: print only every ticket's row and the charts, the host never asked", false},
 		}, false},
 		Order: 301,
 		Run: func(e env, args []string, stdout io.Writer, _ io.Reader) int {
@@ -71,6 +72,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already")
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
+	rosterFlag := fs.Bool("roster", false, "with --json: print only every ticket's row and the charts, the host never asked")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {
 		return 0
@@ -87,6 +89,11 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 			ticketsSet = true
 		}
 	})
+	if *rosterFlag {
+		if err := rosterRefusal(ticket, *forFlag != "", *topology, ticketsSet, *jsonOut); err != nil {
+			return renderErr(stdout, err)
+		}
+	}
 	// The flags are checked against the ticket asked about; a ref is resolved
 	// to its owner first, so they are checked against that owner then.
 	checkAsked := func() (phase.Name, error) {
@@ -124,6 +131,19 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		if asked, err = checkAsked(); err != nil {
 			return renderErr(stdout, err)
 		}
+	}
+	if *rosterFlag {
+		defer readScope(st, mp, jigHome)()
+		n, err := nextForRoster(st, cfg, mp, newKeptMergeReader(e, st, cfg, mp, jigHome))
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		data, err := json.Marshal(n)
+		if err != nil {
+			return renderErr(stdout, err)
+		}
+		fmt.Fprintf(stdout, "%s\n", data)
+		return 0
 	}
 	distribution := ""
 	if cwd, err := e.getwd(); err == nil {
@@ -190,6 +210,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 		n.setReviewer(e, verifydeliver.Deps{Store: st, Home: jigHome})
 		out, blocks = n, n.blocks(*topology)
 	} else {
+		defer readScope(st, mp, jigHome)()
 		n, err := nextForStore(st, cfg, mp, newMergeReader(e, st, cfg, mp, jigHome, listingMergeAge))
 		if err != nil {
 			return renderErr(stdout, err)
@@ -1176,6 +1197,9 @@ type nextRow struct {
 	// Digest is where the ticket stands (nextDigest), the one reading the
 	// screens take their words from.
 	Digest *nextDigest `json:"digest,omitempty"`
+	// Updated is the instant of the newest line of the ticket's journal (RFC
+	// 3339), absent for a ticket with none: how long ago the ticket last moved.
+	Updated string `json:"updated,omitempty"`
 }
 
 // nextSharedRank is a rank that more than one ready ticket holds, so which
@@ -1236,58 +1260,17 @@ var testPairWith = func(dir, a, b string) (string, []string) {
 // nextForStore lists the tickets of the store in order with what blocks each,
 // and the files local ticket branches fight over.
 func nextForStore(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource) (nextStore, error) {
-	ids, err := st.Tickets()
+	rows, err := readStoreRows(st, cfg, mp, merges)
 	if err != nil {
 		return nextStore{}, err
 	}
-	datas := make([]ticketData, len(ids))
-	inputs := make([]ready.Ticket, len(ids))
-	for i, id := range ids {
-		datas[i] = readTicketDataOrProblem(st, id)
-		settleRebuilding(st, merges, &datas[i].in)
-		inputs[i] = datas[i].in
-	}
-	readMerges(st, merges, inputs, false)
-	out := nextStore{Tickets: []nextRow{}, Next: []string{}, Charts: chartRows(st)}
-	digestFrom := digestMerges(merges)
-	// The ready tickets in id order, with their ranks and slices.
-	var ranked []ready.Ranked
-	slicesOf := map[string][]store.Slice{}
-	for i, s := range ready.Tickets(inputs) {
-		row := nextRow{ID: s.ID, Title: datas[i].title, State: s.State, Rank: datas[i].rec.Rank, Ready: s.Ready}
-		if c := datas[i].rec.Closed; c != nil {
-			row.Closed = c.Phrase()
-		}
-		if row.Ready == nil {
-			row.Ready = []string{}
-		}
-		for _, b := range s.Blocked {
-			row.BlockedBy = append(row.BlockedBy, blockerFact(b, s.Why[b.Ticket], inputs))
-		}
-		d := rosterDigest(st, cfg, mp, digestFrom, datas[i], s.State, row.BlockedBy)
-		row.Digest = &d
-		if datas[i].problem != "" {
-			row.State, row.Problem, row.Ready = stateInvalid, datas[i].problem, []string{}
-			out.Tickets = append(out.Tickets, row)
-			continue
-		}
-		if k := datas[i].rec.KindOrDefault(); k != store.KindTask {
-			row.State, row.Kind, row.Ready = k, k, []string{}
-			out.Tickets = append(out.Tickets, row)
-			continue
-		}
-		out.Tickets = append(out.Tickets, row)
-		if s.State == ready.StateReady {
-			ranked = append(ranked, ready.Ranked{ID: s.ID, Rank: datas[i].rec.Rank})
-			slicesOf[s.ID] = datas[i].in.Slices
-		}
-	}
-	out.Next = ready.ByPriority(ranked)
+	out := nextStore{Tickets: rows.rows, Next: []string{}, Charts: chartRows(st)}
+	out.Next = ready.ByPriority(rows.ranked)
 	out.IssueOrder = issueOrder(afterDeps(st, cfg, mp, merges))
-	for _, s := range ready.SharedRanks(ranked) {
+	for _, s := range ready.SharedRanks(rows.ranked) {
 		out.SharedRanks = append(out.SharedRanks, nextSharedRank{Rank: s.Rank, Tickets: s.Tickets})
 	}
-	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, slicesOf)
+	out.WorkspaceOverlaps = workspaceOverlaps(st, cfg, mp, out.Next, rows.slicesOf)
 	out.Overlaps = findOverlaps(st, cfg, mp, ticketOpenFilter(st, merges))
 	return out, nil
 }
