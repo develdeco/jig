@@ -1351,6 +1351,12 @@ func (m *Model) triage(decision string) tea.Cmd {
 		m.notice = "no ask is waiting for a decision"
 		return nil
 	}
+	// A person decides an ask from what the screen shows: one drawn cut, or not
+	// drawn at all, is not decided.
+	if !m.drawnWhole(pick.ID) {
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
+		return nil
+	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
 }
 

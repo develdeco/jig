@@ -93,24 +93,9 @@ func (m *Model) reviewPage(id string) page {
 	case len(asks) == 0:
 		p.add(m.st.dim("nothing: no finding waits for a person"))
 	}
-	rationale := map[string]string{}
-	if t.status != nil {
-		for _, f := range t.status.Findings {
-			rationale[f.ID] = f.Rationale
-		}
-	}
 	for i, line := range m.askLines(asks) {
 		p.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
-		var why []string
-		if r := rationale[asks[i].ID]; r != "" {
-			why = append(why, r)
-		}
-		if w := asks[i].Why; w != "" && w != "-" {
-			why = append(why, w)
-		}
-		for _, l := range wrap(strings.Join(why, " · "), m.width-8, 2) {
-			p.add("    " + m.st.dim(l))
-		}
+		m.addAskText(&p, t, asks[i])
 	}
 
 	p.add("")

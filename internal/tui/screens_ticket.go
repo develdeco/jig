@@ -96,12 +96,13 @@ func (m *Model) ticketPage(id string) page {
 		needs.add(m.st.bold(heading))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
-			for _, l := range m.questionText(q.Text) {
+			for _, l := range m.wholeLines(q.Text) {
 				needs.add("    " + l)
 			}
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
+			m.addAskText(&needs, t, asks[i])
 		}
 		if landing {
 			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
@@ -457,18 +458,26 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 }
 
 // questionLine is an open question as a row: who asked about which slice, and
-// the question's id. The question itself follows the row, whole (questionText).
+// the question's id. The question itself follows the row, whole (wholeLines).
 func (m *Model) questionLine(t *ticket, q questionRow) string {
 	who := firstOf(m.who(t, q.Session), "a session")
 	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + m.st.dim("  "+q.ID)
 }
 
-// questionText is a question's lines as a person reads them to answer: wrapped
-// to the room a page line has under its marker and a four-cell indent, none
-// cut. A question's ask and its default are often its last line, so a cut
+// wholeLines is the text of a question or an ask as a person reads it to act:
+// wrapped to the room a page line has under its marker and a four-cell indent,
+// none cut. A question's ask and its default are often its last line, so a cut
 // would hide them.
-func (m *Model) questionText(text string) []string {
+func (m *Model) wholeLines(text string) []string {
 	return wrapWhole(text, m.width-2-4)
+}
+
+// addAskText adds an ask's text under its row, whole, each line tagged with the
+// ask's id.
+func (m *Model) addAskText(p *page, t *ticket, a askRow) {
+	for _, l := range m.wholeLines(t.askText(a)) {
+		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID})
+	}
 }
 
 // firstLine is the first line of text.

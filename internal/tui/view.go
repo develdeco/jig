@@ -37,12 +37,14 @@ type rowRef struct {
 
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
-// top edge its title in text and right.
+// top edge its title in text and right. A line of an ask's text carries the
+// ask's id, so a screen can tell whether it drew the ask whole (drawnWhole).
 type pline struct {
 	text  string
 	ref   *rowRef
 	box   int
 	right string
+	ask   string
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -102,8 +104,40 @@ const (
 // what the last command printed, and the keys, in exactly the height the
 // terminal has.
 func (m *Model) View() string {
-	w, h := m.width, m.height
+	w := m.width
 	m.followSel()
+	l := m.layout()
+
+	var tailPane []string
+	if l.tailH > 0 {
+		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, l.tailH)...)
+	}
+
+	body := m.window(l.pg, l.sel, l.pageH, w)
+	for len(body) < l.pageH {
+		body = append(body, "")
+	}
+	out := append(append(append(append(l.head, body...), tailPane...), l.panel...), l.foot...)
+	for i, line := range out {
+		out[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(out, "\n")
+}
+
+// screenLayout is how the screen on top is laid out at the size the terminal
+// has: its page and the row the cursor stands on, the rows around the body, and
+// how many rows of the body the page has and the tail takes.
+type screenLayout struct {
+	pg                page
+	sel               int
+	head, foot, panel []string
+	pageH, tailH      int
+}
+
+// layout lays the screen on top out as View draws it. It draws nothing and
+// moves nothing: what the cursor follows is View's to settle first.
+func (m *Model) layout() screenLayout {
+	w, h := m.width, m.height
 	pg := m.page()
 	refs := pg.refs()
 	sel := m.top().sel
@@ -126,23 +160,32 @@ func (m *Model) View() string {
 		bodyH = 1
 	}
 
-	var tailPane []string
-	pageH := bodyH
+	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
 	if m.tail && bodyH >= 8 {
-		tailH := bodyH / 2
-		pageH = bodyH - tailH - 1
-		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, tailH)...)
+		l.tailH = bodyH / 2
+		l.pageH = bodyH - l.tailH - 1
 	}
+	return l
+}
 
-	body := m.window(pg, sel, pageH, w)
-	for len(body) < pageH {
-		body = append(body, "")
+// drawnWhole says whether the screen on top draws every line of the text
+// tagged with id, as View would draw it now: the same page, the same window.
+// It is the one rule for acting on what a person must read first, so it names
+// no screen.
+func (m *Model) drawnWhole(id string) bool {
+	l := m.layout()
+	start := m.windowStart(l.pg, l.sel, l.pageH, false)
+	want, shown := 0, 0
+	for i, line := range l.pg.lines {
+		if line.ask != id {
+			continue
+		}
+		want++
+		if i >= start && i < start+l.pageH {
+			shown++
+		}
 	}
-	out := append(append(append(append(head, body...), tailPane...), panel...), foot...)
-	for i, l := range out {
-		out[i] = strings.TrimRight(l, " ")
-	}
-	return strings.Join(out, "\n")
+	return want > 0 && shown == want
 }
 
 // bodyRows is how many rows the screen's body has: the height less the

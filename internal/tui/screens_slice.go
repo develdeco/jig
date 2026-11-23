@@ -99,7 +99,7 @@ func (m *Model) slicePage(id, slice string) page {
 			} else {
 				p.add("  " + head)
 			}
-			for _, l := range m.questionText(q.Text) {
+			for _, l := range m.wholeLines(q.Text) {
 				p.add("    " + l)
 			}
 			if !q.Open && q.Answer != "" {
