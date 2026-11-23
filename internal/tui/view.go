@@ -69,6 +69,7 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top.
 func (m *Model) page() page {
+	m.pageBuilds++
 	e := m.top()
 	switch e.screen {
 	case screenTicket:
@@ -98,6 +99,12 @@ func (m *Model) View() string {
 	w, h := m.width, m.height
 	m.followSel()
 	pg := m.page()
+	if sub := m.subjectOf(pg); sub != m.keysOn {
+		// The page was sized by a hint line cut for another subject: it is
+		// built again, once, for this one.
+		m.keysOn = sub
+		pg = m.page()
+	}
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -350,86 +357,143 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 	return lines
 }
 
+// hint is a key on the hint line: the key, its meaning, and the action that
+// decides whether it is listed (none for a key that is always there).
+type hint struct {
+	key, text string
+	act       action
+}
+
 // keyHints are the keys that do something on the screen on top, as key and
-// meaning pairs.
+// meaning pairs: the screen's keys, and of those the actions only the ones can
+// lets run now. The key back and the key quit come first, so a line that wraps
+// never strands them.
 func (m *Model) keyHints() []string {
-	move := []string{"↑↓", "move"}
-	open := []string{"enter", "open"}
-	back := []string{"esc", "back"}
-	answer := []string{"a", "answer"}
-	keep := []string{"k", "keep"}
-	dismiss := []string{"d", "dismiss"}
-	gate := []string{"g", "gate"}
-	publish := []string{"p", "publish"}
-	land := []string{"5", "land"}
-	tail := []string{"t", "tail"}
-	quit := []string{"q", "quit"}
-	var keys [][]string
-	switch m.top().screen {
-	case screenMain:
-		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
-	case screenChart:
-		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
-	case screenTicket:
-		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, land, tail, quit}
-		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
-			// Nothing to move on or act on until the ticket exists.
-			keys = [][]string{back, tail, quit}
-		} else if isMulti(t) {
-			// A multi-task's tasks open; nothing else is done from its screen.
-			keys = [][]string{move, open, back, tail, quit}
-		}
-	case screenBrief:
-		keys = [][]string{move, open, back, land, tail, quit}
-	case screenBuild:
-		keys = [][]string{move, open, back, gate, land, tail, quit}
-	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, land, tail, quit}
-	case screenPublish:
-		keys = [][]string{{"↑↓", "scroll"}, back, publish, land, tail, quit}
-	case screenSlice:
-		keys = [][]string{move, back, answer, land, tail, quit}
-	case screenLand:
-		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
-	}
+	sub := m.keysOn
+	keys := m.screenKeys(sub)
 	// The key up to the issue, on the screens of a task that is in one's plan, and
-	// the one that shows the map, on the plan: each goes after the key back.
-	var extra []string
-	switch id := m.upFrom(); {
-	case id != "" && m.multiParent(id) != "":
-		extra = []string{"c", "multi-task"}
-	case id != "" && len(m.issuesOf(id)) > 0:
-		extra = []string{"c", "issue"}
+	// the one that shows the map, on the plan: each goes after the key quit, on
+	// a screen that has a key back.
+	var extra *hint
+	switch up := m.upFrom(); {
+	case up != "" && m.multiParent(up) != "":
+		extra = &hint{key: "c", text: "multi-task"}
+	case up != "" && len(m.issuesOf(up)) > 0:
+		extra = &hint{key: "c", text: "issue"}
 	case m.top().screen == screenChart:
 		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
-			extra = []string{"m", "map"}
+			extra = &hint{key: "m", text: "map"}
 		}
 	}
-	if extra != nil {
-		for i, k := range keys {
-			if k[0] == "esc" {
-				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
-				break
+	flat := make([]string, 0, 2*len(keys)+2)
+	for _, k := range keys {
+		if k.act != "" {
+			if ok, _ := m.canOn(sub, k.act); !ok {
+				continue
 			}
 		}
-	}
-	flat := make([]string, 0, 2*len(keys))
-	for _, k := range keys {
-		flat = append(flat, k...)
+		flat = append(flat, k.key, k.text)
+		if k.key == "q" && extra != nil && keys[0].key == "esc" {
+			flat = append(flat, extra.key, extra.text)
+		}
 	}
 	return flat
 }
 
-// panel is the last command as one line, and the notice, above the keys.
+// screenKeys are the keys the screen on top has, in the order they are listed,
+// whether or not their action can run: the hint line lists the ones can lets
+// run, and a key the screen does not have runs nothing.
+func (m *Model) screenKeys(sub subject) []hint {
+	id := sub.ticket
+	move := hint{key: "↑↓", text: "move"}
+	open := hint{key: "enter", text: "open"}
+	back := hint{key: "esc", text: "back"}
+	answer := hint{"a", "answer", actAnswer}
+	keep := hint{"k", "keep", actKeep}
+	dismiss := hint{"d", "dismiss", actDismiss}
+	gate := hint{"g", "gate", actGate}
+	publish := hint{"p", "publish", actPublish}
+	requeue := hint{"u", "requeue", actRequeue}
+	approve := hint{"v", "approve", actApprove}
+	say := hint{"say", `"Land ` + id + `"`, actLandWord}
+	land := hint{key: "5", text: "land"}
+	tail := hint{key: "t", text: "tail"}
+	quit := hint{key: "q", text: "quit"}
+	var keys []hint
+	switch m.top().screen {
+	case screenMain:
+		keys = []hint{quit, move, open, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+	case screenChart:
+		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+	case screenTicket:
+		keys = []hint{back, quit, move, open, answer, keep, dismiss, requeue, approve, gate, publish, say, land, tail}
+		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
+			// Nothing to move on or act on until the ticket exists.
+			keys = []hint{back, quit, tail}
+		} else if isMulti(t) {
+			// A multi-task's tasks open; nothing else is done from its screen.
+			keys = []hint{back, quit, move, open, tail}
+		}
+	case screenBrief:
+		keys = []hint{back, quit, move, open, approve, say, land, tail}
+	case screenBuild:
+		keys = []hint{back, quit, move, open, requeue, gate, say, land, tail}
+	case screenReview:
+		keys = []hint{back, quit, move, keep, dismiss, gate, say, land, tail}
+	case screenPublish:
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, publish, say, land, tail}
+	case screenSlice:
+		keys = []hint{back, quit, move, answer, requeue, say, land, tail}
+	case screenLand:
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
+	}
+	return keys
+}
+
+// panel is the last command as one line (whole, for a verb that leaves the next
+// move to someone else), and the notice, above the keys.
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		out = append(out, m.lastLine(m.last, w))
+		out = append(out, m.lastLines(m.last, w)...)
 	}
 	if m.notice != "" {
 		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
 	}
 	return out
+}
+
+// helpWrapRows is the most rows a verb's help line takes in the panel when it is
+// shown whole: a sentence of the verb's own is never this long.
+const helpWrapRows = 6
+
+// lastLines are the panel's rows for a key's command: the one line, and for a
+// verb that leaves the next move to someone else the help line it printed, whole
+// and wrapped, beneath the command. The words are the verb's own; the TUI adds
+// none. They are part of the line and expire with it.
+func (m *Model) lastLines(o *outcome, w int) []string {
+	if s := o.shown(); o.leavesTheMove() && s.Code == 0 {
+		if help, ok := firstHelp(s.Out); ok {
+			out := []string{fit("  "+m.st.icon(StateOK)+" "+m.st.bold(m.shownLine(s.Args)), w)}
+			for _, l := range wrap(help, w-4, helpWrapRows) {
+				out = append(out, "    "+m.st.dim(l))
+			}
+			return out
+		}
+	}
+	return []string{m.lastLine(o, w)}
+}
+
+// firstHelp is the first line of the help a verb printed, false when it printed
+// none.
+func firstHelp(out string) (string, bool) {
+	lines := outputLines(out)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "help[") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1]), true
+		}
+	}
+	return "", false
 }
 
 // lastLine is a key's command as typed and what the verb said of it: its own

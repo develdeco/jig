@@ -1,5 +1,6 @@
 jig  demo › checkout  Coupons at checkout                        ? run needs you
 ────────────────────────────────────────────────────────────────────────────────
+  map: 2 decided · 2 fog
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 5 published ─╮
   │  ◇ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"        │
   │▸ ◐ JIG-5  Apply a cou…  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is bein… │
@@ -23,5 +24,4 @@ jig  demo › checkout  Coupons at checkout                        ? run needs y
   │  09:14:20 JIG-4 publish·pr   ▲ opened https://example.test/acme/demo/pull… │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
-  r refresh · q quit
+  esc back · q quit · ↑↓ move · enter open ticket · t tail · r refresh
