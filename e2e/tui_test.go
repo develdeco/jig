@@ -330,6 +330,16 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Fatalf("jig review done (round 2) exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	screens.until("round 2 clean")
+	// The review screen lists the rounds newest first: round 2 above round 1.
+	screens.press("\x1b[H")
+	screens.press("\x1b[B")
+	screens.press("\x1b[B")
+	screens.press("\r")
+	rounds := screens.until("round 2  clean", "round 1  findings", "files read")
+	if strings.Index(rounds, "round 2  clean") > strings.Index(rounds, "round 1  findings") {
+		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
+	}
+	screens.press("\x7f")
 	// The round that closed applied the dismissal: the ask is gone.
 	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
 		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
@@ -340,6 +350,17 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.until("approve the reviewed head")
 	screens.press("y")
 	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
+	// The publish screen's activity reads newest first: what was finished above
+	// the pull request it opened.
+	screens.press("\x1b[H")
+	for i := 0; i < 3; i++ {
+		screens.press("\x1b[B")
+	}
+	screens.press("\r")
+	publish := screens.until("Publish activity", "pull request · opened")
+	if finished, opened := strings.Index(publish, "published · finished"), strings.Index(publish, "pull request · opened"); finished < 0 || finished > opened {
+		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
+	}
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)
