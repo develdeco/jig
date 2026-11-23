@@ -163,6 +163,7 @@ func TestTUIPlanEqualsStatusAndNext(t *testing.T) {
 	// last.
 	frame = screenWith(t, plan, "landed · into main at")
 	frame = screenWith(t, plan, "none recorded")
+	frame = screenWith(t, plan, "the issue's branch at")
 	last := -1
 	for _, id := range tasks {
 		row := frameLineWith(frame, id+" ")
