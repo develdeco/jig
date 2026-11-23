@@ -882,16 +882,26 @@ func (m *Model) move(delta int) {
 		return
 	}
 	e.follow = false
-	if delta < 0 && e.sel == 0 {
-		// Already on the first row: the page moves up above it instead.
-		e.lead = min(e.lead-delta, 1<<20)
+	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
+	switch {
+	case delta <= -(1 << 19):
+		// Home: the first row, with the page held at its top.
+		e.sel, e.lead = 0, 1<<20
 		return
-	}
-	if delta > 0 && e.sel == n-1 && e.lead > 0 {
-		// On the last row with the page held above its window: the page moves
-		// back down toward it. The window clamps lead to what it can hold, so
-		// the first move after a screen opened at its top starts at once.
-		e.lead = max(0, e.lead-delta)
+	case delta >= 1<<19:
+		e.sel, e.lead = n-1, 0
+		return
+	case e.lead > 0 || (delta < 0 && e.sel == 0):
+		// A page held above its cursor's window is read a line at a time, from
+		// whatever row the cursor is on, until it is back at the window; and
+		// up from the first row moves the page above it. The window clamps lead
+		// to the lines there are, so the first move after a screen opened at
+		// its top starts at once.
+		if delta < 0 {
+			e.lead = min(e.lead-delta, 1<<20)
+		} else {
+			e.lead = max(0, e.lead-delta)
+		}
 		return
 	}
 	was := e.sel
@@ -904,9 +914,6 @@ func (m *Model) move(delta int) {
 	}
 	if e.sel != was {
 		e.lead = 0
-		if e.sel == 0 && delta <= -(1<<19) {
-			e.lead = 1 << 20
-		}
 	}
 }
 
@@ -943,7 +950,31 @@ func (m *Model) selected() *rowRef {
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
+	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+		// A row the window does not show is not under the cursor: a key that
+		// acts on it would decide what its person cannot see.
+		return nil
+	}
 	return &refs[sel]
+}
+
+// rowShown says whether the sel-th selectable row of the page on top is in the
+// window the screen draws.
+func (m *Model) rowShown(sel int) bool {
+	pg := m.page()
+	h := m.bodyRows()
+	start := m.windowStart(pg, sel, h, false)
+	n := 0
+	for i, l := range pg.lines {
+		if l.ref == nil {
+			continue
+		}
+		if n == sel {
+			return i >= start && i < start+h
+		}
+		n++
+	}
+	return false
 }
 
 // open goes into the row under the cursor.
