@@ -320,6 +320,11 @@ func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProj
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
 	}
+	// Its own pull request is a row like any ticket's: into the target for an
+	// issue, into the issue's branch for a multi-task.
+	if lines, err := journal.Read(st, data.in.ID); err == nil {
+		d.PRs = digestPRs(st, cfg, merges, data.in.ID, data.rec, stack.Plan{Ticket: data.in.ID}, nil, lines)
+	}
 	r, err := containerReadiness(st, cfg, mp, merges, data.in.ID)
 	if err != nil {
 		d.PhaseProblem = err.Error()

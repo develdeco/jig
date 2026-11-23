@@ -243,6 +243,11 @@ type nextTicket struct {
 	Unmet  []nextUnmet `json:"unmet,omitempty"`
 	// Waived are an issue's suite waivers standing at its tips.
 	Waived []string `json:"waived,omitempty"`
+	// Need is the body of an issue or a multi-task and Suite an issue's suite
+	// history by repo: what `jig status` adds for the plan screen. `jig next`
+	// leaves both out.
+	Need  string         `json:"need,omitempty"`
+	Suite []nextSuiteRow `json:"suite,omitempty"`
 	// Stack is, for a ticket stacked on another, where its branch starts and
 	// where its pull request goes in each repo it builds in (internal/stack).
 	Stack []nextStack `json:"stack,omitempty"`
@@ -382,6 +387,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		if len(n.Issues) > 0 {
 			blocks = append(blocks, "issue: "+strings.Join(n.Issues, ", "))
 		}
+		if n.Need != "" {
+			blocks = append(blocks, "need: "+axi.Quote(n.Need))
+		}
 	} else {
 		pairs := [][2]string{{"ticket", n.Ticket}}
 		if n.Title != "" {
@@ -451,6 +459,9 @@ func (n nextTicket) notATaskBlocks(verb string) []string {
 		help = fmt.Sprintf("%s has no children yet: graduate its chart", n.Ticket)
 	case verb == "next" && n.State == land.StateWaiting:
 		help = fmt.Sprintf("%s waits for its children to land: run `jig next <ticket>` on one of its tasks", n.Ticket)
+	}
+	if len(n.Suite) > 0 {
+		blocks = append(blocks, suiteBlock(n.Suite))
 	}
 	if len(n.Waived) > 0 {
 		blocks = append(blocks, axi.KV("waived", waivedRows(n.Waived)))
