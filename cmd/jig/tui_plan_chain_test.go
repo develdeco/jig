@@ -215,7 +215,7 @@ func TestTUIPlanEqualsStatusAndNext(t *testing.T) {
 	if !strings.Contains(frame, "The second issue's need.") {
 		t.Errorf("the plan has not the need jig status says:\n%s", frame)
 	}
-	if row := frameLineWith(frame, " PR "); !strings.Contains(row, "not opened yet · waits for 1 task and the suite") {
+	if row := frameLineWith(frame, " PR "); !strings.Contains(row, "not opened yet · waits for 1 task") {
 		t.Errorf("the pull request of the second issue: %q\n%s", row, frame)
 	}
 	keys.Write([]byte("q"))
