@@ -1,22 +1,11 @@
 package main
 
 import (
-	"os/exec"
 	"testing"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/project"
 )
-
-// git runs git in dir for a fixture, and fails the test when it fails.
-func fixtureGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "user.name=T", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false"}, args...)...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
 
 // TestTheRosterSaysATicketOwedAMergeIsBehind: a ticket that published, is
 // stacked on a parent that has merged and whose branch lacks the target's head
@@ -50,13 +39,13 @@ func TestTheRosterSaysATicketOwedAMergeIsBehind(t *testing.T) {
 	// The clone: the ticket's branch holds a commit the target's head, which
 	// moved on, does not have.
 	dir := t.TempDir()
-	fixtureGit(t, dir, "init", "-q", "-b", "main")
-	fixtureGit(t, dir, "commit", "-q", "--allow-empty", "-m", "base")
-	fixtureGit(t, dir, "checkout", "-q", "-b", branch)
-	fixtureGit(t, dir, "commit", "-q", "--allow-empty", "-m", "ticket")
-	fixtureGit(t, dir, "checkout", "-q", "main")
-	fixtureGit(t, dir, "commit", "-q", "--allow-empty", "-m", "target moved")
-	fixtureGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "base")
+	gitIn(t, dir, "checkout", "-q", "-b", branch)
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "ticket")
+	gitIn(t, dir, "checkout", "-q", "main")
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "target moved")
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
 	mp := project.MachineProject{Clones: map[string]string{"app": dir}}
 
 	fleet, err := nextForStore(r.st, cfg, mp, merges)
