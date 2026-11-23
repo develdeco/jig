@@ -350,12 +350,12 @@ func TestEachStepCountsItsTimeAndTheStepsTheirTotal(t *testing.T) {
 	g.feed(
 		ll(at(0, 0), "", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-b", "claude", "claude-sonnet-5" }),
 		ll(at(1, 0), "SHOP-1", journal.EventSessionTouch, func(l *journal.Line) { l.Session = "s-b" }),
-		tool(at(1, 1), "s-b", "jig ticket new --title Round", said("Mint the ticket")),
-		tool(at(2, 30), "s-b", "jig validate SHOP-1", said("Check the slices")),
+		toolOn("SHOP-1", at(1, 1), "s-b", "jig ticket new --title Round", said("Mint the ticket")),
+		toolOn("SHOP-1", at(2, 30), "s-b", "jig validate SHOP-1", said("Check the slices")),
 		jl(at(4, 0), "SHOP-1", "", journal.EventApproval, with("s-b", "", "", "Dana <dana@example.invalid>", "0123456789ab", "person")),
-		tool(at(5, 0), "s-b", "jig skill build", said("Read the build skill")),
+		toolOn("SHOP-1", at(5, 0), "s-b", "jig skill build", said("Read the build skill")),
 		jl(at(5, 10), "SHOP-1", "round", journal.EventClaim, with("s-b", "", "", "", "", "")),
-		tool(at(5, 40), "s-b", "go test ./...", said("Run the tests")),
+		toolOn("SHOP-1", at(5, 40), "s-b", "go test ./...", said("Run the tests")),
 	)
 	steps := g.m.steps(g.m.w.tickets["SHOP-1"])
 	for step, want := range map[int]string{stepBrief: "2m 59s", stepBuild: "1m 00s", stepReview: "", stepPublish: "", stepLand: ""} {

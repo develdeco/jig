@@ -85,9 +85,10 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 	for _, ln := range strings.Split(st, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(ln), "2,") {
 			round2 = strings.TrimSpace(ln)
+			break
 		}
 	}
-	if cells := strings.Split(round2, ","); round2 == "" || cells[len(cells)-1] != "1" {
+	if cells := strings.Split(round2, ","); round2 == "" || cells[len(cells)-5] != "1" {
 		t.Fatalf("status rounds row for round 2 does not count the spent keep (kept_fixed 1):\n%s", st)
 	}
 }

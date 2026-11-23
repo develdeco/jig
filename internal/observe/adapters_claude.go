@@ -57,6 +57,7 @@ func (a claudeShape) Parse(data []byte) (Event, error) {
 	switch p.str("hook_event_name") {
 	case "SessionStart":
 		ev.Kind = KindSessionStart
+		ev.Source = p.str("source")
 	case "UserPromptSubmit":
 		ev.Kind = KindPrompt
 		ev.Prompt = p.str("prompt")

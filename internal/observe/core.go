@@ -131,10 +131,16 @@ type handler struct {
 	memRead bool
 
 	jlines []journal.Line
+	// jcache holds the journals the binding read, by ticket.
+	jcache map[string][]journal.Line
 	jread  bool
 	jerr   error
 
 	unattendedKnown, unattendedVal bool
+
+	// noDir is set when the event was placed on a ticket without a directory
+	// of its own: no directory finding is read.
+	noDir bool
 
 	errs []error
 }
@@ -163,7 +169,13 @@ func (h *handler) locate() bool {
 
 // locateAt is locate for the directory cwd.
 func (h *handler) locateAt(cwd string) bool {
-	w, err := locate.Locate(h.d.JigHome, cwd, locate.Opts{Session: h.ev.Session, Getenv: h.d.Getenv})
+	return h.locateOn(cwd, "")
+}
+
+// locateOn is locateAt for the ticket the work is on, when it is known
+// whatever the directory says ("" leaves it to the directory's branch).
+func (h *handler) locateOn(cwd, ticket string) bool {
+	w, err := locate.Locate(h.d.JigHome, cwd, locate.Opts{Session: h.ev.Session, Getenv: h.d.Getenv, Ticket: ticket})
 	if err != nil {
 		h.fail(err)
 		return false

@@ -93,6 +93,18 @@ type findingsYAML struct {
 	// tested, beside the files it read.
 	Probes  []ProbeRecord `yaml:"probes,omitempty"`
 	Skipped []SkipRecord  `yaml:"skipped,omitempty"`
+	// Unprobed is the hunks of the whole change no current probe or skip
+	// covered when the round closed. A pointer, so a round that left none
+	// writes an empty list and a round this jig did not record has no key.
+	Unprobed *[]UnprobedHunk `yaml:"unprobed,omitempty"`
+}
+
+// UnprobedHunk is one hunk a round left unprobed, its file as the round names
+// it (<repo>/<path> in a project of several repos).
+type UnprobedHunk struct {
+	File string `yaml:"file"`
+	From int    `yaml:"from"`
+	To   int    `yaml:"to"`
 }
 
 // statusForAction maps a reviewer's action label to jig's own status: fix
@@ -748,15 +760,16 @@ func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding,
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil
 // reviewedPaths/findings as [] rather than null; a round with no probes or
-// skips writes neither key.
-func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, keptFixed []KeptFixed, summary string, probes []ProbeRecord, skips []SkipRecord) ([]byte, error) {
+// skips writes neither key. A nil unprobed writes no key (the round did not
+// record it); a non-nil one, empty or not, writes the list.
+func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, keptFixed []KeptFixed, summary string, probes []ProbeRecord, skips []SkipRecord, unprobed []UnprobedHunk) ([]byte, error) {
 	if reviewedPaths == nil {
 		reviewedPaths = []string{}
 	}
 	if findings == nil {
 		findings = []Finding{}
 	}
-	return yaml.Marshal(findingsYAML{
+	ff := findingsYAML{
 		Scope:         scope,
 		ReviewedPaths: reviewedPaths,
 		Findings:      findings,
@@ -765,7 +778,11 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 		Summary:       summary,
 		Probes:        probes,
 		Skipped:       skips,
-	})
+	}
+	if unprobed != nil {
+		ff.Unprobed = &unprobed
+	}
+	return yaml.Marshal(ff)
 }
 
 // riskRank orders findings.md's sections, high risk first.
