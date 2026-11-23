@@ -15,10 +15,10 @@ jig  demo › shop  Shop                                           ? run needs y
   │  next     say "Continue shop"                                              │
   │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ──────────────────────────────────────────────── latest 1 of 12 ─╮
+  ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
   │  09:14:21 JIG-4 publish·done ● finished                                    │
-  │  ↓ 11 older                                                                │
+  │  09:14:20 JIG-4 publish·pr   ▲ opened https://example.test/acme/demo/pull… │
+  │  ↓ 10 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
-  r refresh · q quit
+  esc back · q quit · ↑↓ move · enter open ticket · t tail · r refresh

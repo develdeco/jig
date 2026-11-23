@@ -33,4 +33,4 @@ jig  demo › checkout  Coupons at checkout                                     
   │  ↓ 17 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail · r refresh · q quit
+  esc back · q quit · ↑↓ move · enter open ticket · t tail · r refresh

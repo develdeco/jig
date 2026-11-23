@@ -21,4 +21,4 @@ jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs
        ? q-001 Formal or casual?
   ○ d  queued       0 tries  Ship the copy
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · g gate · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · enter open · 5 land · t tail

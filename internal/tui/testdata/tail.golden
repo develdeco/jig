@@ -20,5 +20,4 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   09:00:05 j verify-pending  a   aaaaaaa s-builder
   09:00:01 j claim           a   s-builder
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate
-  p publish · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · enter open · a answer · 5 land · t tail
