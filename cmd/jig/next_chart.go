@@ -39,6 +39,10 @@ type nextChart struct {
 	Run     [][]string        `json:"run"`
 	Tickets []nextChartTicket `json:"tickets"`
 	Ends    []nextChartEnd    `json:"ends"`
+	// Model says the chart plans an issue's tickets (phase.Chart.Model): lands,
+	// publish and an empty list are left out of the output, so this is the one
+	// field that tells every model chart apart from a legacy one.
+	Model bool `json:"model,omitempty"`
 	// Lands, Publish and Issue are a model chart's: left out for a legacy one.
 	Lands   []nextChartLand    `json:"lands,omitempty"`
 	Publish []nextChartPublish `json:"publish,omitempty"`

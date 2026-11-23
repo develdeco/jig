@@ -231,7 +231,7 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 			label = "ends at"
 		}
 		note := endNote(e)
-		if len(info.Lands) > 0 && e.Kind != kindStacked && e.Fact != "" {
+		if info.Model && e.Kind != kindStacked && e.Fact != "" {
 			// An issue's run waits for a landing, not a merge: the verb's fact is
 			// the words internal/phase wrote for it.
 			note = e.Fact

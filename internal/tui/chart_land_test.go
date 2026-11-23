@@ -24,7 +24,7 @@ func atLanding(lands ...map[string]any) func(map[string]any) {
 	return func(v map[string]any) {
 		v["ready"], v["code"], v["reason"] = false, phase.CodeChartWaitsLand, "JIG-4 waits to land"
 		v["prompt"] = "Continue checkout"
-		v["lands"] = lands
+		v["lands"], v["model"] = lands, true
 		v["ends"] = []map[string]any{}
 	}
 }

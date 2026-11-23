@@ -101,7 +101,7 @@ func TestIssueRunStopsAtEachLandingEndToEnd(t *testing.T) {
 
 	// The prompt is in the issue's id, and the folder name answers the same.
 	n := r.issueRun(t)
-	if n.Chart != "plan" || n.Code != phase.CodeChartWaitsLand || n.Ready || n.Prompt != "Continue TK-1" {
+	if !n.Model || n.Chart != "plan" || n.Code != phase.CodeChartWaitsLand || n.Ready || n.Prompt != "Continue TK-1" {
 		t.Fatalf("stop at TK-2: chart %q code %s ready %v prompt %q", n.Chart, n.Code, n.Ready, n.Prompt)
 	}
 	if got := landTickets(n); len(got) != 1 || n.Lands[0].Prompt != "Land TK-2" || n.Lands[0].State != "waits for a merge" || len(n.Lands[0].After) != 0 {

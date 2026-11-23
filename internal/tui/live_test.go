@@ -230,6 +230,105 @@ func TestEndsRowsAtALandingStopReadAsPhaseWritesThem(t *testing.T) {
 	}
 }
 
+// TestAnIssuesEndsReadAsPhaseWritesThemWhateverTheLandings: a chart that plans an
+// issue words every non-stacked end as the verb carries it, once, before any
+// landing is open too; a stacked end keeps its retarget words, and a legacy
+// chart keeps the merge wait.
+func TestAnIssuesEndsReadAsPhaseWritesThemWhateverTheLandings(t *testing.T) {
+	t.Parallel()
+	const fact = "JIG-7 waits for JIG-4 to land"
+	end := func(kind string) func(map[string]any) {
+		return func(v map[string]any) {
+			v["ends"] = []map[string]any{{"ticket": "JIG-7", "blocker": "JIG-4", "kind": kind, "fact": fact, "prs": []map[string]any{pull("7", "OPEN")}}}
+		}
+	}
+	model := func(v map[string]any) { v["model"] = true }
+
+	g := tallChart(t, checkoutJSON(model, end("merged")))
+	v := g.view()
+	if !strings.Contains(v, "ends at  "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
+		t.Errorf("an issue's run with no landing open does not say its end once, as phase writes it:\n%s", v)
+	}
+	g = tallChart(t, checkoutJSON(model, end("stacked")))
+	if v := g.view(); !strings.Contains(v, "JIG-7 retargets when JIG-4 merges") || strings.Contains(v, fact) {
+		t.Errorf("a stacked end lost its retarget words:\n%s", v)
+	}
+	g = tallChart(t, checkoutJSON(end("merged")))
+	if v := g.view(); !strings.Contains(v, "JIG-7 waits for JIG-4 to merge · PR #7 open") {
+		t.Errorf("a legacy chart's merge wait changed:\n%s", v)
+	}
+}
+
+// TestALiveTicketsOwnAsksAndApprovalsStayHeldBackOnTheChart: a ticket whose
+// needs-you is a round's asks does not count as needing the person on the chart
+// while a session is at work on it, and does when the line is quiet; a question
+// on a brief counts whatever else is at work; and a live ticket at findings that
+// also has an open question keeps the step's own words in its header.
+func TestALiveTicketsOwnAsksAndApprovalsStayHeldBackOnTheChart(t *testing.T) {
+	t.Parallel()
+	needsOf := func(g *rig, id string) bool {
+		for _, r := range g.m.chartRows(g.m.w.charts[g.m.top().chart]) {
+			if r.id == id {
+				return r.needs
+			}
+		}
+		t.Fatalf("no row for %s", id)
+		return false
+	}
+	// JIG-5 stands at its first round's asks, JIG-4 has landed.
+	g := newRig(t, "")
+	lines, status := chartTickets()
+	lines = append(asTicket(jig2(), "JIG-4"), asTicket(jig2Mid(), "JIG-5")...)
+	status["JIG-5"] = relabelled(statusJIG2(), "JIG-2", "JIG-5")
+	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
+	g.feed(lines...)
+	g.pin("JIG-4", task("land", false, "done|approved by Ada", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "done|landed"))
+	g.press("end", "enter")
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 60})
+	if !hasNeedsPhase(g, "JIG-5") {
+		t.Fatalf("the fixture's ticket has no phase waiting on the person")
+	}
+	if !needsOf(g, "JIG-5") {
+		t.Fatalf("a quiet ticket with asks does not need the person")
+	}
+	g.feed(ll(at(59, 0), "JIG-5", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
+	if needsOf(g, "JIG-5") {
+		t.Errorf("a live ticket's own asks count on the chart's rows")
+	}
+	if head, _, _ := strings.Cut(g.view(), "\n"); !strings.Contains(head, "running") {
+		t.Errorf("the chart header does not say running:\n%s", head)
+	}
+}
+
+// hasNeedsPhase is whether the ticket's phases say something waits on the person.
+func hasNeedsPhase(g *rig, id string) bool {
+	return needsYou(g.m.phaseOf(g.m.w.tickets[id]))
+}
+
+// TestAQuestionOnABriefCountsWhileASessionIsLive: a live planner's open question
+// on its brief, with no slice in needs-input, is still the person's, and a live
+// ticket at findings that also has an open question keeps the step's own words.
+func TestAQuestionOnABriefCountsWhileASessionIsLive(t *testing.T) {
+	t.Parallel()
+	g := chartScreenRig(t)
+	g.feed(jl(at(30, 0), "JIG-8", "", journal.EventQuestion, with("s-planner", "", "", "Which discount?", "q-brief", "agent")))
+	g.feed(ll(at(59, 0), "JIG-8", journal.EventTool, with("s-planner", "", "", "", "", "")))
+	c := g.m.w.charts[g.m.top().chart]
+	for _, r := range g.m.chartRows(c) {
+		if r.id == "JIG-8" && !r.needs {
+			t.Errorf("a live planner's open question does not count on the chart's row")
+		}
+	}
+
+	r := newRig(t, "JIG-2")
+	r.feed(jig2Mid()...)
+	r.feed(jl(at(12, 30), "JIG-2", "a", journal.EventQuestion, with("s-builder", "", "", "Keep it?", "q-x", "agent")))
+	r.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
+	if h := strings.Join(r.m.header(80), "\n"); strings.Contains(h, "in progress") {
+		t.Errorf("a live ticket with an open question hides its step's own words:\n%s", h)
+	}
+}
+
 // TestNeedsYouEndsWithItsCause: once the answer to a question or the decision of
 // an ask is journaled, the next frame has none of its "needs you": not the ticket
 // screen's group, not main's count, not the chart's header.
