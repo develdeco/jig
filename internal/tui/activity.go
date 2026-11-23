@@ -47,7 +47,7 @@ func stepOfLine(l events.Envelope) int {
 	switch l.Event {
 	case journal.EventApproval, journal.EventRevalidate, eventBriefSeen, eventSlicesSeen:
 		return stepBrief
-	case journal.EventGateOpen, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
+	case journal.EventGateOpen, journal.EventGateRefused, journal.EventGateOracle, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean, journal.EventTriage,
 		journal.EventFixSlice, journal.EventAdopt, journal.EventRoute:
 		return stepReview
 	case journal.EventPrBody, journal.EventPublishApproved, journal.EventPr, journal.EventPublishDone,
@@ -431,6 +431,8 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 		return strings.TrimSpace("the ticket took over " + firstOf(l.Branch, "a branch") + " " + short(l.Commit))
 	case journal.EventGateOpen:
 		return "opened"
+	case journal.EventGateRefused:
+		return "gate refused: " + l.Summary
 	case journal.EventGateReviewer:
 		return firstOf(m.reviewerWho(t, l.Session, t.roundOf(l), l.Model, nil), "a reviewer") + " took it"
 	case journal.EventGateRound:

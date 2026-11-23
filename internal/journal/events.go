@@ -26,6 +26,7 @@ const (
 	EventGateOracle     = "gate-oracle"
 	EventGateOpen       = "gate-open"
 	EventGateReviewer   = "gate-reviewer"
+	EventGateRefused    = "gate-refused"
 	EventGateRound      = "gate-round"
 	EventLeaseRecovered = "lease-recovered"
 	EventMemorize       = "memorize"

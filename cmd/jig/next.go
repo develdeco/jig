@@ -525,6 +525,10 @@ func (n *nextTicket) setPhase(st *store.Store, id string, asked phase.Name, merg
 	}
 	n.derived = &t
 	p := &nextPhase{Name: string(t.Current), Ready: t.Ready, Code: t.Code, Reason: t.Reason, Prompt: t.Prompt}
+	if _, text := t.Refusal(); text != "" && t.Ready {
+		// The review can start, and says the gate was tried and why it stopped.
+		p.Reason = text
+	}
 	for _, ph := range t.Phases {
 		p.Phases = append(p.Phases, nextPhaseRow{Name: string(ph.Name), State: ph.State, Text: ph.Text})
 	}
@@ -961,7 +965,7 @@ func (n nextTicket) phasePairs() [][2]string {
 		}
 	}
 	add("prompt", p.Prompt)
-	if !p.Ready {
+	if !p.Ready || p.Reason != "" {
 		add("code", p.Code)
 		add("reason", p.Reason)
 	}

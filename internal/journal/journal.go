@@ -107,6 +107,10 @@ type Line struct {
 	// at most 600 bytes; the full tail lives in a machine-local log.
 	Signature string `json:"signature,omitempty"`
 	Summary   string `json:"summary,omitempty"`
+	// Code is a gate-refused line's refusal code (GATE_NOT_GREEN,
+	// BRANCH_NOT_FOUND or INTENT_CONFLICT): the precondition the gate
+	// refused a round on before it opened one. Omitted for every other line.
+	Code string `json:"code,omitempty"`
 	// Cause is why a failed oracle line's run never judged the code: CauseTimeout
 	// (the wedge guard's kill) or CauseStopped (jig was told to stop). It is
 	// omitted for a run that ended with the test's own result, and on every line
