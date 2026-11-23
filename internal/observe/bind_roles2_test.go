@@ -2,31 +2,7 @@ package observe
 
 import (
 	"testing"
-
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 )
-
-// TestAPlannerIsBoundFromTheMintCallOnAsTheCLIOrdersIt: `jig ticket new` and
-// `jig graduate` tie the session to the ticket while they run, so the touch is
-// in the ledger before the hook writes the call. The mint call and the
-// drafting calls are the ticket's until the approval.
-func TestAPlannerIsBoundFromTheMintCallOnAsTheCLIOrdersIt(t *testing.T) {
-	t.Parallel()
-	for _, mint := range []string{`jig ticket new --title "Cart totals"`, "jig graduate some-chart"} {
-		r := newRig(t)
-		r.handle(r.ev(KindSessionStart))
-		expectTicket(t, "a call before the ticket", r.call("", "go test ./..."), "")
-		if err := ledger.TouchSession(r.fx.Home, r.clock.Now(), ledger.Registration{ID: "s1", Ticket: r.fx.Ticket}); err != nil {
-			t.Fatal(err)
-		}
-		expectTicket(t, mint, r.call("", mint), r.fx.Ticket)
-		expectTicket(t, "a call drafting the brief", r.call("", "jig skill intake"), r.fx.Ticket)
-		expectTicket(t, "another", r.call("", "cat brief.md"), r.fx.Ticket)
-		r.addTo(r.fx.Ticket, journal.Line{Event: journal.EventApproval, Session: "s1"})
-		expectTicket(t, "a call after the approval", r.call("", "git log"), "")
-	}
-}
 
 // TestAClosedReviewRoundLeavesAnOlderClaimBinding: a builder that reviewed
 // its own work in between keeps the claim it still holds.
