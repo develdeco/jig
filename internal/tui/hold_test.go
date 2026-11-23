@@ -126,7 +126,11 @@ func TestTheCountOfNewLinesNeverHidesTheCursor(t *testing.T) {
 			pg.add("plain " + strconv.Itoa(i))
 		}
 		g.m.top().lead = c.lead
-		out := g.m.window(pg, c.sel, 10, 80)
+		start, counted := g.m.countRow(pg, c.sel, g.m.windowStart(pg, c.sel, 10, true), 10)
+		out := g.m.window(pg, c.sel, start, 10, 80)
+		if counted {
+			out[0] = g.m.newRow(g.m.top().fresh)
+		}
 		if !newMark.MatchString(out[0]) {
 			t.Errorf("%s: the first row reads %q, want the count", name, out[0])
 		}

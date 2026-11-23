@@ -11,9 +11,9 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
 
   asks
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      a failed write would pass silently · needs a human
+      Unchecked error · a failed write would pass silently · needs a human
 ▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-      the import is hidden in this scope
+      Name shadows import · the import is hidden in this scope
 
   ╭─ Review activity ──────────────────────────────────────────────────────────╮
   │  09:11:30 ! round 1 · reviewer finished with findings                      │

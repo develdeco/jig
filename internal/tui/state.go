@@ -434,6 +434,23 @@ type askRow struct {
 	Decision, DecidedBy         string // "", keep or dismiss; person or agent
 }
 
+// askText is what a person decides an ask from: its title, the reason the
+// reviewer gave for the finding behind it, and the ask's own why.
+func (t *ticket) askText(a askRow) string {
+	parts := []string{a.Title}
+	if t.status != nil {
+		for _, f := range t.status.Findings {
+			if f.ID == a.ID && f.Rationale != "" {
+				parts = append(parts, f.Rationale)
+			}
+		}
+	}
+	if a.Why != "" && a.Why != "-" {
+		parts = append(parts, a.Why)
+	}
+	return strings.Join(parts, " · ")
+}
+
 // asks are the asks status lists, each with the latest triage line for it
 // that a round has not closed since: a round applies the decisions made before
 // it closed, and an ask it left again is undecided (the rule internal/phase

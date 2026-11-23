@@ -486,6 +486,9 @@ func (g *rig) send(msg tea.Msg) {
 	_, cmd := g.m.Update(msg)
 	g.settle(cmd)
 	g.syncDigests()
+	// Bubble Tea draws the model after each message it delivers: the screen a
+	// key acts on is the one drawn after the message before it.
+	g.m.View()
 }
 
 // settle runs cmd and every command its messages start, to the end.

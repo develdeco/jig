@@ -174,16 +174,20 @@ func panelLines(rows []string, title string) []string {
 // view, with the sub-steps block and with a question and asks waiting.
 func TestTheTicketScreenFitsWhateverTheStepsAreDoing(t *testing.T) {
 	t.Parallel()
-	for name, g := range map[string]*rig{
-		"a build with a question": func() *rig { g := newRig(t, "JIG-1"); g.feed(jig1()...); return g }(),
-		"a round with asks":       func() *rig { g := newRig(t, "JIG-2"); g.feed(jig2Mid()...); return g }(),
-		"a build in progress":     shop1Rig(t),
+	for name, c := range map[string]struct {
+		g      *rig
+		panels int
+	}{
+		"a build with a question": {func() *rig { g := newRig(t, "JIG-1"); g.feed(jig1()...); return g }(), 3},
+		// The asks are drawn whole, which leaves the sub-steps no room.
+		"a round with asks":   {func() *rig { g := newRig(t, "JIG-2"); g.feed(jig2Mid()...); return g }(), 2},
+		"a build in progress": {shop1Rig(t), 3},
 	} {
-		v := g.view()
+		v := c.g.view()
 		if n := strings.Count(v, "\n") + 1; n != 24 {
 			t.Errorf("%s: the screen has %d lines, want 24:\n%s", name, n, v)
 		}
-		if !strings.Contains(v, "╭─ Activity") || strings.Count(v, "╰") < 3 {
+		if !strings.Contains(v, "╭─ Activity") || strings.Count(v, "╰") < c.panels {
 			t.Errorf("%s: the Steps, sub-steps and activity panels are not all drawn to their edges:\n%s", name, v)
 		}
 	}

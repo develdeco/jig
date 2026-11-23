@@ -38,7 +38,7 @@ const claimSlack = time.Minute
 // it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {
 	if r.t == nil || r.t.digest == nil {
-		return []runRow{{"state", m.st.dim(readingText), 0}}
+		return []runRow{{"state", m.st.dim(readingText), 0, ""}}
 	}
 	var rows []runRow
 	subs := r.d.Of(phase.Build).Subs
@@ -51,17 +51,52 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 		if len(rows) == 0 {
 			label = "slice"
 		}
-		rows = append(rows, runRow{label, m.sliceDetail(r.t, sub, subs, id), 1})
+		rows = append(rows, runRow{label, m.sliceDetail(r.t, sub, subs, id), 1, ""})
 	}
 	for i, l := range r.t.currentHolds() {
 		label := ""
 		if i == 0 {
 			label = "hold"
 		}
-		rows = append(rows, runRow{label, m.moveText(r.t, l), 0})
+		rows = append(rows, runRow{label, m.moveText(r.t, l), 0, ""})
 	}
 	if len(rows) == 0 {
-		rows = append(rows, runRow{"state", m.st.dim(chartStateWord(r)), 0})
+		rows = append(rows, runRow{"state", m.st.dim(chartStateWord(r)), 0, ""})
+	}
+	return append(rows, m.askDetailRows(r.t)...)
+}
+
+// askDetailRows are the asks of a ticket that has one undecided, as the lines
+// `k` and `d` would decide from: an "ask" row with the ask's id, risk and
+// decision, and its text under it, wrapped whole. They are not counted in
+// detailMax and a short screen never cuts them (trimRuns); the window may, and
+// then the keys refuse (drawnAsks).
+func (m *Model) askDetailRows(t *ticket) []runRow {
+	asks := t.asks()
+	undecided := false
+	for _, a := range asks {
+		undecided = undecided || a.Decision == ""
+	}
+	if !undecided {
+		return nil
+	}
+	var rows []runRow
+	for i, a := range asks {
+		label := ""
+		if i == 0 {
+			label = "ask"
+		}
+		head := a.ID + " · " + a.Risk
+		switch a.Decision {
+		case "keep":
+			head += " · kept"
+		case "dismiss":
+			head += " · dismissed"
+		}
+		rows = append(rows, runRow{label, m.st.dim(head), 0, a.ID})
+		for _, l := range wrapWhole(t.askText(a), m.width-16) {
+			rows = append(rows, runRow{"", m.st.dim(l), 0, a.ID})
+		}
 	}
 	return rows
 }
@@ -237,6 +272,7 @@ func (m *Model) detailPanel(p *page, id string, rows []runRow) {
 	p.boxTop("Detail", id)
 	for _, r := range rows {
 		p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
+		p.lines[len(p.lines)-1].ask = r.ask
 	}
 	p.boxEnd()
 }
