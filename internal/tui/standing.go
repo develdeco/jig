@@ -42,7 +42,7 @@ func (m *Model) factsOf(t *ticket) (phase.Facts, []journal.Line) {
 			if detailed {
 				return m.reviewerWho(t, session, round, "", nil)
 			}
-			return m.reviewerRole(t, session)
+			return m.reviewerRole(t, session, round)
 		},
 	}
 	fixes := t.fixRounds()
