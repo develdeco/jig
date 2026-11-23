@@ -25,17 +25,51 @@ func TestAMessageBuildsNoPageAndAFrameBuildsOne(t *testing.T) {
 	}
 }
 
-// TestTheCountOfNewRowsIsRowsAndNotLines: a record of two lines that comes in
-// above the window is one row.
-func TestTheCountOfNewRowsIsRowsAndNotLines(t *testing.T) {
+// TestTheCountOfNewRowsIsRowsThatCameInAndNotLines: the count is of the rows
+// that came in above the window wherever above it they came, a record's later
+// lines going on its row, rows of a nested list each counting, and a line above
+// that went away counting nothing.
+func TestTheCountOfNewRowsIsRowsThatCameInAndNotLines(t *testing.T) {
 	t.Parallel()
-	h := &held{lines: []string{"rounds", "round 1  findings", "    reviewer", "asks"}, start: 1, rows: 3}
-	pg := page{}
-	for _, l := range []string{"rounds", "round 2  open", "    waiting for a reviewer", "round 1  findings", "    reviewer", "asks"} {
-		pg.add(l)
-	}
-	shift, rows := lineShift(h, pg)
-	if shift != 2 || rows != 1 {
-		t.Errorf("shift %d, rows %d; want 2 lines and 1 row", shift, rows)
+	for name, tc := range map[string]struct {
+		old, now    []string
+		start       int
+		shift, rows int
+	}{
+		"a record just above": {
+			[]string{"rounds", "round 1  findings", "    reviewer", "asks"},
+			[]string{"rounds", "round 2  open", "    waiting for a reviewer", "round 1  findings", "    reviewer", "asks"},
+			1, 2, 1,
+		},
+		"a record further up, over lines the reader had": {
+			[]string{"rounds", "round 1  findings", "probes", "as recorded", "p1", "p2", "asks"},
+			[]string{"rounds", "round 2  open", "    waiting for a reviewer", "round 1  findings", "probes", "as recorded", "p1", "p2", "asks"},
+			4, 2, 1,
+		},
+		"two tries in a nested list": {
+			[]string{"a  slice", "       try 1", "         run 1", "sessions"},
+			[]string{"a  slice", "       try 3", "         run 3", "       try 2", "         run 2", "       try 1", "         run 1", "sessions"},
+			3, 4, 2,
+		},
+		"a blank line is no row": {
+			[]string{"one", "two"},
+			[]string{"one", "", "two"},
+			1, 1, 0,
+		},
+		"a line above that went away": {
+			[]string{"one", "two", "three", "four"},
+			[]string{"one", "three", "four"},
+			3, 0, 0,
+		},
+	} {
+		h := &held{start: tc.start, rows: 3}
+		h.lines = tc.old
+		pg := page{}
+		for _, l := range tc.now {
+			pg.add(l)
+		}
+		if shift, rows := lineShift(h, pg); shift != tc.shift || rows != tc.rows {
+			t.Errorf("%s: shift %d, rows %d; want %d lines and %d rows", name, shift, rows, tc.shift, tc.rows)
+		}
 	}
 }

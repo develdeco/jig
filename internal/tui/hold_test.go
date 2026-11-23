@@ -99,7 +99,7 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		g.press("up")
 	}
-	if v := g.view(); newMark.MatchString(v) {
+	if v := g.view(); newMark.MatchString(v) || g.m.top().fresh != 0 {
 		t.Errorf("the mark stays at the top:\n%s", v)
 	}
 }

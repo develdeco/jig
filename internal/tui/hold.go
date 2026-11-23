@@ -26,6 +26,7 @@ type held struct {
 	sel    int
 	start  int // the window's first line before the count row moved it
 	rows   int // the window's height
+	width  int
 	scroll int
 	lead   int
 }
@@ -60,7 +61,7 @@ func (m *Model) settle(l *screenLayout) {
 			}
 		}
 	}
-	if h.start == 0 || h.rows != l.pageH || e.scroll != h.scroll || e.lead != h.lead {
+	if h.start == 0 || h.rows != l.pageH || h.width != m.width || e.scroll != h.scroll || e.lead != h.lead {
 		return
 	}
 	shift, rows := lineShift(h, l.pg)
@@ -81,7 +82,7 @@ func (m *Model) settle(l *screenLayout) {
 func (m *Model) rest(l screenLayout, start int) {
 	e := m.top()
 	h := &held{idx: len(m.nav) - 1, screen: e.screen, ticket: e.ticket, slice: e.slice, chart: e.chart,
-		refs: l.pg.refs(), sel: e.sel, start: start, rows: l.pageH, scroll: e.scroll, lead: e.lead}
+		refs: l.pg.refs(), sel: e.sel, start: start, rows: l.pageH, width: m.width, scroll: e.scroll, lead: e.lead}
 	h.lines = make([]string, len(l.pg.lines))
 	for i, line := range l.pg.lines {
 		h.lines[i] = line.text
@@ -120,10 +121,11 @@ func (m *Model) countRow(pg page, sel, start, h int) (int, bool) {
 }
 
 // lineShift is how many lines the first line the reader had in the window moved
-// down by, which is the lines that came in above it, and how many of those are
-// rows of their own: a line that goes on the one above it (a record's second
-// line) is not another row. Both are 0 when the page no longer has that line,
-// followed by the one under it, as it was.
+// down by, and how many rows of their own came in above it: the lines of the new
+// page above that line that the old page above it did not have, a record's
+// later lines (indented under its first, as it is drawn) going on its row. Both
+// are 0 when the page no longer has that line, followed by the one under it, as
+// it was, or has it where it was or higher.
 func lineShift(h *held, pg page) (shift, rows int) {
 	a := -1
 	for i := h.start; i < min(len(h.lines), h.start+h.rows); i++ {
@@ -150,13 +152,40 @@ func lineShift(h *held, pg page) (shift, rows int) {
 	if best <= a {
 		return 0, 0
 	}
-	for _, l := range pg.lines[a:best] {
-		if strings.TrimSpace(l.text) != "" && !strings.HasPrefix(l.text, "    ") {
-			rows++
+	// Match what was above the line before with what is above it now, in order:
+	// the lines left over came in.
+	came := make([]bool, best)
+	j := 0
+	for i := 0; i < a; i++ {
+		k := j
+		for k < best && pg.lines[k].text != h.lines[i] {
+			k++
 		}
+		if k == best {
+			continue // the line went away
+		}
+		for ; j < k; j++ {
+			came[j] = true
+		}
+		j = k + 1
 	}
-	return best - a, max(rows, 1)
+	for ; j < best; j++ {
+		came[j] = true
+	}
+	for i := 0; i < best; i++ {
+		if !came[i] || strings.TrimSpace(pg.lines[i].text) == "" {
+			continue
+		}
+		if i > 0 && came[i-1] && indent(pg.lines[i].text) > indent(pg.lines[i-1].text) {
+			continue // the record's later line
+		}
+		rows++
+	}
+	return best - a, rows
 }
+
+// indent is the spaces a line starts with.
+func indent(s string) int { return len(s) - len(strings.TrimLeft(s, " ")) }
 
 func abs(n int) int {
 	if n < 0 {
