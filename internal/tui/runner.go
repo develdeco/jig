@@ -41,8 +41,9 @@ type outcome struct {
 	Label  string
 	Ticket string
 	Steps  []ranStep
-	// Print is where the ticket (or the chart on show) stood at the first read
-	// after the command's result arrived, so the command's own effect (a
+	// Print is where the ticket (or the chart on show) stood at the first roster
+	// read (the chart's read, for a line with no ticket) that began after the
+	// command's result arrived, so the command's own effect (a
 	// refusal it journaled, an approval it wrote) is part of it; the line the
 	// panel prints for it is gone once a later read differs. Fixed is set once
 	// it is taken.
