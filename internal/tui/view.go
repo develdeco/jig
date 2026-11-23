@@ -37,12 +37,14 @@ type rowRef struct {
 
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
-// top edge its title in text and right.
+// top edge its title in text and right. A line of an ask's text carries the
+// ask's id, so View can record whether it drew the ask whole (drawnAsks).
 type pline struct {
 	text  string
 	ref   *rowRef
 	box   int
 	right string
+	ask   string
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -92,12 +94,52 @@ func (m *Model) page() page {
 	return m.mainPage()
 }
 
+// minBodyRows is the rows a screen's body keeps whatever the panel and the
+// footer ask for, and headerRows the rows over it: the title and its rule.
+const (
+	minBodyRows = 6
+	headerRows  = 2
+)
+
 // View draws the screen: a header, the body windowed so the cursor shows,
 // what the last command printed, and the keys, in exactly the height the
 // terminal has.
 func (m *Model) View() string {
-	w, h := m.width, m.height
+	w := m.width
 	m.followSel()
+	l := m.layout()
+
+	var tailPane []string
+	if l.tailH > 0 {
+		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, l.tailH)...)
+	}
+
+	start := m.windowStart(l.pg, l.sel, l.pageH, true)
+	body := m.window(l.pg, l.sel, start, l.pageH, w)
+	m.drawn = drawnAsks(l.pg, start, l.pageH)
+	for len(body) < l.pageH {
+		body = append(body, "")
+	}
+	out := append(append(append(append(l.head, body...), tailPane...), l.panel...), l.foot...)
+	for i, line := range out {
+		out[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(out, "\n")
+}
+
+// screenLayout is how the screen on top is laid out at the size the terminal
+// has: its page and the row the cursor stands on, the rows around the body, and
+// how many rows of the body the page has and the tail takes.
+type screenLayout struct {
+	pg                page
+	sel               int
+	head, foot, panel []string
+	pageH, tailH      int
+}
+
+// layout lays the screen on top out as View draws it.
+func (m *Model) layout() screenLayout {
+	w, h := m.width, m.height
 	pg := m.page()
 	if sub := m.subjectOf(pg); sub != m.keysOn {
 		// The page was sized by a hint line cut for another subject: it is
@@ -118,31 +160,53 @@ func (m *Model) View() string {
 	foot := m.footer(w)
 	panel := m.panel(w)
 	bodyH := h - len(head) - len(foot) - len(panel)
-	if bodyH < 6 && len(panel) > 0 {
-		panel = panel[:max(0, len(panel)-(6-bodyH))]
+	if bodyH < minBodyRows && len(panel) > 0 {
+		// The last command goes first: the notice says what to do.
+		panel = panel[min(len(panel), minBodyRows-bodyH):]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
 		bodyH = 1
 	}
 
-	var tailPane []string
-	pageH := bodyH
+	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
 	if m.tail && bodyH >= 8 {
-		tailH := bodyH / 2
-		pageH = bodyH - tailH - 1
-		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, tailH)...)
+		l.tailH = bodyH / 2
+		l.pageH = bodyH - l.tailH - 1
 	}
+	return l
+}
 
-	body := m.window(pg, sel, pageH, w)
-	for len(body) < pageH {
-		body = append(body, "")
+// What View drew of an ask: some of its lines, or all of them. An ask the page
+// has no line of is not in the record.
+const (
+	askCut = iota + 1
+	askWhole
+)
+
+// drawnAsks is what the window of h rows from start draws of each ask the page
+// has lines of. View records it as it draws, so a key acts on the screen the
+// person read, notice and tail and all, and the one rule for acting on what a
+// person must read first names no screen.
+func drawnAsks(pg page, start, h int) map[string]int {
+	total, shown := map[string]int{}, map[string]int{}
+	for i, line := range pg.lines {
+		if line.ask == "" {
+			continue
+		}
+		total[line.ask]++
+		if i >= start && i < start+h {
+			shown[line.ask]++
+		}
 	}
-	out := append(append(append(append(head, body...), tailPane...), panel...), foot...)
-	for i, l := range out {
-		out[i] = strings.TrimRight(l, " ")
+	out := make(map[string]int, len(total))
+	for id, n := range total {
+		out[id] = askCut
+		if shown[id] == n {
+			out[id] = askWhole
+		}
 	}
-	return strings.Join(out, "\n")
+	return out
 }
 
 // bodyRows is how many rows the screen's body has: the height less the
@@ -200,10 +264,9 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	return start
 }
 
-// window renders the page lines that fit in h rows with the sel-th
-// selectable row in view, marking that row.
-func (m *Model) window(pg page, sel, h, w int) []string {
-	start := m.windowStart(pg, sel, h, true)
+// window renders the page lines from start that fit in h rows, marking the
+// sel-th selectable row.
+func (m *Model) window(pg page, sel, start, h, w int) []string {
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -319,11 +382,8 @@ func (m *Model) footer(w int) []string {
 	switch {
 	case m.input != nil:
 		out := []string{rule}
-		about := m.input.about
-		if len(about) > 4 {
-			about = append(about[:3:3], "…")
-		}
-		for _, l := range about {
+		out = append(out, fit("  "+m.st.dim(m.input.head), w))
+		for _, l := range wrapWhole(m.input.about, w-2) {
 			out = append(out, fit("  "+m.st.dim(l), w))
 		}
 		out = append(out, fit("  "+m.st.key(m.input.prompt+" ›")+" "+string(m.input.value)+m.st.dim("▏"), w))
@@ -458,7 +518,11 @@ func (m *Model) panel(w int) []string {
 		out = append(out, m.lastLines(m.last, w)...)
 	}
 	if m.notice != "" {
-		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
+		// Drawn whole, in the rows it needs: what it tells the person is the
+		// point of it, and a cut notice loses its end.
+		for _, l := range wrapWhole(m.notice, w-2) {
+			out = append(out, fit("  "+m.st.state(StateFindings, l), w))
+		}
 	}
 	return out
 }

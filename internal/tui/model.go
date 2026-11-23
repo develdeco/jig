@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,10 +172,12 @@ type navEntry struct {
 // textInput is a line a person is typing: an answer.
 type textInput struct {
 	prompt string
-	about  []string
-	value  []rune
-	ticket string
-	qid    string
+	// head and about are what the person answers: who asked, and the question
+	// as written. The footer wraps about when it draws, so a resize re-wraps it.
+	head, about string
+	value       []rune
+	ticket      string
+	qid         string
 }
 
 // confirmation is an action that waits for a yes.
@@ -201,6 +204,10 @@ type Model struct {
 	last   *outcome
 	notice string
 	tail   bool
+	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
+	// a key has been taken in since that View: a key that acts on an ask acts
+	// on what the person read, never on a screen nobody has seen.
+	drawn map[string]int
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -917,6 +924,8 @@ func (m *Model) keys(k tea.KeyMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, r := range k.Runes {
 		cmds = append(cmds, m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}))
+		// No screen is drawn between the keys of one read.
+		m.drawn = nil
 	}
 	return tea.Batch(cmds...)
 }
@@ -1315,9 +1324,13 @@ func (m *Model) beginAnswer() {
 			return
 		}
 	}
-	about := []string{"slice " + q.Slice + " asked:"}
-	about = append(about, strings.Split(q.Text, "\n")...)
-	m.input = &textInput{prompt: "answer " + q.ID, about: about, ticket: id, qid: q.ID}
+	m.input = &textInput{prompt: "answer " + q.ID, head: "slice " + q.Slice + " asked:", about: q.Text, ticket: id, qid: q.ID}
+	// A question is never answered from a cut: when the prompt with the whole
+	// question would leave the body under its floor, there is no prompt.
+	if need := minBodyRows + headerRows + len(m.footer(m.width)); m.height < need {
+		m.input = nil
+		m.notice = "the screen is too short to show the whole question " + q.ID + ": it needs " + strconv.Itoa(need) + " rows, this has " + strconv.Itoa(m.height)
+	}
 }
 
 // inputKey edits the line being typed.
@@ -1392,6 +1405,23 @@ func (m *Model) triage(decision string) tea.Cmd {
 	}
 	if pick == nil {
 		m.notice = "no ask is waiting for a decision"
+		return nil
+	}
+	// A person decides an ask from what the screen shows: one drawn cut, or not
+	// drawn at all, is not decided.
+	switch drawn, seen := m.drawn[pick.ID]; {
+	case m.drawn == nil:
+		m.notice = "the screen changed under the key before it was drawn: press it again"
+		return nil
+	case drawn == askWhole:
+	case seen:
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
+		return nil
+	case m.top().ticket == id:
+		m.notice = "ask " + pick.ID + " is read and decided on the review screen, which this screen does not draw it on"
+		return nil
+	default:
+		m.notice = "ask " + pick.ID + " is not shown on this screen: open " + id + " to read it"
 		return nil
 	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))

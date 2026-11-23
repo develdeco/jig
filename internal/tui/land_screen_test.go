@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -233,6 +235,8 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	if last := refs[len(refs)-1]; last.kind != rowLand || last.ticket != "JIG-2" {
 		t.Errorf("the last row is %+v, want the landing", last)
 	}
+	// Two asks drawn whole take the rows the land step's block would have.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 40})
 	g.press("end")
 	if v := g.view(); !strings.Contains(v, "╭─ Land ─") {
 		t.Errorf("the cursor on the landing row does not open the land step's sub-steps:\n%s", v)

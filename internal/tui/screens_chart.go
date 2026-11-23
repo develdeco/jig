@@ -65,9 +65,9 @@ func (m *Model) chartPage(name string) page {
 		run = trimRuns(run, len(run)-cut)
 		spare += cut
 	}
-	if spare < 0 && len(detail) > 1 {
-		cut := min(-spare, len(detail)-1)
-		detail = trimRuns(detail, len(detail)-cut)
+	if spare < 0 {
+		var cut int
+		detail, cut = shortenRuns(detail, -spare)
 		spare += cut
 	}
 	var mapPanel page
@@ -206,10 +206,25 @@ func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
 }
 
 // runRow is a line of the Run panel: a label, the words, and how much the line
-// matters when the panel is short (0 is kept longest).
+// matters when the panel is short (0 is kept longest). A line of an ask's text
+// carries the ask's id and is never cut for room: a person decides the ask from
+// it.
 type runRow struct {
 	label, text string
 	weight      int
+	ask         string
+}
+
+// cuttable is how many of rows a short panel may give up: all but the lines of
+// an ask.
+func cuttable(rows []runRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.ask == "" {
+			n++
+		}
+	}
+	return n
 }
 
 // runRows are what a run of the chart would do: the prompt that starts it,
@@ -223,29 +238,29 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 	case info.Reason != "":
 		next = m.st.dim(info.Reason)
 	}
-	rows := []runRow{{"next", next, 0}}
+	rows := []runRow{{"next", next, 0, ""}}
 	first, then := landingsOf(info)
 	switch {
 	case first != nil:
 		// The run stops at a landing: the person's word is the landing's, not
 		// the run's, and the reason is the landing's state as phase words it.
 		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
-		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
+		rows = append(rows, runRow{"why", m.st.dim(first.State), 1, ""})
 		for _, l := range then {
 			words := "also " + l.Prompt
 			if len(l.After) > 0 {
 				words = "then " + l.Prompt + ", after " + andList(l.After)
 			}
-			rows = append(rows, runRow{"", m.st.dim(words), 1})
+			rows = append(rows, runRow{"", m.st.dim(words), 1, ""})
 		}
 	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
-		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})
+		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1, ""})
 	}
 	if len(info.Briefs) > 0 {
-		rows = append(rows, runRow{"briefs", strings.Join(info.Briefs, ", "), 2})
+		rows = append(rows, runRow{"briefs", strings.Join(info.Briefs, ", "), 2, ""})
 	}
 	for i, w := range info.Run {
-		rows = append(rows, runRow{"wave " + strconv.Itoa(i+1), strings.Join(w, ", "), 3})
+		rows = append(rows, runRow{"wave " + strconv.Itoa(i+1), strings.Join(w, ", "), 3, ""})
 	}
 	for i, e := range info.Ends {
 		label := ""
@@ -258,10 +273,10 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 			// the words internal/phase wrote for it.
 			note = e.Fact
 		}
-		rows = append(rows, runRow{label, note, 1})
+		rows = append(rows, runRow{label, note, 1, ""})
 	}
 	if info.Spend != nil {
-		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
+		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2, ""})
 	}
 	return rows
 }
@@ -327,14 +342,26 @@ func andList(words []string) string {
 	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
+// shortenRuns is rows with up to short lines given back, and how many were: one
+// line of the cuttable ones is always kept, and the lines of an ask are never
+// given back.
+func shortenRuns(rows []runRow, short int) ([]runRow, int) {
+	cut := min(short, cuttable(rows)-1)
+	if cut < 1 {
+		return rows, 0
+	}
+	return trimRuns(rows, cuttable(rows)-cut), cut
+}
+
 // trimRuns is rows cut to n lines, the least important first (the last of
-// them among equals), the rest in their order.
+// them among equals), the rest in their order. The lines of an ask are not
+// counted in n and never cut.
 func trimRuns(rows []runRow, n int) []runRow {
 	rows = append([]runRow(nil), rows...)
-	for len(rows) > max(1, n) {
-		drop := 0
+	for cuttable(rows) > max(1, n) {
+		drop := -1
 		for i, r := range rows {
-			if r.weight >= rows[drop].weight {
+			if r.ask == "" && (drop < 0 || r.weight >= rows[drop].weight) {
 				drop = i
 			}
 		}
