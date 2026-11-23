@@ -1,4 +1,4 @@
-jig  demo › JIG-2 › 3 review                                   ! review findings
+jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
       a leaked handle fails the next open
