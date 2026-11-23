@@ -63,14 +63,17 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 		return m, nil
 	}
 	stopped := false            // the walk has passed the agent's own stop
-	touched := ""               // the ticket the earliest session-touch line seen so far names
+	var pending []int           // the briefs begun whose touch, the next older one, the walk has not reached
 	closed := map[string]bool{} // the tickets whose review round the agent closed, after the walk's place
 	err := ledger.ReadBackward(root, memoryWindow, func(l journal.Line) bool {
 		if l.Session != session {
 			return true
 		}
 		if l.Event == journal.EventSessionTouch && l.Ticket != "" {
-			touched = l.Ticket // the walk goes back: the last one set is the earliest after a call
+			for _, i := range pending { // jig ticket new writes it while it runs, before the hook hears the call
+				m.claims[i].ticket = l.Ticket
+			}
+			pending = nil
 		}
 		if l.Agent == agent {
 			// A subagent's stop ends the claims it made before it, unless jig refused it (the agent works on). The
@@ -83,9 +86,12 @@ func readMemory(root, session, agent string) (sessionMemory, error) {
 				m.claims = append(m.claims, c)
 			} else if l.Event == journal.EventTool && ledger.RunsJig(l.Command, "", "review", "done") {
 				closed[reviewWord(l.Command)] = true
-			} else if c, ok := roleCallOf(l, touched); ok {
+			} else if c, ok := roleCallOf(l); ok {
 				c.ended = stopped || (c.kind == roleReview && closed[c.word])
 				m.claims = append(m.claims, c)
+				if c.kind == roleBrief {
+					pending = append(pending, len(m.claims)-1)
+				}
 			}
 			if dir, cd := leadingCd(l.Command); l.Event == journal.EventTool && cd && dir != "" && len(m.agentDirs) < 4 {
 				m.agentDirs = append(m.agentDirs, resolveDir(dir, l.Cwd, ""))

@@ -12,19 +12,22 @@ import (
 
 // A tool call is written on the ticket it belongs to, by the first of:
 //
-//  1. the ticket whose slice the call's own agent holds. A harness reports
-//     the session's directory for a subagent that works in a worktree of its
-//     own, so the directory says nothing of what the agent is on; its claim
-//     does.
-//  2. the ticket of the worktree the command ran in: the directory a leading
+//  1. the ticket a `jig` call names (`jig status T`), as a claim call does.
+//  2. the ticket whose role the call's own agent holds: a claim until its
+//     release, a review round from `jig review context` to `jig review done`,
+//     a brief from `jig ticket new` or `jig graduate` to its approval. A
+//     harness reports the session's directory for a subagent that works in a
+//     worktree of its own, so the directory says nothing of what the agent is
+//     on; its role does.
+//  3. the ticket of the worktree the command ran in: the directory a leading
 //     `cd <dir> &&` names, else the event's directory, through the branch
 //     checked out there.
-//  3. none.
+//  4. none.
 //
 // Nothing carries a ticket forward from one call to the next: a claim binds
-// only while it is held.
+// only while it is held (a role, while its agent holds it).
 
-// claimCall is a `jig claim` call of the event's agent, read back from the
+// claimCall is a call of the event's agent that took a role (a `jig claim`, by default), read back from the
 // ledger: what the claim names, and whether the agent has stopped since.
 type claimCall struct {
 	// word is the ticket the command names, ticket the one the line was
@@ -95,17 +98,17 @@ func idShaped(s string) bool {
 }
 
 // roleCallOf reads a tool line as the start of a review round or a brief, and
-// whether it is one; touch is the ticket the session was tied to just after
-// it, which a brief's start does not name.
-func roleCallOf(l journal.Line, touch string) (claimCall, bool) {
+// whether it is one; a brief's ticket is the one the session was tied to just
+// before it (memory.go).
+func roleCallOf(l journal.Line) (claimCall, bool) {
 	if l.Event != journal.EventTool {
 		return claimCall{}, false
 	}
 	switch {
 	case ledger.RunsJig(l.Command, "", "review", "context"):
 		return claimCall{kind: roleReview, word: reviewWord(l.Command)}, true
-	case (ledger.RunsJig(l.Command, "", "ticket", "new") || ledger.RunsJig(l.Command, "", "graduate")) && touch != "":
-		return claimCall{kind: roleBrief, ticket: touch}, true
+	case ledger.RunsJig(l.Command, "", "ticket", "new") || ledger.RunsJig(l.Command, "", "graduate"):
+		return claimCall{kind: roleBrief}, true
 	}
 	return claimCall{}, false
 }
@@ -216,6 +219,13 @@ func (h *handler) bindTicket() (ticket, slice string) {
 	}
 	if t := h.jigTicketWord(h.ev.Command); t != "" {
 		return t, ""
+	}
+	if ledger.RunsJig(h.ev.Command, "", "ticket", "new") || ledger.RunsJig(h.ev.Command, "", "graduate") {
+		// The verb tied the session to the ticket while it ran, before the
+		// hook heard the call.
+		if t := h.memory().ticket; t != "" {
+			return t, ""
+		}
 	}
 	if t, s := h.claimBinding(false); t != "" {
 		return t, s

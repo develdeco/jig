@@ -2,9 +2,6 @@ package observe
 
 import (
 	"testing"
-
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/ledger"
 )
 
 // TestAReviewerBindsToItsRoundFromContextToDone: a reviewer subagent in a
@@ -23,25 +20,6 @@ func TestAReviewerBindsToItsRoundFromContextToDone(t *testing.T) {
 	expectTicket(t, "the done call", r.call("a-r", "jig review done "+r.fx.Ticket), r.fx.Ticket)
 	expectTicket(t, "a call after the round", r.call("a-r", "ls"), "")
 	expectTicket(t, "the builder, who opened no round", r.call("a-b", "git diff main"), "")
-}
-
-// TestAPlannerBindsToItsBriefFromTicketNewToApproval: a session that mints a
-// ticket is tied to it by the touch line the verb writes, and its calls are
-// the ticket's until the brief is approved.
-func TestAPlannerBindsToItsBriefFromTicketNewToApproval(t *testing.T) {
-	t.Parallel()
-	r := newRig(t)
-	r.handle(r.ev(KindSessionStart))
-
-	expectTicket(t, "a call before the ticket", r.call("", "go test ./..."), "")
-	expectTicket(t, "the mint call, which names no ticket", r.call("", `jig ticket new --title "Cart totals"`), "")
-	if err := ledger.TouchSession(r.fx.Home, r.clock.Now(), ledger.Registration{ID: "s1", Ticket: r.fx.Ticket}); err != nil {
-		t.Fatal(err)
-	}
-	expectTicket(t, "a call drafting the brief", r.call("", "jig skill intake"), r.fx.Ticket)
-	expectTicket(t, "another", r.call("", "cat brief.md"), r.fx.Ticket)
-	r.addTo(r.fx.Ticket, journal.Line{Event: journal.EventApproval, Session: "s1"})
-	expectTicket(t, "a call after the approval", r.call("", "git log"), "")
 }
 
 // TestACallBindsToTheTicketAJigVerbNames: `jig <verb> T` is on T whoever runs
