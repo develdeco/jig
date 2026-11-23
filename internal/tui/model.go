@@ -875,6 +875,9 @@ func (m *Model) settleLast(msg tea.Msg) {
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
 	m.last.After = m.rosterStarted
+	if msg.result.Label == labelPublishWhat {
+		m.publishRead(m.last)
+	}
 	var cmds []tea.Cmd
 	if msg.result.Ticket != "" {
 		// The roster read that follows is the one that says what the command did.
@@ -978,7 +981,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		}
 	case "p":
 		if m.allow(actPublish) {
-			m.beginPublish()
+			return m.beginPublish()
 		}
 	case "5":
 		return m.openLand()
@@ -1392,18 +1395,48 @@ func (m *Model) gate() tea.Cmd {
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
-// beginPublish asks to publish the ticket: a person's approval of the
-// reviewed head, then the push and the pull request.
-func (m *Model) beginPublish() {
+// beginPublish renders the ticket's pull request body, which pushes nothing, to
+// read what its What says: the verb's own word on it comes back as publishRead.
+func (m *Model) beginPublish() tea.Cmd {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
-		return
+		return nil
 	}
 	if m.w.tickets[id].awaiting {
 		m.notice = id + " does not exist yet"
+		return nil
+	}
+	return m.exec(labelPublishWhat, id, m.verbArgs("publish", id, "--body"))
+}
+
+// whatPending says a rendered body has a What nobody wrote: a `what` row (or one
+// for each repo of a ticket of several) the verb says is pending.
+func whatPending(out string) bool {
+	for k, v := range parseAxi(out).KV["publish_body"] {
+		if (k == "what" || strings.HasPrefix(k, "what_")) && v == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// publishRead takes in the render beginPublish ran. With a What to write it
+// stops: nothing is asked or pushed, and the panel keeps the verb's own help
+// line for it, whole. A render the verb refused is shown as any refusal. A body
+// with its What asks to publish, and the render leaves no line of its own.
+func (m *Model) publishRead(res *outcome) {
+	s := res.shown()
+	if s.Code != 0 || whatPending(s.Out) {
 		return
 	}
+	m.last = nil
+	m.askPublish(res.Ticket)
+}
+
+// askPublish asks to publish the ticket: a person's approval of the
+// reviewed head, then the push and the pull request.
+func (m *Model) askPublish(id string) {
 	m.ask = &confirmation{
 		prompt: "publish " + id + ": approve the reviewed head, push it and open the pull request?",
 		run: func() tea.Cmd {

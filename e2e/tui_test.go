@@ -10,6 +10,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -335,7 +336,28 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
 	}
 
-	// One key, and a yes to the question, approves and publishes.
+	// With no What written the key stops: the frame says where the bullets go and
+	// how to give them, and nothing is asked or pushed.
+	screens.press("p")
+	screens.until("✓ jig publish "+fx.Ticket+" --body", "Write the pull request's What", "--what")
+	if got := originRefOrEmpty(t, fx.RepoRemote, "refs/heads/"+branch); got != "" {
+		t.Errorf("origin's %s = %s after a p that stopped on the What, want nothing pushed", branch, got)
+	}
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		if l.Event == journal.EventPublishApproved || l.Event == journal.EventPublishDone {
+			t.Errorf("the journal has a %s line after a p that stopped on the What", l.Event)
+		}
+	}
+
+	// The What is given with the verb the frame named, and one key, and a yes to
+	// the question, approves and publishes.
+	what := filepath.Join(t.TempDir(), "what.md")
+	if err := os.WriteFile(what, []byte("- Greet the person by the name they gave, so the page no longer says hello to nobody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.Jig("publish", fx.Ticket, "--body", "--what", what); res.Code != 0 || !strings.Contains(res.Stdout, "what: given") {
+		t.Fatalf("jig publish --body --what exit = %d, want 0 and the What given\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	screens.press("p")
 	screens.until("approve the reviewed head")
 	screens.press("y")
