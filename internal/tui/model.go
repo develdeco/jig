@@ -150,6 +150,8 @@ type navEntry struct {
 	sel    int
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
+	// showMap shows the Map panel on the plan of an issue, which hides it.
+	showMap bool
 	// scroll is how many lines a page with no row to stand on is moved up, so a
 	// screen longer than its window can be read to its end.
 	scroll int
@@ -676,6 +678,11 @@ func (m *Model) chartTouched(name string, touched map[string]bool) []tea.Cmd {
 			cmds = append(cmds, m.refreshStatus(id))
 		}
 	}
+	if issue := c.issueID(); issue != "" && touched[issue] {
+		c.dirty = true
+		m.lastEvent = m.now()
+		cmds = append(cmds, m.refreshStatus(issue))
+	}
 	return cmds
 }
 
@@ -783,7 +790,9 @@ func (m *Model) onChart(msg chartMsg) tea.Cmd {
 		// read does not stop the timer.
 		c.mergeWait = len(msg.info.Ends) > 0
 	}
-	return nil
+	// The plan of an issue reads its need and its suite from the issue's own
+	// status, read whenever the chart is.
+	return m.refreshIssue(c)
 }
 
 // retryAfter asks, after a moment, for the read of ticket (or of the ticket
@@ -798,7 +807,7 @@ func (m *Model) retryAfter(ticket string) tea.Cmd {
 func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 	c := m.w.charts[e.chart]
 	e.entered = true
-	cmds := []tea.Cmd{m.loadChart(e.chart)}
+	cmds := []tea.Cmd{m.loadChart(e.chart), m.refreshIssue(c)}
 	for _, id := range c.ids() {
 		if t := m.w.tickets[id]; t != nil && t.status == nil {
 			cmds = append(cmds, m.refreshStatus(id))
@@ -959,6 +968,10 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		m.beginPublish()
 	case "5":
 		return m.openLand()
+	case "c":
+		return m.openIssue()
+	case "m":
+		m.toggleMap()
 	case "r":
 		return m.refreshAll()
 	}
@@ -1027,7 +1040,7 @@ func (m *Model) followSel() {
 		return
 	}
 	t := m.w.tickets[e.ticket]
-	if t == nil {
+	if t == nil || isMulti(t) {
 		return
 	}
 	cur := currentStep(m.steps(t))
@@ -1084,6 +1097,10 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:
 		next = navEntry{screen: screenTicket, ticket: ref.id, follow: true}
+		if chart := m.planOf(ref.id); chart != "" {
+			// An issue's screen is its plan, the screen of the chart that plans it.
+			next = navEntry{screen: screenChart, chart: chart, follow: true}
+		}
 	case rowBrief:
 		next = navEntry{screen: screenBrief, ticket: ref.ticket}
 	case rowBuild:
@@ -1183,6 +1200,7 @@ func (m *Model) refreshAll() tea.Cmd {
 			for _, id := range c.ids() {
 				cmds = append(cmds, m.refreshStatus(id))
 			}
+			cmds = append(cmds, m.refreshIssue(c))
 		}
 	}
 	if id := m.watching(); id != "" {

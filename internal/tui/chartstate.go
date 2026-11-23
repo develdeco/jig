@@ -120,6 +120,13 @@ type chartRow struct {
 	// end is where the ticket stands at its end, when atEnd says it does.
 	end   endState
 	atEnd bool
+	// depth is how far the row is nested in a plan: 1 for a task of a
+	// multi-task listed under it.
+	depth int
+	// mark is the state a row is drawn in when it is not its current step's, and
+	// bare says it draws no steps: a multi-task's row in a plan.
+	mark string
+	bare bool
 }
 
 // chartRows are the chart's tickets that have a ticket, in the verb's order (the
@@ -129,36 +136,37 @@ type chartRow struct {
 // (its problem, the entries with no ticket).
 func (m *Model) chartRows(c *chart) []chartRow {
 	var rows []chartRow
-	add := func(id, title string, verb *chartTicket) {
-		r := chartRow{id: id, title: title, verb: verb}
-		if t := m.w.tickets[id]; t != nil {
-			r.t, r.title = t, firstOf(title, t.title)
-			r.d = readingPhases()
-			r.steps = m.stepRows(t, r.d)
-			if t.digest != nil {
-				r.d = m.phaseOf(t)
-				r.steps = m.stepRows(t, r.d)
-				// A question and a landing are the person's whoever else is at
-				// work; what a live session records itself (an approval, a
-				// round's asks) waits.
-				r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
-				r.waits = t.blockers
-				r.behind = t.digest.Behind
-				r.end, r.atEnd = m.endOf(t)
-			}
-			r.done = t.digest != nil && r.steps[stepPublish].Done
-		}
-		rows = append(rows, r)
-	}
 	for _, id := range c.ids() {
-		verb := c.verbOf(id)
-		if verb != nil {
-			add(id, verb.Title, verb)
+		if verb := c.verbOf(id); verb != nil {
+			rows = append(rows, m.rowOf(id, verb.Title, verb))
 		} else {
-			add(id, "", nil)
+			rows = append(rows, m.rowOf(id, "", nil))
 		}
 	}
 	return rows
+}
+
+// rowOf is the row of ticket id as the screens show it, under title when the
+// chart names one.
+func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
+	r := chartRow{id: id, title: title, verb: verb}
+	if t := m.w.tickets[id]; t != nil {
+		r.t, r.title = t, firstOf(title, t.title)
+		r.d = readingPhases()
+		r.steps = m.stepRows(t, r.d)
+		if t.digest != nil {
+			r.d = m.phaseOf(t)
+			r.steps = m.stepRows(t, r.d)
+			// A question and a landing are the person's whoever else is at work; what a
+			// live session records itself (an approval, a round's asks) waits.
+			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
+			r.waits = t.blockers
+			r.behind = t.digest.Behind
+			r.end, r.atEnd = m.endOf(t)
+		}
+		r.done = t.digest != nil && r.steps[stepPublish].Done
+	}
+	return r
 }
 
 // needsYou is whether a phase that is under way waits for the person: an open
@@ -175,6 +183,9 @@ func needsYou(d phase.Ticket) bool {
 // state is the state the ticket's row is drawn in: its current step's, queued
 // for a ticket nothing is known of.
 func (r chartRow) state() string {
+	if r.mark != "" {
+		return r.mark
+	}
 	if r.steps != nil {
 		return r.steps[currentStep(r.steps)].State
 	}
@@ -184,6 +195,10 @@ func (r chartRow) state() string {
 // chartDots are the ticket's steps as icons; queued ones for a ticket the
 // screens know nothing of.
 func (m *Model) chartDots(r chartRow) string {
+	if r.bare {
+		// A multi-task has no five steps of its own: the column is left empty.
+		return spaces(2*stepCount - 1)
+	}
 	if r.steps != nil {
 		return m.stepDots(r.steps)
 	}

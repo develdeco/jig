@@ -177,7 +177,7 @@ before SHOP-1 exists, and fills in when it does.
 
 A chart is a row on the main screen after the tickets, with how many of its
 tickets published. Enter opens its screen: the chart's map (destination, what
-was decided, the fog), its tickets with the same four step marks and what each
+was decided, the fog), its tickets with the same five step marks and what each
 waits for ("waits for SHOP-2 merged · its PR is open") or is ready for, the run
 (what to say to your agent, the briefs to write, the build waves, and where it
 ends) and the tickets' activity together. Under the tickets, a Detail panel shows
@@ -190,6 +190,8 @@ its tickets' events quiet down; a merge on the host writes no line, so while the
 chart ends at a merge the screen reads it every two minutes, and `r` reads it
 now. An agent jig holds back at its stop is an activity line of its own ("⏸ agent
 4f2a91c0 held at its stop · commit 7f03c55 for slice apply has no recorded result").
+
+A chart that plans an issue opens on the issue's plan instead, and so does the issue's own row: the need, the tasks with where each landed (a multi-task's tasks under it), and the issue's branch, suite, pull request and landing, one line each. `m` shows the chart's map, `c` on a task goes up to its issue, and esc comes back.
 
 From it you answer a session's question (`a`), keep or dismiss a review's ask
 (`k`, `d`), open a review round (`g`), and approve and publish (`p`: after your

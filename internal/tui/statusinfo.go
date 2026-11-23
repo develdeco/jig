@@ -45,8 +45,33 @@ type statusInfo struct {
 	Probes     []statusProbe
 	ProbeSkips []statusSkip
 	Unprobed   []statusHunk
+	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
+	// suite by repo: what the plan screen reads. Both are empty for a task.
+	Need  string
+	Suite []statusSuite
+	// Standing, Prompt, Waits and Unmet are an issue's or multi-task's own pull
+	// request as `jig next` derives it: waiting, ready, published or landed, what
+	// to say next, the children not landed and what else is unmet.
+	Standing, Prompt string
+	Waits            []statusWait
+	Unmet            []statusUnmet
 	// Err is set when the status itself was refused.
 	Err *axiErr
+}
+
+// statusWait is a child of a container that has not landed, with its standing.
+type statusWait struct{ Ticket, Standing string }
+
+// statusUnmet is a precondition of a container's publish that is not met.
+type statusUnmet struct{ Code, Why, Prompt string }
+
+// statusSuite is a row of an issue status's suite table: where a repo's suite
+// stands at a tip of the issue's branch, and the tasks begun after it failed.
+type statusSuite struct {
+	Repo, Standing, Command, Tip string
+	Seconds                      int
+	Signature, Waiver, Why       string
+	Fixes                        []string
 }
 
 type statusSlice struct {
@@ -211,6 +236,24 @@ func parseStatus(out string) *statusInfo {
 		}
 		info.LastRuns[r["slice"]] = statusLastRun{Result: r["result"], Covers: r["covers"]}
 	}
+	info.Need = doc.Scalars["need"]
+	info.Standing, info.Prompt = doc.Scalars["standing"], doc.Scalars["prompt"]
+	for _, r := range doc.Tables["waits"].Maps() {
+		info.Waits = append(info.Waits, statusWait{Ticket: r["ticket"], Standing: r["standing"]})
+	}
+	for _, r := range doc.Tables["unmet"].Maps() {
+		info.Unmet = append(info.Unmet, statusUnmet{Code: r["code"], Why: r["why"], Prompt: r["prompt"]})
+	}
+	for _, r := range doc.Tables["suite"].Maps() {
+		row := statusSuite{
+			Repo: r["repo"], Standing: r["standing"], Command: dash(r["command"]), Tip: dash(r["tip"]), Seconds: atoi(dash(r["seconds"])),
+			Signature: dash(r["signature"]), Waiver: dash(r["waiver"]), Why: dash(r["why"]),
+		}
+		if f := dash(r["fixes"]); f != "" {
+			row.Fixes = strings.Split(f, "+")
+		}
+		info.Suite = append(info.Suite, row)
+	}
 	for _, r := range doc.Tables["verification_states"].Maps() {
 		info.Verifications = append(info.Verifications, statusVerification{Slice: r["slice"], Commit: r["commit"], State: r["state"], Clear: dash(r["clear"])})
 	}
@@ -338,7 +381,11 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				Closed       string   `json:"closed"`
 				LandFirst    []string `json:"land_first"`
 				Unfinished   []string `json:"unfinished"`
-				Phases       []struct {
+				Children     []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"children"`
+				Phases []struct {
 					Name  string `json:"name"`
 					State string `json:"state"`
 					Text  string `json:"text"`
@@ -366,6 +413,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			Title       string   `json:"title"`
 			Tickets     []string `json:"tickets"`
 			Ungraduated int      `json:"ungraduated"`
+			Issue       string   `json:"issue"`
 		} `json:"charts"`
 	}
 	if err := json.Unmarshal([]byte(obj), &next); err != nil {
@@ -385,6 +433,9 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			for _, p := range g.PRs {
 				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
 			}
+			for _, c := range g.Children {
+				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})
+			}
 			if s := g.Slices; s != nil {
 				d.Slices = &digestSlices{Total: s.Total, Green: s.Green, Building: s.Building, Queued: s.Queued, NeedsInput: s.NeedsInput, Failed: s.Failed, Stopped: s.Stopped}
 			}
@@ -394,7 +445,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	}
 	var charts []chartListing
 	for _, c := range next.Charts {
-		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated})
+		charts = append(charts, chartListing{Name: c.Name, Title: c.Title, Tickets: c.Tickets, Ungraduated: c.Ungraduated, Issue: c.Issue})
 	}
 	return rows, charts, nil
 }
