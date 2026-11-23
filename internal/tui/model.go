@@ -532,6 +532,12 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	m.expireLast()
+	return next, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -778,6 +784,38 @@ func (m *Model) enterChart(e *navEntry) []tea.Cmd {
 		}
 	}
 	return cmds
+}
+
+// standingPrint is where the ticket stands, as its phases' states and words:
+// what the panel's line is made against, so the line goes when it changes. A
+// command with no ticket is about the chart on show, whose verdict is its
+// standing; one made elsewhere has none and stays until the screen changes.
+func (m *Model) standingPrint(ticket string) string {
+	if ticket == "" {
+		if e := m.top(); e.screen == screenChart {
+			if c := m.w.charts[e.chart]; c != nil && c.info != nil {
+				return strings.Join([]string{c.info.Code, c.info.Reason, c.info.Prompt}, "\x1f")
+			}
+		}
+		return ""
+	}
+	t := m.w.tickets[ticket]
+	if t == nil {
+		return ""
+	}
+	var parts []string
+	for _, p := range m.phaseOf(t).Phases {
+		parts = append(parts, string(p.Name)+"\x1f"+p.State+"\x1f"+p.Text)
+	}
+	return strings.Join(parts, "\x1e")
+}
+
+// expireLast removes the last command's line once what it was about has moved
+// on: the ticket's phases read differently, or the chart's verdict does.
+func (m *Model) expireLast() {
+	if m.last != nil && m.standingPrint(m.last.Ticket) != m.last.Print {
+		m.last = nil
+	}
 }
 
 func (m *Model) onRan(msg ranMsg) tea.Cmd {

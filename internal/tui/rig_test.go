@@ -412,6 +412,9 @@ func (g *rig) syncDigests() {
 		g.synced[id] = from
 		t.digest = fakeDigest(g.m, t)
 	}
+	// The roster read that brings a digest is a message the model takes in, and a
+	// line that was about the ticket's old standing goes with it.
+	g.m.expireLast()
 }
 
 // rigNow is the rigs' clock: after every line the fixtures write (at), so a

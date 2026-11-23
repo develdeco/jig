@@ -367,34 +367,76 @@ func (m *Model) keyHints() []string {
 	return flat
 }
 
-// panel is what the last command printed and the notice, above the keys.
+// panel is the last command as one line, and the notice, above the keys.
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		for _, s := range m.last.Steps {
-			state := StateOK
-			if s.Code != 0 {
-				state = StateFail
-			}
-			out = append(out, fit("  "+m.st.icon(state)+" "+m.st.bold(m.shownLine(s.Args)), w))
-		}
-		shown := m.last.shown()
-		lines := outputLines(shown.Out)
-		if len(lines) > 6 {
-			lines = append(lines[:5:5], "…")
-		}
-		for _, l := range lines {
-			if shown.Code != 0 && (strings.HasPrefix(l, "error:") || strings.HasPrefix(l, "code:")) {
-				out = append(out, fit("    "+m.st.state(StateFail, l), w))
-				continue
-			}
-			out = append(out, fit("    "+m.st.dim(l), w))
-		}
+		out = append(out, m.lastLine(m.last, w))
 	}
 	if m.notice != "" {
 		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
 	}
 	return out
+}
+
+// lastLine is a key's command as typed and what the verb said of it: its own
+// first sentence when it worked, its error and code when it did not. The step
+// that failed is the one shown, so a chain that stopped reads as the failure.
+// The raw output is not printed, and a line too long for the screen is cut.
+func (m *Model) lastLine(o *outcome, w int) string {
+	s := o.shown()
+	state, said := StateOK, firstSentence(s.Out)
+	if s.Code != 0 {
+		state, said = StateFail, errorSentence(s.Out)
+	}
+	line := "  " + m.st.icon(state) + " " + m.st.bold(m.shownLine(s.Args))
+	if said != "" {
+		if state == StateFail {
+			said = m.st.state(StateFail, said)
+		} else {
+			said = m.st.dim(said)
+		}
+		line += "  " + said
+	}
+	return fit(line, w)
+}
+
+// firstSentence is what a verb that worked says of it: the first line of its
+// help, which is a sentence, else its first line.
+func firstSentence(out string) string {
+	lines := outputLines(out)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "help[") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1])
+		}
+	}
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
+	}
+	return ""
+}
+
+// errorSentence is a refusal's error and its code, "error text (CODE)"; output
+// that names neither says its first line.
+func errorSentence(out string) string {
+	var msg, code string
+	for _, l := range outputLines(out) {
+		switch {
+		case msg == "" && strings.HasPrefix(l, "error:"):
+			msg = strings.TrimSpace(strings.TrimPrefix(l, "error:"))
+		case code == "" && strings.HasPrefix(l, "code:"):
+			code = strings.TrimSpace(strings.TrimPrefix(l, "code:"))
+		}
+	}
+	switch {
+	case msg != "" && code != "":
+		return msg + " (" + code + ")"
+	case msg != "":
+		return msg
+	case code != "":
+		return code
+	}
+	return firstSentence(out)
 }
 
 // outputLines are the lines a command printed, without blanks.

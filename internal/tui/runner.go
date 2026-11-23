@@ -41,6 +41,9 @@ type outcome struct {
 	Label  string
 	Ticket string
 	Steps  []ranStep
+	// Print is where the ticket (or the chart on show) stood when the command
+	// was made; the line the panel prints for it is gone once it differs.
+	Print string
 }
 
 // shown is the step the screen reports: the one that failed, else the last.
@@ -77,9 +80,9 @@ func (m *Model) verbArgs(verb string, rest ...string) []string {
 // exec runs the steps in order, each a command line, and stops at the first
 // that fails.
 func (m *Model) exec(label, ticket string, steps ...[]string) tea.Cmd {
-	run := m.run
+	run, stood := m.run, m.standingPrint(ticket)
 	return func() tea.Msg {
-		res := outcome{Label: label, Ticket: ticket}
+		res := outcome{Label: label, Ticket: ticket, Print: stood}
 		for _, args := range steps {
 			out, code := run(args)
 			res.Steps = append(res.Steps, ranStep{Args: args, Out: out, Code: code})
