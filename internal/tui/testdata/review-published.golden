@@ -4,12 +4,12 @@ jig  demo › JIG-2  Config loader › 3 review                      ◇ waits t
     fix budget 1 of 3 rounds used
 
   rounds
-  ! round 1  findings  raised 1 fix · 2 asks · 1 note · 09:11:30
-      reviewer (Claude Code · Opus 5) · independent · s-review
-      full 0000000..ccccccc · 4 files read
   ✓ round 2  clean     09:13:30
       reviewer (Claude Code · Opus 5) · independent · s-review
       delta ccccccc..ddddddd · 2 files read
+  ! round 1  findings  raised 1 fix · 2 asks · 1 note · 09:11:30
+      reviewer (Claude Code · Opus 5) · independent · s-review
+      full 0000000..ccccccc · 4 files read
 
   asks
   nothing: no finding waits for a person

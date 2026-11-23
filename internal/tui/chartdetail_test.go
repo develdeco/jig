@@ -400,10 +400,9 @@ func TestChartDetailShowsTheSessionsOwnHold(t *testing.T) {
 	}
 }
 
-// TestChartDetailShowsTheNewestTwoHoldsOldestFirst: of three holds the oldest is
-// left out, the other two stand in the order they were made, the label on the
-// first.
-func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
+// TestChartDetailShowsTheNewestTwoHoldsNewestFirst: of three holds the oldest is
+// left out, the other two stand newest first, the label on the first.
+func TestChartDetailShowsTheNewestTwoHoldsNewestFirst(t *testing.T) {
 	t.Parallel()
 	g := wideChart(chartRig(t))
 	g.feed(
@@ -417,9 +416,9 @@ func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
 	if strings.Contains(got, "first fact") {
 		t.Errorf("the oldest of three holds is drawn:\n%s", got)
 	}
-	second, third := strings.Index(got, "hold     ⏸ agent bbbbbbbb held at its stop · second fact"), strings.Index(got, "         ⏸ the session held at its stop · third fact")
-	if second < 0 || third < second {
-		t.Errorf("the newest two holds are not drawn in time order, the label on the first:\n%s", got)
+	third, second := strings.Index(got, "hold     ⏸ the session held at its stop · third fact"), strings.Index(got, "         ⏸ agent bbbbbbbb held at its stop · second fact")
+	if third < 0 || second < third {
+		t.Errorf("the newest two holds are not drawn newest first, the label on the first:\n%s", got)
 	}
 }
 
@@ -435,7 +434,7 @@ func TestChartDetailGivesUpTheSliceRowsBeforeTheHold(t *testing.T) {
 	if len(panel)-2 != detailMax {
 		t.Fatalf("the panel has %d rows, want the most it has, %d:\n%s", len(panel)-2, detailMax, got)
 	}
-	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ agent a1 held at its stop · first fact", "         ⏸ the session held at its stop · second fact"} {
+	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ the session held at its stop · second fact", "         ⏸ agent a1 held at its stop · first fact"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, got)
 		}
