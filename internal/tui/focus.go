@@ -106,7 +106,7 @@ func (t *ticket) openTrack(step int, s phase.Sub) subTrack {
 			return tr
 		}
 	}
-	for _, l := range t.ledger {
+	for _, l := range t.workLedger() {
 		if l.Session == "" {
 			continue
 		}

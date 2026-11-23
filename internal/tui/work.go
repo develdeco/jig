@@ -55,7 +55,7 @@ func (w workTimes) ofStep(step int) time.Duration {
 // being built, a brief being drafted. A step whose only open sub-steps wait for
 // a person counts none: nobody is working, and the wait is not work.
 func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
-	placed, ws := m.placedIn(t, d)
+	placed, ws := m.placedFrom(t, d, t.workLines())
 	closed, open := t.answered()
 	waits := append(closed, phaseWaits(placed, d, open)...)
 	w := workTimes{}
@@ -63,7 +63,9 @@ func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
 	prevStep, prevKey := -1, ""
 	for _, p := range withStarts(placed, ws) {
 		at, ok := p.l.At()
-		if p.step < 0 || !ok {
+		if p.step < 0 || !ok || p.l.Src == srcStatus {
+			// A line the screen wrote when it noticed a change says when it
+			// looked, not when the work was done: no launch reads the same.
 			continue
 		}
 		if p.step == prevStep && at.After(prev) {

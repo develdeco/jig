@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -30,6 +31,69 @@ func (t *ticket) logLines() []events.Envelope {
 		}
 	}
 	return out
+}
+
+// workLines are the lines the clocks read: logLines with the calls that left
+// the ledger's tail (fold), so how long a step took does not depend on how many
+// calls it took to do it.
+func (t *ticket) workLines() []events.Envelope {
+	out := t.logLines()
+	for _, l := range t.older {
+		out = insertSorted(out, l)
+	}
+	return out
+}
+
+// workLedger is the machine ledger lines about the ticket the sub-steps' holders
+// are read from: what left the tail, then the tail.
+func (t *ticket) workLedger() []events.Envelope {
+	return append(append([]events.Envelope(nil), t.older...), t.ledger...)
+}
+
+// fold keeps, of the ledger lines gone leaving the tail (rest is what stays),
+// what the work of the ticket still needs of them: the session lines that tie a
+// holder to the ticket, a hold, a named landing, and of the calls only as many
+// as keep every stretch of work they bounded as long as it was (a call is left
+// out when the next call is no more than the liveWindow after the last one
+// kept), so a done step reads the same whether its calls fit the tail or not.
+func (t *ticket) fold(gone, rest []events.Envelope) {
+	for i, l := range gone {
+		if _, ok := l.At(); !ok {
+			continue
+		}
+		switch {
+		case isMove(l):
+			next := time.Time{}
+			for _, x := range append(append([]events.Envelope(nil), gone[i+1:]...), rest...) {
+				if nx, ok := x.At(); ok && isMove(x) {
+					next = nx
+					break
+				}
+			}
+			if last := t.lastFolded(); !last.IsZero() && !next.IsZero() && next.Sub(last) <= liveWindow {
+				continue
+			}
+		case isHold(l) || isLandNamed(l) || (l.Session != "" && (l.Event == journal.EventSessionStart || l.Event == journal.EventSessionTouch)):
+		default:
+			continue
+		}
+		slim := events.Envelope{Src: l.Src, Store: l.Store, Line: journal.Line{TS: l.TS, Ticket: l.Ticket, Event: l.Event, Session: l.Session, Agent: l.Agent, Outcome: l.Outcome, URL: l.URL}}
+		if isMove(l) {
+			slim.Command = "…"
+		}
+		t.older = append(t.older, slim)
+	}
+}
+
+// lastFolded is when the latest call kept by fold was made, zero for none.
+func (t *ticket) lastFolded() time.Time {
+	for i := len(t.older) - 1; i >= 0; i-- {
+		if isMove(t.older[i]) {
+			at, _ := t.older[i].At()
+			return at
+		}
+	}
+	return time.Time{}
 }
 
 // moveWindow is the time a sub-step was held, and by which session: a call
@@ -142,7 +206,7 @@ func (t *ticket) doneTrack(step int, key string) subTrack {
 		}
 	}
 	if tr.holder == "" {
-		for _, l := range t.ledger {
+		for _, l := range t.workLedger() {
 			if l.Session != "" {
 				tr.holder = l.Session
 				if at, ok := l.At(); ok && prev.IsZero() {
@@ -226,7 +290,11 @@ func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
 
 // placedIn is placed with the windows the places came from.
 func (m *Model) placedIn(t *ticket, d phase.Ticket) ([]placedLine, []moveWindow) {
-	all := t.logLines()
+	return m.placedFrom(t, d, t.logLines())
+}
+
+// placedFrom is placedIn for the lines all, oldest first.
+func (m *Model) placedFrom(t *ticket, d phase.Ticket, all []events.Envelope) ([]placedLine, []moveWindow) {
 	ws := m.moveWindows(t, d)
 	out := make([]placedLine, len(all))
 	for i, l := range all {

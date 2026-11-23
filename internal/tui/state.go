@@ -100,6 +100,10 @@ type ticket struct {
 	lines []events.Envelope
 	// ledger are the machine ledger lines about the ticket, newest last.
 	ledger []events.Envelope
+	// older are the lines that left the ledger's tail, kept as little as the
+	// work they said needs (fold): the calls that still bound the stretches
+	// the holders worked in, with none of their words.
+	older []events.Envelope
 	// status is the last `jig status` read, nil before the first.
 	status *statusInfo
 	// seen are the lines the screens wrote themselves, from a status that
@@ -199,7 +203,9 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 	}
 	t.ledger = append(t.ledger, e)
 	if len(t.ledger) > ledgerCap {
-		t.ledger = t.ledger[len(t.ledger)-ledgerCap:]
+		n := len(t.ledger) - ledgerCap
+		t.fold(t.ledger[:n], t.ledger[n:])
+		t.ledger = t.ledger[n:]
 	}
 }
 
