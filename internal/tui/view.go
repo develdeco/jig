@@ -95,7 +95,8 @@ func (m *Model) page() page {
 // wrapLong wraps the lines of pg that are wider than the screen at words onto
 // continuation rows under the line's own text, three rows at most, so a line a
 // screen wrote whole is not cut where the window ends. A row's cursor, and the
-// ask it belongs to, stay with its first line. A line that fits is untouched.
+// ask it belongs to, stay with its first line. A line that fits is untouched,
+// and so is a line of an ask, which its screen wraps whole.
 func (m *Model) wrapLong(pg page) page {
 	var out []pline
 	for _, l := range pg.lines {
@@ -103,7 +104,7 @@ func (m *Model) wrapLong(pg page) page {
 		if l.box != boxNone {
 			w = m.innerWidth()
 		}
-		if l.box == boxTop || l.box == boxBottom || width(l.text) <= w {
+		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
 			out = append(out, l)
 			continue
 		}
@@ -112,7 +113,12 @@ func (m *Model) wrapLong(pg page) page {
 			indent++
 		}
 		lead := min(indent+2, w/2)
-		lines := wrapCell(l.text[indent:], max(1, w-indent), wrapRows)
+		rows := wrapRows
+		if l.ref != nil && (l.ref.kind == rowAsk || l.ref.kind == rowQuestion) {
+			// What a person decides on is never cut.
+			rows = 1 << 20
+		}
+		lines := wrapCell(l.text[indent:], max(1, w-indent), rows)
 		for i, text := range lines {
 			next := l
 			next.text = spaces(indent) + text
@@ -443,13 +449,6 @@ func fitEnd(lines []pline, s, h int) int {
 		}
 	}
 	return s
-}
-
-// window renders the page lines from start that fit in h rows, marking the
-// sel-th selectable row; see windowRows.
-func (m *Model) window(pg page, sel, start, h, w int) []string {
-	rows, _, _ := m.windowRows(pg, sel, start, h, w, "")
-	return rows
 }
 
 // windowRows renders the window of h rows from start and the span of page
@@ -966,3 +965,10 @@ func plural(n int, one, many string) string {
 // lines: the window that does not begin at the top gives a row to the mark that
 // says so, so it is one line further than a plain one.
 func lastStart(n, h int) int { return max(0, n-h+1) }
+
+// taken is how many lines p has once the text too long for the screen is wrapped,
+// which is what the panels below it have to size themselves against.
+func (m *Model) taken(p *page) int {
+	*p = m.wrapLong(*p)
+	return len(p.lines)
+}

@@ -124,7 +124,7 @@ func (m *Model) ticketPage(id string) page {
 			groups = append(groups, g)
 		}
 	}
-	taken := len(p.lines)
+	taken := m.taken(&p)
 	for _, g := range groups {
 		taken += len(g.lines)
 	}
@@ -459,7 +459,7 @@ func subState(step int, s phase.Sub) string {
 // line names the sub-step it advances.
 func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
-	lines, older := cutNewest(all, min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2)))
+	lines, older := cutNewest(all, min(activityCap(m.bodyRows()), max(3, m.bodyRows()-m.taken(p)-2)))
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(lines), len(all))

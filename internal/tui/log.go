@@ -451,7 +451,7 @@ var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReview
 // panel's edge stays on the screen and a tall one is filled to its foot.
 func (m *Model) activityPanel(p *page, t *ticket) {
 	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
-	shown, older := cutNewest(all, max(3, m.bodyRows()-len(p.lines)-2))
+	shown, older := cutNewest(all, max(3, m.bodyRows()-m.taken(p)-2))
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
@@ -470,7 +470,7 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		}
 		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}
 	}
-	m.boxActivity(p, activityColumns, cells, older, max(3, m.bodyRows()-len(p.lines)-2))
+	m.boxActivity(p, activityColumns, cells, older, max(3, m.bodyRows()-m.taken(p)-2))
 	p.boxEnd()
 }
 

@@ -26,11 +26,6 @@ func (p *page) boxAdd(text string) {
 	p.lines = append(p.lines, pline{text: text, box: boxMid})
 }
 
-// boxRow adds a row the cursor can stand on inside the panel.
-func (p *page) boxRow(ref rowRef, text string) {
-	p.lines = append(p.lines, pline{text: text, ref: &ref, box: boxMid})
-}
-
 // boxLaid adds the lines the allocator laid a row out in, inside the panel:
 // the first is the row, standing for ref when the cursor can stand on it, and
 // the rest are its continuation rows.

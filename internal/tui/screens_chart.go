@@ -523,7 +523,7 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
 	}
 	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
-	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-len(p.lines)-2))
+	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
@@ -546,7 +546,7 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		}
 		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}
 	}
-	m.boxActivity(p, chartActivityColumns, cells, older, max(activityFloor-2, m.bodyRows()-len(p.lines)-2))
+	m.boxActivity(p, chartActivityColumns, cells, older, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
 	p.boxEnd()
 }
 
