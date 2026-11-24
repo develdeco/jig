@@ -1,18 +1,17 @@
-jig  demo                                                    5 tickets · 1 chart
+jig  demo                     2 need you · 1 running · 2 waiting · 1 not started
 ────────────────────────────────────────────────────────────────────────────────
+  needs you (2)
 ▸ ◇ JIG-4  Coupon model        ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"
-  ◐ JIG-5  Apply a coupon co…  ✓ ◐ ○ ○ ○  Build: 1 of 2 green · slice s2 is bei…
-  ◐ JIG-6  Remove a coupon     ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
-  ◐ JIG-7  Coupons in receip…  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
-  ◐ JIG-8  Show the discount   ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
-
-  charts
   ? checkout  Coupons at checkout  chart  1 of 5 published · 1 needs you
 
+  running (1)
+  ◐ JIG-5  Apply a coupon co…  ✓ ◐ ○ ○ ○  Build: 1 of 2 green · slice s2 is bei…
 
+  waiting (2)
+  ◐ JIG-6  Remove a coupon     ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
+  ◐ JIG-7  Coupons in receip…  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
 
-
-
+  ▸ not started (1) · enter shows them
 
 
 
@@ -21,4 +20,5 @@ jig  demo                                                    5 tickets · 1 char
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  q quit · ? keys · ↑↓ move · enter open · say "Land JIG-4" · t tail · r refresh
+  q quit · ? keys · ↑↓ move · enter open · say "Land JIG-4" · s by chart
+  t tail · r refresh

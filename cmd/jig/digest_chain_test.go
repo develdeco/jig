@@ -118,7 +118,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 	// The project's list, on the screens, from the first screen to the one that
 	// has read the roster.
 	keys, main, wait := startTUI(t, e, scope...)
-	main.until(t, "13 tickets")
+	showFolds(t, keys, main)
 	keys.Write([]byte("q"))
 	if wait() != 0 {
 		t.Fatalf("jig tui exited non-zero\n%s", main.String())
@@ -127,7 +127,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 	if first := frames[0]; !strings.Contains(first, "reading the store…") || strings.Contains(first, "no tickets yet") {
 		t.Errorf("the first screen does not say it is reading the store:\n%s", first)
 	}
-	list := frames[len(frames)-1]
+	list := main.String() // the rows are read from the screens that showed them
 	icons := regexp.MustCompile(`[^\s] [^\s] [^\s] [^\s]`)
 
 	started := 0

@@ -184,7 +184,7 @@ func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
 			)
 		}
 		g.syncDigests()
-		g.press("end", "enter")
+		g.openChart("second")
 		row := lineWith(stripANSI(g.view()), "SHOP-1  ")
 		for _, want := range []string{c.icon, c.dots, c.words} {
 			if want != "" && !strings.Contains(row, want) {
@@ -226,7 +226,7 @@ func TestALandingIsAFactOfItsIssue(t *testing.T) {
 		t.Errorf("the first issue's count: %q", row)
 	}
 	g.press("esc")
-	g.press("end", "enter")
+	g.openChart("second")
 	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "◆ SHOP-1") || !strings.Contains(row, "✓ ✓ ◆ ○ ○") {
 		t.Errorf("the second issue's plan reads the task as %q", row)
 	}
@@ -240,7 +240,7 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 	t.Parallel()
 	g := planMain(t, planSpec{second: true})
 	g.m.height, g.m.width = 40, 110
-	g.press("end", "enter") // the plan of SHOP-50, the second chart
+	g.openChart("second") // the plan of SHOP-50, the second chart
 	if g.m.top().chart != "second" {
 		t.Fatalf("opened %q, want second", g.m.top().chart)
 	}

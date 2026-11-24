@@ -8,14 +8,7 @@ import (
 // onRow moves the cursor of the screen on top to the row of ticket id.
 func onRow(t *testing.T, g *rig, id string) {
 	t.Helper()
-	g.press("home")
-	for i := 0; i < 40; i++ {
-		if ref := g.m.selected(); ref != nil && ref.id == id {
-			return
-		}
-		g.press("down")
-	}
-	t.Fatalf("no row of %s:\n%s", id, g.view())
+	g.onRow(id)
 }
 
 // TestAnIssueOpensItsPlanFromMainAndTheChartRow: enter on an issue's row on the
@@ -44,7 +37,7 @@ func TestAnIssueOpensItsPlanFromMainAndTheChartRow(t *testing.T) {
 	if g.m.Screen() != "main" {
 		t.Fatalf("esc went to %s, want main", g.m.Screen())
 	}
-	g.press("end", "enter")
+	g.openChart("repeat")
 	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" || !strings.Contains(stripANSI(g.view()), "Need") {
 		t.Errorf("enter on the chart row opened %s of %q:\n%s", g.m.Screen(), g.m.top().chart, g.view())
 	}
@@ -98,7 +91,7 @@ func TestCOpensATasksIssueAndEscReturns(t *testing.T) {
 
 	// A task two issues list: reached through the second plan, c opens the second.
 	s := planMain(t, planSpec{second: true})
-	s.press("end", "enter") // the last chart row: "second"
+	s.openChart("second") // the last chart row: "second"
 	if s.m.top().chart != "second" {
 		t.Fatalf("the last chart row is %q, want second", s.m.top().chart)
 	}

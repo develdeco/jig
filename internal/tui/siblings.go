@@ -43,6 +43,8 @@ type sibSet struct {
 	// refs the rows of its page: the cursor of the list is put on the neighbor.
 	list int
 	refs []rowRef
+	// rowAt is the place in refs of the row each of ids stands on.
+	rowAt []int
 }
 
 // sibs are the siblings of the screen on top, nil when it has none. A frame
@@ -81,43 +83,56 @@ func (m *Model) readSibs() *sibSet {
 		if i < 1 {
 			return nil
 		}
-		s := &sibSet{kind: sibTickets, list: i - 1}
-		s.refs = m.refsOf(i - 1)
-		for _, r := range s.refs {
+		return m.listSibs(sibTickets, i-1, e.ticket, func(r rowRef) string {
 			if r.kind == rowTicket {
-				s.ids = append(s.ids, r.id)
+				return r.id
 			}
-		}
-		if len(s.ids) == 0 {
-			return nil
-		}
-		s.at = slices.Index(s.ids, e.ticket)
-		return s
+			return ""
+		})
 	case screenChart:
-		s := &sibSet{kind: sibCharts, list: 0}
-		s.refs = m.refsOf(0)
-		for _, r := range s.refs {
-			if r.kind == rowChart {
-				s.ids = append(s.ids, r.id)
+		return m.listSibs(sibCharts, 0, e.chart, func(r rowRef) string {
+			switch {
+			case r.kind == rowChart:
+				return r.id
+			case r.kind == rowTicket:
+				// An issue's row opens its plan.
+				return m.planOf(r.id)
 			}
-		}
-		if len(s.ids) == 0 {
-			return nil
-		}
-		s.at = slices.Index(s.ids, e.chart)
-		return s
+			return ""
+		})
 	}
 	return nil
 }
 
-// refsOf are the rows of the page of the screen at place j of the stack, as it
-// draws them: the stack is cut to it for the read, so the page is the one the
-// screen has on top.
+// listSibs are the siblings read from the rows of the list at place list of the
+// stack: of each row, pick names the sibling it stands for, "" for none, and the
+// first row of a sibling is where the list's cursor goes.
+func (m *Model) listSibs(kind sibKind, list int, own string, pick func(rowRef) string) *sibSet {
+	s := &sibSet{kind: kind, list: list, refs: m.refsOf(list)}
+	for i, r := range s.refs {
+		if id := pick(r); id != "" && !slices.Contains(s.ids, id) {
+			s.ids, s.rowAt = append(s.ids, id), append(s.rowAt, i)
+		}
+	}
+	if len(s.ids) == 0 {
+		return nil
+	}
+	s.at = slices.Index(s.ids, own)
+	return s
+}
+
+// refsOf are the rows of the list at place j of the stack. The project's list
+// is read from the page it keeps (mainRefs), so a frame of a ticket builds no
+// list; any other list is built as the screen has it on top, the stack cut to it
+// for the read, and counted as the page build it is.
 func (m *Model) refsOf(j int) []rowRef {
-	saved, builds := m.nav, m.pageBuilds
+	if j == 0 {
+		return m.mainRefs()
+	}
+	saved := m.nav
 	m.nav = m.nav[: j+1 : j+1]
 	refs := m.page().refs()
-	m.nav, m.pageBuilds = saved, builds
+	m.nav = saved
 	return refs
 }
 
@@ -181,10 +196,10 @@ func (m *Model) openSibling(delta int) tea.Cmd {
 	}
 	// The list's cursor is on the neighbor, which esc lands on.
 	list := &m.nav[s.list]
-	for i, r := range s.refs {
-		if (s.kind == sibTickets && r.kind == rowTicket || s.kind == sibCharts && r.kind == rowChart) && r.id == id {
-			list.sel, list.follow, list.lead = i, false, 0
-		}
+	i := s.rowAt[s.at+delta]
+	list.sel, list.follow, list.lead = i, false, 0
+	if list.screen == screenMain {
+		list.cur, list.curSet = s.refs[i].identity(), true
 	}
 	if s.kind == sibCharts {
 		return m.goTo(s.list+1, nil, navEntry{screen: screenChart, chart: id, follow: true})

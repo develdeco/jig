@@ -39,7 +39,10 @@ type nextDigest struct {
 	PhaseProblem string         `json:"phase_problem,omitempty"`
 	// State is an issue's or multi-task's own pull request: waiting, ready,
 	// published or landed.
-	State  string `json:"state,omitempty"`
+	State string `json:"state,omitempty"`
+	// Branch is an issue's or multi-task's own branch, which a task two issues
+	// list is read by under each.
+	Branch string `json:"branch,omitempty"`
 	Closed string `json:"closed,omitempty"`
 	// LandFirst are the tickets that must land before this one may, by the
 	// rules `jig land` reads (land.LandFirst), for a task that published, has
@@ -333,6 +336,9 @@ func lastRun(lines []journal.Line, slice string) runEnd {
 func containerDigest(st *store.Store, cfg project.Config, mp project.MachineProject, merges mergeSource, data ticketData, kind string, blocked []nextBlocker) (nextDigest, []journal.Line) {
 	n := nextNotATask(st, data, kind)
 	d := nextDigest{Kind: kind, Parent: parentOf(st, data.in.ID, data.rec), BlockedBy: blocked, Children: n.Children, PRs: []nextDigestPR{}}
+	if branch, err := st.ResolveTicketBranch(data.in.ID, data.rec, project.Repo{}.TargetBranch()); err == nil {
+		d.Branch = branch
+	}
 	if data.rec.Closed != nil {
 		d.Closed = data.rec.Closed.Phrase()
 	}

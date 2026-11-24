@@ -155,6 +155,9 @@ func (m *Model) keyHints() []string {
 // other than the one on top.
 func canOpen(m *Model, sub subject) (bool, string) {
 	if sub.hasRow {
+		if sub.row.kind == rowFold {
+			return true, ""
+		}
 		if _, ok := m.openTarget(sub.row); ok {
 			return true, ""
 		}
@@ -281,6 +284,20 @@ func keyRows() []keyRow {
 				return false, "this chart plans no issue, so it has no map"
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.toggleMap(); return nil }},
+		{names: []string{"s"}, label: "s", screens: onScreens(screenMain),
+			say: func(m *Model, _ subject) string {
+				if m.nav[0].byChart {
+					return "by state"
+				}
+				return "by chart"
+			},
+			can: func(m *Model, _ subject) (bool, string) {
+				if m.readingStore() {
+					return false, readingText
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.switchView(); return nil }},
 		{names: []string{"t"}, label: "t", words: "tail", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { m.tail = !m.tail; return nil }},
 		{names: []string{"r"}, label: "r", words: "refresh", screens: onAllScreens, hinted: onScreens(screenMain, screenChart),

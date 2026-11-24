@@ -1,4 +1,4 @@
-jig  demo › JIG-2 (2 of 3)  Config loader › 5 land               ◇ waits to land
+jig  demo › JIG-2 (1 of 3)  Config loader › 5 land               ◇ waits to land
 ────────────────────────────────────────────────────────────────────────────────
   ◇ waits to land · say "Land JIG-2"
     the session merges each pull request and records it

@@ -78,4 +78,5 @@ func (m *Model) click(y int) {
 	}
 	e := m.top()
 	e.sel, e.follow, e.lead = h.sel[line], false, 0
+	m.noteCursor()
 }

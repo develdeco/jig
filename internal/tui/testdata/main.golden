@@ -1,7 +1,10 @@
-jig  demo                                                              3 tickets
+jig  demo                                                 2 need you · 1 waiting
 ────────────────────────────────────────────────────────────────────────────────
+  needs you (2)
 ▸ ? JIG-1  Greeting copy  ✓ ? ○ ○ ○  1 open question
   ◇ JIG-2  Config loader  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-2"
+
+  waiting (1)
   ◐ JIG-3  Release notes  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your approval
 
 
@@ -16,9 +19,6 @@ jig  demo                                                              3 tickets
 
 
 
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────
-  q quit · ? keys · ↑↓ move · enter open · a answer · t tail · r refresh
+  q quit · ? keys · ↑↓ move · enter open · a answer · s by chart · t tail
+  r refresh

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,16 +23,29 @@ const (
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
 	rowStop = "stop"
+	// rowFold is the fold row of a group of the project's list: enter opens the
+	// rows it holds in place, and folds them again.
+	rowFold = "fold"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
-// slice it belongs to.
+// slice it belongs to. A row drawn under a container (an issue and its tasks)
+// names it, so a row two containers draw is told apart.
 type rowRef struct {
-	kind   string
-	id     string
-	ticket string
-	slice  string
+	kind      string
+	id        string
+	ticket    string
+	slice     string
+	container string
 }
+
+// rowIdentity is what makes a row the same row on the next draw: its kind, its
+// id and the container it is drawn under.
+type rowIdentity struct {
+	kind, id, container string
+}
+
+func (r rowRef) identity() rowIdentity { return rowIdentity{r.kind, r.id, r.container} }
 
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
@@ -323,12 +335,7 @@ func (m *Model) header(w int) []string {
 		if m.readingStore() {
 			break
 		}
-		n := len(m.w.order)
-		right = strconv.Itoa(n) + " " + plural(n, "ticket", "tickets")
-		if nc := len(m.w.chartOrder); nc > 0 {
-			right += " · " + strconv.Itoa(nc) + " " + plural(nc, "chart", "charts")
-		}
-		right = m.st.dim(right)
+		right = m.st.dim(m.queueSummary())
 	case screenChart:
 		crumbs += " › " + m.st.bold(e.chart) + m.st.dim(m.place())
 		idCrumb = crumbs

@@ -114,16 +114,10 @@ func TestSiblingKeysWalkTheListItCameFrom(t *testing.T) {
 
 	// A plan's siblings are the chart rows of the project's list.
 	s := planMain(t, planSpec{second: true})
-	var charts []string
-	for _, r := range s.m.page().refs() {
-		if r.kind == rowChart {
-			charts = append(charts, r.id)
-		}
-	}
-	if len(charts) != 2 {
-		t.Fatalf("main lists charts %v", charts)
-	}
-	onRow(t, s, charts[0])
+	s.press("s") // the list by chart
+	// The rows that open the two plans are the issues' own.
+	charts := []string{"repeat", "second"}
+	onRow(t, s, "SHOP-49")
 	s.press("enter")
 	if s.m.top().chart != charts[0] {
 		t.Fatalf("enter opened %q, want %q", s.m.top().chart, charts[0])
@@ -133,8 +127,8 @@ func TestSiblingKeysWalkTheListItCameFrom(t *testing.T) {
 		t.Errorf("] opened %s of %q at depth %d, want the chart %q", s.m.Screen(), s.m.top().chart, len(s.m.nav), charts[1])
 	}
 	s.press("esc")
-	if ref := s.m.selected(); ref == nil || ref.id != charts[1] {
-		t.Errorf("esc landed with the cursor on %+v, want %q", ref, charts[1])
+	if ref := s.m.selected(); ref == nil || ref.id != "SHOP-50" {
+		t.Errorf("esc landed with the cursor on %+v, want SHOP-50", ref)
 	}
 }
 
@@ -225,10 +219,11 @@ func TestBreadcrumbNamesThePlace(t *testing.T) {
 
 	// A plan among charts, and a screen with none.
 	s := planMain(t, planSpec{second: true})
+	s.press("s")
 	if h := head(s); strings.Contains(h, " of ") {
 		t.Errorf("the project's list has a place: %q", h)
 	}
-	onRow(t, s, "repeat")
+	onRow(t, s, "SHOP-49")
 	s.press("enter")
 	if h := head(s); !strings.Contains(h, "› repeat (1 of 2)") {
 		t.Errorf("the plan's header: %q", h)
@@ -237,6 +232,7 @@ func TestBreadcrumbNamesThePlace(t *testing.T) {
 	one := newRig(t, "JIG-1")
 	one.feed(jig1()...)
 	one.m.w.order = []string{"JIG-1"}
+	one.m.w.gen++
 	if h := head(one); strings.Contains(h, " of ") {
 		t.Errorf("a ticket alone in its list has a place: %q", h)
 	}

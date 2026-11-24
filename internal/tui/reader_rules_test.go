@@ -13,7 +13,8 @@ import (
 func TestTheHeaderCutsTheTitleBeforeThePlace(t *testing.T) {
 	t.Parallel()
 	g := planMain(t, planSpec{second: true})
-	onRow(t, g, "repeat")
+	g.press("s")
+	onRow(t, g, "SHOP-49")
 	g.press("enter")
 	g.m.w.charts["repeat"].info.Title = strings.Repeat("a long plan title ", 5)[:75]
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 24})
