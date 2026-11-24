@@ -14,7 +14,7 @@ import (
 )
 
 // The tests here pin a chart's spend where it is laid into the standing: the
-// fold over the tickets' latest lines (chartSpend), the JSON key and the text
+// fold over the tickets' latest lines (chartFigures), the JSON key and the text
 // line `jig next <chart>` and `jig status <chart>` print. The lines of each
 // ticket are made by spend.Line and spend.AgentLine, the same the note source
 // writes; the end-to-end chain with the real hooks is e2e's
@@ -118,7 +118,7 @@ func TestChartSpendFoldsEachTicketsLatestLines(t *testing.T) {
 	}
 }
 
-// TestChartSpendIgnoresATicketItCannotRead: chartSpend skips a ticket whose
+// TestChartSpendIgnoresATicketItCannotRead: chartFigures skips a ticket whose
 // journal cannot be read, one with no sessions, and an entry that has no ticket
 // yet, and says nothing when that leaves no spend.
 func TestChartSpendIgnoresATicketItCannotRead(t *testing.T) {
@@ -138,14 +138,14 @@ func TestChartSpendIgnoresATicketItCannotRead(t *testing.T) {
 		return c
 	}
 
-	got := chartSpend(r.st, rows("SHOP-1", "SHOP-2", ""))
+	got, _ := chartFigures(r.st, rows("SHOP-1", "SHOP-2", ""))
 	if got == nil || got.Tickets != 1 || got.Tokens != 10 {
 		t.Errorf("spend = %+v, want the one readable ticket's 10 tokens", got)
 	}
-	if got := chartSpend(r.st, rows("SHOP-2", "")); got != nil {
+	if got, _ := chartFigures(r.st, rows("SHOP-2", "")); got != nil {
 		t.Errorf("spend = %+v, want none when the only ticket with a journal cannot be read", got)
 	}
-	if got := chartSpend(r.st, phase.Chart{}); got != nil {
+	if got, _ := chartFigures(r.st, phase.Chart{}); got != nil {
 		t.Errorf("spend = %+v, want none for an empty chart", got)
 	}
 }
