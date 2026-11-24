@@ -292,8 +292,9 @@ func (m *Model) clearSearch() {
 	m.seen = nil
 	if set {
 		e.cur, e.curSet = from, true
-		if i, ok := findRow(m.mainRefs(), from); ok {
-			e.sel, e.cur = i, m.mainRefs()[i].identity()
+		refs := m.mainRefs()
+		if i, ok := m.findRow(refs, from); ok {
+			e.sel, e.cur = i, refs[i].identity()
 		}
 	}
 }

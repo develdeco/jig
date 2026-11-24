@@ -1185,32 +1185,9 @@ func (m *Model) switchView() {
 	e.sel = min(e.sel, max(len(refs)-1, 0))
 	if ok {
 		// The same row where the view has it, else the same ticket (or chart, or
-		// fold) wherever it is drawn.
-		// A row the new view folds away is on the fold row that hides it.
-		hidden := func(id rowIdentity) bool {
-			fold, ok := m.folded[id]
-			if !ok {
-				return false
-			}
-			for i, r := range refs {
-				if r.identity() == fold {
-					e.sel = i
-					return true
-				}
-			}
-			return false
-		}
-		if i, found := findRow(refs, was.identity()); found {
+		// fold) wherever it is drawn, else the fold row that hides it.
+		if i, found := m.findRow(refs, was.identity()); found {
 			e.sel = i
-		} else {
-			_ = func() bool {
-				for id := range m.folded {
-					if id.kind == was.kind && id.id == was.id && hidden(id) {
-						return true
-					}
-				}
-				return false
-			}()
 		}
 	}
 	e.curSet = false
@@ -1259,10 +1236,12 @@ func (m *Model) followRow(e *navEntry) {
 	e.cur, e.curSet = refs[e.sel].identity(), true
 }
 
-// findRow is where the row stands among refs: its identity (kind, id and the
-// container it is drawn under) first, else the same kind and id wherever it is
-// drawn. Every place that puts a cursor back on a row finds it by this.
-func findRow(refs []rowRef, id rowIdentity) (int, bool) {
+// findRow is where the row stands among refs, as main now draws it: its
+// identity (kind, id and the container it is drawn under) first, else the same
+// kind and id wherever it is drawn, else the fold row that hides a row of that
+// kind and id (m.folded, as the last mainRefs read it). Every place that puts
+// the cursor back on a row finds it by this.
+func (m *Model) findRow(refs []rowRef, id rowIdentity) (int, bool) {
 	for i, r := range refs {
 		if r.identity() == id {
 			return i, true
@@ -1271,6 +1250,16 @@ func findRow(refs []rowRef, id rowIdentity) (int, bool) {
 	for i, r := range refs {
 		if r.kind == id.kind && r.id == id.id {
 			return i, true
+		}
+	}
+	for hidden, fold := range m.folded {
+		if hidden.kind != id.kind || hidden.id != id.id {
+			continue
+		}
+		for i, r := range refs {
+			if r.identity() == fold {
+				return i, true
+			}
 		}
 	}
 	return 0, false

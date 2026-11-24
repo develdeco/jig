@@ -52,6 +52,32 @@ func TestEscOnMainWithNoSearchIsNoKey(t *testing.T) {
 	}
 }
 
+// TestEscAfterSwitchingViewFindsTheFoldThatHidesItsRow: the search began on a
+// closed ticket a chart lists, in the view by chart; the view was switched to
+// by state, which folds it away, and esc puts the cursor on the fold row that
+// hides it.
+func TestEscAfterSwitchingViewFindsTheFoldThatHidesItsRow(t *testing.T) {
+	t.Parallel()
+	m := searchStore(t)
+	m.w.setCharts(append(chartListings(m), chartListing{Name: "closed-run", Title: "A run", Tickets: []string{"CLS-4"}}))
+	typed(m, "s")
+	m.View()
+	press(m, tea.KeyHome)
+	for i := 0; underCursor(m) != "CLS-4"; i++ {
+		if i > 20 {
+			t.Fatalf("the cursor never reached CLS-4 among %v, on %q", shown(m), underCursor(m))
+		}
+		press(m, tea.KeyDown)
+	}
+	typedDrawn(m, "/cls")
+	press(m, tea.KeyEnter)
+	press(m, tea.KeyEsc)
+	typed(m, "s")
+	if got := drawn(m, tea.KeyMsg{Type: tea.KeyEsc}); got != "done" || underCursor(m) != "done" {
+		t.Errorf("esc marks %q and keys act on %q, want the done fold row", got, underCursor(m))
+	}
+}
+
 // TestLitLettersAreOnlyTheRowsOwnWords: a word a cell says that is not one of
 // the row's words lights nothing, even when its letters start the query; the
 // row is listed for the words it has.
