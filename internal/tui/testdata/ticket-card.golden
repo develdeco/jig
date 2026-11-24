@@ -1,11 +1,11 @@
 jig  demo › SHOP-1                                                               ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 1m 10s ─╮
-  │  ✓ 1 Brief            no brief on record                                                       │
-  │▸ ◐ 2 Build    1m 10s  1 of 3 green · slice clamp is being built · idle since 09:02             │
-  │  ○ 3 Review           after the build                                                          │
-  │  ○ 4 Publish          after a clean review                                                     │
-  │  ○ 5 Land             after the publish                                                        │
+  │  ✓ 1 Brief           no brief on record                                                        │
+  │▸ ◐ 2 Build   1m 10s  1 of 3 green · slice clamp is being built · idle since 09:02              │
+  │  ○ 3 Review          after the build                                                           │
+  │  ○ 4 Publish         after a clean review                                                      │
+  │  ○ 5 Land            after the publish                                                         │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 37s                                                    │

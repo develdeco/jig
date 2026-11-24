@@ -1,19 +1,19 @@
 jig  demo › SHOP-1                                           ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 2 of 5 · worked 1m 10s ─╮
-  │  ✓ 1 Brief            approved by Dana (person) · 3 sections, 3 slices     │
-  │▸ ◐ 2 Build    1m 10s  1 of 3 green · slice clamp is be… · idle since 09:02 │
-  │  ○ 3 Review           after the build                                      │
-  │  ○ 4 Publish          after a clean review                                 │
-  │  ○ 5 Land             after the publish                                    │
+  │  ✓ 1 Brief           approved by Dana (person) · 3 sections, 3 slices      │
+  │▸ ◐ 2 Build   1m 10s  1 of 3 green · slice clamp is      · idle since 09:02 │
+  │                      being built                                           │
+  │  ○ 3 Review          after the build                                       │
+  │  ○ 4 Publish         after a clean review                                  │
+  │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
   │  ✓ slice round  verified aaaaaaa · took 7s                                 │
-  │  ◐ slice clamp  claimed ── run ── verified                          1m 03s │
-  │      goal     Clamp negative quantities                                    │
-  │      now      57m 20s · verification requested for bbbbbbb “Clamp negativ… │
+  │  ◐ slice clamp  claimed by builder                                         │
   │  ○ slice cart   waits for clamp                                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
+
   ╭─ Activity ───────────────────────────────────────────────── latest 3 of 7 ─╮
   │  09:02:10 build·clamp · verification requested for bbbbbbb “Clamp negativ… │
   │  09:02:00 build·clamp ◐ builder took it · Clamp negative quantities        │

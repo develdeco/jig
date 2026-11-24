@@ -31,6 +31,9 @@ type column struct {
 	free bool
 	// id marks a column that is cut after every other measured column is.
 	id bool
+	// keep marks a measured column that is never cut, a clock that must always
+	// show: the words give way to it, and never the reverse.
+	keep bool
 	// gap is the spaces drawn before the column, unless it is the first one
 	// drawn.
 	gap int
@@ -49,6 +52,12 @@ type column struct {
 // fewer than freeMin cells it needs, the free columns after the first stack
 // under the first's left edge instead of sitting beside it.
 func layout(cols []column, rows [][]string, width int) [][]string {
+	return layoutRows(cols, rows, width, wrapRows)
+}
+
+// layoutRows is layout with free cells held to at most maxRows rows each: a list
+// short of room asks for fewer than wrapRows before it drops a row.
+func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 	natural := make([]int, len(cols))
 	for _, r := range rows {
 		for c := range cols {
@@ -127,7 +136,7 @@ func layout(cols []column, rows [][]string, width int) [][]string {
 		pick := -1
 		for _, wantID := range []bool{false, true} {
 			for _, c := range visible {
-				if cols[c].free || cols[c].id != wantID || w[c] <= 1 {
+				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= 1 {
 					continue
 				}
 				if pick < 0 || w[c] >= w[pick] {
@@ -158,12 +167,28 @@ func layout(cols []column, rows [][]string, width int) [][]string {
 			}
 			return ""
 		}
+		// A free cell with nothing after it on its row takes the room of the
+		// columns after it as well: a clock only some rows have does not narrow
+		// the words of the rows without one.
+		room := func(c int) int {
+			extra := 0
+			for _, d := range visible {
+				if d <= c || stacked[d] {
+					continue
+				}
+				if cell(d) != "" {
+					return 0
+				}
+				extra += cols[d].gap + w[d]
+			}
+			return extra
+		}
 		lines := map[int][]string{}
 		for _, c := range visible {
 			switch {
 			case stacked[c]:
 			case cols[c].free:
-				lines[c] = wrapCell(cell(c), w[c])
+				lines[c] = wrapCell(cell(c), w[c]+room(c), maxRows)
 			default:
 				lines[c] = []string{cutCell(cell(c), w[c])}
 			}
@@ -172,7 +197,7 @@ func layout(cols []column, rows [][]string, width int) [][]string {
 			head := act[0]
 			for _, c := range visible {
 				if stacked[c] {
-					lines[head] = append(lines[head], wrapCell(cell(c), w[head])...)
+					lines[head] = append(lines[head], wrapCell(cell(c), w[head], maxRows)...)
 				}
 			}
 		}
@@ -199,7 +224,7 @@ func layout(cols []column, rows [][]string, width int) [][]string {
 				b.WriteString(text)
 				b.WriteString(spaces(w[c] - width0(text)))
 			}
-			out[ri][i] = strings.TrimRight(fit(b.String(), width), " ")
+			out[ri][i] = fit(strings.TrimRight(b.String(), " "), width)
 		}
 	}
 	return out
@@ -241,9 +266,9 @@ func cutCell(s string, w int) string {
 }
 
 // wrapCell breaks s at words into rows of at most w cells: no more than
-// wrapRows of them, the last ending in an ellipsis when s goes on. A word wider
+// maxRows of them, the last ending in an ellipsis when s goes on. A word wider
 // than w is broken at w. Color open at a break is reopened on the next row.
-func wrapCell(s string, w int) []string {
+func wrapCell(s string, w, maxRows int) []string {
 	if s == "" {
 		return nil
 	}
@@ -257,10 +282,10 @@ func wrapCell(s string, w int) []string {
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(strings.ReplaceAll(l, nonBreaking, "-"), " ")
 	}
-	if len(lines) > wrapRows {
-		lines = lines[:wrapRows]
-		last := ansi.Truncate(lines[wrapRows-1], w-1, "")
-		lines[wrapRows-1] = last + "…"
+	if len(lines) > maxRows {
+		lines = lines[:maxRows]
+		last := ansi.Truncate(lines[maxRows-1], w-1, "")
+		lines[maxRows-1] = last + "…"
 	}
 	open := ""
 	for i, l := range lines {

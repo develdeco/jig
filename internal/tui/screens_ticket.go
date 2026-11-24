@@ -57,8 +57,8 @@ func (m *Model) ticketPage(id string) page {
 		right += " · worked " + ago(total)
 	}
 	p.boxTop("Steps", right)
-	for i, s := range steps {
-		p.boxRow(rowRef{kind: s.Kind, ticket: id}, m.stepLine(s, i == cur))
+	for i, lines := range m.stepLines(steps, cur) {
+		p.boxLaid(&rowRef{kind: steps[i].Kind, ticket: id}, lines)
 	}
 	p.boxEnd()
 
@@ -170,41 +170,44 @@ func (m *Model) waitingPage(id string) page {
 	return p
 }
 
-// stepLine is a step's row: its icon, number and name, how long it has taken,
-// and where it stands. A step not reached yet is drawn back, and the time of
+// stepColumns are the columns of the steps: the icon, the number, the name, how
+// long it has taken, the words and the clock. The clock is a column of its own,
+// so the words wrap to give it room and never the reverse.
+var stepColumns = []column{{}, {gap: 1}, {gap: 1}, {gap: 1}, {free: true, gap: 2}, {gap: 1, keep: true}}
+
+// stepLines lays the steps out, whose current one is cur: a line or more each,
+// with the words that do not fit wrapped under their column.
+func (m *Model) stepLines(steps []stepRow, cur int) [][]string {
+	cells := make([][]string, len(steps))
+	for i, s := range steps {
+		cells[i] = m.stepCells(s, i == cur)
+	}
+	return layout(stepColumns, cells, m.innerWidth())
+}
+
+// stepCells are a step's row as cells: its icon, number and name, how long it
+// has taken, where it stands, and the clock of a wait or of the time since
+// nobody worked on it. A step not reached yet is drawn back, and the time of
 // the step under way, which counts on, is not.
-func (m *Model) stepLine(s stepRow, current bool) string {
-	name := pad(stepNames[s.Step], 8)
-	num := strconv.Itoa(s.Step+1) + " "
-	text := s.Text
-	if s.Wait != "" {
-		// The clock goes last and always shows: the words give way to it. 21
-		// cells are the icon, number, name and time before the text, 7 the
-		// panel's frame and marker.
-		text = fit(text, m.width-7-21-width(s.Wait)-1) + " " + s.Wait
-	}
-	took := m.st.dim(pad(s.Took, 7))
-	if s.Idle != "" {
-		text = fit(text, m.width-7-21-width(s.Idle)-3) + " · " + s.Idle
-	}
+func (m *Model) stepCells(s stepRow, current bool) []string {
+	num, name, text, took, clock := strconv.Itoa(s.Step+1), stepNames[s.Step], s.Text, m.st.dim(s.Took), ""
 	switch {
 	case s.Idle != "":
 		// A step nobody is working on is drawn back, its time stopped.
-		name, text = m.st.bold(name), m.st.dim(text)
-		took = m.st.dim(pad(s.Took, 7))
+		name, text, clock = m.st.bold(name), m.st.dim(text), m.st.dim("· "+s.Idle)
 	case s.Wait != "":
 		// A step that waits for a person or the host reads it in the colour of
 		// a turn that is not the builder's, current or not.
-		name, text = m.st.bold(name), m.st.state(StateNeedsInput, text)
-		took = pad(s.Took, 7)
+		name, text, clock = m.st.bold(name), m.st.state(StateNeedsInput, text), m.st.state(StateNeedsInput, s.Wait)
+		took = s.Took
 	case current && !s.Done:
-		name, text, took = m.st.bold(name), m.st.state(s.State, text), pad(s.Took, 7)
+		name, text, took = m.st.bold(name), m.st.state(s.State, text), s.Took
 	case current:
 		name, text = m.st.bold(name), m.st.state(s.State, text)
 	case !s.Done:
 		num, name, text = m.st.dim(num), m.st.dim(name), m.st.dim(text)
 	}
-	return m.st.icon(s.State) + " " + num + name + " " + took + " " + text
+	return []string{m.st.icon(s.State), num, name, took, text, clock}
 }
 
 // ticketFocus is the step whose sub-steps and activity the ticket screen
@@ -242,7 +245,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 		if s.State == phase.SubDone {
 			done++
 		}
-		labelW = max(labelW, min(labelMaxW, width(s.Label)))
+		labelW = max(labelW, width(s.Label))
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
@@ -261,9 +264,9 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 		}
 	}
 	if openRows == 0 {
-		shown := pickSubs(subs, room)
-		for _, i := range shown {
-			p.boxAdd(m.foldedLine(t, step, subs[i], labelW, c))
+		shown, laid := m.foldedFit(t, step, subs, labelW, c, room)
+		for _, lines := range laid {
+			p.boxLaid(nil, lines)
 		}
 		if more := len(subs) - len(shown); more > 0 && room >= 2 {
 			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
@@ -279,19 +282,18 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 			others, at = append(others, s), append(at, i)
 		}
 	}
-	shownAt := map[int]bool{}
-	picked := pickSubs(others, room-openRows)
-	for _, j := range picked {
-		shownAt[at[j]] = true
+	shownAt := map[int][]string{}
+	picked, laid := m.foldedFit(t, step, others, labelW, c, room-openRows)
+	for k, j := range picked {
+		shownAt[at[j]] = laid[k]
 	}
 	for i, s := range subs {
-		switch {
-		case i == focus:
+		if i == focus {
 			for _, line := range m.openLines(t, step, s, subs, labelW, openRows, c) {
 				p.boxAdd(line)
 			}
-		case shownAt[i]:
-			p.boxAdd(m.foldedLine(t, step, s, labelW, c))
+		} else if lines, ok := shownAt[i]; ok {
+			p.boxLaid(nil, lines)
 		}
 	}
 	if more := len(others) - len(picked); more > 0 {
@@ -301,14 +303,42 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	return p
 }
 
-// labelMaxW is the widest a sub-step's label column gets.
-const labelMaxW = 16
+// subColumns are the columns of a sub-step's line: its state's icon, its label
+// and its detail.
+var subColumns = []column{{}, {gap: 1}, {free: true, gap: 2}}
 
-// foldedLine is a sub-step on one line: subLine with what the status adds to
+// foldedFit lays out the sub-steps of subs that fit in room lines, in their
+// order, each a line or more: the positions picked in subs and the lines of
+// each. A detail wraps to as many rows as it needs; a block short of room asks
+// for fewer rows of each before it shows fewer sub-steps, and the count of the
+// rest keeps its own line.
+func (m *Model) foldedFit(t *ticket, step int, subs []phase.Sub, labelW int, c clocks, room int) (picked []int, laid [][]string) {
+	picked = pickSubs(subs, room)
+	cells := make([][]string, len(picked))
+	for i, j := range picked {
+		cells[i] = m.foldedCells(t, step, subs[j], labelW, c)
+	}
+	left := room
+	if len(picked) < len(subs) {
+		left--
+	}
+	for rows := wrapRows; ; rows-- {
+		laid = layoutRows(subColumns, cells, m.innerWidth(), rows)
+		used := 0
+		for _, lines := range laid {
+			used += len(lines)
+		}
+		if used <= left || rows <= 1 {
+			return picked, laid
+		}
+	}
+}
+
+// foldedCells are a sub-step on one line: subCells with what the status adds to
 // its detail (subDetail), and how long it took once it is done.
-func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int, c clocks) string {
+func (m *Model) foldedCells(t *ticket, step int, s phase.Sub, labelW int, c clocks) []string {
 	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), m.subSummary(c, step, s)), " · ")
-	return m.subLine(step, s, labelW)
+	return m.subCells(step, s, labelW)
 }
 
 // subDetail is a sub-step's detail with what the status adds to it once it is
@@ -387,22 +417,18 @@ func subWeight(s phase.Sub) int {
 	return subWeightDone
 }
 
-// subLine is a sub-step as a line of the block: its state's icon, its label in
-// a column labelW wide, and a few words of detail. The ones that are waiting or
-// still to come are drawn back.
-func (m *Model) subLine(step int, s phase.Sub, labelW int) string {
+// subCells are a sub-step as the cells of a line of the block: its state's
+// icon, its label in a column labelW wide, and a few words of detail. The ones
+// that are waiting or still to come are drawn back.
+func (m *Model) subCells(step int, s phase.Sub, labelW int) []string {
 	label := pad(s.Label, labelW)
-	detail := ""
-	if s.Detail != "" {
-		detail = m.st.dim("  " + s.Detail)
-	}
 	switch s.State {
 	case phase.SubActive, phase.SubNeedsYou, phase.SubFailed:
 		label = m.st.bold(label)
 	case phase.SubWaiting, phase.SubPending:
 		label = m.st.dim(label)
 	}
-	return m.st.icon(subState(step, s)) + " " + label + detail
+	return []string{m.st.icon(subState(step, s)), label, m.st.dim(s.Detail)}
 }
 
 // subState is the state a sub-step is drawn in.

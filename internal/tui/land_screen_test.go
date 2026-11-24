@@ -225,6 +225,7 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	t.Parallel()
 	digests := endDigests()
 	g := landTicket(t, digests[StateWaitsToLand])
+	g.m.height = 30
 	if page := pagesText(g.m.ticketPage("JIG-2")); !strings.Contains(page, "needs you") || !strings.Contains(page, `◇ waits to land · say "Land JIG-2"`) {
 		t.Errorf("the ticket screen has no needs-you row for the landing:\n%s", page)
 	}

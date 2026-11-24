@@ -70,14 +70,11 @@ func TestTicketStepsLaidOutAtThreeSizes(t *testing.T) {
 			if block == nil {
 				t.Fatalf("the Land step is not drawn:\n%s", view)
 			}
-			pos := 0
+			// A word wider than the column is broken at it, so the words are
+			// compared with the breaks and the frame taken out.
 			text := strings.Join(block, "\n")
-			for _, word := range strings.Fields(longLand) {
-				i := strings.Index(text[pos:], word)
-				if i < 0 {
-					t.Fatalf("the Land text is cut at %q:\n%s", word, text)
-				}
-				pos += i + len(word)
+			if !strings.Contains(squeeze(text), squeeze(longLand)) {
+				t.Fatalf("the Land text is cut:\n%s", text)
 			}
 			if w <= 80 && len(block) < 2 {
 				t.Errorf("at %d wide the Land words are not wrapped under their column:\n%s", w, text)
@@ -93,18 +90,31 @@ func TestTicketStepsLaidOutAtThreeSizes(t *testing.T) {
 			lines := strings.Split(view, "\n")
 			wantNoRowWider(t, lines, w)
 			// The build is idle and its row always says since when.
-			if row := rowBlockOf(lines, "2 Build"); row == nil || !strings.Contains(strings.Join(row, "\n"), "idle since") {
+			if row := rowBlockOf(lines, "◐ 2 "); row == nil || !strings.Contains(strings.Join(row, "\n"), "idle since") {
 				t.Errorf("the build step does not say it is idle:\n%s", view)
 			}
-			if w >= 80 {
-				for _, id := range ids {
-					if !strings.Contains(view, "slice "+id) {
-						t.Errorf("at %d wide the label of slice %s is not whole:\n%s", w, id, view)
+			// A label that is drawn is whole while the width allows; the block
+			// has the room it has, which may not hold every sub-step.
+			drawn := 0
+			for _, id := range ids {
+				if strings.Contains(view, "slice "+id[:12]) {
+					drawn++
+					if w >= 80 && !strings.Contains(view, "slice "+id) {
+						t.Errorf("at %d wide the label of slice %s is cut:\n%s", w, id, view)
 					}
 				}
 			}
+			if drawn == 0 && w >= 80 {
+				t.Errorf("no sub-step is drawn:\n%s", view)
+			}
 		})
 	}
+}
+
+// squeeze is s without its spaces, line breaks and frame, so text wrapped across
+// rows can be compared with the text it came from.
+func squeeze(s string) string {
+	return strings.NewReplacer(" ", "", "\n", "", "│", "", "▸", "").Replace(s)
 }
 
 // rowBlockOf is the lines of a step on a screen: the one that names it, and the

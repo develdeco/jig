@@ -65,9 +65,9 @@ func TestAWaitHasItsOwnClockInTheNeedsYouColor(t *testing.T) {
 	}
 
 	g.m.st = styles{r: colored()}
-	text := "drafted · 3 sections, 1 slice · waiting for your approval 1h 00m"
-	if view := g.view(); !strings.Contains(view, g.m.st.state(StateNeedsInput, text)) {
-		t.Errorf("the wait is not in the needs-you colour:\n%q\nwant %q in it", view, g.m.st.state(StateNeedsInput, text))
+	text, clock := "drafted · 3 sections, 1 slice · waiting for your approval", "1h 00m"
+	if view := g.view(); !strings.Contains(view, g.m.st.state(StateNeedsInput, text)) || !strings.Contains(view, g.m.st.state(StateNeedsInput, clock)) {
+		t.Errorf("the wait is not in the needs-you colour:\n%q\nwant %q and %q in it", view, g.m.st.state(StateNeedsInput, text), g.m.st.state(StateNeedsInput, clock))
 	}
 }
 
@@ -150,7 +150,7 @@ func TestALandingWaitCountsApart(t *testing.T) {
 	atClock(g, "2026-10-23T09:18:31Z") // 4m 10s after the publish
 	g.feed(jig2()...)
 	row := stepsRow(g, stepLand)
-	if !strings.Contains(row, "waits for a merge 4m 10s") {
+	if !strings.Contains(row, "waits for a merge") || !strings.Contains(row, "4m 10s") {
 		t.Errorf("the Land row reads\n%s\nwant it to wait for a merge 4m 10s", row)
 	}
 	if got := g.m.steps(g.m.w.tickets["JIG-2"])[stepLand].Took; got != "" {
@@ -191,8 +191,8 @@ func TestATimePastAHundredHoursFitsItsColumn(t *testing.T) {
 		t.Errorf("span(99h59m) = %q, want 99h 59m", got)
 	}
 	g := newRig(t, "SHOP-1")
-	row := ansi.Strip(g.m.stepLine(stepRow{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}, true))
-	if !strings.Contains(row, " 332h    slice round") || strings.Contains(row, "…") {
+	row := ansi.Strip(g.m.stepLines([]stepRow{{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}}, 0)[0][0])
+	if !strings.Contains(row, " 332h  slice round") || strings.Contains(row, "…") {
 		t.Errorf("the build row reads %q, want 332h in its seven cells", row)
 	}
 }
