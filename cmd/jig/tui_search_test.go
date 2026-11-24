@@ -24,7 +24,7 @@ func screenWhere(t *testing.T, out *tuiOut, what string, ok func(frame string) b
 // onRow says the cursor of the frame stands on the row of id.
 func onRow(frame, id string) bool {
 	i := queueRowOf(frame, id)
-	return i >= 0 && strings.HasPrefix(strings.Split(frame, "\n")[i], "▸")
+	return i >= 0 && strings.Contains(strings.Split(frame, "\n")[i], "│▸")
 }
 
 // TestTUISearchOnAPipe: `jig tui` on a pipe over a store with an issue and its
@@ -58,14 +58,14 @@ func TestTUISearchOnAPipe(t *testing.T) {
 	rowsOf := func(frame string) []string {
 		var ids []string
 		for _, l := range strings.Split(frame, "\n") {
-			if f := strings.Fields(strings.TrimLeft(l, "▸ ")); len(f) > 2 && strings.HasPrefix(f[1], "TK-") {
+			if f := strings.Fields(strings.TrimLeft(l, " │▸")); len(f) > 2 && strings.HasPrefix(f[1], "TK-") {
 				ids = append(ids, f[1])
 			}
 		}
 		return ids
 	}
 
-	screenWith(t, out, "running (")
+	screenWith(t, out, "╭─ Running ")
 	// The cursor goes down to the plain ticket whose brief waits.
 	send("\x1b[B")
 	screenOnRow(t, out, "TK-2")
