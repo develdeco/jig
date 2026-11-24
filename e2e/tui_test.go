@@ -245,22 +245,33 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// what `jig status` and `jig brief show --text` printed for it.
 	// The round: who reviewed it, whether they stood apart from the builders,
 	// what they read, what they raised, and the ask with the reviewer's reason.
-	screens.press("\r")
+	// The steps are one key each: 3 is the review, 2 the build, 1 the brief.
+	screens.press("3")
 	screens.until("round 1  findings", "raised 1 ask", "independent", "files read", "fix budget 0 of 3 rounds used",
 		"Which greeting does the product want?", "undecided", "a user-visible string")
+	// ? lists the keys of the screen, with the ones that cannot run and why: the
+	// gate waits for the ask to be decided, and no pull request is open yet.
+	screens.press("?")
+	screens.until("Keys on this screen", "not now: the review is not ready", "not now: "+fx.Ticket+" has no pull request")
+	screens.press("?")
 	// The build: each slice's workspace and oracle from slices.yaml, and the
 	// commit that was verified, with its subject.
-	screens.press("\x7f")
-	screens.press("\x1b[A")
-	screens.press("\r")
+	screens.press("2")
 	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	// A slice, and the one after it by ]: the header names the place.
+	screens.press("\r")
+	screens.until("slice a (1 of 4)")
+	screens.press("]")
+	screens.until("slice b (2 of 4)")
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
-	screens.press("\x7f")
-	screens.press("\x1b[A")
-	screens.press("\r")
+	screens.press("1")
 	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken", "workspace alpha · oracle test · after a")
-	screens.press("\x7f")
+	// h goes to the project's list, and its row opens the ticket again.
+	screens.press("h")
+	screens.until("1 ticket", fx.Ticket)
+	screens.press("\r")
+	screens.until("› "+fx.Ticket, "Steps")
 
 	// The person dismisses the ask from the screens, and opens the next round.
 	screens.press("d")
@@ -372,6 +383,10 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.until("approve the reviewed head")
 	screens.press("y")
 	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
+	// o names the pull request by number and target; a pipe has no opener, so
+	// the notice carries its address.
+	screens.press("o")
+	screens.until("PR #", " into ", "/pull/")
 	// The publish screen's activity reads newest first: what was finished above
 	// the changelog it wrote just before.
 	screens.press("\x1b[H")
