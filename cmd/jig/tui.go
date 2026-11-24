@@ -124,7 +124,9 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Ledger:   jigHome,
 		Journals: func() ([]events.Journal, error) { return storeJournals(st, cfg.Name) },
 	}
+	terminal := e.stdoutIsTerminal(stdout)
 	err = tui.Run(e.ctx, tui.Config{
+		Open:       tuiOpener(terminal),
 		Source:     eventsSource{scope},
 		Run:        tuiRunner(e),
 		Ticket:     ticket,
@@ -139,7 +141,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		// uncommitted does not, so the ticket's own screen reads its status on
 		// idle for that, and the list shows it at the next head move.
 		StoreHead: func() (string, error) { return gitx.RevParse(st.Root, "HEAD") },
-	}, stdin, stdout, e.stdoutIsTerminal(stdout))
+	}, stdin, stdout, terminal)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

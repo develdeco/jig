@@ -84,6 +84,10 @@ type Config struct {
 	// scratchpad under it says nothing to a reader and names the person on a
 	// shared screen. Empty is the user's home folder.
 	Home string
+	// Open sends a pull request's address to the system's opener, for the key
+	// `o`: the command gives it only on a terminal. Nil opens nothing, and the
+	// key says the address instead.
+	Open func(url string) error
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int

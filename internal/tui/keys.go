@@ -106,7 +106,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -256,6 +256,12 @@ func keyRows() []keyRow {
 				return false, up + " is in no chart"
 			},
 			run: func(m *Model, _ string) tea.Cmd { return m.openIssue() }},
+		{names: []string{"o"}, label: "o", words: "open PRs", screens: onAllScreens,
+			can: func(m *Model, sub subject) (bool, string) {
+				_, why := m.prsOf(sub)
+				return why == "", why
+			},
+			run: func(m *Model, _ string) tea.Cmd { return m.openPRs(m.keysOn) }},
 		{names: []string{"m"}, label: "m", words: "map", screens: onScreens(screenChart),
 			can: func(m *Model, _ subject) (bool, string) {
 				if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
