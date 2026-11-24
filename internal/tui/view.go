@@ -463,9 +463,12 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 	n := len(lines)
 	top := 0
 	if s > 0 {
-		top = 1
-		if lines[s].box != boxNone && lines[s].box != boxTop {
-			top = 2
+		inBox, _, k := hiddenAbove(lines, s)
+		if inBox {
+			top++
+		}
+		if k > 0 {
+			top++
 		}
 	}
 	for e := min(n, s+h); e > s; e-- {
@@ -474,12 +477,15 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 		}
 		bottom := 0
 		if e < n {
-			bottom = 1
-			if lines[e-1].box != boxNone && lines[e-1].box != boxBottom {
-				if lines[e].box == boxBottom {
-					continue
-				}
-				bottom = 2
+			if lines[e-1].box != boxNone && lines[e-1].box != boxBottom && lines[e].box == boxBottom {
+				continue
+			}
+			inBox, _, k := hiddenBelow(lines, e)
+			if inBox {
+				bottom++
+			}
+			if k > 0 {
+				bottom++
 			}
 		}
 		if (e-s)+top+bottom <= h {
@@ -536,17 +542,20 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
-		if top, _ := boxOf(lines, from); top >= 0 && lines[from].box != boxTop {
+		inBox, top, k := hiddenAbove(lines, from)
+		if inBox {
 			rows = append(rows, fit(m.frameLine(lines[top], "  ", w), w))
-			if above != "" {
+		}
+		switch {
+		case above != "":
+			// The count of what came in above takes the place of the mark.
+			if inBox {
 				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w), w))
-			} else if n := rowsIn(lines, top+1, from); n > 0 {
-				rows = append(rows, mark(fmt.Sprintf("↑ %d more", n), true))
+			} else {
+				rows = append(rows, fit("  "+above, w))
 			}
-		} else if above != "" {
-			rows = append(rows, fit("  "+above, w))
-		} else if n := rowsIn(lines, 0, from); n > 0 {
-			rows = append(rows, mark(fmt.Sprintf("↑ %d more", n), false))
+		case k > 0:
+			rows = append(rows, mark(fmt.Sprintf("↑ %d more", k), inBox))
 		}
 	}
 	idx := 0
@@ -568,13 +577,12 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		rows = append(rows, fit(marker+l.text, w))
 	}
 	if to < len(lines) {
-		if _, bottom := boxOf(lines, to-1); bottom >= to && lines[to-1].box != boxBottom {
-			if n := rowsIn(lines, to, bottom); n > 0 {
-				rows = append(rows, mark(fmt.Sprintf("↓ %d more", n), true))
-			}
+		inBox, bottom, k := hiddenBelow(lines, to)
+		if k > 0 {
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox))
+		}
+		if inBox {
 			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w), w))
-		} else if n := rowsIn(lines, to, len(lines)); n > 0 {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", n), false))
 		}
 	}
 	return rows, from, to
@@ -1046,4 +1054,38 @@ func rowsIn(lines []pline, a, b int) int {
 		}
 	}
 	return n
+}
+
+// hiddenAbove is what a window that starts at line from hides above it: whether
+// it starts inside a box (which is then drawn with its top edge, at top), and
+// how many rows the mark says. Inside a box they are the box's rows above; a
+// window that starts on a box's first row hides none of the box's, and says the
+// rows above the box instead. The mark is owed whenever it is more than 0.
+func hiddenAbove(lines []pline, from int) (inBox bool, top, k int) {
+	top, _ = boxOf(lines, from)
+	if top < 0 || lines[from].box == boxTop {
+		return false, 0, rowsIn(lines, 0, from)
+	}
+	if k = rowsIn(lines, top+1, from); k == 0 {
+		k = rowsIn(lines, 0, top)
+	}
+	return true, top, k
+}
+
+// hiddenBelow is hiddenAbove for the lines below a window that ends before line
+// to: whether it ends inside a box (drawn with its bottom edge, at bottom), and
+// how many rows the mark says: the box's rows below, a split row's continuation
+// rows counting as one.
+func hiddenBelow(lines []pline, to int) (inBox bool, bottom, k int) {
+	_, bottom = boxOf(lines, to-1)
+	if bottom < to || lines[to-1].box == boxNone || lines[to-1].box == boxBottom {
+		return false, 0, rowsIn(lines, to, len(lines))
+	}
+	k = rowsIn(lines, to, bottom)
+	switch {
+	case k > 0:
+	case bottom > to:
+		k = 1
+	}
+	return true, bottom, k
 }

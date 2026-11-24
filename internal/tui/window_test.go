@@ -343,6 +343,22 @@ func TestEveryWindowDrawsTheCursorsRow(t *testing.T) {
 							if keep && !strings.Contains(view, "▸") && l.pageH >= 2 {
 								t.Fatalf("%s %dx%d tail %v step %d: no row of the frame has the cursor (window %d to %d, plain %v)\n%s", name, w, h, tail, step, from, to, plain, view)
 							}
+							if !plain {
+								// A side the window cuts, with a line of text on it, says so.
+								hidden := func(a, b int) bool {
+									for _, ln := range l.pg.lines[a:b] {
+										if ln.box != boxTop && ln.box != boxBottom {
+											return true
+										}
+									}
+									return false
+								}
+								if body := strings.Join(bodyOf(view), "\n"); hidden(0, from) && !strings.Contains(body, "↑") {
+									t.Fatalf("%s %dx%d tail %v step %d: lines above the window carry no mark\n%s", name, w, h, tail, step, view)
+								} else if hidden(to, len(l.pg.lines)) && !strings.Contains(body, "↓") {
+									t.Fatalf("%s %dx%d tail %v step %d: lines below the window carry no mark\n%s", name, w, h, tail, step, view)
+								}
+							}
 							if plain {
 								rows, _, _ := g.m.windowRows(l.pg, l.sel, start, l.pageH, w, "")
 								for i, row := range rows {

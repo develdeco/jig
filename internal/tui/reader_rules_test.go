@@ -45,6 +45,8 @@ func TestMoreCountsTheRowsItHides(t *testing.T) {
 		pg.boxLaid(nil, []string{fmt.Sprintf("row %d", i), "  wrapped"})
 	}
 	pg.boxEnd()
+	pg.add("after 1")
+	pg.add("after 2")
 	g := newRig(t, "")
 	g.send(tea.WindowSizeMsg{Width: 40, Height: 30})
 	// Lines 8 to 11 are rows 2 and 3 of the box: two rows hidden above, two below.
@@ -52,14 +54,16 @@ func TestMoreCountsTheRowsItHides(t *testing.T) {
 	if from != 8 || to != 12 || !strings.Contains(rows[1], "↑ 2 more") || !strings.Contains(rows[6], "↓ 2 more") {
 		t.Errorf("the window is lines %d to %d:\n%s", from, to, strings.Join(rows, "\n"))
 	}
-	// Loose lines above a window outside any box count their rows, not lines.
+	// Loose rows that wrapped above a window outside any box count their rows, not
+	// their lines.
 	var loose page
-	for i := 0; i < 20; i++ {
-		loose.add(fmt.Sprintf("line %d", i))
+	for i := 0; i < 10; i++ {
+		loose.addLaid(nil, []string{fmt.Sprintf("row %d", i), "  wrapped"})
 	}
-	rows, _, _ = g.m.windowRows(loose, 0, 5, 6, 40, "")
-	if !strings.Contains(rows[0], "↑ 5 more") || !strings.Contains(rows[len(rows)-1], "↓ 11 more") {
-		t.Errorf("the window of loose lines:\n%s", strings.Join(rows, "\n"))
+	// Lines 6 to 9 are rows 3 and 4: three rows above, five below.
+	rows, _, _ = g.m.windowRows(loose, 0, 6, 6, 40, "")
+	if !strings.Contains(rows[0], "↑ 3 more") || !strings.Contains(rows[len(rows)-1], "↓ 5 more") {
+		t.Errorf("the window of loose rows:\n%s", strings.Join(rows, "\n"))
 	}
 }
 
