@@ -63,7 +63,6 @@ func (m *Model) slicePage(id, slice string) page {
 			// Each commit that is not verified, in the status's words and with
 			// the command that clears it.
 			p.add("")
-			p.add(m.st.bold("verification"))
 			// A row names its commit by a prefix; it stands where the commit's
 			// first line puts it, and one the journal has no line of sinks.
 			commits := t.commits(slice)
@@ -75,12 +74,20 @@ func (m *Model) slicePage(id, slice string) page {
 				}
 				return time.Time{}
 			}
-			for _, v := range newestFirst(states, began) {
-				p.add("  " + m.st.icon(v.icon()) + " " + short(v.Commit) + "  " + m.st.dim(v.State))
+			states = newestFirst(states, began)
+			cells := make([][]string, len(states))
+			for i, v := range states {
+				cells[i] = []string{m.st.icon(v.icon()), short(v.Commit), m.st.dim(v.State)}
+			}
+			p.boxTop("Verification", strconv.Itoa(len(states)))
+			laid := m.laidList(&p, verificationColumns, dimmed(m.st, verificationColumnNames), cells, 0)
+			for i, v := range states {
+				p.boxLaid(nil, laid[i])
 				if v.Clear != "" {
-					p.add("      " + m.st.dim(v.Clear))
+					p.boxAdd("    " + m.st.dim(v.Clear))
 				}
 			}
+			p.boxEnd()
 		}
 	}
 
@@ -92,8 +99,8 @@ func (m *Model) slicePage(id, slice string) page {
 	}
 	if len(qs) > 0 {
 		p.add("")
-		p.add(m.st.bold("questions"))
-		for _, q := range qs {
+		cells := make([][]string, len(qs))
+		for i, q := range qs {
 			state, word := StateNeedsInput, "open"
 			if !q.Open {
 				state, word = StateOK, "answered"
@@ -101,22 +108,28 @@ func (m *Model) slicePage(id, slice string) page {
 					word += " by you"
 				}
 			}
-			head := m.st.icon(state) + " " + q.ID + "  " + m.st.state(state, word)
+			asked := ""
 			if q.Session != "" {
-				head += m.st.dim("  asked by " + m.who(t, q.Session) + " at " + q.At)
+				asked = m.st.dim("asked by " + m.who(t, q.Session) + " at " + q.At)
 			}
+			cells[i] = []string{m.st.icon(state), q.ID, m.st.state(state, word), asked}
+		}
+		p.boxTop("Questions", strconv.Itoa(len(qs)))
+		laid := m.laidList(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0)
+		for i, q := range qs {
+			var ref *rowRef
 			if q.Open {
-				p.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}, head)
-			} else {
-				p.add("  " + head)
+				ref = &rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}
 			}
-			for _, l := range m.wholeLines(q.Text) {
-				p.add("    " + l)
+			p.boxLaid(ref, laid[i])
+			for _, l := range m.panelLines(q.Text) {
+				p.boxAdd("    " + l)
 			}
 			if !q.Open && q.Answer != "" {
-				p.add("    " + m.st.state(StateOK, "answer: ") + q.Answer)
+				p.boxAdd("    " + m.st.state(StateOK, "answer: ") + q.Answer)
 			}
 		}
+		p.boxEnd()
 	}
 
 	var lines []int
@@ -127,21 +140,34 @@ func (m *Model) slicePage(id, slice string) page {
 	}
 	if len(lines) > 0 {
 		p.add("")
-		p.add(m.st.bold("timeline"))
 		lines = newestFirst(lines, func(i int) time.Time { at, _ := t.lines[i].At(); return at })
 		older := 0
 		if len(lines) > timelineLines {
 			older, lines = len(lines)-timelineLines, lines[:timelineLines]
 		}
-		for _, i := range lines {
-			p.add(m.timelineLine(t, t.lines[i]))
+		rows := make([]listRow, len(lines))
+		for k, i := range lines {
+			rows[k] = listRow{cells: m.timelineCells(t, t.lines[i])}
 		}
+		spec := listSpec{title: "Timeline", summary: strconv.Itoa(len(lines) + older), cols: timelineColumns, names: timelineColumnNames, rows: rows}
 		if older > 0 {
-			p.add(m.olderRow(older))
+			spec.after = []string{m.olderRow(older)}
 		}
+		m.listPanel(&p, spec)
 	}
 	return p
 }
+
+// The columns of the slice screen's lists: a commit's verification, a question,
+// and a line of the timeline.
+var (
+	verificationColumns     = []column{{}, {gap: 1}, {free: true, gap: 2}}
+	verificationColumnNames = []string{"", "commit", "state"}
+	questionColumns         = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
+	questionColumnNames     = []string{"", "question", "state", "asked"}
+	timelineColumns         = []column{{}, {free: true, gap: 1}}
+	timelineColumnNames     = []string{"time", "what"}
+)
 
 // claimHolder is the session holding the slice by its latest claim line that
 // no release has followed.

@@ -39,33 +39,70 @@ func (m *Model) buildPage(id string) page {
 		return p
 	}
 	p.add("")
-	p.add(m.st.bold("slices"))
 	goals := t.goals()
-	idW, stateW := 1, 5
-	for _, s := range slices {
-		idW = max(idW, width(s.ID))
-		stateW = max(stateW, width(s.State))
-	}
-	for _, s := range slices {
+	idW, stateW, triesW := width(sliceColumnNames[1]), width(sliceColumnNames[2]), width(sliceColumnNames[3])
+	cells := make([][]string, len(slices))
+	for i, s := range slices {
 		tries := strconv.Itoa(s.Attempts) + " " + plural(s.Attempts, "try", "tries")
-		line := m.st.icon(s.State) + " " + pad(s.ID, idW) + "  " + m.st.state(s.State, pad(s.State, stateW)) +
-			"  " + m.st.dim(pad(tries, 7)) + "  " + firstOf(goals[s.ID], m.st.dim("no goal"))
-		line, below := m.withFacts(line, sliceFacts(s, true))
-		p.addRow(rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, line)
-		m.sliceRecords(&p, t, s, idW, below)
+		idW, stateW, triesW = max(idW, width(s.ID)), max(stateW, width(s.State)), max(triesW, width(tries))
+		cells[i] = []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), m.st.dim(tries), firstOf(goals[s.ID], m.st.dim("no goal"))}
 	}
+	// A slice's facts end its row when they fit in the room its goal has, and are
+	// a line under it when they do not.
+	room := m.innerWidth() - (1 + 1 + idW + 2 + stateW + 2 + triesW + 2)
+	below := make([]string, len(slices))
+	for i, s := range slices {
+		facts := sliceFacts(s, true)
+		switch {
+		case facts == "":
+		case width(cells[i][4])+2+width(facts) <= room:
+			cells[i][4] += m.st.dim("  " + facts)
+		default:
+			below[i] = m.st.dim(facts)
+		}
+	}
+	p.boxTop("Slices", strconv.Itoa(len(slices)))
+	laid := m.laidList(&p, sliceColumns, dimmed(m.st, sliceColumnNames), cells, 0)
+	for i, s := range slices {
+		p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
+		at := len(p.lines)
+		m.sliceRecords(&p, t, s, idW, below[i])
+		for k := at; k < len(p.lines); k++ {
+			p.lines[k].box = boxMid
+		}
+	}
+	p.boxEnd()
 
 	if rows := m.sessionRows(t, roleBuilder); len(rows) > 0 {
-		p.add("")
-		p.add(m.st.bold("sessions"))
-		for _, r := range rows {
-			p.add(r)
-		}
+		m.listPanel(&p, listSpec{title: "Sessions", summary: strconv.Itoa(len(rows)), cols: sessionColumns, names: sessionColumnNames, rows: rows})
 	}
 
 	p.add("")
 	m.stepActivityPanel(&p, t, stepBuild)
 	return p
+}
+
+// sliceColumns are the columns of a slice's row: its icon, id, state, tries and
+// goal; sliceColumnNames name them.
+var (
+	sliceColumns     = []column{{}, {id: true, gap: 1}, {gap: 2}, {gap: 2}, {free: true, gap: 2}}
+	sliceColumnNames = []string{"", "slice", "state", "tries", "goal"}
+)
+
+// sessionColumns are the columns of a session's row: its name, its harness and
+// model, when it started and the start of its id.
+var (
+	sessionColumns     = []column{{}, {free: true, gap: 2}, {gap: 2}, {gap: 2}}
+	sessionColumnNames = []string{"name", "harness", "started", "id"}
+)
+
+// dimmed is names drawn back, as the names of a list's columns are.
+func dimmed(st styles, names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = st.dim(n)
+	}
+	return out
 }
 
 // fixBudgetLine is how much of the ticket's fix budget the rounds so far have
@@ -89,7 +126,7 @@ func (m *Model) fixBudgetLine(t *ticket) string {
 // facts what the row had no room for, drawn back.
 func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts string) {
 	pre := "    " + spaces(idW)
-	room := m.width - width(pre) - 4
+	room := m.innerWidth() - width(pre) - 2
 	if facts != "" {
 		p.add(pre + facts)
 	}
@@ -222,22 +259,18 @@ func (m *Model) failureTail(p *page, pre string, run events.Envelope, room int) 
 	}
 }
 
-// sessionRows are the sessions of the ticket that played role, one row each:
+// sessionRows are the sessions of the ticket that played role, a row each:
 // the name the screens call it by, its harness and model, when it started
 // and the start of its id, the one place a session's id is shown.
-func (m *Model) sessionRows(t *ticket, role string) []string {
+func (m *Model) sessionRows(t *ticket, role string) []listRow {
 	ids := t.roleSessions()[role]
-	nameW := 0
+	out := make([]listRow, 0, len(ids))
 	for _, id := range ids {
-		nameW = max(nameW, width(t.roleLabel(id, role)))
-	}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		row := pad(t.roleLabel(id, role), nameW) + "  " + firstOf(m.sessionDesc(id), "harness unknown")
+		started := ""
 		if start, ok := m.sessionStart(t, id); ok {
-			row += m.st.dim("  started " + clock(start, m.zone))
+			started = m.st.dim(clock(start, m.zone))
 		}
-		out = append(out, row+m.st.dim("  "+shortID(id)))
+		out = append(out, listRow{cells: []string{t.roleLabel(id, role), firstOf(m.sessionDesc(id), "harness unknown"), started, m.st.dim(shortID(id))}})
 	}
 	return out
 }

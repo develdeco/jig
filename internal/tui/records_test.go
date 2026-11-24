@@ -251,7 +251,7 @@ func TestBuildScreenSaysWhereToReadAFailureThatLeftNoOutput(t *testing.T) {
 		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "fail", "", "", "")),
 	).press("enter")
-	if text := pageText(g); !strings.Contains(text, "no output was recorded: the verify log on the machine that ran it") {
+	if text := pageText(g); !strings.Contains(readWords(text), "no output was recorded: the verify log on the machine that ran it") {
 		t.Errorf("the screen does not say where to read a failure with no output:\n%s", text)
 	}
 
@@ -294,7 +294,7 @@ func TestBuildScreenGivesTheFacts(t *testing.T) {
 	if !strings.Contains(text, "Greet  workspace app · oracle unit") {
 		t.Errorf("the short row does not end in its facts:\n%s", text)
 	}
-	if !strings.Contains(text, "\n         workspace app · oracle go test ./... · fix slice of round 1 · after a") {
+	if !strings.Contains(readWords(text), "workspace app · oracle go test ./... · fix slice of round 1 · after a") || strings.Contains(readWords(text), "on and on workspace") {
 		t.Errorf("the facts a long row has no room for are not on the line below it:\n%s", text)
 	}
 }

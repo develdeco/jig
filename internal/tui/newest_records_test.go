@@ -65,11 +65,12 @@ func TestTheSlicesTimelineReadsNewestFirstAndCountsTheOlder(t *testing.T) {
 		t.Fatalf("on %s, want slice", g.m.Screen())
 	}
 	text := pageText(g)
-	block, timeline, _ := strings.Cut(text, "timeline\n")
+	block, timeline, _ := strings.Cut(text, "Timeline\n")
 	if b, a := strings.Index(block, "bbbbbbb"), strings.Index(block, "aaaaaaa"); b < 0 || a < b {
 		t.Errorf("the verification block does not list the newest commit first (b at %d, a at %d):\n%s", b, a, block)
 	}
 	rows := strings.Split(strings.TrimRight(timeline, "\n"), "\n")
+	rows = rows[1:] // the names of the columns are no row of the list
 	if len(rows) != timelineLines+1 {
 		t.Fatalf("%d rows in the timeline, want %d and the older row:\n%s", len(rows), timelineLines, timeline)
 	}

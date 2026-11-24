@@ -490,4 +490,3 @@ var chartActivityColumns = []column{{}, {id: true, gap: 1}, {gap: 1}, {free: tru
 
 // chartActivityColumnNames name them.
 var chartActivityColumnNames = []string{"time", "ticket", "step", "what"}
-

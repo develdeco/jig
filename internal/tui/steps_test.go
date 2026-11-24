@@ -100,7 +100,7 @@ func TestAnAdoptedBranchSeenWithoutItsStatusIsBuilt(t *testing.T) {
 func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.send(tea.WindowSizeMsg{Width: 80, Height: 18})
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 22})
 	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
 	v := g.view()
 	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "slice c builder asks: Formal or casual?") {

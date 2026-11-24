@@ -357,10 +357,10 @@ func (m *Model) activityCells(t *ticket, ls subLabels, l events.Envelope) []stri
 	return []string{m.st.dim(clock(l, m.zone)), m.st.icon(eventState(l)) + " " + t.labelOf(ls, l), m.say(t, l)}
 }
 
-// timelineLine is activityLine without the sub-step, for a screen that is
-// about one of them.
-func (m *Model) timelineLine(t *ticket, l events.Envelope) string {
-	return m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + m.say(t, l)
+// timelineCells are a line of a slice's timeline as cells: its time, then its
+// state and what happened, without the sub-step, which the screen is about.
+func (m *Model) timelineCells(t *ticket, l events.Envelope) []string {
+	return []string{m.st.dim(clock(l, m.zone)), m.st.icon(eventState(l)) + " " + m.say(t, l)}
 }
 
 // say is what a journal line records, in words that follow the sub-step it

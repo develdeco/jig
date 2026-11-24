@@ -71,7 +71,7 @@ func TestEveryListReadsNewestFirst(t *testing.T) {
 	if g.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", g.m.Screen())
 	}
-	_, timeline, _ := strings.Cut(pageText(g), "timeline\n")
+	_, timeline, _ := strings.Cut(pageText(g), "Timeline\n")
 	newestOnTop(t, "slice timeline", clocksOf(strings.Split(timeline, "\n")), 4)
 	g.press("esc", "esc")
 

@@ -1053,7 +1053,7 @@ func (m *Model) moveBy(delta int) {
 	n := len(pg.refs())
 	e := m.top()
 	if n == 0 {
-		e.scroll = max(0, min(e.scroll+delta, lastStart(len(pg.lines), m.bodyRows())))
+		e.scroll = clampStart(pg.lines, m.bodyRows(), e.scroll+delta)
 		return
 	}
 	e.follow = false

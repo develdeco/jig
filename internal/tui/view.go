@@ -368,7 +368,7 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
-		start = max(0, min(start, lastStart(len(pg.lines), h)))
+		start = clampStart(pg.lines, h, start)
 		if selLine < h {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
@@ -376,11 +376,11 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		if n > 0 && sel == n-1 {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
-			start = max(0, min(selLine, lastStart(len(pg.lines), h)))
+			start = clampStart(pg.lines, h, selLine)
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
-			start = max(0, min(m.top().scroll, lastStart(len(pg.lines), h)))
+			start = clampStart(pg.lines, h, m.top().scroll)
 		}
 	}
 	if n > 0 {
@@ -996,10 +996,38 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// lastStart is the furthest down a window of h rows can begin on a page of n
-// lines: the window that does not begin at the top gives a row to the mark that
-// says so, so it is one line further than a plain one.
-func lastStart(n, h int) int { return max(0, n-h+1) }
+// clampStart is start held to the furthest a window of h rows needs to begin. A
+// start no further than a plain window's last is never cut, which is the usual
+// one and costs nothing.
+func clampStart(lines []pline, h, start int) int {
+	if start <= len(lines)-h+1 {
+		return max(0, start)
+	}
+	return max(0, min(start, lastStart(lines, h)))
+}
+
+// lastStart is the furthest down a window of h rows needs to begin on a page: the
+// first line from which the page's last line is in view. A window that does not
+// begin at the top gives rows to the mark that says so, and one that begins in a
+// box to its top edge and names, so it is further than a plain one.
+func lastStart(lines []pline, h int) int {
+	n := len(lines)
+	if n <= h {
+		return 0
+	}
+	lo, hi := 0, n-1
+	for lo < hi {
+		if mid := (lo + hi) / 2; fitEnd(lines, mid, h, false) == n {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	for lo < n-1 && lines[lo].cont {
+		lo++
+	}
+	return lo
+}
 
 // taken is how many lines p has once the text too long for the screen is wrapped,
 // which is what the panels below it have to size themselves against.
