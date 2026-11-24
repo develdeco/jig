@@ -50,7 +50,7 @@ func (m *Model) publishPage(id string) page {
 	}
 	record := func(lines []string, n int) {
 		for _, l := range clip(lines, n) {
-			p.add("    " + m.st.dim(fit(l, m.width-8)))
+			p.add("    " + m.st.dim(l))
 		}
 	}
 	at := func(event string) string {

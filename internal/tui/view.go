@@ -86,8 +86,49 @@ func (p page) refs() []rowRef {
 	return out
 }
 
-// page builds the body of the screen on top.
+// page builds the body of the screen on top: its lines, with the text of any
+// line too long for the width wrapped onto continuation rows.
 func (m *Model) page() page {
+	return m.wrapLong(m.rawPage())
+}
+
+// wrapLong wraps the lines of pg that are wider than the screen at words onto
+// continuation rows under the line's own text, three rows at most, so a line a
+// screen wrote whole is not cut where the window ends. A row's cursor, and the
+// ask it belongs to, stay with its first line. A line that fits is untouched.
+func (m *Model) wrapLong(pg page) page {
+	var out []pline
+	for _, l := range pg.lines {
+		w := max(1, m.width-2)
+		if l.box != boxNone {
+			w = m.innerWidth()
+		}
+		if l.box == boxTop || l.box == boxBottom || width(l.text) <= w {
+			out = append(out, l)
+			continue
+		}
+		indent := 0
+		for indent < len(l.text) && l.text[indent] == ' ' {
+			indent++
+		}
+		lead := min(indent+2, w/2)
+		lines := wrapCell(l.text[indent:], max(1, w-indent), wrapRows)
+		for i, text := range lines {
+			next := l
+			next.text = spaces(indent) + text
+			if i > 0 {
+				next.ref, next.cont = nil, true
+				next.text = spaces(lead) + text
+			}
+			out = append(out, next)
+		}
+	}
+	pg.lines = out
+	return pg
+}
+
+// rawPage builds the body of the screen on top, as its screen wrote it.
+func (m *Model) rawPage() page {
 	m.pageBuilds++
 	e := m.top()
 	switch e.screen {
