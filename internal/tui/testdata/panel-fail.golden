@@ -1,7 +1,6 @@
-jig  demo › JIG-2  Config loader › 3 review                    ! review findings
+jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ↑ 7 more
-
+  ↑ 8 more
   round 1 findings
   ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
       a leaked handle fails the next open
@@ -21,4 +20,5 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ move · k keep · d dismiss · g gate · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · g gate · 1-5 steps
+  [ ] sibling · h main · t tail

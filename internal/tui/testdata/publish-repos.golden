@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader › 4 publish                     ◇ waits to land
+jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits to land
 ────────────────────────────────────────────────────────────────────────────────
   ✓ 2 pull requests · api, web
 
@@ -13,12 +13,12 @@ jig  demo › JIG-2  Config loader › 4 publish                     ◇ waits t
       - b: ddddddd
   ✓ published  09:14:22
 
-  ╭─ Publish activity ───────────────────────────────────────── latest 4 of 7 ─╮
+  ╭─ Publish activity ───────────────────────────────────────── latest 3 of 7 ─╮
   │  09:14:22 ● published · finished                                           │
   │  09:14:21 ▲ pull request web · opened PR #3                                │
   │  09:14:20 ▲ pull request api · opened PR #7                                │
-  │  09:14:11 ▲ approval · you approved web ddddddd                            │
-  │  ↓ 3 older                                                                 │
+  │  ↓ 4 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ scroll · say "Land JIG-2" · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps
+  [ ] sibling · h main · t tail

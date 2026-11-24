@@ -104,7 +104,7 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 
 		// The ticket's screen.
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
-		screen.until(t, "› "+id+"  Ticket "+id)
+		screen.until(t, "  Ticket "+id)
 		screen.until(t, head(land.Text, 20))
 		if id == "TK-13" {
 			screen.until(t, "⊖ 1 Brief") // the status is read: the steps it never finished are told

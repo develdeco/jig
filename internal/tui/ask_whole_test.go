@@ -120,7 +120,7 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 		if got := triaged(g); len(got) != 0 {
 			t.Errorf("%s decided an ask the screen did not draw whole: %q", key, got)
 		}
-		if want := "ask r1-f1 is not drawn whole on this screen: make the screen taller, or open JIG-2 to read it"; g.m.notice != want {
+		if want := "ask r1-f1 is not drawn whole on this screen: make the screen taller"; g.m.notice != want {
 			t.Errorf("notice = %q, want %q", g.m.notice, want)
 		}
 	}
@@ -308,7 +308,7 @@ func TestANoticeIsDrawnWhole(t *testing.T) {
 
 	g = askRig(t, 80, 14, askOne)
 	g.press("k")
-	want = "ask r1-f1 is not drawn whole on this screen: make the screen taller, or open JIG-2 to read it"
+	want = "ask r1-f1 is not drawn whole on this screen: make the screen taller"
 	if g.m.notice != want {
 		t.Fatalf("notice = %q, want %q", g.m.notice, want)
 	}

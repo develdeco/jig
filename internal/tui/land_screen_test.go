@@ -21,7 +21,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 	if ref := g.m.selected(); ref == nil || ref.kind != rowQuestion {
 		t.Fatalf("the cursor is on %+v, want a question", ref)
 	}
-	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "5 land") {
+	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "1-5 steps") {
 		t.Errorf("the ticket's hint line does not list 5:\n%s", hint)
 	}
 	g.press("5")
@@ -49,12 +49,12 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 	if g.m.Screen() != "land" {
 		t.Fatalf("5 on the build screen went to %s", g.m.Screen())
 	}
-	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "esc back") || strings.Contains(hint, "5 land") {
+	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "esc back") || !strings.Contains(hint, "1-5 steps") {
 		t.Errorf("the land screen's hint line:\n%s", hint)
 	}
 	g.press("esc")
-	if g.m.Screen() != "build" {
-		t.Errorf("esc went to %s, want the build screen", g.m.Screen())
+	if g.m.Screen() != "ticket" {
+		t.Errorf("esc went to %s, want the ticket: a step key replaces the screens above it", g.m.Screen())
 	}
 
 	// From each other step's screen and from a slice's.

@@ -1,4 +1,4 @@
-jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ? 1 of 4 green · slice c needs your answer
 
@@ -18,7 +18,7 @@ jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs
          ✗ `go test ./...` failed in 30s · jig ran it
   ? c  needs-input  1 try    Pick the tone
        workspace copy · oracle go test ./...
-       ? q-001 Formal or casual?
-  ↓ 9 more
+  ↓ 10 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ move · enter open · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · enter open · 1-5 steps · [ ] sibling
+  h main · t tail

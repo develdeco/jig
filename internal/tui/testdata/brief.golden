@@ -1,4 +1,4 @@
-jig  demo › JIG-1  Greeting copy › 1 brief                     ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ✓ approved by an agent, as Ada Lovelace · 4 sections, 4 slices
     approved 2026-10-23 09:00 by an agent, as Ada Lovelace
@@ -18,7 +18,7 @@ jig  demo › JIG-1  Greeting copy › 1 brief                     ? build needs
   slices
   ● a  Greet by name  workspace app · oracle unit
   ✗ b  Say goodbye, politely  workspace app · oracle unit
-  ? c  Pick the tone  workspace copy · oracle go test ./...
-  ↓ 3 more
+  ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ move · enter open · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · 1-5 steps · [ ] sibling · h main
+  t tail

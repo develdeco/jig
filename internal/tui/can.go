@@ -30,6 +30,16 @@ type subject struct {
 	ticket, slice string
 	// onSlice says the slice is the screen's own.
 	onSlice bool
+	// row is the row under the cursor, when hasRow: what enter would open. It
+	// is not part of what the page is sized by (see same).
+	row    rowRef
+	hasRow bool
+}
+
+// same says whether o is the subject s is, whatever row the cursor is on: the
+// page is sized by the keys of a subject, not by the row.
+func (s subject) same(o subject) bool {
+	return s.ticket == o.ticket && s.slice == o.slice && s.onSlice == o.onSlice
 }
 
 // subjectNow reads the subject from the page on top.
@@ -53,6 +63,9 @@ func (m *Model) subjectOf(pg page) subject {
 		s.slice, s.onSlice = e.slice, true
 	case ref != nil && (ref.kind == rowSlice || ref.kind == rowQuestion) && ref.ticket == s.ticket:
 		s.slice = ref.slice
+	}
+	if ref != nil {
+		s.row, s.hasRow = *ref, true
 	}
 	return s
 }

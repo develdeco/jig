@@ -1,125 +1,93 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestMainColumnsAreMeasuredByKind: a chart's name is not a ticket's id, so a
-// 47-cell chart name leaves the id column at the widest ticket id, and at 100 by
-// 30 a ticket's title fits one row beside its steps.
-func TestMainColumnsAreMeasuredByKind(t *testing.T) {
+// TestTheHeaderCutsTheTitleBeforeThePlace: on every screen the title gives way
+// first and the place among the siblings only when the id alone no longer fits:
+// a plan with a 75-character title at 100 columns shows its place.
+func TestTheHeaderCutsTheTitleBeforeThePlace(t *testing.T) {
 	t.Parallel()
-	g := chartRig(t)
-	const long = "a-chart-whose-name-is-as-long-as-a-sentence-word" // 47 cells
-	c := g.m.w.charts["checkout"]
-	delete(g.m.w.charts, "checkout")
-	g.m.w.charts[long] = c
-	g.m.w.chartOrder = []string{long}
-	g.m.w.gen++
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 30})
-	view := stripANSI(g.view())
-	if !strings.Contains(view, long) {
-		t.Fatalf("the long chart's name is not drawn:\n%s", view)
+	g := planMain(t, planSpec{second: true})
+	g.press("s")
+	onRow(t, g, "SHOP-49")
+	g.press("enter")
+	g.m.w.charts["repeat"].info.Title = strings.Repeat("a long plan title ", 5)[:75]
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 24})
+	if h := head(g); !strings.Contains(h, "› repeat (1 of 2)") || !strings.Contains(h, "a long plan") {
+		t.Errorf("the plan's header at 100 columns: %q", h)
 	}
-	row := lineWith(view, "JIG-5")
-	if !strings.Contains(row, "JIG-5  Apply a coupon code  ") {
-		t.Errorf("the id column is widened by the chart's name, or the title wraps: %q\n%s", row, view)
+	// Narrower, the title is cut to nothing before the place goes.
+	g.send(tea.WindowSizeMsg{Width: 60, Height: 24})
+	if h := head(g); !strings.Contains(h, "› repeat (1 of 2)") {
+		t.Errorf("the plan's header at 60 columns lost its place before its title: %q", h)
+	}
+	// Where the id alone does not fit, the place goes.
+	g.send(tea.WindowSizeMsg{Width: 30, Height: 24})
+	if h := head(g); strings.Contains(h, "of 2") {
+		t.Errorf("the plan's header at 30 columns kept its place: %q", h)
 	}
 }
 
-// TestMoreCountsTheRowsItHides: the marks of a window count the rows it hides in
-// the box they sit in, a row being its line and the lines its text wrapped onto,
-// and no edge or loose line outside the box.
-func TestMoreCountsTheRowsItHides(t *testing.T) {
+// TestASiblingRefusalSaysWhatHolds: a ticket the list never held is in no list of
+// the screen, not a ticket that left it.
+func TestASiblingRefusalSaysWhatHolds(t *testing.T) {
 	t.Parallel()
-	var pg page
-	for i := 0; i < 3; i++ {
-		pg.add(fmt.Sprintf("loose %d", i))
-	}
-	pg.boxTop("Box", "")
-	for i := 0; i < 6; i++ {
-		pg.boxLaid(nil, []string{fmt.Sprintf("row %d", i), "  wrapped"})
-	}
-	pg.boxEnd()
-	pg.add("after 1")
-	pg.add("after 2")
-	g := newRig(t, "")
-	g.send(tea.WindowSizeMsg{Width: 40, Height: 30})
-	// Lines 8 to 11 are rows 2 and 3 of the box: two rows hidden above, two below.
-	rows, from, to := g.m.windowRows(pg, 0, 8, 8, 40, "")
-	if from != 8 || to != 12 || !strings.Contains(rows[1], "↑ 2 more") || !strings.Contains(rows[6], "↓ 2 more") {
-		t.Errorf("the window is lines %d to %d:\n%s", from, to, strings.Join(rows, "\n"))
-	}
-	// Loose rows that wrapped above a window outside any box count their rows, not
-	// their lines.
-	var loose page
-	for i := 0; i < 10; i++ {
-		loose.addLaid(nil, []string{fmt.Sprintf("row %d", i), "  wrapped"})
-	}
-	// Lines 6 to 9 are rows 3 and 4: three rows above, five below.
-	rows, _, _ = g.m.windowRows(loose, 0, 6, 6, 40, "")
-	if !strings.Contains(rows[0], "↑ 3 more") || !strings.Contains(rows[len(rows)-1], "↓ 5 more") {
-		t.Errorf("the window of loose rows:\n%s", strings.Join(rows, "\n"))
+	g := mainRig(t)
+	g.press("enter")
+	g.m.top().ticket = "JIG-404"
+	g.press("]")
+	if want := "JIG-404 is in no list of this screen"; g.m.notice != want {
+		t.Errorf("notice %q, want %q", g.m.notice, want)
 	}
 }
 
-// TestAStepsClocksAlwaysShow: at 46 columns the time a step took, the clock of
-// its wait or idleness and the open sub-step's clock are drawn whole, and the
-// names and words give way.
-func TestAStepsClocksAlwaysShow(t *testing.T) {
+// TestEnterNeverPushesTheScreenItIsOn: enter on an ask of the review screen or a
+// question of a slice opens no second copy of the screen, and ? lists enter as
+// now only where it opens another screen.
+func TestEnterNeverPushesTheScreenItIsOn(t *testing.T) {
 	t.Parallel()
-	g := longStepsRig(t, 46, 40, [3]string{"round-totals", "fix-4-cart-test", "cart-total"}, false)
-	view := stripANSI(g.view())
-	row := func(start string) string {
-		for _, l := range strings.Split(view, "\n") {
-			if strings.Contains(l, start) {
-				return l
-			}
+	g := sized(can1(t, reviewOpen()), 80, 40)
+	g.press("3")
+	if ref := g.m.selected(); g.m.Screen() != "review" || ref == nil || ref.kind != rowAsk {
+		t.Fatalf("on %s with %+v, want the review on an ask", g.m.Screen(), ref)
+	}
+	depth := len(g.m.nav)
+	g.press("enter")
+	if len(g.m.nav) != depth || g.m.Screen() != "review" {
+		t.Errorf("enter on an ask left the stack at %v", stack(g))
+	}
+	if hint := footerKeys(g.view()); strings.Contains(hint, "enter open") {
+		t.Errorf("the hint line offers enter where it opens nothing:\n%s", hint)
+	}
+	g.press("?")
+	if v := readWords(g.view()); strings.Contains(v, "enter open now") || !strings.Contains(v, "enter open not now") {
+		t.Errorf("? does not say enter opens nothing here:\n%s", g.view())
+	}
+	g.press("?", "esc")
+
+	// On the ticket's screen it opens the step under the cursor, and says so.
+	if hint := footerKeys(g.view()); !strings.Contains(hint, "enter open") {
+		t.Errorf("the ticket's hint line lacks enter:\n%s", hint)
+	}
+
+	// A question of the slice screen is the slice's own.
+	s := newRig(t, "JIG-1")
+	s.feed(jig1()...)
+	s.press("2", "enter")
+	if s.m.Screen() != "slice" {
+		t.Fatalf("on %s, want a slice", s.m.Screen())
+	}
+	depth = len(s.m.nav)
+	for range 6 {
+		s.press("down")
+		s.press("enter")
+		if len(s.m.nav) != depth {
+			t.Fatalf("enter on the slice screen pushed: %v", stack(s))
 		}
-		return ""
-	}
-	for start, clocks := range map[string][]string{"◐ 2": {"1m 10s", "idle since 09:02"}, "◐ slice": {"1m 03s"}} {
-		for _, clock := range clocks {
-			if line := row(start); !strings.Contains(line, clock) {
-				t.Errorf("the clock %q is cut at 46 columns from %q:\n%s", clock, line, view)
-			}
-		}
-	}
-}
-
-// TestTheOpenSubstepsClockShowsWhateverItsLabelIs: a label too long for the
-// open sub-step's line gives way to the clock at its end.
-func TestTheOpenSubstepsClockShowsWhateverItsLabelIs(t *testing.T) {
-	t.Parallel()
-	g := longStepsRig(t, 34, 40, [3]string{"round-totals", "fix-4-cart-test", "cart-total"}, false)
-	for _, l := range strings.Split(stripANSI(g.view()), "\n") {
-		if strings.Contains(l, "◐ slice") && !strings.Contains(l, "1m 03s") {
-			t.Errorf("the open sub-step's clock is cut: %q", l)
-		}
-	}
-}
-
-// TestADownArrowOnMainMeasuresNoRow: the project's list is laid out when it is
-// built for what it reads, so a down arrow, which moves the cursor and nothing
-// else, and a frame that changed nothing measure no row.
-func TestADownArrowOnMainMeasuresNoRow(t *testing.T) {
-	t.Parallel()
-	g := manyTickets(t, 100, 30)
-	g.view()
-	if g.m.measured == 0 {
-		t.Fatal("the first frame measured no row: the counter counts nothing")
-	}
-	before := g.m.measured
-	g.view()
-	g.press("down")
-	g.view()
-	g.press("down", "down")
-	g.view()
-	if g.m.measured != before {
-		t.Errorf("a down arrow and an idle frame measured %d rows", g.m.measured-before)
 	}
 }

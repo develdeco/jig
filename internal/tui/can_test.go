@@ -174,11 +174,11 @@ func TestHintsOfferOnlyWhatRuns(t *testing.T) {
 		d            *digestInfo
 		has, hasNone []string
 	}{
-		{"brief", briefWaiting(), []string{"5 land", "t tail"}, []string{"g gate", "p publish", "a answer"}},
-		{"build", buildUnder(), []string{"5 land"}, []string{"g gate", "p publish", "a answer"}},
+		{"brief", briefWaiting(), []string{"1-5 steps", "t tail"}, []string{"g gate", "p publish", "a answer"}},
+		{"build", buildUnder(), []string{"1-5 steps"}, []string{"g gate", "p publish", "a answer"}},
 		{"review", reviewReady(), []string{"g gate", "k keep", "d dismiss"}, []string{"p publish", "a answer"}},
 		{"publish", publishReady(), []string{"p publish", "k keep"}, []string{"g gate", "a answer"}},
-		{"landing", landStop(), []string{`say "Land JIG-2"`, "5 land"}, []string{"g gate", "p publish", "a answer", "k keep", "d dismiss"}},
+		{"landing", landStop(), []string{`say "Land JIG-2"`, "1-5 steps"}, []string{"g gate", "p publish", "a answer", "k keep", "d dismiss"}},
 	} {
 		g := can1(t, c.d)
 		hint := footerKeys(g.view())

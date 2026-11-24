@@ -84,6 +84,10 @@ type Config struct {
 	// scratchpad under it says nothing to a reader and names the person on a
 	// shared screen. Empty is the user's home folder.
 	Home string
+	// Open sends a pull request's address to the system's opener, for the key
+	// `o`: the command gives it only on a terminal. Nil opens nothing, and the
+	// key says the address instead.
+	Open func(url string) error
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -277,6 +281,19 @@ type Model struct {
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
+	// hit is what the last frame drew of the body, for a click (mouse.go).
+	hit *hitMap
+	// sibMemo is the siblings of the screen on top as one frame or one message
+	// read them, once read (sibs).
+	sibMemo *sibSet
+	sibRead bool
+	// kept is where the cursor stood on each screen the person left, for the
+	// session (moves.go).
+	kept map[navKey]navEntry
+	// table is the key table (keys.go): the one place a key lives.
+	table []keyRow
+	// help is the `?` overlay while it is up.
+	help *helpView
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
 	// measured counts the rows the layout measured: a frame that changed none of
@@ -290,7 +307,7 @@ type Model struct {
 
 // New builds the model for cfg.
 func New(cfg Config) *Model {
-	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height}
+	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height, table: keyRows()}
 	if m.width <= 0 {
 		m.width = defaultWidth
 	}
@@ -600,6 +617,7 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.forgetSibs()
 	if _, key := msg.(tea.KeyMsg); !key {
 		// A key moves the cursor, or starts a command whose result is a message
 		// of its own: what the screens built from the world holds.
@@ -608,6 +626,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
 	m.syncScreen()
+	m.forgetSibs()
 	return next, cmd
 }
 
@@ -617,6 +636,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		return m, m.keys(msg)
+	case tea.MouseMsg:
+		return m, m.mouse(msg)
 	case eventsMsg:
 		return m, tea.Batch(m.onEvents(msg), m.waitEvents())
 	case streamEndMsg:
@@ -1003,6 +1024,9 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if m.ask != nil {
 		return m.confirmKey(k)
 	}
+	if m.help != nil {
+		return m.helpKey(k)
+	}
 	m.notice = ""
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
@@ -1013,67 +1037,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	}
-	switch k.String() {
-	case "q":
-		return m.quit()
-	case "up":
-		m.move(-1)
-	case "down":
-		m.move(1)
-	case "pgup":
-		m.move(-5)
-	case "pgdown":
-		m.move(5)
-	case "home":
-		m.move(-1 << 20)
-	case "end":
-		m.move(1 << 20)
-	case "enter", "right":
-		return m.open()
-	case "esc", "left", "backspace":
-		m.back()
-	case "a":
-		if m.allow(actAnswer) {
-			m.beginAnswer()
-		}
-	case "k":
-		if m.allow(actKeep) {
-			return m.triage("keep")
-		}
-	case "d":
-		if m.allow(actDismiss) {
-			return m.triage("dismiss")
-		}
-	case "u":
-		if m.allow(actRequeue) {
-			return m.requeue()
-		}
-	case "v":
-		if m.allow(actApprove) {
-			m.askApprove()
-		}
-	case "t":
-		m.tail = !m.tail
-	case "g":
-		if m.allow(actGate) {
-			return m.gate()
-		}
-	case "p":
-		if m.allow(actPublish) {
-			return m.beginPublish()
-		}
-	case "5":
-		return m.openLand()
-	case "c":
-		return m.openIssue()
-	case "m":
-		m.toggleMap()
-	case "s":
-		m.switchView()
-	case "r":
-		return m.refreshAll()
-	}
-	return nil
+	return m.runKey(k.String())
 }
 
 // move puts the cursor delta rows on, within the screen's rows. A cursor
@@ -1327,15 +1291,30 @@ func (m *Model) open() tea.Cmd {
 	if ref == nil {
 		return nil
 	}
-	var next navEntry
-	switch ref.kind {
-	case rowFold:
+	if ref.kind == rowFold {
+		// A fold opens or closes in place: no screen is pushed.
 		e := &m.nav[0]
 		if e.open == nil {
 			e.open = map[string]bool{}
 		}
 		e.open[ref.id] = !e.open[ref.id]
 		return nil
+	}
+	next, ok := m.openTarget(*ref)
+	if !ok {
+		return nil
+	}
+	return m.goTo(len(m.nav), ref, next)
+}
+
+// openTarget is the screen enter on the row ref opens: none when the row opens
+// nothing, or opens the screen the person is on (an ask on the review screen,
+// a slice's question on its own screen), which would stack a second copy.
+func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
+	var next navEntry
+	switch ref.kind {
+	case rowFold:
+		return next, false
 	case rowChart:
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:
@@ -1358,54 +1337,15 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowQuestion:
 		if ref.slice == "" {
-			return nil
+			return next, false
 		}
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
 	default:
-		return nil
+		return next, false
 	}
-	m.nav = append(m.nav, next)
-	m.last = nil
-	if next.screen == screenReview {
-		// What the review screen is for, when something waits, is deciding it.
-		m.top().sel = m.askRow(ref)
-		// The page opens at its top, so the rounds are read before the rows.
-		m.top().lead = 1 << 20
-	}
-	var cmds []tea.Cmd
-	if next.screen == screenChart {
-		cmds = append(cmds, m.enterChart(m.top())...)
-	}
-	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
-		cmds = append(cmds, m.refreshStatus(next.ticket))
-	}
-	if next.screen == screenBrief {
-		cmds = append(cmds, m.loadBrief(next.ticket))
-	}
-	return tea.Batch(cmds...)
-}
-
-// openLand opens the Land screen of the ticket on the screen, whatever the
-// cursor is on: from the ticket's screen, a step's or a slice's. The land screen
-// itself, the project's list and a chart's have no ticket of their own to open
-// it for.
-func (m *Model) openLand() tea.Cmd {
-	e := m.top()
-	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish:
-	default:
-		return nil
-	}
-	t := m.w.tickets[e.ticket]
-	if t == nil || t.awaiting {
-		return nil
-	}
-	m.nav = append(m.nav, navEntry{screen: screenLand, ticket: e.ticket})
-	m.last = nil
-	if t.status == nil || t.dirty {
-		return m.refreshStatus(e.ticket)
-	}
-	return nil
+	top := m.top()
+	same := next.screen == top.screen && next.ticket == top.ticket && next.slice == top.slice && next.chart == top.chart
+	return next, !same
 }
 
 // askRow is the position, among the rows of the review screen on top, of the
@@ -1416,7 +1356,7 @@ func (m *Model) askRow(ref *rowRef) int {
 		if r.kind != rowAsk {
 			continue
 		}
-		if ref.kind == rowAsk && r.id == ref.id {
+		if ref != nil && ref.kind == rowAsk && r.id == ref.id {
 			return i
 		}
 		if first < 0 {
@@ -1429,7 +1369,7 @@ func (m *Model) askRow(ref *rowRef) int {
 // back goes up one screen.
 func (m *Model) back() {
 	if len(m.nav) > 1 {
-		m.nav = m.nav[:len(m.nav)-1]
+		m.cut(len(m.nav) - 1)
 		m.last = nil
 	}
 }
@@ -1463,25 +1403,6 @@ func (m *Model) refreshAll() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
-}
-
-// allow asks whether the key's action runs here: the screen must list it and can
-// must let it run; when not, the reason is the notice and nothing runs. The
-// hints list the keys by the same two answers.
-func (m *Model) allow(a action) bool {
-	m.keysOn = m.subjectNow()
-	listed := false
-	for _, k := range m.screenKeys(m.keysOn) {
-		listed = listed || k.act == a
-	}
-	ok, why := m.canOn(m.keysOn, a)
-	switch {
-	case !ok:
-		m.notice = why
-	case !listed:
-		m.notice = string(a) + " is not done from this screen"
-	}
-	return ok && listed
 }
 
 // targetTicket is the ticket a key acts on: the open one, else the one under
@@ -1624,6 +1545,10 @@ func (m *Model) triage(decision string) tea.Cmd {
 		m.notice = "the screen changed under the key before it was drawn: press it again"
 		return nil
 	case drawn == askWhole:
+	case seen && m.top().ticket == id:
+		// The person is on the ticket's own screen: opening it is not a way out.
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller"
+		return nil
 	case seen:
 		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
 		return nil
