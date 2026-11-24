@@ -3,17 +3,17 @@ jig  demo › JIG-1  Greeting copy › 2 build › slice c (3 of 4)      ? needs
   Pick the tone
   ? needs-input · 1 try
   workspace copy · oracle go test ./...
-
   ╭─ Questions ──────────────────────────────────────────────────────────── 1 ─╮
   │    question  state  asked                                                  │
   │▸ ? q-001     open   asked by builder at 09:02:30                           │
   │      Formal or casual?                                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
   ╭─ Timeline ───────────────────────────────────────────────────────────── 1 ─╮
   │  time     what                                                             │
   │  09:02:30 ? builder asks: Formal or casual?                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
+
+
 
 
 

@@ -996,6 +996,28 @@ func plural(n int, one, many string) string {
 	return many
 }
 
+// skipNames is the scroll position s of a page with no row for the cursor, moved
+// on over the top and names of a list a window starts in: the window keeps them
+// above the rows it draws, so a scroll that stops on them would show the page as
+// it was. A move down goes to the list's second row; one up, to the box's edge.
+func skipNames(lines []pline, s, delta, h int) int {
+	if s <= 0 || s >= len(lines) {
+		return s
+	}
+	top, _ := boxOf(lines, s)
+	if top < 0 || s <= top {
+		return s
+	}
+	k := namesRows(lines, top)
+	if k == 0 || s > top+k+1 {
+		return s
+	}
+	if delta > 0 {
+		return clampStart(lines, h, top+k+2)
+	}
+	return top
+}
+
 // clampStart is start held to the furthest a window of h rows needs to begin. A
 // start no further than a plain window's last is never cut, which is the usual
 // one and costs nothing.

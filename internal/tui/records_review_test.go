@@ -48,18 +48,18 @@ func TestReviewScreenSaysWhoReviewedEachRoundAndHowFarTheyStood(t *testing.T) {
 	)...).press("enter")
 	text := pageText(g)
 	for _, want := range []string{
-		"✗ round 1  not clean  raised 1 ask",
+		"✗ round 1 not clean 1 ask",
 		"builder reviewing its own change (Codex · Gpt 5)",
-		"full 0000000..ccccccc · 4 files read",
+		"full 0000000..ccccccc 4 files",
 		"reviewer · independence unknown · s-review", // round 2: nothing known of its model
 		"delta ?..ddddddd",                           // its base is not known, and it has no findings file
 		"fix budget 3 of 3 rounds used, reached",
 	} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(readWords(text), want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "files read\n") && strings.Count(text, "files read") != 1 {
+	if strings.Count(readWords(text), "files") != 1 {
 		t.Errorf("a round with no findings file claims files read:\n%s", text)
 	}
 }
@@ -92,7 +92,7 @@ func TestReviewScreenNamesTheReviewerOfTheOpenRound(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want the review screen", g.m.Screen())
 	}
-	if text := pageText(g); !strings.Contains(text, "round 1  open      opened 09:11:00") || !strings.Contains(text, "waiting for a reviewer to take it") {
+	if text := pageText(g); !strings.Contains(readWords(text), "round 1 open 09:11:00") || !strings.Contains(text, "waiting for a reviewer to take it") {
 		t.Errorf("an open round nobody took:\n%s", text)
 	}
 	g.feed(jl(at(11, 10), "JIG-2", "", journal.EventGateReviewer, func(l *journal.Line) { l.Session, l.Attempt = "s-reviewer", 1 }))
@@ -116,8 +116,11 @@ func TestReviewScreenListsWhatTheRoundFoundBesideTheAsks(t *testing.T) {
 	}), 0)
 	g.feed(jig2Mid()...).press("enter")
 	text := pageText(g)
-	findings, asks, _ := strings.Cut(text, "\nasks\n")
-	for _, want := range []string{"round 1 findings", "to fix", "Close the file", "a leaked handle fails the next open", "dismissed", "Rename the helper"} {
+	findings, asks, _ := strings.Cut(text, "\nAsks\n")
+	if summaryOf(g.m.page(), "Findings") != "round 1" {
+		t.Errorf("the findings are not those of round 1:\n%s", text)
+	}
+	for _, want := range []string{"to fix", "Close the file", "a leaked handle fails the next open", "dismissed", "Rename the helper"} {
 		if !strings.Contains(findings, want) {
 			t.Errorf("the findings lack %q:\n%s", want, text)
 		}
@@ -141,7 +144,7 @@ func TestReviewScreenSaysACleanRoundRaisedNotesNotFixes(t *testing.T) {
 	}, nil), 0)
 	g.feed(jig2Mid()...).press("enter")
 	text := pageText(g)
-	if !strings.Contains(text, "raised 3 notes") {
+	if !strings.Contains(readWords(text), "3 notes") {
 		t.Errorf("the screen does not say the round raised 3 notes:\n%s", text)
 	}
 }

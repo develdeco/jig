@@ -201,9 +201,10 @@ func TestAnswerRefusesAQuestionThatIsAnswered(t *testing.T) {
 func TestTriageDecidesTheAskUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("enter") // the cursor follows the current step: the review
-	g.press("down", "d")                // r1-f2
-	g.press("up", "k")                  // r1-f1
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30}) // the panels' edges and names take rows an ask needs
+	g.feed(jig2Mid()...).press("enter")              // the cursor follows the current step: the review
+	g.press("down", "d")                             // r1-f2
+	g.press("up", "k")                               // r1-f1
 	want := []string{
 		"triage JIG-2 r1-f2 dismiss --store /s",
 		"triage JIG-2 r1-f1 keep --store /s",

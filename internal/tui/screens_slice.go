@@ -98,7 +98,6 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 	}
 	if len(qs) > 0 {
-		p.add("")
 		cells := make([][]string, len(qs))
 		for i, q := range qs {
 			state, word := StateNeedsInput, "open"
@@ -139,7 +138,6 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 	}
 	if len(lines) > 0 {
-		p.add("")
 		lines = newestFirst(lines, func(i int) time.Time { at, _ := t.lines[i].At(); return at })
 		older := 0
 		if len(lines) > timelineLines {

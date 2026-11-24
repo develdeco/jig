@@ -14,7 +14,7 @@ var newMark = regexp.MustCompile(`↑ \d+ new`)
 // markedRow is the row of a frame the cursor stands on.
 func markedRow(frame string) string {
 	for _, l := range strings.Split(frame, "\n") {
-		if strings.HasPrefix(l, "▸") {
+		if strings.HasPrefix(l, "▸") || strings.Contains(l, "│▸") {
 			return l
 		}
 	}

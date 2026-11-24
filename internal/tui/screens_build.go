@@ -77,7 +77,6 @@ func (m *Model) buildPage(id string) page {
 		m.listPanel(&p, listSpec{title: "Sessions", summary: strconv.Itoa(len(rows)), cols: sessionColumns, names: sessionColumnNames, rows: rows})
 	}
 
-	p.add("")
 	m.stepActivityPanel(&p, t, stepBuild)
 	return p
 }

@@ -163,7 +163,7 @@ func TestTheReviewScreenOpenedBelowTheFoldShowsItsMark(t *testing.T) {
 	g.press("end")
 	view := g.view()
 	body := bodyOf(view)
-	if got := strings.TrimSpace(body[0]); !strings.HasPrefix(got, "↑ ") {
+	if !hasMark(body[:3], "↑ ", "") {
 		t.Errorf("the review read from its last row does not start with a mark of what is above:\n%s", view)
 	}
 }

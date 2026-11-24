@@ -545,28 +545,31 @@ func (m *Model) askLines(asks []askRow) []string {
 	words := make([]string, len(asks))
 	for i, a := range asks {
 		riskW, whereW = max(riskW, width(a.Risk)), max(whereW, width(a.Where))
-		switch a.Decision {
-		case "keep":
-			words[i] = "kept" + decidedBy(a)
-		case "dismiss":
-			words[i] = "dismissed" + decidedBy(a)
-		default:
-			words[i] = "undecided"
-		}
+		_, words[i] = askDecision(a)
 		decW = max(decW, width(words[i]))
 	}
 	out := make([]string, len(asks))
 	for i, a := range asks {
-		state, decision := StateAsk, m.st.dim(pad(words[i], decW))
-		switch a.Decision {
-		case "keep":
-			state, decision = StateKept, m.st.state(StateKept, pad(words[i], decW))
-		case "dismiss":
-			state, decision = StateDismissed, m.st.state(StateDismissed, pad(words[i], decW))
+		state, _ := askDecision(a)
+		decision := m.st.dim(pad(words[i], decW))
+		if state != StateAsk {
+			decision = m.st.state(state, pad(words[i], decW))
 		}
 		out[i] = fmt.Sprintf("%s %s  %s  %s  %s%s", m.st.icon(state), pad(a.Risk, riskW), pad(a.Where, whereW), decision, a.Title, m.st.dim("  "+a.ID))
 	}
 	return out
+}
+
+// askDecision is the state an ask is drawn in and the word for what has been
+// decided of it.
+func askDecision(a askRow) (state, word string) {
+	switch a.Decision {
+	case "keep":
+		return StateKept, "kept" + decidedBy(a)
+	case "dismiss":
+		return StateDismissed, "dismissed" + decidedBy(a)
+	}
+	return StateAsk, "undecided"
 }
 
 func decidedBy(a askRow) string {

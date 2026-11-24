@@ -70,7 +70,6 @@ func (m *Model) briefPage(id string) page {
 	}
 	p.boxEnd()
 
-	p.add("")
 	slices := t.slices(m.zone)
 	idW := width(briefSliceColumnNames[1])
 	cells = make([][]string, len(slices))
@@ -92,7 +91,6 @@ func (m *Model) briefPage(id string) page {
 	}
 	p.boxEnd()
 
-	p.add("")
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }

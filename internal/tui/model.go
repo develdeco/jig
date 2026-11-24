@@ -1053,7 +1053,7 @@ func (m *Model) moveBy(delta int) {
 	n := len(pg.refs())
 	e := m.top()
 	if n == 0 {
-		e.scroll = clampStart(pg.lines, m.bodyRows(), e.scroll+delta)
+		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
 		return
 	}
 	e.follow = false
@@ -1072,10 +1072,24 @@ func (m *Model) moveBy(delta int) {
 		// up from the first row moves the page above it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
 		// its top starts at once.
-		if delta < 0 {
-			e.lead = min(e.lead-delta, 1<<20)
-		} else {
-			e.lead = max(0, e.lead-delta)
+		// A window that would start where it cannot, on the top or the names of the
+		// list it is in, is the one it was: the page goes on to the next line it
+		// can show.
+		h := m.bodyRows()
+		from := func() int {
+			f, _, _ := windowSpan(pg, e.sel, m.windowStart(pg, e.sel, h, false), h, e.lead == 0)
+			return f
+		}
+		was := from()
+		for i := 0; i < 8; i++ {
+			if delta < 0 {
+				e.lead = min(e.lead-delta, 1<<20)
+			} else {
+				e.lead = max(0, e.lead-delta)
+			}
+			if e.lead == 0 || e.lead == 1<<20 || from() != was {
+				break
+			}
 		}
 		return
 	}

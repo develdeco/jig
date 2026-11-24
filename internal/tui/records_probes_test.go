@@ -56,15 +56,15 @@ func TestReviewScreenShowsEachRoundsProbes(t *testing.T) {
 		"3 probes · 2 caught · 1 survived · 2 hunks unprobed · 1 skipped",
 		"no probes · 0 hunks unprobed",
 		"as recorded: a file changed since a round is not marked",
-		"round 1  beta/b.go:4  survived",
-		"round 1  alpha/a.go:9  caught",
+		"round 1 beta/b.go:4 survived",
+		"round 1 alpha/a.go:9 caught",
 		"the greeting · go test ./beta",
 	} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(readWords(text), want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
-	if rounds, _, _ := strings.Cut(text, "\nprobes\n"); strings.Count(rounds, "unprobed") != 2 {
+	if rounds, _, _ := strings.Cut(text, "Probes\n"); strings.Count(rounds, "unprobed") != 2 {
 		t.Errorf("a round no reviewer ran has a counts line:\n%s", text)
 	}
 	if strings.Index(text, "beta/b.go:4") > strings.Index(text, "alpha/a.go:9") {
@@ -104,16 +104,16 @@ func TestReviewScreenMarksASupersededProbe(t *testing.T) {
 	g.feed(jig2Mid()...).press("enter")
 	text := pageText(g)
 	for _, want := range []string{
-		"round 1  a.go:4  survived · caught in round 2",
-		"round 1  a.go:8  survived · survived again in round 2",
-		"round 1  a.go:12  caught · survived in round 2 (caught in round 1)",
+		"round 1 a.go:4 survived · caught in round 2",
+		"round 1 a.go:8 survived · survived again in round 2",
+		"round 1 a.go:12 caught · survived in round 2 (caught in round 1)",
 	} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(readWords(text), want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
 	for _, l := range strings.Split(text, "\n") {
-		if strings.Contains(l, "round 2  a.go:") && strings.Contains(l, " in round ") {
+		if f := strings.Fields(l); len(f) > 3 && f[1] == "round" && f[2] == "2" && strings.Contains(l, " in round ") {
 			t.Errorf("the latest probe of a line is marked superseded: %q", l)
 		}
 	}
@@ -140,8 +140,11 @@ func TestReviewScreenUnprobedHunks(t *testing.T) {
 		), 0)
 		g.feed(jig2Mid()...).press("enter")
 		text := pageText(g)
-		for _, want := range []string{"round 2 left 2 hunks unprobed", "web/c.go:1-5", "web/d.go:10-12", "a_test.go  set aside: a test file", "gen.go:3-8  set aside: generated"} {
-			if !strings.Contains(text, want) {
+		if got := summaryOf(g.m.page(), "Unprobed"); got != "round 2 left 2 hunks" {
+			t.Errorf("the unprobed panel says %q", got)
+		}
+		for _, want := range []string{"web/c.go:1-5", "web/d.go:10-12", "a_test.go set aside: a test file", "gen.go:3-8 set aside: generated"} {
+			if !strings.Contains(readWords(text), want) {
 				t.Errorf("the screen lacks %q:\n%s", want, text)
 			}
 		}
@@ -151,7 +154,7 @@ func TestReviewScreenUnprobedHunks(t *testing.T) {
 		g := newRig(t, "JIG-2")
 		g.r.answer("status JIG-2 --store /s", ledgerStatus([][]string{ledgerRound("1", "0", "0", "0", "0")}), 0)
 		g.feed(jig2Mid()...).press("enter")
-		if text := pageText(g); !strings.Contains(text, "round 1 left no hunk unprobed") {
+		if text := pageText(g); summaryOf(g.m.page(), "Unprobed") != "round 1 left no hunk unprobed" || !strings.Contains(text, "no hunk left unprobed") {
 			t.Errorf("the screen does not say the round left none:\n%s", text)
 		}
 	})

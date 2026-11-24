@@ -43,6 +43,20 @@ func (o *tuiOut) untilFold(t *testing.T, title, state string) {
 	t.Fatalf("the fold %s never was %s; the last screen was:\n%s", title, state, lastScreen(o.String()))
 }
 
+// untilWords waits for the output to hold want as words: a panel's frame and the
+// padding of its columns are no part of what a screen says.
+func (o *tuiOut) untilWords(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(o.String(), "│", " ")), " "), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the screens never showed %q; they showed:\n%s", want, o.String())
+}
+
 // until waits for the output to hold want.
 func (o *tuiOut) until(t *testing.T, want string) {
 	t.Helper()
