@@ -279,36 +279,29 @@ func (m *Model) searchCursor() {
 // text, the moves move over the rows drawn, enter opens one and esc clears.
 func (m *Model) searchKey(k tea.KeyMsg) tea.Cmd {
 	e := &m.nav[0]
-	switch s := k.String(); s {
-	case "esc":
+	// The keys are told by their type: letters typed together arrive as one key
+	// whose text may be a key's name ("up").
+	switch k.Type {
+	case tea.KeyEsc:
 		m.clearSearch()
-		return nil
-	case "enter":
+	case tea.KeyEnter:
 		if m.selected() == nil {
 			return nil
 		}
 		e.search.open = false
 		return m.open()
-	case "up":
+	case tea.KeyUp:
 		m.move(-1)
-		return nil
-	case "down":
+	case tea.KeyDown:
 		m.move(1)
-		return nil
-	case "pgup":
+	case tea.KeyPgUp:
 		m.move(-5)
-		return nil
-	case "pgdown":
+	case tea.KeyPgDown:
 		m.move(5)
-		return nil
-	case "home":
+	case tea.KeyHome:
 		m.move(-1 << 20)
-		return nil
-	case "end":
+	case tea.KeyEnd:
 		m.move(1 << 20)
-		return nil
-	}
-	switch k.Type {
 	case tea.KeyBackspace:
 		if n := len(e.search.query); n > 0 {
 			e.search.query = e.search.query[:n-1]

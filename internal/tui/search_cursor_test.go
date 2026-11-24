@@ -149,6 +149,20 @@ func TestSearchEscPutsTheCursorBack(t *testing.T) {
 	}
 }
 
+// TestSearchLettersTypedTogetherAreText: letters that arrive in one key (a paste,
+// or fast typing) are text, whatever name of a key they spell.
+func TestSearchLettersTypedTogetherAreText(t *testing.T) {
+	t.Parallel()
+	m := searchStore(t)
+	typed(m, "/")
+	for _, word := range []string{"up", "down", "esc", "enter", "end"} {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(word)})
+	}
+	if got := string(m.nav[0].search.query); got != "updownescenterend" || m.top().screen != screenMain {
+		t.Errorf("the line holds %q on %v, want the letters as text", got, m.top().screen)
+	}
+}
+
 // TestSearchStaysOnWhenMainIsComeBackTo: opening a row leaves the search applied
 // with the line closed, so every key acts as on main, and esc from the ticket
 // comes back to the narrowed list; `s` keeps the query; esc clears it.

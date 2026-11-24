@@ -1010,7 +1010,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		if m.nav[0].search.open {
 			return m.searchKey(k)
 		}
-		if k.String() == "esc" && m.searchApplied() {
+		if k.Type == tea.KeyEsc && m.searchApplied() {
 			m.clearSearch()
 			return nil
 		}

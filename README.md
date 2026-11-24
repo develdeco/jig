@@ -175,6 +175,13 @@ first ticket a session creates after it started (a brief verdict mints it; a
 chart verdict creates none), until you press a key; `jig tui SHOP-1` can be open
 before SHOP-1 exists, and fills in when it does.
 
+`/` on the main screen opens a search line: type, and the list narrows as you type to the
+rows whose words start with every word you typed, in any order - an id (`shop-11`) or its number
+(`11`), a word of the title, a kind (`issue`), a chart, a state (`waiting`, `landed`, `closed`) or a
+pull request's number (`287`, `#287`). The letters that matched are lit, a task's issue stays above
+it, and folded groups open for the search. The header counts the matches, `enter` opens the row under
+the cursor and `esc` clears the search and puts the cursor back where it was.
+
 A chart is a row on the main screen after the tickets, with how many of its
 tickets published. Enter opens its screen: the chart's map (destination, what
 was decided, the fog), its tickets with the same five step marks and what each
