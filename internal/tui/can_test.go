@@ -60,7 +60,7 @@ func quietRigAt(t *testing.T, id string, d *digestInfo) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.r.answer("next --json --store /s", string(out)+"\n", 0)
+	g.r.answer("next --json --roster --store /s", string(out)+"\n", 0)
 	g.pin(id, d)
 	return g
 }

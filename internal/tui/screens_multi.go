@@ -102,7 +102,7 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 		// from the task as it stands in this issue and from nothing of the other's.
 		cut := m.cutFor(r.t, container, branch)
 		r.t, r.d = cut, m.phaseOf(cut)
-		r.steps = m.stepRows(cut, r.d)
+		r.steps, _ = m.rowSteps(cut, r.d)
 		r.end, r.atEnd = m.endOf(cut)
 		r.done = r.steps[stepPublish].Done
 		r.mark = ""

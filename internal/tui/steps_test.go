@@ -86,6 +86,7 @@ func TestAStepIsNotDoneBeforeTheStepsAheadOfIt(t *testing.T) {
 func TestAnAdoptedBranchSeenWithoutItsStatusIsBuilt(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "") // the main screen reads no ticket's status
+	g.r.answer("next --json --roster --store /s", rosterListing("JIG-5"), 0)
 	g.feed(
 		jl(at(20, 0), "JIG-5", "", journal.EventGateOpen),
 		jl(at(20, 30), "JIG-5", "", journal.EventGateClean, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-reviewer" }),

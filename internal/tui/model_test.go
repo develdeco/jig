@@ -395,6 +395,11 @@ func TestACursorBelowTheWindowScrollsIntoView(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
 	var envs []events.Envelope
+	var ids []string
+	for i := 0; i < 30; i++ {
+		ids = append(ids, fmt.Sprintf("JIG-%d", 100+i))
+	}
+	g.r.answer("next --json --roster --store /s", rosterListing(ids...), 0)
 	for i := 0; i < 30; i++ {
 		envs = append(envs, jl(at(5, i), fmt.Sprintf("JIG-%d", 100+i), "a", journal.EventClaim, with("s", "", "", "", "", "")))
 	}

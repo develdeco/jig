@@ -53,9 +53,13 @@ func (r Report) Blocks() []string {
 	if len(r.Receipts) > 0 {
 		rows := make([][]string, len(r.Receipts))
 		for i, x := range r.Receipts {
-			rows[i] = []string{x.Ticket, strconv.Itoa(x.Files), strconv.FormatInt(x.Bytes, 10), strconv.FormatInt(x.Peak, 10)}
+			back := "no"
+			if x.Back {
+				back = "yes"
+			}
+			rows[i] = []string{x.Ticket, strconv.Itoa(x.Files), strconv.FormatInt(x.Bytes, 10), strconv.FormatInt(x.Peak, 10), strconv.Itoa(x.Rounds), back}
 		}
-		blocks = append(blocks, axi.Table("receipts", []string{"ticket", "files", "bytes", "peak"}, rows))
+		blocks = append(blocks, axi.Table("receipts", []string{"ticket", "files", "bytes", "peak", "rounds", "back"}, rows))
 	}
 	if len(r.Fog) > 0 {
 		var rows [][]string

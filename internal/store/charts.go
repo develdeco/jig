@@ -131,6 +131,9 @@ func (s *Store) ChartsListing(ticket string) ([]Listing, error) {
 	if ticket == "" {
 		return nil, nil
 	}
+	if out, ok, err := s.charts.pinnedListings(s, ticket); ok {
+		return out, err
+	}
 	names, err := s.ChartNames()
 	if err != nil {
 		return nil, err
@@ -799,6 +802,14 @@ func (s *Store) CreateChartWithIssue(name, title, issue string) error {
 // subdirectory of charts/ that has a tickets.yaml; an absent charts/
 // directory lists no charts.
 func (s *Store) ChartNames() ([]string, error) {
+	if names, ok, err := s.charts.pinnedNames(s); ok {
+		return names, err
+	}
+	return s.listCharts()
+}
+
+// listCharts is ChartNames read from the directory.
+func (s *Store) listCharts() ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(s.Root, chartsDirName))
 	if err != nil {
 		if os.IsNotExist(err) {

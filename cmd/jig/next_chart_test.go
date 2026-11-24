@@ -514,7 +514,7 @@ func TestChartWaitsOnAStackedParentsOpenPullRequest(t *testing.T) {
 	if want := "SHOP-2 waits for SHOP-1 to merge (" + parentPR + " OPEN), then its pull request is retargeted"; c.Reason != want {
 		t.Errorf("reason = %q, want %q", c.Reason, want)
 	}
-	n := chartOutput(c, m, nil)
+	n := chartOutput(c, m, nil, nil)
 	end := nextChartEnd{
 		Ticket: "SHOP-2", Blocker: "SHOP-1", Kind: "stacked",
 		Fact: "SHOP-2 is stacked on SHOP-1, whose work has not merged: once it has, the pull request of SHOP-2 is retargeted",

@@ -18,8 +18,8 @@ import (
 const deltaMaxLines = 400
 
 // deltaReadLine is the `read` line of a delta round's context: what to read,
-// in one sentence. The call-site part is also the review skill's reach step,
-// which widens it to any changed behavior.
+// in one sentence. The rule lives here, in jig's output, and not in the review
+// skill.
 const deltaReadLine = "this is a delta round: read the delta block and the answers; for each function or constant the delta changes in signature, return value or contract, find its call sites with `git grep` in the worktree and read them; open a whole file only for what the diff cannot show; make independent reads in one step"
 
 // fullReadLine is the `read` line of a full round's context: the same rule as

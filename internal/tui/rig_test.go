@@ -292,6 +292,16 @@ func draftedDigest() map[string]any {
 
 // rosterJSON is `jig next --json` for the store: JIG-1 is in its build, JIG-2
 // published and waits for a merge, JIG-3 has a brief waiting for its approval.
+// rosterJSONWith is rosterJSON with more rows after its own.
+func rosterJSONWith(rows ...map[string]any) string {
+	var r struct {
+		Tickets []map[string]any `json:"tickets"`
+	}
+	_ = json.Unmarshal([]byte(rosterJSON()), &r)
+	data, _ := json.Marshal(map[string]any{"tickets": append(r.Tickets, rows...)})
+	return string(data) + "\n"
+}
+
 func rosterJSON() string {
 	data, _ := json.Marshal(map[string]any{"tickets": []map[string]any{
 		{"id": "JIG-1", "title": "Greeting copy", "state": "ready", "digest": digestJSON("build", true,
@@ -321,9 +331,9 @@ type fakeRunner struct {
 
 func newRunner() *fakeRunner {
 	return &fakeRunner{by: map[string]ranStep{
-		"status JIG-1 --store /s": {Out: statusJIG1()},
-		"status JIG-2 --store /s": {Out: statusJIG2()},
-		"next --json --store /s":  {Out: rosterJSON()},
+		"status JIG-1 --store /s":         {Out: statusJIG1()},
+		"status JIG-2 --store /s":         {Out: statusJIG2()},
+		"next --json --roster --store /s": {Out: rosterJSON()},
 	}}
 }
 
@@ -465,7 +475,7 @@ func newRig(t *testing.T, ticket string) *rig {
 func newQuietRig(t *testing.T, ticket string) *rig {
 	t.Helper()
 	g := newRig(t, ticket)
-	g.r.answer("next --json --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
+	g.r.answer("next --json --roster --store /s", `{"tickets":[{"id":"JIG-1","title":"Greeting copy","state":"ready"},{"id":"JIG-2","title":"Config loader","state":"ready"}]}`+"\n", 0)
 	return g
 }
 

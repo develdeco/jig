@@ -243,7 +243,7 @@ func chartQuietRig(t *testing.T) (g *rig, advance func(time.Duration)) {
 func TestTheChartIsReadAgainWhenItsTicketsWereTouchedAndTheScreenWentQuiet(t *testing.T) {
 	t.Parallel()
 	g, advance := chartQuietRig(t)
-	chart, roster := "next checkout --json --store /s", "next --json --store /s"
+	chart, roster := "next checkout --json --store /s", "next --json --roster --store /s"
 	reads := func() (int, int) { return g.r.ran(chart), g.r.ran(roster) }
 	c0, r0 := reads()
 
@@ -306,7 +306,7 @@ func TestTicketsGraduatedIntoTheOpenChartAreReadAtOnce(t *testing.T) {
 	before := g.r.ran(chart)
 	listing := checkoutListing()
 	listing["tickets"] = []string{"JIG-4", "JIG-5", "JIG-6", "JIG-7", "JIG-8", "JIG-9"}
-	g.r.answer("next --json --store /s", chartRoster(listing), 0)
+	g.r.answer("next --json --roster --store /s", chartRoster(listing), 0)
 	g.r.answer("status JIG-9 --store /s", untouchedStatus("JIG-9"), 0)
 	g.feed(jl(at(25, 0), "JIG-9", "", journal.EventClaim, with("s-builder", "", "", "", "", "")))
 	if n := g.r.ran(chart); n != before+1 {

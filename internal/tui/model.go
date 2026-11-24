@@ -194,10 +194,12 @@ type confirmation struct {
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
-	cfg  Config
-	st   styles
-	run  Runner
-	zone *time.Location
+	cfg Config
+	st  styles
+	run classedRunner
+	// queue is what run goes through: one command at a time, the next by class.
+	queue *queue
+	zone  *time.Location
 
 	w             *world
 	width, height int
@@ -218,6 +220,12 @@ type Model struct {
 	stream     chan events.Envelope
 	streamErr  chan error
 	rosterBusy bool
+	// mergeRefreshing is set while the read that asks the host for the kept
+	// pull request states is out (mergerefresh.go).
+	mergeRefreshing bool
+	// clockRuns counts the work clocks computed (work.go): the screens that
+	// show no time compute none.
+	clockRuns int
 	// rosterStarted counts the roster reads begun, so a read can be told from one
 	// that was already out when something happened.
 	rosterStarted int
@@ -308,7 +316,8 @@ func New(cfg Config) *Model {
 	}
 	m.st = styles{r: r}
 	if cfg.Run != nil {
-		m.run = serial(cfg.Run)
+		m.queue = &queue{run: cfg.Run}
+		m.run = m.queue.do
 	}
 	m.nav = []navEntry{{screen: screenMain}}
 	m.followNew, m.started = cfg.Ticket == "" && cfg.Chart == "", m.now()
@@ -319,6 +328,7 @@ func New(cfg Config) *Model {
 	} else if cfg.Chart != "" {
 		m.nav = append(m.nav, navEntry{screen: screenChart, chart: cfg.Chart, follow: true})
 	}
+	m.syncScreen()
 	return m
 }
 
@@ -402,6 +412,12 @@ func (m *Model) mergeAfterTick() tea.Cmd {
 // its status. Every other screen, the project's list included, reads nothing.
 // A read already out is not doubled: the loads refuse a second one.
 func (m *Model) onMerge() tea.Cmd {
+	if e := m.top(); e.screen == screenMain {
+		if m.mainWaitsOnMerge() {
+			return m.refreshMergesThenRoster()
+		}
+		return nil
+	}
 	if e := m.top(); e.screen == screenChart {
 		if c := m.w.charts[e.chart]; c != nil && c.waitsOnMerge() {
 			return tea.Batch(m.loadRoster(), m.loadChart(e.chart))
@@ -567,6 +583,7 @@ func (m *Model) waitEvents() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
+	m.syncScreen()
 	return next, cmd
 }
 
@@ -592,6 +609,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case idleMsg:
 		return m, tea.Batch(m.onIdle(), m.idleAfterTick())
+	case mergeRefreshedMsg:
+		m.mergeRefreshing = false
+		return m, m.loadRoster()
 	case mergeMsg:
 		return m, tea.Batch(m.onMerge(), m.mergeAfterTick())
 	case statusMsg:
@@ -766,9 +786,18 @@ func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	if e := m.top(); e.screen == screenChart && m.w.charts[e.chart] != nil {
 		shown = m.w.charts[e.chart].listing.Tickets
 	}
+	first := !m.w.rosterRead
+	under, onRow := m.rowUnderCursor()
 	m.w.setRoster(msg.rows)
 	m.w.setCharts(msg.charts)
+	m.putCursorOn(under, onRow)
 	var cmds []tea.Cmd
+	if first && m.top().screen == screenMain && m.mainWaitsOnMerge() {
+		// What the roster shows of a merge is the last state kept, which may be
+		// old at launch: the host is asked once, in the background, as the merge
+		// timer does after.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	}
 	if was && !m.awaitingTicket() {
 		// The awaited ticket is listed: read it.
 		cmds = append(cmds, m.refreshStatus(m.cfg.Ticket))
@@ -1068,6 +1097,40 @@ func (m *Model) move(delta int) {
 	}
 }
 
+// rowUnderCursor is the row the cursor stands on, false when the screen has no
+// row or none is under it.
+func (m *Model) rowUnderCursor() (rowRef, bool) {
+	e := m.top()
+	if e.follow {
+		return rowRef{}, false
+	}
+	refs := m.page().refs()
+	if e.sel < 0 || e.sel >= len(refs) {
+		return rowRef{}, false
+	}
+	return refs[e.sel], true
+}
+
+// putCursorOn moves the cursor to the row ref names, which a new list of rows
+// may have put elsewhere: the person's place is the ticket, not its number in
+// the list. A row the list no longer has leaves the cursor where it was.
+func (m *Model) putCursorOn(ref rowRef, ok bool) {
+	if !ok {
+		return
+	}
+	refs := m.page().refs()
+	for i, r := range refs {
+		if r == ref {
+			m.top().sel = i
+			return
+		}
+	}
+	// A row the new list lacks leaves the cursor on the last one there is.
+	if e := m.top(); e.sel >= len(refs) {
+		e.sel = max(0, len(refs)-1)
+	}
+}
+
 // followSel puts a following cursor on the ticket's current step, and moves
 // a cursor the person left on the current step on to the next one when the
 // step is done.
@@ -1086,7 +1149,7 @@ func (m *Model) followSel() {
 	if t == nil || isMulti(t) {
 		return
 	}
-	cur := currentStep(m.steps(t))
+	cur := currentStep(m.stepWords(t))
 	if e.follow || (e.sel == e.lastCur && cur != e.lastCur) {
 		e.sel = cur
 	}
@@ -1240,7 +1303,14 @@ func (m *Model) back() {
 
 // refreshAll reads the ticket list and the open ticket's status again.
 func (m *Model) refreshAll() tea.Cmd {
-	cmds := []tea.Cmd{m.loadRoster()}
+	var cmds []tea.Cmd
+	if m.top().screen == screenMain && m.run != nil {
+		// What merged on the host is asked in the background first; the roster
+		// follows it.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	} else {
+		cmds = append(cmds, m.loadRoster())
+	}
 	if e := m.top(); e.screen == screenChart {
 		cmds = append(cmds, m.loadChart(e.chart))
 		if c := m.w.charts[e.chart]; c != nil {
