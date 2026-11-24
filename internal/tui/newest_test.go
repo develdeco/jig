@@ -186,7 +186,7 @@ func TestACutActivityCountsTheOlderRowsBelow(t *testing.T) {
 		g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
 		return g.feed(jig2()...).press("up", "enter").view()
 	}()
-	frames["chart"] = chartScreenRig(t).view()
+	frames["chart"] = chartScreenOfHeight(t, 30).view()
 	titles := map[string]string{"ticket": "Activity", "step": "Publish activity", "chart": "Activity"}
 	for name, frame := range frames {
 		var latest, of int

@@ -499,7 +499,7 @@ func TestChartRowReadsReadingUntilTheRosterIsThere(t *testing.T) {
 	answerChart(g, roster, "checkout", checkoutJSON(), nil)
 	g.feed().press("enter")
 	v := g.view()
-	for _, want := range []string{"○ JIG-4  Coupon model", "○ ○ ○ ○", "reading…", "state reading…"} {
+	for _, want := range []string{"○ JIG-4   Coupon model", "○ ○ ○ ○", "reading…", "state reading…"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, v)
 		}
@@ -731,7 +731,7 @@ func historyRig(t *testing.T, commits ...map[string]any) *rig {
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
 	g.feed(lines...)
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 43})
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 45})
 	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
@@ -763,14 +763,15 @@ func TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines(t *testing.T) {
 		"09:13:10 chart", "09:13:00 JIG-4 review·r2",
 	}
 	last := -1
+	words := readWords(v)
 	for _, want := range order {
-		at := strings.Index(v, want)
+		at := strings.Index(words, want)
 		if at < 0 || at < last {
 			t.Fatalf("%q is not below what precedes it in the Activity (at %d after %d):\n%s", want, at, last, v)
 		}
 		last = at
 	}
-	for _, want := range []string{"latest 11 of 23", "↓ 12 older", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
+	for _, want := range []string{"latest 11 of 23", "↓ 12 older", "09:14:25 chart  store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the Activity lacks %q:\n%s", want, v)
 		}

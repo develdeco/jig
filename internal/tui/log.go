@@ -488,17 +488,6 @@ var activityColumnNames = []string{"time", "step", "what"}
 // its tag and what happened.
 var chartActivityColumns = []column{{}, {id: true, gap: 1}, {gap: 1}, {free: true, gap: 1}}
 
-// boxActivity adds the lines of an activity panel, newest first: cells laid
-// out under cols, then the row that counts the older ones when there are any.
-// room is the rows the panel has for both.
-func (m *Model) boxActivity(p *page, cols []column, cells [][]string, older, room int) {
-	if older > 0 {
-		room--
-	}
-	for _, lines := range laidWithin(cols, cells, m.innerWidth(), room) {
-		p.boxLaid(nil, lines)
-	}
-	if older > 0 {
-		p.boxAdd(m.olderRow(older))
-	}
-}
+// chartActivityColumnNames name them.
+var chartActivityColumnNames = []string{"time", "ticket", "step", "what"}
+

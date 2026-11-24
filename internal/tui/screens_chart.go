@@ -11,7 +11,7 @@ import (
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
 // its frame: the newest two lines.
-const activityFloor = 4
+const activityFloor = 5
 
 // mapLabelW is the width of the label column of the Map panel.
 const mapLabelW = 12
@@ -116,19 +116,30 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		cells = append(cells, []string{m.st.icon(r.state()), spaces(2*r.depth) + r.id, r.title, m.chartDots(r), noteOf(r)})
+		age := ""
+		if r.t != nil {
+			age = m.st.dim(m.ageOf(r.t.lastActivity()))
+		}
+		cells = append(cells, []string{m.st.icon(r.state()), spaces(2*r.depth) + r.id, r.title, m.chartDots(r), noteOf(r), age})
 	}
 	// The entries that have no ticket yet: fog, listed after the tickets.
 	nFog := 0
 	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
-				cells = append(cells, []string{m.st.dim("·"), "", m.st.dim(t.Title), "", m.st.dim("fog · not graduated")})
+				cells = append(cells, []string{m.st.dim("·"), "", m.st.dim(t.Title), "", m.st.dim("fog · not graduated"), ""})
 				nFog++
 			}
 		}
 	}
-	laid := layout(ticketColumns, cells, m.innerWidth())
+	var laid [][]string
+	if len(cells) > 0 {
+		names := make([]string, len(ticketColumnNames))
+		for i, n := range ticketColumnNames {
+			names[i] = m.st.dim(n)
+		}
+		laid = m.laidList(&p, ticketColumns, names, cells, 0)
+	}
 	for i, r := range rows {
 		p.boxLaid(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
@@ -153,8 +164,9 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 }
 
 // ticketColumns are the columns of a panel's ticket rows: the state icon
-// (indented under its parent), the id, the title, the five steps and the note.
-var ticketColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}}
+// (indented under its parent), the id, the title, the five steps, the note and
+// the age, which is never cut.
+var ticketColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}, {gap: 2, keep: true}}
 
 // chartNote is the words after a ticket's steps in the chart: what it waits
 // for when its build has not begun, that it can start, or where it stands as
@@ -523,20 +535,18 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
 	}
 	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
-	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
+	// The edges and the names take three of the rows the panel has.
+	room := max(activityFloor-3, m.bodyRows()-m.taken(p)-3)
+	shown, older := cutNewest(all, room)
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
 	}
-	p.boxTop("Activity", right)
-	if len(all) == 0 {
-		p.boxAdd(m.st.dim("nothing yet"))
-	}
-	cells := make([][]string, len(shown))
+	items := make([]listRow, len(shown))
 	for i, e := range shown {
 		tag := e.tag()
 		if e.commit != nil {
-			cells[i] = []string{m.st.dim(clockAt(e.at, m.zone)), e.id, m.st.dim(tag), m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject}
+			items[i] = listRow{cells: []string{m.st.dim(clockAt(e.at, m.zone)), e.id, m.st.dim(tag), m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject}}
 			continue
 		}
 		if e.step >= 0 {
@@ -544,10 +554,14 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		} else {
 			tag = m.st.dim(tag)
 		}
-		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}
+		items[i] = listRow{cells: []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}}
 	}
-	m.boxActivity(p, chartActivityColumns, cells, older, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
-	p.boxEnd()
+	spec := listSpec{title: "Activity", summary: right, cols: chartActivityColumns, names: chartActivityColumnNames, rows: items, empty: "nothing yet", room: room}
+	if older > 0 {
+		spec.room--
+		spec.after = []string{m.olderRow(older)}
+	}
+	m.listPanel(p, spec)
 }
 
 // chartFirstOpen is the position, among a chart screen's rows, of the first

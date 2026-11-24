@@ -1,14 +1,16 @@
 jig  demo › checkout  Coupons at checkout                        ? run needs you
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 5 published ─╮
-  │  ◇ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4" │
-  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2   │
-  │                                           is being built                   │
-  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next               │
-  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                 │
-  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR  │
-  │                                           is open                          │
-  │  ·        Stack two coupons               fog · not graduated              │
+  │    ticket  title                steps      where it stands             age │
+  │  ◇ JIG-4   Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land   45m │
+  │                                            JIG-4"                          │
+  │▸ ◐ JIG-5   Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green ·       57m │
+  │                                            slice s2 is being built         │
+  │  ◐ JIG-8   Show the discount    ◐ ○ ○ ○ ○  ready · brief next              │
+  │  ◐ JIG-6   Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                │
+  │  ◐ JIG-7   Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR │
+  │                                            is open                         │
+  │  ·         Stack two coupons               fog · not graduated             │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────── JIG-5 ─╮
   │  slice s2 · claimed · builder                                              │
@@ -20,7 +22,8 @@ jig  demo › checkout  Coupons at checkout                        ? run needs y
   │  spend   31.2M tokens · $12.34 · 3 tickets · 2 subagents                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────── latest 1 of 18 ─╮
-  │  09:14:21 JIG-4 publish·done ● finished                                    │
+  │  time     ticket step         what                                         │
+  │  09:14:21 JIG-4  publish·done ● finished                                   │
   │  ↓ 17 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────

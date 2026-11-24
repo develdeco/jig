@@ -49,19 +49,11 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		for i, n := range s.names {
 			names[i] = m.st.dim(n)
 		}
-		cells := make([][]string, 0, len(s.rows)+1)
-		cells = append(cells, names)
-		for _, r := range s.rows {
-			cells = append(cells, r.cells)
+		cells := make([][]string, len(s.rows))
+		for i, r := range s.rows {
+			cells[i] = r.cells
 		}
-		var laid [][]string
-		if s.room > 0 {
-			laid = laidWithin(s.cols, cells, m.innerWidth(), s.room+1)
-		} else {
-			laid = layout(s.cols, cells, m.innerWidth())
-		}
-		p.boxNames(laid[0])
-		for i, lines := range laid[1:] {
+		for i, lines := range m.laidList(p, s.cols, names, cells, s.room) {
 			p.boxLaid(s.rows[i].ref, lines)
 		}
 	}
@@ -89,10 +81,27 @@ func (m *Model) ageOf(at time.Time) string {
 	return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 }
 
+// laidList lays the cells of a list out under cols with its names, in one call of
+// the allocator, adds the names row to the panel p and gives back the lines of
+// each row. room, when it is more than 0, is the most lines the rows may take.
+func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int) [][]string {
+	all := make([][]string, 0, len(cells)+1)
+	all = append(all, names)
+	all = append(all, cells...)
+	var laid [][]string
+	if room > 0 {
+		laid = laidWithin(cols, all, m.innerWidth(), room+1)
+	} else {
+		laid = layout(cols, all, m.innerWidth())
+	}
+	p.boxNames(laid[0])
+	return laid[1:]
+}
+
 // boxNames adds the row of a list's column names to the panel.
 func (p *page) boxNames(lines []string) {
 	for i, l := range lines {
-		p.lines = append(p.lines, pline{text: l, box: boxMid, names: i == 0, cont: i > 0})
+		p.lines = append(p.lines, pline{text: l, box: boxMid, names: true, cont: i > 0})
 	}
 }
 

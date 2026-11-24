@@ -11,7 +11,7 @@ import (
 // spendHeight is the height of the terminal the spend tests draw on: three rows
 // more than the 80 by 24 screen, which the Detail panel takes, so the Run panel
 // keeps every row, the spend one among them.
-const spendHeight = 27
+const spendHeight = 30
 
 // chartScreenOfHeight is chartScreenRig on a terminal of 80 columns and height
 // rows.

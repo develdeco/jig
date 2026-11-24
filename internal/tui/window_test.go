@@ -359,7 +359,7 @@ func TestEveryWindowDrawsTheCursorsRow(t *testing.T) {
 								// A side the window cuts, with a line of text on it, says so.
 								hidden := func(a, b int) bool {
 									for _, ln := range l.pg.lines[a:b] {
-										if ln.box != boxTop && ln.box != boxBottom {
+										if ln.box != boxTop && ln.box != boxBottom && !ln.names {
 											return true
 										}
 									}

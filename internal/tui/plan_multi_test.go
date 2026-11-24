@@ -104,7 +104,7 @@ func TestMultiTaskNestsUnderTheIssuesTasks(t *testing.T) {
 	kids := &digestInfo{Kind: "multi-task", Parent: "SHOP-49", State: "landed", Children: []digestChild{{ID: "SHOP-5"}, {ID: "SHOP-6"}},
 		PRs: []digestPR{{Repo: "demo", Number: 7, State: "merged", Target: planBranch}}}
 	done := planRig(t, planSpec{multi: true, kidsLanded: true, multiDigest: kids})
-	done.m.height, done.m.width = 40, 100
+	done.m.height, done.m.width = 40, 170
 	dv := stripANSI(done.view())
 	if row := lineWith(dv, "SHOP-7  "); !strings.Contains(row, "✓ SHOP-7") || !strings.Contains(row, "multi-task · landed · into the issue's branch at 09:25:00") {
 		t.Errorf("a landed multi-task reads %q", row)

@@ -164,9 +164,9 @@ func TestChartDetailGivesUpSliceRowsBeforeAnAsk(t *testing.T) {
 		slice, hold bool
 		whole       bool
 	}{
-		{28, true, true, true},
-		{26, false, true, true},
-		{21, false, true, true},
+		{30, true, true, true},
+		{28, false, true, true},
+		{23, false, true, true},
 		{18, false, true, false},
 	} {
 		g := heldChartRig(t)

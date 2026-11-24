@@ -220,7 +220,7 @@ func (m *Model) View() string {
 	body, from, to := m.windowRows(l.pg, l.sel, start, l.pageH, w, above)
 	m.drawn = drawnAsks(l.pg, from, to-from)
 	m.rest(l, start)
-	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, above))
+	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, l.pageH, above))
 	if m.help != nil {
 		// The keys list is drawn over the body, and no ask is drawn under it.
 		body = m.helpBody(l.pageH, w)
@@ -420,11 +420,10 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 	for s > 0 && lines[s].cont {
 		s--
 	}
-	if s > 0 && lines[s].box == boxMid && lines[s-1].box == boxTop {
-		s--
-	}
-	if s > 1 && lines[s-1].names && lines[s-2].box == boxTop {
-		s -= 2
+	if top, _ := boxOf(lines, s); top >= 0 && s > top && s <= top+namesRows(lines, top)+1 {
+		// A window that would start on a list's first row, or in its names,
+		// starts at the box's top edge.
+		s = top
 	}
 	for {
 		e := fitEnd(lines, s, h, false)
@@ -490,9 +489,7 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 		if k > 0 {
 			top++
 		}
-		if namesAbove(lines, s) {
-			top++
-		}
+		top += namesAbove(lines, s, h)
 	}
 	for e := min(n, s+h); e > s; e-- {
 		if e < n && lines[e].cont && !split {
@@ -591,9 +588,9 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		inBox, top, k := hiddenAbove(lines, from)
 		if inBox {
 			rows = append(rows, fit(m.frameLine(lines[top], "  ", w, false), w))
-			if namesAbove(lines, from) {
-				// A list cut from below its first row keeps its column names.
-				rows = append(rows, fit(m.frameLine(lines[top+1], "  ", w, false), w))
+			// A list cut from below its first row keeps its column names.
+			for i := 1; i <= namesAbove(lines, from, h); i++ {
+				rows = append(rows, fit(m.frameLine(lines[top+i], "  ", w, false), w))
 			}
 		}
 		switch {
@@ -1040,12 +1037,33 @@ func hiddenAbove(lines []pline, from int) (inBox bool, top, k int) {
 	return true, top, k
 }
 
-// namesAbove is whether a window that starts at line from, below the first row
-// of a list's box, draws the box's names row under the top edge it draws.
-func namesAbove(lines []pline, from int) bool {
-	inBox, top, _ := hiddenAbove(lines, from)
-	return inBox && top+1 < len(lines) && lines[top+1].names && from > top+1
+// namesRows is how many lines the names of the list in the box whose top edge is
+// line top take: one, and the lines the names wrapped onto when the list is
+// narrow.
+func namesRows(lines []pline, top int) int {
+	n := 0
+	for i := top + 1; i < len(lines) && lines[i].names; i++ {
+		n++
+	}
+	return n
 }
+
+// namesAbove is how many lines of a list's names a window that starts at line
+// from, below the first row of the list's box, draws under the top edge it
+// draws.
+// A window of fewer rows than namesMinWindow has no room for them beside the
+// marks and the edges, and leaves them out.
+func namesAbove(lines []pline, from, h int) int {
+	inBox, top, _ := hiddenAbove(lines, from)
+	if n := namesRows(lines, top); inBox && from > top+n && h >= namesMinWindow {
+		return n
+	}
+	return 0
+}
+
+// namesMinWindow is the fewest rows of a window that keep the names of a list it
+// cuts under its top edge.
+const namesMinWindow = 9
 
 // hiddenBelow is hiddenAbove for the lines below a window that ends before line
 // to: whether it ends inside a box (drawn with its bottom edge, at bottom), and
@@ -1069,7 +1087,7 @@ func hiddenBelow(lines []pline, to int) (inBox bool, bottom, k int) {
 // before its first line: the top edge of the box it starts in and the mark of
 // what lies above, or the count of what came in above in its place. A plain
 // window has none.
-func windowPrefix(lines []pline, from, to int, above string) int {
+func windowPrefix(lines []pline, from, to, h int, above string) int {
 	if from == 0 {
 		return 0
 	}
@@ -1081,8 +1099,5 @@ func windowPrefix(lines []pline, from, to int, above string) int {
 	if k > 0 || above != "" {
 		n++
 	}
-	if namesAbove(lines, from) {
-		n++
-	}
-	return n
+	return n + namesAbove(lines, from, h)
 }
