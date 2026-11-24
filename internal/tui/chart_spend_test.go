@@ -19,7 +19,7 @@ func chartScreenOfHeight(t *testing.T, height int) *rig {
 	t.Helper()
 	g := chartRig(t)
 	g.send(tea.WindowSizeMsg{Width: 80, Height: height})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}
@@ -47,7 +47,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 	}), status)
 	g.feed(lines...)
 	g.send(tea.WindowSizeMsg{Width: 80, Height: spendHeight})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}

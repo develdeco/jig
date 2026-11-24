@@ -153,6 +153,8 @@ type navEntry struct {
 	// the page has had a row to stand on.
 	cur    rowIdentity
 	curSet bool
+	// open are the fold rows of the main screen that are opened, by group name.
+	open map[string]bool
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -243,7 +245,10 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	started   time.Time
+	// folded says, for each row of the main screen's list that a closed fold
+	// hides, the fold row it is in: the page of the last draw.
+	folded  map[rowIdentity]rowIdentity
+	started time.Time
 }
 
 // New builds the model for cfg.
@@ -1093,6 +1098,15 @@ func (m *Model) followRow(e *navEntry) {
 			}
 		}
 	}
+	if fold, ok := m.folded[e.cur]; ok && e.curSet {
+		// The row is folded away: the cursor is on the fold row that holds it.
+		for i, r := range refs {
+			if r.identity() == fold {
+				e.sel, e.cur = i, fold
+				return
+			}
+		}
+	}
 	e.sel = min(max(e.sel, 0), len(refs)-1)
 	e.cur, e.curSet = refs[e.sel].identity(), true
 }
@@ -1140,6 +1154,13 @@ func (m *Model) open() tea.Cmd {
 	}
 	var next navEntry
 	switch ref.kind {
+	case rowFold:
+		e := &m.nav[0]
+		if e.open == nil {
+			e.open = map[string]bool{}
+		}
+		e.open[ref.id] = !e.open[ref.id]
+		return nil
 	case rowChart:
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:

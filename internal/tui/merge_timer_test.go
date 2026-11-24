@@ -76,7 +76,7 @@ func TestAChartThatWaitsOnNothingIsNotReadOnTheTimer(t *testing.T) {
 	g := chartRig(t)
 	_, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", withoutEnds(), status)
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart", g.m.Screen())
 	}

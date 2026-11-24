@@ -131,6 +131,13 @@ type ticket struct {
 	// blockers are the blockers `jig next` listed for the ticket that are not
 	// met.
 	blockers []chartWait
+	// state is the roster's word on the ticket (new, ready, active, green,
+	// blocked, done or closed), rostered whether the last roster listed it, and
+	// readyAt its place in that roster's order to start the ready tickets, 1 for
+	// the first and 0 for a ticket the order does not name.
+	state    string
+	rostered bool
+	readyAt  int
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -215,9 +222,13 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 func (w *world) setRoster(rows []rosterRow) {
 	listed := map[string]bool{}
 	order := make([]string, 0, len(rows)+len(w.order))
+	for _, t := range w.tickets {
+		t.rostered, t.readyAt = false, 0
+	}
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.blockers, t.digest = r.Title, r.Blockers, r.Digest
+		t.state, t.rostered, t.readyAt = r.State, true, r.StartOrder
 		t.awaiting = false
 		listed[r.ID] = true
 		order = append(order, r.ID)
@@ -275,6 +286,10 @@ type rosterRow struct {
 	ID, Title, State string
 	Blockers         []chartWait
 	Digest           *digestInfo
+	// StartOrder is the ticket's place in the roster's next list, the ready
+	// tickets in the order to start them: 1 for the first, 0 when it is not
+	// in it.
+	StartOrder int
 }
 
 // latest is the position of the last line of the ticket whose event is one

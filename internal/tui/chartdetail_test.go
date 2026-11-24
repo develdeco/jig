@@ -44,7 +44,7 @@ func heldChartRig(t *testing.T) *rig {
 // onChart opens the chart screen of a rig that shows the project's list.
 func onChart(g *rig) *rig {
 	g.t.Helper()
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		g.t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}

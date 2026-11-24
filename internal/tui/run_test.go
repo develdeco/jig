@@ -165,8 +165,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	src := newLiveSource(append(jig1(), jig2()...)...)
 	s := startRun(t, plainConfig(src, r))
 
-	s.out.until(t, "waits to land")
-	s.keys("\r") // open JIG-1
+	s.out.until(t, "needs you (2)")
+	s.keys("\x1b[H\r") // open JIG-1, the first row of the group
 	s.out.until(t, "needs you")
 	s.keys("g")
 	r.untilRan(t, "gate JIG-1 --store /s")
@@ -203,7 +203,7 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	s.out.until(t, "open question")
 
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
-	s.out.until(t, "JIG-7")
+	s.out.until(t, "done (1)") // the roster does not list it: it stands with the finished
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatal(err)

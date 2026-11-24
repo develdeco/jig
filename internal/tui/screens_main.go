@@ -5,22 +5,21 @@ import (
 	"strings"
 )
 
-// mainPage is the project: one row per ticket, with its five steps as a row
-// of icons and where its current step stands, then a row per chart.
+// mainPage is the project as a queue of what the person does next: its tickets
+// and the charts that plan no issue, each in the first group that holds for it
+// (queue.go), a heading with its count over each group, and a fold row for the
+// groups that are mostly history.
 func (m *Model) mainPage() page {
 	var p page
+	m.folded = nil
 	if !m.w.rosterRead && m.run != nil {
 		// Nothing is drawn from the stream before the roster is read: rows
 		// listed in replay order would re-sort under the cursor when it arrives.
 		p.add(m.st.dim("reading the store…"))
 		return p
 	}
-	ids := m.w.order
-	if len(ids) == 0 && len(m.w.chartOrder) > 0 {
-		m.mainCharts(&p, 4, 0)
-		return p
-	}
-	if len(ids) == 0 {
+	q := m.queue()
+	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
 		if m.followNew {
@@ -28,32 +27,58 @@ func (m *Model) mainPage() page {
 		}
 		return p
 	}
-
-	type row struct {
-		id, title, dots, detail, state string
+	open := m.top().open
+	if m.top().screen != screenMain {
+		open = nil
 	}
-	rows := make([]row, 0, len(ids))
-	idW, titleW := 4, 0
-	for _, id := range ids {
-		t := m.w.tickets[id]
-		steps := m.steps(t)
-		r := row{id: id, title: t.title, dots: m.stepDots(steps), detail: m.ticketDetail(t, steps), state: steps[currentStep(steps)].State}
-		rows = append(rows, r)
-		idW = max(idW, width(id))
-		titleW = max(titleW, width(r.title))
-	}
-	titleW = min(titleW, max(0, (m.width-idW-20)/3))
-
-	for _, r := range rows {
-		line := m.st.icon(r.state) + " " + pad(r.id, idW)
-		if titleW > 0 {
-			line += "  " + pad(r.title, titleW)
+	for g := mainGroup(0); g < groupCount; g++ {
+		rows := q.byGroup[g]
+		if len(rows) == 0 {
+			continue
 		}
-		line += "  " + r.dots + "  " + r.detail
-		p.addRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		if len(p.lines) > 0 {
+			p.add("")
+		}
+		if !g.folds() {
+			p.add(m.st.dim(g.heading(len(rows))))
+			m.addQueueRows(&p, q, rows)
+			continue
+		}
+		fold := rowRef{kind: rowFold, id: g.name()}
+		if open[g.name()] {
+			p.addRow(fold, m.st.dim("▾ "+g.heading(len(rows))+" · enter folds them"))
+			m.addQueueRows(&p, q, rows)
+			continue
+		}
+		p.addRow(fold, m.st.dim("▸ "+g.heading(len(rows))+" · enter shows them"))
+		if m.folded == nil {
+			m.folded = map[rowIdentity]rowIdentity{}
+		}
+		for _, r := range rows {
+			m.folded[r.ref().identity()] = fold.identity()
+		}
 	}
-	m.mainCharts(&p, idW, titleW)
 	return p
+}
+
+// addQueueRows draws the rows of one group.
+func (m *Model) addQueueRows(p *page, q queue, rows []queueRow) {
+	for _, r := range rows {
+		p.addRow(r.ref(), m.queueLine(q, r))
+	}
+}
+
+// queueLine is a row of the queue: a ticket's icon, id, title, the five steps and
+// where it stands, or a chart's name, title and published count.
+func (m *Model) queueLine(q queue, r queueRow) string {
+	if r.chart {
+		return m.chartMainRow(r.id, q.chartIDW, q.chartTitleW)
+	}
+	line := m.st.icon(r.cur.State) + " " + pad(r.id, q.idW)
+	if q.titleW > 0 {
+		line += "  " + pad(r.t.title, q.titleW)
+	}
+	return line + "  " + m.stepDots(r.steps) + "  " + m.ticketDetail(r.t, r.steps)
 }
 
 // stepDots are a ticket's steps as icons, in order.

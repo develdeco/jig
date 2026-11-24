@@ -170,7 +170,7 @@ func TestAnOpenQuestionIsNeverHeldBackByALiveBuilder(t *testing.T) {
 	if p := pagesText(g.m.ticketPage("JIG-1")); !hasGroup(p) || !strings.Contains(p, "Formal or casual?") {
 		t.Errorf("a live builder hides its own question on the ticket screen:\n%s", p)
 	}
-	if p := pagesText(g.m.mainPage()); !strings.Contains(p, "1 open question") {
+	if p := g.mainText(); !strings.Contains(p, "1 open question") {
 		t.Errorf("main does not count the question of a live builder:\n%s", p)
 	}
 
@@ -302,7 +302,7 @@ func TestALiveTicketsOwnAsksAndApprovalsStayHeldBackOnTheChart(t *testing.T) {
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
 	g.feed(lines...)
 	g.pin("JIG-4", task("land", false, "done|approved by Ada", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "done|landed"))
-	g.press("end", "enter")
+	g.openChart("checkout")
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 60})
 	if !hasNeedsPhase(g, "JIG-5") {
 		t.Fatalf("the fixture's ticket has no phase waiting on the person")
@@ -363,7 +363,7 @@ func TestNeedsYouEndsWithItsCause(t *testing.T) {
 		if p := pagesText(g.m.ticketPage("JIG-1")); hasGroup(p) {
 			t.Errorf("the ticket screen still asks after the answer:\n%s", p)
 		}
-		if p := pagesText(g.m.mainPage()); strings.Contains(p, "open question") {
+		if p := g.mainText(); strings.Contains(p, "open question") {
 			t.Errorf("main still counts the question after the answer:\n%s", p)
 		}
 	})

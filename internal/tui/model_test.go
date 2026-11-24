@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -385,18 +384,19 @@ func TestResizeRedrawsWithinTheNewSize(t *testing.T) {
 func TestACursorBelowTheWindowScrollsIntoView(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
-	var envs []events.Envelope
+	var rows []rosterRow
 	for i := 0; i < 30; i++ {
-		envs = append(envs, jl(at(5, i), fmt.Sprintf("JIG-%d", 100+i), "a", journal.EventClaim, with("s", "", "", "", "", "")))
+		rows = append(rows, rosterRow{ID: fmt.Sprintf("JIG-%d", 100+i), Title: "T", State: "ready"})
 	}
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 12})
-	g.feed(envs...)
+	g.feed()
+	g.m.w.setRoster(rows)
 	if v := g.view(); !strings.Contains(v, "JIG-100") || strings.Contains(v, "JIG-129") {
 		t.Fatalf("the top of 30 tickets in 12 lines:\n%s", v)
 	}
 	g.press("end")
 	v := g.view()
-	if !strings.Contains(v, "▸ ◐ JIG-129") || strings.Contains(v, "JIG-100") {
+	if !strings.Contains(v, "▸ ◐ JIG-3 ") || strings.Contains(v, "JIG-100") {
 		t.Errorf("the cursor is not in view after end:\n%s", v)
 	}
 	if lines := strings.Count(v, "\n") + 1; lines != 12 {

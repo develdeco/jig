@@ -2,7 +2,6 @@ package tui
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/events"
@@ -24,6 +23,9 @@ const (
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
 	rowStop = "stop"
+	// rowFold is the fold row of a group of the project's list: enter opens the
+	// rows it holds in place, and folds them again.
+	rowFold = "fold"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
@@ -240,12 +242,7 @@ func (m *Model) header(w int) []string {
 	var right, title, idCrumb string
 	switch e.screen {
 	case screenMain:
-		n := len(m.w.order)
-		right = strconv.Itoa(n) + " " + plural(n, "ticket", "tickets")
-		if nc := len(m.w.chartOrder); nc > 0 {
-			right += " · " + strconv.Itoa(nc) + " " + plural(nc, "chart", "charts")
-		}
-		right = m.st.dim(right)
+		right = m.st.dim(m.queueSummary())
 	case screenChart:
 		crumbs += " › " + m.st.bold(e.chart)
 		if c := m.w.charts[e.chart]; c != nil {
