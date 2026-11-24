@@ -313,3 +313,19 @@ func openStyle(s string) string {
 	}
 	return open
 }
+
+// laidWithin lays cells out under cols in width cells and takes at most room
+// lines: free text wraps to as many rows as it needs, and a list short of room
+// asks for fewer rows of each before it gives up a row.
+func laidWithin(cols []column, cells [][]string, width, room int) [][]string {
+	for rows := wrapRows; ; rows-- {
+		laid := layoutRows(cols, cells, width, rows)
+		used := 0
+		for _, lines := range laid {
+			used += len(lines)
+		}
+		if used <= room || rows <= 1 {
+			return laid
+		}
+	}
+}

@@ -507,19 +507,14 @@ func (c chartLine) tag() string {
 // as the rows left below p allow, two at least.
 func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
 	var all []chartLine
-	idW := 0
 	for _, r := range rows {
 		if r.t == nil {
 			continue
 		}
-		idW = max(idW, width(r.id))
 		for _, pl := range m.placed(r.t, r.d) {
 			at, _ := pl.l.At()
 			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
 		}
-	}
-	if len(history) > 0 {
-		idW = max(idW, width(chartCommitID))
 	}
 	// The commits come after the tickets' lines, oldest first, so that at one
 	// instant the stable sort keeps git's order (the newer above the older) and
@@ -537,14 +532,11 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	tagW := 0
-	for _, e := range shown {
-		tagW = max(tagW, min(tagMaxW, width(e.tag())))
-	}
-	for _, e := range shown {
-		tag := pad(e.tag(), tagW)
+	cells := make([][]string, len(shown))
+	for i, e := range shown {
+		tag := e.tag()
 		if e.commit != nil {
-			p.boxAdd(m.st.dim(clockAt(e.at, m.zone)) + " " + pad(e.id, idW) + " " + m.st.dim(tag) + " " + m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject)
+			cells[i] = []string{m.st.dim(clockAt(e.at, m.zone)), e.id, m.st.dim(tag), m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject}
 			continue
 		}
 		if e.step >= 0 {
@@ -552,11 +544,9 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		} else {
 			tag = m.st.dim(tag)
 		}
-		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + pad(e.id, idW) + " " + tag + " " + m.moveText(e.t, e.l))
+		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}
 	}
-	if older > 0 {
-		p.boxAdd(m.olderRow(older))
-	}
+	m.boxActivity(p, chartActivityColumns, cells, older, max(activityFloor-2, m.bodyRows()-len(p.lines)-2))
 	p.boxEnd()
 }
 

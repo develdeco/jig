@@ -328,16 +328,7 @@ func (m *Model) foldedFit(t *ticket, step int, subs []phase.Sub, labelW int, c c
 	if len(picked) < len(subs) {
 		left--
 	}
-	for rows := wrapRows; ; rows-- {
-		laid = layoutRows(subColumns, cells, m.innerWidth(), rows)
-		used := 0
-		for _, lines := range laid {
-			used += len(lines)
-		}
-		if used <= left || rows <= 1 {
-			return picked, laid
-		}
-	}
+	return picked, laidWithin(subColumns, cells, m.innerWidth(), left)
 }
 
 // foldedCells are a sub-step on one line: subCells with what the status adds to

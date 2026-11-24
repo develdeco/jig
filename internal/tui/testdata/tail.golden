@@ -10,14 +10,14 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   needs you
   ? builder asks about slice c  q-001
   tail ─────────────────────────────────────────────────────────────────────────
-  09:02:01 l tool                Bash s-builder
-  09:02:00 j question        c   q-001 Formal or casual? (agent) s-builder
-  09:01:40 j oracle          b   fail bbbbbbb TestB: want 2, got 3
-  09:01:10 j verify-pending  b   bbbbbbb s-builder
-  09:01:00 j claim           b   s-builder
-  09:00:21 j verified        a   aaaaaaa
-  09:00:20 j oracle          a   pass aaaaaaa
-  09:00:05 j verify-pending  a   aaaaaaa s-builder
-  09:00:01 j claim           a   s-builder
+  09:02:01 l tool             Bash s-builder
+  09:02:00 j question       c q-001 Formal or casual? (agent) s-builder
+  09:01:40 j oracle         b fail bbbbbbb TestB: want 2, got 3
+  09:01:10 j verify-pending b bbbbbbb s-builder
+  09:01:00 j claim          b s-builder
+  09:00:21 j verified       a aaaaaaa
+  09:00:20 j oracle         a pass aaaaaaa
+  09:00:05 j verify-pending a aaaaaaa s-builder
+  09:00:01 j claim          a s-builder
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ↑↓ move · enter open · a answer · 5 land · t tail

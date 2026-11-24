@@ -746,7 +746,7 @@ func describe(l events.Envelope) string {
 	case journal.EventPublishApproved:
 		return "publish approved " + repoWords(l) + short(l.Commit) + who
 	case journal.EventPr:
-		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + l.URL)
+		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + prRef(l.URL))
 	case journal.EventPublishDone:
 		return "published"
 	}

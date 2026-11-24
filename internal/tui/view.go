@@ -691,9 +691,20 @@ func (m *Model) tailLines(w, n int) []string {
 	}
 	envs = newestFirst(envs, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
 	envs, older := cutNewest(envs, n)
+	withTicket := e.screen == screenMain || e.screen == screenChart
+	cells := make([][]string, len(envs))
+	for i, l := range envs {
+		cells[i] = m.tailCells(l, withTicket)
+	}
+	room := n
+	if older > 0 {
+		room--
+	}
 	out := make([]string, 0, n)
-	for _, l := range envs {
-		out = append(out, fit("  "+m.tailLine(l, e.screen == screenMain || e.screen == screenChart), w))
+	for _, lines := range laidWithin(tailColumns, cells, max(1, w-2), room) {
+		for _, l := range lines {
+			out = append(out, fit("  "+l, w))
+		}
 	}
 	if older > 0 {
 		out = append(out, fit("  "+m.olderRow(older), w))
@@ -701,31 +712,34 @@ func (m *Model) tailLines(w, n int) []string {
 	return out
 }
 
-// tailLine is one stream line: the time, where it came from, the event, and
-// what it is about.
-func (m *Model) tailLine(l events.Envelope, withTicket bool) string {
+// tailColumns are the columns of a tail line: the time and where it came from,
+// the event, the ticket, the slice and what it is about.
+var tailColumns = []column{{}, {gap: 1}, {gap: 1}, {gap: 1}, {free: true, gap: 1}}
+
+// tailCells are one stream line as cells: the time, where it came from, the
+// event, the ticket when the screen is about several, the slice, and what the
+// line is about.
+func (m *Model) tailCells(l events.Envelope, withTicket bool) []string {
 	src := "j"
 	if l.Src == events.SrcLedger {
 		src = "l"
 	}
-	line := m.st.dim(clock(l, m.zone)+" "+src) + " "
-	event := pad(l.Event, 15)
+	event := l.Event
 	if s := eventState(l); s != "" {
 		event = m.st.state(s, event)
 	}
-	line += event + " "
+	ticket := ""
 	if withTicket {
-		line += pad(l.Ticket, 8) + " "
+		ticket = l.Ticket
 	}
-	line += pad(l.Slice, 3) + " " + detailOf(l)
-	return line
+	return []string{m.st.dim(clock(l, m.zone) + " " + src), event, ticket, l.Slice, detailOf(l)}
 }
 
 // detailOf is what a stream line is about, beyond its event: whatever of the
 // line's own fields name a subject or say what came of it.
 func detailOf(l events.Envelope) string {
 	var parts []string
-	for _, s := range []string{l.Tool, l.Ref, l.Outcome, short(l.Commit), l.Summary, l.URL} {
+	for _, s := range []string{l.Tool, l.Ref, l.Outcome, short(l.Commit), l.Summary, prRef(l.URL)} {
 		if s != "" {
 			parts = append(parts, s)
 		}

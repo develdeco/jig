@@ -318,13 +318,20 @@ func endNote(e chartEnd) string {
 // prNumber matches the number a pull request's address ends in.
 var prNumber = regexp.MustCompile(`/(?:pull|pulls|merge_requests)/(\d+)`)
 
+// prRef is how a line names the pull request at address: "PR #7", from the
+// number its path ends in. An address that is not a pull request's is returned
+// as it is: free text, which the layout wraps whole.
+func prRef(address string) string {
+	if m := prNumber.FindStringSubmatch(address); m != nil {
+		return "PR #" + m[1]
+	}
+	return address
+}
+
 // chartPRWords names a pull request and its state: "PR #7 open", or its address when
 // no number can be read from it.
 func chartPRWords(pr chartPR) string {
-	name := pr.URL
-	if m := prNumber.FindStringSubmatch(pr.URL); m != nil {
-		name = "PR #" + m[1]
-	}
+	name := prRef(pr.URL)
 	if pr.State != "" {
 		name += " " + strings.ToLower(pr.State)
 	}

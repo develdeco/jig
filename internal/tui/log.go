@@ -446,9 +446,6 @@ func tagOf(step int, key string) string {
 // stepTagState is the state whose color tags a step's lines.
 var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing, StatePublishing}
 
-// tagMaxW is the most cells a tag takes.
-const tagMaxW = 18
-
 // activityPanel adds the ticket's activity log to p, newest first: as many
 // lines as the rows left below what p holds allow, three at least, so the
 // panel's edge stays on the screen and a tall one is filled to its foot.
@@ -463,21 +460,39 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	tagW := 0
-	for _, e := range shown {
-		tagW = max(tagW, min(tagMaxW, width(tagOf(e.step, e.key))))
-	}
-	for _, e := range shown {
-		tag := pad(tagOf(e.step, e.key), tagW)
+	cells := make([][]string, len(shown))
+	for i, e := range shown {
+		tag := tagOf(e.step, e.key)
 		if e.step >= 0 {
 			tag = m.st.state(stepTagState[e.step], tag)
 		} else {
 			tag = m.st.dim(tag)
 		}
-		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + tag + " " + m.moveText(t, e.l))
+		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}
+	}
+	m.boxActivity(p, activityColumns, cells, older, max(3, m.bodyRows()-len(p.lines)-2))
+	p.boxEnd()
+}
+
+// activityColumns are the columns of an activity line: its time, its tag and
+// what happened.
+var activityColumns = []column{{}, {gap: 1}, {free: true, gap: 1}}
+
+// chartActivityColumns are a chart's activity line's: its time, the ticket,
+// its tag and what happened.
+var chartActivityColumns = []column{{}, {id: true, gap: 1}, {gap: 1}, {free: true, gap: 1}}
+
+// boxActivity adds the lines of an activity panel, newest first: cells laid
+// out under cols, then the row that counts the older ones when there are any.
+// room is the rows the panel has for both.
+func (m *Model) boxActivity(p *page, cols []column, cells [][]string, older, room int) {
+	if older > 0 {
+		room--
+	}
+	for _, lines := range laidWithin(cols, cells, m.innerWidth(), room) {
+		p.boxLaid(nil, lines)
 	}
 	if older > 0 {
 		p.boxAdd(m.olderRow(older))
 	}
-	p.boxEnd()
 }

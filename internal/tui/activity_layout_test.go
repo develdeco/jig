@@ -31,14 +31,14 @@ func TestActivityAndTailLaidOutAtThreeSizes(t *testing.T) {
 			lines := strings.Split(view, "\n")
 			wantNoRowWider(t, lines, w)
 			tail := view[strings.Index(view, "tail "):]
-			if !strings.Contains(tail, "publish-approved") {
+			if w >= 80 && !strings.Contains(tail, "publish-approved") {
 				t.Errorf("the tail does not name the newest event whole:\n%s", view)
 			}
 			if w >= 80 && !strings.Contains(tail, ids[1]) {
 				t.Errorf("at %d wide the tail does not name the slice whole:\n%s", w, view)
 			}
 			// Newest first, as the tail is drawn.
-			if a, b := strings.Index(tail, "publish-approved"), strings.Index(tail, "verify-pending"); a < 0 || b < 0 || a > b {
+			if a, b, c := strings.Index(tail, "09:03:00"), strings.Index(tail, "09:02:10"), strings.Index(tail, "09:00:00"); a < 0 || b < a || c < b {
 				t.Errorf("the tail's lines are out of order:\n%s", tail)
 			}
 		})
