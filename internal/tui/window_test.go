@@ -282,4 +282,79 @@ func TestAWindowTooShortForItsMarksDrawsPlainLines(t *testing.T) {
 	if from, to, plain = windowSpan(pg, 0, 4, 8, false); plain || to-from < 3 {
 		t.Errorf("a window of 8 rows is lines %d to %d (plain %v), want marks and at least 3 lines", from, to, plain)
 	}
+	// The marks count the page lines above and below the window, and the box
+	// keeps its edges: the top edge and 4 above, 4 lines, 4 below and the edge.
+	g := newRig(t, "")
+	g.send(tea.WindowSizeMsg{Width: 40, Height: 30})
+	rows, from, to := g.m.windowRows(pg, 0, 4, 8, 40, "")
+	if len(rows) != 8 || from != 4 || to != 8 || !strings.Contains(rows[1], "↑ 4 more") || !strings.Contains(rows[6], "↓ 4 more") ||
+		!strings.Contains(rows[0], "╭") || !strings.Contains(rows[7], "╰") {
+		t.Errorf("the window of 8 rows is %d rows, lines %d to %d:\n%s", len(rows), from, to, strings.Join(rows, "\n"))
+	}
+}
+
+// TestEveryWindowDrawsTheCursorsRow: on the ticket, the plan and the chart, at 60
+// and 80 columns by 8 to 24 rows, with the tail open and closed, the cursor
+// moved down through twenty rows: the window never starts on a continuation row,
+// it holds the cursor's row, the frame draws the cursor's mark, and a plain
+// window frames the box lines it draws.
+func TestEveryWindowDrawsTheCursorsRow(t *testing.T) {
+	t.Parallel()
+	ids := [3]string{"round-totals", "fix-4-cart-test", "cart-total"}
+	titles := map[string]string{}
+	var tasks []string
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("SHOP-%020d", i)
+		tasks = append(tasks, id)
+		titles[id] = longTitle(i)
+	}
+	rigs := map[string]func(w, h int) *rig{
+		"ticket": func(w, h int) *rig { return longStepsRig(t, w, h, ids, true) },
+		"plan": func(w, h int) *rig {
+			g := planRig(t, planSpec{tasks: tasks, titles: titles, landed: map[string]bool{tasks[0]: true}})
+			g.send(tea.WindowSizeMsg{Width: w, Height: h})
+			return g
+		},
+		"chart": func(w, h int) *rig {
+			g := chartScreenRig(t)
+			g.send(tea.WindowSizeMsg{Width: w, Height: h})
+			return g
+		},
+	}
+	for name, mk := range rigs {
+		for _, w := range []int{60, 80} {
+			for h := 8; h <= 24; h++ {
+				for _, tail := range []bool{false, true} {
+					g := mk(w, h)
+					if tail {
+						g.press("t")
+					}
+					for step := 0; step < 20; step++ {
+						view := g.view()
+						l := g.m.layout()
+						if len(l.pg.refs()) > 0 {
+							start := g.m.windowStart(l.pg, l.sel, l.pageH, true)
+							keep := g.m.top().lead == 0
+							from, to, plain := windowSpan(l.pg, l.sel, start, l.pageH, keep)
+							if from < len(l.pg.lines) && l.pg.lines[from].cont {
+								t.Fatalf("%s %dx%d tail %v step %d: the window starts on a continuation row (line %d)\n%s", name, w, h, tail, step, from, view)
+							}
+							if keep && !strings.Contains(view, "▸") && l.pageH >= 2 {
+								t.Fatalf("%s %dx%d tail %v step %d: no row of the frame has the cursor (window %d to %d, plain %v)\n%s", name, w, h, tail, step, from, to, plain, view)
+							}
+							if plain {
+								rows, _, _ := g.m.windowRows(l.pg, l.sel, start, l.pageH, w, "")
+								for i, row := range rows {
+									if l.pg.lines[from+i].box != boxNone && !strings.Contains(row, "│") && !strings.Contains(row, "╭") && !strings.Contains(row, "╰") {
+										t.Fatalf("%s %dx%d tail %v step %d: a plain window draws the box line %q with no frame", name, w, h, tail, step, row)
+									}
+								}
+							}
+						}
+						g.press("down")
+					}
+				}
+			}
+		}
+	}
 }

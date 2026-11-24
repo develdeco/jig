@@ -396,19 +396,24 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 			e = fitEnd(lines, s, h, true)
 		}
 		if e == s {
-			// The marks and edges leave no row for a line: the window is plain.
+			// The marks and edges leave no row for a line: the window is plain,
+			// and starts where the cursor's row is in it.
+			if keep && selLine >= 0 {
+				if selLine < s || selLine >= s+h {
+					// The window starts at the cursor's row, which begins on a
+					// line of its own.
+					s = selLine
+				}
+			}
 			return s, min(n, s+h), true
 		}
 		if !keep || selLine < 0 || selLine < e || e >= n {
 			return s, e, false
 		}
+		// The window moves down a row, and stops at the cursor's row, which is the
+		// first line of a row of its own: there e is past it.
 		s++
 		for s < n-1 && lines[s].cont {
-			s++
-		}
-		if s < n && lines[s].box == boxMid && lines[s-1].box == boxTop {
-			// A mark of nothing above in the box: the next line is the first
-			// with something above it.
 			s++
 		}
 	}
@@ -516,10 +521,6 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if from > 0 {
 		upText := fmt.Sprintf("↑ %d more", from)
 		if top, _ := boxOf(lines, from); top >= 0 && lines[from].box != boxTop {
-			upText = fmt.Sprintf("↑ %d more", from-top-1)
-			if above != "" {
-				upText = ""
-			}
 			rows = append(rows, fit(m.frameLine(lines[top], "  ", w), w))
 			if above != "" {
 				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w), w))
@@ -552,7 +553,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	}
 	if to < len(lines) {
 		if _, bottom := boxOf(lines, to-1); bottom >= to && lines[to-1].box != boxBottom {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", bottom-to), true))
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", len(lines)-to), true))
 			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w), w))
 		} else {
 			rows = append(rows, mark(fmt.Sprintf("↓ %d more", len(lines)-to), false))
