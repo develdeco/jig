@@ -84,6 +84,9 @@ func TestAClockStepMovesWhatTheClockMoves(t *testing.T) {
 	g.m.w.setRoster([]rosterRow{{ID: "JIG-1", Title: "Greeting copy",
 		Digest: task("build", true, "done|approved", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish")}})
 	g.feed(ll(at(0, 30), "JIG-1", journal.EventTool, with("s-builder", "", "", "", "", "")))
+	// A later line of the journal: the moment the row stops running is the
+	// session's sign leaving its window, not the ticket's last line doing so.
+	g.feed(jl(at(2, 0), "JIG-1", "", journal.EventMemorize))
 	g.m.w.gen++
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if v := g.view(); !strings.Contains(v, "╭─ Running ") {
