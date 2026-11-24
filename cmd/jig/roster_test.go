@@ -40,11 +40,11 @@ func TestRosterPrintsRowsAndChartsOnly(t *testing.T) {
 	}
 	rows, top := rosterRows(t, out)
 	for key := range top {
-		if key != "tickets" && key != "charts" {
+		if key != "tickets" && key != "charts" && key != "next" {
 			t.Errorf("the roster has %q, which no screen reads", key)
 		}
 	}
-	for _, key := range []string{"next", "issue_order", "shared_ranks", "workspace_overlaps", "overlaps"} {
+	for _, key := range []string{"issue_order", "shared_ranks", "workspace_overlaps", "overlaps"} {
 		if _, ok := top[key]; ok {
 			t.Errorf("the roster prints %q", key)
 		}
@@ -59,6 +59,18 @@ func TestRosterPrintsRowsAndChartsOnly(t *testing.T) {
 			t.Errorf("%s has no digest", id)
 		}
 		updated[id], _ = row["updated"].(string)
+	}
+	// An issue's row carries its own branch, which a task two issues list is read
+	// by, and a task's does not.
+	for _, row := range rows {
+		digest, _ := row["digest"].(map[string]any)
+		branch, _ := digest["branch"].(string)
+		if row["id"] == "TK-1" && !strings.HasPrefix(branch, "TK-1") {
+			t.Errorf("the issue's digest branch is %q, want its own branch", branch)
+		}
+		if row["id"] == "TK-9" && branch != "" {
+			t.Errorf("a task's digest names the branch %q", branch)
+		}
 	}
 	// TK-9 has journal lines, TK-7 has none.
 	if _, err := time.Parse(time.RFC3339, updated["TK-9"]); err != nil {
@@ -130,6 +142,9 @@ func TestRosterRowsEqualTheFullListing(t *testing.T) {
 		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("row %v differs:\nroster %v\nfull   %v", want[i]["id"], got[i], want[i])
 		}
+	}
+	if string(gotTop["next"]) != string(wantTop["next"]) || string(gotTop["next"]) == "" {
+		t.Errorf("the start order differs:\nroster %s\nfull   %s", gotTop["next"], wantTop["next"])
 	}
 	if string(gotTop["charts"]) != string(wantTop["charts"]) {
 		t.Errorf("charts differ:\nroster %s\nfull   %s", gotTop["charts"], wantTop["charts"])

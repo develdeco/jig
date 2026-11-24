@@ -3,7 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
-	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestTUIPipeFramesCutNothingAt100: `jig tui` on a pipe prints its frames at
@@ -17,7 +18,7 @@ func TestTUIPipeFramesCutNothingAt100(t *testing.T) {
 	frame := screenWith(t, out, "TK-2")
 	frame = screenWith(t, out, "PR #2")
 	for _, l := range strings.Split(frame, "\n") {
-		if n := utf8.RuneCountInString(l); n > 100 {
+		if n := ansi.StringWidth(l); n > 100 {
 			t.Errorf("a row is %d cells in a 100 wide frame: %q", n, l)
 		}
 	}

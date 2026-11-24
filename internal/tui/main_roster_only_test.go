@@ -17,11 +17,11 @@ func TestMainListsTheRosterOnly(t *testing.T) {
 	m.w.apply([]events.Envelope{jl(at(3, 1), "T-22", "a", "claim")})
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2")}, seq: 1})
 	frame := m.View()
-	if strings.Contains(frame, "T-22") || strings.Contains(frame, "TRACK-1") || !strings.Contains(frame, "2 tickets") {
+	if strings.Contains(frame, "T-22") || strings.Contains(frame, "TRACK-1") || !strings.Contains(frame, "1 need you · 1 running") {
 		t.Errorf("main lists what the roster does not, or counts it:\n%s", frame)
 	}
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2"), listed("JIG-3")}, seq: 2})
-	if frame := m.View(); strings.Contains(frame, "T-22") || !strings.Contains(frame, "3 tickets") {
+	if frame := m.View(); strings.Contains(frame, "T-22") || !strings.Contains(frame, "1 need you · 2 running") {
 		t.Errorf("a later roster brings the stream's ids back:\n%s", frame)
 	}
 }
@@ -75,7 +75,7 @@ func TestAStreamLineAfterTheRosterAddsNoRow(t *testing.T) {
 	m := New(quietConfig())
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2")}, seq: 1})
 	m.w.apply([]events.Envelope{jl(at(3, 1), "T-23", "a", "claim"), jl(at(3, 2), "JIG-1", "a", "claim")})
-	if frame := m.View(); strings.Contains(frame, "T-23") || !strings.Contains(frame, "2 tickets") {
+	if frame := m.View(); strings.Contains(frame, "T-23") || !strings.Contains(frame, "2 running") {
 		t.Errorf("a stream line after the roster made a row or was counted:\n%s", frame)
 	}
 }

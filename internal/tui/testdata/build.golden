@@ -19,6 +19,6 @@ jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs
   ? c  needs-input  1 try    Pick the tone
        workspace copy · oracle go test ./...
        ? q-001 Formal or casual?
-  ↓ 12 more
+  ↓ 9 more
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ↑↓ move · enter open · 5 land · t tail

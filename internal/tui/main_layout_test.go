@@ -24,7 +24,7 @@ func longRows() (ids []string, titles map[string]string, rows []rosterRow) {
 		ids = append(ids, id)
 		titles[id] = longTitle(i)
 		rows = append(rows, rosterRow{ID: id, Title: titles[id],
-			Digest: task("build", false, "done|approved", "current|1 of 2 slices green", "pending|after the build", "pending|after a clean review", "pending|after the publish")})
+			Digest: task("build", true, "done|approved", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish")})
 	}
 	return ids, titles, rows
 }
@@ -104,13 +104,14 @@ var tallSizes = [][2]int{{60, 80}, {80, 70}, {230, 50}}
 // terminal, in a narrow, a standard and a wide one.
 func TestMainLaidOutAtThreeSizes(t *testing.T) {
 	t.Parallel()
-	for _, size := range layoutSizes {
+	for _, size := range tallSizes {
 		w, h := size[0], size[1]
 		t.Run(fmt.Sprintf("%dx%d", w, h), func(t *testing.T) {
 			t.Parallel()
 			g := newRig(t, "")
 			ids, titles, rows := longRows()
 			g.m.w.setRoster(rows)
+			g.m.w.gen++
 			g.send(tea.WindowSizeMsg{Width: w, Height: h})
 			lines := strings.Split(stripANSI(g.view()), "\n")
 			wantNoRowWider(t, lines, w)

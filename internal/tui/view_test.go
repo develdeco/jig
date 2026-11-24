@@ -17,6 +17,9 @@ import (
 func mainRig(t *testing.T) *rig {
 	g := newRig(t, "")
 	g.feed(append(jig1(), jig2()...)...)
+	// The list is drawn from the roster before the stream says JIG-1 has a
+	// question, so the cursor is put on JIG-1 here, the first row of its group.
+	g.focus("JIG-1")
 	return g
 }
 

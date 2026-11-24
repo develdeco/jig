@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,16 +24,29 @@ const (
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
 	rowStop = "stop"
+	// rowFold is the fold row of a group of the project's list: enter opens the
+	// rows it holds in place, and folds them again.
+	rowFold = "fold"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
-// slice it belongs to.
+// slice it belongs to. A row drawn under a container (an issue and its tasks)
+// names it, so a row two containers draw is told apart.
 type rowRef struct {
-	kind   string
-	id     string
-	ticket string
-	slice  string
+	kind      string
+	id        string
+	ticket    string
+	slice     string
+	container string
 }
+
+// rowIdentity is what makes a row the same row on the next draw: its kind, its
+// id and the container it is drawn under.
+type rowIdentity struct {
+	kind, id, container string
+}
+
+func (r rowRef) identity() rowIdentity { return rowIdentity{r.kind, r.id, r.container} }
 
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
@@ -89,6 +101,10 @@ func (p page) refs() []rowRef {
 // page builds the body of the screen on top: its lines, with the text of any
 // line too long for the width wrapped onto continuation rows.
 func (m *Model) page() page {
+	if m.top().screen == screenMain {
+		// The project's list is wrapped when it is built, once for what it reads.
+		return m.rawPage()
+	}
 	return m.wrapLong(m.rawPage())
 }
 
@@ -99,6 +115,7 @@ func (m *Model) page() page {
 // and so is a line of an ask, which its screen wraps whole.
 func (m *Model) wrapLong(pg page) page {
 	var out []pline
+	m.measured += len(pg.lines)
 	for _, l := range pg.lines {
 		w := max(1, m.width-2)
 		if l.box != boxNone {
@@ -519,18 +536,17 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
-		upText := fmt.Sprintf("↑ %d more", from)
 		if top, _ := boxOf(lines, from); top >= 0 && lines[from].box != boxTop {
 			rows = append(rows, fit(m.frameLine(lines[top], "  ", w), w))
 			if above != "" {
 				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w), w))
-			} else {
-				rows = append(rows, mark(upText, true))
+			} else if n := rowsIn(lines, top+1, from); n > 0 {
+				rows = append(rows, mark(fmt.Sprintf("↑ %d more", n), true))
 			}
 		} else if above != "" {
 			rows = append(rows, fit("  "+above, w))
-		} else {
-			rows = append(rows, mark(upText, false))
+		} else if n := rowsIn(lines, 0, from); n > 0 {
+			rows = append(rows, mark(fmt.Sprintf("↑ %d more", n), false))
 		}
 	}
 	idx := 0
@@ -553,10 +569,12 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	}
 	if to < len(lines) {
 		if _, bottom := boxOf(lines, to-1); bottom >= to && lines[to-1].box != boxBottom {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", len(lines)-to), true))
+			if n := rowsIn(lines, to, bottom); n > 0 {
+				rows = append(rows, mark(fmt.Sprintf("↓ %d more", n), true))
+			}
 			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w), w))
-		} else {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", len(lines)-to), false))
+		} else if n := rowsIn(lines, to, len(lines)); n > 0 {
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", n), false))
 		}
 	}
 	return rows, from, to
@@ -575,12 +593,7 @@ func (m *Model) header(w int) []string {
 		if m.readingStore() {
 			break
 		}
-		n := len(m.w.order)
-		right = strconv.Itoa(n) + " " + plural(n, "ticket", "tickets")
-		if nc := len(m.w.chartOrder); nc > 0 {
-			right += " · " + strconv.Itoa(nc) + " " + plural(nc, "chart", "charts")
-		}
-		right = m.st.dim(right)
+		right = m.st.dim(m.queueSummary())
 	case screenChart:
 		crumbs += " › " + m.st.bold(e.chart)
 		if c := m.w.charts[e.chart]; c != nil {
@@ -757,7 +770,11 @@ func (m *Model) screenKeys(sub subject) []hint {
 	var keys []hint
 	switch m.top().screen {
 	case screenMain:
-		keys = []hint{quit, move, open, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+		view := hint{key: "s", text: "by chart"}
+		if m.nav[0].byChart {
+			view.text = "by state"
+		}
+		keys = []hint{quit, move, open, gate, publish, answer, say, view, tail, {key: "r", text: "refresh"}}
 	case screenChart:
 		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:
@@ -1016,4 +1033,17 @@ func lastStart(n, h int) int { return max(0, n-h+1) }
 func (m *Model) taken(p *page) int {
 	*p = m.wrapLong(*p)
 	return len(p.lines)
+}
+
+// rowsIn counts the rows among the page lines from a to b: a row is one line and
+// the continuation rows of its free text, and a box's edges are no row. It is
+// what the marks say a window hides.
+func rowsIn(lines []pline, a, b int) int {
+	n := 0
+	for _, l := range lines[a:b] {
+		if !l.cont && l.box != boxTop && l.box != boxBottom {
+			n++
+		}
+	}
+	return n
 }

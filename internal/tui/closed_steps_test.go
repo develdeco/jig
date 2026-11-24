@@ -55,7 +55,7 @@ func TestClosedTicketTellsUnfinishedStepsFromThePhasesDoneMarks(t *testing.T) {
 			t.Errorf("%s: the land step is %+v", name, steps[stepLand])
 		}
 		// The same dots on the project's list, with no status read.
-		if row := lineWith(pagesText(g.m.mainPage()), "JIG-9"); !strings.Contains(row, tc.dots) {
+		if row := lineWith(g.mainText(), "JIG-9"); !strings.Contains(row, tc.dots) {
 			t.Errorf("%s: main's row does not draw %s:\n%s", name, tc.dots, row)
 		}
 	}

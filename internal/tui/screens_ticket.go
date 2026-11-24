@@ -177,9 +177,9 @@ func (m *Model) waitingPage(id string) page {
 }
 
 // stepColumns are the columns of the steps: the icon, the number, the name, how
-// long it has taken, the words and the clock. The clock is a column of its own,
-// so the words wrap to give it room and never the reverse.
-var stepColumns = []column{{}, {gap: 1}, {gap: 1}, {gap: 1}, {free: true, gap: 2}, {gap: 1, keep: true}}
+// long it has taken, the words and the clock. The time taken and the clock are
+// never cut: the names give way first, and the words wrap.
+var stepColumns = []column{{}, {gap: 1}, {gap: 1}, {gap: 1, keep: true}, {free: true, gap: 2}, {gap: 1, keep: true}}
 
 // stepLines lays the steps out, whose current one is cur: a line or more each,
 // with the words that do not fit wrapped under their column.

@@ -101,7 +101,7 @@ func TestEveryListReadsNewestFirst(t *testing.T) {
 	chartLines, _ := chartTickets()
 	chart2 := newChartBackwards(t, chartLines)
 	chart2.send(tea.WindowSizeMsg{Width: 100, Height: 40})
-	chart2.press("end", "enter")
+	chart2.openChart("checkout")
 	newestOnTop(t, "chart activity", clocksOf(panelRows(chart2.view(), "Activity")), 3)
 }
 

@@ -31,6 +31,9 @@ func TestChartAndPlanLaidOutAtThreeSizes(t *testing.T) {
 			}
 			answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(retitle), status)
 			g.feed(stream...)
+			for id, title := range titles {
+				g.m.w.tickets[id].title = title
+			}
 			g.send(tea.WindowSizeMsg{Width: w, Height: h})
 			g.press("end", "enter")
 			lines := strings.Split(stripANSI(g.view()), "\n")

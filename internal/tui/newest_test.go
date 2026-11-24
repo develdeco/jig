@@ -134,7 +134,7 @@ func TestTheTailReadsNewestFirst(t *testing.T) {
 	lines, status := chartTickets()
 	answerChart(chart, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
 	chart.feed(backwards(lines)...)
-	chart.press("end", "enter", "t")
+	chart.openChart("checkout").press("t")
 	newestOnTop(t, "chart", clocksOf(tailRows(chart.view())), 5)
 
 	main := newRig(t, "")

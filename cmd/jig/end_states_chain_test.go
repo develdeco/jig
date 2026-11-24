@@ -65,12 +65,12 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 	}
 
 	keys, main, wait := startTUI(t, e, scope...)
-	main.until(t, "17 tickets")
+	showFolds(t, keys, main)
 	keys.Write([]byte("q"))
 	if wait() != 0 {
 		t.Fatalf("jig tui exited non-zero\n%s", main.String())
 	}
-	list := lastScreen(main.String())
+	list := main.String() // the rows are read from the screens that showed them
 
 	for id, w := range want {
 		var n nextTicket

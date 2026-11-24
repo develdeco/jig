@@ -63,7 +63,7 @@ func TestEndStatesReadApart(t *testing.T) {
 		icons[icon] = state
 
 		// The project's list.
-		row := lineWith(pagesText(g.m.mainPage()), "JIG-4")
+		row := lineWith(g.mainText(), "JIG-4")
 		if !strings.Contains(row, icon+" JIG-4") || !strings.Contains(row, words[state]) {
 			t.Errorf("%s: main's row is not %s with %q:\n%s", state, icon, words[state], row)
 		}
@@ -115,7 +115,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 		}
 		for screen, text := range map[string]string{
 			"the ticket": pagesText(g.m.ticketPage("JIG-4")),
-			"main":       lineWith(pagesText(g.m.mainPage()), "JIG-4"),
+			"main":       lineWith(g.mainText(), "JIG-4"),
 			"the chart":  lineWith(pagesText(g.m.chartPage("checkout")), "JIG-4"),
 		} {
 			for _, bad := range []string{"reading", "ready for a fresh session", "of 1 green", "being drafted", "round 1 open", "waiting for your approval"} {
@@ -127,7 +127,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 				t.Errorf("%s: %s does not read closed with its icon:\n%s", name, screen, text)
 			}
 		}
-		if !strings.Contains(lineWith(pagesText(g.m.mainPage()), "JIG-4"), "closed · not planned") {
+		if !strings.Contains(lineWith(g.mainText(), "JIG-4"), "closed · not planned") {
 			t.Errorf("%s: main does not give the reason", name)
 		}
 	}
@@ -139,7 +139,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 	d.Closed = "not planned"
 	g.pin("JIG-1", d)
 	g.syncDigests()
-	if row := lineWith(pagesText(g.m.mainPage()), "JIG-1"); strings.Contains(row, "open question") || !strings.Contains(row, "closed · not planned") {
+	if row := lineWith(g.mainText(), "JIG-1"); strings.Contains(row, "open question") || !strings.Contains(row, "closed · not planned") {
 		t.Errorf("a closed ticket with a question open reads:\n%s", row)
 	}
 }

@@ -94,9 +94,10 @@ func manyTickets(t *testing.T, w, h int) *rig {
 	var rows []rosterRow
 	for i := 1; i <= 60; i++ {
 		rows = append(rows, rosterRow{ID: fmt.Sprintf("JIG-%d", i), Title: fmt.Sprintf("Ticket number %d", i),
-			Digest: task("build", false, "done|approved", "current|1 of 2 slices green", "pending|after the build", "pending|after a clean review", "pending|after the publish")})
+			Digest: task("build", true, "done|approved", "current|ready to build", "pending|after the build", "pending|after a clean review", "pending|after the publish")})
 	}
 	g.m.w.setRoster(rows)
+	g.m.w.gen++
 	g.send(tea.WindowSizeMsg{Width: w, Height: h})
 	return g
 }
@@ -282,12 +283,12 @@ func TestAWindowTooShortForItsMarksDrawsPlainLines(t *testing.T) {
 	if from, to, plain = windowSpan(pg, 0, 4, 8, false); plain || to-from < 3 {
 		t.Errorf("a window of 8 rows is lines %d to %d (plain %v), want marks and at least 3 lines", from, to, plain)
 	}
-	// The marks count the page lines above and below the window, and the box
-	// keeps its edges: the top edge and 4 above, 4 lines, 4 below and the edge.
+	// The marks count the rows the window hides in the box, and the box keeps its
+	// edges: the top edge, 3 rows above, 4 lines, 3 below and the edge.
 	g := newRig(t, "")
 	g.send(tea.WindowSizeMsg{Width: 40, Height: 30})
 	rows, from, to := g.m.windowRows(pg, 0, 4, 8, 40, "")
-	if len(rows) != 8 || from != 4 || to != 8 || !strings.Contains(rows[1], "↑ 4 more") || !strings.Contains(rows[6], "↓ 4 more") ||
+	if len(rows) != 8 || from != 4 || to != 8 || !strings.Contains(rows[1], "↑ 3 more") || !strings.Contains(rows[6], "↓ 3 more") ||
 		!strings.Contains(rows[0], "╭") || !strings.Contains(rows[7], "╰") {
 		t.Errorf("the window of 8 rows is %d rows, lines %d to %d:\n%s", len(rows), from, to, strings.Join(rows, "\n"))
 	}

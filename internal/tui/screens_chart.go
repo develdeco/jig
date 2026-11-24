@@ -550,34 +550,6 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	p.boxEnd()
 }
 
-// mainChartCells are the project's charts as rows of main's table, after its
-// tickets: the state icon, the name, the title, "chart", and how many of its
-// tickets are published and whether one needs the person.
-func (m *Model) mainChartCells() ([]rowRef, [][]string) {
-	var refs []rowRef
-	var cells [][]string
-	for _, name := range m.w.chartOrder {
-		c := m.w.charts[name]
-		rows := m.chartRows(c)
-		total, done, needs := chartProgress(rows)
-		state, _ := m.chartStatus(c, rows)
-		title := c.title()
-		if title == name {
-			title = ""
-		}
-		counts := m.st.dim("not graduated")
-		if total > 0 {
-			counts = m.st.dim(fmt.Sprintf("%d of %d published", done, total))
-		}
-		if needs > 0 {
-			counts += m.st.state(StateNeedsInput, fmt.Sprintf(" · %d needs you", needs))
-		}
-		refs = append(refs, rowRef{kind: rowChart, id: name})
-		cells = append(cells, []string{m.st.icon(state), name, title, m.st.dim("chart"), counts})
-	}
-	return refs, cells
-}
-
 // chartFirstOpen is the position, among a chart screen's rows, of the first
 // ticket that is not published: where the cursor starts.
 func (m *Model) chartFirstOpen(c *chart) int {

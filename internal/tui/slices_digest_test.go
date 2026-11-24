@@ -28,7 +28,7 @@ func TestSliceCountsStayTheDigestsAfterTheStatusIsRead(t *testing.T) {
 	if build.State != StateFail || build.Text != "1 of 4 green · slice b failed its last run" {
 		t.Errorf("the Build step before the status is %+v, want failing, in the digest's words", build)
 	}
-	main := pagesText(g.m.mainPage())
+	main := g.mainText()
 	if !strings.Contains(main, "1 of 4 green · slice b failed its last run") || !strings.Contains(main, g.m.st.icon(StateFail)) {
 		t.Errorf("main before the status does not show the failing build:\n%s", main)
 	}

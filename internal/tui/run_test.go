@@ -165,8 +165,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	src := newLiveSource(append(jig1(), jig2()...)...)
 	s := startRun(t, plainConfig(src, r))
 
-	s.out.until(t, "waits to land")
-	s.keys("\r") // open JIG-1
+	s.out.until(t, "needs you (2)")
+	s.keys("\x1b[H\r") // open JIG-1, the first row of the group
 	s.out.until(t, "needs you")
 	s.keys("aOK")
 	r.untilRan(t, "answer --as person --store /s JIG-1 q-001 -- OK")
@@ -208,7 +208,7 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	r.answer("next --json --roster --store /s", rosterJSONWith(map[string]any{
 		"id": "JIG-7", "title": "New work", "state": "ready", "digest": draftedDigest()}), 0)
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
-	s.out.until(t, "JIG-7")
+	s.out.until(t, "not started (")
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatal(err)

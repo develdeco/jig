@@ -35,6 +35,7 @@ func TestToursCutNothingWhileWidthAllows(t *testing.T) {
 			g := newRig(t, "")
 			rowIDs, titles, rows := longRows()
 			g.m.w.setRoster(rows)
+			g.m.w.gen++
 			g.press("t")
 			view := check(t, g, "main")
 			if w >= 230 {

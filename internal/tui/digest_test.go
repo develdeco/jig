@@ -101,7 +101,7 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 		if tc.d.Kind == "task" && (!strings.Contains(page, "5 Land") || !strings.Contains(page, tc.land)) {
 			t.Errorf("%s: the ticket screen has no fifth step saying %q:\n%s", tc.name, tc.land, page)
 		}
-		if row := pagesText(g.m.mainPage()); tc.kind != "" && !strings.Contains(row, tc.kind) {
+		if row := g.mainText(); tc.kind != "" && !strings.Contains(row, tc.kind) {
 			t.Errorf("%s: the main screen's row does not name %q:\n%s", tc.name, tc.kind, row)
 		}
 	}

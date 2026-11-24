@@ -149,6 +149,16 @@ type navEntry struct {
 	slice  string
 	chart  string
 	sel    int
+	// cur is the row the main screen's cursor stands on, by identity, found
+	// again on each draw wherever the page now has it; curSet is false until
+	// the page has had a row to stand on.
+	cur    rowIdentity
+	curSet bool
+	// open are the fold rows of the main screen that are opened, by group name;
+	// byChart is the view of the main screen laid out by chart, which a run does
+	// not keep.
+	open    map[string]bool
+	byChart bool
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -257,12 +267,21 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
+	// folded says, for each row of the main screen's list that a closed fold
+	// hides, the fold row it is in: the page of the last draw.
+	folded map[rowIdentity]rowIdentity
+	// main is the project's list as last built (mainqueue.go), kept while nothing it
+	// reads has moved.
+	main *mainCache
 	// keysOn is what the keys of the screen on top act on, as the last frame
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
+	// measured counts the rows the layout measured: a frame that changed none of
+	// what a page reads measures none.
+	measured int
 	// seen is what the last frame drew of the screen on top, which the next one
 	// settles the cursor and the window against (hold.go).
 	seen    *held
@@ -581,6 +600,11 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, key := msg.(tea.KeyMsg); !key {
+		// A key moves the cursor, or starts a command whose result is a message
+		// of its own: what the screens built from the world holds.
+		m.w.gen++
+	}
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
 	m.syncScreen()
@@ -1044,6 +1068,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.openIssue()
 	case "m":
 		m.toggleMap()
+	case "s":
+		m.switchView()
 	case "r":
 		return m.refreshAll()
 	}
@@ -1053,6 +1079,11 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // move puts the cursor delta rows on, within the screen's rows. A cursor
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
+	m.moveBy(delta)
+	m.noteCursor()
+}
+
+func (m *Model) moveBy(delta int) {
 	m.followSel()
 	pg := m.page()
 	n := len(pg.refs())
@@ -1136,6 +1167,10 @@ func (m *Model) putCursorOn(ref rowRef, ok bool) {
 // step is done.
 func (m *Model) followSel() {
 	e := m.top()
+	if e.screen == screenMain {
+		m.followRow(e)
+		return
+	}
 	if e.screen == screenChart && e.follow {
 		if c := m.w.charts[e.chart]; c != nil {
 			e.sel = m.chartFirstOpen(c)
@@ -1154,6 +1189,96 @@ func (m *Model) followSel() {
 		e.sel = cur
 	}
 	e.lastCur = cur
+}
+
+// switchView is `s` on the main screen: the list by state, or by chart. The
+// cursor stays on its ticket (its chart, or its fold row) across the switch.
+func (m *Model) switchView() {
+	e := m.top()
+	if e.screen != screenMain || m.readingStore() {
+		return
+	}
+	was, ok := rowRef{}, false
+	if refs := m.mainRefs(); e.sel >= 0 && e.sel < len(refs) {
+		was, ok = refs[e.sel], true
+	}
+	m.nav[0].byChart = !m.nav[0].byChart
+	e.lead = 0
+	refs := m.mainRefs()
+	e.sel = min(e.sel, max(len(refs)-1, 0))
+	if ok {
+		// The same row where the view has it, else the same ticket (or chart, or
+		// fold) wherever it is drawn.
+		// A row the new view folds away is on the fold row that hides it.
+		at := func(match func(r rowRef) bool) bool {
+			for i, r := range refs {
+				if match(r) {
+					e.sel = i
+					return true
+				}
+			}
+			return false
+		}
+		hidden := func(id rowIdentity) bool {
+			fold, ok := m.folded[id]
+			return ok && at(func(r rowRef) bool { return r.identity() == fold })
+		}
+		sameRow := func(r rowRef) bool { return r.kind == was.kind && r.id == was.id }
+		_ = at(func(r rowRef) bool { return r.identity() == was.identity() }) ||
+			at(sameRow) ||
+			func() bool {
+				for id := range m.folded {
+					if id.kind == was.kind && id.id == was.id && hidden(id) {
+						return true
+					}
+				}
+				return false
+			}()
+	}
+	e.curSet = false
+	m.noteCursor()
+}
+
+// noteCursor remembers the row under the main screen's cursor as an identity.
+func (m *Model) noteCursor() {
+	e := m.top()
+	if e.screen != screenMain {
+		return
+	}
+	refs := m.mainRefs()
+	if e.sel >= 0 && e.sel < len(refs) {
+		e.cur, e.curSet = refs[e.sel].identity(), true
+	}
+}
+
+// followRow puts the main screen's cursor on the row it stood on, wherever the
+// page now has it. A row that left the page leaves the cursor on the row at
+// the same place, or the nearest one, and that row is the one it follows from
+// then on.
+func (m *Model) followRow(e *navEntry) {
+	refs := m.mainRefs()
+	if len(refs) == 0 {
+		return
+	}
+	if e.curSet {
+		for i, r := range refs {
+			if r.identity() == e.cur {
+				e.sel = i
+				return
+			}
+		}
+	}
+	if fold, ok := m.folded[e.cur]; ok && e.curSet {
+		// The row is folded away: the cursor is on the fold row that holds it.
+		for i, r := range refs {
+			if r.identity() == fold {
+				e.sel, e.cur = i, fold
+				return
+			}
+		}
+	}
+	e.sel = min(max(e.sel, 0), len(refs)-1)
+	e.cur, e.curSet = refs[e.sel].identity(), true
 }
 
 // selected is the row under the cursor, nil when the screen has none.
@@ -1204,6 +1329,13 @@ func (m *Model) open() tea.Cmd {
 	}
 	var next navEntry
 	switch ref.kind {
+	case rowFold:
+		e := &m.nav[0]
+		if e.open == nil {
+			e.open = map[string]bool{}
+		}
+		e.open[ref.id] = !e.open[ref.id]
+		return nil
 	case rowChart:
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:

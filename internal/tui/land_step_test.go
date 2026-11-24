@@ -54,7 +54,7 @@ func TestLandIsTheFifthStep(t *testing.T) {
 			t.Errorf("%s: the Land row is not %q saying %q:\n%s", tc.name, want, tc.words, page)
 		}
 		dots := g.m.stepDots(g.m.steps(g.m.w.tickets["JIG-9"]))
-		if row := pagesText(g.m.mainPage()); len(strings.Fields(dots)) != 5 || !strings.Contains(row, dots) {
+		if row := g.mainText(); len(strings.Fields(dots)) != 5 || !strings.Contains(row, dots) {
 			t.Errorf("%s: the main row does not draw the five dots %q:\n%s", tc.name, dots, row)
 		}
 

@@ -181,7 +181,7 @@ func TestALandingWaitCountsApart(t *testing.T) {
 }
 
 // TestATimePastAHundredHoursFitsItsColumn: a step that has run for 332 hours
-// reads "332h" in its seven cells, with no ellipsis.
+// reads "332h" whole, with no ellipsis, in a column as wide as its time.
 func TestATimePastAHundredHoursFitsItsColumn(t *testing.T) {
 	t.Parallel()
 	if got := span(332*time.Hour + 51*time.Minute); got != "332h" {
@@ -193,7 +193,7 @@ func TestATimePastAHundredHoursFitsItsColumn(t *testing.T) {
 	g := newRig(t, "SHOP-1")
 	row := ansi.Strip(g.m.stepLines([]stepRow{{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}}, 0)[0][0])
 	if !strings.Contains(row, " 332h  slice round") || strings.Contains(row, "…") {
-		t.Errorf("the build row reads %q, want 332h in its seven cells", row)
+		t.Errorf("the build row reads %q, want 332h whole before the words", row)
 	}
 }
 

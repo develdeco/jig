@@ -211,7 +211,7 @@ func planMain(t *testing.T, spec planSpec) *rig {
 func planRig(t *testing.T, spec planSpec) *rig {
 	t.Helper()
 	g := planMain(t, spec)
-	g.press("end", "enter")
+	g.openChart("repeat")
 	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" {
 		t.Fatalf("on %s, want the chart screen:\n%s", g.m.Screen(), g.view())
 	}

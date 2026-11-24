@@ -439,7 +439,7 @@ func (g *rig) syncDigests() {
 		if m, ok := moved[id]; ok {
 			d = m
 		}
-		changed = append(changed, rosterRow{ID: id, Title: t.title, Blockers: t.blockers, Digest: d})
+		changed = append(changed, rosterRow{ID: id, Title: t.title, State: t.state, Blockers: t.blockers, Digest: d, StartOrder: t.readyAt})
 	}
 	var charts []chartListing
 	for _, name := range g.m.w.chartOrder {
@@ -555,6 +555,51 @@ func (g *rig) press(keys ...string) *rig {
 }
 
 func (g *rig) view() string { return g.m.View() }
+
+// onRow puts the cursor of the screen on top on the row of id, whatever group
+// the project's list drew it in.
+func (g *rig) onRow(id string) *rig {
+	g.t.Helper()
+	return g.unfold().focus(id)
+}
+
+// focus is onRow with the folds as they are.
+func (g *rig) focus(id string) *rig {
+	g.t.Helper()
+	for i, r := range g.m.page().refs() {
+		if r.id == id {
+			e := g.m.top()
+			e.sel, e.lead, e.follow = i, 0, false
+			g.m.noteCursor()
+			return g
+		}
+	}
+	g.t.Fatalf("no row %s on the screen:\n%s", id, g.view())
+	return g
+}
+
+// mainText is the project's list, every fold open, as text.
+func (g *rig) mainText() string {
+	g.t.Helper()
+	return pagesText(g.unfold().m.mainPage())
+}
+
+// unfold opens the folds of the project's list, so every row is drawn.
+func (g *rig) unfold() *rig {
+	g.m.nav[0].open = map[string]bool{groupNotStarted.name(): true, groupDone.name(): true}
+	return g
+}
+
+// openChart opens the screen of the chart name from the project's list: its
+// chart row, or the issue it plans when it plans one, since that row stands for
+// it.
+func (g *rig) openChart(name string) *rig {
+	g.t.Helper()
+	if c := g.m.w.charts[name]; c != nil && c.listing.Issue != "" {
+		return g.onRow(c.listing.Issue).press("enter")
+	}
+	return g.onRow(name).press("enter")
+}
 
 // colored is a renderer that draws with the colors of a terminal, whatever the
 // output is.

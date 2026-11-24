@@ -51,6 +51,10 @@ type world struct {
 	// rosterRead is set once the ticket list has been read: until then the
 	// screens do not know what the store holds, and say they are reading.
 	rosterRead bool
+	// gen counts what moved the world: a stream batch, a roster, a chart
+	// listing, and any message but a key (Update). What is built from the world
+	// once (main's rows) is built again when it differs.
+	gen uint64
 }
 
 func newWorld() *world {
@@ -80,6 +84,7 @@ type chart struct {
 // setCharts takes the charts the store listing named: the order they are
 // listed in, with what was read of each kept; a chart no longer listed is gone.
 func (w *world) setCharts(listed []chartListing) {
+	w.gen++
 	charts := make(map[string]*chart, len(listed))
 	order := make([]string, 0, len(listed))
 	for _, l := range listed {
@@ -135,6 +140,12 @@ type ticket struct {
 	// blockers are the blockers `jig next` listed for the ticket that are not
 	// met.
 	blockers []chartWait
+	// state is the roster's word on the ticket (new, ready, active, green,
+	// blocked, done or closed), and readyAt its place in the roster's order to
+	// start the ready tickets, 1 for the first and 0 for a ticket the order
+	// does not name.
+	state   string
+	readyAt int
 	// updated is when the ticket's journal last had a line, as the roster says
 	// it (zero for none): the age of the ticket, which no screen reads the
 	// stream for.
@@ -169,6 +180,7 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 // apply takes a batch of the stream in. It reports the tickets the batch
 // touched, and whether any of them was new to the screens.
 func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bool) {
+	w.gen++
 	touched = map[string]bool{}
 	for _, in := range envs {
 		for _, e := range w.place(in) {
@@ -240,10 +252,12 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 // setRoster takes the tickets `jig next` listed: their titles and states, and
 // the order they are listed in.
 func (w *world) setRoster(rows []rosterRow) {
+	w.gen++
 	order := make([]string, 0, len(rows))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.blockers, t.digest, t.updated = r.Title, r.Blockers, r.Digest, r.Updated
+		t.state, t.readyAt = r.State, r.StartOrder
 		t.awaiting = false
 		order = append(order, r.ID)
 	}
@@ -301,6 +315,10 @@ type rosterRow struct {
 	// Updated is the instant of the newest line of the ticket's journal, zero
 	// for a ticket with none.
 	Updated time.Time
+	// StartOrder is the ticket's place in the roster's next list, the ready
+	// tickets in the order to start them: 1 for the first, 0 when it is not in
+	// it.
+	StartOrder int
 }
 
 // latest is the position of the last line of the ticket whose event is one
