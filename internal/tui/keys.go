@@ -101,10 +101,10 @@ func (m *Model) listed(r *keyRow) bool {
 	switch {
 	case t != nil && t.awaiting:
 		// Nothing to move on or act on until the ticket exists.
-		return slices.Contains([]string{"esc", "q", "?", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "c", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "h", "c", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -215,24 +215,35 @@ func keyRows() []keyRow {
 				ok, _ := m.canOn(sub, actLandWord)
 				return ok, ""
 			}},
-		{names: []string{"5"}, label: "5", words: "land", screens: onScreens(screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice),
-			run: func(m *Model, _ string) tea.Cmd { return m.openLand() }},
-		{names: []string{"c"}, label: "c", words: "issue", screens: onTicketScreens,
-			say: func(m *Model, _ subject) string {
-				if up := m.upFrom(); up != "" && m.multiParent(up) != "" {
-					return "multi-task"
+		{names: []string{"1", "2", "3", "4", "5"}, label: "1-5", words: "steps", screens: onTicketScreens,
+			can: func(m *Model, _ subject) (bool, string) {
+				if why := m.stepsReason(); why != "" {
+					return false, why
 				}
-				return "issue"
+				return true, ""
+			},
+			run: func(m *Model, key string) tea.Cmd { return m.openStep(int(key[0] - '0')) }},
+		{names: []string{"h"}, label: "h", words: "main", screens: onAllScreens &^ onScreens(screenMain), hinted: onTicketScreens,
+			run: func(m *Model, _ string) tea.Cmd { return m.openMain() }},
+		{names: []string{"c"}, label: "c", words: "chart", screens: onTicketScreens,
+			say: func(m *Model, _ subject) string {
+				switch up := m.upFrom(); {
+				case up != "" && m.multiParent(up) != "":
+					return "multi-task"
+				case up != "" && len(m.issuesOf(up)) > 0:
+					return "issue"
+				}
+				return "chart"
 			},
 			can: func(m *Model, _ subject) (bool, string) {
 				up := m.upFrom()
 				switch {
 				case up == "":
 					return false, "this ticket does not exist yet"
-				case m.multiParent(up) != "" || len(m.issuesOf(up)) > 0:
+				case m.multiParent(up) != "" || len(m.issuesOf(up)) > 0 || len(m.chartsOf(up)) > 0:
 					return true, ""
 				}
-				return false, up + " is in no issue's plan"
+				return false, up + " is in no chart"
 			},
 			run: func(m *Model, _ string) tea.Cmd { return m.openIssue() }},
 		{names: []string{"m"}, label: "m", words: "map", screens: onScreens(screenChart),

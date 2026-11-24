@@ -134,9 +134,9 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 	}{
 		{"main", func(t *testing.T) *rig { return can1(t, buildUnder()) }, func(g *rig) { g.m.nav = g.m.nav[:1]; g.view() },
 			[]string{"Keys on this screen", "q quit now", "↑↓ move now", "g gate not now: the review is not ready: after the build", "t tail now"},
-			[]string{"esc back", "k keep", "5 land"}},
+			[]string{"esc back", "k keep"}},
 		{"brief", func(t *testing.T) *rig { return can1(t, briefWaiting()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenBrief, ticket: "JIG-2"}) },
-			[]string{"esc back now", "v approve now", "5 land now"},
+			[]string{"esc back now", "v approve now", "1-5 steps now"},
 			[]string{"g gate", "k keep", "p publish"}},
 		{"build", func(t *testing.T) *rig { return can1(t, buildUnder()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenBuild, ticket: "JIG-2"}) },
 			[]string{"u requeue not now: slice a is not stalled or env-blocked", "g gate not now: the review is not ready: after the build", "enter open now"},
@@ -148,8 +148,8 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 			[]string{"↑↓ scroll now", "p publish not now: the publish is not ready: after a clean review"},
 			[]string{"g gate", "enter open"}},
 		{"land", func(t *testing.T) *rig { return can1(t, landStop()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenLand, ticket: "JIG-2"}) },
-			[]string{"↑↓ scroll now", "esc back now"},
-			[]string{"g gate", "p publish", "5 land now", "k keep"}},
+			[]string{"↑↓ scroll now", "esc back now", "1-5 steps now", "h main now"},
+			[]string{"g gate", "p publish", "k keep"}},
 	} {
 		for _, wd := range []int{80, 100} {
 			g := sized(c.rig(t), wd, 24)

@@ -1,6 +1,5 @@
 jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-      reviewer (Claude Code · Opus 5) · independent · s-review
       full 0000000..ccccccc · 4 files read
 
   round 1 findings
@@ -21,4 +20,5 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps · h main
+  t tail

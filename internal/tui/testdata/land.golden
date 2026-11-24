@@ -19,6 +19,6 @@ jig  demo › JIG-2  Config loader › 5 land                        ◇ waits t
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · t tail
+  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps · h main
+  t tail

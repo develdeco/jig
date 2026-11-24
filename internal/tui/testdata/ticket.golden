@@ -9,8 +9,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
   │  ✖ slice b  failed its last run                                            │
-  │  ? slice c  waits for your answer                                          │
-  │  +2 more                                                                   │
+  │  +3 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
   ? builder asks about slice c  q-001
@@ -21,4 +20,5 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  ↓ 6 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open · a answer · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · enter open · a answer · 1-5 steps
+  h main · t tail

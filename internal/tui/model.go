@@ -261,6 +261,9 @@ type Model struct {
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
+	// kept is where the cursor stood on each screen the person left, for the
+	// session (moves.go).
+	kept map[navKey]navEntry
 	// table is the key table (keys.go): the one place a key lives.
 	table []keyRow
 	// help is the `?` overlay while it is up.
@@ -1180,48 +1183,7 @@ func (m *Model) open() tea.Cmd {
 	default:
 		return nil
 	}
-	m.nav = append(m.nav, next)
-	m.last = nil
-	if next.screen == screenReview {
-		// What the review screen is for, when something waits, is deciding it.
-		m.top().sel = m.askRow(ref)
-		// The page opens at its top, so the rounds are read before the rows.
-		m.top().lead = 1 << 20
-	}
-	var cmds []tea.Cmd
-	if next.screen == screenChart {
-		cmds = append(cmds, m.enterChart(m.top())...)
-	}
-	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
-		cmds = append(cmds, m.refreshStatus(next.ticket))
-	}
-	if next.screen == screenBrief {
-		cmds = append(cmds, m.loadBrief(next.ticket))
-	}
-	return tea.Batch(cmds...)
-}
-
-// openLand opens the Land screen of the ticket on the screen, whatever the
-// cursor is on: from the ticket's screen, a step's or a slice's. The land screen
-// itself, the project's list and a chart's have no ticket of their own to open
-// it for.
-func (m *Model) openLand() tea.Cmd {
-	e := m.top()
-	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish:
-	default:
-		return nil
-	}
-	t := m.w.tickets[e.ticket]
-	if t == nil || t.awaiting {
-		return nil
-	}
-	m.nav = append(m.nav, navEntry{screen: screenLand, ticket: e.ticket})
-	m.last = nil
-	if t.status == nil || t.dirty {
-		return m.refreshStatus(e.ticket)
-	}
-	return nil
+	return m.goTo(len(m.nav), ref, next)
 }
 
 // askRow is the position, among the rows of the review screen on top, of the
@@ -1232,7 +1194,7 @@ func (m *Model) askRow(ref *rowRef) int {
 		if r.kind != rowAsk {
 			continue
 		}
-		if ref.kind == rowAsk && r.id == ref.id {
+		if ref != nil && ref.kind == rowAsk && r.id == ref.id {
 			return i
 		}
 		if first < 0 {
@@ -1245,7 +1207,7 @@ func (m *Model) askRow(ref *rowRef) int {
 // back goes up one screen.
 func (m *Model) back() {
 	if len(m.nav) > 1 {
-		m.nav = m.nav[:len(m.nav)-1]
+		m.cut(len(m.nav) - 1)
 		m.last = nil
 	}
 }
