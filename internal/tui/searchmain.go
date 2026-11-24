@@ -181,7 +181,7 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 		var add func(rows []queueRow)
 		add = func(rows []queueRow) {
 			for _, r := range rows {
-				p.addRow(r.ref(), sc.line(m, c.q, r))
+				p.addRow(r.ref(), m.st.lit(sc.line(m, c.q, r), terms))
 				add(r.kids)
 			}
 		}
@@ -192,7 +192,7 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 			if len(p.lines) > 0 {
 				p.add("")
 			}
-			p.addRow(s.ref(), sc.line(m, c.q, s))
+			p.addRow(s.ref(), m.st.lit(sc.line(m, c.q, s), terms))
 			rows(s.kids)
 		}
 		if n := q.rowsIn(); n > 0 {

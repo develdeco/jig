@@ -13,9 +13,12 @@ import (
 // searchStore is a model of a store with an issue and its tasks (planned by a
 // chart), a published task with a pull request, a waiting task, a closed one
 // and a chart that plans no issue.
-func searchStore(t testing.TB) *Model {
+func searchStore(t testing.TB) *Model { return searchStoreIn(t, quietConfig()) }
+
+// searchStoreIn is searchStore with a configuration of its own.
+func searchStoreIn(t testing.TB, cfg Config) *Model {
 	t.Helper()
-	m := New(quietConfig())
+	m := New(cfg)
 	m.width, m.height = 110, 40
 	pending := []string{"pending|after the brief", "pending|after the build", "pending|after a clean review", "pending|after the publish"}
 	published := task("land", false, "done|approved", "done|2 slices green", "done|round 1 clean", "done|pull request opened", "current|waits for a merge")

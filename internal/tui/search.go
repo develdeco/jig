@@ -143,6 +143,43 @@ func (s *searchRun) keep(rows []queueRow) []queueRow {
 	return out
 }
 
+// litMask says which of the runes of text are the letters a term matched: the
+// first letters of a word (a blank-separated token whole, or a run of letters
+// and digits inside it) that a term starts, as many as the term has.
+func litMask(text []rune, terms []string) []bool {
+	mask := make([]bool, len(text))
+	if len(terms) == 0 {
+		return mask
+	}
+	lower := make([]rune, len(text))
+	for i, r := range text {
+		lower[i] = unicode.ToLower(r)
+	}
+	isWord := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+	for i := range text {
+		token := !unicode.IsSpace(text[i]) && (i == 0 || unicode.IsSpace(text[i-1]))
+		part := isWord(text[i]) && (i == 0 || !isWord(text[i-1]))
+		if !token && !part {
+			continue
+		}
+		for _, term := range terms {
+			rs := []rune(term)
+			if i+len(rs) > len(text) || string(lower[i:i+len(rs)]) != term {
+				continue
+			}
+			// Inside a token a term that holds more than letters and digits is
+			// no word of it.
+			if !token && strings.IndexFunc(term, func(r rune) bool { return !isWord(r) }) >= 0 {
+				continue
+			}
+			for j := i; j < i+len(rs); j++ {
+				mask[j] = true
+			}
+		}
+	}
+	return mask
+}
+
 // kindKey tells a ticket's id from a chart's name.
 func kindKey(r queueRow) string {
 	if r.chart {
