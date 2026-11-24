@@ -21,4 +21,4 @@ jig  demo › JIG-2  Config loader › 4 publish                     ◇ waits t
   │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ scroll · say "Land JIG-2" · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 5 land · t tail

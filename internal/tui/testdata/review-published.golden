@@ -21,4 +21,4 @@ jig  demo › JIG-2  Config loader › 3 review                      ◇ waits t
   │  ↓ 3 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ move · say "Land JIG-2" · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 5 land · t tail

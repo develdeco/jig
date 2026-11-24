@@ -261,6 +261,10 @@ type Model struct {
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
+	// table is the key table (keys.go): the one place a key lives.
+	table []keyRow
+	// help is the `?` overlay while it is up.
+	help *helpView
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
 	// seen is what the last frame drew of the screen on top, which the next one
@@ -271,7 +275,7 @@ type Model struct {
 
 // New builds the model for cfg.
 func New(cfg Config) *Model {
-	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height}
+	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height, table: keyRows()}
 	if m.width <= 0 {
 		m.width = defaultWidth
 	}
@@ -979,6 +983,9 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if m.ask != nil {
 		return m.confirmKey(k)
 	}
+	if m.help != nil {
+		return m.helpKey(k)
+	}
 	m.notice = ""
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
@@ -989,65 +996,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	}
-	switch k.String() {
-	case "q":
-		return m.quit()
-	case "up":
-		m.move(-1)
-	case "down":
-		m.move(1)
-	case "pgup":
-		m.move(-5)
-	case "pgdown":
-		m.move(5)
-	case "home":
-		m.move(-1 << 20)
-	case "end":
-		m.move(1 << 20)
-	case "enter", "right":
-		return m.open()
-	case "esc", "left", "backspace":
-		m.back()
-	case "a":
-		if m.allow(actAnswer) {
-			m.beginAnswer()
-		}
-	case "k":
-		if m.allow(actKeep) {
-			return m.triage("keep")
-		}
-	case "d":
-		if m.allow(actDismiss) {
-			return m.triage("dismiss")
-		}
-	case "u":
-		if m.allow(actRequeue) {
-			return m.requeue()
-		}
-	case "v":
-		if m.allow(actApprove) {
-			m.askApprove()
-		}
-	case "t":
-		m.tail = !m.tail
-	case "g":
-		if m.allow(actGate) {
-			return m.gate()
-		}
-	case "p":
-		if m.allow(actPublish) {
-			return m.beginPublish()
-		}
-	case "5":
-		return m.openLand()
-	case "c":
-		return m.openIssue()
-	case "m":
-		m.toggleMap()
-	case "r":
-		return m.refreshAll()
-	}
-	return nil
+	return m.runKey(k.String())
 }
 
 // move puts the cursor delta rows on, within the screen's rows. A cursor
@@ -1332,25 +1281,6 @@ func (m *Model) refreshAll() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// allow asks whether the key's action runs here: the screen must list it and can
-// must let it run; when not, the reason is the notice and nothing runs. The
-// hints list the keys by the same two answers.
-func (m *Model) allow(a action) bool {
-	m.keysOn = m.subjectNow()
-	listed := false
-	for _, k := range m.screenKeys(m.keysOn) {
-		listed = listed || k.act == a
-	}
-	ok, why := m.canOn(m.keysOn, a)
-	switch {
-	case !ok:
-		m.notice = why
-	case !listed:
-		m.notice = string(a) + " is not done from this screen"
-	}
-	return ok && listed
-}
-
 // targetTicket is the ticket a key acts on: the open one, else the one under
 // the cursor on the main screen and on a chart's.
 func (m *Model) targetTicket() string {
@@ -1491,6 +1421,10 @@ func (m *Model) triage(decision string) tea.Cmd {
 		m.notice = "the screen changed under the key before it was drawn: press it again"
 		return nil
 	case drawn == askWhole:
+	case seen && m.top().ticket == id:
+		// The person is on the ticket's own screen: opening it is not a way out.
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller"
+		return nil
 	case seen:
 		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
 		return nil
