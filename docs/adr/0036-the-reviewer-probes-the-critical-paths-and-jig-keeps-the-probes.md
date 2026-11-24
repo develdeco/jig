@@ -1,5 +1,7 @@
 # The reviewer probes the critical paths, and jig keeps the probes across rounds
 
+**Amended 2026-11-24:** the reach step added on 2026-11-22 (develdeco/jig#530: before probing, every round listed what the change reaches past the code it alters, and read it) was tried and taken out. On the next chart run, five tickets took 6 to 11 rounds, and the rounds after the first found 29 new medium findings, against 6 across the 14 tickets reviewed before it. They were new cases of the ticket's own rule around each fix, not repeats: each fix's reach found another one. The step's own measure was 2 rounds or fewer and no medium from the PR reader after a clean gate, and both went the wrong way. The independent PR reader that reads each pull request once after a clean gate stays; it already reads wide. A reviewer again runs a test only to probe.
+
 **Amended 2026-11-18:** a probe's `command` can be the finding's own `--oracle`: the narrowest command that covers the mutated term is the narrowest that proves its fix.
 
 A gate round after the first reviews the delta since the last reviewed head (`scope: delta`), and `must_review` and `reviewed_paths` prove it read every file the delta changed. Nothing records which behavior a round tested. In jig-demo-shop's PRs #24 and #26 the same fix to `cart.Total` passed every oracle with a test suite that pinned no line total's quantity factor: dropping the factor changed no test result.
