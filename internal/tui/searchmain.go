@@ -259,6 +259,9 @@ func (m *Model) clearSearch() {
 	e := &m.nav[0]
 	from, set := e.search.from, e.search.fromSet
 	e.search = searchState{}
+	// The cursor moved here is the reader's own: the next frame does not settle
+	// it back onto the row the last frame held.
+	m.seen = nil
 	if set {
 		e.cur, e.curSet = from, true
 	}
@@ -271,6 +274,7 @@ func (m *Model) searchCursor() {
 		return
 	}
 	e := &m.nav[0]
+	m.seen = nil
 	i := max(res.first, 0)
 	e.sel, e.cur, e.curSet, e.lead = i, res.refs[i].identity(), true, 0
 }
