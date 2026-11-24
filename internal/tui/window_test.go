@@ -10,6 +10,18 @@ import (
 
 // bodyOf is the rows of a frame between the header's rule and the first of the
 // tail's heading or the keys' rule.
+// hasMark is whether one of rows is a mark of what lies above or below, which a
+// window of boxes draws inside the box it cuts.
+func hasMark(rows []string, prefix, suffix string) bool {
+	for _, r := range rows {
+		inner := strings.TrimSpace(strings.Trim(strings.TrimSpace(r), "│"))
+		if strings.HasPrefix(inner, prefix) && strings.HasSuffix(inner, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func bodyOf(view string) []string {
 	lines := strings.Split(view, "\n")
 	var body []string
@@ -109,7 +121,7 @@ func TestWindowMarksWhatLiesAboveAndBelow(t *testing.T) {
 	t.Parallel()
 	g := manyTickets(t, 80, 24)
 	body := bodyOf(g.view())
-	if got := strings.TrimSpace(body[len(body)-1]); !strings.HasPrefix(got, "↓ ") || !strings.HasSuffix(got, " more") {
+	if !hasMark(body[len(body)-2:], "↓ ", " more") {
 		t.Errorf("the top of a long page does not end with a mark of what is below:\n%s", g.view())
 	}
 	for _, l := range body {
@@ -120,10 +132,10 @@ func TestWindowMarksWhatLiesAboveAndBelow(t *testing.T) {
 	g.press("down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down")
 	view := g.view()
 	body = bodyOf(view)
-	if got := strings.TrimSpace(body[0]); !strings.HasPrefix(got, "↑ ") || !strings.HasSuffix(got, " more") {
+	if !hasMark(body[:3], "↑ ", " more") {
 		t.Errorf("the middle of a long page does not start with a mark of what is above:\n%s", view)
 	}
-	if got := strings.TrimSpace(body[len(body)-1]); !strings.HasPrefix(got, "↓ ") {
+	if !hasMark(body[len(body)-2:], "↓ ", "") {
 		t.Errorf("the middle of a long page does not end with a mark of what is below:\n%s", view)
 	}
 	if !strings.Contains(view, "▸") || len(strings.Split(view, "\n")) != 24 {

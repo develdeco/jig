@@ -553,7 +553,7 @@ func TestChartStatusWords(t *testing.T) {
 	if state, label := status(); state != StateNeedsInput || label != "run needs you" {
 		t.Errorf("a chart with an open question: %s, %q", state, label)
 	}
-	if v := g.view(); !strings.Contains(v, "1 needs you") {
+	if v := g.view(); !strings.Contains(v, "1 needs") {
 		t.Errorf("the list does not say a chart needs you:\n%s", v)
 	}
 

@@ -31,7 +31,7 @@ func TestTUIReadsAStoreThatMoves(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(4 * time.Second)
-	if strings.Contains(out.String(), "not started (") {
+	if strings.Contains(out.String(), "Not started") {
 		t.Fatalf("a ticket with no line and no commit showed:\n%s", out.String())
 	}
 
@@ -40,7 +40,7 @@ func TestTUIReadsAStoreThatMoves(t *testing.T) {
 	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventLanded, Repo: "r", URL: "https://example.test/o/r/pull/1", Provenance: "person"}); err != nil {
 		t.Fatal(err)
 	}
-	out.until(t, "not started (1)")
+	out.until(t, "╭─ Not started ")
 
 	keys.Write([]byte("q"))
 	if code := wait(); code != 0 {

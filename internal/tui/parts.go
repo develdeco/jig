@@ -1,5 +1,10 @@
 package tui
 
+import (
+	"strconv"
+	"time"
+)
+
 // The parts every screen draws with. A section of a screen is a panel; a panel
 // of rows that are cells in the allocator is a list and names its columns in a
 // dim row under its top edge, laid out by the same call as its rows.
@@ -64,6 +69,24 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		p.boxAdd(l)
 	}
 	p.boxEnd()
+}
+
+// ageOf is how long ago at was, in its largest whole unit: "42s", "4m", "3h",
+// "13d". It is empty for a row with no line yet.
+func (m *Model) ageOf(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	d := max(0, m.now().Sub(at))
+	switch {
+	case d < time.Minute:
+		return strconv.Itoa(int(d/time.Second)) + "s"
+	case d < time.Hour:
+		return strconv.Itoa(int(d/time.Minute)) + "m"
+	case d < 24*time.Hour:
+		return strconv.Itoa(int(d/time.Hour)) + "h"
+	}
+	return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 }
 
 // boxNames adds the row of a list's column names to the panel.

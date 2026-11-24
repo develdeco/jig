@@ -138,6 +138,17 @@ func TestTicketScreenSectionsArePanels(t *testing.T) {
 	}
 }
 
+// summaryOf is the words at the right of the top edge of the panel titled
+// title on pg.
+func summaryOf(pg page, title string) string {
+	for _, l := range pg.lines {
+		if l.box == boxTop && l.text == title {
+			return l.right
+		}
+	}
+	return ""
+}
+
 // unframed is a screen with its panels' frames taken off: a panel's top edge is
 // its title alone, a row its text under the cursor's mark, and its bottom edge
 // goes. A test that reads the words of a section reads them through it.

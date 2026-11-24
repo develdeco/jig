@@ -104,7 +104,9 @@ var tallSizes = [][2]int{{60, 80}, {80, 70}, {230, 50}}
 // terminal, in a narrow, a standard and a wide one.
 func TestMainLaidOutAtThreeSizes(t *testing.T) {
 	t.Parallel()
-	for _, size := range tallSizes {
+	// A panel's frame and the age column take five cells more than the loose
+	// list did, so the narrow terminal is as wide as the ids need beside them.
+	for _, size := range [][2]int{{64, 80}, {80, 70}, {230, 50}} {
 		w, h := size[0], size[1]
 		t.Run(fmt.Sprintf("%dx%d", w, h), func(t *testing.T) {
 			t.Parallel()

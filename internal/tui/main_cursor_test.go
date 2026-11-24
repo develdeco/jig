@@ -29,7 +29,7 @@ func TestMainReadsTheStoreBeforeItDraws(t *testing.T) {
 		t.Fatal("the stream named no ticket")
 	}
 	before := pagesText(m.mainPage())
-	if !strings.Contains(before, "reading the store…") || strings.Contains(before, "JIG-1") || strings.Contains(before, "done (") {
+	if !strings.Contains(before, "reading the store…") || strings.Contains(before, "JIG-1") || strings.Contains(before, "Done") {
 		t.Errorf("main before the roster draws the stream's tickets:\n%s", before)
 	}
 	m.w.setRoster([]rosterRow{{ID: "JIG-1", Title: "Greeting copy", State: "ready"}})
@@ -40,7 +40,7 @@ func TestMainReadsTheStoreBeforeItDraws(t *testing.T) {
 
 	// With no runner nothing is read: the stream's ticket is all there is, and
 	// it is a ticket nothing is known of: not started.
-	if got := pagesText(bareMain(false).mainPage()); strings.Contains(got, "reading the store…") || !strings.Contains(got, "not started (1)") {
+	if got := pagesText(bareMain(false).mainPage()); strings.Contains(got, "reading the store…") || !strings.Contains(got, "Not started") {
 		t.Errorf("a model with no runner does not draw what it knows:\n%s", got)
 	}
 }

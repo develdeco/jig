@@ -38,7 +38,7 @@ func TestMainByChartHeadsItsTickets(t *testing.T) {
 	if got := strings.Join(rowIDs(text), " "); got != want {
 		t.Errorf("the rows read %s, want %s:\n%s", got, want, text)
 	}
-	if !strings.Contains(text, "plain") || strings.Index(text, "plain") < strings.Index(text, "SHOP-50") || !strings.Contains(text, "no chart (1)") || strings.Index(text, "no chart (1)") < strings.Index(text, "SHOP-3") {
+	if !strings.Contains(text, "plain") || strings.Index(text, "plain") < strings.Index(text, "SHOP-50") || !strings.Contains(text, "No chart") || strings.Index(text, "No chart") < strings.Index(text, "SHOP-3") {
 		t.Errorf("the ticket in no chart does not come last under its heading:\n%s", text)
 	}
 	if head := g.m.header(110)[0]; !strings.Contains(head, "by chart") {

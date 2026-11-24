@@ -49,7 +49,7 @@ func TestEndStatesReadApart(t *testing.T) {
 		g := chartRig(t)
 		// Wide enough that the branch the pull request goes into is one word on
 		// one row.
-		g.send(tea.WindowSizeMsg{Width: 140, Height: 30})
+		g.send(tea.WindowSizeMsg{Width: 200, Height: 30})
 		g.feed(jl(at(15, 30), "JIG-4", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
 		tk := g.m.w.tickets["JIG-4"]
 		if state != StateLanded {

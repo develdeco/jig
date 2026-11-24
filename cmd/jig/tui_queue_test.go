@@ -14,7 +14,7 @@ import (
 // then the id, after a cursor mark and indentation.
 func queueRowOf(frame, id string) int {
 	for i, l := range strings.Split(frame, "\n") {
-		if f := strings.Fields(strings.TrimLeft(l, "▸ ")); len(f) > 2 && f[1] == id {
+		if f := strings.Fields(strings.TrimLeft(l, " │▸")); len(f) > 2 && f[1] == id {
 			return i
 		}
 	}
@@ -32,7 +32,7 @@ func screenOnRow(t *testing.T, out *tuiOut, id string) string {
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		frame := lastScreen(out.String())
-		if i := queueRowOf(frame, id); i >= 0 && strings.HasPrefix(strings.Split(frame, "\n")[i], "▸") {
+		if i := queueRowOf(frame, id); i >= 0 && strings.Contains(strings.Split(frame, "\n")[i], "│▸") {
 			return frame
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -41,15 +41,46 @@ func screenOnRow(t *testing.T, out *tuiOut, id string) string {
 	return ""
 }
 
-// queueHeadingOf is the index of the line of frame that is the heading or fold
-// row of a group.
-func queueHeadingOf(frame, group string) int {
+// queueHeadingOf is the index of the line of frame that is the top edge of the
+// panel titled title.
+func queueHeadingOf(frame, title string) int {
 	for i, l := range strings.Split(frame, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(l, "▸▾ "), group) {
+		if strings.HasPrefix(l, "  ╭─ "+title+" ") {
 			return i
 		}
 	}
 	return -1
+}
+
+// panelCount is the count at the right of the top edge of the panel titled
+// title in frame, or "" when it has none.
+func panelCount(frame, title string) string {
+	for _, l := range strings.Split(frame, "\n") {
+		if strings.HasPrefix(l, "  ╭─ "+title+" ") {
+			f := strings.Fields(strings.TrimSuffix(strings.TrimSpace(l), "╮"))
+			return strings.TrimSpace(f[len(f)-2])
+		}
+	}
+	return ""
+}
+
+// foldState is whether the fold panel titled title in frame is "closed" (its one
+// row offers to show the rows) or "open", or "" when the frame has no such panel.
+func foldState(frame, title string) string {
+	in := false
+	for _, l := range strings.Split(frame, "\n") {
+		switch {
+		case strings.HasPrefix(l, "  ╭─ "+title+" "):
+			in = true
+		case in && strings.Contains(l, "enter shows them"):
+			return "closed"
+		case in && strings.Contains(l, "enter folds them"):
+			return "open"
+		case in && strings.HasPrefix(l, "  ╰"):
+			return ""
+		}
+	}
+	return ""
 }
 
 // TestTUIMainQueueFrames: `jig tui` on a pipe over a store with an issue and the
@@ -66,7 +97,7 @@ func TestTUIMainQueueFrames(t *testing.T) {
 	scope := []string{"--store", r.root}
 
 	keys, out, wait := startTUI(t, e, scope...)
-	frame := screenWith(t, out, "running (")
+	frame := screenWith(t, out, "╭─ Running ")
 	issue, task := queueRowOf(frame, "TK-1"), queueRowOf(frame, "TK-2")
 	if issue < 0 || task != issue+1 {
 		t.Errorf("the issue's task is not the row under it:\n%s", frame)
@@ -75,16 +106,22 @@ func TestTUIMainQueueFrames(t *testing.T) {
 	if col(lines[task], "TK-2") <= col(lines[issue], "TK-1") {
 		t.Errorf("the task is not drawn in from its issue:\n%s", frame)
 	}
-	needs, running, done := queueHeadingOf(frame, "needs you ("), queueHeadingOf(frame, "running ("), queueHeadingOf(frame, "done (")
+	needs, running, ready := queueHeadingOf(frame, "Needs you"), queueHeadingOf(frame, "Running"), queueHeadingOf(frame, "Ready")
 	if tk7 := queueRowOf(frame, "TK-7"); !(needs < tk7 && tk7 < running) {
 		t.Errorf("the plain ticket whose brief waits is not under needs you:\n%s", frame)
 	}
-	if tk9 := queueRowOf(frame, "TK-9"); !(running < tk9 && tk9 < done) {
+	if tk9 := queueRowOf(frame, "TK-9"); !(running < tk9 && tk9 < ready) {
 		t.Errorf("the ticket being built is not under running:\n%s", frame)
 	}
-	if queueRowOf(frame, "TK-12") >= 0 || !strings.Contains(frame, "done (") || !strings.Contains(frame, "enter shows them") {
-		t.Errorf("done is not one fold row:\n%s", frame)
+	// The last panel is below the first screen: the end of the list is its one
+	// fold row.
+	keys.Write([]byte("\x1b[F"))
+	foot := screenWith(t, out, "╭─ Done ")
+	if queueRowOf(foot, "TK-12") >= 0 || foldState(foot, "Done") != "closed" {
+		t.Errorf("done is not one fold row:\n%s", foot)
 	}
+	keys.Write([]byte("\x1b[H"))
+	screenOnRow(t, out, "TK-1")
 
 	// The cursor goes to the task, and on to the plain ticket whose brief waits;
 	// a landing another session records takes TK-6 out of needs you from above
@@ -96,8 +133,12 @@ func TestTUIMainQueueFrames(t *testing.T) {
 	if err := journal.Append(r.st, "TK-6", journal.Line{Event: journal.EventLanded}); err != nil {
 		t.Fatal(err)
 	}
-	moved := screenWith(t, out, "needs you (3)")
-	if i := queueRowOf(moved, "TK-7"); i < 0 || !strings.HasPrefix(strings.Split(moved, "\n")[i], "▸") {
+	var moved string
+	for i := 0; i < 2000 && panelCount(moved, "Needs you") != "3"; i++ {
+		moved = lastScreen(out.String())
+		time.Sleep(10 * time.Millisecond)
+	}
+	if i := queueRowOf(moved, "TK-7"); i < 0 || !strings.Contains(strings.Split(moved, "\n")[i], "│▸") {
 		t.Errorf("the cursor left its ticket when the store moved:\n%s", moved)
 	}
 
@@ -106,10 +147,10 @@ func TestTUIMainQueueFrames(t *testing.T) {
 	// list by state back.
 	keys.Write([]byte("s"))
 	byChart := screenWith(t, out, "in no chart")
-	if issue, noChart, tk7 := queueRowOf(byChart, "TK-1"), queueHeadingOf(byChart, "no chart ("), queueRowOf(byChart, "TK-7"); issue < 0 || noChart < 0 || !(issue < noChart && noChart < tk7) {
+	if issue, noChart, tk7 := queueRowOf(byChart, "TK-1"), queueHeadingOf(byChart, "No chart"), queueRowOf(byChart, "TK-7"); issue < 0 || noChart < 0 || !(issue < noChart && noChart < tk7) {
 		t.Errorf("the list by chart:\n%s", byChart)
 	}
-	if i := queueRowOf(byChart, "TK-7"); i < 0 || !strings.HasPrefix(strings.Split(byChart, "\n")[i], "▸") {
+	if i := queueRowOf(byChart, "TK-7"); i < 0 || !strings.Contains(strings.Split(byChart, "\n")[i], "│▸") {
 		t.Errorf("the cursor left its ticket across s:\n%s", byChart)
 	}
 	keys.Write([]byte("s"))
