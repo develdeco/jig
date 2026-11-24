@@ -96,6 +96,57 @@ func TestMainContainerRules(t *testing.T) {
 	}
 }
 
+// TestMainAMultiTasksLandingStopIsNeedsYou: a multi-task no issue lists, whose own
+// pull request is published and waits for the person's word, is in needs you in
+// the waits-to-land icon, whatever its tasks say; landed it is done.
+func TestMainAMultiTasksLandingStopIsNeedsYou(t *testing.T) {
+	t.Parallel()
+	open := []digestPR{{Repo: "demo", Number: 7, State: "open", Target: "main"}}
+	m := queueModel(
+		rosterRow{ID: "M-1", Title: "M-1", State: "multi-task", Digest: &digestInfo{Kind: "multi-task", State: "published", PRs: open, Children: []digestChild{{ID: "M-2"}}}},
+		rosterRow{ID: "M-2", Title: "M-2", State: "new", Digest: task("brief", true, "current|being drafted", pendingAfter[0], pendingAfter[1], pendingAfter[2], "pending|after the publish")},
+		rosterRow{ID: "M-3", Title: "M-3", State: "multi-task", Digest: &digestInfo{Kind: "multi-task", State: "landed", Children: []digestChild{{ID: "M-4"}}}},
+		rosterRow{ID: "M-4", Title: "M-4", State: "new", Digest: task("brief", true, "current|being drafted", pendingAfter[0], pendingAfter[1], pendingAfter[2], "pending|after the publish")},
+	)
+	if got := groupOf(m, "M-1"); got != "needs you" {
+		t.Errorf("a multi-task at its landing stop is in %q, want needs you", got)
+	}
+	if got := groupOf(m, "M-3"); got != "done" {
+		t.Errorf("a landed multi-task is in %q, want done", got)
+	}
+	m.nav[0].open = map[string]bool{"done": true, "not started": true}
+	m.w.gen++
+	if row := lineWith(stripANSI(pagesText(m.mainPage())), "M-1 "); !strings.Contains(row, "◇ M-1") || !strings.Contains(row, `say "Land M-1"`) {
+		t.Errorf("the multi-task's row at its landing stop: %q", row)
+	}
+}
+
+// TestMainTheCursorOnATaskGoesToTheFoldThatHidesItsIssue: the cursor on a task of
+// an issue that lands, and so folds into done with its tasks, is on the fold row.
+func TestMainTheCursorOnATaskGoesToTheFoldThatHidesItsIssue(t *testing.T) {
+	t.Parallel()
+	ready := func(order int, id string) rosterRow {
+		return rosterRow{ID: id, Title: id, State: "ready", StartOrder: order}
+	}
+	open := []digestPR{{Repo: "demo", Number: 7, State: "open", Target: "main"}}
+	issue := func(state string, prs []digestPR) rosterRow {
+		return rosterRow{ID: "I-1", Title: "I-1", State: "issue", Digest: &digestInfo{Kind: "issue", State: state, PRs: prs, Children: []digestChild{{ID: "K-1"}, {ID: "K-2"}}}}
+	}
+	landed := task("land", false, "done|a", "done|b", "done|c", "done|d", "done|landed")
+	m := queueModel(issue("published", open), rosterRow{ID: "K-1", Title: "K-1", State: "done", Digest: landed}, rosterRow{ID: "K-2", Title: "K-2", State: "done", Digest: landed}, ready(1, "A-1"), ready(2, "A-2"), ready(3, "A-3"))
+	m.w.setCharts([]chartListing{{Name: "plan", Title: "Plan", Tickets: []string{"K-1", "K-2"}, Issue: "I-1"}})
+	m.View()
+	m.move(1)
+	if ref := m.selected(); ref == nil || ref.id != "K-1" || ref.container != "I-1" {
+		t.Fatalf("the cursor is on %+v, want K-1 under I-1", ref)
+	}
+	m.w.setRoster([]rosterRow{issue("landed", nil), {ID: "K-1", Title: "K-1", State: "done", Digest: landed}, {ID: "K-2", Title: "K-2", State: "done", Digest: landed}, ready(1, "A-1"), ready(2, "A-2"), ready(3, "A-3")})
+	m.View()
+	if ref := m.selected(); ref == nil || ref.kind != rowFold || ref.id != "done" {
+		t.Errorf("the cursor is on %+v, want the done fold row that holds the issue and its tasks", ref)
+	}
+}
+
 // colOf is the screen column text starts at in line, -1 when it is not in it.
 func colOf(line, text string) int {
 	i := strings.Index(line, text)
