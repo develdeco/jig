@@ -179,7 +179,7 @@ func keyRows() []keyRow {
 			run: func(m *Model, _ string) tea.Cmd { return m.quit() }},
 		{names: []string{"esc"}, label: "esc", words: "clear search", screens: onScreens(screenMain),
 			can: func(m *Model, _ subject) (bool, string) {
-				return m.searchApplied(), "no search is on"
+				return m.searchApplied(), ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.clearSearch(); return nil }},
 		{names: []string{"?"}, label: "?", words: "keys", screens: onAllScreens,

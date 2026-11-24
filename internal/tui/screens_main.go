@@ -32,9 +32,9 @@ func (m *Model) mainPage() page {
 }
 
 // buildMain draws the queue's page: the groups in order, each under its heading.
-func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity) {
+func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity, map[rowIdentity][]string) {
 	p, folded := m.draftMain(q, open)
-	return m.layMain(p), folded
+	return m.layMain(p), folded, p.memo
 }
 
 // mainDraft is the project's page before its rows are laid out: its headings
@@ -47,12 +47,15 @@ type mainDraft struct {
 	// chart says the row at a line is a chart's, laid out by its own kind of
 	// column: a chart's name is not a ticket's id.
 	chart map[int]bool
+	// memo is the cells of every row the draft holds, by identity, which the
+	// search reads instead of building a row's cells and detail again.
+	memo map[rowIdentity][]string
 }
 
 // draftMain is buildMain's page of headings and rows, the rows still to be laid
 // out by layMain.
 func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[rowIdentity]rowIdentity) {
-	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}}
+	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, memo: map[rowIdentity][]string{}}
 	var folded map[rowIdentity]rowIdentity
 	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
@@ -146,6 +149,7 @@ func (m *Model) addQueueRow(p *mainDraft, r queueRow) {
 	at := len(p.lines)
 	p.addRow(r.ref(), "")
 	p.cells[at], p.chart[at] = m.queueCells(r), r.chart
+	p.memo[r.ref().identity()] = p.cells[at]
 }
 
 // mainColumns are the columns of the project's rows: the state icon, the id or
@@ -213,6 +217,7 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 // ticketDetailIn is ticketDetail with or without the kind the ticket says of
 // itself.
 func (m *Model) ticketDetailIn(t *ticket, steps []stepRow, withKind bool) string {
+	m.detailBuilds++
 	end, atEnd := m.endOf(t)
 	kind := ""
 	if k := t.digest.kindWords(); withKind && k != "" {

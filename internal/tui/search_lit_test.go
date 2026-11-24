@@ -79,9 +79,9 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 
 	// A chart's row lights its name.
 	press(m, tea.KeyEsc)
-	typed(m, "/tui-d")
-	if got := strings.Join(litSpans(styledLine(t, m, "tui-design")), "|"); got != "tui-d" {
-		t.Errorf("/tui-d lights %q in the chart's row, want tui-d", got)
+	typed(m, "/orbit-d")
+	if got := strings.Join(litSpans(styledLine(t, m, "orbit-design")), "|"); got != "orbit-d" {
+		t.Errorf("/orbit-d lights %q in the chart's row, want orbit-d", got)
 	}
 
 	// A title cut by a narrow layout lights what stays of it, and no letter
@@ -116,7 +116,7 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 func TestLitLettersMoveNoColumn(t *testing.T) {
 	t.Parallel()
 	for _, w := range []int{60, 100, 230} {
-		for _, query := range []string{"rel 11", "the", "t", "tui-d", "iss"} {
+		for _, query := range []string{"rel 11", "the", "t", "orbit-d", "iss"} {
 			styled, plain := searchStoreIn(t, styledConfig()), searchStore(t)
 			for _, m := range []*Model{styled, plain} {
 				m.width = w
@@ -126,7 +126,7 @@ func TestLitLettersMoveNoColumn(t *testing.T) {
 			if got, want := stripANSI(lit), plain.View(); got != want {
 				t.Errorf("%d columns, /%s: the frame lit differs from the plain one\n--- plain\n%s\n--- lit\n%s", w, query, want, got)
 			}
-			if !strings.Contains(lit, "\x1b[1;4m") && query != "tui-d" {
+			if !strings.Contains(lit, "\x1b[1;4m") && query != "orbit-d" {
 				t.Errorf("%d columns, /%s: nothing is lit in the frame", w, query)
 			}
 		}

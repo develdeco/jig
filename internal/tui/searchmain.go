@@ -30,7 +30,7 @@ func (s searchState) applied() bool { return s.open || len(s.query) > 0 }
 // row's detail again.
 type searchCache struct {
 	words map[string][]string
-	cells map[rowIdentity][]string
+	own   map[string]map[string]bool
 	total int
 	// chartsOf are the charts that list a ticket, issuesOf the issues whose
 	// chart lists it, planOf the chart that plans an issue.
@@ -73,7 +73,7 @@ func (m *Model) searchOf(c *mainCache) *searchResult {
 func (m *Model) newSearchCache(q mainQueue) *searchCache {
 	sc := &searchCache{
 		words:    map[string][]string{},
-		cells:    map[rowIdentity][]string{},
+		own:      map[string]map[string]bool{},
 		chartsOf: map[string][]string{},
 		issuesOf: map[string][]string{},
 		planOf:   map[string]string{},
@@ -154,15 +154,30 @@ func (m *Model) rowFactsOf(sc *searchCache, r queueRow) rowFacts {
 	return f
 }
 
-// cellsOf are the row's cells, built once.
-func (sc *searchCache) cellsOf(m *Model, r queueRow) []string {
+// cellsOf are the row's cells as main built them; a row main did not build (one
+// in a fold) is built once and kept with the rest.
+func (c *mainCache) cellsOf(m *Model, r queueRow) []string {
 	id := r.ref().identity()
-	if c, ok := sc.cells[id]; ok {
-		return c
+	if cells, ok := c.cells[id]; ok {
+		return cells
 	}
-	c := m.queueCells(r)
-	sc.cells[id] = c
-	return c
+	cells := m.queueCells(r)
+	c.cells[id] = cells
+	return cells
+}
+
+// ownOf are the row's words as a set: the words the letters lit may be of.
+func (sc *searchCache) ownOf(m *Model, r queueRow) map[string]bool {
+	key := kindKey(r)
+	if own, ok := sc.own[key]; ok {
+		return own
+	}
+	own := map[string]bool{}
+	for _, w := range sc.wordsOf(m, r) {
+		own[w] = true
+	}
+	sc.own[key] = own
+	return own
 }
 
 // runSearch narrows the queue to what the query matches and draws it.
@@ -180,7 +195,12 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 	addRow := func(r queueRow) {
 		at := len(p.lines)
 		p.addRow(r.ref(), "")
-		p.cells[at], p.chart[at] = sc.cellsOf(m, r), r.chart
+		own := sc.ownOf(m, r)
+		cells := make([]string, len(c.cellsOf(m, r)))
+		for i, cell := range c.cellsOf(m, r) {
+			cells[i] = m.st.lit(cell, terms, own)
+		}
+		p.cells[at], p.chart[at] = cells, r.chart
 	}
 	rows := func(rows []queueRow) {
 		var add func(rows []queueRow)
@@ -225,13 +245,8 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 		p.add(m.st.dim("nothing matches"))
 	}
 	// The rows are laid out by the allocator, as main's are; the letters lit are
-	// style over the laid text, so they move no column.
+	// style over the cells' text, so they move no column.
 	pg := m.layMain(p)
-	for i, l := range pg.lines {
-		if l.ref != nil || l.cont {
-			pg.lines[i].text = m.st.lit(l.text, terms)
-		}
-	}
 	res := &searchResult{pg: pg, refs: pg.refs(), first: -1, matched: len(run.tickets), total: sc.total}
 	for i, ref := range res.refs {
 		if run.self[ref.identity()] {
@@ -277,6 +292,9 @@ func (m *Model) clearSearch() {
 	m.seen = nil
 	if set {
 		e.cur, e.curSet = from, true
+		if i, ok := findRow(m.mainRefs(), from); ok {
+			e.sel, e.cur = i, m.mainRefs()[i].identity()
+		}
 	}
 }
 

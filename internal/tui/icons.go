@@ -138,7 +138,7 @@ func (s styles) key(text string) string {
 // underline on and off alone, so a colour set before them goes on after. They
 // are no width (`width` counts none), and a terminal that styles nothing gets
 // the text as it was.
-func (s styles) lit(text string, terms []string) string {
+func (s styles) lit(text string, terms []string, own map[string]bool) string {
 	if len(terms) == 0 || s.style().Bold(true).Render("x") == "x" {
 		return text
 	}
@@ -165,7 +165,7 @@ func (s styles) lit(text string, terms []string) string {
 		visible = append(visible, r)
 		i += n
 	}
-	mask := litMask(visible, terms)
+	mask := litMask(visible, terms, own)
 	var b strings.Builder
 	on, at := false, 0
 	for _, p := range pieces {

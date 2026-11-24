@@ -18,6 +18,9 @@ type mainCache struct {
 	folded map[rowIdentity]rowIdentity
 	refs   []rowRef
 
+	// cells are the cells of the rows the page was built from, by identity.
+	cells map[rowIdentity][]string
+
 	// srch is the search over this list, built when a search first asks.
 	srch *searchCache
 }
@@ -63,7 +66,7 @@ func (m *Model) mainBuilt() *mainCache {
 	m.queueBuilds++
 	c := &mainCache{gen: m.w.gen, width: m.width, bucket: bucket, folds: folds}
 	c.q = m.mainRows()
-	c.pg, c.folded = m.buildMain(c.q, open)
+	c.pg, c.folded, c.cells = m.buildMain(c.q, open)
 	c.refs = c.pg.refs()
 	m.main = c
 	return c

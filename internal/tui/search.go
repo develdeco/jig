@@ -145,8 +145,10 @@ func (s *searchRun) keep(rows []queueRow) []queueRow {
 
 // litMask says which of the runes of text are the letters a term matched: the
 // first letters of a word (a blank-separated token whole, or a run of letters
-// and digits inside it) that a term starts, as many as the term has.
-func litMask(text []rune, terms []string) []bool {
+// and digits inside it) that a term starts, as many as the term has. Only a word
+// that is one of the row's own (own) is lit: a word the row's cell says but the
+// row does not hold lights nothing, so what is lit is why the row is kept.
+func litMask(text []rune, terms []string, own map[string]bool) []bool {
 	mask := make([]bool, len(text))
 	if len(terms) == 0 {
 		return mask
@@ -156,25 +158,33 @@ func litMask(text []rune, terms []string) []bool {
 		lower[i] = unicode.ToLower(r)
 	}
 	isWord := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
-	for i := range text {
-		token := !unicode.IsSpace(text[i]) && (i == 0 || unicode.IsSpace(text[i-1]))
-		part := isWord(text[i]) && (i == 0 || !isWord(text[i-1]))
-		if !token && !part {
-			continue
+	// light marks the first n runes of the word that runs from i while in holds.
+	light := func(i int, in func(rune) bool, bareTerms bool) {
+		end := i
+		for end < len(text) && in(text[end]) {
+			end++
+		}
+		word := string(lower[i:end])
+		if !own[word] {
+			return
 		}
 		for _, term := range terms {
-			rs := []rune(term)
-			if i+len(rs) > len(text) || string(lower[i:i+len(rs)]) != term {
+			if bareTerms && strings.IndexFunc(term, func(r rune) bool { return !isWord(r) }) >= 0 {
 				continue
 			}
-			// Inside a token a term that holds more than letters and digits is
-			// no word of it.
-			if !token && strings.IndexFunc(term, func(r rune) bool { return !isWord(r) }) >= 0 {
-				continue
+			if strings.HasPrefix(word, term) {
+				for j := i; j < i+len([]rune(term)); j++ {
+					mask[j] = true
+				}
 			}
-			for j := i; j < i+len(rs); j++ {
-				mask[j] = true
-			}
+		}
+	}
+	for i := range text {
+		if !unicode.IsSpace(text[i]) && (i == 0 || unicode.IsSpace(text[i-1])) {
+			light(i, func(r rune) bool { return !unicode.IsSpace(r) }, false)
+		}
+		if isWord(text[i]) && (i == 0 || !isWord(text[i-1])) {
+			light(i, isWord, true)
 		}
 	}
 	return mask

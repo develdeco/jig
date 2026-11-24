@@ -40,8 +40,8 @@ func searchStoreIn(t testing.TB, cfg Config) *Model {
 		{ID: "CLS-4", Title: "Drop the old screen", Digest: closed},
 	})
 	m.w.setCharts([]chartListing{
-		{Name: "queue-plan", Title: "Queue plan", Tickets: []string{"TSK-1", "TSK-2"}, Issue: "ISS-1"},
-		{Name: "tui-design", Title: "Design of the TUI", Tickets: []string{"WAI-3"}},
+		{Name: "harbor-plan", Title: "Queue plan", Tickets: []string{"TSK-1", "TSK-2"}, Issue: "ISS-1"},
+		{Name: "orbit-design", Title: "Design of the orbit", Tickets: []string{"WAI-3"}},
 	})
 	return m
 }
@@ -94,13 +94,13 @@ func TestSearchMatchesWordsByPrefixInAnyOrder(t *testing.T) {
 		"no such":       "",
 		// The kind: the issue's row, and the charts' rows by the word chart.
 		"issue": "ISS-1",
-		"chart": "tui-design",
+		"chart": "orbit-design",
 		// An issue's tasks by the issue they are in, and by the chart's name.
-		"iss-1":      "ISS-1 TSK-1 TSK-2",
-		"queue-plan": "ISS-1 TSK-1 TSK-2",
-		"queue":      "ISS-1 TSK-1 TSK-2",
-		"tui-design": "WAI-3 tui-design",
-		"design":     "WAI-3 tui-design",
+		"iss-1":        "ISS-1 TSK-1 TSK-2",
+		"harbor-plan":  "ISS-1 TSK-1 TSK-2",
+		"harbor":       "ISS-1 TSK-1 TSK-2",
+		"orbit-design": "WAI-3 orbit-design",
+		"design":       "WAI-3 orbit-design",
 		// A task's own words keep its issue and no other task.
 		"draw":        "ISS-1 TSK-2",
 		"sort groups": "ISS-1 TSK-1",
@@ -188,7 +188,7 @@ func TestSearchUnfoldsFoldedGroups(t *testing.T) {
 	byChart := stripANSI(m.View())
 	typed(m, "/notes")
 	frame = stripANSI(m.View())
-	if strings.Contains(frame, "TSK-1") || !strings.Contains(frame, "REL-11") || !strings.Contains(frame, "WAI-3") || !strings.Contains(frame, "tui-design") {
+	if strings.Contains(frame, "TSK-1") || !strings.Contains(frame, "REL-11") || !strings.Contains(frame, "WAI-3") || !strings.Contains(frame, "orbit-design") {
 		t.Errorf("the view by chart is not narrowed to the matches and their charts:\n%s", frame)
 	}
 	press(m, tea.KeyEsc)
