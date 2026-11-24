@@ -83,7 +83,8 @@ type Report struct {
 	Answers []LedgerEntry `json:"answers"`
 	// Receipts are the last MaxReceipts shipped tickets that have a recorded
 	// change size and a builder peak, newest first: what the project's own
-	// recent tickets cost, for sizing a new one against.
+	// recent tickets cost, for sizing a new one against, with the reviewed
+	// rounds each took and whether it went back to build after publish.
 	Receipts []Receipt `json:"receipts"`
 }
 

@@ -1,7 +1,9 @@
 package recall
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -64,6 +66,75 @@ func TestRecallReceiptsBuilderIsWhoSpentFromTheFirstClaim(t *testing.T) {
 	// A ticket with no claim line was built outside jig: no builder is named.
 	if f := FactsOf([]journal.Line{spendAt(after, "s", "", "x", 5)}); f.Peak != 0 {
 		t.Errorf("no claim: peak = %d, want 0", f.Peak)
+	}
+}
+
+// TestRecallReceiptsRoundsAndReturnComeFromTheJournal: a ticket's reviewed
+// rounds are its gate-round and gate-clean lines less a gate-clean that
+// carries an earlier round's verdict (no reviewer ran), before and after
+// publish alike; it went back to build when a slice was claimed or verified
+// after its first publish-done line, and a publish repeated with nothing built
+// is no return.
+func TestRecallReceiptsRoundsAndReturnComeFromTheJournal(t *testing.T) {
+	t.Parallel()
+	line := func(ev string, slice string) journal.Line { return journal.Line{Event: ev, Slice: slice} }
+	round, clean := line(journal.EventGateRound, ""), line(journal.EventGateClean, "")
+	carried := journal.Line{Event: journal.EventGateClean, Carried: 2}
+	publish := line(journal.EventPublishDone, "")
+	cases := []struct {
+		name   string
+		lines  []journal.Line
+		rounds int
+		back   bool
+	}{
+		{"nothing journaled", nil, 0, false},
+		{"a round and a clean round", []journal.Line{line(journal.EventClaim, "a"), round, clean, publish}, 2, false},
+		{"a carried round is no review", []journal.Line{line(journal.EventClaim, "a"), round, clean, carried, carried, publish}, 2, false},
+		{"rounds after publish count", []journal.Line{line(journal.EventClaim, "a"), round, clean, publish, round, clean, publish}, 4, false},
+		{"a publish repeated is no return", []journal.Line{line(journal.EventClaim, "a"), line(journal.EventVerified, "a"), clean, publish, publish, publish}, 1, false},
+		{"a claim after publish is a return", []journal.Line{line(journal.EventClaim, "a"), clean, publish, line(journal.EventClaim, "fix-1"), clean, publish}, 2, true},
+		{"a verified line after publish is a return", []journal.Line{line(journal.EventVerified, "a"), clean, publish, line(journal.EventVerified, "fix-1")}, 1, true},
+		{"claims and verifies before publish are not", []journal.Line{line(journal.EventClaim, "a"), line(journal.EventClaim, "b"), line(journal.EventVerified, "a"), line(journal.EventVerified, "b"), clean, publish}, 1, false},
+		{"a line naming no slice is not a slice built", []journal.Line{clean, publish, line(journal.EventClaim, ""), line(journal.EventVerified, "")}, 1, false},
+		{"no publish yet is no return", []journal.Line{line(journal.EventClaim, "a"), round, line(journal.EventClaim, "fix-1")}, 1, false},
+		{"the first publish counts, not the last", []journal.Line{publish, line(journal.EventClaim, "a"), publish}, 0, true},
+	}
+	for _, c := range cases {
+		f := FactsOf(c.lines)
+		if f.Rounds != c.rounds || f.Back != c.back {
+			t.Errorf("%s: rounds = %d, back = %v, want %d and %v", c.name, f.Rounds, f.Back, c.rounds, c.back)
+		}
+	}
+}
+
+// TestRecallReceiptsCarryTheirRoundsAndReturn: a receipt names the reviewed
+// rounds and the return to build of the ticket it was read from, and the
+// table shows rounds as a number and back as yes or no.
+func TestRecallReceiptsCarryTheirRoundsAndReturn(t *testing.T) {
+	t.Parallel()
+	tickets := []Ticket{
+		{ID: "T-1", Shipped: true, Facts: &Facts{At: "2026-01-01T00:00:00Z", Change: &journal.ChangeSize{Files: 2, Bytes: 20}, Peak: 5000, Rounds: 3, Back: true}},
+		{ID: "T-2", Shipped: true, Facts: &Facts{At: "2026-01-02T00:00:00Z", Change: &journal.ChangeSize{Files: 1, Bytes: 10}, Peak: 4000}},
+	}
+	r := Build(tickets, Material{}, "")
+	want := []Receipt{{Ticket: "T-2", Files: 1, Bytes: 10, Peak: 4000}, {Ticket: "T-1", Files: 2, Bytes: 20, Peak: 5000, Rounds: 3, Back: true}}
+	if len(r.Receipts) != 2 || r.Receipts[0] != want[0] || r.Receipts[1] != want[1] {
+		t.Fatalf("receipts = %+v, want %+v", r.Receipts, want)
+	}
+	var table string
+	for _, b := range r.Blocks() {
+		if strings.HasPrefix(b, "receipts") {
+			table = b
+		}
+	}
+	for _, s := range []string{"ticket,files,bytes,peak,rounds,back", "T-2,1,10,4000,0,no", "T-1,2,20,5000,3,yes"} {
+		if !strings.Contains(table, s) {
+			t.Errorf("block = %q, want %q", table, s)
+		}
+	}
+	data, err := json.Marshal(r.Receipts[1])
+	if err != nil || string(data) != `{"ticket":"T-1","files":2,"bytes":20,"peak":5000,"rounds":3,"back_to_build":true}` {
+		t.Errorf("receipt json = %s, %v", data, err)
 	}
 }
 
