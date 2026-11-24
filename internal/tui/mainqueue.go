@@ -109,6 +109,11 @@ type mainQueue struct {
 	idW, titleW, chartIDW, chartTitleW int
 	// issues counts the issues among the rows, drawn anywhere.
 	issues int
+	// byChart says the list is laid out by chart: sections are the rows that head
+	// the tickets of a chart (an issue's row or a chart's), and byGroup holds
+	// only the tickets in no chart.
+	byChart  bool
+	sections []queueRow
 }
 
 // mainRows reads the roster's rows into the groups: the roster is all main
@@ -158,6 +163,10 @@ func (m *Model) mainRows() mainQueue {
 	if len(names) > 0 {
 		q.chartIDW, q.chartTitleW = m.chartColumns(names, q.idW, q.titleW)
 	}
+	if m.nav[0].byChart {
+		m.chartView(&q, rows, built, drawn)
+		return q
+	}
 	for _, r := range q.rows {
 		q.byGroup[r.group] = append(q.byGroup[r.group], r)
 	}
@@ -165,6 +174,83 @@ func (m *Model) mainRows() mainQueue {
 		sortGroup(mainGroup(g), q.byGroup[g])
 	}
 	return q
+}
+
+// chartView lays the list out by chart: each chart that plans an issue is the
+// issue's row, each other chart its own, every one heading the tickets it lists
+// in the store's order of charts; the tickets in no chart come last, in the
+// groups of the view by state with done folded. A ticket two charts list is
+// under each.
+func (m *Model) chartView(q *mainQueue, rows, built map[string]queueRow, drawn map[string]bool) {
+	q.byChart = true
+	inChart := map[string]bool{}
+	for _, name := range m.w.chartOrder {
+		c := m.w.charts[name]
+		if c == nil {
+			continue
+		}
+		for _, id := range c.ids() {
+			inChart[id] = true
+		}
+		if issue := c.listing.Issue; issue != "" {
+			if row, ok := built[issue]; ok {
+				inChart[issue] = true
+				q.sections = append(q.sections, row)
+			}
+			continue
+		}
+		head := m.chartRow(name, c)
+		for _, id := range c.ids() {
+			r, ok := rows[id]
+			if !ok {
+				continue
+			}
+			if b, ok := built[id]; ok {
+				r = b
+			}
+			head.kids = append(head.kids, under(r, name, 1))
+		}
+		q.sections = append(q.sections, head)
+	}
+	for _, r := range q.rows {
+		if !r.chart && !inChart[r.id] {
+			q.byGroup[r.group] = append(q.byGroup[r.group], r)
+		}
+	}
+	for g := range q.byGroup {
+		sortGroup(mainGroup(g), q.byGroup[g])
+	}
+	for _, s := range q.sections {
+		q.idW = max(q.idW, s.indentedIDW())
+	}
+	q.titleW = min(q.titleW, max(0, (m.width-q.idW-20)/3))
+}
+
+// rowsIn counts the rows of the groups.
+func (q mainQueue) rowsIn() int {
+	n := 0
+	for _, rows := range q.byGroup {
+		n += len(rows)
+	}
+	return n
+}
+
+// under is the row drawn under the container, depth levels in, with the rows
+// under it as far further in.
+func under(r queueRow, container string, depth int) queueRow {
+	shift := depth - r.depth
+	r.container = container
+	return shifted(r, shift)
+}
+
+func shifted(r queueRow, by int) queueRow {
+	r.depth += by
+	kids := make([]queueRow, len(r.kids))
+	for i, k := range r.kids {
+		kids[i] = shifted(k, by)
+	}
+	r.kids = kids
+	return r
 }
 
 // ticketRow is the row of ticket id and the group the first rule that holds
@@ -421,6 +507,25 @@ func (m *Model) queueSummary() string {
 	}
 	q := m.mainBuilt().q
 	var parts []string
+	if q.byChart {
+		charts := 0
+		for _, s := range q.sections {
+			if s.chart {
+				charts++
+			}
+		}
+		parts = append(parts, "by chart")
+		if q.issues > 0 {
+			parts = append(parts, strconv.Itoa(q.issues)+" "+plural(q.issues, "issue", "issues"))
+		}
+		if charts > 0 {
+			parts = append(parts, strconv.Itoa(charts)+" "+plural(charts, "chart", "charts"))
+		}
+		if n := q.rowsIn(); n > 0 {
+			parts = append(parts, strconv.Itoa(n)+" in no chart")
+		}
+		return strings.Join(parts, " · ")
+	}
 	if q.issues > 0 {
 		parts = append(parts, strconv.Itoa(q.issues)+" "+plural(q.issues, "issue", "issues"))
 	}

@@ -101,6 +101,23 @@ func TestTUIMainQueueFrames(t *testing.T) {
 		t.Errorf("the cursor left its ticket when the store moved:\n%s", moved)
 	}
 
+	// s lays the list out by chart: the issue heads its tasks, the tickets in no
+	// chart come last, and the cursor stays on its ticket; s again brings the
+	// list by state back.
+	keys.Write([]byte("s"))
+	byChart := screenWith(t, out, "in no chart")
+	if issue, noChart, tk7 := queueRowOf(byChart, "TK-1"), queueHeadingOf(byChart, "no chart ("), queueRowOf(byChart, "TK-7"); issue < 0 || noChart < 0 || !(issue < noChart && noChart < tk7) {
+		t.Errorf("the list by chart:\n%s", byChart)
+	}
+	if i := queueRowOf(byChart, "TK-7"); i < 0 || !strings.HasPrefix(strings.Split(byChart, "\n")[i], "▸") {
+		t.Errorf("the cursor left its ticket across s:\n%s", byChart)
+	}
+	keys.Write([]byte("s"))
+	back := screenWith(t, out, "s by chart")
+	if strings.Contains(back, "in no chart") {
+		t.Errorf("s again did not bring the list by state back:\n%s", back)
+	}
+
 	// enter on the issue prints its plan.
 	keys.Write([]byte("\x1b[H\r"))
 	plan := screenWith(t, out, "Tasks")

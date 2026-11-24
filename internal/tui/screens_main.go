@@ -37,12 +37,31 @@ func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdent
 		}
 		return p, nil
 	}
+	if q.byChart {
+		for _, s := range q.sections {
+			if len(p.lines) > 0 {
+				p.add("")
+			}
+			p.addRow(s.ref(), m.queueLine(q, s))
+			m.addQueueRows(&p, q, s.kids)
+		}
+		if n := q.rowsIn(); n > 0 {
+			if len(p.lines) > 0 {
+				p.add("")
+			}
+			p.add(m.st.dim("no chart (" + strconv.Itoa(n) + ")"))
+		}
+	}
 	for g := mainGroup(0); g < groupCount; g++ {
 		rows := q.byGroup[g]
 		if len(rows) == 0 {
 			continue
 		}
-		if len(p.lines) > 0 {
+		if q.byChart && g != groupDone {
+			m.addQueueRows(&p, q, rows)
+			continue
+		}
+		if len(p.lines) > 0 && !q.byChart {
 			p.add("")
 		}
 		if !g.folds() {

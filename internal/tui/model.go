@@ -154,8 +154,11 @@ type navEntry struct {
 	// the page has had a row to stand on.
 	cur    rowIdentity
 	curSet bool
-	// open are the fold rows of the main screen that are opened, by group name.
-	open map[string]bool
+	// open are the fold rows of the main screen that are opened, by group name;
+	// byChart is the view of the main screen laid out by chart, which a run does
+	// not keep.
+	open    map[string]bool
+	byChart bool
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -1062,6 +1065,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.openIssue()
 	case "m":
 		m.toggleMap()
+	case "s":
+		m.switchView()
 	case "r":
 		return m.refreshAll()
 	}
@@ -1181,6 +1186,44 @@ func (m *Model) followSel() {
 		e.sel = cur
 	}
 	e.lastCur = cur
+}
+
+// switchView is `s` on the main screen: the list by state, or by chart. The
+// cursor stays on its ticket (its chart, or its fold row) across the switch.
+func (m *Model) switchView() {
+	e := m.top()
+	if e.screen != screenMain || m.readingStore() {
+		return
+	}
+	was, ok := rowRef{}, false
+	if refs := m.mainRefs(); e.sel >= 0 && e.sel < len(refs) {
+		was, ok = refs[e.sel], true
+	}
+	m.nav[0].byChart = !m.nav[0].byChart
+	e.lead = 0
+	refs := m.mainRefs()
+	e.sel = min(e.sel, max(len(refs)-1, 0))
+	if ok {
+		// The same row where the view has it, else the same ticket (or chart, or
+		// fold) wherever it is drawn.
+		for _, same := range []func(r rowRef) bool{
+			func(r rowRef) bool { return r.identity() == was.identity() },
+			func(r rowRef) bool { return r.kind == was.kind && r.id == was.id },
+		} {
+			found := false
+			for i, r := range refs {
+				if same(r) {
+					e.sel, found = i, true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+	e.curSet = false
+	m.noteCursor()
 }
 
 // noteCursor remembers the row under the main screen's cursor as an identity.

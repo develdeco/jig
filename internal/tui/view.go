@@ -502,7 +502,11 @@ func (m *Model) screenKeys(sub subject) []hint {
 	var keys []hint
 	switch m.top().screen {
 	case screenMain:
-		keys = []hint{quit, move, open, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+		view := hint{key: "s", text: "by chart"}
+		if m.nav[0].byChart {
+			view.text = "by state"
+		}
+		keys = []hint{quit, move, open, gate, publish, answer, say, view, tail, {key: "r", text: "refresh"}}
 	case screenChart:
 		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:

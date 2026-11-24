@@ -23,6 +23,9 @@ type mainCache struct {
 func (m *Model) foldsOpen() (map[string]bool, string) {
 	open := m.nav[0].open
 	key := ""
+	if m.nav[0].byChart {
+		key = "by chart;"
+	}
 	for g := mainGroup(0); g < groupCount; g++ {
 		if g.folds() && open[g.name()] {
 			key += g.name() + ";"

@@ -158,7 +158,7 @@ func TestMainScreenWithoutChartsDrawsNoChartAndReadsNone(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
 	v := g.view()
-	if strings.Contains(v, "chart") {
+	if strings.Contains(strings.ReplaceAll(v, "s by chart", ""), "chart") { // the key that lays the list out by chart is no chart
 		t.Errorf("a store with no charts draws one:\n%s", v)
 	}
 	g.press("end", "enter")

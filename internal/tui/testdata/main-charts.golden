@@ -19,6 +19,6 @@ jig  demo                                                 2 need you · 4 runnin
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────
-  q quit · ↑↓ move · enter open · say "Land JIG-4" · t tail · r refresh
+  q quit · ↑↓ move · enter open · say "Land JIG-4" · s by chart · t tail
+  r refresh
