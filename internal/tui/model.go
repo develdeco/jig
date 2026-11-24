@@ -159,6 +159,8 @@ type navEntry struct {
 	// not keep.
 	open    map[string]bool
 	byChart bool
+	// search narrows the main screen to the rows its query matches (search.go).
+	search searchState
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -279,6 +281,9 @@ type Model struct {
 	keysOn subject
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
+	// queueBuilds counts the project's list built (maincache.go): a key that
+	// moves nothing the list reads builds none, a search key included.
+	queueBuilds int
 	// seen is what the last frame drew of the screen on top, which the next one
 	// settles the cursor and the window against (hold.go).
 	seen    *held
@@ -1001,6 +1006,15 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.confirmKey(k)
 	}
 	m.notice = ""
+	if m.top().screen == screenMain {
+		if m.nav[0].search.open {
+			return m.searchKey(k)
+		}
+		if k.String() == "esc" && m.searchApplied() {
+			m.clearSearch()
+			return nil
+		}
+	}
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
@@ -1067,6 +1081,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		m.toggleMap()
 	case "s":
 		m.switchView()
+	case "/":
+		m.beginSearch()
 	case "r":
 		return m.refreshAll()
 	}

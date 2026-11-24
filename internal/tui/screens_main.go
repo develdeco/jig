@@ -21,6 +21,12 @@ func (m *Model) mainPage() page {
 		return p
 	}
 	c := m.mainBuilt()
+	if m.searchApplied() {
+		// A search draws the rows that match, every group open, and no row of it
+		// is folded away.
+		m.folded = nil
+		return m.searchOf(c).pg
+	}
 	m.folded = c.folded
 	return c.pg
 }

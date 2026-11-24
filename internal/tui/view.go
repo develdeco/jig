@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -411,6 +412,8 @@ func (m *Model) footer(w int) []string {
 	case m.ask != nil:
 		out := []string{rule, fit("  "+m.st.state(StateFindings, m.ask.prompt), w)}
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
+	case m.top().screen == screenMain && m.nav[0].search.open:
+		return append([]string{rule}, m.searchFooter(w)...)
 	}
 	return append([]string{rule}, m.hintLines(w, m.keyHints()...)...)
 }
@@ -507,6 +510,14 @@ func (m *Model) screenKeys(sub subject) []hint {
 			view.text = "by state"
 		}
 		keys = []hint{quit, move, open, gate, publish, answer, say, view, tail, {key: "r", text: "refresh"}}
+		if !m.readingStore() {
+			// The key that searches is the main screen's alone, and waits for the
+			// store to be read.
+			keys = slices.Insert(keys, 3, hint{key: "/", text: "search"})
+		}
+		if m.searchApplied() {
+			keys = slices.Insert(keys, 1, hint{key: "esc", text: "clear search"})
+		}
 	case screenChart:
 		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
 	case screenTicket:

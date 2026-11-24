@@ -515,6 +515,9 @@ func (m *Model) queueSummary() string {
 	if m.readingStore() {
 		return ""
 	}
+	if m.searchApplied() {
+		return m.searchSummary()
+	}
 	q := m.mainBuilt().q
 	var parts []string
 	if q.byChart {
