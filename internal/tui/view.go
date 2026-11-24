@@ -159,10 +159,12 @@ type screenLayout struct {
 func (m *Model) layout() screenLayout {
 	w, h := m.width, m.height
 	pg := m.page()
-	if sub := m.subjectOf(pg); sub != m.keysOn {
+	sub := m.subjectOf(pg)
+	changed := !sub.same(m.keysOn)
+	m.keysOn = sub
+	if changed {
 		// The page was sized by a hint line cut for another subject: it is
 		// built again, once, for this one.
-		m.keysOn = sub
 		pg = m.page()
 	}
 	refs := pg.refs()
@@ -329,9 +331,10 @@ func (m *Model) header(w int) []string {
 		right = m.st.dim(right)
 	case screenChart:
 		crumbs += " › " + m.st.bold(e.chart) + m.st.dim(m.place())
+		idCrumb = crumbs
 		if c := m.w.charts[e.chart]; c != nil {
-			if title := c.title(); title != "" && title != e.chart {
-				crumbs += "  " + title
+			if t := c.title(); t != "" && t != e.chart {
+				title = t
 			}
 			state, label := m.chartStatus(c, m.chartRows(c))
 			right = m.st.icon(state) + " " + m.st.state(state, label)

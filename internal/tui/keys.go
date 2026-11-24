@@ -151,6 +151,17 @@ func (m *Model) keyHints() []string {
 	return flat
 }
 
+// canOpen is the availability of enter: the row under the cursor opens a screen
+// other than the one on top.
+func canOpen(m *Model, sub subject) (bool, string) {
+	if sub.hasRow {
+		if _, ok := m.openTarget(sub.row); ok {
+			return true, ""
+		}
+	}
+	return false, "nothing under the cursor opens another screen"
+}
+
 // keyRows is the table. Its order is the hint line's and `?`'s.
 func keyRows() []keyRow {
 	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenSlice)
@@ -194,9 +205,9 @@ func keyRows() []keyRow {
 				return step(1<<20)(m, key)
 			}},
 		{names: []string{"enter", "right"}, label: "enter", words: "open", screens: moves &^ onScreens(screenChart), hinted: onScreens(screenMain, screenTicket, screenBrief, screenBuild),
-			run: func(m *Model, _ string) tea.Cmd { return m.open() }},
+			can: canOpen, run: func(m *Model, _ string) tea.Cmd { return m.open() }},
 		{names: []string{"enter", "right"}, label: "enter", words: "open ticket", screens: onScreens(screenChart),
-			run: func(m *Model, _ string) tea.Cmd { return m.open() }},
+			can: canOpen, run: func(m *Model, _ string) tea.Cmd { return m.open() }},
 		{names: []string{"a"}, label: "a", words: "answer", act: actAnswer, screens: onScreens(screenMain, screenChart, screenTicket, screenSlice),
 			run: func(m *Model, _ string) tea.Cmd { m.beginAnswer(); return nil }},
 		{names: []string{"k"}, label: "k", words: "keep", act: actKeep, screens: onScreens(screenTicket, screenReview),

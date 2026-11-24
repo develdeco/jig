@@ -189,7 +189,7 @@ func TestSiblingsEndWithAReason(t *testing.T) {
 	// A ticket that is not in its list.
 	m.m.top().ticket = "JIG-404"
 	m.press("]")
-	if !strings.Contains(m.m.notice, "no longer in its list") {
+	if !strings.Contains(m.m.notice, "is in no list of this screen") {
 		t.Errorf("a ticket not in its list: notice %q", m.m.notice)
 	}
 }

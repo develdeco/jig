@@ -1167,6 +1167,17 @@ func (m *Model) open() tea.Cmd {
 	if ref == nil {
 		return nil
 	}
+	next, ok := m.openTarget(*ref)
+	if !ok {
+		return nil
+	}
+	return m.goTo(len(m.nav), ref, next)
+}
+
+// openTarget is the screen enter on the row ref opens: none when the row opens
+// nothing, or opens the screen the person is on (an ask on the review screen,
+// a slice's question on its own screen), which would stack a second copy.
+func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 	var next navEntry
 	switch ref.kind {
 	case rowChart:
@@ -1191,13 +1202,15 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowQuestion:
 		if ref.slice == "" {
-			return nil
+			return next, false
 		}
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
 	default:
-		return nil
+		return next, false
 	}
-	return m.goTo(len(m.nav), ref, next)
+	top := m.top()
+	same := next.screen == top.screen && next.ticket == top.ticket && next.slice == top.slice && next.chart == top.chart
+	return next, !same
 }
 
 // askRow is the position, among the rows of the review screen on top, of the

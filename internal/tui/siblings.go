@@ -146,7 +146,7 @@ func (m *Model) canSibling(delta int) (bool, string) {
 	case s == nil:
 		return false, "this screen has no siblings"
 	case s.at < 0:
-		return false, m.top().subjectName() + " is no longer in its list"
+		return false, m.top().subjectName() + " is in no list of this screen"
 	case s.at+delta < 0:
 		return false, "the first " + s.kind.noun()
 	case s.at+delta >= len(s.ids):
