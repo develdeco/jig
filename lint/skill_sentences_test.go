@@ -352,3 +352,16 @@ func TestIntakeItemDocs(t *testing.T) {
 		"mints nothing before the verdict", "An item is one need, so one issue and one chart",
 		"`jig chart new <name> --item <n>`", "Rejected:", "Consequence:")
 }
+
+// TestRunFigureSentences pins the figures a run is judged by: the chart skill's
+// stop report says the rounds line with the spend line, and the intake skill
+// lists a shipped ticket's reviewed rounds and return to build with the other
+// receipts it sizes against.
+func TestRunFigureSentences(t *testing.T) {
+	wantAll(t, "skills/chart", skillFile(t, "chart"),
+		"Say the `spend` and `rounds` lines.")
+	wantNone(t, "skills/chart", skillFile(t, "chart"),
+		"Say the `spend` line.")
+	wantAll(t, "skills/intake", skillFile(t, "intake"),
+		"the last shipped tickets' files, bytes, builder peak, reviewed rounds and return to build")
+}
