@@ -126,26 +126,25 @@ func (m *Model) upIssue(id string) string {
 	return issues[0]
 }
 
-// openIssue is `c`: the plan of the issue the ticket on the screen belongs to.
+// openIssue is `c`: the ticket's chart. A task of a multi-task goes up to it,
+// and it goes up to the issue's plan; a task of an issue goes to the plan; any
+// other ticket goes to the first chart that lists it.
 func (m *Model) openIssue() tea.Cmd {
 	id := m.upFrom()
 	if id == "" {
 		return nil
 	}
 	if parent := m.multiParent(id); parent != "" {
-		// A task of a multi-task goes up to it, and it goes up to the issue.
-		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: parent})
-		m.last = nil
-		return m.refreshStatus(parent)
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenTicket, ticket: parent})
 	}
-	issue := m.upIssue(id)
-	if issue == "" {
-		m.notice = id + " is in no issue's plan"
-		return nil
+	if issue := m.upIssue(id); issue != "" {
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenChart, chart: m.planOf(issue), follow: true})
 	}
-	m.nav = append(m.nav, navEntry{screen: screenChart, chart: m.planOf(issue), follow: true})
-	m.last = nil
-	return tea.Batch(m.enterChart(m.top())...)
+	if charts := m.chartsOf(id); len(charts) > 0 {
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenChart, chart: charts[0], follow: true})
+	}
+	m.notice = id + " is in no chart"
+	return nil
 }
 
 // toggleMap is `m`: the plan's map shows and hides in place.

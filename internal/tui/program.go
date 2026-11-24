@@ -33,10 +33,10 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 	m := New(cfg)
 	defer m.Stop()
 
-	opts := []tea.ProgramOption{tea.WithInput(programInput(in)), tea.WithOutput(out)}
+	set := setupFor(screen)
+	opts := append([]tea.ProgramOption{tea.WithInput(programInput(in)), tea.WithOutput(out)}, set.options()...)
 	var model tea.Model = m
 	if screen {
-		opts = append(opts, tea.WithAltScreen())
 		// What anything in the process writes to stderr meanwhile (a verb's
 		// warning a seam does not reach) waits until the screens give the
 		// terminal back: a line written under them scrolls it, and every
@@ -70,6 +70,25 @@ func Run(ctx context.Context, cfg Config, in io.Reader, out io.Writer, screen bo
 		return nil
 	}
 	return err
+}
+
+// programSetup is what the program is started with, by whether the screens own
+// the terminal: the alternate screen and the mouse, which a pipe has neither of
+// (a mouse reported to a pipe is a few escape sequences written to a file).
+type programSetup struct{ altScreen, mouse bool }
+
+func setupFor(screen bool) programSetup { return programSetup{altScreen: screen, mouse: screen} }
+
+// options are the program options the setup stands for.
+func (s programSetup) options() []tea.ProgramOption {
+	var opts []tea.ProgramOption
+	if s.altScreen {
+		opts = append(opts, tea.WithAltScreen())
+	}
+	if s.mouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	return opts
 }
 
 // programInput is the reader the keys come from. A terminal goes to the

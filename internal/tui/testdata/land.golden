@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader › 5 land                        ◇ waits to land
+jig  demo › JIG-2 (1 of 3)  Config loader › 5 land               ◇ waits to land
 ────────────────────────────────────────────────────────────────────────────────
   ◇ waits to land · say "Land JIG-2"
     the session merges each pull request and records it
@@ -19,6 +19,6 @@ jig  demo › JIG-2  Config loader › 5 land                        ◇ waits t
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ scroll · say "Land JIG-2" · t tail
+  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps
+  [ ] sibling · h main · o open PRs · t tail
