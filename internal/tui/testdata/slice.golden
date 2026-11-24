@@ -1,4 +1,4 @@
-jig  demo › JIG-1  Greeting copy › 2 build › slice c               ? needs-input
+jig  demo › JIG-1  Greeting copy › 2 build › slice c (3 of 4)      ? needs-input
 ────────────────────────────────────────────────────────────────────────────────
   Pick the tone
   ? needs-input · 1 try
@@ -19,6 +19,6 @@ jig  demo › JIG-1  Greeting copy › 2 build › slice c               ? needs
 
 
 
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · a answer · 1-5 steps · h main · t tail
+  esc back · q quit · ? keys · ↑↓ move · a answer · 1-5 steps · [ ] sibling
+  h main · t tail

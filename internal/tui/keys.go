@@ -33,6 +33,8 @@ func (s screenSet) has(k screenKind) bool { return s&(1<<k) != 0 }
 var (
 	// onTicketScreens are the screens of one ticket.
 	onTicketScreens = onScreens(screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice, screenLand)
+	// siblingScreens are the screens that stand among others of their kind.
+	siblingScreens = onTicketScreens | onScreens(screenChart)
 	// onAllScreens is every screen.
 	onAllScreens = onTicketScreens | onScreens(screenMain, screenChart)
 )
@@ -104,7 +106,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "h", "c", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -223,6 +225,14 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, key string) tea.Cmd { return m.openStep(int(key[0] - '0')) }},
+		{names: []string{"["}, label: "[", words: "previous sibling", hintKey: "[ ]", hintText: "sibling", screens: siblingScreens,
+			say: func(m *Model, _ subject) string { return "previous " + m.siblingNoun() },
+			can: func(m *Model, _ subject) (bool, string) { return m.canSibling(-1) },
+			run: func(m *Model, _ string) tea.Cmd { return m.openSibling(-1) }},
+		{names: []string{"]"}, label: "]", words: "next sibling", hintKey: "[ ]", hintText: "sibling", screens: siblingScreens,
+			say: func(m *Model, _ subject) string { return "next " + m.siblingNoun() },
+			can: func(m *Model, _ subject) (bool, string) { return m.canSibling(1) },
+			run: func(m *Model, _ string) tea.Cmd { return m.openSibling(1) }},
 		{names: []string{"h"}, label: "h", words: "main", screens: onAllScreens &^ onScreens(screenMain), hinted: onTicketScreens,
 			run: func(m *Model, _ string) tea.Cmd { return m.openMain() }},
 		{names: []string{"c"}, label: "c", words: "chart", screens: onTicketScreens,

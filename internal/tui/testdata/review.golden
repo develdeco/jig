@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader › 3 review                    ! review findings
+jig  demo › JIG-2 (2 of 3)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ! round 1: 2 asks wait for you
     fix budget 1 of 3 rounds used
@@ -20,5 +20,5 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
       Name shadows import · the import is hidden in this scope
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps · h main
-  t tail
+  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps
+  [ ] sibling · h main · t tail

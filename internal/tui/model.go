@@ -261,6 +261,10 @@ type Model struct {
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
+	// sibMemo is the siblings of the screen on top as one frame or one message
+	// read them, once read (sibs).
+	sibMemo *sibSet
+	sibRead bool
 	// kept is where the cursor stood on each screen the person left, for the
 	// session (moves.go).
 	kept map[navKey]navEntry
@@ -588,9 +592,11 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.forgetSibs()
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
 	m.syncScreen()
+	m.forgetSibs()
 	return next, cmd
 }
 

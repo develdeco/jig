@@ -106,6 +106,8 @@ const (
 // terminal has.
 func (m *Model) View() string {
 	w := m.width
+	defer m.forgetSibs()
+	m.forgetSibs()
 	m.followSel()
 	l := m.layout()
 	m.settle(&l)
@@ -325,7 +327,7 @@ func (m *Model) header(w int) []string {
 		}
 		right = m.st.dim(right)
 	case screenChart:
-		crumbs += " › " + m.st.bold(e.chart)
+		crumbs += " › " + m.st.bold(e.chart) + m.st.dim(m.place())
 		if c := m.w.charts[e.chart]; c != nil {
 			if title := c.title(); title != "" && title != e.chart {
 				crumbs += "  " + title
@@ -336,6 +338,9 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
+		if e.screen != screenSlice {
+			crumbs += m.st.dim(m.place())
+		}
 		idCrumb = crumbs
 		if t != nil && t.title != "" {
 			title = t.title
@@ -357,7 +362,7 @@ func (m *Model) header(w int) []string {
 		case screenLand:
 			crumbs += " › 5 land"
 		case screenSlice:
-			crumbs += " › 2 build › slice " + m.st.bold(e.slice)
+			crumbs += " › 2 build › slice " + m.st.bold(e.slice) + m.st.dim(m.place())
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
@@ -377,6 +382,10 @@ func (m *Model) header(w int) []string {
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
+	}
+	if place := m.st.dim(m.place()); place != "" && width(crumbs)+width(right)+1 > w {
+		// The place among the siblings gives way before the step and the state.
+		crumbs, idCrumb = strings.Replace(crumbs, place, "", 1), strings.Replace(idCrumb, place, "", 1)
 	}
 	if title != "" {
 		// The title gives way first: it takes what the id, the step and the

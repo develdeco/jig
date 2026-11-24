@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader                               ! review findings
+jig  demo › JIG-2 (2 of 3)  Config loader                      ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 3 of 5 · worked 1m 00s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
@@ -21,4 +21,4 @@ jig  demo › JIG-2  Config loader                               ! review findin
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · enter open · k keep · d dismiss
-  1-5 steps · h main · t tail
+  1-5 steps · [ ] sibling · h main · t tail

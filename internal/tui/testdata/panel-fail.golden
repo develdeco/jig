@@ -1,4 +1,4 @@
-jig  demo › JIG-2  Config loader › 3 review                    ! review findings
+jig  demo › JIG-2 (2 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
 
   round 1 findings
@@ -21,4 +21,4 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
   ✖ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · g gate · 1-5 steps
-  h main · t tail
+  [ ] sibling · h main · t tail

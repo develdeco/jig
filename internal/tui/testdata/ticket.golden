@@ -1,4 +1,4 @@
-jig  demo › JIG-1  Greeting copy                               ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 2 of 5 · worked 1m 59s ─╮
   │  ✓ 1 Brief            no brief on record                                   │
@@ -21,4 +21,4 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · enter open · a answer · 1-5 steps
-  h main · t tail
+  [ ] sibling · h main · t tail
