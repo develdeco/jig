@@ -149,6 +149,12 @@ func summaryOf(pg page, title string) string {
 	return ""
 }
 
+// hasWords is whether a screen says want as words, or as it is drawn: a panel's
+// summary is part of its frame, and not of the words a row says.
+func hasWords(view, want string) bool {
+	return strings.Contains(readWords(view), want) || strings.Contains(view, want)
+}
+
 // unframed is a screen with its panels' frames taken off: a panel's top edge is
 // its title alone, a row its text under the cursor's mark, and its bottom edge
 // goes. A test that reads the words of a section reads them through it.

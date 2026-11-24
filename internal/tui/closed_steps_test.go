@@ -73,8 +73,8 @@ func TestLandedTicketOfOneRepoIsNotOwedAMerge(t *testing.T) {
 	}))
 	g.press("5")
 	view := g.view()
-	for _, want := range []string{"1 of 1 landed", "✓ PR #22 into main · landed at 09:15:30"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{"1 of 1 landed", "✓ PR #22 merged into main landed at 09:15:30"} {
+		if !hasWords(view, want) {
 			t.Errorf("the land screen lacks %q:\n%s", want, view)
 		}
 	}

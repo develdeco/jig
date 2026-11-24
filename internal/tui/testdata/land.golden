@@ -4,11 +4,11 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 5 land               ◇ waits t
     the session merges each pull request and records it
 
   ╭─ Pull requests ──────────────────────────────────────────── 1 of 3 landed ─╮
-  │  ◇ api  merge PR #7 into main · open on the host                           │
-  │  ✓ web  PR #3 into main · landed at 09:15:30 · by you                      │
-  │  ◇ docs  merge PR #2 into main · merged on the host, not recorded          │
+  │    repo  pull request            state                                     │
+  │  ◇ api   PR #7 open into main    merge to make                             │
+  │  ✓ web   PR #3 merged into main  landed at 09:15:30 · by you               │
+  │  ◇ docs  PR #2 merged into main  merged on the host, not recorded          │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
   ╭─ Land activity ────────────────────────────────────────────────────────────╮
   │  time     step     what                                                    │
   │  09:15:30 · record landed web into main                                    │

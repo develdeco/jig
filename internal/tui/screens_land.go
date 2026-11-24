@@ -17,13 +17,21 @@ func (m *Model) landingNeedsYou(t *ticket) bool {
 }
 
 // landRow is a pull request of a ticket in the Land screen's panel: what is to
-// be merged, or what landed.
+// be merged, or what landed, as the cells of its row: its state's icon, its repo
+// when the ticket has several, the pull request and where it stands.
 type landRow struct {
 	state string
-	text  string
+	cells []string
 	// landed says a landed line records it.
 	landed bool
 }
+
+// landColumns are the columns of the Land screen's list; landColumnNames name
+// them. The repo's column is drawn when a row has one.
+var (
+	landColumns     = []column{{}, {gap: 1, keep: true}, {id: true, gap: 2}, {free: true, gap: 2}}
+	landColumnNames = []string{"", "repo", "pull request", "state"}
+)
 
 // landPage is the land: the end state's words first, then a panel with a row
 // for each pull request of the ticket (one for each repo, and for each issue of
@@ -63,22 +71,22 @@ func (m *Model) landPage(id string) page {
 	if len(rows) > 0 {
 		right = fmt.Sprintf("%d of %d landed", landed, len(rows))
 	}
-	p.boxTop("Pull requests", right)
+	empty := ""
 	switch {
 	case len(rows) == 0 && atEnd && end.State == StateClosed:
-		p.boxAdd(m.st.dim("closed without a pull request to merge"))
+		empty = "closed without a pull request to merge"
 	case len(rows) == 0 && len(t.digest.prs()) > 0:
 		// Published, and built again or behind: its pull requests merge once it
 		// publishes again.
-		p.boxAdd(m.st.dim("no merge to make until it publishes again"))
+		empty = "no merge to make until it publishes again"
 	case len(rows) == 0:
-		p.boxAdd(m.st.dim("no pull request to land yet"))
+		empty = "no pull request to land yet"
 	}
-	for _, r := range rows {
-		p.boxAdd(m.st.icon(r.state) + " " + r.text)
+	items := make([]listRow, len(rows))
+	for i, r := range rows {
+		items[i] = listRow{cells: r.cells}
 	}
-	p.boxEnd()
-	p.add("")
+	m.listPanel(&p, listSpec{title: "Pull requests", summary: right, cols: landColumns, names: landColumnNames, rows: items, empty: empty})
 	m.stepActivityPanel(&p, t, stepLand)
 	return p
 }
@@ -98,46 +106,37 @@ func (m *Model) landRows(t *ticket, end endState, atEnd bool) []landRow {
 	var rows []landRow
 	several := len(t.digest.prs()) > 1
 	for _, pr := range t.digest.prs() {
-		where := ""
+		repo := ""
 		if several {
-			where = repoPrefix(pr.Repo)
+			repo = pr.Repo
 		}
-		name := prWords([]digestPR{{Number: pr.Number, URL: pr.URL, Target: pr.Target}}, false)
+		// A pull request reads by number, the host's word and the branch it goes
+		// into, as the digest has them.
+		name := prWords([]digestPR{pr}, true)
 		if i := landingOf(lines, used, pr); i >= 0 {
 			used[i] = true
-			rows = append(rows, landRow{StateLanded, where + name + " · " + m.landedText(t, lines[i], pr.Target), true})
+			rows = append(rows, landRow{StateLanded, []string{m.st.icon(StateLanded), repo, name, m.landedText(t, lines[i], pr.Target)}, true})
 			continue
 		}
 		state := StateWaitsToLand
 		if atEnd && end.State == StateOnLand {
 			state = StateOnLand
 		}
-		host := "state not read"
+		host := "merge to make"
 		switch strings.ToLower(pr.State) {
-		case "open":
-			host = "open on the host"
 		case "merged":
 			host = "merged on the host, not recorded"
 		case "closed":
 			state, host = StateStalled, "closed on the host, not merged"
 		}
-		rows = append(rows, landRow{state, where + "merge " + name + " · " + host, false})
+		rows = append(rows, landRow{state, []string{m.st.icon(state), repo, name, host}, false})
 	}
 	for i, l := range lines {
 		if !used[i] {
-			rows = append(rows, landRow{StateLanded, repoPrefix(l.Repo) + m.landedText(t, l, ""), true})
+			rows = append(rows, landRow{StateLanded, []string{m.st.icon(StateLanded), l.Repo, "", m.landedText(t, l, "")}, true})
 		}
 	}
 	return rows
-}
-
-// repoPrefix names a repo before a row's words; a ticket with a single pull
-// request names none.
-func repoPrefix(repo string) string {
-	if repo == "" {
-		return ""
-	}
-	return repo + "  "
 }
 
 // landingOf is the index of the landed line, not used yet, that records pr: the
