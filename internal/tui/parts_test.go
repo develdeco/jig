@@ -138,6 +138,19 @@ func TestTicketScreenSectionsArePanels(t *testing.T) {
 	}
 }
 
+// addLaid adds the lines the allocator laid a row out in, loose: the first is the
+// row, with the cursor's ref when it has one, and the rest are its continuation
+// rows.
+func (p *page) addLaid(ref *rowRef, lines []string) {
+	for i, l := range lines {
+		pl := pline{text: l, cont: i > 0}
+		if i == 0 {
+			pl.ref = ref
+		}
+		p.lines = append(p.lines, pl)
+	}
+}
+
 // summaryOf is the words at the right of the top edge of the panel titled
 // title on pg.
 func summaryOf(pg page, title string) string {
