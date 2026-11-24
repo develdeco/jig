@@ -1,6 +1,5 @@
 jig  demo › JIG-2  Config loader › 3 review                    ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-      reviewer (Claude Code · Opus 5) · independent · s-review
       full 0000000..ccccccc · 4 files read
 
   round 1 findings
@@ -10,15 +9,16 @@ jig  demo › JIG-2  Config loader › 3 review                    ! review find
       a clearer name, whenever the file is next touched
 
   asks
-  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      a failed write would pass silently · needs a human
-▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-      the import is hidden in this scope
+  + high  alpha/a.go:3  kept by you       Unchecked error  r1-f1
+      Unchecked error · a failed write would pass silently · needs a human
+▸ - low   beta/b.go:9   dismissed by you  Name shadows import  r1-f2
+      Name shadows import · the import is hidden in this scope
 
-  ╭─ Review activity ──────────────────────────────────────────────────────────╮
-  │  09:11:00 ◎ round 1 · opened                                               │
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
+  ╭─ Review activity ────────────────────────────────────────── latest 2 of 4 ─╮
+  │  09:11:41 - asks · you dismissed “Name shadows import”                     │
+  │  09:11:40 + asks · you kept “Unchecked error”                              │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · esc back · k keep · d dismiss · g gate · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · k keep · d dismiss · g gate · 5 land · t tail

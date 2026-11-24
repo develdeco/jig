@@ -7,6 +7,7 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   │               ✓ Discounts apply before tax                                 │
   │  fog          ~ Stacking two codes                                         │
   │               ~ Codes in other currencies                                  │
+  │  out of scope · Gift cards                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
   │  ·  Gift cards      fog · not graduated                                    │
@@ -20,5 +21,4 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   ╰────────────────────────────────────────────────────────────────────────────╯
 
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
-  r refresh · q quit
+  esc back · q quit · ↑↓ move · enter open ticket · t tail · r refresh

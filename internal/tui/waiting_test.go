@@ -84,7 +84,7 @@ func TestAWaitedTicketFillsInWhenTheTicketListNamesIt(t *testing.T) {
 		t.Fatalf("a waited ticket arms no poll of the ticket list")
 	}
 
-	g.r.answer("next --json --store /s", rosterWith(t), 0)
+	g.r.answer("next --json --roster --store /s", rosterWith(t), 0)
 	g.r.answer("status SHOP-1 --store /s", statusSHOP1(), 0)
 	g.m.awaitEvery = -1
 	g.send(awaitMsg{})

@@ -125,7 +125,7 @@ func TestReviewScreenListsWhatTheRoundFoundBesideTheAsks(t *testing.T) {
 	if strings.Contains(findings, "Unchecked error") {
 		t.Errorf("an ask that waits for a person is listed with the other findings:\n%s", text)
 	}
-	if !strings.Contains(asks, "a failed write would pass silently · the fix budget is reached") {
+	if !strings.Contains(readWords(asks), "Unchecked error · a failed write would pass silently · the fix budget is reached") {
 		t.Errorf("the ask lacks the reason and the why under it:\n%s", text)
 	}
 }

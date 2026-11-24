@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,6 +161,10 @@ type navEntry struct {
 	// a screen opens at its top, raised by a move up from the first row, and
 	// cleared by any move of the cursor.
 	lead int
+	// fresh is how many rows came in above the window of a page read below its
+	// top, which its first row counts; it is cleared once the window is back at
+	// the top.
+	fresh int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
@@ -171,10 +176,12 @@ type navEntry struct {
 // textInput is a line a person is typing: an answer.
 type textInput struct {
 	prompt string
-	about  []string
-	value  []rune
-	ticket string
-	qid    string
+	// head and about are what the person answers: who asked, and the question
+	// as written. The footer wraps about when it draws, so a resize re-wraps it.
+	head, about string
+	value       []rune
+	ticket      string
+	qid         string
 }
 
 // confirmation is an action that waits for a yes.
@@ -187,10 +194,12 @@ type confirmation struct {
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
-	cfg  Config
-	st   styles
-	run  Runner
-	zone *time.Location
+	cfg Config
+	st  styles
+	run classedRunner
+	// queue is what run goes through: one command at a time, the next by class.
+	queue *queue
+	zone  *time.Location
 
 	w             *world
 	width, height int
@@ -201,12 +210,22 @@ type Model struct {
 	last   *outcome
 	notice string
 	tail   bool
+	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
+	// a key has been taken in since that View: a key that acts on an ask acts
+	// on what the person read, never on a screen nobody has seen.
+	drawn map[string]int
 
 	ctx        context.Context
 	cancel     context.CancelFunc
 	stream     chan events.Envelope
 	streamErr  chan error
 	rosterBusy bool
+	// mergeRefreshing is set while the read that asks the host for the kept
+	// pull request states is out (mergerefresh.go).
+	mergeRefreshing bool
+	// clockRuns counts the work clocks computed (work.go): the screens that
+	// show no time compute none.
+	clockRuns int
 	// rosterStarted counts the roster reads begun, so a read can be told from one
 	// that was already out when something happened.
 	rosterStarted int
@@ -238,7 +257,16 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	started   time.Time
+	// keysOn is what the keys of the screen on top act on, as the last frame
+	// found it: the hint line is cut by it, and a key reads it again before it
+	// runs.
+	keysOn subject
+	// pageBuilds counts the pages built: a frame builds one.
+	pageBuilds int
+	// seen is what the last frame drew of the screen on top, which the next one
+	// settles the cursor and the window against (hold.go).
+	seen    *held
+	started time.Time
 }
 
 // New builds the model for cfg.
@@ -288,7 +316,8 @@ func New(cfg Config) *Model {
 	}
 	m.st = styles{r: r}
 	if cfg.Run != nil {
-		m.run = serial(cfg.Run)
+		m.queue = &queue{run: cfg.Run}
+		m.run = m.queue.do
 	}
 	m.nav = []navEntry{{screen: screenMain}}
 	m.followNew, m.started = cfg.Ticket == "" && cfg.Chart == "", m.now()
@@ -299,6 +328,7 @@ func New(cfg Config) *Model {
 	} else if cfg.Chart != "" {
 		m.nav = append(m.nav, navEntry{screen: screenChart, chart: cfg.Chart, follow: true})
 	}
+	m.syncScreen()
 	return m
 }
 
@@ -382,6 +412,12 @@ func (m *Model) mergeAfterTick() tea.Cmd {
 // its status. Every other screen, the project's list included, reads nothing.
 // A read already out is not doubled: the loads refuse a second one.
 func (m *Model) onMerge() tea.Cmd {
+	if e := m.top(); e.screen == screenMain {
+		if m.mainWaitsOnMerge() {
+			return m.refreshMergesThenRoster()
+		}
+		return nil
+	}
 	if e := m.top(); e.screen == screenChart {
 		if c := m.w.charts[e.chart]; c != nil && c.waitsOnMerge() {
 			return tea.Batch(m.loadRoster(), m.loadChart(e.chart))
@@ -547,6 +583,7 @@ func (m *Model) waitEvents() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
+	m.syncScreen()
 	return next, cmd
 }
 
@@ -572,6 +609,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case idleMsg:
 		return m, tea.Batch(m.onIdle(), m.idleAfterTick())
+	case mergeRefreshedMsg:
+		m.mergeRefreshing = false
+		return m, m.loadRoster()
 	case mergeMsg:
 		return m, tea.Batch(m.onMerge(), m.mergeAfterTick())
 	case statusMsg:
@@ -746,9 +786,18 @@ func (m *Model) takeRoster(msg rosterMsg) tea.Cmd {
 	if e := m.top(); e.screen == screenChart && m.w.charts[e.chart] != nil {
 		shown = m.w.charts[e.chart].listing.Tickets
 	}
+	first := !m.w.rosterRead
+	under, onRow := m.rowUnderCursor()
 	m.w.setRoster(msg.rows)
 	m.w.setCharts(msg.charts)
+	m.putCursorOn(under, onRow)
 	var cmds []tea.Cmd
+	if first && m.top().screen == screenMain && m.mainWaitsOnMerge() {
+		// What the roster shows of a merge is the last state kept, which may be
+		// old at launch: the host is asked once, in the background, as the merge
+		// timer does after.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	}
 	if was && !m.awaitingTicket() {
 		// The awaited ticket is listed: read it.
 		cmds = append(cmds, m.refreshStatus(m.cfg.Ticket))
@@ -871,6 +920,9 @@ func (m *Model) settleLast(msg tea.Msg) {
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
 	m.last.After = m.rosterStarted
+	if msg.result.Label == labelPublishWhat {
+		m.publishRead(m.last)
+	}
 	var cmds []tea.Cmd
 	if msg.result.Ticket != "" {
 		// The roster read that follows is the one that says what the command did.
@@ -908,6 +960,8 @@ func (m *Model) keys(k tea.KeyMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, r := range k.Runes {
 		cmds = append(cmds, m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}))
+		// No screen is drawn between the keys of one read.
+		m.drawn = nil
 	}
 	return tea.Batch(cmds...)
 }
@@ -930,7 +984,7 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
 		switch k.String() {
-		case "a", "k", "d", "g", "p":
+		case "a", "k", "d", "g", "p", "u", "v":
 			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
 			return nil
 		}
@@ -955,17 +1009,35 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	case "esc", "left", "backspace":
 		m.back()
 	case "a":
-		m.beginAnswer()
+		if m.allow(actAnswer) {
+			m.beginAnswer()
+		}
 	case "k":
-		return m.triage("keep")
+		if m.allow(actKeep) {
+			return m.triage("keep")
+		}
 	case "d":
-		return m.triage("dismiss")
+		if m.allow(actDismiss) {
+			return m.triage("dismiss")
+		}
+	case "u":
+		if m.allow(actRequeue) {
+			return m.requeue()
+		}
+	case "v":
+		if m.allow(actApprove) {
+			m.askApprove()
+		}
 	case "t":
 		m.tail = !m.tail
 	case "g":
-		return m.gate()
+		if m.allow(actGate) {
+			return m.gate()
+		}
 	case "p":
-		m.beginPublish()
+		if m.allow(actPublish) {
+			return m.beginPublish()
+		}
 	case "5":
 		return m.openLand()
 	case "c":
@@ -1025,6 +1097,40 @@ func (m *Model) move(delta int) {
 	}
 }
 
+// rowUnderCursor is the row the cursor stands on, false when the screen has no
+// row or none is under it.
+func (m *Model) rowUnderCursor() (rowRef, bool) {
+	e := m.top()
+	if e.follow {
+		return rowRef{}, false
+	}
+	refs := m.page().refs()
+	if e.sel < 0 || e.sel >= len(refs) {
+		return rowRef{}, false
+	}
+	return refs[e.sel], true
+}
+
+// putCursorOn moves the cursor to the row ref names, which a new list of rows
+// may have put elsewhere: the person's place is the ticket, not its number in
+// the list. A row the list no longer has leaves the cursor where it was.
+func (m *Model) putCursorOn(ref rowRef, ok bool) {
+	if !ok {
+		return
+	}
+	refs := m.page().refs()
+	for i, r := range refs {
+		if r == ref {
+			m.top().sel = i
+			return
+		}
+	}
+	// A row the new list lacks leaves the cursor on the last one there is.
+	if e := m.top(); e.sel >= len(refs) {
+		e.sel = max(0, len(refs)-1)
+	}
+}
+
 // followSel puts a following cursor on the ticket's current step, and moves
 // a cursor the person left on the current step on to the next one when the
 // step is done.
@@ -1043,7 +1149,7 @@ func (m *Model) followSel() {
 	if t == nil || isMulti(t) {
 		return
 	}
-	cur := currentStep(m.steps(t))
+	cur := currentStep(m.stepWords(t))
 	if e.follow || (e.sel == e.lastCur && cur != e.lastCur) {
 		e.sel = cur
 	}
@@ -1053,12 +1159,17 @@ func (m *Model) followSel() {
 // selected is the row under the cursor, nil when the screen has none.
 func (m *Model) selected() *rowRef {
 	m.followSel()
-	refs := m.page().refs()
+	return m.refIn(m.page())
+}
+
+// refIn is the row of pg under the cursor.
+func (m *Model) refIn(pg page) *rowRef {
+	refs := pg.refs()
 	sel := m.top().sel
 	if sel < 0 || sel >= len(refs) {
 		return nil
 	}
-	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {
 		// A row the window does not show is not under the cursor: a key that
 		// acts on it would decide what its person cannot see.
 		return nil
@@ -1066,10 +1177,9 @@ func (m *Model) selected() *rowRef {
 	return &refs[sel]
 }
 
-// rowShown says whether the sel-th selectable row of the page on top is in the
-// window the screen draws.
-func (m *Model) rowShown(sel int) bool {
-	pg := m.page()
+// rowShown says whether the sel-th selectable row of pg is in the window the
+// screen draws.
+func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
 	n := 0
@@ -1193,7 +1303,14 @@ func (m *Model) back() {
 
 // refreshAll reads the ticket list and the open ticket's status again.
 func (m *Model) refreshAll() tea.Cmd {
-	cmds := []tea.Cmd{m.loadRoster()}
+	var cmds []tea.Cmd
+	if m.top().screen == screenMain && m.run != nil {
+		// What merged on the host is asked in the background first; the roster
+		// follows it.
+		cmds = append(cmds, m.refreshMergesThenRoster())
+	} else {
+		cmds = append(cmds, m.loadRoster())
+	}
 	if e := m.top(); e.screen == screenChart {
 		cmds = append(cmds, m.loadChart(e.chart))
 		if c := m.w.charts[e.chart]; c != nil {
@@ -1213,6 +1330,25 @@ func (m *Model) refreshAll() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// allow asks whether the key's action runs here: the screen must list it and can
+// must let it run; when not, the reason is the notice and nothing runs. The
+// hints list the keys by the same two answers.
+func (m *Model) allow(a action) bool {
+	m.keysOn = m.subjectNow()
+	listed := false
+	for _, k := range m.screenKeys(m.keysOn) {
+		listed = listed || k.act == a
+	}
+	ok, why := m.canOn(m.keysOn, a)
+	switch {
+	case !ok:
+		m.notice = why
+	case !listed:
+		m.notice = string(a) + " is not done from this screen"
+	}
+	return ok && listed
 }
 
 // targetTicket is the ticket a key acts on: the open one, else the one under
@@ -1265,9 +1401,13 @@ func (m *Model) beginAnswer() {
 			return
 		}
 	}
-	about := []string{"slice " + q.Slice + " asked:"}
-	about = append(about, strings.Split(q.Text, "\n")...)
-	m.input = &textInput{prompt: "answer " + q.ID, about: about, ticket: id, qid: q.ID}
+	m.input = &textInput{prompt: "answer " + q.ID, head: "slice " + q.Slice + " asked:", about: q.Text, ticket: id, qid: q.ID}
+	// A question is never answered from a cut: when the prompt with the whole
+	// question would leave the body under its floor, there is no prompt.
+	if need := minBodyRows + headerRows + len(m.footer(m.width)); m.height < need {
+		m.input = nil
+		m.notice = "the screen is too short to show the whole question " + q.ID + ": it needs " + strconv.Itoa(need) + " rows, this has " + strconv.Itoa(m.height)
+	}
 }
 
 // inputKey edits the line being typed.
@@ -1344,7 +1484,54 @@ func (m *Model) triage(decision string) tea.Cmd {
 		m.notice = "no ask is waiting for a decision"
 		return nil
 	}
+	// A person decides an ask from what the screen shows: one drawn cut, or not
+	// drawn at all, is not decided.
+	switch drawn, seen := m.drawn[pick.ID]; {
+	case m.drawn == nil:
+		m.notice = "the screen changed under the key before it was drawn: press it again"
+		return nil
+	case drawn == askWhole:
+	case seen:
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
+		return nil
+	case m.top().ticket == id:
+		m.notice = "ask " + pick.ID + " is read and decided on the review screen, which this screen does not draw it on"
+		return nil
+	default:
+		m.notice = "ask " + pick.ID + " is not shown on this screen: open " + id + " to read it"
+		return nil
+	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
+}
+
+// requeue puts a stalled or env-blocked slice back in the queue: the one the
+// keys act on (the cursor's, or the slice screen's), else the only one. It runs
+// at once: a requeue is a retry the builder's next claim takes.
+func (m *Model) requeue() tea.Cmd {
+	id := m.keysOn.ticket
+	slice := m.keysOn.slice
+	if slice == "" {
+		// can said at least one is stuck.
+		stuck := m.w.tickets[id].stuckSlices()
+		if len(stuck) != 1 {
+			m.notice = "several slices are stalled: put the cursor on the one to requeue"
+			return nil
+		}
+		slice = stuck[0]
+	}
+	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
+}
+
+// askApprove asks to approve the brief as it stands: the verb records the
+// approval as the person's, since the runner has them at the keys.
+func (m *Model) askApprove() {
+	id := m.targetTicket()
+	m.ask = &confirmation{
+		prompt: "approve the brief of " + id + " as it is now?",
+		run: func() tea.Cmd {
+			return m.exec("validate", id, m.verbArgs("validate", id))
+		},
+	}
 }
 
 // gate opens a gate round on the ticket.
@@ -1361,18 +1548,48 @@ func (m *Model) gate() tea.Cmd {
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
-// beginPublish asks to publish the ticket: a person's approval of the
-// reviewed head, then the push and the pull request.
-func (m *Model) beginPublish() {
+// beginPublish renders the ticket's pull request body, which pushes nothing, to
+// read what its What says: the verb's own word on it comes back as publishRead.
+func (m *Model) beginPublish() tea.Cmd {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
-		return
+		return nil
 	}
 	if m.w.tickets[id].awaiting {
 		m.notice = id + " does not exist yet"
+		return nil
+	}
+	return m.exec(labelPublishWhat, id, m.verbArgs("publish", id, "--body"))
+}
+
+// whatPending says a rendered body has a What nobody wrote: a `what` row (or one
+// for each repo of a ticket of several) the verb says is pending.
+func whatPending(out string) bool {
+	for k, v := range parseAxi(out).KV["publish_body"] {
+		if (k == "what" || strings.HasPrefix(k, "what_")) && v == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// publishRead takes in the render beginPublish ran. With a What to write it
+// stops: nothing is asked or pushed, and the panel keeps the verb's own help
+// line for it, whole. A render the verb refused is shown as any refusal. A body
+// with its What asks to publish, and the render leaves no line of its own.
+func (m *Model) publishRead(res *outcome) {
+	s := res.shown()
+	if s.Code != 0 || whatPending(s.Out) {
 		return
 	}
+	m.last = nil
+	m.askPublish(res.Ticket)
+}
+
+// askPublish asks to publish the ticket: a person's approval of the
+// reviewed head, then the push and the pull request.
+func (m *Model) askPublish(id string) {
 	m.ask = &confirmation{
 		prompt: "publish " + id + ": approve the reviewed head, push it and open the pull request?",
 		run: func() tea.Cmd {

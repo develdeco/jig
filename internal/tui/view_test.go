@@ -134,7 +134,10 @@ func TestPublishConfirmScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
-	g.feed(jig2()...).press("p")
+	g.feed(jig2()...)
+	g.pin("JIG-2", publishReady())
+	g.syncDigests()
+	g.press("p")
 	golden(t, "publish-confirm", g.view())
 }
 
@@ -156,6 +159,7 @@ func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 	golden(t, "panel-ok", g.view())
 
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
+	g.feed(decided()...) // both asks decided: the gate that applies them can run
 	g.press("g")
 	golden(t, "panel-fail", g.view())
 }

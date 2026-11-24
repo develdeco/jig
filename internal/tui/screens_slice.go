@@ -3,6 +3,7 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -11,8 +12,7 @@ import (
 const timelineLines = 40
 
 // slicePage is one slice: its state and who holds it, where it builds and what
-// checks it, the questions asked about it, and its lines in the order they were
-// written.
+// checks it, the questions asked about it, and its lines newest first.
 func (m *Model) slicePage(id, slice string) page {
 	var p page
 	t := m.w.tickets[id]
@@ -64,7 +64,18 @@ func (m *Model) slicePage(id, slice string) page {
 			// the command that clears it.
 			p.add("")
 			p.add(m.st.bold("verification"))
-			for _, v := range states {
+			// A row names its commit by a prefix; it stands where the commit's
+			// first line puts it, and one the journal has no line of sinks.
+			commits := t.commits(slice)
+			began := func(v statusVerification) time.Time {
+				for _, c := range commits {
+					if v.Commit != "" && strings.HasPrefix(c.SHA, v.Commit) {
+						return c.Began
+					}
+				}
+				return time.Time{}
+			}
+			for _, v := range newestFirst(states, began) {
 				p.add("  " + m.st.icon(v.icon()) + " " + short(v.Commit) + "  " + m.st.dim(v.State))
 				if v.Clear != "" {
 					p.add("      " + m.st.dim(v.Clear))
@@ -99,7 +110,7 @@ func (m *Model) slicePage(id, slice string) page {
 			} else {
 				p.add("  " + head)
 			}
-			for _, l := range strings.Split(q.Text, "\n") {
+			for _, l := range m.wholeLines(q.Text) {
 				p.add("    " + l)
 			}
 			if !q.Open && q.Answer != "" {
@@ -117,12 +128,16 @@ func (m *Model) slicePage(id, slice string) page {
 	if len(lines) > 0 {
 		p.add("")
 		p.add(m.st.bold("timeline"))
+		lines = newestFirst(lines, func(i int) time.Time { at, _ := t.lines[i].At(); return at })
+		older := 0
 		if len(lines) > timelineLines {
-			lines = lines[len(lines)-timelineLines:]
+			older, lines = len(lines)-timelineLines, lines[:timelineLines]
 		}
 		for _, i := range lines {
-			l := t.lines[i]
-			p.add(m.timelineLine(t, l))
+			p.add(m.timelineLine(t, t.lines[i]))
+		}
+		if older > 0 {
+			p.add(m.olderRow(older))
 		}
 	}
 	return p

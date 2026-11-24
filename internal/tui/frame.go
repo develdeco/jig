@@ -79,7 +79,17 @@ func (m *Model) runCells(rows []runRow) [][]string {
 }
 
 // runBoxRows adds the rows of a Run or Detail panel.
-func (m *Model) runBoxRows(p *page, rows []runRow) { m.boxRows(p, runColumns, m.runCells(rows)) }
+// A row that is an ask carries the ask on every line it wraps to, so the
+// window can tell whether the ask was drawn whole.
+func (m *Model) runBoxRows(p *page, rows []runRow) {
+	for i, lines := range layout(runColumns, m.runCells(rows), m.innerWidth()) {
+		at := len(p.lines)
+		p.boxLaid(nil, lines)
+		for k := at; k < len(p.lines); k++ {
+			p.lines[k].ask = rows[i].ask
+		}
+	}
+}
 
 // runHeight is the lines runBoxRows adds for rows.
 func (m *Model) runHeight(rows []runRow) int { return m.boxHeight(runColumns, m.runCells(rows)) }

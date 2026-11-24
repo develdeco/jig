@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/develdeco/jig/internal/journal"
@@ -155,7 +156,8 @@ func TestLandedLinesAreTheLatestOfEachRepoAndContainer(t *testing.T) {
 	land(at(15, 10), "web", "main")
 	land(at(15, 20), "api", "release")
 	got := g.m.landedLines(g.m.w.tickets["JIG-4"])
-	want := []landedAt{{Repo: "api", Into: "release", At: "09:15:20"}, {Repo: "web", Into: "main", At: "09:15:10"}}
+	when := func(sec int) time.Time { return time.Date(2026, 10, 23, 9, 15, sec, 0, time.UTC) }
+	want := []landedAt{{Repo: "api", Into: "release", At: "09:15:20", When: when(20)}, {Repo: "web", Into: "main", At: "09:15:10", When: when(10)}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("landed lines = %+v, want %+v", got, want)
 	}

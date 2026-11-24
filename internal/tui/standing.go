@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -20,16 +21,25 @@ import (
 // once the status is read. Where the two differ the digest's words win and the
 // detail stays. A ticket nothing has been read of stands at "reading".
 func (m *Model) phaseOf(t *ticket) phase.Ticket {
-	d := readingPhases()
-	if t.status != nil {
-		f, lines := m.factsOf(t, t.status)
-		d = phase.Derive(f, lines)
+	memo := t.memoFor()
+	if memo.phase == nil {
+		d := readingPhases()
+		if t.status != nil {
+			t.scanned += len(t.lines)
+			f, lines := m.factsOf(t, t.status)
+			d = phase.Derive(f, lines)
+		}
+		if t.digest != nil {
+			t.digest.lay(&d)
+		}
+		addFinalRun(t, &d)
+		// A caller that adds a sub-step to a copy adds it to the copy alone.
+		for i := range d.Phases {
+			d.Phases[i].Subs = slices.Clip(d.Phases[i].Subs)
+		}
+		memo.phase = &d
 	}
-	if t.digest != nil {
-		t.digest.lay(&d)
-	}
-	addFinalRun(t, &d)
-	return d
+	return *memo.phase
 }
 
 // subFinal is the key of the build's sub-step for the ticket's last run.
@@ -183,7 +193,7 @@ func (m *Model) Standing(ticket string) (Standing, bool) {
 		return Standing{}, false
 	}
 	d := m.phaseOf(t)
-	steps := m.stepRows(t, d)
+	steps, _ := m.rowSteps(t, d)
 	cur := currentStep(steps)
 	s := Standing{Current: string(d.Current), Ready: d.Ready}
 	for i, row := range steps {

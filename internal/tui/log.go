@@ -453,21 +453,19 @@ const tagMaxW = 18
 // lines as the rows left below what p holds allow, three at least, so the
 // panel's edge stays on the screen and a tall one is filled to its foot.
 func (m *Model) activityPanel(p *page, t *ticket) {
-	all := m.placed(t, m.phaseOf(t))
-	keep := max(3, m.bodyRows()-len(p.lines)-2)
+	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
+	shown, older := cutNewest(all, max(3, m.bodyRows()-len(p.lines)-2))
 	right := ""
-	if n := len(all); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
+	if older > 0 {
+		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
 	}
 	p.boxTop("Activity", right)
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	var shown []placedLine
 	tagW := 0
-	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(tagOf(all[i].step, all[i].key))))
-		shown = append(shown, all[i])
+	for _, e := range shown {
+		tagW = max(tagW, min(tagMaxW, width(tagOf(e.step, e.key))))
 	}
 	for _, e := range shown {
 		tag := pad(tagOf(e.step, e.key), tagW)
@@ -477,6 +475,9 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 			tag = m.st.dim(tag)
 		}
 		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + tag + " " + m.moveText(t, e.l))
+	}
+	if older > 0 {
+		p.boxAdd(m.olderRow(older))
 	}
 	p.boxEnd()
 }

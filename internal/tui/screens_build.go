@@ -3,12 +3,13 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/events"
 )
 
 // buildCommits is the most commits of one slice the build screen lists; the
-// ones before them are counted.
+// older ones are counted below them.
 const buildCommits = 3
 
 // buildPage is a ticket's build: each slice with its state, its goal, its
@@ -93,10 +94,10 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		p.add(pre + facts)
 	}
 
-	commits := t.commits(s.ID)
+	commits := newestFirst(t.commits(s.ID), func(c commitRecord) time.Time { return c.Began })
+	earlier := 0
 	if n := len(commits) - buildCommits; n > 0 {
-		p.add(pre + m.st.dim("+"+strconv.Itoa(n)+" earlier "+plural(n, "commit", "commits")))
-		commits = commits[n:]
+		earlier, commits = n, commits[:buildCommits]
 	}
 	failed, failedOK := t.lastRunFailed(s.ID)
 	for _, c := range commits {
@@ -118,7 +119,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		// The time is the end of the line, so the commit's words give way to it.
 		when := m.commitWhen(c)
 		p.add(pre + fit(line, room-width(when)-2) + m.st.dim("  "+when))
-		for _, run := range c.Runs {
+		for _, run := range newestFirst(c.Runs, func(l events.Envelope) time.Time { at, _ := l.At(); return at }) {
 			state := StateGreen
 			switch {
 			case run.Cause != "":
@@ -148,6 +149,10 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 				p.add(pre + "    " + m.st.dim(l))
 			}
 		}
+	}
+
+	if earlier > 0 {
+		p.add(pre + m.st.dim("+"+strconv.Itoa(earlier)+" earlier "+plural(earlier, "commit", "commits")))
 	}
 
 	if t.status != nil {

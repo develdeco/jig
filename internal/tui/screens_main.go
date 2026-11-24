@@ -9,12 +9,15 @@ import (
 // of icons and where its current step stands, then a row per chart.
 func (m *Model) mainPage() page {
 	var p page
+	if m.readingStore() {
+		// Main draws from the roster and from nothing else: the stream's replay
+		// names the tickets in the order it arrives, and rows drawn from it
+		// would all move when the list lands.
+		p.add(m.st.dim("reading the store…"))
+		return p
+	}
 	ids := m.w.order
 	if len(ids) == 0 && len(m.w.chartOrder) == 0 {
-		if !m.w.rosterRead && m.run != nil {
-			p.add(m.st.dim("reading the store…"))
-			return p
-		}
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
 		if m.followNew {
@@ -29,7 +32,7 @@ func (m *Model) mainPage() page {
 	var cells [][]string
 	for _, id := range ids {
 		t := m.w.tickets[id]
-		steps := m.steps(t)
+		steps := m.stepWords(t)
 		state := steps[currentStep(steps)].State
 		refs = append(refs, rowRef{kind: rowTicket, id: id, ticket: id})
 		cells = append(cells, []string{m.st.icon(state), id, t.title, m.stepDots(steps), m.ticketDetail(t, steps)})
@@ -54,6 +57,11 @@ func (m *Model) mainPage() page {
 // mainColumns are the columns of main's rows: the state icon, the id or name,
 // the title, the step dots (or "chart") and what stands.
 var mainColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}}
+
+// readingStore is whether the screens have a runner and the store's ticket list
+// has not been read: nothing is known of what the store holds. A model with no
+// runner (a test, or a screen fed by the stream alone) draws the stream.
+func (m *Model) readingStore() bool { return m.run != nil && !m.w.rosterRead }
 
 // stepDots are a ticket's steps as icons, in order.
 func (m *Model) stepDots(steps []stepRow) string {

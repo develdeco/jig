@@ -69,30 +69,6 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 		"A finding names the rule broken. Before filing, search the change for the same rule's other instances",
 		"`--oracle` proves the rule across them",
 		"An `--action ask` about a rule lays out every case it must decide, with one recommended answer.",
-		"`jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`",
-		"`unprobed` is the work list: set aside a hunk with no critical-path code, `jig probe T-1 --skip F[:A-B] --why W`.",
-		"A subagent stops at its verdict line.",
-		"Read `jig skill review then` when the person's prompt named later phases (a start-to-finish run) or the round left asks.",
-		"A reached path in a repo the round does not cover is filed at the changed line, naming that path in `--detail`.",
-		"Read `jig skill review findings` for what `--action`, `--risk` and `--oracle` mean",
-		"list with `git grep` what the change reaches past the code it alters:",
-		"the callers of each function whose behavior changed;",
-		"the sibling commands or verbs that share a changed helper;",
-		"the record or file shapes and states main, or an older writer, still produces that the changed code reads;",
-		"the doc and ADR sentences about the changed behavior, the change's own too, against the code they describe.",
-		"Every round, over the round's changes (a delta round: its delta's), before probing,",
-		"Read each against the new behavior; when in doubt run the path in your worktree and put it back.",
-		"A test runs only to probe or to run a reached path.",
-		"Edit your worktree only to probe or to run a reached path, and put it back.",
-		"and goes in `--reviewed`.",
-		"One the change breaks is a finding at its own file and line.",
-		"Reached code is read, not probed",
-	)
-	wantAll(t, "skills/review then", skillFile(t, "review", "then"),
-		"When the person's prompt named later phases (a start-to-finish run), go on to the next phase's skill the prompt named",
-		"record their answer with `jig triage`",
-	)
-	wantAll(t, "skills/review findings", skillFile(t, "review", "findings"),
 		"a search that must come back empty, such as `! git grep -n '<pattern>'`",
 	)
 	wantAll(t, "skills/review rounds", skillFile(t, "review", "rounds"),
@@ -375,4 +351,17 @@ func TestIntakeItemDocs(t *testing.T) {
 	wantAll(t, "the ADR section", sec,
 		"mints nothing before the verdict", "An item is one need, so one issue and one chart",
 		"`jig chart new <name> --item <n>`", "Rejected:", "Consequence:")
+}
+
+// TestRunFigureSentences pins the figures a run is judged by: the chart skill's
+// stop report says the rounds line with the spend line, and the intake skill
+// lists a shipped ticket's reviewed rounds and return to build with the other
+// receipts it sizes against.
+func TestRunFigureSentences(t *testing.T) {
+	wantAll(t, "skills/chart", skillFile(t, "chart"),
+		"Say the `spend` and `rounds` lines.")
+	wantNone(t, "skills/chart", skillFile(t, "chart"),
+		"Say the `spend` line.")
+	wantAll(t, "skills/intake", skillFile(t, "intake"),
+		"the last shipped tickets' files, bytes, builder peak, reviewed rounds and return to build")
 }

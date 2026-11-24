@@ -97,7 +97,7 @@ func TestABriefBeingDraftedOpensIntoThePlannersCard(t *testing.T) {
 func TestScreensOpenedOnNoTicketOpenTheFirstOneASessionCreates(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
-	g.r.answer("next --json --store /s", `{"tickets":[]}`+"\n", 0)
+	g.r.answer("next --json --roster --store /s", `{"tickets":[]}`+"\n", 0)
 	g.feed()
 	if v := g.view(); !strings.Contains(v, "the first ticket a session creates opens here") {
 		t.Errorf("an empty list does not say a new ticket opens:\n%s", v)

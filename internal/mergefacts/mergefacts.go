@@ -16,6 +16,7 @@ package mergefacts
 import (
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
@@ -27,7 +28,8 @@ import (
 
 // Reader reads the merge facts of the tickets of one project, and remembers
 // each for the life of the value: a command that asks about the same blocker
-// twice reads it once. It is not safe for concurrent use.
+// twice reads it once. It is safe for concurrent use: the facts it remembers
+// are guarded, and two readers of the same ticket at once may both read it.
 type Reader struct {
 	Store *store.Store
 	Cfg   project.Config
@@ -38,6 +40,7 @@ type Reader struct {
 	// pull request is one the host could not be asked about.
 	PRs PRs
 
+	mu   sync.Mutex
 	memo map[string]ready.Merge
 }
 
@@ -46,7 +49,7 @@ type Reader struct {
 // only when every issue's fact is: Of is then the first issue's fact that is
 // not met, else the first.
 func (r *Reader) Of(ticket string) (ready.Merge, error) {
-	if m, ok := r.memo[ticket]; ok {
+	if m, ok := r.remembered(ticket); ok {
 		return m, nil
 	}
 	rec, err := r.Store.ReadTicket(ticket)
@@ -83,7 +86,7 @@ func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
 		return r.Of(ticket)
 	}
 	key := ticket + "\x00" + issue
-	if m, ok := r.memo[key]; ok {
+	if m, ok := r.remembered(key); ok {
 		return m, nil
 	}
 	m, err := r.of(ticket, issue)
@@ -101,6 +104,8 @@ func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
 // tickets stands without a host call for each.
 func (r *Reader) Cached() *Reader {
 	c := &Reader{Store: r.Store, Cfg: r.Cfg, Clones: r.Clones}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	// What this reader already read stands: a fact just read is not read again.
 	if len(r.memo) > 0 {
 		c.memo = make(map[string]ready.Merge, len(r.memo))
@@ -114,7 +119,17 @@ func (r *Reader) Cached() *Reader {
 	return c
 }
 
+// remembered is the fact already read for key.
+func (r *Reader) remembered(key string) (ready.Merge, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, ok := r.memo[key]
+	return m, ok
+}
+
 func (r *Reader) remember(key string, m ready.Merge) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.memo == nil {
 		r.memo = map[string]ready.Merge{}
 	}

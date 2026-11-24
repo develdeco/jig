@@ -192,7 +192,7 @@ func TestARosterThatFailedKeepsTheLastDigestAndSaysWhy(t *testing.T) {
 	if got := g.m.w.tickets["JIG-2"].digest; got == nil || got.Current != "land" {
 		t.Fatalf("the roster gave JIG-2 %+v", got)
 	}
-	g.r.answer("next --json --store /s", "error: no jig store found\ncode: ERROR\n", 1)
+	g.r.answer("next --json --roster --store /s", "error: no jig store found\ncode: ERROR\n", 1)
 	g.settle(g.m.loadRoster())
 	if !strings.Contains(g.m.notice, "no jig store found") {
 		t.Errorf("the notice is %q, want the verb's words", g.m.notice)

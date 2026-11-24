@@ -3,6 +3,7 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
@@ -45,6 +46,8 @@ type endState struct {
 // (its provenance, and the session that wrote it).
 type landedAt struct {
 	Repo, Into, At, Provenance, Session string
+	// When is the instant of the landed line At shows.
+	When time.Time
 	// Container is the issue or multi-task the landing was into, by id, when the
 	// line names one: the one thing that tells the landings of a task two issues
 	// list apart.
@@ -129,6 +132,9 @@ func prWords(prs []digestPR, state bool) string {
 			switch s := strings.ToLower(pr.State); s {
 			case "open", "merged", "closed":
 				word = " " + s
+				if !pr.AsOf.IsZero() {
+					note = " (as of " + pr.AsOf.UTC().Format("15:04 UTC") + ")"
+				}
 			default:
 				note = " (state not read)"
 			}
@@ -146,8 +152,19 @@ func prWords(prs []digestPR, state bool) string {
 }
 
 // landedLines are the landed lines of the ticket, the latest of each repo and
-// container, oldest first, with the time of each as the screens show it.
+// container, newest first, with the time of each as the screens show it.
 func (m *Model) landedLines(t *ticket) []landedAt {
+	memo := t.memoFor()
+	if memo.landed == nil || memo.zone != m.zone {
+		t.scanned += len(t.lines)
+		rows := m.readLandedLines(t)
+		memo.landed, memo.zone = &rows, m.zone
+	}
+	return *memo.landed
+}
+
+// readLandedLines is landedLines, read from the lines.
+func (m *Model) readLandedLines(t *ticket) []landedAt {
 	type key struct{ repo, into string }
 	var order []key
 	latest := map[key]landedAt{}
@@ -159,13 +176,14 @@ func (m *Model) landedLines(t *ticket) []landedAt {
 		if _, ok := latest[k]; !ok {
 			order = append(order, k)
 		}
-		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone), Provenance: l.Provenance, Session: l.Session, Container: l.Into}
+		when, _ := l.At()
+		latest[k] = landedAt{Repo: l.Repo, Into: firstOf(l.Base, l.Into), At: clock(l, m.zone), When: when, Provenance: l.Provenance, Session: l.Session, Container: l.Into}
 	}
 	out := make([]landedAt, len(order))
 	for i, k := range order {
 		out[i] = latest[k]
 	}
-	return out
+	return newestFirst(out, func(l landedAt) time.Time { return l.When })
 }
 
 // endOf is the end state of the ticket, false until it stands at one.

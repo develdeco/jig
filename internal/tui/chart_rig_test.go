@@ -167,7 +167,7 @@ func chartRig(t *testing.T) *rig {
 // answerChart sets what the store listing, a chart's verb and the tickets'
 // statuses print.
 func answerChart(g *rig, roster, chart, verb string, status map[string]string) {
-	g.r.answer("next --json --store /s", roster, 0)
+	g.r.answer("next --json --roster --store /s", roster, 0)
 	g.r.answer("next "+chart+" --json --store /s", verb, 0)
 	for id, out := range status {
 		g.r.answer("status "+id+" --store /s", out, 0)

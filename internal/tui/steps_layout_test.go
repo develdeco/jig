@@ -30,6 +30,7 @@ func longStepsRig(t *testing.T, w, h int, ids [3]string, land bool) *rig {
 		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "Dana"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "person"}}),
 	}, "\n") + "\n"
 	g := newRig(t, "SHOP-1")
+	g.r.answer("next --json --roster --store /s", `{"tickets":[{"id":"SHOP-1","title":"Cart totals","state":"ready"}]}`+"\n", 0)
 	atClock(g, "2026-10-23T09:14:00Z")
 	g.r.answer("status SHOP-1 --store /s", status, 0)
 	g.send(tea.WindowSizeMsg{Width: w, Height: h})

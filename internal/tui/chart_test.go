@@ -134,10 +134,15 @@ func TestTheChartCursorStartsOnTheFirstTicketNotPublishedAndATicketOpensAndRetur
 func TestKeysOnTheChartActOnTheTicketUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	g.pin("JIG-8", reviewReady())
+	g.syncDigests()
 	g.press("down", "g")
 	if got := g.r.lines(); !reflect.DeepEqual(got, []string{"gate JIG-8 --store /s"}) {
 		t.Errorf("g ran %v, want the gate of JIG-8", got)
 	}
+	g.pin("JIG-8", publishReady())
+	g.pin("JIG-4", publishReady())
+	g.syncDigests()
 	g.press("p")
 	if v := g.view(); !strings.Contains(v, "publish JIG-8: approve the reviewed head") {
 		t.Errorf("p did not ask to publish JIG-8:\n%s", v)
@@ -238,7 +243,7 @@ func chartQuietRig(t *testing.T) (g *rig, advance func(time.Duration)) {
 func TestTheChartIsReadAgainWhenItsTicketsWereTouchedAndTheScreenWentQuiet(t *testing.T) {
 	t.Parallel()
 	g, advance := chartQuietRig(t)
-	chart, roster := "next checkout --json --store /s", "next --json --store /s"
+	chart, roster := "next checkout --json --store /s", "next --json --roster --store /s"
 	reads := func() (int, int) { return g.r.ran(chart), g.r.ran(roster) }
 	c0, r0 := reads()
 
@@ -280,7 +285,10 @@ func TestAKeyThatRanOnAChartsTicketMarksTheChartToBeRead(t *testing.T) {
 	t.Parallel()
 	g, advance := chartQuietRig(t)
 	before := g.r.ran("next checkout --json --store /s")
-	g.press("down", "g")
+	g.press("down")
+	g.pin(g.m.targetTicket(), reviewReady())
+	g.syncDigests()
+	g.press("g")
 	advance(10 * time.Second)
 	g.send(idleMsg{})
 	if n := g.r.ran("next checkout --json --store /s"); n != before+1 {
@@ -298,7 +306,7 @@ func TestTicketsGraduatedIntoTheOpenChartAreReadAtOnce(t *testing.T) {
 	before := g.r.ran(chart)
 	listing := checkoutListing()
 	listing["tickets"] = []string{"JIG-4", "JIG-5", "JIG-6", "JIG-7", "JIG-8", "JIG-9"}
-	g.r.answer("next --json --store /s", chartRoster(listing), 0)
+	g.r.answer("next --json --roster --store /s", chartRoster(listing), 0)
 	g.r.answer("status JIG-9 --store /s", untouchedStatus("JIG-9"), 0)
 	g.feed(jl(at(25, 0), "JIG-9", "", journal.EventClaim, with("s-builder", "", "", "", "", "")))
 	if n := g.r.ran(chart); n != before+1 {
@@ -762,7 +770,7 @@ func TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines(t *testing.T) {
 		}
 		last = at
 	}
-	for _, want := range []string{"latest 12 of 23", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
+	for _, want := range []string{"latest 11 of 23", "↓ 12 older", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the Activity lacks %q:\n%s", want, v)
 		}

@@ -21,4 +21,4 @@ jig  demo                                                    5 tickets · 1 char
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · g gate · a answer · t tail · r refresh · q quit
+  q quit · ↑↓ move · enter open · say "Land JIG-4" · t tail · r refresh
