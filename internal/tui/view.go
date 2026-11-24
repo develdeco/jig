@@ -129,6 +129,7 @@ func (m *Model) View() string {
 		m.drawn = drawnAsks(l.pg, start, l.pageH)
 	}
 	m.rest(l, anchor)
+	m.recordHit(l, start, counted)
 	if m.help != nil {
 		// The keys list is drawn over the body, and no ask is drawn under it.
 		body = m.helpBody(l.pageH, w)

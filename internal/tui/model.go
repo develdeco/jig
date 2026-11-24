@@ -265,6 +265,8 @@ type Model struct {
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
+	// hit is what the last frame drew of the body, for a click (mouse.go).
+	hit *hitMap
 	// sibMemo is the siblings of the screen on top as one frame or one message
 	// read them, once read (sibs).
 	sibMemo *sibSet
@@ -610,6 +612,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		return m, m.keys(msg)
+	case tea.MouseMsg:
+		return m, m.mouse(msg)
 	case eventsMsg:
 		return m, tea.Batch(m.onEvents(msg), m.waitEvents())
 	case streamEndMsg:
