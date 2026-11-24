@@ -269,7 +269,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken", "workspace alpha · oracle test · after a")
 	// h goes to the project's list, and its row opens the ticket again.
 	screens.press("h")
-	screens.until("1 ticket", fx.Ticket)
+	screens.until("running (1)", fx.Ticket)
 	screens.press("\r")
 	screens.until("› "+fx.Ticket, "Steps")
 
