@@ -11,7 +11,8 @@ import (
 
 // TestRecallReceiptsReachTheBlockAndTheJSON: a shipped ticket whose journal
 // holds a change size and a builder's peak is a row of the receipts, in the
-// rendered block and in the json; one that lacks either, and an open ticket,
+// rendered block and in the json, with the reviewed rounds it took and whether
+// it went back to build after publish; one that lacks either, and an open ticket,
 // are not.
 func TestRecallReceiptsReachTheBlockAndTheJSON(t *testing.T) {
 	t.Parallel()
@@ -33,6 +34,13 @@ func TestRecallReceiptsReachTheBlockAndTheJSON(t *testing.T) {
 	shipped("T-1", "2026-01-01T10:00:00Z", &journal.ChangeSize{Files: 4, Bytes: 4096})
 	built("T-1", "small", 90000)
 	built("T-1", "big", 150000)
+	// T-1 took a reviewed round and a clean one, a carried clean one that ran no
+	// reviewer, and went back to build a slice after its publish, then published again.
+	add("T-1", journal.Line{Event: journal.EventGateRound})
+	add("T-1", journal.Line{Event: journal.EventGateClean})
+	add("T-1", journal.Line{Event: journal.EventGateClean, Carried: 1})
+	add("T-1", journal.Line{Event: journal.EventClaim, Session: "s", Slice: "fix-1"})
+	add("T-1", journal.Line{TS: "2026-01-01T10:00:00Z", Event: journal.EventPublishDone, Change: &journal.ChangeSize{Files: 4, Bytes: 4096}})
 	shipped("T-2", "2026-01-02T10:00:00Z", &journal.ChangeSize{Files: 1, Bytes: 0})
 	built("T-2", "x", 70000)
 	shipped("T-3", "2026-01-03T10:00:00Z", nil) // no size recorded
@@ -45,7 +53,7 @@ func TestRecallReceiptsReachTheBlockAndTheJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := recall.Build(tickets, recall.Material{}, "")
-	want := []recall.Receipt{{Ticket: "T-2", Files: 1, Bytes: 0, Peak: 70000}, {Ticket: "T-1", Files: 4, Bytes: 4096, Peak: 150000}}
+	want := []recall.Receipt{{Ticket: "T-2", Files: 1, Bytes: 0, Peak: 70000}, {Ticket: "T-1", Files: 4, Bytes: 4096, Peak: 150000, Rounds: 2, Back: true}}
 	if len(report.Receipts) != len(want) || report.Receipts[0] != want[0] || report.Receipts[1] != want[1] {
 		t.Fatalf("receipts = %+v, want %+v", report.Receipts, want)
 	}
@@ -56,7 +64,7 @@ func TestRecallReceiptsReachTheBlockAndTheJSON(t *testing.T) {
 			table = b
 		}
 	}
-	for _, row := range []string{"T-2,1,0,70000", "T-1,4,4096,150000"} {
+	for _, row := range []string{"ticket,files,bytes,peak,rounds,back", "T-2,1,0,70000,0,no", "T-1,4,4096,150000,2,yes"} {
 		if !strings.Contains(table, row) {
 			t.Errorf("block = %q, want the row %q", table, row)
 		}

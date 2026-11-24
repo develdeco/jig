@@ -19,10 +19,11 @@ import (
 // chart screen reads it (--json): the verdict (Ready, Code, Reason, Prompt), the
 // tickets in dependency order with each one's phases and reach, the briefs to
 // write and the waves to build, where the run ends, what map.md says, what the
-// run has spent and, for --json, the commits of the store that touched the
-// chart's folder. Every key is present but rank, steps, waits_for, prs, map and
-// spend, which are left out when there is nothing to say; history is [] when
-// the text form is read or the history cannot be.
+// run has spent and the reviewed rounds its tickets took and, for --json, the
+// commits of the store that touched the chart's folder. Every key is present
+// but rank, steps, waits_for, prs, map, spend and rounds, which are left out
+// when there is nothing to say; history is [] when the text form is read or the
+// history cannot be.
 type nextChart struct {
 	Chart       string `json:"chart"`
 	Title       string `json:"title"`
@@ -50,6 +51,9 @@ type nextChart struct {
 	History []nextChartCommit  `json:"history"`
 	Map     *nextChartMap      `json:"map,omitempty"`
 	Spend   *nextChartSpend    `json:"spend,omitempty"`
+	// Rounds are the reviewed rounds each ticket took, beside the spend: the
+	// tickets with at least one, in the rows' order, with no total.
+	Rounds []nextChartRound `json:"rounds,omitempty"`
 	// WorkspaceOverlaps are the tickets of one wave that build in one workspace
 	// of a repo, the pair in Plan order: the later one is to be stacked on the
 	// earlier. Same element as `jig next`'s workspace_overlaps. [] when none.
@@ -151,12 +155,12 @@ type nextChartMap struct {
 	OutOfScope  []string `json:"out_of_scope"`
 }
 
-// chartOutput lays the standing, the map and the spend (nil when no ticket has
-// any) into what the verbs print.
-func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend) nextChart {
+// chartOutput lays the standing, the map, the spend (nil when no ticket has any)
+// and the rounds (nil when no ticket took one) into what the verbs print.
+func chartOutput(c phase.Chart, m chartMap, spend *nextChartSpend, rounds []nextChartRound) nextChart {
 	out := nextChart{
 		Chart: c.Name, Title: m.Title, Ready: c.Ready, Code: c.Code, Reason: c.Reason, Prompt: c.Prompt,
-		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend,
+		Started: c.Started, Ungraduated: c.Ungraduated, Spend: spend, Rounds: rounds,
 		Briefs: orEmpty(c.Briefs), Run: c.Run, WorkspaceOverlaps: []nextWorkspaceOverlap{}, Tickets: []nextChartTicket{}, Ends: []nextChartEnd{}, History: []nextChartCommit{}, derived: c,
 	}
 	if out.Run == nil {
@@ -308,6 +312,9 @@ func (n nextChart) blocks(label string) []string {
 	}
 	if n.Spend != nil {
 		pairs = append(pairs, [2]string{"spend", n.Spend.line()})
+	}
+	if len(n.Rounds) > 0 {
+		pairs = append(pairs, [2]string{"rounds", roundsLine(n.Rounds)})
 	}
 	blocks := []string{axi.KV(label, pairs)}
 

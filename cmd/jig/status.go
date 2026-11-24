@@ -64,7 +64,8 @@ func cmdStatus(e env, args []string, stdout io.Writer) int {
 		if err != nil {
 			return renderErr(stdout, err)
 		}
-		n := chartOutput(c, m, chartSpend(st, c))
+		spend, rounds := chartFigures(st, c)
+		n := chartOutput(c, m, spend, rounds)
 		n.setWorkspaceOverlaps(st, cfg, mp)
 		n.setIssue(st, cfg, mp, merges)
 		axi.Render(stdout, n.blocks("status")...)
