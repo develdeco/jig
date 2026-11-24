@@ -277,11 +277,11 @@ func (m *Model) ticketRow(id string) queueRow {
 	switch {
 	case r.needs:
 		row.group = groupNeeds
-	case m.ticketLive(t) || (t.state != "new" && !r.atEnd && !row.cur.Done && row.cur.State != StateQueued && row.cur.State != StateReady):
+	case m.ticketLive(t) || (row.cur.Step != stepBrief && !r.atEnd && !row.cur.Done && row.cur.State != StateQueued && row.cur.State != StateReady):
 		// A step that is not done and is not waiting to start is under way, a
 		// stalled or failed one too: its builder has not finished with it. A
-		// ticket the roster says is new has no work begun, its brief being
-		// drafted or not, unless a session is at work on it.
+		// brief being drafted is no work begun while no session is at work on
+		// it, whatever the ticket's blockers or slices say.
 		row.group = groupRunning
 	case !unmet && t.state != "new" && ((d != nil && d.Ready) || (d == nil && t.state == "ready")):
 		// A new ticket's digest says its brief can start; it is not started.
@@ -463,8 +463,8 @@ func sortGroup(g mainGroup, rows []queueRow) {
 	})
 }
 
-// naturalLess orders ids with their numbers as numbers: T-22 before T-23, and
-// T-9 before T-10.
+// naturalLess orders ids with their numbers as numbers: 22 before 23, and 9
+// before 10.
 func naturalLess(a, b string) bool {
 	for a != "" && b != "" {
 		ta, tb := idRun(a), idRun(b)

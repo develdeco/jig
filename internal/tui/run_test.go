@@ -208,7 +208,7 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	r.answer("next --json --roster --store /s", rosterJSONWith(map[string]any{
 		"id": "JIG-7", "title": "New work", "state": "ready", "digest": draftedDigest()}), 0)
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
-	s.out.until(t, "JIG-7")
+	s.out.until(t, "not started (")
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatal(err)
