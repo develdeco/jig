@@ -25,20 +25,9 @@ It names the branch, whose copy (`copy`), the `head`, its `base` and `scope` (fu
 Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, you filed a note below the floor, or it lists open, answered or dismissed findings (`--prior`).
 
 - **Make your worktree at the head** as the `worktree` advice says (`jig skill review worktree` for the variants and the removal), and read the code there as the context's `read` line says, in either scope. Never in the clone.
-- **Never edit the person's clone**: you only read it. Run no oracle and no suite: each in `oracles_passed` was run by its builder; `at_head` says if on this head. A test runs only to probe or to run a reached path.
+- **Never edit the person's clone**: you only read it. Run no oracle and no suite: each in `oracles_passed` was run by its builder; `at_head` says if on this head. A test runs only to probe.
 - Read `jig skill review evidence` when `recordings` lists any, or the `intent` is `none`.
 - The `intent` is the human's own statement (`brief` or `explicit`, at `intent_path`).
-
-## Reach
-
-Every round, over the round's changes (a delta round: its delta's), before probing, list with `git grep` what the change reaches past the code it alters:
-
-- the callers of each function whose behavior changed;
-- the sibling commands or verbs that share a changed helper;
-- the record or file shapes and states main, or an older writer, still produces that the changed code reads;
-- the doc and ADR sentences about the changed behavior, the change's own too, against the code they describe.
-
-Read each against the new behavior; when in doubt run the path in your worktree and put it back. One the change breaks is a finding at its own file and line. A reached path in a repo the round does not cover is filed at the changed line, naming that path in `--detail`. Reached code is read, not probed, and goes in `--reviewed`.
 
 ## Probe
 
@@ -58,7 +47,8 @@ jig finding T-1 --file alpha/alpha.go --line 12 --title "..." --detail "..." \
   --action fix --risk medium --risk-rationale "..." --oracle "go test ./alpha -run 'TestAlpha'"
 ```
 
-- Read `jig skill review findings` for what `--action`, `--risk` and `--oracle` mean; `--oracle` is required for a fix.
+- `--action`: `fix` when the fix is objective and keeps what the intent asks; `ask` when only a person can decide; `note` when nothing needs to change but a person should know.
+- `--risk`: `low`, `medium` or `high`: how much harm follows if this part is wrong. `--oracle`: the narrowest command that proves the fix everywhere its rule applies (the test the fix adds or extends, by name, or a search that must come back empty, such as `! git grep -n '<pattern>'`), required for a fix.
 - A finding names the rule broken. Before filing, search the change for the same rule's other instances: the `--detail` lists them, and `--oracle` proves the rule across them. An `--action ask` about a rule lays out every case it must decide, with one recommended answer.
 - Never raise again what a person dismissed.
 - A missing test is a problem only at a seam the intent names, or as proof of a defect you report. A finding about a missing or weak test names the mutant its test must catch and the assertion that catches it.
@@ -74,9 +64,9 @@ jig review done T-1 --result result.json     # or: the whole report as one file
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person and stop. A subagent stops at its verdict line. Read `jig skill review then` when the person's prompt named later phases (a start-to-finish run) or the round left asks.
+Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the next phase's skill the prompt named: build when the round queued fixes, publish when it is clean. Asks the round left are the person's: put each to them and record their answer with `jig triage`, or, when the prompt told you to go with your recommendations, decide them yourself. A subagent stops at its verdict line.
 
 ## Never
 
 - Do not review a change you built, or call `jig review done` for a round you did not read.
-- Do not edit the clone, commit, push, or write the store by hand. Edit your worktree only to probe or to run a reached path, and put it back.
+- Do not edit the clone, commit, push, or write the store by hand. Edit your worktree only to probe, and put it back.
