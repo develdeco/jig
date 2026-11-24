@@ -22,6 +22,9 @@ type digestInfo struct {
 	// multi-task's own pull request (waiting, ready, published or landed).
 	PhaseProblem, State string
 	Closed              string
+	// Branch is an issue's or multi-task's own branch, which the tasks that
+	// go into it are read by.
+	Branch string
 	// LandFirst are the tickets that must land before this one may: a
 	// published ticket whose pull request waits behind them.
 	LandFirst []string

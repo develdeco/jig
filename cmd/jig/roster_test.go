@@ -60,6 +60,18 @@ func TestRosterPrintsRowsAndChartsOnly(t *testing.T) {
 		}
 		updated[id], _ = row["updated"].(string)
 	}
+	// An issue's row carries its own branch, which a task two issues list is read
+	// by, and a task's does not.
+	for _, row := range rows {
+		digest, _ := row["digest"].(map[string]any)
+		branch, _ := digest["branch"].(string)
+		if row["id"] == "TK-1" && !strings.HasPrefix(branch, "TK-1") {
+			t.Errorf("the issue's digest branch is %q, want its own branch", branch)
+		}
+		if row["id"] == "TK-9" && branch != "" {
+			t.Errorf("a task's digest names the branch %q", branch)
+		}
+	}
 	// TK-9 has journal lines, TK-7 has none.
 	if _, err := time.Parse(time.RFC3339, updated["TK-9"]); err != nil {
 		t.Errorf("TK-9 updated = %q, want an RFC 3339 instant: %v", updated["TK-9"], err)

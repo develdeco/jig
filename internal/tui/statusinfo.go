@@ -381,6 +381,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				PhaseProblem string   `json:"phase_problem"`
 				State        string   `json:"state"`
 				Closed       string   `json:"closed"`
+				Branch       string   `json:"branch"`
 				LandFirst    []string `json:"land_first"`
 				Unfinished   []string `json:"unfinished"`
 				Children     []struct {
@@ -442,7 +443,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}
 		if g := t.Digest; g != nil {
-			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
+			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, Branch: g.Branch, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
 			for _, p := range g.Phases {
 				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
 			}

@@ -16,7 +16,8 @@ import (
 )
 
 // nextRoster is what `jig next --json --roster` prints: every ticket's row as
-// `jig next --json` prints it, and the charts of the store, and nothing a
+// `jig next --json` prints it, the charts of the store and the order to start
+// the ready tickets, and nothing a
 // screen does not read. The rows are made by readStoreRows, the one function
 // both verbs use, so they cannot differ.
 type nextRoster struct {

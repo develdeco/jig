@@ -257,11 +257,17 @@ func shifted(r queueRow, by int) queueRow {
 // puts it in.
 func (m *Model) ticketRow(id string) queueRow {
 	r := m.rowOf(id, "", nil)
-	t := r.t
-	if t.digest == nil {
+	if r.t.digest == nil {
 		// A ticket the roster gave no digest to stands as its status says.
-		r.steps = m.stepWords(t)
+		r.steps = m.stepWords(r.t)
 	}
+	return m.classify(id, r)
+}
+
+// classify is the row of a ticket as the chart row r says it stands, and the
+// group the first rule that holds puts it in.
+func (m *Model) classify(id string, r chartRow) queueRow {
+	t := r.t
 	row := queueRow{id: id, key: id, t: t, steps: r.steps, cur: r.steps[currentStep(r.steps)], at: t.lastActivity(), next: t.readyAt}
 	d := t.digest
 	if isIssue(t) || isMulti(t) {
@@ -273,7 +279,10 @@ func (m *Model) ticketRow(id string) queueRow {
 		}
 		return row
 	}
-	unmet := len(t.blockers) > 0 || r.behind || t.state == "blocked" || (d != nil && len(d.LandFirst) > 0)
+	// A blocker, an after edge or a merge owed holds a ticket only while it has a
+	// move of its own left: one landed or closed has none.
+	moveLeft := !r.atEnd || (r.end.State != StateLanded && r.end.State != StateClosed)
+	unmet := moveLeft && (len(t.blockers) > 0 || r.behind || t.state == "blocked" || (d != nil && len(d.LandFirst) > 0))
 	switch {
 	case r.needs:
 		row.group = groupNeeds
@@ -357,11 +366,13 @@ func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[s
 			continue
 		}
 		drawn[id] = true
-		if m.shared(r.t) && own.t.status != nil && own.t.status.Branch != "" {
+		if d := own.t.digest; m.shared(r.t) && d != nil && d.Branch != "" {
 			// A task two issues list stands here as its pull request and landing
-			// into this issue make of it, once the issue's branch is known.
-			cut := m.rowInPlan(m.rowOf(id, "", nil), own.id, own.t.status.Branch)
-			r.t, r.steps, r.cur = cut.t, cut.steps, cut.steps[currentStep(cut.steps)]
+			// into this issue make of it, by the branch the roster gave the
+			// issue, and is grouped as it stands here.
+			cut := m.rowInPlan(m.rowOf(id, "", nil), own.id, d.Branch)
+			cut.needs = cut.needs || m.landingNeedsYou(cut.t)
+			r = m.classify(id, cut)
 		}
 		r.container, r.depth = own.id, depth+1
 		if isMulti(r.t) {

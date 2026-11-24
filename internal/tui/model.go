@@ -1206,21 +1206,31 @@ func (m *Model) switchView() {
 	if ok {
 		// The same row where the view has it, else the same ticket (or chart, or
 		// fold) wherever it is drawn.
-		for _, same := range []func(r rowRef) bool{
-			func(r rowRef) bool { return r.identity() == was.identity() },
-			func(r rowRef) bool { return r.kind == was.kind && r.id == was.id },
-		} {
-			found := false
+		// A row the new view folds away is on the fold row that hides it.
+		at := func(match func(r rowRef) bool) bool {
 			for i, r := range refs {
-				if same(r) {
-					e.sel, found = i, true
-					break
+				if match(r) {
+					e.sel = i
+					return true
 				}
 			}
-			if found {
-				break
-			}
+			return false
 		}
+		hidden := func(id rowIdentity) bool {
+			fold, ok := m.folded[id]
+			return ok && at(func(r rowRef) bool { return r.identity() == fold })
+		}
+		sameRow := func(r rowRef) bool { return r.kind == was.kind && r.id == was.id }
+		_ = at(func(r rowRef) bool { return r.identity() == was.identity() }) ||
+			at(sameRow) ||
+			func() bool {
+				for id := range m.folded {
+					if id.kind == was.kind && id.id == was.id && hidden(id) {
+						return true
+					}
+				}
+				return false
+			}()
 	}
 	e.curSet = false
 	m.noteCursor()

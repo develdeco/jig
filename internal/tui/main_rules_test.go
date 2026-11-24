@@ -147,6 +147,57 @@ func TestMainTheCursorOnATaskGoesToTheFoldThatHidesItsIssue(t *testing.T) {
 	}
 }
 
+// TestMainSwitchPutsTheCursorOnTheFoldThatHidesItsRow: s to a view that folds the
+// cursor's row away puts the cursor on the fold row that hides it, not on the
+// row now at its old number.
+func TestMainSwitchPutsTheCursorOnTheFoldThatHidesItsRow(t *testing.T) {
+	t.Parallel()
+	closed := task("brief", false, "done|closed", "done|closed", "done|closed", "done|closed", "done|none · closed without a pull request")
+	closed.Closed = "not planned"
+	ready := func(order int, id string) rosterRow {
+		return rosterRow{ID: id, Title: id, State: "ready", StartOrder: order}
+	}
+	m := queueModel(ready(1, "A-1"), ready(2, "A-2"), rosterRow{ID: "A-9", Title: "A-9", State: "closed", Digest: closed})
+	m.w.setCharts([]chartListing{{Name: "plan", Title: "Plan", Tickets: []string{"A-9"}}})
+	m.View()
+	m.switchView()
+	for i, r := range m.mainRefs() {
+		if r.id == "A-9" {
+			m.top().sel = i
+		}
+	}
+	m.noteCursor()
+	if ref := m.selected(); ref == nil || ref.id != "A-9" {
+		t.Fatalf("by chart the cursor is on %+v, want A-9", ref)
+	}
+	m.switchView()
+	m.View()
+	if ref := m.selected(); ref == nil || ref.kind != rowFold || ref.id != "done" {
+		t.Errorf("by state the cursor is on %+v, want the done fold row that hides A-9", ref)
+	}
+}
+
+// TestMainADoneTicketWithAnOldBlockerIsDone: a blocker that was met, or an after
+// edge, holds a ticket in waiting only while it has a move left: one that landed
+// with nothing to merge is done, one that waits to land behind another is not.
+func TestMainADoneTicketWithAnOldBlockerIsDone(t *testing.T) {
+	t.Parallel()
+	nothing := task("land", false, "done|a", "done|b", "done|c", "done|d", "done|none · no pull request to merge")
+	behind := task("land", false, "done|a", "done|b", "done|c", "done|pull request opened", "current|waits for a merge")
+	behind.LandFirst = []string{"A-1"}
+	blocker := []chartWait{{Ticket: "A-1", Kind: "merged"}}
+	m := queueModel(
+		rosterRow{ID: "A-1", Title: "A-1", State: "done", Digest: nothing},
+		rosterRow{ID: "A-2", Title: "A-2", State: "done", Blockers: blocker, Digest: nothing},
+		rosterRow{ID: "A-3", Title: "A-3", State: "done", Blockers: blocker, Digest: behind},
+	)
+	for id, want := range map[string]string{"A-1": "done", "A-2": "done", "A-3": "waiting"} {
+		if got := groupOf(m, id); got != want {
+			t.Errorf("%s is in %q, want %q", id, got, want)
+		}
+	}
+}
+
 // colOf is the screen column text starts at in line, -1 when it is not in it.
 func colOf(line, text string) int {
 	i := strings.Index(line, text)
@@ -174,12 +225,15 @@ func TestMainDoneRowsKeepTheirIcons(t *testing.T) {
 
 // TestMainASharedTaskReadsAsEachPlanReadsIt: a task two issues list, under the
 // issue whose branch is known, reads as that issue's plan reads it.
-func TestMainASharedTaskReadsAsEachPlanReadsIt(t *testing.T) {
+func TestMainASharedTaskReadsAndGroupsByEachIssuesBranch(t *testing.T) {
 	t.Parallel()
 	g := planMain(t, planSpec{issue: waitingIssue, second: true})
 	g.m.height, g.m.width = 40, 110
-	g.m.w.tickets["SHOP-49"].status = &statusInfo{Branch: planBranch}
-	g.m.w.tickets["SHOP-50"].status = &statusInfo{Branch: "502-another"}
+	for id, branch := range map[string]string{"SHOP-49": planBranch, "SHOP-50": "502-another"} {
+		d := *g.m.w.tickets[id].digest
+		d.Branch = branch
+		g.m.w.tickets[id].digest = &d
+	}
 	g.m.w.gen++
 	var rows []queueRow
 	for _, r := range g.m.mainBuilt().q.rows {
@@ -194,6 +248,14 @@ func TestMainASharedTaskReadsAsEachPlanReadsIt(t *testing.T) {
 	}
 	under49 := stripANSI(g.m.queueLine(g.m.mainBuilt().q, rows[0]))
 	under50 := stripANSI(g.m.queueLine(g.m.mainBuilt().q, rows[1]))
+	// Each issue is grouped by its task as it stands there: the second issue's
+	// task waits for the person's word, the first's landed.
+	if got := groupOf(g.m, "SHOP-50"); got != "needs you" {
+		t.Errorf("the second issue is in %q, want needs you", got)
+	}
+	if got := groupOf(g.m, "SHOP-49"); got == "needs you" {
+		t.Errorf("the first issue is in needs you with every task landed there")
+	}
 	g.openChart("second")
 	plan := stripANSI(g.view())
 	if want := lineWith(plan, "SHOP-1 "); !strings.Contains(want, "waits to land") || !strings.Contains(under50, "waits to land") {
