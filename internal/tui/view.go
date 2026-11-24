@@ -118,6 +118,8 @@ const (
 // terminal has.
 func (m *Model) View() string {
 	w := m.width
+	defer m.forgetSibs()
+	m.forgetSibs()
 	m.followSel()
 	l := m.layout()
 	m.settle(&l)
@@ -139,6 +141,12 @@ func (m *Model) View() string {
 		m.drawn = drawnAsks(l.pg, start, l.pageH)
 	}
 	m.rest(l, anchor)
+	m.recordHit(l, start, counted)
+	if m.help != nil {
+		// The keys list is drawn over the body, and no ask is drawn under it.
+		body = m.helpBody(l.pageH, w)
+		m.drawn = drawnAsks(l.pg, 0, 0)
+	}
 	for len(body) < l.pageH {
 		body = append(body, "")
 	}
@@ -163,10 +171,12 @@ type screenLayout struct {
 func (m *Model) layout() screenLayout {
 	w, h := m.width, m.height
 	pg := m.page()
-	if sub := m.subjectOf(pg); sub != m.keysOn {
+	sub := m.subjectOf(pg)
+	changed := !sub.same(m.keysOn)
+	m.keysOn = sub
+	if changed {
 		// The page was sized by a hint line cut for another subject: it is
 		// built again, once, for this one.
-		m.keysOn = sub
 		pg = m.page()
 	}
 	refs := pg.refs()
@@ -327,10 +337,11 @@ func (m *Model) header(w int) []string {
 		}
 		right = m.st.dim(m.queueSummary())
 	case screenChart:
-		crumbs += " › " + m.st.bold(e.chart)
+		crumbs += " › " + m.st.bold(e.chart) + m.st.dim(m.place())
+		idCrumb = crumbs
 		if c := m.w.charts[e.chart]; c != nil {
-			if title := c.title(); title != "" && title != e.chart {
-				crumbs += "  " + title
+			if t := c.title(); t != "" && t != e.chart {
+				title = t
 			}
 			state, label := m.chartStatus(c, m.chartRows(c))
 			right = m.st.icon(state) + " " + m.st.state(state, label)
@@ -338,6 +349,9 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
+		if e.screen != screenSlice {
+			crumbs += m.st.dim(m.place())
+		}
 		idCrumb = crumbs
 		if t != nil && t.title != "" {
 			title = t.title
@@ -359,7 +373,7 @@ func (m *Model) header(w int) []string {
 		case screenLand:
 			crumbs += " › 5 land"
 		case screenSlice:
-			crumbs += " › 2 build › slice " + m.st.bold(e.slice)
+			crumbs += " › 2 build › slice " + m.st.bold(e.slice) + m.st.dim(m.place())
 		}
 		if t != nil {
 			state, label := m.stepLabel(t)
@@ -379,6 +393,10 @@ func (m *Model) header(w int) []string {
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
+	}
+	if place := m.st.dim(m.place()); place != "" && width(crumbs)+width(right)+1 > w {
+		// The place among the siblings gives way before the step and the state.
+		crumbs, idCrumb = strings.Replace(crumbs, place, "", 1), strings.Replace(idCrumb, place, "", 1)
 	}
 	if title != "" {
 		// The title gives way first: it takes what the id, the step and the
@@ -411,6 +429,8 @@ func (m *Model) footer(w int) []string {
 	case m.ask != nil:
 		out := []string{rule, fit("  "+m.st.state(StateFindings, m.ask.prompt), w)}
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
+	case m.help != nil:
+		return append([]string{rule}, m.hintLines(w, "esc", "close", "↑↓", "scroll", "q", "quit")...)
 	}
 	return append([]string{rule}, m.hintLines(w, m.keyHints()...)...)
 }
@@ -435,103 +455,6 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 		lines = append(lines, "  "+cur)
 	}
 	return lines
-}
-
-// hint is a key on the hint line: the key, its meaning, and the action that
-// decides whether it is listed (none for a key that is always there).
-type hint struct {
-	key, text string
-	act       action
-}
-
-// keyHints are the keys that do something on the screen on top, as key and
-// meaning pairs: the screen's keys, and of those the actions only the ones can
-// lets run now. The key back and the key quit come first, so a line that wraps
-// never strands them.
-func (m *Model) keyHints() []string {
-	sub := m.keysOn
-	keys := m.screenKeys(sub)
-	// The key up to the issue, on the screens of a task that is in one's plan, and
-	// the one that shows the map, on the plan: each goes after the key quit, on
-	// a screen that has a key back.
-	var extra *hint
-	switch up := m.upFrom(); {
-	case up != "" && m.multiParent(up) != "":
-		extra = &hint{key: "c", text: "multi-task"}
-	case up != "" && len(m.issuesOf(up)) > 0:
-		extra = &hint{key: "c", text: "issue"}
-	case m.top().screen == screenChart:
-		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
-			extra = &hint{key: "m", text: "map"}
-		}
-	}
-	flat := make([]string, 0, 2*len(keys)+2)
-	for _, k := range keys {
-		if k.act != "" {
-			if ok, _ := m.canOn(sub, k.act); !ok {
-				continue
-			}
-		}
-		flat = append(flat, k.key, k.text)
-		if k.key == "q" && extra != nil && keys[0].key == "esc" {
-			flat = append(flat, extra.key, extra.text)
-		}
-	}
-	return flat
-}
-
-// screenKeys are the keys the screen on top has, in the order they are listed,
-// whether or not their action can run: the hint line lists the ones can lets
-// run, and a key the screen does not have runs nothing.
-func (m *Model) screenKeys(sub subject) []hint {
-	id := sub.ticket
-	move := hint{key: "↑↓", text: "move"}
-	open := hint{key: "enter", text: "open"}
-	back := hint{key: "esc", text: "back"}
-	answer := hint{"a", "answer", actAnswer}
-	keep := hint{"k", "keep", actKeep}
-	dismiss := hint{"d", "dismiss", actDismiss}
-	gate := hint{"g", "gate", actGate}
-	publish := hint{"p", "publish", actPublish}
-	requeue := hint{"u", "requeue", actRequeue}
-	approve := hint{"v", "approve", actApprove}
-	say := hint{"say", `"Land ` + id + `"`, actLandWord}
-	land := hint{key: "5", text: "land"}
-	tail := hint{key: "t", text: "tail"}
-	quit := hint{key: "q", text: "quit"}
-	var keys []hint
-	switch m.top().screen {
-	case screenMain:
-		view := hint{key: "s", text: "by chart"}
-		if m.nav[0].byChart {
-			view.text = "by state"
-		}
-		keys = []hint{quit, move, open, gate, publish, answer, say, view, tail, {key: "r", text: "refresh"}}
-	case screenChart:
-		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
-	case screenTicket:
-		keys = []hint{back, quit, move, open, answer, keep, dismiss, requeue, approve, gate, publish, say, land, tail}
-		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
-			// Nothing to move on or act on until the ticket exists.
-			keys = []hint{back, quit, tail}
-		} else if isMulti(t) {
-			// A multi-task's tasks open; nothing else is done from its screen.
-			keys = []hint{back, quit, move, open, tail}
-		}
-	case screenBrief:
-		keys = []hint{back, quit, move, open, approve, say, land, tail}
-	case screenBuild:
-		keys = []hint{back, quit, move, open, requeue, gate, say, land, tail}
-	case screenReview:
-		keys = []hint{back, quit, move, keep, dismiss, gate, say, land, tail}
-	case screenPublish:
-		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, publish, say, land, tail}
-	case screenSlice:
-		keys = []hint{back, quit, move, answer, requeue, say, land, tail}
-	case screenLand:
-		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
-	}
-	return keys
 }
 
 // panel is the last command as one line (whole, for a verb that leaves the next

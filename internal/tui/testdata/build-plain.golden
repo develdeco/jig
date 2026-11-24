@@ -1,4 +1,4 @@
-jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ? 1 of 4 green · slice c needs your answer
 
@@ -19,6 +19,6 @@ jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs
   sessions
   builder  harness unknown  s-builde
 
-  ╭─ Build activity ─────────────────────────────────────────── latest 2 of 8 ─╮
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ↑↓ move · enter open · 5 land · t tail
+  esc back · q quit · ? keys · ↑↓ move · enter open · 1-5 steps · [ ] sibling
+  h main · t tail

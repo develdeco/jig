@@ -173,7 +173,16 @@ each review round with its reviewer, what it sent back and the asks it left, and
 the pull request's body and changelog. `jig tui` opened on no ticket opens the
 first ticket a session creates after it started (a brief verdict mints it; a
 chart verdict creates none), until you press a key; `jig tui SHOP-1` can be open
-before SHOP-1 exists, and fills in when it does.
+before SHOP-1 exists, and fills in when it does. `jig tui 48` opens what the
+tracker item 48 is bound to (an issue opens its plan); an item with no record is
+refused, and `jig next 48` reads it.
+
+Every move is one key. `1` to `5` open a ticket's steps from any of its screens,
+`[` and `]` go to the previous and next sibling (the header says the place, `2
+of 5`), `h` goes to the project's list, `c` to the ticket's chart and `o` opens
+its pull requests; the mouse wheel moves the cursor and a click on a row selects
+it. `?` lists every key of the screen, and says why the ones that cannot run
+now cannot.
 
 A chart is a row on the main screen after the tickets, with how many of its
 tickets published. Enter opens its screen: the chart's map (destination, what
