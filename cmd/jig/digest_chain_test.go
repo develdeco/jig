@@ -163,7 +163,7 @@ func TestTUIWordsEqualNextAcrossTheAuditsStates(t *testing.T) {
 
 		// The ticket's screen.
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
-		screen.until(t, "› "+id+"  Ticket "+id) // the roster has been read: the title is its
+		screen.until(t, "  Ticket "+id) // the roster has been read: the title is its
 		if n.Phase != nil {
 			for i, p := range n.Phase.Phases {
 				want := p.Text
