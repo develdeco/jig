@@ -381,6 +381,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				PhaseProblem string   `json:"phase_problem"`
 				State        string   `json:"state"`
 				Closed       string   `json:"closed"`
+				Branch       string   `json:"branch"`
 				LandFirst    []string `json:"land_first"`
 				Unfinished   []string `json:"unfinished"`
 				Children     []struct {
@@ -416,6 +417,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				} `json:"slices"`
 			} `json:"digest"`
 		} `json:"tickets"`
+		Next   []string `json:"next"`
 		Charts []struct {
 			Name        string   `json:"name"`
 			Title       string   `json:"title"`
@@ -428,8 +430,12 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 		return nil, nil, fmt.Errorf("jig next printed a ticket list that does not parse: %w", err)
 	}
 	rows := make([]rosterRow, 0, len(next.Tickets))
+	startAt := make(map[string]int, len(next.Next))
+	for i, id := range next.Next {
+		startAt[id] = i + 1
+	}
 	for _, t := range next.Tickets {
-		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State}
+		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State, StartOrder: startAt[t.ID]}
 		if at, err := time.Parse(time.RFC3339, t.Updated); err == nil {
 			row.Updated = at
 		}
@@ -437,7 +443,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}
 		if g := t.Digest; g != nil {
-			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
+			d := &digestInfo{Kind: g.Kind, Parent: g.Parent, Current: g.Current, Ready: g.Ready, Behind: g.Behind, PhaseProblem: g.PhaseProblem, State: g.State, Closed: g.Closed, Branch: g.Branch, LandFirst: g.LandFirst, Unfinished: g.Unfinished}
 			for _, p := range g.Phases {
 				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
 			}

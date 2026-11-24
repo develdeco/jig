@@ -14,7 +14,7 @@ import (
 
 func TestMainScreenWithCharts(t *testing.T) {
 	t.Parallel()
-	g := chartRig(t)
+	g := chartRig(t).focus("JIG-4")
 	golden(t, "main-charts", g.view())
 }
 
@@ -27,7 +27,7 @@ func TestChartScreenOfATallTerminal(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	golden(t, "chart-tall", g.view())
 }
 
@@ -57,7 +57,7 @@ func shopRig(t *testing.T) *rig {
 	})
 	answerChart(g, roster, "shop", verb, map[string]string{"JIG-4": status["JIG-4"], "JIG-7": status["JIG-7"]})
 	g.feed(lines[:len(asTicket(jig2(), "JIG-4"))]...)
-	g.press("end", "enter")
+	g.openChart("shop")
 	return g
 }
 
@@ -97,7 +97,7 @@ func TestChartScreenOfAChartNothingIsGraduatedOf(t *testing.T) {
 func TestChartRowOpensTheChartScreenAndEscReturns(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart", g.m.Screen())
 	}
@@ -158,7 +158,7 @@ func TestMainScreenWithoutChartsDrawsNoChartAndReadsNone(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
 	v := g.view()
-	if strings.Contains(v, "chart") {
+	if strings.Contains(strings.ReplaceAll(v, "s by chart", ""), "chart") { // the key that lays the list out by chart is no chart
 		t.Errorf("a store with no charts draws one:\n%s", v)
 	}
 	g.press("end", "enter")
@@ -175,7 +175,7 @@ func TestAChartVerbThatPrintsNoChartLeavesTheScreenWithTheListingAndNoNotice(t *
 		g := newRig(t, "")
 		lines, status := chartTickets()
 		answerChart(g, chartRoster(checkoutListing()), "checkout", out, status)
-		g.feed(lines...).press("end", "enter")
+		g.feed(lines...).openChart("checkout")
 		v := g.view()
 		if g.m.notice != "" {
 			t.Errorf("a verb that printed %q left the notice %q", out, g.m.notice)
@@ -196,7 +196,7 @@ func TestAChartOfTheWrongShapeIsReadAgainAndThenSaid(t *testing.T) {
 	g := newRig(t, "")
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", `{"chart":"checkout","tickets":"none"}`+"\n", status)
-	g.feed(lines...).press("end", "enter")
+	g.feed(lines...).openChart("checkout")
 	if !strings.HasPrefix(g.m.notice, "chart checkout: ") {
 		t.Errorf("notice = %q, want the chart's read said", g.m.notice)
 	}
@@ -212,7 +212,7 @@ func TestTheChartScreenReadsItsChartOnOpenAndOnRefreshAndNotFromTheListScreen(t 
 	if n := g.r.ran(read); n != 0 {
 		t.Fatalf("the project's list read the chart %d times", n)
 	}
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if n := g.r.ran(read); n != 1 {
 		t.Fatalf("opening the chart read it %d times, want 1", n)
 	}
@@ -231,7 +231,7 @@ func chartQuietRig(t *testing.T) (g *rig, advance func(time.Duration)) {
 	now := time.Date(2026, 10, 23, 9, 30, 0, 0, time.UTC)
 	g = chartRig(t)
 	g.m.now = func() time.Time { return now }
-	g.press("end", "enter")
+	g.openChart("checkout")
 	return g, func(d time.Duration) { now = now.Add(d) }
 }
 
@@ -478,7 +478,7 @@ func TestTheChartRowsAreWhatTheTicketsListSaysUntilTheVerbIsRead(t *testing.T) {
 		t.Errorf("JIG-6's note = %q, %v", note, own)
 	}
 	// With the verb read, its order is the screen's: what can start comes before what waits.
-	g.press("end", "enter")
+	g.openChart("checkout")
 	var after []string
 	for _, r := range g.m.chartRows(c) {
 		after = append(after, r.id)
@@ -695,7 +695,7 @@ func TestAChartScreenDrawnWithColorHasTheTextOfOneWithout(t *testing.T) {
 	plain := chartScreenRig(t)
 	paint := chartRig(t)
 	paint.m.st = styles{r: colored()}
-	paint.press("end", "enter")
+	paint.openChart("checkout")
 	got := paint.view()
 	if !strings.Contains(got, "\x1b[") {
 		t.Fatalf("the colored screen has no escape sequence:\n%s", got)
@@ -732,7 +732,7 @@ func historyRig(t *testing.T, commits ...map[string]any) *rig {
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
 	g.feed(lines...)
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 43})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}

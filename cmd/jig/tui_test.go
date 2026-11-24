@@ -43,6 +43,30 @@ func (o *tuiOut) until(t *testing.T, want string) {
 	t.Fatalf("the screens never showed %q; they showed:\n%s", want, o.String())
 }
 
+// showFolds waits for the project's list to be read and opens its folds, the
+// ones of the groups at the end of a queue (not started, then done), so every
+// ticket has a row on the screens, and leaves the cursor on the last row.
+func showFolds(t *testing.T, keys io.Writer, out *tuiOut) {
+	t.Helper()
+	out.until(t, "done (")
+	for _, group := range []string{"not started", "done"} {
+		if !strings.Contains(lastScreen(out.String()), "▸ "+group+" (") {
+			continue
+		}
+		// The done group's fold row is the last row, and the other's the one
+		// before it, so opening it first leaves the done group's where it is.
+		keys.Write([]byte("\x1b[F"))
+		if group == "not started" {
+			keys.Write([]byte("\x1b[A"))
+		}
+		keys.Write([]byte("\r"))
+		out.until(t, "▾ "+group+" (")
+	}
+	// The list is longer than the screen: the last rows are read with the
+	// cursor on the last one, the first ones from the screens before.
+	keys.Write([]byte("\x1b[F"))
+}
+
 // startTUI runs `jig tui args...` in e in the background on a pipe, as a
 // script drives it, and returns the pipe to write keys to, the output and a
 // func that waits for the exit code.
@@ -100,7 +124,7 @@ func TestTUIWithATicketOpensItsScreen(t *testing.T) {
 	out.until(t, "› "+fx.Ticket)
 	out.until(t, "waiting for your approval") // the status was read
 	keys.Write([]byte("\x1b"))                // esc: back to the project
-	out.until(t, "1 ticket")
+	out.until(t, "1 need you")                // the project's list, grouped by what the person does next
 	keys.Write([]byte("q"))
 	if code := wait(); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out.String())
