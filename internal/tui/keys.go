@@ -177,6 +177,11 @@ func keyRows() []keyRow {
 			run: func(m *Model, _ string) tea.Cmd { m.back(); return nil }},
 		{names: []string{"q"}, label: "q", words: "quit", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { return m.quit() }},
+		{names: []string{"esc"}, label: "esc", words: "clear search", screens: onScreens(screenMain),
+			can: func(m *Model, _ subject) (bool, string) {
+				return m.searchApplied(), ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.clearSearch(); return nil }},
 		{names: []string{"?"}, label: "?", words: "keys", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { m.help = &helpView{}; return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
@@ -211,6 +216,14 @@ func keyRows() []keyRow {
 			can: canOpen, run: func(m *Model, _ string) tea.Cmd { return m.open() }},
 		{names: []string{"enter", "right"}, label: "enter", words: "open ticket", screens: onScreens(screenChart),
 			can: canOpen, run: func(m *Model, _ string) tea.Cmd { return m.open() }},
+		{names: []string{"/"}, label: "/", words: "search", screens: onScreens(screenMain),
+			can: func(m *Model, _ subject) (bool, string) {
+				if m.readingStore() {
+					return false, readingText
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.beginSearch(); return nil }},
 		{names: []string{"a"}, label: "a", words: "answer", act: actAnswer, screens: onScreens(screenMain, screenChart, screenTicket, screenSlice),
 			run: func(m *Model, _ string) tea.Cmd { m.beginAnswer(); return nil }},
 		{names: []string{"k"}, label: "k", words: "keep", act: actKeep, screens: onScreens(screenTicket, screenReview),

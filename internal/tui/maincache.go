@@ -17,6 +17,12 @@ type mainCache struct {
 	pg     page
 	folded map[rowIdentity]rowIdentity
 	refs   []rowRef
+
+	// cells are the cells of the rows the page was built from, by identity.
+	cells map[rowIdentity][]string
+
+	// srch is the search over this list, built when a search first asks.
+	srch *searchCache
 }
 
 // foldsOpen says which folds of the project's list are open, as a key.
@@ -41,6 +47,10 @@ func (m *Model) mainRefs() []rowRef {
 		return nil
 	}
 	c := m.mainBuilt()
+	if m.searchApplied() {
+		m.folded = nil
+		return m.searchOf(c).refs
+	}
 	m.folded = c.folded
 	return c.refs
 }
@@ -53,9 +63,10 @@ func (m *Model) mainBuilt() *mainCache {
 	if c := m.main; c != nil && c.gen == m.w.gen && c.width == m.width && c.bucket == bucket && c.folds == folds {
 		return c
 	}
+	m.queueBuilds++
 	c := &mainCache{gen: m.w.gen, width: m.width, bucket: bucket, folds: folds}
 	c.q = m.mainRows()
-	c.pg, c.folded = m.buildMain(c.q, open)
+	c.pg, c.folded, c.cells = m.buildMain(c.q, open)
 	c.refs = c.pg.refs()
 	m.main = c
 	return c

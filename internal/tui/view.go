@@ -705,6 +705,8 @@ func (m *Model) footer(w int) []string {
 	case m.ask != nil:
 		out := []string{rule, fit("  "+m.st.state(StateFindings, m.ask.prompt), w)}
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
+	case m.top().screen == screenMain && m.nav[0].search.open:
+		return append([]string{rule}, m.searchFooter(w)...)
 	case m.help != nil:
 		return append([]string{rule}, m.hintLines(w, "esc", "close", "↑↓", "scroll", "q", "quit")...)
 	}

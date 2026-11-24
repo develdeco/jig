@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"strings"
+	"unicode/utf8"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -128,6 +131,67 @@ func (s styles) bold(text string) string {
 // key is a key name in a hint line.
 func (s styles) key(text string) string {
 	return s.style().Foreground(lipgloss.Color("6")).Render(text)
+}
+
+// lit draws the letters of text that the search terms matched bold and
+// underlined, over whatever style the text has: the codes switch bold and
+// underline on and off alone, so a colour set before them goes on after. They
+// are no width (`width` counts none), and a terminal that styles nothing gets
+// the text as it was.
+func (s styles) lit(text string, terms []string, own map[string]bool) string {
+	if len(terms) == 0 || s.style().Bold(true).Render("x") == "x" {
+		return text
+	}
+	// Split the text into escape sequences and the letters between them.
+	type piece struct {
+		esc string
+		r   rune
+	}
+	var pieces []piece
+	var visible []rune
+	for i := 0; i < len(text); {
+		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) && (text[j] < '@' || text[j] > '~') {
+				j++
+			}
+			j = min(j+1, len(text))
+			pieces = append(pieces, piece{esc: text[i:j]})
+			i = j
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(text[i:])
+		pieces = append(pieces, piece{r: r})
+		visible = append(visible, r)
+		i += n
+	}
+	mask := litMask(visible, terms, own)
+	var b strings.Builder
+	on, at := false, 0
+	for _, p := range pieces {
+		if p.esc != "" {
+			if on {
+				b.WriteString("\x1b[22;24m")
+				on = false
+			}
+			b.WriteString(p.esc)
+			continue
+		}
+		if lit := mask[at]; lit != on {
+			if lit {
+				b.WriteString("\x1b[1;4m")
+			} else {
+				b.WriteString("\x1b[22;24m")
+			}
+			on = lit
+		}
+		b.WriteRune(p.r)
+		at++
+	}
+	if on {
+		b.WriteString("\x1b[22;24m")
+	}
+	return b.String()
 }
 
 // fit cuts text to at most w cells, ending in an ellipsis when it cut, and
