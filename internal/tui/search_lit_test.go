@@ -49,12 +49,12 @@ func styledConfig() Config {
 func TestSearchLightsTheMatchedLetters(t *testing.T) {
 	t.Parallel()
 	m := searchStoreIn(t, styledConfig())
-	typed(m, "/pub 11")
-	line := styledLine(t, m, "PUB-11")
+	typed(m, "/rel 11")
+	line := styledLine(t, m, "REL-11")
 	// The id, the title's word, and the id again in the words that say what to
 	// do with it.
-	if got, want := strings.Join(litSpans(line), "|"), "PUB|11|Pub|PUB|11"; got != want {
-		t.Errorf("the lit letters of /pub 11 are %q, want %q in %q", got, want, line)
+	if got, want := strings.Join(litSpans(line), "|"), "REL|11|rel|REL|11"; got != want {
+		t.Errorf("the lit letters of /rel 11 are %q, want %q in %q", got, want, line)
 	}
 	if strings.Contains(stripANSI(line), "\x1b") || stripANSI(line) != ansi.Strip(line) {
 		t.Errorf("the line has codes the plain text does not drop: %q", line)
@@ -63,17 +63,17 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 	// A prefix lights only the letters typed: /re lights the start of release.
 	press(m, tea.KeyEsc)
 	typed(m, "/rele")
-	if got := strings.Join(litSpans(styledLine(t, m, "PUB-11")), "|"); got != "rele" {
+	if got := strings.Join(litSpans(styledLine(t, m, "REL-11")), "|"); got != "rele" {
 		t.Errorf("/rele lights %q, want rele", got)
 	}
 
 	// The group's name is no word of the line: the row is listed and lights nothing.
 	press(m, tea.KeyEsc)
 	typed(m, "/needs")
-	if ids := strings.Join(shown(m), " "); ids != "PUB-11" {
-		t.Fatalf("/needs draws %q, want PUB-11 alone", ids)
+	if ids := strings.Join(shown(m), " "); ids != "REL-11" {
+		t.Fatalf("/needs draws %q, want REL-11 alone", ids)
 	}
-	if got := litSpans(styledLine(t, m, "PUB-11")); len(got) != 0 {
+	if got := litSpans(styledLine(t, m, "REL-11")); len(got) != 0 {
 		t.Errorf("a word the line does not draw lit %q", got)
 	}
 
@@ -89,7 +89,7 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 	press(m, tea.KeyEsc)
 	m.width = 60
 	typed(m, "/the")
-	line = styledLine(t, m, "PUB-11")
+	line = styledLine(t, m, "REL-11")
 	text := stripANSI(line)
 	for _, span := range litSpans(line) {
 		if !strings.Contains(strings.ToLower(text), strings.ToLower(span)) {
@@ -105,8 +105,8 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 
 	// A model that styles nothing draws no code.
 	plain := searchStore(t)
-	typed(plain, "/pub 11")
-	if line := styledLine(t, plain, "PUB-11"); strings.Contains(line, "\x1b") {
+	typed(plain, "/rel 11")
+	if line := styledLine(t, plain, "REL-11"); strings.Contains(line, "\x1b") {
 		t.Errorf("a pipe's frame has style codes: %q", line)
 	}
 }
@@ -116,7 +116,7 @@ func TestSearchLightsTheMatchedLetters(t *testing.T) {
 func TestLitLettersMoveNoColumn(t *testing.T) {
 	t.Parallel()
 	for _, w := range []int{60, 100, 230} {
-		for _, query := range []string{"pub 11", "the", "t", "tui-d", "iss"} {
+		for _, query := range []string{"rel 11", "the", "t", "tui-d", "iss"} {
 			styled, plain := searchStoreIn(t, styledConfig()), searchStore(t)
 			for _, m := range []*Model{styled, plain} {
 				m.width = w

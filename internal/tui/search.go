@@ -65,8 +65,8 @@ func rowWords(f rowFacts) []string {
 }
 
 // wordsOf are the words of s, lower case: each run of letters and digits, and
-// each blank-separated token whole, so `pub-11` is found as typed and by its
-// parts, `pub` and `11`.
+// each blank-separated token whole, so `rel-11` is found as typed and by its
+// parts, `rel` and `11`.
 func wordsOf(s string) []string {
 	var out []string
 	for _, tok := range strings.Fields(strings.ToLower(s)) {

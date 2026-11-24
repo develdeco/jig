@@ -23,8 +23,8 @@ func searchStoreIn(t testing.TB, cfg Config) *Model {
 	pending := []string{"pending|after the brief", "pending|after the build", "pending|after a clean review", "pending|after the publish"}
 	published := task("land", false, "done|approved", "done|2 slices green", "done|round 1 clean", "done|pull request opened", "current|waits for a merge")
 	published.PRs = []digestPR{{Repo: "demo", Number: 287, State: "open", Target: "main"}}
-	waiting := task("build", false, "done|approved", "pending|after PUB-11", pending[1], pending[2], pending[3])
-	waiting.LandFirst = []string{"PUB-11"}
+	waiting := task("build", false, "done|approved", "pending|after REL-11", pending[1], pending[2], pending[3])
+	waiting.LandFirst = []string{"REL-11"}
 	closed := task("publish", false, "done|closed", "done|closed", "done|closed", "done|closed", "done|none · closed without a pull request")
 	closed.Closed = "covered elsewhere"
 	t1 := task("build", true, "done|approved", "current|ready to build", pending[1], pending[2], pending[3])
@@ -35,7 +35,7 @@ func searchStoreIn(t testing.TB, cfg Config) *Model {
 		{ID: "ISS-1", Title: "Rebuild the queue", Digest: &digestInfo{Kind: "issue", State: "waiting"}},
 		{ID: "TSK-1", Title: "Sort the groups", Digest: t1},
 		{ID: "TSK-2", Title: "Draw the headings", Digest: t2},
-		{ID: "PUB-11", Title: "Publish the release notes", Digest: published},
+		{ID: "REL-11", Title: "Publish the release notes", Digest: published},
 		{ID: "WAI-3", Title: "Wait for the notes", Digest: waiting},
 		{ID: "CLS-4", Title: "Drop the old screen", Digest: closed},
 	})
@@ -83,13 +83,13 @@ func TestSearchMatchesWordsByPrefixInAnyOrder(t *testing.T) {
 	t.Parallel()
 	m := searchStore(t)
 	for query, want := range map[string]string{
-		"pub-11":        "PUB-11",
-		"PUB":           "PUB-11",
-		"11":            "PUB-11",
-		"#287":          "PUB-11",
-		"287":           "PUB-11",
-		"28":            "PUB-11",
-		"notes release": "PUB-11",
+		"rel-11":        "REL-11",
+		"REL":           "REL-11",
+		"11":            "REL-11",
+		"#287":          "REL-11",
+		"287":           "REL-11",
+		"28":            "REL-11",
+		"notes release": "REL-11",
 		"for notes":     "WAI-3",
 		"no such":       "",
 		// The kind: the issue's row, and the charts' rows by the word chart.
@@ -107,7 +107,7 @@ func TestSearchMatchesWordsByPrefixInAnyOrder(t *testing.T) {
 		// State words: the group's name and the end state's word.
 		"waiting":   "WAI-3",
 		"closed":    "CLS-4",
-		"to land":   "PUB-11",
+		"to land":   "REL-11",
 		"published": "",
 	} {
 		if got := found(m, query); got != want {
@@ -188,7 +188,7 @@ func TestSearchUnfoldsFoldedGroups(t *testing.T) {
 	byChart := stripANSI(m.View())
 	typed(m, "/notes")
 	frame = stripANSI(m.View())
-	if strings.Contains(frame, "TSK-1") || !strings.Contains(frame, "PUB-11") || !strings.Contains(frame, "WAI-3") || !strings.Contains(frame, "tui-design") {
+	if strings.Contains(frame, "TSK-1") || !strings.Contains(frame, "REL-11") || !strings.Contains(frame, "WAI-3") || !strings.Contains(frame, "tui-design") {
 		t.Errorf("the view by chart is not narrowed to the matches and their charts:\n%s", frame)
 	}
 	press(m, tea.KeyEsc)
@@ -239,7 +239,7 @@ func TestSearchLineTakesEveryPrintableKey(t *testing.T) {
 	press(m, tea.KeyEsc)
 
 	// Off the main screen the key is none.
-	m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: "PUB-11"})
+	m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: "REL-11"})
 	typed(m, "/")
 	if m.nav[0].search.applied() {
 		t.Errorf("/ opened a search on a ticket's screen")
@@ -264,7 +264,7 @@ func TestSearchReadsNothing(t *testing.T) {
 	m.w.setCharts(chartListings(src))
 	m.View()
 	calls, builds, clocks := 0, m.queueBuilds, m.clockRuns
-	for _, k := range "/pub-1" {
+	for _, k := range "/rel-1" {
 		typed(m, string(k))
 		m.View()
 	}
@@ -292,7 +292,7 @@ func TestSearchReadsNothing(t *testing.T) {
 	if m.queueBuilds != builds+1 {
 		t.Errorf("a store move built the queue %d times, want once", m.queueBuilds-builds)
 	}
-	if ids := strings.Join(shown(m), " "); ids != "PUB-11 WAI-3" {
+	if ids := strings.Join(shown(m), " "); ids != "REL-11 WAI-3" {
 		t.Errorf("the search after a store move draws %q", ids)
 	}
 }

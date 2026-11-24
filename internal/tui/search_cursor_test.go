@@ -184,7 +184,7 @@ func TestSearchStaysOnWhenMainIsComeBackTo(t *testing.T) {
 	if s := m.nav[0].search; s.open || string(s.query) != "sort" {
 		t.Errorf("the search is %+v coming back, want the query kept and the line closed", s)
 	}
-	if got := stripANSI(m.View()); !strings.Contains(got, "search “sort” · 1 of 7") || strings.Contains(got, "PUB-11") || underCursor(m) != "TSK-1" {
+	if got := stripANSI(m.View()); !strings.Contains(got, "search “sort” · 1 of 7") || strings.Contains(got, "REL-11") || underCursor(m) != "TSK-1" {
 		t.Errorf("main coming back is not the narrowed list it was:\n%s\n--- before\n%s", got, narrowed)
 	}
 	if hint := stripANSI(strings.Join(m.footer(110), "\n")); !strings.Contains(hint, "esc clear search") || !strings.Contains(hint, "/ search") {
@@ -195,7 +195,7 @@ func TestSearchStaysOnWhenMainIsComeBackTo(t *testing.T) {
 	if !m.nav[0].byChart || string(m.nav[0].search.query) != "sort" || m.nav[0].search.open {
 		t.Errorf("s did not switch the view with the search kept: %+v", m.nav[0])
 	}
-	if got := stripANSI(m.View()); strings.Contains(got, "PUB-11") || !strings.Contains(got, "TSK-1") {
+	if got := stripANSI(m.View()); strings.Contains(got, "REL-11") || !strings.Contains(got, "TSK-1") {
 		t.Errorf("the view by chart is not narrowed:\n%s", got)
 	}
 	typed(m, "s")
