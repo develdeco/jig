@@ -30,7 +30,7 @@ func sized(g *rig, w, h int) *rig {
 }
 
 // readWords is the words of a screen in reading order.
-func readWords(view string) string { return strings.Join(strings.Fields(view), " ") }
+func readWords(view string) string { return strings.Join(strings.Fields(unframed(view)), " ") }
 
 // between is the text of a screen after the first from and before the next to.
 func between(view, from, to string) string {
@@ -72,9 +72,9 @@ func TestQuestionWholeInNeedsYou(t *testing.T) {
 	for _, w := range []int{100, 40, 24} {
 		g := sized(newRig(t, "JIG-1"), w, 80)
 		g.feed(questionTicket()...)
-		view := g.view()
+		view := unframed(g.view())
 		// The activity panel keeps one cut line per entry; the question does not.
-		for _, l := range strings.Split(between(view, "\n  needs you\n", "Activity"), "\n") {
+		for _, l := range strings.Split(between(view, "\n  Needs you\n", "Activity"), "\n") {
 			if strings.HasPrefix(l, "      ") && strings.Contains(l, "…") {
 				t.Errorf("at %d columns the question is cut at %q:\n%s", w, l, view)
 			}
@@ -111,7 +111,7 @@ func TestOneLineQuestionIsOneRow(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
 	g.feed(jig1()...)
-	view := g.view()
+	view := unframed(g.view())
 	if !strings.Contains(view, "  ? builder asks about slice c  q-001\n      Formal or casual?\n") {
 		t.Errorf("a one-line question is not its row and its line:\n%s", view)
 	}
@@ -140,7 +140,15 @@ func TestAnswerPromptGrowsToFit(t *testing.T) {
 	if len(lines) != 40 {
 		t.Errorf("the screen is %d rows, want 40", len(lines))
 	}
-	foot := strings.Join(lines[len(lines)-12:], "\n")
+	// The footer begins at the last rule; the Activity above it has cut lines of
+	// its own.
+	rule := 0
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "──────") {
+			rule = i
+		}
+	}
+	foot := strings.Join(lines[rule:], "\n")
 	if !strings.Contains(readWords(foot), readWords("slice c asked: "+longQuestion)) {
 		t.Errorf("the prompt does not show the question whole:\n%s", view)
 	}

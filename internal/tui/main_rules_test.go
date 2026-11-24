@@ -252,8 +252,8 @@ func TestMainASharedTaskReadsAndGroupsByEachIssuesBranch(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("the shared task is under %d issues", len(rows))
 	}
-	under49 := stripANSI(g.m.queueLine(g.m.mainBuilt().q, rows[0]))
-	under50 := stripANSI(g.m.queueLine(g.m.mainBuilt().q, rows[1]))
+	under49 := stripANSI(strings.Join(g.m.queueCells(rows[0]), " "))
+	under50 := stripANSI(strings.Join(g.m.queueCells(rows[1]), " "))
 	// Each issue is grouped by its task as it stands there: the second issue's
 	// task waits for the person's word, the first's landed.
 	if got := groupOf(g.m, "SHOP-50"); got != "needs you" {

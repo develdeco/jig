@@ -1,7 +1,6 @@
 jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-      full 0000000..ccccccc · 4 files read
-
+  ↑ 8 more
   round 1 findings
   ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
       a leaked handle fails the next open
@@ -15,8 +14,9 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
       Name shadows import · the import is hidden in this scope
 
   ╭─ Review activity ──────────────────────────────────────────────────────────╮
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
-  │  09:11:00 ◎ round 1 · opened                                               │
+  │  time     step      what                                                   │
+  │  09:11:30 ! round 1 reviewer finished with findings                        │
+  │  09:11:00 ◎ round 1 opened                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────

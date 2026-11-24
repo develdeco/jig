@@ -15,9 +15,9 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review             ◇ waits t
   nothing: no finding waits for a person
 
   ╭─ Review activity ────────────────────────────────────────── latest 2 of 6 ─╮
-  │  09:13:30 ● round 2 · reviewer finished: clean                             │
-  │  09:13:00 ◎ round 2 · opened                                               │
-  │  ↓ 4 older                                                                 │
+  │  time     step      what                                                   │
+  │  09:13:30 ● round 2 reviewer finished: clean                               │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 1-5 steps

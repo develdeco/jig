@@ -103,10 +103,6 @@ func (r queueRow) tasks() int {
 type mainQueue struct {
 	rows    []queueRow
 	byGroup [groupCount][]queueRow
-	// idW and titleW are the columns of the ticket rows; chartIDW and
-	// chartTitleW the chart rows'. They hold for every row, folded or not, so a
-	// fold opened moves nothing.
-	idW, titleW, chartIDW, chartTitleW int
 	// issues counts the issues among the rows, drawn anywhere.
 	issues int
 	// byChart says the list is laid out by chart: sections are the rows that head
@@ -120,13 +116,10 @@ type mainQueue struct {
 // draws, so a ticket it does not list is no row.
 func (m *Model) mainRows() mainQueue {
 	var q mainQueue
-	q.idW = 4
 	rows := make(map[string]queueRow, len(m.w.order))
 	for _, id := range m.w.order {
 		r := m.ticketRow(id)
 		rows[id] = r
-		q.idW = max(q.idW, width(id))
-		q.titleW = max(q.titleW, width(r.t.title))
 		if isIssue(r.t) {
 			q.issues++
 		}
@@ -139,7 +132,6 @@ func (m *Model) mainRows() mainQueue {
 		if t := rows[id].t; isIssue(t) || isMulti(t) {
 			c := m.containerRow(rows[id], rows, drawn, 0, map[string]bool{id: true})
 			built[id] = c
-			q.idW = max(q.idW, c.indentedIDW())
 		}
 	}
 	for _, id := range m.w.order {
@@ -152,16 +144,10 @@ func (m *Model) mainRows() mainQueue {
 			q.rows = append(q.rows, rows[id])
 		}
 	}
-	q.titleW = min(q.titleW, max(0, (m.width-q.idW-20)/3))
-	var names []string
 	for _, name := range m.w.chartOrder {
 		if c := m.w.charts[name]; c != nil && c.listing.Issue == "" {
-			names = append(names, name)
 			q.rows = append(q.rows, m.chartRow(name, c))
 		}
-	}
-	if len(names) > 0 {
-		q.chartIDW, q.chartTitleW = m.chartColumns(names, q.idW, q.titleW)
 	}
 	if m.nav[0].byChart {
 		m.chartView(&q, rows, built, drawn)
@@ -220,10 +206,6 @@ func (m *Model) chartView(q *mainQueue, rows, built map[string]queueRow, drawn m
 	for g := range q.byGroup {
 		sortGroup(mainGroup(g), q.byGroup[g])
 	}
-	for _, s := range q.sections {
-		q.idW = max(q.idW, s.indentedIDW())
-	}
-	q.titleW = min(q.titleW, max(0, (m.width-q.idW-20)/3))
 }
 
 // rowsIn counts the rows of the groups.
@@ -398,16 +380,6 @@ func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[s
 		}
 	}
 	return own
-}
-
-// indentedIDW is the width the row's id and its tasks' ids need with their
-// indentation.
-func (r queueRow) indentedIDW() int {
-	w := width(r.id) + 2*r.depth
-	for _, k := range r.kids {
-		w = max(w, k.indentedIDW())
-	}
-	return w
 }
 
 // chartRow is the row of a chart that plans no issue. It is in Needs you when

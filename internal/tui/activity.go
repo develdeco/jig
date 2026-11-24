@@ -351,10 +351,10 @@ func (t *ticket) labelOf(ls subLabels, l events.Envelope) string {
 	return kind + " " + id
 }
 
-// activityLine is one line of a step's activity: its time, the state it is
-// drawn in, the sub-step it advances and what happened.
-func (m *Model) activityLine(t *ticket, ls subLabels, l events.Envelope) string {
-	return m.st.dim(clock(l, m.zone)) + " " + m.st.icon(eventState(l)) + " " + t.labelOf(ls, l) + m.st.dim(" · ") + m.say(t, l)
+// activityCells is a line of a step's activity as cells: its time, the state it is
+// drawn in with the sub-step it advances, and what happened.
+func (m *Model) activityCells(t *ticket, ls subLabels, l events.Envelope) []string {
+	return []string{m.st.dim(clock(l, m.zone)), m.st.icon(eventState(l)) + " " + t.labelOf(ls, l), m.say(t, l)}
 }
 
 // timelineLine is activityLine without the sub-step, for a screen that is
@@ -517,9 +517,9 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventPublishApproved:
 		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + repoWords(l) + short(l.Commit)
 	case journal.EventPr:
-		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + l.URL)
+		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + prRef(l.URL))
 	case journal.EventReviewNotes:
-		return strings.TrimSpace("review notes posted " + l.URL)
+		return strings.TrimSpace("review notes posted " + prRef(l.URL))
 	case journal.EventSquash:
 		return strings.TrimSpace("the branch was squashed " + short(l.Commit))
 	case journal.EventChangelog:

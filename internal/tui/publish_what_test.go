@@ -84,7 +84,7 @@ func TestPublishAsksOnAStoredWhat(t *testing.T) {
 	if g.m.ask != nil {
 		t.Errorf("p asked to publish after the render was refused")
 	}
-	if v := g.view(); !strings.Contains(v, "✖ jig publish JIG-2 --body  JIG-2 is behind (PUBLISH_BEHIND)") {
+	if v := g.view(); !strings.Contains(v, "✗ jig publish JIG-2 --body  JIG-2 is behind (PUBLISH_BEHIND)") {
 		t.Errorf("the refusal is not on the frame:\n%s", v)
 	}
 }

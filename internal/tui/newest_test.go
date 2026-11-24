@@ -34,7 +34,12 @@ func panelRows(frame, title string) []string {
 		case in && strings.Contains(l, "╰"):
 			return rows
 		case in:
-			rows = append(rows, strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│")))
+			row := strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│"))
+			if strings.HasPrefix(row, "time ") {
+				// The names of the columns are no row of the list.
+				continue
+			}
+			rows = append(rows, row)
 		}
 	}
 	return rows

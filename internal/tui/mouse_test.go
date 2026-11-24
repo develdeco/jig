@@ -162,7 +162,7 @@ func TestClickSelectsARow(t *testing.T) {
 	w := sized(planRig(t, planSpec{multi: true}), 80, 14)
 	w.press("end", "up", "up")
 	frame = w.view()
-	const target = "SHOP-3"
+	const target = "SHOP-4"
 	if termRow(frame, target) < 0 || strings.Contains(frame, "Need") {
 		t.Fatalf("the window is not past the first rows of the page:\n%s", frame)
 	}
@@ -171,18 +171,15 @@ func TestClickSelectsARow(t *testing.T) {
 		t.Errorf("a click on %s in a windowed page selected %+v", target, ref)
 	}
 
-	// The count of rows that came in above, which takes the first row of the
-	// window, is no row.
-	c := mainRig(t)
-	c.press("down", "down")
-	c.view()
-	if c.m.hit == nil {
+	// The mark of what lies above, and the edge of the box the window starts in,
+	// are no rows: a click on the row above the first line drawn selects nothing.
+	before = w.m.top().sel
+	if w.m.hit == nil || w.m.hit.top == 0 {
 		t.Fatal("the frame recorded no window")
 	}
-	c.m.hit.counted = true
-	click(c, c.m.hit.top)
-	if c.m.top().sel != 2 {
-		t.Errorf("a click on the count row moved the cursor to %d", c.m.top().sel)
+	click(w, w.m.hit.top-1)
+	if w.m.top().sel != before {
+		t.Errorf("a click on the mark above the window moved the cursor to %d", w.m.top().sel)
 	}
 
 	// The panel and the keys list are not rows either: with ? up a click does nothing.

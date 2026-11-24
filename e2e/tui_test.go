@@ -394,8 +394,8 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		screens.press("\x1b[B")
 	}
 	screens.press("\r")
-	publish := screens.until("Publish activity", "published · finished", "changelog · written")
-	if finished, written := strings.Index(publish, "published · finished"), strings.Index(publish, "changelog · written"); finished < 0 || finished > written {
+	publish := screens.until("Publish activity", "published finished", "changelog written")
+	if finished, written := strings.Index(publish, "published finished"), strings.LastIndex(publish, "changelog written"); finished < 0 || finished > written {
 		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
 	}
 	screens.press("q")

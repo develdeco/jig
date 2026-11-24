@@ -60,6 +60,7 @@ func TestAReviewerSubagentIsNamedAsOneAndByTheModelItRanOn(t *testing.T) {
 	g.feed(reviewRound("s-builder", "claude-sonnet-5", "claude-opus-5")...)
 
 	// The review sub-steps, with the cursor on the review.
+	sized(g, 80, 30)
 	g.press("down")
 	v := g.view()
 	for _, want := range []string{"Review ─", "reviewer reviewer subagent · Claude Code · Opus 5", "review·r1   ◎ reviewer subagent (Claude Code · Opus 5) took it"} {

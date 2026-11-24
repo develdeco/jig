@@ -30,8 +30,8 @@ func askedRig(t *testing.T, ticket string) *rig {
 	return g
 }
 
-// hasGroup is whether a ticket screen draws its "needs you" group.
-func hasGroup(page string) bool { return hasLine(page, "needs you") }
+// hasGroup is whether a ticket screen draws its "Needs you" panel.
+func hasGroup(page string) bool { return hasLine(page, "Needs you") }
 
 // waitingOnAnswer is the roster's word that n slices of the ticket wait on an
 // answer, as `jig next` gives it once the store has moved.
@@ -201,7 +201,7 @@ func TestALiveSessionKeepsTheRoundsAsksOnScreen(t *testing.T) {
 	g.feed(jig2Mid()...)
 	g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
 	p := pagesText(g.m.ticketPage("JIG-2"))
-	if hasGroup(p) || !hasLine(p, "asks") || !strings.Contains(p, "Unchecked error") {
+	if hasGroup(p) || !hasLine(p, "Asks") || !strings.Contains(p, "Unchecked error") {
 		t.Fatalf("a live session's round does not keep its asks under the asks group:\n%s", p)
 	}
 	g.press("enter") // the review step: the cursor lands on the first ask
@@ -265,7 +265,7 @@ func TestAnIssuesEndsReadAsPhaseWritesThemWhateverTheLandings(t *testing.T) {
 
 	g := tallChart(t, checkoutJSON(model, end("merged")))
 	v := g.view()
-	if !strings.Contains(v, "ends at  "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
+	if !strings.Contains(v, "ends at "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
 		t.Errorf("an issue's run with no landing open does not say its end once, as phase writes it:\n%s", v)
 	}
 	g = tallChart(t, checkoutJSON(model, end("stacked")))

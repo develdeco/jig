@@ -1,0 +1,88 @@
+package tui
+
+// The parts every screen draws with. A section of a screen is a panel; a panel
+// of rows that are cells in the allocator is a list and names its columns in a
+// dim row under its top edge, laid out by the same call as its rows.
+
+// listRow is a row of a list: the cells of its columns and the place the
+// cursor takes when it can stand on the row.
+type listRow struct {
+	ref   *rowRef
+	cells []string
+}
+
+// listSpec is a list panel.
+type listSpec struct {
+	title, summary string
+	cols           []column
+	// names are the words of the columns, a lowercase word or two each, in the
+	// order of cols; a column that answers nothing has an empty name.
+	names []string
+	rows  []listRow
+	// empty is said in place of the list when it has no rows, and the panel then
+	// has no names row.
+	empty string
+	// room is the most lines the rows may take, the names row apart; 0 is no
+	// cap. A list short of room asks its free text for fewer rows before it
+	// drops one.
+	room int
+	// after are lines inside the panel under the rows, such as the count of
+	// the older ones.
+	after []string
+}
+
+// listPanel adds a list panel to p: the top edge with the title and the summary,
+// the names of the columns, the rows, and the bottom edge.
+func (m *Model) listPanel(p *page, s listSpec) {
+	p.boxTop(s.title, s.summary)
+	if len(s.rows) == 0 {
+		if s.empty != "" {
+			p.boxAdd(m.st.dim(s.empty))
+		}
+	} else {
+		names := make([]string, len(s.names))
+		for i, n := range s.names {
+			names[i] = m.st.dim(n)
+		}
+		cells := make([][]string, 0, len(s.rows)+1)
+		cells = append(cells, names)
+		for _, r := range s.rows {
+			cells = append(cells, r.cells)
+		}
+		var laid [][]string
+		if s.room > 0 {
+			laid = laidWithin(s.cols, cells, m.innerWidth(), s.room+1)
+		} else {
+			laid = layout(s.cols, cells, m.innerWidth())
+		}
+		p.boxNames(laid[0])
+		for i, lines := range laid[1:] {
+			p.boxLaid(s.rows[i].ref, lines)
+		}
+	}
+	for _, l := range s.after {
+		p.boxAdd(l)
+	}
+	p.boxEnd()
+}
+
+// boxNames adds the row of a list's column names to the panel.
+func (p *page) boxNames(lines []string) {
+	for i, l := range lines {
+		p.lines = append(p.lines, pline{text: l, box: boxMid, names: i == 0, cont: i > 0})
+	}
+}
+
+// intoPanel makes the lines the page holds from line at the lines of a panel
+// titled title, with summary at the right of its top edge: a section built as
+// loose rows becomes a panel.
+func (p *page) intoPanel(at int, title, summary string) {
+	body := append([]pline(nil), p.lines[at:]...)
+	p.lines = p.lines[:at]
+	p.boxTop(title, summary)
+	for _, l := range body {
+		l.box = boxMid
+		p.lines = append(p.lines, l)
+	}
+	p.boxEnd()
+}

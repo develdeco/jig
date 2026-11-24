@@ -597,7 +597,12 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	} else if took := c.work.of(step, s.Key); took > 0 {
 		right = m.st.state(state, ago(took))
 	}
-	head := m.st.icon(state) + " " + m.st.bold(pad(s.Label, labelW)) + "  "
+	// The clock always shows: the label gives way to it.
+	label := pad(s.Label, labelW)
+	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room {
+		label = pad(s.Label, max(1, room))
+	}
+	head := m.st.icon(state) + " " + m.st.bold(label) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
 	track := m.trackLine(state, stages, reached)
 	if width(head)+width(track)+width(right)+2 > w {

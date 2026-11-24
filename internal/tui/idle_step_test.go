@@ -115,7 +115,7 @@ func TestAStepWhoseHolderIsQuietPastTheWindowStops(t *testing.T) {
 		t.Errorf("a builder silent past the window: the build reads\n%s\nwant 2m 00s and idle since 09:02", row)
 	}
 	g.m.st = styles{r: colored()}
-	if view := g.view(); !strings.Contains(view, g.m.st.dim("0 of 1 green · slice round is being built · idle since 09:02")) {
+	if view := g.view(); !strings.Contains(view, g.m.st.dim("0 of 1 green · slice round is being built")) || !strings.Contains(view, g.m.st.dim("· idle since 09:02")) {
 		t.Errorf("the idle words are not in the dim colour:\n%q", view)
 	}
 }

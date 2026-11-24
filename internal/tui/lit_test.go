@@ -45,6 +45,12 @@ func undecorated(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// drawnRows draws the whole of a page whose cursor is on its sel-th row.
+func drawnRows(m *Model, pg page, sel, w int) []string {
+	rows, _, _ := m.windowRows(pg, sel, 0, len(pg.lines), w, "")
+	return rows
+}
+
 // coloredPage is a model drawing with the colors of a terminal.
 func coloredPage(t *testing.T) *Model {
 	t.Helper()
@@ -63,8 +69,8 @@ func TestSelectedRowIsLitAcrossItsWidth(t *testing.T) {
 	cell := m.st.state(StateGreen, "green") + " then " + m.st.dim("dim") + " and more"
 	var pg page
 	pg.boxTop("Slices", "2")
-	pg.boxRow(rowRef{kind: rowSlice, id: "a"}, cell)
-	pg.boxRow(rowRef{kind: rowSlice, id: "b"}, cell)
+	pg.boxLaid(&rowRef{kind: rowSlice, id: "a"}, []string{cell})
+	pg.boxLaid(&rowRef{kind: rowSlice, id: "b"}, []string{cell})
 	pg.boxEnd()
 	pg.addRow(rowRef{kind: rowSlice, id: "c"}, cell)
 	const w = 60
@@ -76,7 +82,7 @@ func TestSelectedRowIsLitAcrossItsWidth(t *testing.T) {
 		"a panel row": {0, 1, 2, 3, w - 1},
 		"a loose row": {2, 4, 1, 0, w},
 	} {
-		out := m.window(pg, c.sel, 0, len(pg.lines), w)
+		out := drawnRows(m, pg, c.sel, w)
 		cells, lit := litCells(out[c.line])
 		if got := len(cells); got != w {
 			t.Fatalf("%s: the line is %d cells, want %d: %q", name, got, w, out[c.line])
@@ -103,15 +109,15 @@ func TestPlainModeKeepsTheSelectionMarkerAlone(t *testing.T) {
 	m := newRig(t, "JIG-1").m
 	var pg page
 	pg.boxTop("Slices", "")
-	pg.boxRow(rowRef{kind: rowSlice, id: "a"}, "alpha")
+	pg.boxLaid(&rowRef{kind: rowSlice, id: "a"}, []string{"alpha"})
 	pg.boxEnd()
 	pg.addRow(rowRef{kind: rowSlice, id: "b"}, "beta")
 	const w = 40
-	out := m.window(pg, 0, 0, len(pg.lines), w)
+	out := drawnRows(m, pg, 0, w)
 	if !strings.Contains(out[1], "│▸ alpha") || strings.Contains(strings.Join(out, ""), "\x1b") {
 		t.Errorf("the plain panel row is %q", out[1])
 	}
-	out = m.window(pg, 1, 0, len(pg.lines), w)
+	out = drawnRows(m, pg, 1, w)
 	if out[3] != "▸ beta" {
 		t.Errorf("the plain loose row is %q, want the marker and its text only", out[3])
 	}
@@ -126,7 +132,7 @@ func TestAFocusedPanelDrawsItsBorderLit(t *testing.T) {
 	build := func(focus bool) page {
 		var pg page
 		pg.boxTop("Slices", "1")
-		pg.boxRow(rowRef{kind: rowSlice, id: "a"}, "alpha")
+		pg.boxLaid(&rowRef{kind: rowSlice, id: "a"}, []string{"alpha"})
 		pg.boxEnd()
 		for i := range pg.lines {
 			pg.lines[i].focus = focus
@@ -138,7 +144,7 @@ func TestAFocusedPanelDrawsItsBorderLit(t *testing.T) {
 	dimOn, _, _ := strings.Cut(m.st.dim("╭"), "╭")
 	for name, focus := range map[string]bool{"focused": true, "unfocused": false} {
 		pg := build(focus)
-		out := m.window(pg, 0, 0, len(pg.lines), w)
+		out := drawnRows(m, pg, 0, w)
 		for i, edge := range []string{"╭", "│", "╰"} {
 			line := out[i]
 			at := strings.Index(line, edge)

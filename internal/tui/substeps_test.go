@@ -65,6 +65,9 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	if refs := g.m.page().refs(); len(refs) != 5 {
 		t.Errorf("the page has %d rows for the cursor, want the 5 steps and no sub-step", len(refs))
 	}
+	// The names of the columns take a row of each panel, so the sub-steps are read
+	// in a taller window than the golden's.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 	for _, tc := range []struct {
 		keys  []string
 		title string
@@ -135,11 +138,11 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 		tk := g.m.w.tickets["BIG-1"]
 		subs := g.m.phaseOf(tk).Of(phase.Build).Subs
 		extra := g.m.openWant(tk, stepBuild, subs[focusIndex(subs)]) - 1
-		if len(block) < 3 || len(block) > min(9, room)+2+extra {
+		if len(block) < 3 || len(block) > min(9, room)+3+extra {
 			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame, 1 to %d sub-steps and the card's %d more:\n%s", height, len(block), room, extra, v)
 		}
-		if len(act) < 5 {
-			t.Errorf("height %d: the activity panel takes %d lines, want its three and the frame:\n%s", height, len(act), v)
+		if len(act) < 6 {
+			t.Errorf("height %d: the activity panel takes %d lines, want its three, the names and the frame:\n%s", height, len(act), v)
 		}
 		joined := strings.Join(block, "\n")
 		if !strings.Contains(joined, "slice s6") || strings.Contains(joined, "more") != (room < 9) {

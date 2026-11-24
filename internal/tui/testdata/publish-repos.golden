@@ -13,11 +13,11 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
       - b: ddddddd
   ✓ published  09:14:22
 
-  ╭─ Publish activity ───────────────────────────────────────── latest 3 of 7 ─╮
-  │  09:14:22 ● published · finished                                           │
-  │  09:14:21 ▲ pull request web · opened https://example.test/acme/web/pull/3 │
-  │  09:14:20 ▲ pull request api · opened https://example.test/acme/api/pull/7 │
-  │  ↓ 4 older                                                                 │
+  ╭─ Publish activity ───────────────────────────────────────── latest 2 of 7 ─╮
+  │  time     step               what                                          │
+  │  09:14:22 ● published        finished                                      │
+  │  09:14:21 ▲ pull request web opened PR #3                                  │
+  │  ↓ 5 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps

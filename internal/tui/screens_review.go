@@ -99,7 +99,7 @@ func (m *Model) reviewPage(id string) page {
 	}
 	for i, line := range m.askLines(asks) {
 		p.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
-		m.addAskText(&p, t, asks[i])
+		m.addAskText(&p, t, asks[i], false)
 	}
 
 	p.add("")

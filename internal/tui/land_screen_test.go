@@ -140,7 +140,7 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 		"◇ api  merge PR #7 into main · open on the host",
 		"✓ web  PR #3 into main · landed at 09:15:30 · by you",
 		"◇ docs  merge PR #2 into main · merged on the host, not recorded",
-		"record · landed web into main", // the landed line, in the land step's own activity
+		"record landed web into main", // the landed line, in the land step's own activity
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("two repos: the land screen lacks %q:\n%s", want, view)
@@ -197,7 +197,7 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 	closedPR.PRs = []digestPR{{Repo: "api", Number: 9, URL: "https://x/9", State: "closed", Target: "main"}}
 	g = landTicket(t, closedPR)
 	g.press("5")
-	if view := g.view(); !strings.Contains(view, "✖ merge PR #9 into main · closed on the host, not merged") {
+	if view := g.view(); !strings.Contains(view, "✗ merge PR #9 into main · closed on the host, not merged") {
 		t.Errorf("a closed pull request:\n%s", view)
 	}
 
@@ -227,7 +227,8 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	t.Parallel()
 	digests := endDigests()
 	g := landTicket(t, digests[StateWaitsToLand])
-	if page := pagesText(g.m.ticketPage("JIG-2")); !strings.Contains(page, "needs you") || !strings.Contains(page, `◇ waits to land · say "Land JIG-2"`) {
+	g.m.height = 30
+	if page := pagesText(g.m.ticketPage("JIG-2")); !strings.Contains(page, "Needs you") || !strings.Contains(page, `◇ waits to land · say "Land JIG-2"`) {
 		t.Errorf("the ticket screen has no needs-you row for the landing:\n%s", page)
 	}
 	// The row opens the land screen.
@@ -258,7 +259,7 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 		if _, label := c.m.chartStatus(ch, c.m.chartRows(ch)); want && label != "run needs you" {
 			t.Errorf("%s: the chart says %q, want it to say the run needs you", state, label)
 		}
-		if page := pagesText(c.m.ticketPage("JIG-4")); strings.Contains(page, "needs you") != want {
+		if page := pagesText(c.m.ticketPage("JIG-4")); strings.Contains(page, "Needs you") != want {
 			t.Errorf("%s: the ticket screen's needs-you block = %v, want %v:\n%s", state, !want, want, page)
 		}
 	}
