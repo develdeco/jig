@@ -154,3 +154,26 @@ func TestAllocatorStacksFreeColumnsAndCutsMeasuredOnesLast(t *testing.T) {
 		t.Errorf("the id gives way last: %q, want %q", got, want)
 	}
 }
+
+// TestAllocatorStacksWhenTheFirstFreeColumnWouldGetLessThanItNeeds: a second
+// free column that gets all it needs does not leave the first under 20 cells
+// while a measured column is cut: the second stacks under the first, and the
+// step dots stay whole on the first line.
+func TestAllocatorStacksWhenTheFirstFreeColumnWouldGetLessThanItNeeds(t *testing.T) {
+	t.Parallel()
+	title := strings.TrimSpace(strings.Repeat("word ", 14))
+	rows := [][]string{{"○", "JIG-12345", title, "◐ ○ ○ ○ ○", "review · 1 of 2"}}
+	got := layout(testColumns, rows, 58)[0]
+	if !strings.Contains(got[0], "◐ ○ ○ ○ ○") || strings.Contains(strings.Join(got, ""), "…") {
+		t.Errorf("the dots or the title are cut: %q", got)
+	}
+	col := width(got[0][:strings.Index(got[0], "word")])
+	if last := got[len(got)-1]; !strings.HasPrefix(last, spaces(col)+"review") {
+		t.Errorf("the detail does not stack under the title's left edge: %q", got)
+	}
+	for _, l := range got {
+		if width(l) > 58 {
+			t.Errorf("a row is %d cells: %q", width(l), l)
+		}
+	}
+}

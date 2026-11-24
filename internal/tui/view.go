@@ -118,7 +118,9 @@ func (m *Model) wrapLong(pg page) page {
 			// What a person decides on is never cut.
 			rows = 1 << 20
 		}
-		lines := wrapCell(l.text[indent:], max(1, w-indent), rows)
+		// Every row, the first too, is wrapped to the room the continuation rows
+		// have under their indent, so none is wider than the line may be.
+		lines := wrapCell(l.text[indent:], max(1, w-lead), rows)
 		for i, text := range lines {
 			next := l
 			next.text = spaces(indent) + text
@@ -364,11 +366,11 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 // box's top edge when only that would leave above it. With keep, the cursor's
 // row stays in the span, which moves down as the marks cost it rows; without
 // it, a row the page holds out of view stays out.
-func windowSpan(pg page, sel, start, h int, keep bool) (from, to int) {
+func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool) {
 	lines := pg.lines
 	n := len(lines)
 	if n <= h {
-		return 0, n
+		return 0, n, false
 	}
 	selLine, k := -1, 0
 	for i, l := range lines {
@@ -388,12 +390,25 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int) {
 		s--
 	}
 	for {
-		e := fitEnd(lines, s, h)
+		e := fitEnd(lines, s, h, false)
+		if e == s {
+			// A row taller than the window is split rather than cut off from its box.
+			e = fitEnd(lines, s, h, true)
+		}
+		if e == s {
+			// The marks and edges leave no row for a line: the window is plain.
+			return s, min(n, s+h), true
+		}
 		if !keep || selLine < 0 || selLine < e || e >= n {
-			return s, max(e, min(n, s+1))
+			return s, e, false
 		}
 		s++
 		for s < n-1 && lines[s].cont {
+			s++
+		}
+		if s < n && lines[s].box == boxMid && lines[s-1].box == boxTop {
+			// A mark of nothing above in the box: the next line is the first
+			// with something above it.
 			s++
 		}
 	}
@@ -420,8 +435,9 @@ func boxOf(lines []pline, i int) (top, bottom int) {
 // that does not begin at the page's top starts with a mark of what is above, or
 // with the top edge of the box it is in and a mark inside it; one that does not
 // reach the page's end finishes with a mark of what is below, or with a mark
-// inside the box it is in and that box's bottom edge.
-func fitEnd(lines []pline, s, h int) int {
+// inside the box it is in and that box's bottom edge. A row is not split from its
+// continuation rows unless split says it may be, for a row taller than the window.
+func fitEnd(lines []pline, s, h int, split bool) int {
 	n := len(lines)
 	top := 0
 	if s > 0 {
@@ -431,7 +447,7 @@ func fitEnd(lines []pline, s, h int) int {
 		}
 	}
 	for e := min(n, s+h); e > s; e-- {
-		if e < n && lines[e].cont {
+		if e < n && lines[e].cont && !split {
 			continue
 		}
 		bottom := 0
@@ -451,6 +467,31 @@ func fitEnd(lines []pline, s, h int) int {
 	return s
 }
 
+// plainRows are the page lines from..to as rows with no marks and no edges, for
+// a window too short to give a row to them.
+func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
+	var rows []string
+	idx := 0
+	for i, l := range pg.lines {
+		marker := "  "
+		if l.ref != nil {
+			if idx == sel {
+				marker = m.st.key("▸") + " "
+			}
+			idx++
+		}
+		if i < from || i >= to {
+			continue
+		}
+		if l.box != boxNone {
+			rows = append(rows, fit(m.frameLine(l, marker, w), w))
+			continue
+		}
+		rows = append(rows, fit(marker+l.text, w))
+	}
+	return rows
+}
+
 // windowRows renders the window of h rows from start and the span of page
 // lines it drew. The window works on boxes and loose lines: a box that fits is
 // drawn whole, and one that does not is drawn with its top edge, the rows that
@@ -460,7 +501,10 @@ func fitEnd(lines []pline, s, h int) int {
 // last ends with "↓ N more". A row is never cut from its continuation rows.
 func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []string, from, to int) {
 	lines := pg.lines
-	from, to = windowSpan(pg, sel, start, h, above != "" || m.top().lead == 0)
+	from, to, plain := windowSpan(pg, sel, start, h, above != "" || m.top().lead == 0)
+	if plain {
+		return m.plainRows(pg, sel, from, to, w), from, to
+	}
 	mark := func(text string, boxed bool) string {
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if boxed {

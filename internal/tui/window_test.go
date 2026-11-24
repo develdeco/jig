@@ -175,3 +175,111 @@ func TestATailThatCannotFitSaysSo(t *testing.T) {
 		t.Errorf("a tall screen draws its tail:\n%s", view)
 	}
 }
+
+// TestWrapLongKeepsEveryRowWithinTheScreen: a line too long for the screen wraps
+// to rows that are all within its room, loose or in a box, at word breaks or in
+// the middle of an unbroken token; its text is whole across the rows, and only
+// its first row carries the cursor.
+func TestWrapLongKeepsEveryRowWithinTheScreen(t *testing.T) {
+	t.Parallel()
+	for _, w := range []int{40, 60} {
+		for _, boxed := range []bool{false, true} {
+			g := newRig(t, "")
+			g.send(tea.WindowSizeMsg{Width: w, Height: 30})
+			for _, text := range []string{"  see " + strings.Repeat("x", 50), "  " + strings.TrimSpace(strings.Repeat("word ", 18))} {
+				var pg page
+				ref := &rowRef{kind: rowSlice, id: "s"}
+				if boxed {
+					pg.lines = append(pg.lines, pline{text: text, ref: ref, box: boxMid})
+				} else {
+					pg.lines = append(pg.lines, pline{text: text, ref: ref})
+				}
+				room := w - 2
+				if boxed {
+					room = g.m.innerWidth()
+				}
+				got := g.m.wrapLong(pg)
+				var flat strings.Builder
+				for i, l := range got.lines {
+					if width(l.text) > room {
+						t.Errorf("w=%d boxed=%v: row %d is %d cells in a room of %d: %q", w, boxed, i, width(l.text), room, l.text)
+					}
+					if (i == 0) != (l.ref != nil) || (i > 0) != l.cont {
+						t.Errorf("w=%d boxed=%v: row %d has ref %v and cont %v, want the ref on the first row alone", w, boxed, i, l.ref != nil, l.cont)
+					}
+					flat.WriteString(strings.TrimSpace(l.text))
+				}
+				if want := strings.ReplaceAll(strings.TrimSpace(text), " ", ""); strings.ReplaceAll(flat.String(), " ", "") != want {
+					t.Errorf("w=%d boxed=%v: the text is cut: %q, want %q", w, boxed, flat.String(), want)
+				}
+				if again := g.m.wrapLong(got); len(again.lines) != len(got.lines) {
+					t.Errorf("w=%d boxed=%v: wrapping again changes %d rows into %d", w, boxed, len(got.lines), len(again.lines))
+				}
+			}
+		}
+	}
+}
+
+// TestEveryFrameIsTheTerminalsHeight: with the tail open on a terminal of 10 to
+// 16 rows, no screen draws more rows than the terminal has, with the cursor
+// on every row of it, and no mark counts nothing.
+func TestEveryFrameIsTheTerminalsHeight(t *testing.T) {
+	t.Parallel()
+	ids := [3]string{"round-totals", "fix-4-cart-test", "cart-total"}
+	titles := map[string]string{}
+	var tasks []string
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("SHOP-%020d", i)
+		tasks = append(tasks, id)
+		titles[id] = longTitle(i)
+	}
+	rigs := map[string]func(h int) *rig{
+		"ticket": func(h int) *rig { return longStepsRig(t, 80, h, ids, true) },
+		"plan": func(h int) *rig {
+			g := planRig(t, planSpec{tasks: tasks, titles: titles, landed: map[string]bool{tasks[0]: true}})
+			g.send(tea.WindowSizeMsg{Width: 80, Height: h})
+			return g
+		},
+		"chart": func(h int) *rig {
+			g := chartScreenRig(t)
+			g.send(tea.WindowSizeMsg{Width: 80, Height: h})
+			return g
+		},
+	}
+	for name, mk := range rigs {
+		for h := 10; h <= 16; h++ {
+			g := mk(h)
+			g.press("t")
+			for step := 0; step < 14; step++ {
+				view := g.view()
+				if n := len(strings.Split(view, "\n")); n > h {
+					t.Fatalf("%s at 80x%d, step %d: the frame is %d rows, over the terminal's:\n%s", name, h, step, n, view)
+				}
+				if strings.Contains(view, "↑ 0 ") || strings.Contains(view, "↓ 0 ") {
+					t.Fatalf("%s at 80x%d, step %d: a mark counts nothing:\n%s", name, h, step, view)
+				}
+				g.press("down")
+			}
+		}
+	}
+}
+
+// TestAWindowTooShortForItsMarksDrawsPlainLines: a window with no row to spare
+// for the marks and edges of the box it is in draws its lines plain, all the
+// rows it has, so the frame stays the terminal's height.
+func TestAWindowTooShortForItsMarksDrawsPlainLines(t *testing.T) {
+	t.Parallel()
+	var pg page
+	pg.boxTop("Box", "")
+	for i := 0; i < 10; i++ {
+		pg.boxAdd(fmt.Sprintf("line %d", i))
+	}
+	pg.boxEnd()
+	from, to, plain := windowSpan(pg, 0, 4, 3, false)
+	if !plain || from != 4 || to != 7 {
+		t.Errorf("a window of 3 rows inside a box is lines %d to %d (plain %v), want 4 to 7 plain", from, to, plain)
+	}
+	if from, to, plain = windowSpan(pg, 0, 4, 8, false); plain || to-from < 3 {
+		t.Errorf("a window of 8 rows is lines %d to %d (plain %v), want marks and at least 3 lines", from, to, plain)
+	}
+}

@@ -296,7 +296,8 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	for i, s := range subs {
 		if i == focus {
 			for _, line := range m.openLines(t, step, s, subs, labelW, openRows, c) {
-				p.boxAdd(line)
+				// The block counts a row for each of these, so each is cut to one.
+				p.boxAdd(fit(line, m.innerWidth()))
 			}
 		} else if lines, ok := shownAt[i]; ok {
 			p.boxLaid(nil, lines)

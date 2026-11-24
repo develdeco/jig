@@ -155,20 +155,20 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	}
 }
 
-// TestTheOpenSubstepGivesWayOnASmallScreen: at 80 by 26 the open slice keeps
+// TestTheOpenSubstepGivesWayOnASmallScreen: at 80 by 24 the open slice keeps
 // its line and its live line and its fields give way; a screen too short for
 // even that lists the sub-steps one line each.
 func TestTheOpenSubstepGivesWayOnASmallScreen(t *testing.T) {
 	t.Parallel()
-	v := cardRig(t, 80, 26).view()
+	v := cardRig(t, 80, 24).view()
 	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if !strings.Contains(block, "now ") || strings.Contains(block, "   a quantity above") {
-		t.Errorf("the 80x26 block does not keep the live line over the fields:\n%s", v)
+		t.Errorf("the 80x24 block does not keep the live line over the fields:\n%s", v)
 	}
-	v = cardRig(t, 80, 22).view()
+	v = cardRig(t, 80, 20).view()
 	block = strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if strings.Contains(block, "now ") || !strings.Contains(block, "◐ slice clamp  claimed by builder") {
-		t.Errorf("the 80x22 block is not one line per sub-step:\n%s", v)
+		t.Errorf("the 80x20 block is not one line per sub-step:\n%s", v)
 	}
 }
 

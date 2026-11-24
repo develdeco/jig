@@ -48,9 +48,9 @@ type column struct {
 // they and freeMin cells for the free text leave no room: then the widest one
 // that is not an id gives way first, each ending in an ellipsis, and ids last.
 //
-// Free columns share the rest. When a free column after the first would get
-// fewer than freeMin cells it needs, the free columns after the first stack
-// under the first's left edge instead of sitting beside it.
+// Free columns share the rest. When any free column would get fewer than
+// freeMin cells it needs, the free columns after the first stack under the
+// first's left edge instead of sitting beside it.
 func layout(cols []column, rows [][]string, width int) [][]string {
 	return layoutRows(cols, rows, width, wrapRows)
 }
@@ -116,7 +116,7 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 
 	if len(free) > 1 {
 		got := share(width-gaps()-measured(), natural, free)
-		for i := 1; i < len(free); i++ {
+		for i := range free {
 			if got[i] < min(natural[free[i]], freeMin) {
 				for _, o := range free[1:] {
 					stacked[o] = true
