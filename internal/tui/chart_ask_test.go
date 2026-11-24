@@ -166,8 +166,8 @@ func TestChartDetailGivesUpSliceRowsBeforeAnAsk(t *testing.T) {
 	}{
 		{28, true, true, true},
 		{26, false, true, true},
-		{19, false, true, true},
-		{16, false, true, false},
+		{21, false, true, true},
+		{18, false, true, false},
 	} {
 		g := heldChartRig(t)
 		g.send(tea.WindowSizeMsg{Width: 100, Height: c.height})

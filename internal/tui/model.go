@@ -1058,7 +1058,7 @@ func (m *Model) move(delta int) {
 	n := len(pg.refs())
 	e := m.top()
 	if n == 0 {
-		e.scroll = max(0, min(e.scroll+delta, len(pg.lines)-m.bodyRows()))
+		e.scroll = max(0, min(e.scroll+delta, lastStart(len(pg.lines), m.bodyRows())))
 		return
 	}
 	e.follow = false
@@ -1182,13 +1182,14 @@ func (m *Model) refIn(pg page) *rowRef {
 func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
+	from, to := windowSpan(pg, sel, start, h, m.top().lead == 0 || (m.top().fresh != 0 && start != 0))
 	n := 0
 	for i, l := range pg.lines {
 		if l.ref == nil {
 			continue
 		}
 		if n == sel {
-			return i >= start && i < start+h
+			return i >= from && i < to
 		}
 		n++
 	}

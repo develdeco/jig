@@ -8,7 +8,7 @@ jig  demo › JIG-1  Greeting copy                               ? build needs y
   │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
   needs you
-  ? builder asks about slice c  q-001
+  ↓ 7 more
   tail ─────────────────────────────────────────────────────────────────────────
   09:02:01 l tool             Bash s-builder
   09:02:00 j question       c q-001 Formal or casual? (agent) s-builder

@@ -92,7 +92,7 @@ func manyTickets(t *testing.T, w, h int) *rig {
 	t.Helper()
 	g := newRig(t, "")
 	var rows []rosterRow
-	for i := 1; i <= 30; i++ {
+	for i := 1; i <= 60; i++ {
 		rows = append(rows, rosterRow{ID: fmt.Sprintf("JIG-%d", i), Title: fmt.Sprintf("Ticket number %d", i),
 			Digest: task("build", false, "done|approved", "current|1 of 2 slices green", "pending|after the build", "pending|after a clean review", "pending|after the publish")})
 	}

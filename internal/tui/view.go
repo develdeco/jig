@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -127,22 +128,23 @@ func (m *Model) View() string {
 	m.settle(&l)
 
 	var tailPane []string
-	if l.tailH > 0 {
+	switch {
+	case l.tailH > 0:
 		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, l.tailH)...)
+	case l.tailNote != "":
+		tailPane = []string{fit("  "+m.st.dim(l.tailNote), w)}
 	}
 
 	start := m.windowStart(l.pg, l.sel, l.pageH, true)
-	anchor := start
-	start, counted := m.countRow(l.pg, l.sel, start, l.pageH)
-	body := m.window(l.pg, l.sel, start, l.pageH, w)
-	if counted {
-		// The count takes the first row of the window, which draws no line.
-		body[0] = fit("  "+m.newRow(m.top().fresh), w)
-		m.drawn = drawnAsks(l.pg, start+1, l.pageH-1)
-	} else {
-		m.drawn = drawnAsks(l.pg, start, l.pageH)
+	above := ""
+	if m.counting(start) {
+		// The count of what came in above takes the place of the mark that says
+		// there is more above.
+		above = m.newRow(m.top().fresh)
 	}
-	m.rest(l, anchor)
+	body, from, to := m.windowRows(l.pg, l.sel, start, l.pageH, w, above)
+	m.drawn = drawnAsks(l.pg, from, to-from)
+	m.rest(l, start)
 	for len(body) < l.pageH {
 		body = append(body, "")
 	}
@@ -161,6 +163,9 @@ type screenLayout struct {
 	sel               int
 	head, foot, panel []string
 	pageH, tailH      int
+	// tailNote is the line that stands where the tail would be when the body is
+	// too short for it, and takes a row of the body.
+	tailNote string
 }
 
 // layout lays the screen on top out as View draws it.
@@ -196,11 +201,24 @@ func (m *Model) layout() screenLayout {
 	}
 
 	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
-	if m.tail && bodyH >= 8 {
+	switch {
+	case m.tail && bodyH >= tailMinRows:
 		l.tailH = bodyH / 2
 		l.pageH = bodyH - l.tailH - 1
+	case m.tail && bodyH >= 2:
+		l.tailNote = tailNeeds(bodyH)
+		l.pageH = bodyH - 1
 	}
 	return l
+}
+
+// tailMinRows is the body rows a screen needs to have its tail.
+const tailMinRows = 8
+
+// tailNeeds is the line that stands in the tail's place on a screen too short
+// for it: what it needs and what the screen has.
+func tailNeeds(rows int) string {
+	return fmt.Sprintf("the tail needs %d body rows, this screen has %d", tailMinRows, rows)
 }
 
 // What View drew of an ask: some of its lines, or all of them. An ask the page
@@ -240,8 +258,11 @@ func drawnAsks(pg page, start, h int) map[string]int {
 // it is open.
 func (m *Model) bodyRows() int {
 	h := m.height - 2 - len(m.footer(m.width)) - len(m.panel(m.width))
-	if m.tail && h >= 8 {
+	switch {
+	case m.tail && h >= tailMinRows:
 		h = h - h/2 - 1
+	case m.tail && h >= 2:
+		h--
 	}
 	return h
 }
@@ -264,7 +285,7 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
-		start = max(0, min(start, len(pg.lines)-h))
+		start = max(0, min(start, lastStart(len(pg.lines), h)))
 		if selLine < h {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
@@ -272,11 +293,11 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		if n > 0 && sel == n-1 {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
-			start = max(0, min(selLine, len(pg.lines)-h))
+			start = max(0, min(selLine, lastStart(len(pg.lines), h)))
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
-			start = max(0, min(m.top().scroll, len(pg.lines)-h))
+			start = max(0, min(m.top().scroll, lastStart(len(pg.lines), h)))
 		}
 	}
 	if n > 0 {
@@ -290,13 +311,145 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	return start
 }
 
+// windowSpan is the page lines the window of h rows from start draws, from the
+// first to the one before to, once the marks and edges that keep a box whole
+// have taken their rows. start is moved to the first line of a row, and to a
+// box's top edge when only that would leave above it. With keep, the cursor's
+// row stays in the span, which moves down as the marks cost it rows; without
+// it, a row the page holds out of view stays out.
+func windowSpan(pg page, sel, start, h int, keep bool) (from, to int) {
+	lines := pg.lines
+	n := len(lines)
+	if n <= h {
+		return 0, n
+	}
+	selLine, k := -1, 0
+	for i, l := range lines {
+		if l.ref == nil {
+			continue
+		}
+		if k == sel {
+			selLine = i
+		}
+		k++
+	}
+	s := max(0, min(start, n-1))
+	for s > 0 && lines[s].cont {
+		s--
+	}
+	if s > 0 && lines[s].box == boxMid && lines[s-1].box == boxTop {
+		s--
+	}
+	for {
+		e := fitEnd(lines, s, h)
+		if !keep || selLine < 0 || selLine < e || e >= n {
+			return s, max(e, min(n, s+1))
+		}
+		s++
+		for s < n-1 && lines[s].cont {
+			s++
+		}
+	}
+}
+
+// boxOf is the positions of the top edge and of the bottom edge of the box that
+// line i is in, or -1 for a line that is in none.
+func boxOf(lines []pline, i int) (top, bottom int) {
+	if lines[i].box == boxNone {
+		return -1, -1
+	}
+	top, bottom = i, i
+	for top > 0 && lines[top].box != boxTop {
+		top--
+	}
+	for bottom < len(lines)-1 && lines[bottom].box != boxBottom {
+		bottom++
+	}
+	return top, bottom
+}
+
+// fitEnd is the end of the window of h rows that starts at line s: the most
+// lines it can draw once the rows of the marks and edges are counted. A window
+// that does not begin at the page's top starts with a mark of what is above, or
+// with the top edge of the box it is in and a mark inside it; one that does not
+// reach the page's end finishes with a mark of what is below, or with a mark
+// inside the box it is in and that box's bottom edge.
+func fitEnd(lines []pline, s, h int) int {
+	n := len(lines)
+	top := 0
+	if s > 0 {
+		top = 1
+		if lines[s].box != boxNone && lines[s].box != boxTop {
+			top = 2
+		}
+	}
+	for e := min(n, s+h); e > s; e-- {
+		if e < n && lines[e].cont {
+			continue
+		}
+		bottom := 0
+		if e < n {
+			bottom = 1
+			if lines[e-1].box != boxNone && lines[e-1].box != boxBottom {
+				if lines[e].box == boxBottom {
+					continue
+				}
+				bottom = 2
+			}
+		}
+		if (e-s)+top+bottom <= h {
+			return e
+		}
+	}
+	return s
+}
+
 // window renders the page lines from start that fit in h rows, marking the
-// sel-th selectable row.
+// sel-th selectable row; see windowRows.
 func (m *Model) window(pg page, sel, start, h, w int) []string {
-	end := min(len(pg.lines), start+h)
-	out := make([]string, 0, end-start)
+	rows, _, _ := m.windowRows(pg, sel, start, h, w, "")
+	return rows
+}
+
+// windowRows renders the window of h rows from start and the span of page
+// lines it drew. The window works on boxes and loose lines: a box that fits is
+// drawn whole, and one that does not is drawn with its top edge, the rows that
+// fit, a dim mark inside it for each side that is cut and its bottom edge. A
+// window that does not show the page's first line starts with a dim "↑ N more"
+// (above, when it is given, says it instead), and one that does not show the
+// last ends with "↓ N more". A row is never cut from its continuation rows.
+func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []string, from, to int) {
+	lines := pg.lines
+	from, to = windowSpan(pg, sel, start, h, above != "" || m.top().lead == 0)
+	mark := func(text string, boxed bool) string {
+		l := pline{text: m.st.dim(text), box: boxNone}
+		if boxed {
+			l.box = boxMid
+			return fit(m.frameLine(l, "  ", w), w)
+		}
+		return fit("  "+l.text, w)
+	}
+	if from > 0 {
+		upText := fmt.Sprintf("↑ %d more", from)
+		if top, _ := boxOf(lines, from); top >= 0 && lines[from].box != boxTop {
+			upText = fmt.Sprintf("↑ %d more", from-top-1)
+			if above != "" {
+				upText = ""
+			}
+			rows = append(rows, fit(m.frameLine(lines[top], "  ", w), w))
+			if above != "" {
+				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w), w))
+			} else {
+				rows = append(rows, mark(upText, true))
+			}
+		} else if above != "" {
+			rows = append(rows, fit("  "+above, w))
+		} else {
+			rows = append(rows, mark(upText, false))
+		}
+	}
 	idx := 0
-	for i, l := range pg.lines {
+	for i, l := range lines {
 		marker := "  "
 		if l.ref != nil {
 			if idx == sel {
@@ -304,16 +457,24 @@ func (m *Model) window(pg page, sel, start, h, w int) []string {
 			}
 			idx++
 		}
-		if i < start || i >= end {
+		if i < from || i >= to {
 			continue
 		}
 		if l.box != boxNone {
-			out = append(out, fit(m.frameLine(l, marker, w), w))
+			rows = append(rows, fit(m.frameLine(l, marker, w), w))
 			continue
 		}
-		out = append(out, fit(marker+l.text, w))
+		rows = append(rows, fit(marker+l.text, w))
 	}
-	return out
+	if to < len(lines) {
+		if _, bottom := boxOf(lines, to-1); bottom >= to && lines[to-1].box != boxBottom {
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", bottom-to), true))
+			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w), w))
+		} else {
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", len(lines)-to), false))
+		}
+	}
+	return rows, from, to
 }
 
 // header is the title line and the rule under it.
@@ -759,3 +920,8 @@ func plural(n int, one, many string) string {
 	}
 	return many
 }
+
+// lastStart is the furthest down a window of h rows can begin on a page of n
+// lines: the window that does not begin at the top gives a row to the mark that
+// says so, so it is one line further than a plain one.
+func lastStart(n, h int) int { return max(0, n-h+1) }
