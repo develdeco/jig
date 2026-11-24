@@ -139,7 +139,7 @@ func TestMainOrderWithinAGroup(t *testing.T) {
 	building := task("build", false, "done|approved by Ada", "current|1 of 2 green", pendingAfter[1], pendingAfter[2], "pending|after the publish")
 	building.Slices = &digestSlices{Total: 2, Green: 1, Building: 1}
 	m := queueModel(
-		ready("T-10", 2), ready("T-9", 0), ready("T-22", 1), ready("T-23", 0), ready("T-100", 0),
+		ready("ZED-10", 2), ready("ZED-9", 0), ready("ZED-22", 1), ready("ZED-23", 0), ready("ZED-100", 0),
 		fresh("N-10"), fresh("N-9"), fresh("N-100"),
 		rosterRow{ID: "R-1", Title: "R-1", State: "active", Digest: building},
 		rosterRow{ID: "R-2", Title: "R-2", State: "active", Digest: building},
@@ -152,7 +152,7 @@ func TestMainOrderWithinAGroup(t *testing.T) {
 	if want := []string{"R-2", "R-3", "R-1"}; !reflect.DeepEqual(got["running"], want) {
 		t.Errorf("running reads %v, want newest activity first %v", got["running"], want)
 	}
-	if want := []string{"T-22", "T-10", "T-9", "T-23", "T-100"}; !reflect.DeepEqual(got["ready"], want) {
+	if want := []string{"ZED-22", "ZED-10", "ZED-9", "ZED-23", "ZED-100"}; !reflect.DeepEqual(got["ready"], want) {
 		t.Errorf("ready reads %v, want the start order, then the rest by number %v", got["ready"], want)
 	}
 	if want := []string{"N-9", "N-10", "N-100"}; !reflect.DeepEqual(got["not started"], want) {
@@ -202,7 +202,7 @@ func TestMainFoldsOpenInPlace(t *testing.T) {
 // with the tickets, as each one's place in the order to start them.
 func TestParseRosterReadsTheReadyOrder(t *testing.T) {
 	t.Parallel()
-	rows, _, err := parseRoster(`{"tickets":[{"id":"T-1","state":"ready"},{"id":"T-2","state":"ready"},{"id":"T-3","state":"active"}],"next":["T-2","T-1"]}` + "\n")
+	rows, _, err := parseRoster(`{"tickets":[{"id":"ZED-1","state":"ready"},{"id":"ZED-2","state":"ready"},{"id":"ZED-3","state":"active"}],"next":["ZED-2","ZED-1"]}` + "\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestParseRosterReadsTheReadyOrder(t *testing.T) {
 	for _, r := range rows {
 		got[r.ID] = r.StartOrder
 	}
-	if want := map[string]int{"T-1": 2, "T-2": 1, "T-3": 0}; !reflect.DeepEqual(got, want) {
+	if want := map[string]int{"ZED-1": 2, "ZED-2": 1, "ZED-3": 0}; !reflect.DeepEqual(got, want) {
 		t.Errorf("the start order is %v, want %v", got, want)
 	}
 }
