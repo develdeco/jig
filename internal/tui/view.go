@@ -524,7 +524,7 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 			continue
 		}
 		if lit[i] {
-			rows = append(rows, fit(m.st.lit(marker+l.text, w), w))
+			rows = append(rows, fit(m.st.selectedRow(marker+l.text, w), w))
 			continue
 		}
 		rows = append(rows, fit(marker+l.text, w))
@@ -610,7 +610,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 			continue
 		}
 		if lit[i] {
-			rows = append(rows, fit(m.st.lit(marker+l.text, w), w))
+			rows = append(rows, fit(m.st.selectedRow(marker+l.text, w), w))
 			continue
 		}
 		rows = append(rows, fit(marker+l.text, w))
@@ -734,6 +734,8 @@ func (m *Model) footer(w int) []string {
 	case m.ask != nil:
 		out := []string{rule, fit("  "+m.st.state(StateFindings, m.ask.prompt), w)}
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
+	case m.top().screen == screenMain && m.nav[0].search.open:
+		return append([]string{rule}, m.searchFooter(w)...)
 	case m.help != nil:
 		return append([]string{rule}, m.hintLines(w, "esc", "close", "↑↓", "scroll", "q", "quit")...)
 	}

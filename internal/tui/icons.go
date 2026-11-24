@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -135,12 +136,12 @@ func (s styles) key(text string) string {
 // litBackground is the color behind the row the cursor stands on.
 const litBackground = "236"
 
-// lit draws text as the selected row: padded to w cells and drawn on the lit
+// selectedRow draws text as the selected row: padded to w cells and drawn on the lit
 // background, which is put back after every reset an inner color writes, so
 // the row is lit across its whole width whatever its cells carry. A renderer
 // with no color profile draws the text as it is; the marker alone says which
 // row is selected.
-func (s styles) lit(text string, w int) string {
+func (s styles) selectedRow(text string, w int) string {
 	const probe = "x"
 	on, _, ok := strings.Cut(s.style().Background(lipgloss.Color(litBackground)).Render(probe), probe)
 	if !ok || on == "" {
@@ -153,6 +154,67 @@ func (s styles) lit(text string, w int) string {
 		text = strings.ReplaceAll(text, reset, reset+on)
 	}
 	return on + text + "\x1b[0m"
+}
+
+// lit draws the letters of text that the search terms matched bold and
+// underlined, over whatever style the text has: the codes switch bold and
+// underline on and off alone, so a colour set before them goes on after. They
+// are no width (`width` counts none), and a terminal that styles nothing gets
+// the text as it was.
+func (s styles) lit(text string, terms []string, own map[string]bool) string {
+	if len(terms) == 0 || s.style().Bold(true).Render("x") == "x" {
+		return text
+	}
+	// Split the text into escape sequences and the letters between them.
+	type piece struct {
+		esc string
+		r   rune
+	}
+	var pieces []piece
+	var visible []rune
+	for i := 0; i < len(text); {
+		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) && (text[j] < '@' || text[j] > '~') {
+				j++
+			}
+			j = min(j+1, len(text))
+			pieces = append(pieces, piece{esc: text[i:j]})
+			i = j
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(text[i:])
+		pieces = append(pieces, piece{r: r})
+		visible = append(visible, r)
+		i += n
+	}
+	mask := litMask(visible, terms, own)
+	var b strings.Builder
+	on, at := false, 0
+	for _, p := range pieces {
+		if p.esc != "" {
+			if on {
+				b.WriteString("\x1b[22;24m")
+				on = false
+			}
+			b.WriteString(p.esc)
+			continue
+		}
+		if lit := mask[at]; lit != on {
+			if lit {
+				b.WriteString("\x1b[1;4m")
+			} else {
+				b.WriteString("\x1b[22;24m")
+			}
+			on = lit
+		}
+		b.WriteRune(p.r)
+		at++
+	}
+	if on {
+		b.WriteString("\x1b[22;24m")
+	}
+	return b.String()
 }
 
 // fit cuts text to at most w cells, ending in an ellipsis when it cut, and

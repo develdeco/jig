@@ -163,6 +163,8 @@ type navEntry struct {
 	// not keep.
 	open    map[string]bool
 	byChart bool
+	// search narrows the main screen to the rows its query matches (search.go).
+	search searchState
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -298,6 +300,15 @@ type Model struct {
 	help *helpView
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
+	// queueBuilds counts the project's list built (maincache.go): a key that
+	// moves nothing the list reads builds none, a search key included.
+	queueBuilds int
+	// rowBuilds counts the rows of the project's list built from a ticket (their
+	// cells), which a step of the clock does not do.
+	rowBuilds int
+	// detailBuilds counts the details of a ticket's row built, the words after
+	// its steps: a key of a search builds none.
+	detailBuilds int
 	// measured counts the rows the layout measured: a frame that changed none of
 	// what a page reads measures none.
 	measured int
@@ -1030,6 +1041,11 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		return m.helpKey(k)
 	}
 	m.notice = ""
+	if m.top().screen == screenMain {
+		if m.nav[0].search.open {
+			return m.searchKey(k)
+		}
+	}
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
@@ -1188,32 +1204,10 @@ func (m *Model) switchView() {
 	e.sel = min(e.sel, max(len(refs)-1, 0))
 	if ok {
 		// The same row where the view has it, else the same ticket (or chart, or
-		// fold) wherever it is drawn.
-		// A row the new view folds away is on the fold row that hides it.
-		at := func(match func(r rowRef) bool) bool {
-			for i, r := range refs {
-				if match(r) {
-					e.sel = i
-					return true
-				}
-			}
-			return false
+		// fold) wherever it is drawn, else the fold row that hides it.
+		if i, found := m.findRow(refs, was.identity()); found {
+			e.sel = i
 		}
-		hidden := func(id rowIdentity) bool {
-			fold, ok := m.folded[id]
-			return ok && at(func(r rowRef) bool { return r.identity() == fold })
-		}
-		sameRow := func(r rowRef) bool { return r.kind == was.kind && r.id == was.id }
-		_ = at(func(r rowRef) bool { return r.identity() == was.identity() }) ||
-			at(sameRow) ||
-			func() bool {
-				for id := range m.folded {
-					if id.kind == was.kind && id.id == was.id && hidden(id) {
-						return true
-					}
-				}
-				return false
-			}()
 	}
 	e.curSet = false
 	m.noteCursor()
@@ -1259,6 +1253,35 @@ func (m *Model) followRow(e *navEntry) {
 	}
 	e.sel = min(max(e.sel, 0), len(refs)-1)
 	e.cur, e.curSet = refs[e.sel].identity(), true
+}
+
+// findRow is where the row stands among refs, as main now draws it: its
+// identity (kind, id and the container it is drawn under) first, else the same
+// kind and id wherever it is drawn, else the fold row that hides a row of that
+// kind and id (m.folded, as the last mainRefs read it). Every place that puts
+// the cursor back on a row finds it by this.
+func (m *Model) findRow(refs []rowRef, id rowIdentity) (int, bool) {
+	for i, r := range refs {
+		if r.identity() == id {
+			return i, true
+		}
+	}
+	for i, r := range refs {
+		if r.kind == id.kind && r.id == id.id {
+			return i, true
+		}
+	}
+	for hidden, fold := range m.folded {
+		if hidden.kind != id.kind || hidden.id != id.id {
+			continue
+		}
+		for i, r := range refs {
+			if r.identity() == fold {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // selected is the row under the cursor, nil when the screen has none.

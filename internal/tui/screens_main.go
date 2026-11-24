@@ -21,14 +21,20 @@ func (m *Model) mainPage() page {
 		return p
 	}
 	c := m.mainBuilt()
+	if m.searchApplied() {
+		// A search draws the rows that match, every group open, and no row of it
+		// is folded away.
+		m.folded = nil
+		return m.searchOf(c).pg
+	}
 	m.folded = c.folded
 	return c.pg
 }
 
 // buildMain draws the queue's page: the groups in order, each a panel.
-func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity) {
-	p, folded := m.draftMain(q, open)
-	return m.layMain(p), folded
+func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity, map[rowIdentity][]string) {
+	p, folded := m.draftMain(q, open, nil)
+	return m.layMain(p), folded, p.memo
 }
 
 // mainDraft is the project's page before its rows are laid out: its panels'
@@ -44,12 +50,23 @@ type mainDraft struct {
 	// names are the lines that stand for a list's names row, and whether the
 	// names are a chart's.
 	names map[int]bool
+	// cellOf, when set, gives a row's cells in place of building them.
+	cellOf func(queueRow) []string
+	// memo is the cells of every row the draft holds, by identity, which the
+	// search reads instead of building a row's cells and detail again.
+	memo map[rowIdentity][]string
 }
 
 // draftMain is buildMain's page of headings and rows, the rows still to be laid
 // out by layMain.
-func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[rowIdentity]rowIdentity) {
-	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, names: map[int]bool{}}
+//
+// A search draws the same panels from the rows that match: its cellOf gives the
+// cells of a row, drawn already, and every group is a list, none a fold.
+func (m *Model) draftMain(q mainQueue, open map[string]bool, search *searchDraw) (*mainDraft, map[rowIdentity]rowIdentity) {
+	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, names: map[int]bool{}, memo: map[rowIdentity][]string{}}
+	if search != nil {
+		p.cellOf = search.cellOf
+	}
 	var folded map[rowIdentity]rowIdentity
 	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
@@ -80,7 +97,7 @@ func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[ro
 			continue
 		}
 		title := strings.ToUpper(g.name()[:1]) + g.name()[1:]
-		if !g.folds() {
+		if !g.folds() || (search != nil && !search.keepFolds) {
 			m.addPanel(p, title, strconv.Itoa(len(rows)), rows)
 			continue
 		}
@@ -113,6 +130,14 @@ func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[ro
 		}
 	}
 	return p, folded
+}
+
+// searchDraw is what a search changes in the drawing of main's panels.
+type searchDraw struct {
+	cellOf func(queueRow) []string
+	// keepFolds draws the groups that fold as folds, which a step of the clock
+	// does; a search draws them as lists.
+	keepFolds bool
 }
 
 // addPanel adds a panel titled title with the rows, and the rows under them: a
@@ -167,7 +192,12 @@ func (m *Model) addQueueRow(p *mainDraft, r queueRow) {
 	at := len(p.lines)
 	ref := r.ref()
 	p.lines = append(p.lines, pline{ref: &ref, box: boxMid})
+	if p.cellOf != nil {
+		p.cells[at], p.chart[at] = p.cellOf(r), r.chart
+		return
+	}
 	p.cells[at], p.chart[at] = m.queueCells(r), r.chart
+	p.memo[r.ref().identity()] = p.cells[at]
 }
 
 // mainColumns are the columns of the project's rows: the state icon, the id or
@@ -248,6 +278,7 @@ func (m *Model) layMain(p *mainDraft) page {
 // queueCells are a row of the queue as cells: a ticket's icon, id, title, the
 // five steps and where it stands, or a chart's.
 func (m *Model) queueCells(r queueRow) []string {
+	m.rowBuilds++
 	if r.chart {
 		return append(m.chartCells(r.id), m.st.dim(m.ageOf(r.at)))
 	}
@@ -272,6 +303,7 @@ func (m *Model) ticketDetail(t *ticket, steps []stepRow) string {
 // ticketDetailIn is ticketDetail with or without the kind the ticket says of
 // itself.
 func (m *Model) ticketDetailIn(t *ticket, steps []stepRow, withKind bool) string {
+	m.detailBuilds++
 	end, atEnd := m.endOf(t)
 	kind := ""
 	if k := t.digest.kindWords(); withKind && k != "" {

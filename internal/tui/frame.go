@@ -155,7 +155,7 @@ func (m *Model) frameLine(l pline, marker string, w int, lit bool) string {
 	body := marker + pad(l.text, max(0, inner)) + " "
 	if lit {
 		// The row is lit from border to border.
-		body = m.st.lit(body, max(0, inner)+3)
+		body = m.st.selectedRow(body, max(0, inner)+3)
 	}
 	line := "  " + edge("│") + body + edge("│")
 	if w < 8 {
