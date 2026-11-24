@@ -103,7 +103,7 @@ func (m *Model) ticketPage(id string) page {
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
-			m.addAskText(&needs, t, asks[i], true)
+			m.addAskText(&needs, t, asks[i])
 		}
 		if landing {
 			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
@@ -498,35 +498,24 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 }
 
 // questionLine is an open question as a row: who asked about which slice, and
-// the question's id. The question itself follows the row, whole (wholeLines).
+// the question's id. The question itself follows the row, whole (panelLines).
 func (m *Model) questionLine(t *ticket, q questionRow) string {
 	who := firstOf(m.who(t, q.Session), "a session")
 	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + m.st.dim("  "+q.ID)
 }
 
-// wholeLines is the text of a question or an ask as a person reads it to act:
-// wrapped to the room a page line has under its marker and a four-cell indent,
-// none cut. A question's ask and its default are often its last line, so a cut
-// would hide them.
-func (m *Model) wholeLines(text string) []string {
-	return wrapWhole(text, m.width-2-4)
-}
-
-// panelLines is wholeLines for a text inside a panel, whose frame takes the
-// room of its edges.
+// panelLines is the text of a question or an ask as a person reads it to act:
+// wrapped to the room a panel's line has under its marker and a four-cell
+// indent, none cut. A question's ask and its default are often its last line,
+// so a cut would hide them.
 func (m *Model) panelLines(text string) []string {
 	return wrapWhole(text, m.innerWidth()-4)
 }
 
 // addAskText adds an ask's text under its row, whole, each line tagged with the
 // ask's id.
-// A panel's text has the room inside its frame.
-func (m *Model) addAskText(p *page, t *ticket, a askRow, inPanel bool) {
-	lines := m.wholeLines(t.askText(a))
-	if inPanel {
-		lines = m.panelLines(t.askText(a))
-	}
-	for _, l := range lines {
+func (m *Model) addAskText(p *page, t *ticket, a askRow) {
+	for _, l := range m.panelLines(t.askText(a)) {
 		// The text belongs to its row, as the lines a row wrapped onto do: a window
 		// that shows the row shows it.
 		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID, cont: true})

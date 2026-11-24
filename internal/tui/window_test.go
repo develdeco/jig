@@ -10,6 +10,33 @@ import (
 
 // bodyOf is the rows of a frame between the header's rule and the first of the
 // tail's heading or the keys' rule.
+// TestAWindowNeverDrawsAnEmptyPanel: a window whose start falls on a panel's
+// bottom edge starts at the panel's last row, so the panel is drawn with a row
+// and its mark, never as an edge, names and a mark alone.
+func TestAWindowNeverDrawsAnEmptyPanel(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	var pg page
+	pg.boxTop("Run", "")
+	for i := 0; i < 6; i++ {
+		pg.boxLaid(nil, []string{fmt.Sprintf("task %d", i), "  wrapped"})
+	}
+	bottom := len(pg.lines)
+	pg.boxEnd()
+	pg.boxTop("Next", "")
+	for i := 0; i < 20; i++ {
+		pg.boxLaid(nil, []string{fmt.Sprintf("later %d", i)})
+	}
+	pg.boxEnd()
+	for _, start := range []int{bottom, bottom - 1} {
+		rows, from, _ := g.m.windowRows(pg, 0, start, 10, 40, "")
+		text := strings.Join(rows, "\n")
+		if from >= bottom || !strings.Contains(text, "task 5") || !strings.Contains(text, "↑ ") {
+			t.Errorf("a window starting at line %d draws from %d:\n%s", start, from, text)
+		}
+	}
+}
+
 // hasMark is whether one of rows is a mark of what lies above or below, which a
 // window of boxes draws inside the box it cuts.
 func hasMark(rows []string, prefix, suffix string) bool {

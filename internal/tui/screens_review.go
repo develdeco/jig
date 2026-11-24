@@ -462,7 +462,7 @@ func (m *Model) asksPanel(p *page, t *ticket, asks []askRow) {
 		for i, a := range asks {
 			p.boxLaid(&rowRef{kind: rowAsk, id: a.ID, ticket: t.id}, laid[i])
 			at := len(p.lines)
-			m.addAskText(p, t, a, true)
+			m.addAskText(p, t, a)
 			for k := at; k < len(p.lines); k++ {
 				p.lines[k].box = boxMid
 			}

@@ -412,6 +412,18 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// starts at the box's top edge.
 		s = top
 	}
+	if s > 0 && lines[s].box == boxBottom {
+		// A window never draws a panel with no row in it: one that would start on
+		// the bottom edge starts at the panel's last row.
+		top, _ := boxOf(lines, s)
+		j := s - 1
+		for j > top && lines[j].cont {
+			j--
+		}
+		if j > top+namesRows(lines, top) {
+			s = j
+		}
+	}
 	for {
 		e := fitEnd(lines, s, h, false)
 		if e == s {
