@@ -118,7 +118,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 		}
 		// The time is the end of the line, so the commit's words give way to it.
 		when := m.commitWhen(c)
-		p.add(pre + fit(line, room-width(when)-2) + m.st.dim("  "+when))
+		p.add(pre + line + m.st.dim("  "+when))
 		for _, run := range newestFirst(c.Runs, func(l events.Envelope) time.Time { at, _ := l.At(); return at }) {
 			state := StateGreen
 			switch {
@@ -128,7 +128,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 			case run.Outcome != "pass":
 				state = StateStalled
 			}
-			p.add(pre + "  " + m.st.icon(state) + " " + m.st.dim(fit(oracleWords(run), room-4)))
+			p.add(pre + "  " + m.st.icon(state) + " " + m.st.dim(oracleWords(run)))
 			if failedOK && run.TS == failed.TS && run.Commit == failed.Commit {
 				m.failureTail(p, pre+"    ", run, room-4)
 			}
@@ -163,7 +163,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 			if run.Result != "pass" {
 				state = StateStalled
 			}
-			p.add(pre + m.st.icon(state) + " " + m.st.dim(fit("last run: "+run.Result+" · covers: "+run.Covers, room-2)))
+			p.add(pre + m.st.icon(state) + " " + m.st.dim("last run: "+run.Result+" · covers: "+run.Covers))
 		}
 	}
 
@@ -178,7 +178,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 				line += " → " + firstLine(q.Answer)
 			}
 		}
-		p.add(pre + m.st.icon(state) + " " + fit(line, room))
+		p.add(pre + m.st.icon(state) + " " + line)
 	}
 }
 

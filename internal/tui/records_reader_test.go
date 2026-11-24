@@ -32,6 +32,13 @@ func body(view string) []string {
 	for _, l := range lines[2 : len(lines)-2] {
 		out = append(out, strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(l, " "), "▸")))
 	}
+	// The marks of what lies above and below are not lines of the page.
+	if len(out) > 0 && strings.HasPrefix(out[0], "↑ ") {
+		out = out[1:]
+	}
+	if len(out) > 0 && strings.HasPrefix(out[len(out)-1], "↓ ") {
+		out = out[:len(out)-1]
+	}
 	return out
 }
 

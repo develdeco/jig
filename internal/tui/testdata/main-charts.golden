@@ -1,20 +1,20 @@
 jig  demo                     2 need you · 1 running · 2 waiting · 1 not started
 ────────────────────────────────────────────────────────────────────────────────
   needs you (2)
-▸ ◇ JIG-4  Coupon model        ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"
+▸ ◇ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"
   ? checkout  Coupons at checkout  chart  1 of 5 published · 1 needs you
 
   running (1)
-  ◐ JIG-5  Apply a coupon co…  ✓ ◐ ○ ○ ○  Build: 1 of 2 green · slice s2 is bei…
+  ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 2 green · slice s2 is
+                                           being built
 
   waiting (2)
-  ◐ JIG-6  Remove a coupon     ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
-  ◐ JIG-7  Coupons in receip…  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your app…
+  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  Brief: drafted · waiting for your
+                                           approval
+  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your
+                                           approval
 
   ▸ not started (1) · enter shows them
-
-
-
 
 
 

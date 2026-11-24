@@ -13,11 +13,12 @@ func mainOf(t *testing.T, spec planSpec) (*rig, string) {
 	return g, stripANSI(g.unfold().mainText())
 }
 
-// indentOf is how many spaces the row of id starts with.
+// indentOf is the column the id of a row starts at: a task is indented under its
+// issue in the id column.
 func indentOf(text, id string) int {
 	for _, line := range strings.Split(text, "\n") {
 		if f := strings.Fields(line); len(f) > 2 && f[1] == id {
-			return len(line) - len(strings.TrimLeft(line, " "))
+			return len([]rune(line[:strings.Index(line, id)]))
 		}
 	}
 	return -1

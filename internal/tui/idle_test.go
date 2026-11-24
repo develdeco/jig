@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -84,6 +85,7 @@ func TestAQuietTicketScreenReadsItsStatusAgainAndSaysWhatAppeared(t *testing.T) 
 	if n := g.r.statusReads("SHOP-1"); n != 2 {
 		t.Fatalf("the status was read %d times after 3.5s of quiet, want 2", n)
 	}
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 	v = g.view()
 	for _, want := range []string{"✓ brief drafted   6 sections", "◐ slices written", "brief·drafted ✓ 6 sections written"} {
 		if !strings.Contains(v, want) {
@@ -98,6 +100,7 @@ func TestAQuietTicketScreenReadsItsStatusAgainAndSaysWhatAppeared(t *testing.T) 
 	g.r.answer("status SHOP-1 --store /s", draftStatus(sections(6), "round", "cart"), 0)
 	advance(3 * time.Second)
 	g.send(idleMsg{})
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 	v = g.view()
 	for _, want := range []string{"✓ slices written  2 slices", "brief·slices  ✓ 2 slices written", "brief·drafted ✓ 6 sections written"} {
 		if !strings.Contains(v, want) {

@@ -15,6 +15,18 @@ import (
 // They take the rows the steps and the activity leave, so the screen fits the
 // window it has; past that they end in an ellipsis, and the files hold the rest.
 func (m *Model) publishPage(id string) page {
+	p := m.publishPageLess(id, 0)
+	if over := len(p.lines) - m.bodyRows(); over > 0 {
+		// A check that wrapped took rows the sizes did not count: the texts give
+		// them up, so the page ends where the window does.
+		p = m.publishPageLess(id, over)
+	}
+	return p
+}
+
+// publishPageLess is publishPage with the two texts held to less rows than the
+// room the page's sizes give them.
+func (m *Model) publishPageLess(id string, less int) page {
 	var p page
 	t := m.w.tickets[id]
 	if t == nil {
@@ -34,7 +46,7 @@ func (m *Model) publishPage(id string) page {
 	// checks, the rule before the activity and its floor of three lines.
 	checks := 6 + max(0, len(pub.Repos)-1)
 	activity := 2 + min(3, max(1, len(t.stepLines(stepPublish))))
-	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-len(p.lines)-checks-1-activity)
+	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-m.taken(&p)-checks-1-activity-less)
 
 	check := func(done bool, text, when string) {
 		state := StateQueued
@@ -50,7 +62,7 @@ func (m *Model) publishPage(id string) page {
 	}
 	record := func(lines []string, n int) {
 		for _, l := range clip(lines, n) {
-			p.add("    " + m.st.dim(fit(l, m.width-8)))
+			p.add("    " + m.st.dim(l))
 		}
 	}
 	at := func(event string) string {

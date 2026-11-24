@@ -17,8 +17,8 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
 
   slices
   ● a  Greet by name  workspace app · oracle unit
-  ✖ b  Say goodbye, politely  workspace app · oracle unit
-  ? c  Pick the tone  workspace copy · oracle go test ./...
+  ✗ b  Say goodbye, politely  workspace app · oracle unit
+  ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · 1-5 steps · [ ] sibling · h main
   t tail

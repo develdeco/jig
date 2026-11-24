@@ -1,6 +1,6 @@
 jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-      full 0000000..ccccccc · 4 files read
+  ↑ 7 more
 
   round 1 findings
   ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3

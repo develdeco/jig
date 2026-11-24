@@ -82,10 +82,11 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	if got := strings.TrimSpace(after[0]); got != "↑ 2 new" {
 		t.Fatalf("the first row reads %q, want \"↑ 2 new\":\n%s", got, g.view())
 	}
-	// The lines it showed stay, all but the last, which the row took the place of.
-	for i := 0; i < len(before)-4; i++ {
-		if before[i] != after[i+1] {
-			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i+1], g.view())
+	// The lines it showed stay where they were: the count took the place of the
+	// mark that said there was more above.
+	for i := 1; i < len(before)-4; i++ {
+		if before[i] != after[i] {
+			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i], g.view())
 		}
 	}
 	// Read to its end with the mark up, the page still shows its last row: the
@@ -126,11 +127,12 @@ func TestTheCountOfNewLinesNeverHidesTheCursor(t *testing.T) {
 			pg.add("plain " + strconv.Itoa(i))
 		}
 		g.m.top().lead = c.lead
-		start, counted := g.m.countRow(pg, c.sel, g.m.windowStart(pg, c.sel, 10, true), 10)
-		out := g.m.window(pg, c.sel, start, 10, 80)
-		if counted {
-			out[0] = g.m.newRow(g.m.top().fresh)
+		start := g.m.windowStart(pg, c.sel, 10, true)
+		above := ""
+		if g.m.counting(start) {
+			above = g.m.newRow(g.m.top().fresh)
 		}
+		out, _, _ := g.m.windowRows(pg, c.sel, start, 10, 80, above)
 		if !newMark.MatchString(out[0]) {
 			t.Errorf("%s: the first row reads %q, want the count", name, out[0])
 		}

@@ -51,7 +51,7 @@ func lookOf(state string) Look {
 	case StateNeedsInput:
 		return Look{"?", "5"}
 	case StateStalled:
-		return Look{"✖", "1"}
+		return Look{"✗", "1"}
 	case StateEnvBlocked:
 		return Look{"⊘", "1"}
 	case StateReviewing:
@@ -81,7 +81,7 @@ func lookOf(state string) Look {
 	case StateOK:
 		return Look{"✓", "2"}
 	case StateFail:
-		return Look{"✖", "1"}
+		return Look{"✗", "1"}
 	}
 	return Look{"·", "8"}
 }

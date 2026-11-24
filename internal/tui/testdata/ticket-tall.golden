@@ -1,11 +1,11 @@
 jig  demo › BIG-1                                                                ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 8m 20s ─╮
-  │  ✓ 1 Brief            no brief on record                                                       │
-  │▸ ◐ 2 Build    8m 20s  8 of 12 green · slice s9 is being built · idle since 09:09               │
-  │  ○ 3 Review           after the build                                                          │
-  │  ○ 4 Publish          after a clean review                                                     │
-  │  ○ 5 Land             after the publish                                                        │
+  │  ✓ 1 Brief           no brief on record                                                        │
+  │▸ ◐ 2 Build   8m 20s  8 of 12 green · slice s9 is being built · idle since 09:09                │
+  │  ○ 3 Review          after the build                                                           │
+  │  ○ 4 Publish         after a clean review                                                      │
+  │  ○ 5 Land            after the publish                                                         │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ───────────────────────────────────────────────────────────────────────── 8 of 12 done ─╮
   │  ✓ slice s1   verified 1111111 · took 40s                                                      │

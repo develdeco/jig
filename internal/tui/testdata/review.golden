@@ -18,7 +18,7 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review           ! review find
 ▸ ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
       Unchecked error · a failed write would pass silently · needs a human
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-      Name shadows import · the import is hidden in this scope
+  ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps
   [ ] sibling · h main · t tail

@@ -517,9 +517,9 @@ func (m *Model) say(t *ticket, l events.Envelope) string {
 	case journal.EventPublishApproved:
 		return firstOf(m.byWhom(t, l.Provenance, l.Session), "someone") + " approved " + repoWords(l) + short(l.Commit)
 	case journal.EventPr:
-		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + l.URL)
+		return strings.TrimSpace(firstOf(l.Outcome, "recorded") + " " + prRef(l.URL))
 	case journal.EventReviewNotes:
-		return strings.TrimSpace("review notes posted " + l.URL)
+		return strings.TrimSpace("review notes posted " + prRef(l.URL))
 	case journal.EventSquash:
 		return strings.TrimSpace("the branch was squashed " + short(l.Commit))
 	case journal.EventChangelog:

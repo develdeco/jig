@@ -58,7 +58,7 @@ func (m *Model) chartPage(name string) page {
 			run = m.runningRows(run, c.info, age)
 		}
 	}
-	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
+	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight(detail)) - frame(m.runHeight(run)) - activityFloor
 	if spare < 0 && len(run) > 1 {
 		cut := min(-spare, len(run)-1)
 		run = trimRuns(run, len(run)-cut)
@@ -80,9 +80,7 @@ func (m *Model) chartPage(name string) page {
 	}
 	if c.info != nil {
 		p.boxTop("Run", runWord(c.info))
-		for _, r := range run {
-			p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
-		}
+		m.runBoxRows(&p, run)
 		p.boxEnd()
 	}
 	var history []chartCommit
@@ -109,99 +107,83 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 // ticketRowsPanel is the panel of a chart's tickets as chartTicketsPanel draws
 // it, under title and with right at its edge: noteOf says the words after each
 // row's steps, and sub, when set, the lines a row has under it that the cursor
-// does not stand on.
-func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) (string, bool), sub func(chartRow) []string) page {
+// does not stand on. A task under another has its id indented. The rows are
+// laid out together, so the ids, titles and steps line up, and a note or a
+// title that does not fit wraps under its column.
+func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) string, sub func(chartRow) []string) page {
 	var p page
 	p.boxTop(title, right)
 
+	cells := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		cells = append(cells, []string{m.st.icon(r.state()), spaces(2*r.depth) + r.id, r.title, m.chartDots(r), noteOf(r)})
+	}
 	// The entries that have no ticket yet: fog, listed after the tickets.
-	var fog []string
+	nFog := 0
 	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
-				fog = append(fog, t.Title)
+				cells = append(cells, []string{m.st.dim("·"), "", m.st.dim(t.Title), "", m.st.dim("fog · not graduated")})
+				nFog++
 			}
 		}
 	}
-
-	idW, titleW, noteW, ownW, nestW := 0, 0, 0, 0, 0
-	for _, title := range fog {
-		titleW = max(titleW, width(title))
-	}
-	notes := make([]string, len(rows))
+	laid := layout(ticketColumns, cells, m.innerWidth())
 	for i, r := range rows {
-		var own bool
-		notes[i], own = noteOf(r)
-		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
-		nestW = max(nestW, 2*r.depth)
-		if own {
-			ownW = max(ownW, width(notes[i]))
-		}
-	}
-	// "icon id  title  ◐ ○ ○ ○  note" in the room a panel's text has. The words
-	// the chart says itself keep their whole column, the title gives way to them,
-	// and a status's own words are cut at the end of the line.
-	room := m.width - 7 - (nestW + 2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
-	noteW = max(ownW, min(noteW, room-min(titleW, 16)))
-	titleW = min(titleW, max(0, room-noteW))
-	for i, r := range rows {
-		line := spaces(2*r.depth) + m.st.icon(r.state()) + " " + pad(r.id, idW)
-		if titleW > 0 {
-			line += "  " + pad(r.title, titleW)
-		}
-		line += "  " + m.chartDots(r) + "  " + notes[i]
-		p.boxRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		p.boxLaid(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
 			for _, l := range sub(r) {
 				p.boxAdd(l)
 			}
 		}
 	}
-
-	for _, title := range fog {
-		p.boxAdd(m.st.dim("·" + spaces(1+idW) + "  " + pad(title, titleW) + "  fog · not graduated"))
+	for _, lines := range laid[len(rows):] {
+		p.boxLaid(nil, lines)
 	}
 	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
 		n := c.listing.Ungraduated
-		fog = append(fog, "")
+		nFog++
 		p.boxAdd(m.st.dim("· " + strconv.Itoa(n) + " " + plural(n, "entry", "entries") + " not graduated"))
 	}
-	if len(rows)+len(fog) == 0 {
+	if len(rows)+nFog == 0 {
 		p.boxAdd(m.st.dim("no tickets yet"))
 	}
 	p.boxEnd()
 	return p
 }
 
+// ticketColumns are the columns of a panel's ticket rows: the state icon
+// (indented under its parent), the id, the title, the five steps and the note.
+var ticketColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}}
+
 // chartNote is the words after a ticket's steps in the chart: what it waits
 // for when its build has not begun, that it can start, or where it stands as
-// on the project's list. own says they are the chart's own words, which a
-// narrow row must not cut, and not the ticket's status.
-func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
+// on the project's list.
+func (m *Model) chartNote(r chartRow) string { return m.chartNoteIn(r, true) }
 
 // chartNoteIn is chartNote with or without the kind a ticket says of itself
 // ("task of <issue> · "), which a screen that is about that parent need not say.
-func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
+func (m *Model) chartNoteIn(r chartRow, kind bool) string {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
-		return m.st.state(StateStalled, r.verb.Problem), true
+		return m.st.state(StateStalled, r.verb.Problem)
 	case r.t == nil || r.t.digest == nil:
 		// The roster has not listed the ticket: nothing of it is known.
-		return m.st.dim(readingText), true
+		return m.st.dim(readingText)
 	case r.behind:
-		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
+		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes)
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
-		return m.ticketDetailIn(r.t, r.steps, kind), false
+		return m.ticketDetailIn(r.t, r.steps, kind)
 	case r.done:
-		return m.st.state(StatePublished, "published"), true
+		return m.st.state(StatePublished, "published")
 	case len(r.waits) > 0:
-		return m.st.dim(waitNote(r.waits[0])), true
+		return m.st.dim(waitNote(r.waits[0]))
 	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
-		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
+		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next")
 	case r.t != nil:
-		return m.ticketDetailIn(r.t, r.steps, kind), false
+		return m.ticketDetailIn(r.t, r.steps, kind)
 	}
-	return "", false
+	return ""
 }
 
 // runRow is a line of the Run panel: a label, the words, and how much the line
@@ -525,19 +507,14 @@ func (c chartLine) tag() string {
 // as the rows left below p allow, two at least.
 func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
 	var all []chartLine
-	idW := 0
 	for _, r := range rows {
 		if r.t == nil {
 			continue
 		}
-		idW = max(idW, width(r.id))
 		for _, pl := range m.placed(r.t, r.d) {
 			at, _ := pl.l.At()
 			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
 		}
-	}
-	if len(history) > 0 {
-		idW = max(idW, width(chartCommitID))
 	}
 	// The commits come after the tickets' lines, oldest first, so that at one
 	// instant the stable sort keeps git's order (the newer above the older) and
@@ -546,7 +523,7 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
 	}
 	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
-	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-len(p.lines)-2))
+	shown, older := cutNewest(all, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
@@ -555,14 +532,11 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	if len(all) == 0 {
 		p.boxAdd(m.st.dim("nothing yet"))
 	}
-	tagW := 0
-	for _, e := range shown {
-		tagW = max(tagW, min(tagMaxW, width(e.tag())))
-	}
-	for _, e := range shown {
-		tag := pad(e.tag(), tagW)
+	cells := make([][]string, len(shown))
+	for i, e := range shown {
+		tag := e.tag()
 		if e.commit != nil {
-			p.boxAdd(m.st.dim(clockAt(e.at, m.zone)) + " " + pad(e.id, idW) + " " + m.st.dim(tag) + " " + m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject)
+			cells[i] = []string{m.st.dim(clockAt(e.at, m.zone)), e.id, m.st.dim(tag), m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject}
 			continue
 		}
 		if e.step >= 0 {
@@ -570,11 +544,9 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		} else {
 			tag = m.st.dim(tag)
 		}
-		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + pad(e.id, idW) + " " + tag + " " + m.moveText(e.t, e.l))
+		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}
 	}
-	if older > 0 {
-		p.boxAdd(m.olderRow(older))
-	}
+	m.boxActivity(p, chartActivityColumns, cells, older, max(activityFloor-2, m.bodyRows()-m.taken(p)-2))
 	p.boxEnd()
 }
 
