@@ -8,17 +8,17 @@ jig  demo › JIG-1  Greeting copy › 2 build                     ? build needs
          ● `go test ./...` passed in 15s · jig ran it
        ✓ q-000 Trim the name? → Yes, trim it.
   ✖ b  fail         2 tries  Say goodbye, politely  workspace app · oracle unit
-       ✖ bbbbbbb “Say goodbye”  09:01:40
-         ✖ `go test ./...` failed in 30s · jig ran it
        ✖ eeeeeee “Say goodbye, politely”  09:02:15
          ✖ `go test ./...` failed in 25s · jig ran it
            --- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit
            status 1
            the end of its output; all of it is in the verify log on the
            machine that ran it
+       ✖ bbbbbbb “Say goodbye”  09:01:40
+         ✖ `go test ./...` failed in 30s · jig ran it
   ? c  needs-input  1 try    Pick the tone
        workspace copy · oracle go test ./...
        ? q-001 Formal or casual?
   ○ d  queued       0 tries  Ship the copy
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · g gate · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · enter open · 5 land · t tail

@@ -7,18 +7,18 @@ jig  demo › JIG-2  Config loader                               ! review findin
   │  ○ 4 Publish          after a clean review                                 │
   │  ○ 5 Land             after the publish                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Review ───────────────────────────────────────────────────── 1 of 3 done ─╮
-  │  ! asks     2 to decide                                                    │
-  │  +2 more                                                                   │
-  ╰────────────────────────────────────────────────────────────────────────────╯
+
   needs you
   ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
+      Unchecked error · a failed write would pass silently · needs a human
   ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 4 ─╮
+      Name shadows import · the import is hidden in this scope
+
+  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 4 ─╮
   │  09:11:30 review·r1 ! reviewer finished with findings                      │
   │  09:11:00 review·r1 ◎ opened                                               │
-  │  09:10:30 build·a   ● verified ccccccc                                     │
+  │  ↓ 2 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · a answer · k keep · d dismiss · g gate
-  p publish · 5 land · t tail · q quit
+  esc back · q quit · ↑↓ move · enter open · k keep · d dismiss · 5 land
+  t tail

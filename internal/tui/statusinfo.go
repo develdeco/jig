@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/phase"
 )
@@ -341,7 +342,7 @@ func closedPhrase(reason, by string) string {
 	return reason
 }
 
-// parseRoster reads `jig next --json` for the store: the tickets, in the order
+// parseRoster reads `jig next --json --roster` for the store: the tickets, in the order
 // the verb lists them, each with the blockers that are not met, and the charts
 // the store has. The verb may print a note before the object (a checkpoint
 // line); the object is the first line that starts with a brace.
@@ -364,6 +365,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 			ID        string `json:"id"`
 			Title     string `json:"title"`
 			State     string `json:"state"`
+			Updated   string `json:"updated"`
 			BlockedBy []struct {
 				Ticket string    `json:"ticket"`
 				Kind   string    `json:"kind"`
@@ -399,6 +401,7 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 					URL    string `json:"url"`
 					State  string `json:"state"`
 					Target string `json:"target"`
+					AsOf   string `json:"as_of"`
 				} `json:"prs"`
 				Slices *struct {
 					Total      int `json:"total"`
@@ -432,6 +435,9 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 	}
 	for _, t := range next.Tickets {
 		row := rosterRow{ID: t.ID, Title: t.Title, State: t.State, StartOrder: startAt[t.ID]}
+		if at, err := time.Parse(time.RFC3339, t.Updated); err == nil {
+			row.Updated = at
+		}
 		for _, b := range t.BlockedBy {
 			row.Blockers = append(row.Blockers, chartWait{Ticket: b.Ticket, Kind: b.Kind, Fact: b.Fact, PRs: b.PRs})
 		}
@@ -441,7 +447,11 @@ func parseRoster(out string) ([]rosterRow, []chartListing, error) {
 				d.Phases = append(d.Phases, digestPhase{Name: p.Name, State: p.State, Text: p.Text, NeedsYou: p.NeedsYou, SubDone: p.SubDone, Changed: p.Changed})
 			}
 			for _, p := range g.PRs {
-				d.PRs = append(d.PRs, digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target})
+				pr := digestPR{Repo: p.Repo, Number: p.Number, URL: p.URL, State: p.State, Target: p.Target}
+				if at, err := time.Parse(time.RFC3339, p.AsOf); err == nil {
+					pr.AsOf = at
+				}
+				d.PRs = append(d.PRs, pr)
 			}
 			for _, c := range g.Children {
 				d.Children = append(d.Children, digestChild{ID: c.ID, Title: c.Title})

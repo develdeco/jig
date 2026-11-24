@@ -10,6 +10,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -169,7 +170,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if res := h.Jig("ask", fx.Ticket, "--slice", "c", "Formal or casual?"); res.Code != 0 {
 		t.Fatalf("jig ask exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	screens.until("Formal or casual?")
+	screens.until("Formal or casual?", "a answer") // the key is listed once the roster has read the ticket
 	screens.press("a")
 	screens.until("answer q-001")
 	screens.press("Casual, please.")
@@ -330,16 +331,58 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Fatalf("jig review done (round 2) exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	screens.until("round 2 clean")
+	// The review screen lists the rounds newest first: round 2 above round 1.
+	screens.press("\x1b[H")
+	screens.press("\x1b[B")
+	screens.press("\x1b[B")
+	screens.press("\r")
+	rounds := screens.until("round 2  clean", "round 1  findings", "files read")
+	if strings.Index(rounds, "round 2  clean") > strings.Index(rounds, "round 1  findings") {
+		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
+	}
+	screens.press("\x7f")
 	// The round that closed applied the dismissal: the ask is gone.
 	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
 		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
 	}
 
-	// One key, and a yes to the question, approves and publishes.
+	// With no What written the key stops: the frame says where the bullets go and
+	// how to give them, and nothing is asked or pushed.
+	screens.press("p")
+	screens.until("✓ jig publish "+fx.Ticket+" --body", "Write the pull request's What", "--what")
+	if got := originRefOrEmpty(t, fx.RepoRemote, "refs/heads/"+branch); got != "" {
+		t.Errorf("origin's %s = %s after a p that stopped on the What, want nothing pushed", branch, got)
+	}
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		if l.Event == journal.EventPublishApproved || l.Event == journal.EventPublishDone {
+			t.Errorf("the journal has a %s line after a p that stopped on the What", l.Event)
+		}
+	}
+
+	// The What is given with the verb the frame named, and one key, and a yes to
+	// the question, approves and publishes.
+	what := filepath.Join(t.TempDir(), "what.md")
+	if err := os.WriteFile(what, []byte("- Greet the person by the name they gave, so the page no longer says hello to nobody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.Jig("publish", fx.Ticket, "--body", "--what", what); res.Code != 0 || !strings.Contains(res.Stdout, "what: given") {
+		t.Fatalf("jig publish --body --what exit = %d, want 0 and the What given\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	screens.press("p")
 	screens.until("approve the reviewed head")
 	screens.press("y")
 	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
+	// The publish screen's activity reads newest first: what was finished above
+	// the changelog it wrote just before.
+	screens.press("\x1b[H")
+	for i := 0; i < 3; i++ {
+		screens.press("\x1b[B")
+	}
+	screens.press("\r")
+	publish := screens.until("Publish activity", "published · finished", "changelog · written")
+	if finished, written := strings.Index(publish, "published · finished"), strings.Index(publish, "changelog · written"); finished < 0 || finished > written {
+		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
+	}
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)

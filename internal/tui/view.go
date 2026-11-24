@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"sort"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/events"
 )
@@ -49,12 +49,14 @@ func (r rowRef) identity() rowIdentity { return rowIdentity{r.kind, r.id, r.cont
 
 // pline is one line of a screen's body, with what it is when the cursor can
 // stand on it, and its place in a panel (frame.go): box, and for a panel's
-// top edge its title in text and right.
+// top edge its title in text and right. A line of an ask's text carries the
+// ask's id, so View can record whether it drew the ask whole (drawnAsks).
 type pline struct {
 	text  string
 	ref   *rowRef
 	box   int
 	right string
+	ask   string
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -81,6 +83,7 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top.
 func (m *Model) page() page {
+	m.pageBuilds++
 	e := m.top()
 	switch e.screen {
 	case screenTicket:
@@ -103,13 +106,69 @@ func (m *Model) page() page {
 	return m.mainPage()
 }
 
+// minBodyRows is the rows a screen's body keeps whatever the panel and the
+// footer ask for, and headerRows the rows over it: the title and its rule.
+const (
+	minBodyRows = 6
+	headerRows  = 2
+)
+
 // View draws the screen: a header, the body windowed so the cursor shows,
 // what the last command printed, and the keys, in exactly the height the
 // terminal has.
 func (m *Model) View() string {
-	w, h := m.width, m.height
+	w := m.width
 	m.followSel()
+	l := m.layout()
+	m.settle(&l)
+
+	var tailPane []string
+	if l.tailH > 0 {
+		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, l.tailH)...)
+	}
+
+	start := m.windowStart(l.pg, l.sel, l.pageH, true)
+	anchor := start
+	start, counted := m.countRow(l.pg, l.sel, start, l.pageH)
+	body := m.window(l.pg, l.sel, start, l.pageH, w)
+	if counted {
+		// The count takes the first row of the window, which draws no line.
+		body[0] = fit("  "+m.newRow(m.top().fresh), w)
+		m.drawn = drawnAsks(l.pg, start+1, l.pageH-1)
+	} else {
+		m.drawn = drawnAsks(l.pg, start, l.pageH)
+	}
+	m.rest(l, anchor)
+	for len(body) < l.pageH {
+		body = append(body, "")
+	}
+	out := append(append(append(append(l.head, body...), tailPane...), l.panel...), l.foot...)
+	for i, line := range out {
+		out[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(out, "\n")
+}
+
+// screenLayout is how the screen on top is laid out at the size the terminal
+// has: its page and the row the cursor stands on, the rows around the body, and
+// how many rows of the body the page has and the tail takes.
+type screenLayout struct {
+	pg                page
+	sel               int
+	head, foot, panel []string
+	pageH, tailH      int
+}
+
+// layout lays the screen on top out as View draws it.
+func (m *Model) layout() screenLayout {
+	w, h := m.width, m.height
 	pg := m.page()
+	if sub := m.subjectOf(pg); sub != m.keysOn {
+		// The page was sized by a hint line cut for another subject: it is
+		// built again, once, for this one.
+		m.keysOn = sub
+		pg = m.page()
+	}
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -123,31 +182,53 @@ func (m *Model) View() string {
 	foot := m.footer(w)
 	panel := m.panel(w)
 	bodyH := h - len(head) - len(foot) - len(panel)
-	if bodyH < 6 && len(panel) > 0 {
-		panel = panel[:max(0, len(panel)-(6-bodyH))]
+	if bodyH < minBodyRows && len(panel) > 0 {
+		// The last command goes first: the notice says what to do.
+		panel = panel[min(len(panel), minBodyRows-bodyH):]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
 		bodyH = 1
 	}
 
-	var tailPane []string
-	pageH := bodyH
+	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
 	if m.tail && bodyH >= 8 {
-		tailH := bodyH / 2
-		pageH = bodyH - tailH - 1
-		tailPane = append([]string{"  " + m.st.dim("tail "+strings.Repeat("─", max(0, w-7)))}, m.tailLines(w, tailH)...)
+		l.tailH = bodyH / 2
+		l.pageH = bodyH - l.tailH - 1
 	}
+	return l
+}
 
-	body := m.window(pg, sel, pageH, w)
-	for len(body) < pageH {
-		body = append(body, "")
+// What View drew of an ask: some of its lines, or all of them. An ask the page
+// has no line of is not in the record.
+const (
+	askCut = iota + 1
+	askWhole
+)
+
+// drawnAsks is what the window of h rows from start draws of each ask the page
+// has lines of. View records it as it draws, so a key acts on the screen the
+// person read, notice and tail and all, and the one rule for acting on what a
+// person must read first names no screen.
+func drawnAsks(pg page, start, h int) map[string]int {
+	total, shown := map[string]int{}, map[string]int{}
+	for i, line := range pg.lines {
+		if line.ask == "" {
+			continue
+		}
+		total[line.ask]++
+		if i >= start && i < start+h {
+			shown[line.ask]++
+		}
 	}
-	out := append(append(append(append(head, body...), tailPane...), panel...), foot...)
-	for i, l := range out {
-		out[i] = strings.TrimRight(l, " ")
+	out := make(map[string]int, len(total))
+	for id, n := range total {
+		out[id] = askCut
+		if shown[id] == n {
+			out[id] = askWhole
+		}
 	}
-	return strings.Join(out, "\n")
+	return out
 }
 
 // bodyRows is how many rows the screen's body has: the height less the
@@ -205,10 +286,9 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	return start
 }
 
-// window renders the page lines that fit in h rows with the sel-th
-// selectable row in view, marking that row.
-func (m *Model) window(pg page, sel, h, w int) []string {
-	start := m.windowStart(pg, sel, h, true)
+// window renders the page lines from start that fit in h rows, marking the
+// sel-th selectable row.
+func (m *Model) window(pg page, sel, start, h, w int) []string {
 	end := min(len(pg.lines), start+h)
 	out := make([]string, 0, end-start)
 	idx := 0
@@ -242,6 +322,9 @@ func (m *Model) header(w int) []string {
 	var right, title, idCrumb string
 	switch e.screen {
 	case screenMain:
+		if m.readingStore() {
+			break
+		}
 		right = m.st.dim(m.queueSummary())
 	case screenChart:
 		crumbs += " › " + m.st.bold(e.chart)
@@ -319,11 +402,8 @@ func (m *Model) footer(w int) []string {
 	switch {
 	case m.input != nil:
 		out := []string{rule}
-		about := m.input.about
-		if len(about) > 4 {
-			about = append(about[:3:3], "…")
-		}
-		for _, l := range about {
+		out = append(out, fit("  "+m.st.dim(m.input.head), w))
+		for _, l := range wrapWhole(m.input.about, w-2) {
 			out = append(out, fit("  "+m.st.dim(l), w))
 		}
 		out = append(out, fit("  "+m.st.key(m.input.prompt+" ›")+" "+string(m.input.value)+m.st.dim("▏"), w))
@@ -357,86 +437,147 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 	return lines
 }
 
+// hint is a key on the hint line: the key, its meaning, and the action that
+// decides whether it is listed (none for a key that is always there).
+type hint struct {
+	key, text string
+	act       action
+}
+
 // keyHints are the keys that do something on the screen on top, as key and
-// meaning pairs.
+// meaning pairs: the screen's keys, and of those the actions only the ones can
+// lets run now. The key back and the key quit come first, so a line that wraps
+// never strands them.
 func (m *Model) keyHints() []string {
-	move := []string{"↑↓", "move"}
-	open := []string{"enter", "open"}
-	back := []string{"esc", "back"}
-	answer := []string{"a", "answer"}
-	keep := []string{"k", "keep"}
-	dismiss := []string{"d", "dismiss"}
-	gate := []string{"g", "gate"}
-	publish := []string{"p", "publish"}
-	land := []string{"5", "land"}
-	tail := []string{"t", "tail"}
-	quit := []string{"q", "quit"}
-	var keys [][]string
-	switch m.top().screen {
-	case screenMain:
-		keys = [][]string{move, open, gate, answer, tail, {"r", "refresh"}, quit}
-	case screenChart:
-		keys = [][]string{move, {"enter", "open ticket"}, back, gate, answer, tail, {"r", "refresh"}, quit}
-	case screenTicket:
-		keys = [][]string{move, open, back, answer, keep, dismiss, gate, publish, land, tail, quit}
-		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
-			// Nothing to move on or act on until the ticket exists.
-			keys = [][]string{back, tail, quit}
-		} else if isMulti(t) {
-			// A multi-task's tasks open; nothing else is done from its screen.
-			keys = [][]string{move, open, back, tail, quit}
-		}
-	case screenBrief:
-		keys = [][]string{move, open, back, land, tail, quit}
-	case screenBuild:
-		keys = [][]string{move, open, back, gate, land, tail, quit}
-	case screenReview:
-		keys = [][]string{move, back, keep, dismiss, gate, land, tail, quit}
-	case screenPublish:
-		keys = [][]string{{"↑↓", "scroll"}, back, publish, land, tail, quit}
-	case screenSlice:
-		keys = [][]string{move, back, answer, land, tail, quit}
-	case screenLand:
-		keys = [][]string{{"↑↓", "scroll"}, back, tail, quit}
-	}
+	sub := m.keysOn
+	keys := m.screenKeys(sub)
 	// The key up to the issue, on the screens of a task that is in one's plan, and
-	// the one that shows the map, on the plan: each goes after the key back.
-	var extra []string
-	switch id := m.upFrom(); {
-	case id != "" && m.multiParent(id) != "":
-		extra = []string{"c", "multi-task"}
-	case id != "" && len(m.issuesOf(id)) > 0:
-		extra = []string{"c", "issue"}
+	// the one that shows the map, on the plan: each goes after the key quit, on
+	// a screen that has a key back.
+	var extra *hint
+	switch up := m.upFrom(); {
+	case up != "" && m.multiParent(up) != "":
+		extra = &hint{key: "c", text: "multi-task"}
+	case up != "" && len(m.issuesOf(up)) > 0:
+		extra = &hint{key: "c", text: "issue"}
 	case m.top().screen == screenChart:
 		if c := m.w.charts[m.top().chart]; c != nil && c.issueID() != "" {
-			extra = []string{"m", "map"}
+			extra = &hint{key: "m", text: "map"}
 		}
 	}
-	if extra != nil {
-		for i, k := range keys {
-			if k[0] == "esc" {
-				keys = append(keys[:i+1], append([][]string{extra}, keys[i+1:]...)...)
-				break
+	flat := make([]string, 0, 2*len(keys)+2)
+	for _, k := range keys {
+		if k.act != "" {
+			if ok, _ := m.canOn(sub, k.act); !ok {
+				continue
 			}
 		}
-	}
-	flat := make([]string, 0, 2*len(keys))
-	for _, k := range keys {
-		flat = append(flat, k...)
+		flat = append(flat, k.key, k.text)
+		if k.key == "q" && extra != nil && keys[0].key == "esc" {
+			flat = append(flat, extra.key, extra.text)
+		}
 	}
 	return flat
 }
 
-// panel is the last command as one line, and the notice, above the keys.
+// screenKeys are the keys the screen on top has, in the order they are listed,
+// whether or not their action can run: the hint line lists the ones can lets
+// run, and a key the screen does not have runs nothing.
+func (m *Model) screenKeys(sub subject) []hint {
+	id := sub.ticket
+	move := hint{key: "↑↓", text: "move"}
+	open := hint{key: "enter", text: "open"}
+	back := hint{key: "esc", text: "back"}
+	answer := hint{"a", "answer", actAnswer}
+	keep := hint{"k", "keep", actKeep}
+	dismiss := hint{"d", "dismiss", actDismiss}
+	gate := hint{"g", "gate", actGate}
+	publish := hint{"p", "publish", actPublish}
+	requeue := hint{"u", "requeue", actRequeue}
+	approve := hint{"v", "approve", actApprove}
+	say := hint{"say", `"Land ` + id + `"`, actLandWord}
+	land := hint{key: "5", text: "land"}
+	tail := hint{key: "t", text: "tail"}
+	quit := hint{key: "q", text: "quit"}
+	var keys []hint
+	switch m.top().screen {
+	case screenMain:
+		keys = []hint{quit, move, open, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+	case screenChart:
+		keys = []hint{back, quit, move, {key: "enter", text: "open ticket"}, gate, publish, answer, say, tail, {key: "r", text: "refresh"}}
+	case screenTicket:
+		keys = []hint{back, quit, move, open, answer, keep, dismiss, requeue, approve, gate, publish, say, land, tail}
+		if t := m.w.tickets[m.top().ticket]; t != nil && t.awaiting {
+			// Nothing to move on or act on until the ticket exists.
+			keys = []hint{back, quit, tail}
+		} else if isMulti(t) {
+			// A multi-task's tasks open; nothing else is done from its screen.
+			keys = []hint{back, quit, move, open, tail}
+		}
+	case screenBrief:
+		keys = []hint{back, quit, move, open, approve, say, land, tail}
+	case screenBuild:
+		keys = []hint{back, quit, move, open, requeue, gate, say, land, tail}
+	case screenReview:
+		keys = []hint{back, quit, move, keep, dismiss, gate, say, land, tail}
+	case screenPublish:
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, publish, say, land, tail}
+	case screenSlice:
+		keys = []hint{back, quit, move, answer, requeue, say, land, tail}
+	case screenLand:
+		keys = []hint{back, quit, {key: "↑↓", text: "scroll"}, say, tail}
+	}
+	return keys
+}
+
+// panel is the last command as one line (whole, for a verb that leaves the next
+// move to someone else), and the notice, above the keys.
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		out = append(out, m.lastLine(m.last, w))
+		out = append(out, m.lastLines(m.last, w)...)
 	}
 	if m.notice != "" {
-		out = append(out, fit("  "+m.st.state(StateFindings, m.notice), w))
+		// Drawn whole, in the rows it needs: what it tells the person is the
+		// point of it, and a cut notice loses its end.
+		for _, l := range wrapWhole(m.notice, w-2) {
+			out = append(out, fit("  "+m.st.state(StateFindings, l), w))
+		}
 	}
 	return out
+}
+
+// helpWrapRows is the most rows a verb's help line takes in the panel when it is
+// shown whole: a sentence of the verb's own is never this long.
+const helpWrapRows = 6
+
+// lastLines are the panel's rows for a key's command: the one line, and for a
+// verb that leaves the next move to someone else the help line it printed, whole
+// and wrapped, beneath the command. The words are the verb's own; the TUI adds
+// none. They are part of the line and expire with it.
+func (m *Model) lastLines(o *outcome, w int) []string {
+	if s := o.shown(); o.leavesTheMove() && s.Code == 0 {
+		if help, ok := firstHelp(s.Out); ok {
+			out := []string{fit("  "+m.st.icon(StateOK)+" "+m.st.bold(m.shownLine(s.Args)), w)}
+			for _, l := range wrap(help, w-4, helpWrapRows) {
+				out = append(out, "    "+m.st.dim(l))
+			}
+			return out
+		}
+	}
+	return []string{m.lastLine(o, w)}
+}
+
+// firstHelp is the first line of the help a verb printed, false when it printed
+// none.
+func firstHelp(out string) (string, bool) {
+	lines := outputLines(out)
+	for i, l := range lines {
+		if strings.HasPrefix(l, "help[") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1]), true
+		}
+	}
+	return "", false
 }
 
 // lastLine is a key's command as typed and what the verb said of it: its own
@@ -511,7 +652,8 @@ func outputLines(out string) []string {
 }
 
 // tailLines are the last n lines of the stream the screen is about, one line
-// each, newest last.
+// each, newest first; a stream that does not fit ends with the row that counts
+// the lines the screen kept and does not show.
 func (m *Model) tailLines(w, n int) []string {
 	var envs []events.Envelope
 	e := m.top()
@@ -525,19 +667,9 @@ func (m *Model) tailLines(w, n int) []string {
 					envs = append(append(envs, t.lines...), t.ledger...)
 				}
 			}
-			sort.SliceStable(envs, func(i, j int) bool {
-				a, _ := envs[i].At()
-				b, _ := envs[j].At()
-				return a.Before(b)
-			})
 		}
 	} else if t := m.w.tickets[e.ticket]; t != nil {
 		envs = append(append(envs, t.lines...), t.ledger...)
-		sort.SliceStable(envs, func(i, j int) bool {
-			a, _ := envs[i].At()
-			b, _ := envs[j].At()
-			return a.Before(b)
-		})
 		if e.screen == screenSlice {
 			var only []events.Envelope
 			for _, l := range envs {
@@ -548,12 +680,14 @@ func (m *Model) tailLines(w, n int) []string {
 			envs = only
 		}
 	}
-	if len(envs) > n {
-		envs = envs[len(envs)-n:]
-	}
+	envs = newestFirst(envs, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	envs, older := cutNewest(envs, n)
 	out := make([]string, 0, n)
 	for _, l := range envs {
 		out = append(out, fit("  "+m.tailLine(l, e.screen == screenMain || e.screen == screenChart), w))
+	}
+	if older > 0 {
+		out = append(out, fit("  "+m.olderRow(older), w))
 	}
 	return out
 }

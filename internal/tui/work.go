@@ -55,6 +55,7 @@ func (w workTimes) ofStep(step int) time.Duration {
 // being built, a brief being drafted. A step whose only open sub-steps wait for
 // a person counts none: nobody is working, and the wait is not work.
 func (m *Model) clocks(t *ticket, d phase.Ticket) clocks {
+	m.clockRuns++
 	placed, ws := m.placedFrom(t, d, t.workLines())
 	closed, open := t.answered()
 	waits := append(append(closed, phaseWaits(placed, d, open)...), asksWaits(placed, d)...)

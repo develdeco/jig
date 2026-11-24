@@ -150,9 +150,13 @@ func TestChartDetailOfATicketTheScreensDoNotKnowSaysSo(t *testing.T) {
 func TestChartDetailTakesItsRowsFromTheMapAndTheRunPanelFirst(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	// One row short of 80 by 24: the hint line of a chart is one line when no
+	// key of a ticket can run, which leaves a row more than the screen the
+	// panels' budget was set on.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 23})
 	v := g.view()
 	if strings.Contains(v, "map:") || strings.Contains(v, "╭─ Map") {
-		t.Errorf("the 80 by 24 screen still has the map:\n%s", v)
+		t.Errorf("the short screen still has the map:\n%s", v)
 	}
 	run := strings.Join(panelLines(strings.Split(v, "\n"), "Run"), "\n")
 	if !strings.Contains(run, "next ") || !strings.Contains(run, "ends at") || strings.Contains(run, "wave") {
@@ -248,7 +252,7 @@ func TestChartDetailGivesUpRowsDownToOneOnAShortScreen(t *testing.T) {
 		t.Errorf("the rows do not name each slice, its stage and its holder, the label on the first only:\n%s", got)
 	}
 
-	for _, c := range []struct{ height, rows int }{{24, 2}, {23, 1}} {
+	for _, c := range []struct{ height, rows int }{{23, 2}, {22, 1}} {
 		v := buildingRig(t, 80, c.height, 3).view()
 		panel = detailPanelOf(t, v)
 		if len(panel)-2 != c.rows || !strings.Contains(strings.Join(panel, "\n"), "slice    s1 · claimed") || strings.Contains(strings.Join(panel, "\n"), "s3") {
@@ -400,10 +404,9 @@ func TestChartDetailShowsTheSessionsOwnHold(t *testing.T) {
 	}
 }
 
-// TestChartDetailShowsTheNewestTwoHoldsOldestFirst: of three holds the oldest is
-// left out, the other two stand in the order they were made, the label on the
-// first.
-func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
+// TestChartDetailShowsTheNewestTwoHoldsNewestFirst: of three holds the oldest is
+// left out, the other two stand newest first, the label on the first.
+func TestChartDetailShowsTheNewestTwoHoldsNewestFirst(t *testing.T) {
 	t.Parallel()
 	g := wideChart(chartRig(t))
 	g.feed(
@@ -417,9 +420,9 @@ func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
 	if strings.Contains(got, "first fact") {
 		t.Errorf("the oldest of three holds is drawn:\n%s", got)
 	}
-	second, third := strings.Index(got, "hold     ⏸ agent bbbbbbbb held at its stop · second fact"), strings.Index(got, "         ⏸ the session held at its stop · third fact")
-	if second < 0 || third < second {
-		t.Errorf("the newest two holds are not drawn in time order, the label on the first:\n%s", got)
+	third, second := strings.Index(got, "hold     ⏸ the session held at its stop · third fact"), strings.Index(got, "         ⏸ agent bbbbbbbb held at its stop · second fact")
+	if third < 0 || second < third {
+		t.Errorf("the newest two holds are not drawn newest first, the label on the first:\n%s", got)
 	}
 }
 
@@ -435,7 +438,7 @@ func TestChartDetailGivesUpTheSliceRowsBeforeTheHold(t *testing.T) {
 	if len(panel)-2 != detailMax {
 		t.Fatalf("the panel has %d rows, want the most it has, %d:\n%s", len(panel)-2, detailMax, got)
 	}
-	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ agent a1 held at its stop · first fact", "         ⏸ the session held at its stop · second fact"} {
+	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ the session held at its stop · second fact", "         ⏸ agent a1 held at its stop · first fact"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, got)
 		}

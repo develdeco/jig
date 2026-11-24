@@ -1,23 +1,23 @@
-jig  demo › JIG-2  Config loader                                 ◇ waits to land
+jig  demo › JIG-2  Config loader                              ◆ ready to publish
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Steps ────────────────────────────────────── step 5 of 5 · worked 2m 36s ─╮
-  │  ✓ 1 Brief            no brief on record                                   │
-  │  ✓ 2 Build    30s     1 slice green, each verified by jig                  │
-  │  ✓ 3 Review   1m 55s  round 2 clean · by reviewer                          │
-  │  ✓ 4 Publish  11s     pull request opened · https://example.test/acme/dem… │
-  │▸ ◇ 5 Land             waits for a merge 45m 09s                            │
+  ╭─ Steps ────────────────────────────────────── step 4 of 5 · worked 2m 36s ─╮
+  │  ✓ 1 Brief            approved by Ada                                      │
+  │  ✓ 2 Build    30s     2 slices green                                       │
+  │  ✓ 3 Review   1m 55s  round 1 clean                                        │
+  │▸ ◆ 4 Publish  11s     ready: approve it, push the branch and open the pul… │
+  │  ○ 5 Land             after the publish 45m 09s                            │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Land ─────────────────────────────────────────────────────── 0 of 2 done ─╮
-  │  ○ merge   the session merges it at the person's word                      │
-  │  ○ record                                                                  │
+  ╭─ Publish ──────────────────────────────────────────────────── 4 of 5 done ─╮
+  │  ✓ body          ccccccc                                                   │
+  │  ✓ approval      waited 10s                                                │
+  │  ✓ pull request  https://example.test/acme/demo/pull/7 · took 10s          │
+  │  ○ changelog                                                               │
+  │  ✓ published     took 1s                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-  needs you
-  ◇ waits to land · say "Land JIG-2"  5 opens it
-  ╭─ Activity ──────────────────────────────────────────────── latest 3 of 12 ─╮
-  │  09:14:21 publish·done     ● finished                                      │
-  │  09:14:20 publish·pr       ▲ opened https://example.test/acme/demo/pull/7  │
-  │  09:14:10 publish·approval ▲ you approved ccccccc                          │
+  ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
+  │  09:14:21 publish·done ● finished                                          │
+  │  09:14:20 publish·pr   ▲ opened https://example.test/acme/demo/pull/7      │
+  │  ↓ 10 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   publish JIG-2: approve the reviewed head, push it and open the pull request?

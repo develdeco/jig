@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -25,6 +26,9 @@ type commitRecord struct {
 	State string
 	// At is when the verification was asked for, and Verified when it passed.
 	At, Verified events.Envelope
+	// Began is the instant of the first line about the commit, which is where
+	// a list of commits puts it: later words add to the commit and never move it.
+	Began time.Time
 	// Runs are the oracle runs against the commit, oldest first.
 	Runs []events.Envelope
 	// Error is the verify-error line that ended the commit's verification, if
@@ -32,19 +36,21 @@ type commitRecord struct {
 	Error *events.Envelope
 }
 
-// commits are the commits slice's verifications were asked about, oldest first,
+// commits are the commits slice's verifications were asked about, oldest first by
+// their first line,
 // from the journal's verify-pending, oracle, verified and verify-error lines. An
 // oracle line for a commit that was never asked about (the session ran the
 // oracle itself) is a commit of its own, with no subject.
 func (t *ticket) commits(slice string) []commitRecord {
 	var out []commitRecord
 	at := map[string]int{}
-	get := func(sha string) *commitRecord {
-		if i, ok := at[sha]; ok {
+	get := func(l events.Envelope) *commitRecord {
+		if i, ok := at[l.Commit]; ok {
 			return &out[i]
 		}
-		at[sha] = len(out)
-		out = append(out, commitRecord{SHA: sha, State: StateQueued})
+		at[l.Commit] = len(out)
+		began, _ := l.At()
+		out = append(out, commitRecord{SHA: l.Commit, State: StateQueued, Began: began})
 		return &out[len(out)-1]
 	}
 	for _, l := range t.lines {
@@ -53,10 +59,10 @@ func (t *ticket) commits(slice string) []commitRecord {
 		}
 		switch l.Event {
 		case journal.EventVerifyPending:
-			c := get(l.Commit)
+			c := get(l)
 			c.At, c.Subject = l, firstOf(c.Subject, l.Summary)
 		case journal.EventOracle:
-			c := get(l.Commit)
+			c := get(l)
 			c.Subject = firstOf(c.Subject, l.Subject)
 			c.Runs = append(c.Runs, l)
 			// A run that covers nothing is listed, and leaves the state alone.
@@ -68,10 +74,10 @@ func (t *ticket) commits(slice string) []commitRecord {
 				c.State = StateStalled
 			}
 		case journal.EventVerified:
-			c := get(l.Commit)
+			c := get(l)
 			c.State, c.Verified = StateGreen, l
 		case journal.EventVerifyError:
-			c := get(l.Commit)
+			c := get(l)
 			l := l
 			c.State, c.Error = StateStalled, &l
 		}
@@ -142,9 +148,43 @@ func wrap(text string, w, maxLines int) []string {
 	if w < 1 || maxLines < 1 {
 		return nil
 	}
+	lines := wordLines(text, w)
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		last := lines[len(lines)-1]
+		if width(last)+1 > w {
+			last = fit(last, w-1)
+			last = strings.TrimSuffix(last, "…")
+		}
+		lines[len(lines)-1] = last + "…"
+	}
+	return lines
+}
+
+// wrapWhole breaks text into lines of at most w cells and cuts none of it: it
+// breaks on spaces, keeps the line breaks the text has (a blank line stays a
+// blank line), cuts a word wider than a line into lines, and never ends in an
+// ellipsis. It is for text a person acts on, which a cut would leave unread.
+func wrapWhole(text string, w int) []string {
+	if w < 1 {
+		return nil
+	}
+	var lines []string
+	for _, para := range strings.Split(strings.TrimRight(text, "\n\r "), "\n") {
+		if got := wordLines(para, w); len(got) > 0 {
+			lines = append(lines, got...)
+		} else {
+			lines = append(lines, "")
+		}
+	}
+	return lines
+}
+
+// wordLines is text broken into lines of at most w cells on spaces, its line
+// breaks read as spaces.
+func wordLines(text string, w int) []string {
 	var lines []string
 	cur := ""
-	cut := false
 	for _, word := range strings.Fields(text) {
 		for width(word) > w {
 			head := ansi.Truncate(word, w, "")
@@ -174,17 +214,6 @@ func wrap(text string, w, maxLines int) []string {
 	}
 	if cur != "" {
 		lines = append(lines, cur)
-	}
-	if len(lines) > maxLines {
-		lines, cut = lines[:maxLines], true
-	}
-	if cut {
-		last := lines[len(lines)-1]
-		if width(last)+1 > w {
-			last = fit(last, w-1)
-			last = strings.TrimSuffix(last, "…")
-		}
-		lines[len(lines)-1] = last + "…"
 	}
 	return lines
 }

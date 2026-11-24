@@ -5,7 +5,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -96,9 +98,13 @@ func (m *Model) ticketPage(id string) page {
 		needs.add(m.st.bold(heading))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
+			for _, l := range m.wholeLines(q.Text) {
+				needs.add("    " + l)
+			}
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
+			m.addAskText(&needs, t, asks[i])
 		}
 		if landing {
 			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
@@ -246,7 +252,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	}
 	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
 	room := height - 2
-	c := m.clocks(t, m.phaseOf(t))
+	c := m.clocksOf(t)
 	focus, openRows := focusIndex(subs), 0
 	if focus >= 0 {
 		// The open sub-step takes what the other lines leave; with too many
@@ -435,12 +441,11 @@ func subState(step int, s phase.Sub) string {
 // least, so the newest line and the panel's edge stay on the screen. Each
 // line names the sub-step it advances.
 func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
-	lines := t.stepLines(step)
-	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
+	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	lines, older := cutNewest(all, min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2)))
 	right := ""
-	if n := len(lines); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
-		lines = lines[n-keep:]
+	if older > 0 {
+		right = fmt.Sprintf("latest %d of %d", len(lines), len(all))
 	}
 	p.boxTop(stepNames[step]+" activity", right)
 	if len(lines) == 0 {
@@ -450,14 +455,33 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	for _, l := range lines {
 		p.boxAdd(m.activityLine(t, labels, l))
 	}
+	if older > 0 {
+		p.boxAdd(m.olderRow(older))
+	}
 	p.boxEnd()
 }
 
 // questionLine is an open question as a row: who asked about which slice, and
-// the question.
+// the question's id. The question itself follows the row, whole (wholeLines).
 func (m *Model) questionLine(t *ticket, q questionRow) string {
 	who := firstOf(m.who(t, q.Session), "a session")
-	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + ": " + firstLine(q.Text) + m.st.dim("  "+q.ID)
+	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + m.st.dim("  "+q.ID)
+}
+
+// wholeLines is the text of a question or an ask as a person reads it to act:
+// wrapped to the room a page line has under its marker and a four-cell indent,
+// none cut. A question's ask and its default are often its last line, so a cut
+// would hide them.
+func (m *Model) wholeLines(text string) []string {
+	return wrapWhole(text, m.width-2-4)
+}
+
+// addAskText adds an ask's text under its row, whole, each line tagged with the
+// ask's id.
+func (m *Model) addAskText(p *page, t *ticket, a askRow) {
+	for _, l := range m.wholeLines(t.askText(a)) {
+		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID})
+	}
 }
 
 // firstLine is the first line of text.

@@ -39,8 +39,8 @@ func TestMainReadsTheStoreBeforeItDraws(t *testing.T) {
 	}
 
 	// With no runner nothing is read: the stream's ticket is all there is, and
-	// it stands with the ones the roster does not list.
-	if got := pagesText(bareMain(false).mainPage()); strings.Contains(got, "reading the store…") || !strings.Contains(got, "done (1)") {
+	// it is a ticket nothing is known of: not started.
+	if got := pagesText(bareMain(false).mainPage()); strings.Contains(got, "reading the store…") || !strings.Contains(got, "not started (1)") {
 		t.Errorf("a model with no runner does not draw what it knows:\n%s", got)
 	}
 }
@@ -93,6 +93,7 @@ func TestMainCursorFollowsItsRow(t *testing.T) {
 // dropTicket takes a ticket out of what the screens know, as a store that no
 // longer holds it would.
 func (m *Model) dropTicket(id string) {
+	m.w.gen++
 	delete(m.w.tickets, id)
 	m.w.order = slices.DeleteFunc(m.w.order, func(x string) bool { return x == id })
 }

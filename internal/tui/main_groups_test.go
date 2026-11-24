@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/develdeco/jig/internal/journal"
 	"reflect"
 	"strings"
@@ -18,8 +21,9 @@ func queueModel(rows ...rosterRow) *Model {
 
 // groupRows are the ids of each group of the list, by group name.
 func groupRows(m *Model) map[string][]string {
+	m.w.gen++ // the tests change tickets without a message
 	out := map[string][]string{}
-	q := m.queue()
+	q := m.mainBuilt().q
 	for g := mainGroup(0); g < groupCount; g++ {
 		for _, r := range q.byGroup[g] {
 			out[g.name()] = append(out[g.name()], r.id)
@@ -208,5 +212,53 @@ func TestParseRosterReadsTheReadyOrder(t *testing.T) {
 	}
 	if want := map[string]int{"T-1": 2, "T-2": 1, "T-3": 0}; !reflect.DeepEqual(got, want) {
 		t.Errorf("the start order is %v, want %v", got, want)
+	}
+}
+
+// TestMainIsBuiltOnceForWhatItReads: a frame that moved only the cursor draws the
+// rows built before it, whatever number of tickets there are, and a roster, a
+// stream batch or a fold opened builds them again.
+func TestMainIsBuiltOnceForWhatItReads(t *testing.T) {
+	t.Parallel()
+	var rows []rosterRow
+	for i := 0; i < 300; i++ {
+		rows = append(rows, fresh(fmt.Sprintf("N-%d", i)))
+	}
+	rows = append(rows, rosterRow{ID: "R-1", Title: "R-1", State: "ready", StartOrder: 1}, rosterRow{ID: "R-2", Title: "R-2", State: "ready", StartOrder: 2})
+	m := queueModel(rows...)
+	m.View()
+	built := m.main
+	if built == nil {
+		t.Fatal("a frame built no list")
+	}
+	for _, key := range []tea.KeyType{tea.KeyDown, tea.KeyDown, tea.KeyUp} {
+		m.Update(tea.KeyMsg{Type: key})
+		m.View()
+		if m.main != built {
+			t.Fatalf("a key's frame built the list again")
+		}
+	}
+	m.Update(eventsMsg{jl(at(1, 0), "R-1", "a", "claim")})
+	m.View()
+	if m.main == built {
+		t.Errorf("a stream batch left the list as it was")
+	}
+	built = m.main
+	m.Update(rosterMsg{rows: rows, seq: 5})
+	m.View()
+	if m.main == built {
+		t.Errorf("a roster left the list as it was")
+	}
+	built = m.main
+	for i, r := range m.mainRefs() {
+		if r.kind == rowFold {
+			m.top().sel = i
+		}
+	}
+	m.noteCursor()
+	m.open() // the not started fold
+	m.View()
+	if m.main == built {
+		t.Errorf("a fold opened left the list as it was")
 	}
 }

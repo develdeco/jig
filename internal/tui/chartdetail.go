@@ -32,13 +32,13 @@ const claimSlack = time.Minute
 
 // chartDetailRows are the rows of the Detail panel for the ticket of r: a row
 // for each slice being built (its id, its stage, the session that holds it and
-// the agent that claimed it), then the holds that are current, the newest two
-// oldest first, and, when there is neither, the one row that says where the
+// the agent that claimed it), then the holds that are current, the newest two,
+// newest first, and, when there is neither, the one row that says where the
 // ticket stands. A hold weighs 0 so a short screen gives up slice rows before
 // it gives up a hold.
 func (m *Model) chartDetailRows(r chartRow) []runRow {
 	if r.t == nil || r.t.digest == nil {
-		return []runRow{{"state", m.st.dim(readingText), 0}}
+		return []runRow{{"state", m.st.dim(readingText), 0, ""}}
 	}
 	var rows []runRow
 	subs := r.d.Of(phase.Build).Subs
@@ -51,17 +51,52 @@ func (m *Model) chartDetailRows(r chartRow) []runRow {
 		if len(rows) == 0 {
 			label = "slice"
 		}
-		rows = append(rows, runRow{label, m.sliceDetail(r.t, sub, subs, id), 1})
+		rows = append(rows, runRow{label, m.sliceDetail(r.t, sub, subs, id), 1, ""})
 	}
 	for i, l := range r.t.currentHolds() {
 		label := ""
 		if i == 0 {
 			label = "hold"
 		}
-		rows = append(rows, runRow{label, m.moveText(r.t, l), 0})
+		rows = append(rows, runRow{label, m.moveText(r.t, l), 0, ""})
 	}
 	if len(rows) == 0 {
-		rows = append(rows, runRow{"state", m.st.dim(chartStateWord(r)), 0})
+		rows = append(rows, runRow{"state", m.st.dim(chartStateWord(r)), 0, ""})
+	}
+	return append(rows, m.askDetailRows(r.t)...)
+}
+
+// askDetailRows are the asks of a ticket that has one undecided, as the lines
+// `k` and `d` would decide from: an "ask" row with the ask's id, risk and
+// decision, and its text under it, wrapped whole. They are not counted in
+// detailMax and a short screen never cuts them (trimRuns); the window may, and
+// then the keys refuse (drawnAsks).
+func (m *Model) askDetailRows(t *ticket) []runRow {
+	asks := t.asks()
+	undecided := false
+	for _, a := range asks {
+		undecided = undecided || a.Decision == ""
+	}
+	if !undecided {
+		return nil
+	}
+	var rows []runRow
+	for i, a := range asks {
+		label := ""
+		if i == 0 {
+			label = "ask"
+		}
+		head := a.ID + " · " + a.Risk
+		switch a.Decision {
+		case "keep":
+			head += " · kept"
+		case "dismiss":
+			head += " · dismissed"
+		}
+		rows = append(rows, runRow{label, m.st.dim(head), 0, a.ID})
+		for _, l := range wrapWhole(t.askText(a), m.width-16) {
+			rows = append(rows, runRow{"", m.st.dim(l), 0, a.ID})
+		}
 	}
 	return rows
 }
@@ -153,7 +188,7 @@ func (t *ticket) claimAgent(claim events.Envelope) string {
 
 // currentHolds are the holds of the ticket that no step has moved past: the
 // machine ledger's lines that say jig held an agent at its stop (isHold), the
-// newest two, oldest first, that are stamped after the latest journal line of a
+// newest two, newest first, that are stamped after the latest journal line of a
 // step (a verification landing, a gate opening, a pull request recorded). A line
 // about the ticket as a whole (what it has cost) belongs to no step, so the
 // main session's stop does not end a hold, and the lines the screens wrote
@@ -172,12 +207,8 @@ func (t *ticket) currentHolds() []events.Envelope {
 			holds = append(holds, l)
 		}
 	}
-	slices.SortStableFunc(holds, func(a, b events.Envelope) int {
-		x, _ := a.At()
-		y, _ := b.At()
-		return x.Compare(y)
-	})
-	return holds[max(0, len(holds)-holdsMax):]
+	holds = newestFirst(holds, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	return holds[:min(len(holds), holdsMax)]
 }
 
 // claimCall is whether the shell command line cmd runs `jig claim` and does not
@@ -241,6 +272,7 @@ func (m *Model) detailPanel(p *page, id string, rows []runRow) {
 	p.boxTop("Detail", id)
 	for _, r := range rows {
 		p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
+		p.lines[len(p.lines)-1].ask = r.ask
 	}
 	p.boxEnd()
 }

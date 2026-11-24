@@ -44,9 +44,17 @@ type world struct {
 	// charts by name, and the order the store listing gave them.
 	charts     map[string]*chart
 	chartOrder []string
+	// infoSeq counts the changes to sessionInfo and sessionEnd: what a
+	// ticket's memoized readings that name a person depend on besides its own
+	// lines.
+	infoSeq int
 	// rosterRead is set once the ticket list has been read: until then the
 	// screens do not know what the store holds, and say they are reading.
 	rosterRead bool
+	// gen counts what moved the world: a stream batch, a roster, a chart
+	// listing, and any message but a key (Update). What is built from the world
+	// once (main's rows) is built again when it differs.
+	gen uint64
 }
 
 func newWorld() *world {
@@ -76,6 +84,7 @@ type chart struct {
 // setCharts takes the charts the store listing named: the order they are
 // listed in, with what was read of each kept; a chart no longer listed is gone.
 func (w *world) setCharts(listed []chartListing) {
+	w.gen++
 	charts := make(map[string]*chart, len(listed))
 	order := make([]string, 0, len(listed))
 	for _, l := range listed {
@@ -132,12 +141,24 @@ type ticket struct {
 	// met.
 	blockers []chartWait
 	// state is the roster's word on the ticket (new, ready, active, green,
-	// blocked, done or closed), rostered whether the last roster listed it, and
-	// readyAt its place in that roster's order to start the ready tickets, 1 for
-	// the first and 0 for a ticket the order does not name.
-	state    string
-	rostered bool
-	readyAt  int
+	// blocked, done or closed), and readyAt its place in the roster's order to
+	// start the ready tickets, 1 for the first and 0 for a ticket the order
+	// does not name.
+	state   string
+	readyAt int
+	// updated is when the ticket's journal last had a line, as the roster says
+	// it (zero for none): the age of the ticket, which no screen reads the
+	// stream for.
+	updated time.Time
+	// ledgerSeq counts the ledger lines taken, which keeps counting once the
+	// ledger holds as many as it keeps; memo is what the screens read of the
+	// ticket's lines (memo.go), and scanned counts the lines those readings
+	// visited.
+	ledgerSeq int
+	memo      *ticketMemo
+	scanned   int
+	// w is the world the ticket is in, when it was made by ticketFor.
+	w *world
 }
 
 // ticketFor returns the ticket id, making it known when it is not.
@@ -145,15 +166,21 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 	if t, ok := w.tickets[id]; ok {
 		return t, false
 	}
-	t := &ticket{id: id}
+	t := &ticket{id: id, w: w}
 	w.tickets[id] = t
-	w.order = append(w.order, id)
+	// Once the roster is read the list is its own: a ticket the stream names
+	// first gets a row when a later roster lists it, so an id an old journal
+	// names never shows or counts.
+	if !w.rosterRead {
+		w.order = append(w.order, id)
+	}
 	return t, true
 }
 
 // apply takes a batch of the stream in. It reports the tickets the batch
 // touched, and whether any of them was new to the screens.
 func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bool) {
+	w.gen++
 	touched = map[string]bool{}
 	for _, in := range envs {
 		for _, e := range w.place(in) {
@@ -187,11 +214,15 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 	if e.Src == events.SrcLedger && e.Session != "" && (e.Event == journal.EventSessionStart || e.Event == journal.EventSessionTouch) {
 		info := w.sessionInfo[e.Session]
 		info.Harness, info.Model = firstOf(e.Harness, info.Harness), firstOf(e.Model, info.Model)
+		if w.sessionInfo[e.Session] != info {
+			w.infoSeq++
+		}
 		w.sessionInfo[e.Session] = info
 	}
 	if e.Src == events.SrcLedger && e.Session != "" && e.Event == journal.EventSessionEnd {
 		if at, ok := e.At(); ok && at.After(w.sessionEnd[e.Session]) {
 			w.sessionEnd[e.Session] = at
+			w.infoSeq++
 		}
 	}
 	id := e.Ticket
@@ -210,6 +241,7 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 		return
 	}
 	t.ledger = append(t.ledger, e)
+	t.ledgerSeq++
 	if len(t.ledger) > ledgerCap {
 		n := len(t.ledger) - ledgerCap
 		t.fold(t.ledger[:n], t.ledger[n:])
@@ -220,24 +252,18 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 // setRoster takes the tickets `jig next` listed: their titles and states, and
 // the order they are listed in.
 func (w *world) setRoster(rows []rosterRow) {
-	listed := map[string]bool{}
-	order := make([]string, 0, len(rows)+len(w.order))
-	for _, t := range w.tickets {
-		t.rostered, t.readyAt = false, 0
-	}
+	w.gen++
+	order := make([]string, 0, len(rows))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
-		t.title, t.blockers, t.digest = r.Title, r.Blockers, r.Digest
-		t.state, t.rostered, t.readyAt = r.State, true, r.StartOrder
+		t.title, t.blockers, t.digest, t.updated = r.Title, r.Blockers, r.Digest, r.Updated
+		t.state, t.readyAt = r.State, r.StartOrder
 		t.awaiting = false
-		listed[r.ID] = true
 		order = append(order, r.ID)
 	}
-	for _, id := range w.order {
-		if !listed[id] {
-			order = append(order, id)
-		}
-	}
+	// The list is the roster's and nothing else: an id the stream knows and the
+	// roster does not (one an old journal names, or a ticket made since the
+	// read, which the stream's line asks the roster to list) is no row.
 	w.order = order
 	w.rosterRead = true
 }
@@ -286,9 +312,12 @@ type rosterRow struct {
 	ID, Title, State string
 	Blockers         []chartWait
 	Digest           *digestInfo
+	// Updated is the instant of the newest line of the ticket's journal, zero
+	// for a ticket with none.
+	Updated time.Time
 	// StartOrder is the ticket's place in the roster's next list, the ready
-	// tickets in the order to start them: 1 for the first, 0 when it is not
-	// in it.
+	// tickets in the order to start them: 1 for the first, 0 when it is not in
+	// it.
 	StartOrder int
 }
 
@@ -330,6 +359,17 @@ type questionRow struct {
 // is the question line's; whether one is open is the store's word (status)
 // when it has been read, else the journal's (no answer line yet).
 func (t *ticket) questions(zone *time.Location) []questionRow {
+	memo := t.memoFor()
+	if memo.questions == nil || memo.zone != zone {
+		t.scanned += len(t.lines)
+		rows := t.readQuestions(zone)
+		memo.questions, memo.zone = &rows, zone
+	}
+	return *memo.questions
+}
+
+// readQuestions is questions, read from the lines.
+func (t *ticket) readQuestions(zone *time.Location) []questionRow {
 	byID := map[string]*questionRow{}
 	var order []string
 	for _, l := range t.lines {
@@ -384,6 +424,9 @@ type roundRow struct {
 	State    string // StateReviewing, StateFindings or StateReady
 	At       string
 	Reviewer string
+	// Began is the instant the round was opened, or when it closed for a round
+	// whose opening no line records: where a list of rounds puts it.
+	Began time.Time
 	// Carried is the round whose verdict a clean round carries over, 0 for a
 	// round a reviewer read.
 	Carried int
@@ -392,10 +435,25 @@ type roundRow struct {
 // rounds are the gate rounds the journal records, closed ones by their
 // number, and the round open now (opened and not yet closed) last.
 func (t *ticket) rounds(zone *time.Location) []roundRow {
+	memo := t.memoFor()
+	if memo.rounds == nil || memo.zone != zone {
+		t.scanned += len(t.lines)
+		rows := t.readRounds(zone)
+		memo.rounds, memo.zone = &rows, zone
+	}
+	return *memo.rounds
+}
+
+// readRounds is rounds, read from the lines.
+func (t *ticket) readRounds(zone *time.Location) []roundRow {
 	closed := map[int]roundRow{}
 	var order []int
 	lastClosed := -1
+	var opened time.Time // the opening no round has used yet
 	for i, l := range t.lines {
+		if l.Event == journal.EventGateOpen {
+			opened, _ = l.At()
+		}
 		if l.Event != journal.EventGateRound && l.Event != journal.EventGateClean {
 			continue
 		}
@@ -407,10 +465,16 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 		if n == 0 {
 			n = len(order) + 1
 		}
-		if _, dup := closed[n]; !dup {
+		began, dup := closed[n]
+		if !dup {
 			order = append(order, n)
+			began.Began = opened
+			if began.Began.IsZero() {
+				began.Began, _ = l.At()
+			}
+			opened = time.Time{}
 		}
-		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Carried: l.Carried}
+		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Began: began.Began, Carried: l.Carried}
 		lastClosed = i
 	}
 	sort.Ints(order)
@@ -423,7 +487,8 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 		if len(order) > 0 {
 			n = order[len(order)-1] + 1
 		}
-		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone)})
+		began, _ := t.lines[open].At()
+		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone), Began: began})
 	}
 	return out
 }
@@ -433,6 +498,23 @@ func (t *ticket) rounds(zone *time.Location) []roundRow {
 type askRow struct {
 	ID, Risk, Where, Title, Why string
 	Decision, DecidedBy         string // "", keep or dismiss; person or agent
+}
+
+// askText is what a person decides an ask from: its title, the reason the
+// reviewer gave for the finding behind it, and the ask's own why.
+func (t *ticket) askText(a askRow) string {
+	parts := []string{a.Title}
+	if t.status != nil {
+		for _, f := range t.status.Findings {
+			if f.ID == a.ID && f.Rationale != "" {
+				parts = append(parts, f.Rationale)
+			}
+		}
+	}
+	if a.Why != "" && a.Why != "-" {
+		parts = append(parts, a.Why)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // asks are the asks status lists, each with the latest triage line for it
@@ -487,6 +569,17 @@ type publishRepo struct {
 }
 
 func (t *ticket) publish() publishInfo {
+	memo := t.memoFor()
+	if memo.publish == nil {
+		t.scanned += len(t.lines)
+		p := t.readPublish()
+		memo.publish = &p
+	}
+	return *memo.publish
+}
+
+// readPublish is publish, read from the lines.
+func (t *ticket) readPublish() publishInfo {
 	var p publishInfo
 	by := map[string]*publishRepo{}
 	var order []string

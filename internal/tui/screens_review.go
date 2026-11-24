@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -12,10 +13,12 @@ import (
 // fixRow is a fix slice a round sent back: its id and its row.
 type fixRow struct {
 	id, line string
+	at       time.Time
 }
 
-// fixRows are the fix slices the rounds sent back, oldest first: the state
-// each is in, the round, and the finding it fixes.
+// fixRows are the fix slices the rounds sent back, the newest first by the line
+// that sent each back: the state each is in, the round, and the finding it
+// fixes.
 func (m *Model) fixRows(t *ticket) []fixRow {
 	states := map[string]string{}
 	for _, s := range t.slices(m.zone) {
@@ -34,9 +37,10 @@ func (m *Model) fixRows(t *ticket) []fixRow {
 			round = "  round " + strconv.Itoa(n) + "  "
 		}
 		line := m.st.icon(state) + " " + l.Slice + m.st.dim(round) + t.goals()[l.Slice]
-		out = append(out, fixRow{id: l.Slice, line: line})
+		at, _ := l.At()
+		out = append(out, fixRow{id: l.Slice, line: line, at: at})
 	}
-	return out
+	return newestFirst(out, func(f fixRow) time.Time { return f.at })
 }
 
 // reviewPage is a ticket's review: each gate round with who reviewed it,
@@ -64,7 +68,7 @@ func (m *Model) reviewPage(id string) page {
 	if len(rounds) == 0 {
 		p.add(m.st.dim("no round yet: a fresh session reviews the change once every slice is green"))
 	}
-	for _, r := range rounds {
+	for _, r := range newestFirst(rounds, func(r roundRow) time.Time { return r.Began }) {
 		m.roundRecord(&p, t, r)
 	}
 
@@ -93,24 +97,9 @@ func (m *Model) reviewPage(id string) page {
 	case len(asks) == 0:
 		p.add(m.st.dim("nothing: no finding waits for a person"))
 	}
-	rationale := map[string]string{}
-	if t.status != nil {
-		for _, f := range t.status.Findings {
-			rationale[f.ID] = f.Rationale
-		}
-	}
 	for i, line := range m.askLines(asks) {
 		p.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
-		var why []string
-		if r := rationale[asks[i].ID]; r != "" {
-			why = append(why, r)
-		}
-		if w := asks[i].Why; w != "" && w != "-" {
-			why = append(why, w)
-		}
-		for _, l := range wrap(strings.Join(why, " · "), m.width-8, 2) {
-			p.add("    " + m.st.dim(l))
-		}
+		m.addAskText(&p, t, asks[i])
 	}
 
 	p.add("")
@@ -235,8 +224,9 @@ func ledgerCounts(r statusRound) string {
 	return strings.Join(parts, " · ")
 }
 
-// probeRows adds every round's probes as plain rows, as recorded: a survivor
-// first within its round, then the caught ones in the order taken. A probe a
+// probeRows adds every round's probes as plain rows, the newest round first
+// and as recorded within it: a survivor first, then the caught ones in the
+// order taken. A probe a
 // later round probed on the same file and line is drawn back and says what
 // that round found; whether the file changed since a round needs git, which the
 // screen does not read, so the block says it does not mark that.
@@ -247,7 +237,7 @@ func (m *Model) probeRows(p *page, t *ticket) {
 	probes := append([]statusProbe(nil), t.status.Probes...)
 	sort.SliceStable(probes, func(i, j int) bool {
 		if probes[i].Round != probes[j].Round {
-			return probes[i].Round < probes[j].Round
+			return probes[i].Round > probes[j].Round
 		}
 		return probes[i].Outcome == "survived" && probes[j].Outcome != "survived"
 	})

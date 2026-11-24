@@ -7,29 +7,35 @@ import (
 
 // mainPage is the project as a queue of what the person does next: its tickets
 // and the charts that plan no issue, each in the first group that holds for it
-// (queue.go), a heading with its count over each group, and a fold row for the
-// groups that are mostly history.
+// (mainqueue.go), a heading with its count over each group, and a fold row for
+// the groups that are mostly history. It is built once for what it reads (the
+// roster, the stream, the clock's bucket, the width and the folds that are
+// open), and a frame that changed none of them draws the page it built.
 func (m *Model) mainPage() page {
-	var p page
-	m.folded = nil
-	if !m.w.rosterRead && m.run != nil {
-		// Nothing is drawn from the stream before the roster is read: rows
-		// listed in replay order would re-sort under the cursor when it arrives.
+	if m.readingStore() {
+		// Main draws from the roster and from nothing else: the stream's replay
+		// names the tickets in the order it arrives, and rows drawn from it
+		// would all move when the list lands.
+		var p page
 		p.add(m.st.dim("reading the store…"))
 		return p
 	}
-	q := m.queue()
+	c := m.mainBuilt()
+	m.folded = c.folded
+	return c.pg
+}
+
+// buildMain draws the queue's page: the groups in order, each under its heading.
+func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity) {
+	var p page
+	var folded map[rowIdentity]rowIdentity
 	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
 		p.add(m.st.dim("ask your agent to plan one, or make one with `jig ticket new --title \"...\"`"))
 		if m.followNew {
 			p.add(m.st.dim("the first ticket a session creates opens here"))
 		}
-		return p
-	}
-	open := m.top().open
-	if m.top().screen != screenMain {
-		open = nil
+		return p, nil
 	}
 	for g := mainGroup(0); g < groupCount; g++ {
 		rows := q.byGroup[g]
@@ -51,18 +57,23 @@ func (m *Model) mainPage() page {
 			continue
 		}
 		p.addRow(fold, m.st.dim("▸ "+g.heading(len(rows))+" · enter shows them"))
-		if m.folded == nil {
-			m.folded = map[rowIdentity]rowIdentity{}
+		if folded == nil {
+			folded = map[rowIdentity]rowIdentity{}
 		}
 		for _, r := range rows {
-			m.folded[r.ref().identity()] = fold.identity()
+			folded[r.ref().identity()] = fold.identity()
 		}
 	}
-	return p
+	return p, folded
 }
 
+// readingStore is whether the screens have a runner and the store's ticket list
+// has not been read: nothing is known of what the store holds. A model with no
+// runner (a test, or a screen fed by the stream alone) draws the stream.
+func (m *Model) readingStore() bool { return m.run != nil && !m.w.rosterRead }
+
 // addQueueRows draws the rows of one group.
-func (m *Model) addQueueRows(p *page, q queue, rows []queueRow) {
+func (m *Model) addQueueRows(p *page, q mainQueue, rows []queueRow) {
 	for _, r := range rows {
 		p.addRow(r.ref(), m.queueLine(q, r))
 	}
@@ -70,7 +81,7 @@ func (m *Model) addQueueRows(p *page, q queue, rows []queueRow) {
 
 // queueLine is a row of the queue: a ticket's icon, id, title, the five steps and
 // where it stands, or a chart's name, title and published count.
-func (m *Model) queueLine(q queue, r queueRow) string {
+func (m *Model) queueLine(q mainQueue, r queueRow) string {
 	if r.chart {
 		return m.chartMainRow(r.id, q.chartIDW, q.chartTitleW)
 	}

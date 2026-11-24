@@ -233,6 +233,7 @@ func TestTUIReadsAndActsOnTheStoreItWasOpenedOn(t *testing.T) {
 	out := t.TempDir()
 	keys, screen, wait := startTUI(t, testEnv(fx.Home).inDir(out), "--store", fx.StoreDir, fx.Ticket)
 	screen.until(t, "q-001")
+	screen.until(t, "a answer") // the key is listed once the roster has read the ticket
 	keys.Write([]byte("a"))
 	screen.until(t, "answer q-001")
 	keys.Write([]byte("Casual\r"))
@@ -348,6 +349,7 @@ func TestTUIFramesNameNoLaunchingSession(t *testing.T) {
 
 	keys, screen, wait := startTUI(t, e, fx.Ticket)
 	screen.until(t, "q-001")
+	screen.until(t, "a answer") // the key is listed once the roster has read the ticket
 	keys.Write([]byte("a"))
 	screen.until(t, "answer q-001")
 	keys.Write([]byte("Casual\r"))
