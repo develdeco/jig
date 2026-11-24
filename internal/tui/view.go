@@ -520,7 +520,7 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 			continue
 		}
 		if l.box != boxNone {
-			rows = append(rows, fit(m.frameLine(l, marker, w, lit[i]), w))
+			rows = append(rows, m.frameLine(l, marker, w, lit[i]))
 			continue
 		}
 		if lit[i] {
@@ -567,24 +567,24 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if boxed {
 			l.box = boxMid
-			return fit(m.frameLine(l, "  ", w, false), w)
+			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
 		inBox, top, k := hiddenAbove(lines, from)
 		if inBox {
-			rows = append(rows, fit(m.frameLine(lines[top], "  ", w, false), w))
+			rows = append(rows, m.frameLine(lines[top], "  ", w, false))
 			// A list cut from below its first row keeps its column names.
 			for i := 1; i <= namesAbove(lines, from, h); i++ {
-				rows = append(rows, fit(m.frameLine(lines[top+i], "  ", w, false), w))
+				rows = append(rows, m.frameLine(lines[top+i], "  ", w, false))
 			}
 		}
 		switch {
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w, false), w))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}
@@ -606,7 +606,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 			continue
 		}
 		if l.box != boxNone {
-			rows = append(rows, fit(m.frameLine(l, marker, w, lit[i]), w))
+			rows = append(rows, m.frameLine(l, marker, w, lit[i]))
 			continue
 		}
 		if lit[i] {
@@ -621,7 +621,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox))
 		}
 		if inBox {
-			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w, false), w))
+			rows = append(rows, m.frameLine(lines[bottom], "  ", w, false))
 		}
 	}
 	return rows, from, to
@@ -648,7 +648,7 @@ func (m *Model) header(w int) []string {
 			if t := c.title(); t != "" && t != e.chart {
 				title = t
 			}
-			state, label := m.chartStatus(c, m.chartRows(c))
+			state, label := m.chartStatus(c, m.statusRows(c))
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
 	default:

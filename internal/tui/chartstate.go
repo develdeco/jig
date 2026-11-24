@@ -146,6 +146,19 @@ func (m *Model) chartRows(c *chart) []chartRow {
 	return rows
 }
 
+// statusRows are the rows a chart's status is counted from: for the chart that
+// plans an issue, the plan's rows, each task as it stands in that issue, so what
+// needs the person here is what its rows say and a landing into another issue is
+// not counted; else the chart's own.
+func (m *Model) statusRows(c *chart) []chartRow {
+	rows := m.chartRows(c)
+	if c.issueID() == "" {
+		return rows
+	}
+	is := c.planIssue()
+	return m.planRows(rows, is.Ticket, is.Branch)
+}
+
 // rowOf is the row of ticket id as the screens show it, under title when the
 // chart names one.
 func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {

@@ -210,7 +210,9 @@ type confirmation struct {
 type Model struct {
 	cfg Config
 	st  styles
-	run classedRunner
+	// edges remembers the pieces of a panel's border the renderer drew.
+	edges edgeCache
+	run   classedRunner
 	// queue is what run goes through: one command at a time, the next by class.
 	queue *queue
 	zone  *time.Location

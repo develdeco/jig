@@ -385,7 +385,7 @@ func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[s
 // otherwise.
 func (m *Model) chartRow(name string, c *chart) queueRow {
 	row := queueRow{id: name, key: name, chart: true, group: groupCharts}
-	state, _ := m.chartStatus(c, m.chartRows(c))
+	state, _ := m.chartStatus(c, m.statusRows(c))
 	_, live := c.live(m.w, m.now())
 	for _, id := range c.ids() {
 		if t := m.w.tickets[id]; t != nil {

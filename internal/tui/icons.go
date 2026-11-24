@@ -166,8 +166,15 @@ func fit(text string, w int) string {
 
 // pad fills text with spaces to w cells; text wider than w is cut.
 func pad(text string, w int) string {
-	text = fit(text, w)
-	if gap := w - ansi.StringWidth(text); gap > 0 {
+	if w <= 0 {
+		return ""
+	}
+	sw := ansi.StringWidth(text)
+	if sw > w {
+		text = ansi.Truncate(text, w, "…")
+		sw = ansi.StringWidth(text)
+	}
+	if gap := w - sw; gap > 0 {
 		text += spaces(gap)
 	}
 	return text

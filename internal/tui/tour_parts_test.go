@@ -74,8 +74,9 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 	}
 
 	// The row under the cursor is lit across its panel.
+	was := g.m.st
 	g.m.st = styles{r: colored()}
-	defer func() { g.m.st = styles{r: nil} }()
+	defer func() { g.m.st = was }()
 	for _, l := range strings.Split(g.view(), "\n") {
 		if !strings.Contains(stripANSI(l), "│▸") {
 			continue
