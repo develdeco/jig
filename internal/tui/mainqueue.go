@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/land"
 )
 
 // The project's list is a queue of what the person does next: every top-level
@@ -68,6 +71,15 @@ type queueRow struct {
 	// a ticket the roster's next list does not name.
 	at   time.Time
 	next int
+	// key is the id the row is ordered by in the groups ordered by id: the
+	// row's own, or the best among a container's and its tasks'.
+	key string
+	// container is the issue or multi-task the row is drawn under, "" for a
+	// top-level row; depth how far in it is drawn; kids the rows drawn under
+	// it, in the chart's order.
+	container string
+	depth     int
+	kids      []queueRow
 }
 
 // ref is what the cursor stands on when it is on the row.
@@ -75,7 +87,16 @@ func (r queueRow) ref() rowRef {
 	if r.chart {
 		return rowRef{kind: rowChart, id: r.id}
 	}
-	return rowRef{kind: rowTicket, id: r.id, ticket: r.id}
+	return rowRef{kind: rowTicket, id: r.id, ticket: r.id, container: r.container}
+}
+
+// tasks counts the rows drawn under the row, at any depth.
+func (r queueRow) tasks() int {
+	n := len(r.kids)
+	for _, k := range r.kids {
+		n += k.tasks()
+	}
+	return n
 }
 
 // mainQueue is the project's list, grouped.
@@ -86,6 +107,8 @@ type mainQueue struct {
 	// chartTitleW the chart rows'. They hold for every row, folded or not, so a
 	// fold opened moves nothing.
 	idW, titleW, chartIDW, chartTitleW int
+	// issues counts the issues among the rows, drawn anywhere.
+	issues int
 }
 
 // mainRows reads the roster's rows into the groups: the roster is all main
@@ -93,11 +116,36 @@ type mainQueue struct {
 func (m *Model) mainRows() mainQueue {
 	var q mainQueue
 	q.idW = 4
+	rows := make(map[string]queueRow, len(m.w.order))
 	for _, id := range m.w.order {
 		r := m.ticketRow(id)
-		q.rows = append(q.rows, r)
+		rows[id] = r
 		q.idW = max(q.idW, width(id))
 		q.titleW = max(q.titleW, width(r.t.title))
+		if isIssue(r.t) {
+			q.issues++
+		}
+	}
+	// A task a container draws is no row of its own, and a task two issues list
+	// is drawn under each.
+	drawn := map[string]bool{}
+	built := map[string]queueRow{}
+	for _, id := range m.w.order {
+		if t := rows[id].t; isIssue(t) || isMulti(t) {
+			c := m.containerRow(rows[id], rows, drawn, 0, map[string]bool{id: true})
+			built[id] = c
+			q.idW = max(q.idW, c.indentedIDW())
+		}
+	}
+	for _, id := range m.w.order {
+		if drawn[id] {
+			continue
+		}
+		if c, ok := built[id]; ok {
+			q.rows = append(q.rows, c)
+		} else {
+			q.rows = append(q.rows, rows[id])
+		}
 	}
 	q.titleW = min(q.titleW, max(0, (m.width-q.idW-20)/3))
 	var names []string
@@ -128,8 +176,17 @@ func (m *Model) ticketRow(id string) queueRow {
 		// A ticket the roster gave no digest to stands as its status says.
 		r.steps = m.stepWords(t)
 	}
-	row := queueRow{id: id, t: t, steps: r.steps, cur: r.steps[currentStep(r.steps)], at: t.lastActivity(), next: t.readyAt}
+	row := queueRow{id: id, key: id, t: t, steps: r.steps, cur: r.steps[currentStep(r.steps)], at: t.lastActivity(), next: t.readyAt}
 	d := t.digest
+	if isIssue(t) || isMulti(t) {
+		row.group = m.containerGroup(t, r.needs)
+		if st, _ := m.planLanding(id, t); st == StateWaitsToLand || st == StateLanded || st == StateClosed {
+			// The container is drawn as its own landing stands, in the end
+			// states' icons.
+			row.cur = stepRow{State: st}
+		}
+		return row
+	}
 	unmet := len(t.blockers) > 0 || r.behind || t.state == "blocked" || (d != nil && len(d.LandFirst) > 0)
 	switch {
 	case r.needs:
@@ -153,12 +210,116 @@ func (m *Model) ticketRow(id string) queueRow {
 	return row
 }
 
+// isIssue says t is an issue.
+func isIssue(t *ticket) bool {
+	return t != nil && t.digest != nil && t.digest.Kind == kindIssue
+}
+
+// containerGroup is the group an issue or a multi-task stands in by itself, as
+// a ticket would: its own landing waits for the person, it is running, its pull
+// request is ready, or it waits for its tasks; landed or closed it is done.
+func (m *Model) containerGroup(t *ticket, needs bool) mainGroup {
+	st, _ := m.planLanding(t.id, t)
+	switch {
+	case st == StateLanded || st == StateClosed:
+		return groupDone
+	case needs || st == StateWaitsToLand:
+		return groupNeeds
+	case m.ticketLive(t):
+		return groupRunning
+	case t.digest.State == land.StateReady:
+		return groupReady
+	}
+	return groupWaiting
+}
+
+// taskIDs are the tickets a container draws under it, in the chart's order: the
+// chart that plans an issue lists them, a multi-task's digest names its own.
+// An entry with no ticket yet is none.
+func (m *Model) taskIDs(t *ticket) []string {
+	if isIssue(t) {
+		if name := m.planOf(t.id); name != "" {
+			if c := m.w.charts[name]; c != nil {
+				return c.ids()
+			}
+		}
+	}
+	var ids []string
+	for _, c := range t.digest.Children {
+		if c.ID != "" {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids
+}
+
+// containerRow is the row of an issue or a multi-task with its tasks under it:
+// the rows of the tasks it lists that the roster has, a multi-task's own tasks
+// under the multi-task. The container is in the first group that holds for it
+// or any task, and takes the best key among them; landed or closed it is done
+// whatever its tasks say. seen holds the containers on the way down.
+func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[string]bool, depth int, seen map[string]bool) queueRow {
+	own.depth = depth
+	ids := m.taskIDs(own.t)
+	for _, id := range ids {
+		r, ok := rows[id]
+		if !ok || seen[id] {
+			continue
+		}
+		if parent := m.multiParent(id); parent != "" && parent != own.id && slices.Contains(ids, parent) {
+			// A multi-task's task is drawn under the multi-task.
+			continue
+		}
+		drawn[id] = true
+		if m.shared(r.t) && own.t.status != nil && own.t.status.Branch != "" {
+			// A task two issues list stands here as its pull request and landing
+			// into this issue make of it, once the issue's branch is known.
+			cut := m.rowInPlan(m.rowOf(id, "", nil), own.id, own.t.status.Branch)
+			r.t, r.steps, r.cur = cut.t, cut.steps, cut.steps[currentStep(cut.steps)]
+		}
+		r.container, r.depth = own.id, depth+1
+		if isMulti(r.t) {
+			next := maps.Clone(seen)
+			next[id] = true
+			r = m.containerRow(r, rows, drawn, depth+1, next)
+			r.container = own.id
+		}
+		own.kids = append(own.kids, r)
+	}
+	if st, _ := m.planLanding(own.id, own.t); st == StateLanded || st == StateClosed {
+		return own
+	}
+	for _, k := range own.kids {
+		own.group = min(own.group, k.group)
+		if k.at.After(own.at) {
+			own.at = k.at
+		}
+		if k.next != 0 && (own.next == 0 || k.next < own.next) {
+			own.next = k.next
+		}
+		if naturalLess(k.key, own.key) {
+			own.key = k.key
+		}
+	}
+	return own
+}
+
+// indentedIDW is the width the row's id and its tasks' ids need with their
+// indentation.
+func (r queueRow) indentedIDW() int {
+	w := width(r.id) + 2*r.depth
+	for _, k := range r.kids {
+		w = max(w, k.indentedIDW())
+	}
+	return w
+}
+
 // chartRow is the row of a chart that plans no issue. It is in Needs you when
 // one of its tickets waits for the person or its landing does, Running when a
 // session is at work on it, Done when its run is, and the Charts group
 // otherwise.
 func (m *Model) chartRow(name string, c *chart) queueRow {
-	row := queueRow{id: name, chart: true, group: groupCharts}
+	row := queueRow{id: name, key: name, chart: true, group: groupCharts}
 	state, _ := m.chartStatus(c, m.chartRows(c))
 	_, live := c.live(m.w, m.now())
 	for _, id := range c.ids() {
@@ -212,7 +373,7 @@ func sortGroup(g mainGroup, rows []queueRow) {
 				return b.next == 0
 			}
 		}
-		return naturalLess(a.id, b.id)
+		return naturalLess(a.key, b.key)
 	})
 }
 
@@ -260,6 +421,9 @@ func (m *Model) queueSummary() string {
 	}
 	q := m.mainBuilt().q
 	var parts []string
+	if q.issues > 0 {
+		parts = append(parts, strconv.Itoa(q.issues)+" "+plural(q.issues, "issue", "issues"))
+	}
 	for g := mainGroup(0); g < groupCount; g++ {
 		n := len(q.byGroup[g])
 		if n == 0 {

@@ -19,6 +19,7 @@ import (
 
 // The kinds of ticket the plan tells apart, as the digest names them.
 const (
+	kindIssue     = "issue"
 	kindTask      = "task"
 	kindMultiTask = "multi-task"
 )
