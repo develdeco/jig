@@ -80,6 +80,28 @@ func TestSliceScreen(t *testing.T) {
 	golden(t, "slice", g.view())
 }
 
+// TestKeepActsOnTheReviewScreenAt80x24: the review screen of a ticket with asks
+// opens at the default size with the cursor's ask drawn whole under its row, so
+// k keeps it without a taller terminal.
+func TestKeepActsOnTheReviewScreenAt80x24(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...).press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want review", g.m.Screen())
+	}
+	if g.m.width != 80 || g.m.height != 24 {
+		t.Fatalf("the rig is %dx%d, want 80x24", g.m.width, g.m.height)
+	}
+	if v := g.view(); !strings.Contains(readWords(v), "a failed write would pass silently") {
+		t.Fatalf("the ask under the cursor is not drawn whole:\n%s", v)
+	}
+	g.press("k")
+	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 keep") {
+		t.Errorf("k on the first ask at 80x24 ran %q, notice %q", got, g.m.notice)
+	}
+}
+
 func TestReviewScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")

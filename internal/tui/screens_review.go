@@ -458,7 +458,7 @@ func (m *Model) asksPanel(p *page, t *ticket, asks []askRow) {
 			state, word := askDecision(a)
 			cells[i] = []string{m.st.icon(state), a.Risk, a.Where, m.st.state(state, word), a.Title, m.st.dim(a.ID)}
 		}
-		laid := m.laidList(p, askColumns, dimmed(m.st, askColumnNames), cells, 0)
+		laid := m.laidList(p, askColumns, dimmed(m.st, askColumnNames), cells, -1)
 		for i, a := range asks {
 			p.boxLaid(&rowRef{kind: rowAsk, id: a.ID, ticket: t.id}, laid[i])
 			at := len(p.lines)

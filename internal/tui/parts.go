@@ -83,15 +83,21 @@ func (m *Model) ageOf(at time.Time) string {
 
 // laidList lays the cells of a list out under cols with its names, in one call of
 // the allocator, adds the names row to the panel p and gives back the lines of
-// each row. room, when it is more than 0, is the most lines the rows may take.
+// each row. room, when it is more than 0, is the most lines the rows may take,
+// and when it is less than 0 the rows are not cut at all.
 func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int) [][]string {
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
 	var laid [][]string
-	if room > 0 {
+	switch {
+	case room < 0:
+		// What a person decides on is never cut: its free text wraps as far as it
+		// goes.
+		laid = layoutRows(cols, all, m.innerWidth(), 1<<20)
+	case room > 0:
 		laid = laidWithin(cols, all, m.innerWidth(), room+1)
-	} else {
+	default:
 		laid = layout(cols, all, m.innerWidth())
 	}
 	p.boxNames(laid[0])

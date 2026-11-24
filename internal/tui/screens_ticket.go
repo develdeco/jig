@@ -98,7 +98,7 @@ func (m *Model) ticketPage(id string) page {
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
 			for _, l := range m.panelLines(q.Text) {
-				needs.add("    " + l)
+				needs.lines = append(needs.lines, pline{text: "    " + l, cont: true})
 			}
 		}
 		for i, line := range m.askLines(asks) {
@@ -527,7 +527,9 @@ func (m *Model) addAskText(p *page, t *ticket, a askRow, inPanel bool) {
 		lines = m.panelLines(t.askText(a))
 	}
 	for _, l := range lines {
-		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID})
+		// The text belongs to its row, as the lines a row wrapped onto do: a window
+		// that shows the row shows it.
+		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID, cont: true})
 	}
 }
 

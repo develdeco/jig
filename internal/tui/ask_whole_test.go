@@ -75,7 +75,7 @@ func TestAskWholeOnTicketAndReview(t *testing.T) {
 					t.Errorf("at %d columns the %s screen lacks the ask text %q:\n%s", w, screen, want, view)
 				}
 			}
-			heading := map[string]string{"ticket": "\n  Needs you\n", "review": "\n  asks\n"}[screen]
+			heading := map[string]string{"ticket": "\n  Needs you\n", "review": "\n  Asks\n"}[screen]
 			for _, l := range strings.Split(between(view, heading, "ctivity"), "\n") {
 				if strings.HasPrefix(l, "      ") && strings.Contains(l, "…") {
 					t.Errorf("at %d columns the %s screen cuts the ask at %q:\n%s", w, screen, l, view)

@@ -128,14 +128,9 @@ func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	for i := 0; i < 100 && !strings.Contains(g.view(), "▸"); i++ {
 		g.press("down")
 	}
-	// The row is shown at the window's last line, its text below it cut: an
-	// ask is decided from what is drawn, so d runs nothing.
+	// The row is shown with its text, which the window keeps with it as a row's
+	// wrapped lines: the ask is drawn whole, so d decides it.
 	g.press("d")
-	if n := triages(); n != 0 {
-		t.Errorf("d decided an ask whose text the window cut: %q", g.r.lines())
-	}
-	// A move down with no row below scrolls the window to the ask's text.
-	g.press("down", "d")
 	if got := g.r.lines(); triages() != 1 || !strings.Contains(got[len(got)-1], "triage JIG-2 r1-f1 dismiss") {
 		t.Errorf("d on an ask drawn whole did not triage it: %q", got)
 	}

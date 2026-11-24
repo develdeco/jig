@@ -8,7 +8,7 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   │  ○ 4 Publish         after a clean review                                  │
   │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ↓ 5 more
+  ↓ 4 more
   tail ─────────────────────────────────────────────────────────────────────────
   09:02:01 l tool             Bash s-builder
   09:02:00 j question       c q-001 Formal or casual? (agent) s-builder
