@@ -161,7 +161,7 @@ func TestApproveAsksThenValidates(t *testing.T) {
 	if got, want := g.r.lines(), []string{"validate JIG-1 --store /s"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands run = %q, want %q", got, want)
 	}
-	if v := g.view(); !strings.Contains(v, "✖ jig validate JIG-1  slice b has no oracle (BRIEF_INVALID)") {
+	if v := g.view(); !strings.Contains(v, "✗ jig validate JIG-1  slice b has no oracle (BRIEF_INVALID)") {
 		t.Errorf("the verb's problem is not on the frame:\n%s", v)
 	}
 

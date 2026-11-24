@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -46,6 +47,9 @@ func TestEndStatesReadApart(t *testing.T) {
 
 	for state, d := range endDigests() {
 		g := chartRig(t)
+		// Wide enough that the branch the pull request goes into is one word on
+		// one row.
+		g.send(tea.WindowSizeMsg{Width: 140, Height: 30})
 		g.feed(jl(at(15, 30), "JIG-4", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
 		tk := g.m.w.tickets["JIG-4"]
 		if state != StateLanded {
@@ -66,7 +70,7 @@ func TestEndStatesReadApart(t *testing.T) {
 		// The chart's row and its Detail.
 		c := g.m.w.charts["checkout"]
 		cr := g.m.chartRows(c)[0]
-		if note, _ := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
+		if note := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
 			t.Errorf("%s: the chart's row is %s saying %q, want %q", state, cr.state(), note, words[state])
 		}
 		if got := chartStateWord(cr); got != header[state] {

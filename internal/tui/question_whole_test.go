@@ -140,7 +140,15 @@ func TestAnswerPromptGrowsToFit(t *testing.T) {
 	if len(lines) != 40 {
 		t.Errorf("the screen is %d rows, want 40", len(lines))
 	}
-	foot := strings.Join(lines[len(lines)-12:], "\n")
+	// The footer begins at the last rule; the Activity above it has cut lines of
+	// its own.
+	rule := 0
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "──────") {
+			rule = i
+		}
+	}
+	foot := strings.Join(lines[rule:], "\n")
 	if !strings.Contains(readWords(foot), readWords("slice c asked: "+longQuestion)) {
 		t.Errorf("the prompt does not show the question whole:\n%s", view)
 	}

@@ -301,6 +301,9 @@ type Model struct {
 	// queueBuilds counts the project's list built (maincache.go): a key that
 	// moves nothing the list reads builds none, a search key included.
 	queueBuilds int
+	// measured counts the rows the layout measured: a frame that changed none of
+	// what a page reads measures none.
+	measured int
 	// seen is what the last frame drew of the screen on top, which the next one
 	// settles the cursor and the window against (hold.go).
 	seen    *held
@@ -1060,7 +1063,7 @@ func (m *Model) moveBy(delta int) {
 	n := len(pg.refs())
 	e := m.top()
 	if n == 0 {
-		e.scroll = max(0, min(e.scroll+delta, len(pg.lines)-m.bodyRows()))
+		e.scroll = max(0, min(e.scroll+delta, lastStart(len(pg.lines), m.bodyRows())))
 		return
 	}
 	e.follow = false
@@ -1278,13 +1281,14 @@ func (m *Model) refIn(pg page) *rowRef {
 func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
+	from, to, _ := windowSpan(pg, sel, start, h, m.top().lead == 0 || (m.top().fresh != 0 && start != 0))
 	n := 0
 	for i, l := range pg.lines {
 		if l.ref == nil {
 			continue
 		}
 		if n == sel {
-			return i >= start && i < start+h
+			return i >= from && i < to
 		}
 		n++
 	}

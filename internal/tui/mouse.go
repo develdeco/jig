@@ -8,26 +8,24 @@ import (
 const wheelRows = 3
 
 // hitMap is where the last frame drew the body: the terminal row it began at,
-// how many rows it drew, which line of the page its first row was, and for each
+// how many lines of the page it drew, which line of the page its first row was
+// (after the edge and the mark a window puts before its lines), and for each
 // line of the page the place of the row the cursor can stand on, -1 for a line
 // that is no row. A click is found through it, so it reads the window the
 // frame drew and no other.
 type hitMap struct {
 	top, rows, start int
-	// counted says the first row drew the count of rows that came in above, which
-	// is no line of the page.
-	counted bool
 	// sel is, for each line of the page, its place among the rows, else -1.
 	sel []int
 }
 
 // recordHit notes what the frame drew of the body, for a click to be read against.
-func (m *Model) recordHit(l screenLayout, start int, counted bool) {
+func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 	if m.help != nil {
 		m.hit = nil
 		return
 	}
-	h := &hitMap{top: len(l.head), rows: min(l.pageH, len(l.pg.lines)-start), start: start, counted: counted}
+	h := &hitMap{top: len(l.head) + prefix, rows: to - from, start: from}
 	n := 0
 	for _, line := range l.pg.lines {
 		if line.ref == nil {
@@ -69,7 +67,7 @@ func (m *Model) mouse(k tea.MouseMsg) tea.Cmd {
 // click puts the cursor on the row drawn at terminal row y, when one is.
 func (m *Model) click(y int) {
 	h := m.hit
-	if m.help != nil || h == nil || y < h.top || y >= h.top+h.rows || (h.counted && y == h.top) {
+	if m.help != nil || h == nil || y < h.top || y >= h.top+h.rows {
 		return
 	}
 	line := h.start + y - h.top

@@ -90,34 +90,15 @@ func (m *Model) rest(l screenLayout, start int) {
 	m.seen = h
 }
 
-// countRow is where the window starts and whether its first row is the count of
-// the rows that came in above it, for a page read below its top that rows came
-// in above. The count says so in the row above the line the window began at: the
-// window starts one line up, and that row is the count. That drops the window's
-// last line, so when that is the page's end or the line the cursor stands on,
-// the count takes the first line's row instead and the window stays where it was.
-func (m *Model) countRow(pg page, sel, start, h int) (int, bool) {
+// counting is whether the window that starts at start says how many rows came
+// in above it: a page read below its top that rows came in above. The count
+// takes the place of the mark that says there is more above.
+func (m *Model) counting(start int) bool {
 	e := m.top()
 	if start == 0 {
 		e.fresh = 0
 	}
-	if e.fresh == 0 || start == 0 {
-		return start, false
-	}
-	selLine, n := -1, 0
-	for i, l := range pg.lines {
-		if l.ref == nil {
-			continue
-		}
-		if n == sel {
-			selLine = i
-		}
-		n++
-	}
-	if last := start + h - 1; last != selLine && (last < len(pg.lines)-1 || start == selLine) {
-		start--
-	}
-	return start, true
+	return e.fresh != 0 && start != 0
 }
 
 // lineShift is how many lines the first line the reader had in the window moved

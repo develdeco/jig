@@ -30,7 +30,7 @@ func TestChartDetailShowsTheAskWhole(t *testing.T) {
 	t.Parallel()
 	g := askChartRig(t, 100, 70, askOne)
 	panel := strings.Join(detailPanelOf(t, g.view()), "\n")
-	if !strings.Contains(panel, "ask      r1-f1 · high") {
+	if !strings.Contains(strings.Join(strings.Fields(panel), " "), "ask r1-f1 · high") {
 		t.Errorf("the Detail panel does not label the ask with its id and risk:\n%s", panel)
 	}
 	if !strings.Contains(readWords(strings.ReplaceAll(panel, "│", "")), readWords(wholeAskText)) {
@@ -166,18 +166,18 @@ func TestChartDetailGivesUpSliceRowsBeforeAnAsk(t *testing.T) {
 	}{
 		{28, true, true, true},
 		{26, false, true, true},
-		{18, false, true, true},
-		{16, false, true, false},
+		{21, false, true, true},
+		{18, false, true, false},
 	} {
 		g := heldChartRig(t)
 		g.send(tea.WindowSizeMsg{Width: 100, Height: c.height})
 		onChart(g)
 		g.m.w.tickets["JIG-5"].status.Asks = []statusAsk{{ID: "r1-f1", Risk: "high", Where: "a.go:1", Title: longAskTitle, Why: longAskWhy}}
 		view := g.view()
-		if got := strings.Contains(view, "slice    s2 · claimed"); got != c.slice {
+		if got := strings.Contains(strings.Join(strings.Fields(view), " "), "slice s2 · claimed"); got != c.slice {
 			t.Errorf("at height %d the slice row is drawn: %v, want %v:\n%s", c.height, got, c.slice, view)
 		}
-		if got := strings.Contains(view, "hold     ⏸ agent 4f2a91c0"); got != c.hold {
+		if got := strings.Contains(strings.Join(strings.Fields(view), " "), "hold ⏸ agent 4f2a91c0"); got != c.hold {
 			t.Errorf("at height %d the hold row is drawn: %v, want %v:\n%s", c.height, got, c.hold, view)
 		}
 		if got := g.m.drawn["r1-f1"] == askWhole; got != c.whole {

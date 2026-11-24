@@ -78,7 +78,7 @@ func TestAChartRowFollowsTheDigestForATicketThatIsBehind(t *testing.T) {
 		t.Errorf("the Tickets panel counts the ticket that is behind as published:\n%s", v)
 	}
 	panel := strings.Join(detailPanelOf(t, v), "\n")
-	if !strings.Contains(panel, "state    behind · owes a merge, then a publish") || strings.Contains(panel, "published") {
+	if !strings.Contains(panel, "state behind · owes a merge, then a publish") || strings.Contains(panel, "published") {
 		t.Errorf("the Detail panel does not say JIG-4 owes a merge and a publish, or says it is published:\n%s", panel)
 	}
 	golden(t, "chart-behind", v)
@@ -108,7 +108,7 @@ func TestAChartRowOfATicketThatIsNotBehindKeepsItsOwnWords(t *testing.T) {
 		t.Errorf("the cursor follows to row %d, want 1, JIG-5", got)
 	}
 	g.press("up")
-	if panel := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(panel, "state    waits to land") || strings.Contains(panel, "behind") {
+	if panel := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(panel, "state waits to land") || strings.Contains(panel, "behind") {
 		t.Errorf("the Detail panel of a published ticket does not say so:\n%s", panel)
 	}
 }

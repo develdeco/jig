@@ -18,6 +18,10 @@
 // its pane ends with "↓ n older", and a line that comes in leaves the cursor on
 // its row and a page read below its top on the lines it showed (hold.go).
 //
+// One allocator (layout.go) lays out every list: measured columns are as wide as
+// their widest cell, free columns share the rest and wrap their words under their
+// column, and a window keeps each box whole and marks what lies above and below.
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on

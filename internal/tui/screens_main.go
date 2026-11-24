@@ -33,7 +33,26 @@ func (m *Model) mainPage() page {
 
 // buildMain draws the queue's page: the groups in order, each under its heading.
 func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity) {
-	var p page
+	p, folded := m.draftMain(q, open)
+	return m.layMain(p), folded
+}
+
+// mainDraft is the project's page before its rows are laid out: its headings
+// and fold rows as lines, and a line for each ticket or chart row that stands
+// for the cells the row says.
+type mainDraft struct {
+	page
+	// cells is the cells of the row drawn at a line, by line.
+	cells map[int][]string
+	// chart says the row at a line is a chart's, laid out by its own kind of
+	// column: a chart's name is not a ticket's id.
+	chart map[int]bool
+}
+
+// draftMain is buildMain's page of headings and rows, the rows still to be laid
+// out by layMain.
+func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[rowIdentity]rowIdentity) {
+	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}}
 	var folded map[rowIdentity]rowIdentity
 	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
@@ -48,8 +67,8 @@ func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdent
 			if len(p.lines) > 0 {
 				p.add("")
 			}
-			p.addRow(s.ref(), m.queueLine(q, s))
-			m.addQueueRows(&p, q, s.kids)
+			m.addQueueRow(p, s)
+			m.addQueueRows(p, s.kids)
 		}
 		if n := q.rowsIn(); n > 0 {
 			if len(p.lines) > 0 {
@@ -64,7 +83,7 @@ func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdent
 			continue
 		}
 		if q.byChart && g != groupDone {
-			m.addQueueRows(&p, q, rows)
+			m.addQueueRows(p, rows)
 			continue
 		}
 		if len(p.lines) > 0 && !q.byChart {
@@ -72,13 +91,13 @@ func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdent
 		}
 		if !g.folds() {
 			p.add(m.st.dim(g.heading(len(rows))))
-			m.addQueueRows(&p, q, rows)
+			m.addQueueRows(p, rows)
 			continue
 		}
 		fold := rowRef{kind: rowFold, id: g.name()}
 		if open[g.name()] {
 			p.addRow(fold, m.st.dim("▾ "+g.heading(len(rows))+" · enter folds them"))
-			m.addQueueRows(&p, q, rows)
+			m.addQueueRows(p, rows)
 			continue
 		}
 		tasks := 0
@@ -114,26 +133,66 @@ func foldRow(folded map[rowIdentity]rowIdentity, r queueRow, fold rowIdentity) {
 // runner (a test, or a screen fed by the stream alone) draws the stream.
 func (m *Model) readingStore() bool { return m.run != nil && !m.w.rosterRead }
 
-// addQueueRows draws the rows of one group.
-func (m *Model) addQueueRows(p *page, q mainQueue, rows []queueRow) {
+// addQueueRows adds the rows of one group.
+func (m *Model) addQueueRows(p *mainDraft, rows []queueRow) {
 	for _, r := range rows {
-		p.addRow(r.ref(), m.queueLine(q, r))
-		m.addQueueRows(p, q, r.kids)
+		m.addQueueRow(p, r)
+		m.addQueueRows(p, r.kids)
 	}
 }
 
-// queueLine is a row of the queue: a ticket's icon, id, title, the five steps and
-// where it stands, or a chart's name, title and published count.
-func (m *Model) queueLine(q mainQueue, r queueRow) string {
+// addQueueRow adds a row of the queue as the cells it says; layMain lays them out.
+func (m *Model) addQueueRow(p *mainDraft, r queueRow) {
+	at := len(p.lines)
+	p.addRow(r.ref(), "")
+	p.cells[at], p.chart[at] = m.queueCells(r), r.chart
+}
+
+// mainColumns are the columns of the project's rows: the state icon, the id or
+// the name, the title, the step dots (or "chart") and what stands.
+var mainColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}}
+
+// layMain lays the draft's rows out, a column to the widest cell of its own
+// kind: the tickets' ids are measured over the tickets, and a chart's name never
+// widens them. A row that wraps keeps the cursor on its first line.
+func (m *Model) layMain(p *mainDraft) page {
+	var tickets, charts [][]string
+	for i := range p.lines {
+		if cells, ok := p.cells[i]; ok {
+			if p.chart[i] {
+				charts = append(charts, cells)
+			} else {
+				tickets = append(tickets, cells)
+			}
+		}
+	}
+	m.measured += len(tickets) + len(charts)
+	w := max(1, m.width-2)
+	laidT, laidC := layout(mainColumns, tickets, w), layout(mainColumns, charts, w)
+	var out page
+	for i, l := range p.lines {
+		if _, ok := p.cells[i]; !ok {
+			out.lines = append(out.lines, l)
+			continue
+		}
+		var lines []string
+		if p.chart[i] {
+			lines, laidC = laidC[0], laidC[1:]
+		} else {
+			lines, laidT = laidT[0], laidT[1:]
+		}
+		out.addLaid(l.ref, lines)
+	}
+	return m.wrapLong(out)
+}
+
+// queueCells are a row of the queue as cells: a ticket's icon, id, title, the
+// five steps and where it stands, or a chart's.
+func (m *Model) queueCells(r queueRow) []string {
 	if r.chart {
-		return m.chartMainRow(r.id, q.chartIDW, q.chartTitleW)
+		return m.chartCells(r.id)
 	}
-	indent := 2 * r.depth
-	line := spaces(indent) + m.st.icon(r.cur.State) + " " + pad(r.id, q.idW-indent)
-	if q.titleW > 0 {
-		line += "  " + pad(r.t.title, q.titleW)
-	}
-	return line + "  " + m.stepDots(r.steps) + "  " + m.ticketDetail(r.t, r.steps)
+	return []string{m.st.icon(r.cur.State), spaces(2*r.depth) + r.id, r.t.title, m.stepDots(r.steps), m.ticketDetail(r.t, r.steps)}
 }
 
 // stepDots are a ticket's steps as icons, in order.

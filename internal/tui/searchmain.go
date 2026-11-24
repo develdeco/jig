@@ -30,7 +30,7 @@ func (s searchState) applied() bool { return s.open || len(s.query) > 0 }
 // row's detail again.
 type searchCache struct {
 	words map[string][]string
-	lines map[rowIdentity]string
+	cells map[rowIdentity][]string
 	total int
 	// chartsOf are the charts that list a ticket, issuesOf the issues whose
 	// chart lists it, planOf the chart that plans an issue.
@@ -73,7 +73,7 @@ func (m *Model) searchOf(c *mainCache) *searchResult {
 func (m *Model) newSearchCache(q mainQueue) *searchCache {
 	sc := &searchCache{
 		words:    map[string][]string{},
-		lines:    map[rowIdentity]string{},
+		cells:    map[rowIdentity][]string{},
 		chartsOf: map[string][]string{},
 		issuesOf: map[string][]string{},
 		planOf:   map[string]string{},
@@ -154,15 +154,15 @@ func (m *Model) rowFactsOf(sc *searchCache, r queueRow) rowFacts {
 	return f
 }
 
-// line is the row's line, built once.
-func (sc *searchCache) line(m *Model, q mainQueue, r queueRow) string {
+// cellsOf are the row's cells, built once.
+func (sc *searchCache) cellsOf(m *Model, r queueRow) []string {
 	id := r.ref().identity()
-	if l, ok := sc.lines[id]; ok {
-		return l
+	if c, ok := sc.cells[id]; ok {
+		return c
 	}
-	l := m.queueLine(q, r)
-	sc.lines[id] = l
-	return l
+	c := m.queueCells(r)
+	sc.cells[id] = c
+	return c
 }
 
 // runSearch narrows the queue to what the query matches and draws it.
@@ -176,12 +176,17 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 	for g := range q.byGroup {
 		q.byGroup[g] = run.keep(c.q.byGroup[g])
 	}
-	var p page
+	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}}
+	addRow := func(r queueRow) {
+		at := len(p.lines)
+		p.addRow(r.ref(), "")
+		p.cells[at], p.chart[at] = sc.cellsOf(m, r), r.chart
+	}
 	rows := func(rows []queueRow) {
 		var add func(rows []queueRow)
 		add = func(rows []queueRow) {
 			for _, r := range rows {
-				p.addRow(r.ref(), m.st.lit(sc.line(m, c.q, r), terms))
+				addRow(r)
 				add(r.kids)
 			}
 		}
@@ -192,7 +197,7 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 			if len(p.lines) > 0 {
 				p.add("")
 			}
-			p.addRow(s.ref(), m.st.lit(sc.line(m, c.q, s), terms))
+			addRow(s)
 			rows(s.kids)
 		}
 		if n := q.rowsIn(); n > 0 {
@@ -219,7 +224,15 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 	if len(p.lines) == 0 {
 		p.add(m.st.dim("nothing matches"))
 	}
-	res := &searchResult{pg: p, refs: p.refs(), first: -1, matched: len(run.tickets), total: sc.total}
+	// The rows are laid out by the allocator, as main's are; the letters lit are
+	// style over the laid text, so they move no column.
+	pg := m.layMain(p)
+	for i, l := range pg.lines {
+		if l.ref != nil || l.cont {
+			pg.lines[i].text = m.st.lit(l.text, terms)
+		}
+	}
+	res := &searchResult{pg: pg, refs: pg.refs(), first: -1, matched: len(run.tickets), total: sc.total}
 	for i, ref := range res.refs {
 		if run.self[ref.identity()] {
 			res.first = i

@@ -10,11 +10,11 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   │  out of scope · Gift cards                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
-  │  ·   Gift cards      fog · not graduated                                   │
-  │  ·   Loyalty points  fog · not graduated                                   │
+  │  ·  Gift cards      fog · not graduated                                    │
+  │  ·  Loyalty points  fog · not graduated                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────── not started ─╮
-  │  next     run `jig graduate ideas`                                         │
+  │  next run `jig graduate ideas`                                             │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ─────────────────────────────────────────────────────────────────╮
   │  nothing yet                                                               │
