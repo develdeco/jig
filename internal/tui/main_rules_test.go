@@ -234,6 +234,12 @@ func TestMainASharedTaskReadsAndGroupsByEachIssuesBranch(t *testing.T) {
 		d.Branch = branch
 		g.m.w.tickets[id].digest = &d
 	}
+	// As `jig next` prints a task that landed into one issue with its pull request
+	// into the other still open: its own land phase is current.
+	shared := *g.m.w.tickets["SHOP-1"].digest
+	shared.Phases = append([]digestPhase(nil), shared.Phases...)
+	shared.Phases[4] = digestPhase{Name: "land", State: "current", Text: "waits for a merge"}
+	g.m.w.tickets["SHOP-1"].digest = &shared
 	g.m.w.gen++
 	var rows []queueRow
 	for _, r := range g.m.mainBuilt().q.rows {

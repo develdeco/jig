@@ -106,6 +106,7 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 		r.steps, _ = m.rowSteps(cut, r.d)
 		r.end, r.atEnd = m.endOf(cut)
 		r.done = r.steps[stepPublish].Done
+		r.needs = m.needsYouOf(cut, r.d)
 		r.mark = ""
 		if r.atEnd {
 			r.mark = r.end.State

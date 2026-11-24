@@ -371,7 +371,6 @@ func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[s
 			// into this issue make of it, by the branch the roster gave the
 			// issue, and is grouped as it stands here.
 			cut := m.rowInPlan(m.rowOf(id, "", nil), own.id, d.Branch)
-			cut.needs = cut.needs || m.landingNeedsYou(cut.t)
 			r = m.classify(id, cut)
 		}
 		r.container, r.depth = own.id, depth+1
