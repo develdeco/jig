@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -128,6 +130,29 @@ func (s styles) bold(text string) string {
 // key is a key name in a hint line.
 func (s styles) key(text string) string {
 	return s.style().Foreground(lipgloss.Color("6")).Render(text)
+}
+
+// litBackground is the color behind the row the cursor stands on.
+const litBackground = "236"
+
+// lit draws text as the selected row: padded to w cells and drawn on the lit
+// background, which is put back after every reset an inner color writes, so
+// the row is lit across its whole width whatever its cells carry. A renderer
+// with no color profile draws the text as it is; the marker alone says which
+// row is selected.
+func (s styles) lit(text string, w int) string {
+	const probe = "x"
+	on, _, ok := strings.Cut(s.style().Background(lipgloss.Color(litBackground)).Render(probe), probe)
+	if !ok || on == "" {
+		return text
+	}
+	if gap := w - width(text); gap > 0 {
+		text += spaces(gap)
+	}
+	for _, reset := range []string{"\x1b[0m", "\x1b[m"} {
+		text = strings.ReplaceAll(text, reset, reset+on)
+	}
+	return on + text + "\x1b[0m"
 }
 
 // fit cuts text to at most w cells, ending in an ellipsis when it cut, and

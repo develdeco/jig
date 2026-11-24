@@ -57,6 +57,9 @@ type pline struct {
 	box   int
 	right string
 	ask   string
+	// focus draws the line with its panel border in the key color; a panel is
+	// drawn focused when every one of its lines says so.
+	focus bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -304,9 +307,11 @@ func (m *Model) window(pg page, sel, start, h, w int) []string {
 	idx := 0
 	for i, l := range pg.lines {
 		marker := "  "
+		selected := false
 		if l.ref != nil {
 			if idx == sel {
 				marker = m.st.key("▸") + " "
+				selected = true
 			}
 			idx++
 		}
@@ -314,7 +319,11 @@ func (m *Model) window(pg page, sel, start, h, w int) []string {
 			continue
 		}
 		if l.box != boxNone {
-			out = append(out, fit(m.frameLine(l, marker, w), w))
+			out = append(out, fit(m.frameLine(l, marker, w, selected), w))
+			continue
+		}
+		if selected {
+			out = append(out, fit(m.st.lit(marker+l.text, w), w))
 			continue
 		}
 		out = append(out, fit(marker+l.text, w))

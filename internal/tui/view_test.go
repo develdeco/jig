@@ -232,7 +232,7 @@ func TestColorIsOnlyDecoration(t *testing.T) {
 	if !strings.Contains(got, "\x1b[") {
 		t.Fatalf("the colored screen has no escape sequence:\n%s", got)
 	}
-	if stripped := stripANSI(got); stripped != plain.view() {
+	if stripped := undecorated(got); stripped != plain.view() {
 		t.Errorf("color changed the text\n--- plain\n%s\n--- colored, stripped\n%s", plain.view(), stripped)
 	}
 }

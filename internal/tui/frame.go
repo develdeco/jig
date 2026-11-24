@@ -39,8 +39,13 @@ func (p *page) boxEnd() {
 // frameLine draws a page line of a panel w cells wide, two cells in from the
 // left like every other line; marker is the cursor's mark for a row ("▸ " or
 // two spaces).
-func (m *Model) frameLine(l pline, marker string, w int) string {
+func (m *Model) frameLine(l pline, marker string, w int, lit bool) string {
 	inner := w - 7 // "  │" + marker + text + " │"
+	edge := m.st.dim
+	if l.focus {
+		// A focused panel's border is drawn in the key color.
+		edge = m.st.key
+	}
 	switch l.box {
 	case boxTop:
 		title := " " + m.st.bold(l.text) + " "
@@ -53,9 +58,14 @@ func (m *Model) frameLine(l pline, marker string, w int) string {
 			right = ""
 			fill = max(1, w-6-width(title))
 		}
-		return "  " + m.st.dim("╭─") + title + m.st.dim(strings.Repeat("─", fill)) + right + m.st.dim("─╮")
+		return "  " + edge("╭─") + title + edge(strings.Repeat("─", fill)) + right + edge("─╮")
 	case boxBottom:
-		return "  " + m.st.dim("╰"+strings.Repeat("─", max(0, w-4))+"╯")
+		return "  " + edge("╰"+strings.Repeat("─", max(0, w-4))+"╯")
 	}
-	return "  " + m.st.dim("│") + marker + pad(l.text, max(0, inner)) + " " + m.st.dim("│")
+	body := marker + pad(l.text, max(0, inner)) + " "
+	if lit {
+		// The row is lit from border to border.
+		body = m.st.lit(body, max(0, inner)+3)
+	}
+	return "  " + edge("│") + body + edge("│")
 }
