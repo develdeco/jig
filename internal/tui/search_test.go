@@ -294,23 +294,6 @@ func TestSearchReadsNothing(t *testing.T) {
 	}
 }
 
-func rosterRows(m *Model) []rosterRow {
-	var rows []rosterRow
-	for _, id := range m.w.order {
-		t := m.w.tickets[id]
-		rows = append(rows, rosterRow{ID: id, Title: t.title, Digest: t.digest})
-	}
-	return rows
-}
-
-func chartListings(m *Model) []chartListing {
-	var out []chartListing
-	for _, name := range m.w.chartOrder {
-		out = append(out, m.w.charts[name].listing)
-	}
-	return out
-}
-
 // searchBig is a store of n tickets with issues, tasks, charts and pull request
 // numbers.
 func searchBig(t testing.TB, n int) *Model {
