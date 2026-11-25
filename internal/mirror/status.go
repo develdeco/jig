@@ -177,12 +177,14 @@ const (
 )
 
 // TicketStatus derives ticket's Status:
-// Done when it was closed as covered, its journal records it landed or any of
-// prs merged; Not planned when it
+// Done when it was closed as covered, its journal records it landed, or one of
+// prs merged and none is still open; Not planned when it
 // was closed as superseded or not planned; In review when one of prs is open;
 // In progress when its journal is not empty or any slice has left queued;
 // Briefed when it has a brief.md; Backlog otherwise. A closure wins over every
-// other state: the store says the ticket is closed.
+// other state: the store says the ticket is closed. A pull request with no
+// State, which GitHub no longer resolves or could not be asked about, counts as
+// not open.
 func TicketStatus(st *store.Store, ticket string, prs []PRRef) (string, error) {
 	rec, err := st.ReadTicket(ticket)
 	if err != nil {
@@ -203,15 +205,16 @@ func TicketStatus(st *store.Store, ticket string, prs []PRRef) (string, error) {
 	if landed, _ := phase.LandedIn(lines); landed {
 		return StatusDone, nil
 	}
+	merged, open := false, false
 	for _, pr := range prs {
-		if strings.EqualFold(pr.State, "MERGED") {
-			return StatusDone, nil
-		}
+		merged = merged || strings.EqualFold(pr.State, "MERGED")
+		open = open || strings.EqualFold(pr.State, "OPEN")
 	}
-	for _, pr := range prs {
-		if strings.EqualFold(pr.State, "OPEN") {
-			return "In review", nil
-		}
+	switch {
+	case open:
+		return "In review", nil
+	case merged:
+		return StatusDone, nil
 	}
 
 	slices, err := st.ReadSlices(ticket)
@@ -245,30 +248,97 @@ func hasBrief(st *store.Store, ticket string) bool {
 }
 
 // ChartStatus derives a chart's Status from its own tickets' Statuses:
-// Done when it has tickets and every
-// one is finished, Done or Not planned (a closed ticket is finished); In
-// progress when any is In progress, In review or Done; Backlog otherwise.
+// Not planned when it has tickets and every one is Not planned; Done when
+// every one is finished, Done or Not planned (a closed ticket is finished), and
+// at least one is Done; In progress when any is In progress, In review or Done;
+// Backlog otherwise.
 func ChartStatus(ticketStatuses []string) string {
 	if len(ticketStatuses) == 0 {
 		return "Backlog"
 	}
-	allDone := true
-	anyAdvanced := false
+	allFinished, anyDone, anyAdvanced := true, false, false
 	for _, s := range ticketStatuses {
-		if s != StatusDone && s != StatusNotPlanned {
-			allDone = false
+		if IsOpen(s) {
+			allFinished = false
 		}
-		if s == "In progress" || s == "In review" || s == "Done" {
+		if s == StatusDone {
+			anyDone = true
+		}
+		if s == "In progress" || s == "In review" || s == StatusDone {
 			anyAdvanced = true
 		}
 	}
-	if allDone {
-		return "Done"
-	}
-	if anyAdvanced {
+	switch {
+	case allFinished && anyDone:
+		return StatusDone
+	case allFinished:
+		return StatusNotPlanned
+	case anyAdvanced:
 		return "In progress"
 	}
 	return "Backlog"
+}
+
+// chartStatusOf is ChartStatus over the tickets chart name lists, except the
+// ticket except (the issue the chart plans; "" excludes none), each read on its
+// own record, never as its card. own holds the Statuses of the tickets the sync
+// carries, found with their pull requests; any other ticket the store holds, one
+// the mirror leaves out or has no issue for yet, is read from the store alone,
+// with no pull request known. So a chart reads the same in every step of a sync,
+// in a dry run as in a real one, whatever order the tickets come in.
+func chartStatusOf(st *store.Store, name, except string, own map[string]string) (string, error) {
+	entries, err := st.ReadChart(name)
+	if err != nil {
+		return "", err
+	}
+	var statuses []string
+	for _, e := range entries {
+		if e.ID == "" || e.ID == except {
+			continue
+		}
+		s, ok := own[e.ID]
+		if !ok {
+			if !st.TicketExists(e.ID) {
+				continue
+			}
+			if s, err = TicketStatus(st, e.ID, nil); err != nil {
+				return "", err
+			}
+		}
+		statuses = append(statuses, s)
+	}
+	return ChartStatus(statuses), nil
+}
+
+// issueCard is the Status the board shows for issue ticket, whose own Status is
+// status. A finished issue and one no chart plans show their own. An unfinished
+// one is In review while its own pull request is open, and else shows what its
+// chart's tickets say, but never in a column that means closed: moving a card to
+// Done can close the issue, so the tickets' finished readings are not the
+// issue's (ADR 0069). Where they would say Done it is In progress, and where
+// they would say Not planned it is Backlog.
+func issueCard(st *store.Store, ticket, status string, own map[string]string) (string, error) {
+	if !IsOpen(status) || status == "In review" {
+		return status, nil
+	}
+	chart, err := st.ChartOfIssue(ticket)
+	if err != nil {
+		return "", err
+	}
+	if chart == "" {
+		return status, nil
+	}
+	plan, err := chartStatusOf(st, chart, ticket, own)
+	if err != nil {
+		return "", err
+	}
+	switch plan {
+	case StatusDone:
+		return "In progress", nil
+	case StatusNotPlanned:
+		return "Backlog", nil
+	}
+	return plan, nil
 }
 
 // IsOpen reports whether status's issue should be open on GitHub:

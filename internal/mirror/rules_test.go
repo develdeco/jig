@@ -95,12 +95,16 @@ func (w *ruleWorld) adopt(what string, n int) string {
 	w.t.Helper()
 	node := "NODE_" + what
 	writeAdoptedRecord(w.t, w.st, what, "example/tracking", n, node, "")
+	w.client.number(n, node)
 	return node
 }
 
 type planOpts struct {
 	public, dryRun bool
-	terms          []string
+	// tasks carries the tasks of a chart with an issue, as trackers: github:
+	// tasks: true does.
+	tasks bool
+	terms []string
 }
 
 // plan runs the update, link and board steps of a sync, in the order doSync
@@ -108,7 +112,7 @@ type planOpts struct {
 func (w *ruleWorld) plan(o planOpts) SyncReport {
 	w.t.Helper()
 	w.st.ReloadTrackerTree()
-	items, _, err := collectItems(w.st, w.cfg.GitHub.Repo, false)
+	items, _, err := collectItems(w.st, w.cfg.GitHub.Repo, o.tasks)
 	if err != nil {
 		w.t.Fatal(err)
 	}

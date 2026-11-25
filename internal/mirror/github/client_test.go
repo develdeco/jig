@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -457,12 +458,12 @@ func TestAddSubIssueAndBlockedBySendTheirMutations(t *testing.T) {
 }
 
 // TestFetchIssuesReadsCurrentState checks FetchIssues decodes each issue's
-// title, body, closed state, parent and sub-issue/blocked-by node ids off
-// one nodes(ids:) query, matching each answer to its id by order.
+// title, body, closed state and its reason, parent and sub-issue/blocked-by
+// node ids off one nodes(ids:) query, matching each answer to its id by order.
 func TestFetchIssuesReadsCurrentState(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query, vars := decodeGraphQLRequest(t, r)
-		if !strings.Contains(query, "nodes(ids:") || !strings.Contains(query, "... on Issue") {
+		if !strings.Contains(query, "nodes(ids:") || !strings.Contains(query, "... on Issue") || !strings.Contains(query, "stateReason") {
 			t.Fatalf("unexpected query: %s", query)
 		}
 		if ids, _ := vars["ids"].([]any); len(ids) != 2 || ids[0] != "ISSUE_1" || ids[1] != "ISSUE_2" {
@@ -470,7 +471,7 @@ func TestFetchIssuesReadsCurrentState(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"nodes":[
-			{"title":"A title","body":"A body","closed":true,
+			{"title":"A title","body":"A body","closed":true,"stateReason":"DUPLICATE",
 			 "parent":{"id":"PARENT_1"},
 			 "subIssues":{"nodes":[{"id":"SUB_1"}]},
 			 "blockedBy":{"nodes":[{"id":"BLOCKER_1"}]}},
@@ -486,8 +487,8 @@ func TestFetchIssuesReadsCurrentState(t *testing.T) {
 		t.Fatalf("FetchIssues: %v", err)
 	}
 	state := states["ISSUE_1"]
-	if state.Title != "A title" || state.Body != "A body" || state.Open {
-		t.Fatalf("ISSUE_1 = %+v, want title/body set and Open false", state)
+	if state.Title != "A title" || state.Body != "A body" || state.Open || state.StateReason != "DUPLICATE" {
+		t.Fatalf("ISSUE_1 = %+v, want title/body set, Open false and closed as a duplicate", state)
 	}
 	if state.ParentID != "PARENT_1" || len(state.SubIssueIDs) != 1 || state.SubIssueIDs[0] != "SUB_1" {
 		t.Fatalf("ISSUE_1 = %+v, want parent PARENT_1 and sub-issue SUB_1", state)
@@ -1191,6 +1192,88 @@ type sendTimes struct {
 func (s *sendTimes) RoundTrip(r *http.Request) (*http.Response, error) {
 	s.at = append(s.at, time.Now())
 	return s.base.RoundTrip(r)
+}
+
+// TestSetCloseReasonPatchesTheIssueOverREST: the one REST write goes to the
+// endpoint without its /graphql path, authenticated, with the closed state and
+// the reason, and is paced as the client's mutations are.
+func TestSetCloseReasonPatchesTheIssueOverREST(t *testing.T) {
+	const interval = 100 * time.Millisecond
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		got = append(got, fmt.Sprintf("%s %s %s %s", r.Method, r.URL.Path, r.Header.Get("Authorization"), body))
+		_, _ = w.Write([]byte(`{"number":7,"state":"closed"}`))
+	}))
+	defer srv.Close()
+
+	sent := &sendTimes{base: http.DefaultTransport}
+	c := newFastClient(srv.URL+"/graphql", "test-token")
+	c.HTTPClient = &http.Client{Transport: sent}
+	c.MutationInterval = interval
+	for _, reason := range []string{CloseReasonCompleted, CloseReasonNotPlanned} {
+		if err := c.SetCloseReason(context.Background(), "example", "demo", 7, reason); err != nil {
+			t.Fatalf("SetCloseReason: %v", err)
+		}
+	}
+	want := []string{
+		`PATCH /repos/example/demo/issues/7 bearer test-token {"state":"closed","state_reason":"completed"}`,
+		`PATCH /repos/example/demo/issues/7 bearer test-token {"state":"closed","state_reason":"not_planned"}`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %q, want %q", got, want)
+	}
+	// Half the interval, for the clock's tick (see
+	// TestDoThrottlesMutationsOneAtATime).
+	if gap := sent.at[1].Sub(sent.at[0]); gap < interval/2 {
+		t.Fatalf("the two writes were sent %v apart, want them paced %v apart", gap, interval)
+	}
+}
+
+// TestSetCloseReasonRetriesAndFailsAsAMutationDoes: a server error and a
+// rate-limit status are retried, any other failure is not and names the issue,
+// and a redirect fails rather than being followed as a GET that writes nothing.
+func TestSetCloseReasonRetriesAndFailsAsAMutationDoes(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		statuses []int // the answers, in turn; the last one repeats
+		requests int
+		fails    bool
+	}{
+		{"a server error, then success", []int{http.StatusBadGateway, http.StatusOK}, 2, false},
+		{"a rate limit, then success", []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusOK}, 3, false},
+		{"a server error every time", []int{http.StatusInternalServerError}, 4, true},
+		{"not found", []int{http.StatusNotFound}, 1, true},
+		{"a moved issue", []int{http.StatusMovedPermanently}, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				status := tc.statuses[min(requests, len(tc.statuses)-1)]
+				requests++
+				if status == http.StatusMovedPermanently {
+					w.Header().Set("Location", "/elsewhere")
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+
+			err := newFastClient(srv.URL, "test-token").SetCloseReason(context.Background(), "example", "demo", 7, CloseReasonCompleted)
+			if (err != nil) != tc.fails {
+				t.Fatalf("err = %v, want a failure %v", err, tc.fails)
+			}
+			if err != nil && !strings.Contains(err.Error(), "example/demo#7") {
+				t.Errorf("err = %v, want it to name example/demo#7", err)
+			}
+			if requests != tc.requests {
+				t.Errorf("requests = %d, want %d", requests, tc.requests)
+			}
+		})
+	}
 }
 
 // TestDoRetriesWithBackoff checks that do waits BackoffBase before its

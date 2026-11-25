@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/develdeco/jig/internal/mirror/github"
@@ -27,8 +26,8 @@ type DriftLine struct {
 	Field string
 }
 
-// UpdatedIssue is one issue Sync brought up to date: its title, body or
-// open/closed state changed to match the store.
+// UpdatedIssue is one issue Sync brought up to date: its title, body,
+// open/closed state or close reason changed to match the store.
 type UpdatedIssue struct {
 	What   string
 	Fields []string
@@ -57,6 +56,25 @@ func openState(open bool) string {
 	return "CLOSED"
 }
 
+// closeReason is the reason an issue held closed with status takes.
+func closeReason(status string) string {
+	if status == StatusNotPlanned {
+		return github.CloseReasonNotPlanned
+	}
+	return github.CloseReasonCompleted
+}
+
+// contradictsReason reports whether reason, GitHub's spelling of why a closed
+// issue was closed, says otherwise than status. An issue closed with no reason
+// reads as completed on GitHub, and one closed as a duplicate as not planned,
+// so those two stand where they agree.
+func contradictsReason(status, reason string) bool {
+	if status == StatusNotPlanned {
+		return reason == "COMPLETED" || reason == ""
+	}
+	return reason == "NOT_PLANNED" || reason == "DUPLICATE"
+}
+
 // updateIssues is the update step of a sync: for every
 // ticket and chart that already has a record (including one this same Sync
 // just created, with only its title and footer as a body), it renders the
@@ -74,23 +92,26 @@ func openState(open bool) string {
 // linkParentsAndBlockers/placeBoardItems make no write for it either.
 //
 // dryRun withholds every mutation (UpdateIssue, CreateIssue on a recreation,
-// ReopenIssue, CloseIssueCompleted, CloseIssueNotPlanned, the record write)
-// while still reading GitHub (FetchIssues, PullRequestsByHeads) to report what
-// would change.
+// ReopenIssue, CloseIssueCompleted, CloseIssueNotPlanned, SetCloseReason, the
+// record write) while still reading GitHub (FetchIssues, PullRequestsByHeads)
+// to report what would change.
 //
 // An issue whose status is Done is closed as completed and one whose status is
 // Not planned is closed as not planned (a ticket closed as covered, superseded
-// or not planned, `jig close`); one that is closed already stays as it is, and
-// a ticket reopened gets its issue back open.
+// or not planned, `jig close`); one that is closed already stays closed, but a
+// close reason that says otherwise is set to the store's, and a ticket reopened
+// gets its issue back open. This step makes every write of an issue's state, so
+// it is done before the board step moves any card: a card never reads Done or
+// Not planned for an issue this sync does not hold closed.
 //
 // It returns, for later steps to reuse rather than querying GitHub again:
 // curByWhat (each item's current GitHub state, fetched before this step's
-// own writes), statusByTicket (every ticket's derived Status, chart Status
-// needs), prsByTicket (every ticket's own pull requests, the board step
+// own writes), cardByWhat (the Status each item's card shows, charts
+// included), prsByTicket (every ticket's own pull requests, the board step
 // places) and skip (every item a publish-safety hit took out of this sync).
-func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, client github.Client, items []item, report *SyncReport, terms []string, public, dryRun bool) (curByWhat map[string]github.IssueState, statusByTicket map[string]string, prsByTicket map[string][]PRRef, skip map[string]bool, err error) {
+func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, client github.Client, items []item, report *SyncReport, terms []string, public, dryRun bool) (curByWhat map[string]github.IssueState, cardByWhat map[string]string, prsByTicket map[string][]PRRef, skip map[string]bool, err error) {
 	curByWhat = map[string]github.IssueState{}
-	statusByTicket = map[string]string{}
+	cardByWhat = map[string]string{}
 	prsByTicket = map[string][]PRRef{}
 	skip = map[string]bool{}
 
@@ -108,8 +129,8 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		rec githubRecord
 		// lookup is this ticket's index in lookups; -1 for a chart.
 		lookup int
-		// issue is a ticket of kind issue: its Status comes from its
-		// chart's tickets, so it is handled after every other item.
+		// issue is a ticket of kind issue, whose card follows its chart's
+		// tickets while it is unfinished (issueCard).
 		issue bool
 	}
 	var todo []pending
@@ -145,7 +166,6 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 		nodeIDs = append(nodeIDs, rec.NodeID)
 		todo = append(todo, p)
 	}
-	sort.SliceStable(todo, func(i, j int) bool { return !todo[i].issue && todo[j].issue })
 	found, ferr := findPullRequests(ctx, client, cfg, lookups)
 	if ferr != nil {
 		return nil, nil, nil, nil, fmt.Errorf("mirror: find the tickets' pull requests: %w", ferr)
@@ -154,16 +174,29 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 	if ferr != nil {
 		return nil, nil, nil, nil, fmt.Errorf("mirror: fetch the issues: %w", ferr)
 	}
+	// Every ticket's own Status comes first, since a chart's and an issue's
+	// card read the Statuses of the tickets a chart lists.
+	statusByTicket := map[string]string{}
+	for _, p := range todo {
+		if p.it.kind != "ticket" {
+			continue
+		}
+		statusByTicket[p.it.id], err = TicketStatus(st, p.it.id, found[p.lookup].prs)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 
 	for _, p := range todo {
 		it, rec := p.it, p.rec
 		what := it.what()
 
 		var title, body, status string
-		// board is the Status the board shows: the ticket's own, but for an
-		// issue ticket its chart's. The issue's open or closed state follows
-		// status, the item's own.
-		var board string
+		// card is the Status the board shows: the item's own, but for an
+		// unfinished issue ticket its own pull request's and its chart's
+		// (issueCard). The issue's open or closed state and its close reason
+		// follow status, the item's own.
+		var card string
 		if it.kind == "ticket" {
 			prs, gone := found[p.lookup].prs, found[p.lookup].gone
 			prsByTicket[it.id] = prs
@@ -171,13 +204,10 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				report.GoneRecordedPRs = append(report.GoneRecordedPRs, GoneRecordedPR{Owner: g.Owner, Repo: g.Repo, Number: g.Number, Ticket: it.id})
 			}
 
-			status, err = TicketStatus(st, it.id, prs)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			board = status
+			status = statusByTicket[it.id]
+			card = status
 			if p.issue {
-				board, err = issueStatus(st, it.id, status, statusByTicket)
+				card, err = issueCard(st, it.id, status, statusByTicket)
 				if err != nil {
 					return nil, nil, nil, nil, err
 				}
@@ -191,11 +221,11 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 				return nil, nil, nil, nil, err
 			}
 		} else {
-			statuses, cerr := chartTicketStatuses(st, it.id, statusByTicket)
-			if cerr != nil {
-				return nil, nil, nil, nil, cerr
+			status, err = chartStatusOf(st, it.id, "", statusByTicket)
+			if err != nil {
+				return nil, nil, nil, nil, err
 			}
-			status = ChartStatus(statuses)
+			card = status
 			title, err = chartTitle(st, it.id)
 			if err != nil {
 				return nil, nil, nil, nil, err
@@ -206,9 +236,7 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 		}
 
-		if it.kind == "ticket" {
-			statusByTicket[it.id] = board
-		}
+		cardByWhat[what] = card
 
 		if dryRun || public {
 			if hits := ScanTitleAndBody(title, body, terms); len(hits) > 0 {
@@ -279,7 +307,8 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 
 		wantOpen := IsOpen(status)
 		curState := openState(cur.Open)
-		if cur.Open != wantOpen {
+		switch {
+		case cur.Open != wantOpen:
 			if synced.State != "" && curState != synced.State {
 				report.Drift = append(report.Drift, DriftLine{What: what, Issue: rec.Issue, Field: "state"})
 			}
@@ -299,7 +328,22 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			}
 			changed = append(changed, "state")
 			synced.State = openState(wantOpen)
-		} else {
+		case !wantOpen && contradictsReason(status, cur.StateReason):
+			// Closed as the store holds it, but under another reason: whoever
+			// closed it, the reason is the store's. No drift line: the record
+			// keeps no reason to compare against.
+			synced.State = curState
+			if !dryRun {
+				owner, repo, serr := splitRepo(rec.Repo)
+				if serr != nil {
+					return nil, nil, nil, nil, serr
+				}
+				if rerr := client.SetCloseReason(ctx, owner, repo, rec.Issue, closeReason(status)); rerr != nil {
+					return nil, nil, nil, nil, fmt.Errorf("mirror: set %s's issue close reason: %w", what, rerr)
+				}
+			}
+			changed = append(changed, "close reason")
+		default:
 			// GitHub already holds the store's value: nothing is overwritten,
 			// so nothing is drift. Record it so the next sync has a baseline.
 			synced.State = curState
@@ -315,48 +359,5 @@ func updateIssues(ctx context.Context, st *store.Store, cfg project.Config, clie
 			report.Updated = append(report.Updated, UpdatedIssue{What: what, Fields: changed})
 		}
 	}
-	return curByWhat, statusByTicket, prsByTicket, skip, nil
-}
-
-// issueStatus is an issue ticket's board Status: ChartStatus over the Statuses
-// of the tickets of its chart, mirrored or not (a ticket the sync did not
-// carry is read from the store alone, with no pull request known). own is the
-// ticket's Status on its own, kept when it was closed, is Done (the issue
-// landed, whatever its tasks read) or has no chart yet.
-func issueStatus(st *store.Store, ticket, own string, statusByTicket map[string]string) (string, error) {
-	rec, err := st.ReadTicket(ticket)
-	if err != nil {
-		return "", err
-	}
-	if rec.Closed != nil {
-		return own, nil
-	}
-	if own == StatusDone {
-		return own, nil
-	}
-	chart, err := st.ChartOfIssue(ticket)
-	if err != nil {
-		return "", err
-	}
-	if chart == "" {
-		return own, nil
-	}
-	entries, err := st.ReadChart(chart)
-	if err != nil {
-		return "", err
-	}
-	var statuses []string
-	for _, e := range entries {
-		if e.ID == "" || e.ID == ticket {
-			continue
-		}
-		s, ok := statusByTicket[e.ID]
-		if !ok {
-			if s, err = TicketStatus(st, e.ID, nil); err != nil {
-				return "", err
-			}
-		}
-		statuses = append(statuses, s)
-	}
-	return ChartStatus(statuses), nil
+	return curByWhat, cardByWhat, prsByTicket, skip, nil
 }

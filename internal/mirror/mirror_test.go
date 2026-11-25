@@ -139,7 +139,16 @@ type fakeClient struct {
 	// moving their card to Done, as a project's built-in Auto-close issue
 	// workflow does, which new projects have on.
 	autoClosed []string
-	removedSubs []fakeSubIssue
+	// numbers maps an issue's number to its node id, what SetCloseReason, a
+	// REST write, names an issue by: CreateIssue fills it, and a test fills it
+	// for an adopted record.
+	numbers map[int]string
+	// cardAhead is every card of an issue moved to Done or Not planned before
+	// the issue was closed, or before its close reason matched the card.
+	cardAhead    []string
+	reasonWrites []fakeReasonWrite
+	reasonErr    error // if set, every SetCloseReason call fails with it
+	removedSubs  []fakeSubIssue
 	// itemFields simulates a board item's current Status and Store ID,
 	// keyed by item id: PlaceItem writes it, ItemFieldValues reads it back,
 	// and a test can mutate it directly to simulate an edit made on GitHub.
@@ -164,9 +173,17 @@ type fakeIssueState struct {
 	Title string
 	Body  string
 	Open  bool
-	// Reason is why a closed issue was closed: "completed" or "not planned";
-	// empty while it is open.
+	// Reason is why a closed issue was closed: "completed", "not planned" or,
+	// set by a test, "duplicate"; empty while it is open, and for one closed
+	// with no reason.
 	Reason string
+}
+
+// fakeReasonWrite is one SetCloseReason call fakeClient saw.
+type fakeReasonWrite struct {
+	Owner, Repo string
+	Number      int
+	Reason      string
 }
 
 // fakeUpdate is one UpdateIssue call fakeClient saw.
@@ -231,7 +248,35 @@ func (c *fakeClient) CreateIssue(_ context.Context, owner, repo, title, body str
 	c.next++
 	nodeID := "NODE_" + title
 	*c.issue(nodeID) = fakeIssueState{Title: title, Body: body, Open: true}
+	c.number(c.next, nodeID)
 	return github.Issue{Number: c.next, NodeID: nodeID}, nil
+}
+
+// number records that issue number n is nodeID.
+func (c *fakeClient) number(n int, nodeID string) {
+	if c.numbers == nil {
+		c.numbers = map[int]string{}
+	}
+	c.numbers[n] = nodeID
+}
+
+// SetCloseReason refuses an open issue, which the REST write would close: jig
+// sets the reason only of an issue GitHub already holds closed.
+func (c *fakeClient) SetCloseReason(_ context.Context, owner, repo string, number int, reason string) error {
+	c.reasonWrites = append(c.reasonWrites, fakeReasonWrite{Owner: owner, Repo: repo, Number: number, Reason: reason})
+	if c.reasonErr != nil {
+		return c.reasonErr
+	}
+	nodeID, ok := c.numbers[number]
+	if !ok {
+		return fmt.Errorf("fake: no issue %s/%s#%d", owner, repo, number)
+	}
+	is := c.issue(nodeID)
+	if is.Open {
+		return fmt.Errorf("fake: %s/%s#%d is open", owner, repo, number)
+	}
+	is.Reason = strings.ReplaceAll(reason, "_", " ")
+	return nil
 }
 
 func (c *fakeClient) CloseIssueNotPlanned(_ context.Context, nodeID string) error {
@@ -328,7 +373,7 @@ func (c *fakeClient) FetchIssues(_ context.Context, nodeIDs []string) (map[strin
 		}
 		st := c.issue(nodeID)
 		states[nodeID] = github.IssueState{
-			Title: st.Title, Body: st.Body, Open: st.Open,
+			Title: st.Title, Body: st.Body, Open: st.Open, StateReason: strings.ToUpper(strings.ReplaceAll(st.Reason, " ", "_")),
 			ParentID: c.parentOf[nodeID], SubIssueIDs: c.subIssuesOf[nodeID], BlockedByIDs: c.blockedByOf[nodeID],
 		}
 	}
@@ -416,6 +461,13 @@ func (c *fakeClient) LookupProject(_ context.Context, _ string, _ bool, _ int) (
 
 func (c *fakeClient) PlaceItem(_ context.Context, _ github.ProjectV2, contentID, status, storeID string) (string, error) {
 	c.placedItems = append(c.placedItems, fakePlacedItem{ContentID: contentID, Status: status, StoreID: storeID})
+	if is, ok := c.issues[contentID]; ok && !IsOpen(status) {
+		wrong := status == StatusNotPlanned && (is.Reason == "completed" || is.Reason == "") ||
+			status == StatusDone && (is.Reason == "not planned" || is.Reason == "duplicate")
+		if is.Open || wrong {
+			c.cardAhead = append(c.cardAhead, fmt.Sprintf("%s to %q with the issue open %v, closed as %q", storeID, status, is.Open, is.Reason))
+		}
+	}
 	c.nextItem++
 	itemID := fmt.Sprintf("ITEM_%d", c.nextItem)
 	if c.itemFields == nil {
