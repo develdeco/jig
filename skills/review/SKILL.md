@@ -45,6 +45,7 @@ The round's `scope` (per repo in a `repos` table) says what to look for:
 Judge code against the intent's rules, never against how the code already does it: matching existing code is no defense where a rule says otherwise. Rank each finding by the intent. Prove it at file:line in `--detail`, by its kind: a defect's input or state and wrong outcome; a broken rule and where it is stated; an ask's decision; a test gap as Report says. File only what you can prove so.
 
 Run a test only to prove one finding you are about to file: the narrowest command, against a mutant of one term for a test gap, or to settle a suspected defect reading cannot. Never an oracle, a suite or a sweep over terms. Mutate in your worktree, never the clone, and put it back.
+
 ## Report
 
 One call per problem, as you find it:
