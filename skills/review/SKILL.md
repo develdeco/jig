@@ -5,9 +5,11 @@ description: Reviews a ticket's branch in a fresh context and reports to the ope
 
 # review
 
+The job is to find what the builder got wrong before it ships, not to certify the change: `clean` is a valid verdict, never the goal.
+
 Run `jig next <T>`. If the phase it names is not review (an open round is review), tell the person what the ticket needs and the prompt that does it, and stop. Do not run an earlier phase on your own.
 
-`jig gate` starts no reviewer. The reviewer is a fresh-context agent that did **not** build the change; the round records if it did (`independent`), and the review notes say so. `jig next` and `jig gate` say whether this session is fresh:
+`jig gate` starts no reviewer. The reviewer did **not** build the change; the round records if it did (`independent`). `jig next` and `jig gate` say whether this session is fresh:
 
 - **Fresh** ("review it in this session"): review below, yourself.
 - **Not fresh, or unknown**: you briefed or built it. Read `jig skill review spawn` and spawn the reviewer it describes.
@@ -20,7 +22,7 @@ jig review context T-1   # opens the round if none is open; --json prints the re
 jig review context T-1 --session $JIG_SESSION --model <yours> --effort <yours>
 ```
 
-It names the branch, its `copy`, `head`, `base`, `scope`, `worktree` advice and `request` file, with tables `must_review` (every file you must read), `open` and `dismissed` findings, `probed` probes and `oracles_passed`.
+It names the branch, its `copy`, `head`, `base`, `scope`, `worktree` advice and `request` file, with tables `must_review` (every file you must read), `open` and `dismissed` findings and `oracles_passed`.
 
 Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, you filed a note below the floor, or it lists open, answered or dismissed findings (`--prior`).
 
@@ -33,16 +35,16 @@ Read `jig skill review rounds` when the report is refused or stale, the round ha
 
 The round's `scope` (per repo in a `repos` table) says what to look for:
 
-- **full**: read the whole change against the intent, as a reader judging the finished change would, not term by term, for:
+- **full**: read the whole change against the intent, not term by term, for:
   - wrong code, and states of the intent's rules it never handles;
   - what it breaks elsewhere: callers, pinned output in other packages, docs that now say something false;
   - the repo's own rules, as its agent instructions (AGENTS.md) and contributing guide state them;
   - cost that grows with real data.
 - **delta**: check only that each fix fixes its finding and its delta breaks nothing. Never search outside the delta; a defect you meet there anyway, report at its rank.
 
-Rank each finding by the intent. Prove it at file:line in `--detail`, by its kind: a defect's input or state and wrong outcome; a broken rule and where it is stated; an ask's decision; a test gap as Report says. File only what you can prove so.
+Judge code against the intent's rules, never against how the code already does it: matching existing code is no defense where a rule says otherwise. Rank each finding by the intent. Prove it at file:line in `--detail`, by its kind: a defect's input or state and wrong outcome; a broken rule and where it is stated; an ask's decision; a test gap as Report says. File only what you can prove so.
 
-Run a test only to prove one finding you are about to file: the narrowest command, against a mutant of one term for a test gap, or to settle a suspected defect reading cannot. Never an oracle, a suite or a sweep over terms. Mutate in your worktree, never the clone, and put it back. You may record a probe that proves a finding: `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`.
+Run a test only to prove one finding you are about to file: the narrowest command, against a mutant of one term for a test gap, or to settle a suspected defect reading cannot. Never an oracle, a suite or a sweep over terms. Mutate in your worktree, never the clone, and put it back.
 
 ## Report
 

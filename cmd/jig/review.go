@@ -321,7 +321,7 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 	blocks := roundBlocks(p, moved, true, deltas)
 	blocks = append(blocks, reviewerWorktreeBlocks(p, mp.Clones, dirExists)...)
 	help := []string{
-		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (the oracles above passed): run a test only to prove one finding you are about to file, with the narrowest command, against a mutant of one term for a test gap or to settle a suspected defect that reading cannot, mutating only in your worktree and putting the file back",
+		"Make your worktree at the head as the worktree advice says, and read the code there, never in the clone, and never edit the clone; run no oracle and no suite (a passing oracle above says only that its tests pass, not that the change is right): run a test only to prove one finding you are about to file, with the narrowest command, against a mutant of one term for a test gap or to settle a suspected defect that reading cannot, mutating only in your worktree and putting the file back",
 		fmt.Sprintf("Report each problem: `jig finding %s --file F --line N --title T --detail D --action fix|ask|note --risk low|medium|high --risk-rationale R --oracle O`; confirm an earlier one with `jig finding %s --still-present ID --line N`", ticket, ticket),
 		fmt.Sprintf("Optionally, record a probe that proves a finding: `jig probe %s --seam S --file F --line N --mutation M --command C --outcome caught|survived`", ticket),
 		fmt.Sprintf("Then close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket),

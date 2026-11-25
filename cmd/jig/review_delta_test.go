@@ -69,8 +69,9 @@ func TestADeltaRoundsContextHoldsOnlyItsDelta(t *testing.T) {
 }
 
 // TestAFullRoundsContextHoldsItsReadLine: round 1 prints the open table, the
-// probed table and the full read line, no hunk or unprobed count, and no delta
-// or answers block.
+// probed table and the full read line, help that says a passing oracle shows
+// only that its tests pass, no hunk or unprobed count, and no delta or answers
+// block.
 func TestAFullRoundsContextHoldsItsReadLine(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
@@ -83,7 +84,8 @@ func TestAFullRoundsContextHoldsItsReadLine(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("review context: exit = %d\n%s", code, out)
 	}
-	for _, want := range []string{"scope: full", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]", fullReadLine} {
+	for _, want := range []string{"scope: full", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]", fullReadLine,
+		"run no oracle and no suite (a passing oracle above says only that its tests pass, not that the change is right)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("a full round's context lacks %q\n%s", want, out)
 		}
