@@ -29,8 +29,9 @@ const (
 	ActionNote = "note"
 )
 
-// Finding risk vocabulary: how much harm follows if this part of the change
-// is wrong.
+// Finding risk vocabulary: a finding's rank against the intent. High is wrong
+// behavior a person meets, medium wrong in a case the intent names or a broken
+// repo rule, low worth a note (ADR 0067).
 const (
 	RiskLow    = "low"
 	RiskMedium = "medium"

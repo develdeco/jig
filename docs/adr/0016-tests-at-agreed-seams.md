@@ -1,5 +1,7 @@
 # Tests at agreed seams: the reviewer's contract
 
+**Amended by [ADR 0067](0067-a-gate-round-reads-the-whole-change-and-runs-a-test-only-to-prove-a-finding.md):** the per-term sweep of ADR 0036, which overrode this seams rule, is gone.
+
 Briefs that list test cases one by one and demand that every new test fail when its rule is removed create large test suites and make every later session that reads them costly. The gate reviewer holds a change to its brief, so every unpinned rule becomes a finding, then a fix slice, then more tests.
 
 Instead, briefs name only their seams - the public interfaces and critical paths - and the reviewer judges testing only at those seams. A missing test is a problem only at a seam the intent names, or as the proof of a defect the reviewer reports. A test elsewhere is at most a note.

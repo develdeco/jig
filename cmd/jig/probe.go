@@ -27,7 +27,7 @@ const (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"probe", "record a probe of a critical path's term in the open gate round, or set aside code on no critical path", []flagSpec{
+		Spec: cmdSpec{"probe", "optionally record, in the open gate round, a probe that proves a finding, or set aside code on no critical path", []flagSpec{
 			{"seam", probeSeamUsage, false},
 			{"file", probeFileUsage, false},
 			{"line", probeLineUsage, false},
@@ -151,7 +151,7 @@ func cmdProbe(e env, args []string, stdout io.Writer) int {
 			{"ticket", ticket}, {"round", strconv.Itoa(p.Round)}, {"kind", kind}, {"drafts", strconv.Itoa(n)},
 			{"unprobed", strconv.Itoa(len(left))},
 		}),
-		axi.Help(fmt.Sprintf("Probe the next term or skip the next hunk, or close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket)),
+		axi.Help(fmt.Sprintf("File the finding it proves with `jig finding`, or close the round: `jig review done %s --reviewed <every file you read> --summary <text>`", ticket)),
 	)
 	return 0
 }
