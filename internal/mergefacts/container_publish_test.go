@@ -75,17 +75,28 @@ func TestContainerPublishMergeFactReadsItsOwnPullRequests(t *testing.T) {
 }
 
 // TestContainerPublishMergeFactNamedOnlyReadsTheChartsTasks: a reader kept to
-// the tickets named takes a multi-task's tasks from the chart that lists it. A
-// ticket no chart lists, though its record names the multi-task, is not read,
-// so the repo it builds in is not the multi-task's.
+// the tickets named takes a multi-task's tasks from the entries its chart
+// lists under it, by its id or by its position. Any other ticket is not
+// opened: one beside it in the chart, one under another entry and one no chart
+// lists stay out, though each record names the multi-task, so the repo they
+// build in is not the multi-task's.
 func TestContainerPublishMergeFactNamedOnlyReadsTheChartsTasks(t *testing.T) {
 	t.Parallel()
 	st, cfg := containerStore(t, "https://github.com/o/api/pull/1", "https://github.com/o/web/pull/2")
-	if err := st.CreateTicketRecord("T-3", store.Ticket{Title: "Unlisted", Parent: "M-1"}); err != nil {
+	chart := "issue: I-1\ntickets:\n  - id: M-1\n    title: Multi\n    kind: multi-task\n" +
+		"  - id: T-1\n    title: One\n    under: M-1\n  - id: T-2\n    title: Two\n    under: \"#1\"\n" +
+		"  - id: T-3\n    title: Beside\n  - id: T-4\n    title: Under another entry\n    under: \"#2\"\n"
+	if err := store.AtomicWrite(st.ChartFile("c"), []byte(chart)); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(st.TicketDir("T-3"), "slices.yaml"),
-		"slices:\n  - id: s\n    workspace: docs/pages\n    goal: g\n    oracle: test\n    blocked_by: []\n    from_brief: []\n")
+	// T-5 is in no chart.
+	for _, id := range []string{"T-3", "T-4", "T-5"} {
+		if err := st.CreateTicketRecord(id, store.Ticket{Title: id, Parent: "M-1"}); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(st.TicketDir(id), "slices.yaml"),
+			"slices:\n  - id: s\n    workspace: docs/pages\n    goal: g\n    oracle: test\n    blocked_by: []\n    from_brief: []\n")
+	}
 	repos := func(r *Reader) (names []string) {
 		t.Helper()
 		m, err := r.Of("M-1")

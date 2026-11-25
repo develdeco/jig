@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -222,10 +223,12 @@ func (s *Store) TasksUnder(container string, rec Ticket) ([]string, error) {
 }
 
 // ListedTasksUnder is TasksUnder of the multi-task container as its charts
-// tell it: the tasks whose parent it is among the entries of the charts that
-// list it, in chart order, so no ticket those charts do not name is read. A
-// task whose record names container as its parent and that no such chart lists
-// is not found.
+// tell it, in chart order: of the entries of the charts that list it, those
+// whose under names it, and of those the tasks whose record names it as their
+// parent. Only the tickets of those entries are opened, so a ticket that is
+// not under the multi-task, a sibling in its chart included, is not read. jig
+// writes a ticket's parent only from an entry's under (jig graduate); a parent
+// set by hand that no chart shows is not found.
 func (s *Store) ListedTasksUnder(container string) ([]string, error) {
 	listings, err := s.ChartsListing(container)
 	if err != nil {
@@ -239,7 +242,7 @@ func (s *Store) ListedTasksUnder(container string) ([]string, error) {
 			return nil, err
 		}
 		for _, e := range cf.Tickets {
-			if e.ID == "" || seen[e.ID] {
+			if e.ID == "" || seen[e.ID] || !underNames(cf.Tickets, e.Under, container) {
 				continue
 			}
 			seen[e.ID] = true
@@ -249,6 +252,20 @@ func (s *Store) ListedTasksUnder(container string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// underNames reports whether an entry's under, in the chart of entries, names
+// the ticket id: that id itself, or "#k", the 1-based position of its entry.
+func underNames(entries []ChartEntry, under, id string) bool {
+	if under == id {
+		return true
+	}
+	digits, ok := strings.CutPrefix(under, "#")
+	if !ok {
+		return false
+	}
+	k, err := strconv.ParseUint(digits, 10, 0)
+	return err == nil && k >= 1 && k <= uint64(len(entries)) && entries[k-1].ID == id
 }
 
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
