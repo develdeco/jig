@@ -77,22 +77,25 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 	)
 }
 
-// TestSkillSentencesReviewRead pins the method a reviewer follows: what a full
-// and a delta round read for, how a finding is ranked and proved, and when a
-// test runs. The `## Read` section holds them, tied to the round's scope.
+// TestSkillSentencesReviewRead pins the method a reviewer follows: the job the
+// core states first, what a full and a delta round read for, how code is judged
+// and a finding ranked and proved, and when a test runs. The `## Read` section
+// holds the method, tied to the round's scope.
 func TestSkillSentencesReviewRead(t *testing.T) {
 	core := skillFile(t, "review")
+	wantAll(t, "the top of skills/review", core,
+		"# review\n\nThe job is to find what the builder got wrong before it ships, not to certify the change: `clean` is a valid verdict, never the goal.\n",
+	)
 	wantAll(t, "the Read section of skills/review", section(t, core, "## Read\n", "## Report\n"),
 		"The round's `scope` (per repo in a `repos` table) says what to look for:",
-		"**full**: read the whole change against the intent, as a reader judging the finished change would, not term by term",
+		"**full**: read the whole change against the intent, not term by term",
 		"wrong code, and states of the intent's rules it never handles;",
 		"what it breaks elsewhere: callers, pinned output in other packages, docs that now say something false;",
 		"the repo's own rules, as its agent instructions (AGENTS.md) and contributing guide state them;",
 		"cost that grows with real data.",
 		"**delta**: check only that each fix fixes its finding and its delta breaks nothing. Never search outside the delta; a defect you meet there anyway, report at its rank.",
-		"Rank each finding by the intent. Prove it at file:line in `--detail`, by its kind: a defect's input or state and wrong outcome; a broken rule and where it is stated; an ask's decision; a test gap as Report says. File only what you can prove so.",
+		"\nJudge code against the intent's rules, never against how the code already does it: matching existing code is no defense where a rule says otherwise. Rank each finding by the intent. Prove it at file:line in `--detail`, by its kind: a defect's input or state and wrong outcome; a broken rule and where it is stated; an ask's decision; a test gap as Report says. File only what you can prove so.",
 		"Run a test only to prove one finding you are about to file: the narrowest command, against a mutant of one term for a test gap, or to settle a suspected defect reading cannot. Never an oracle, a suite or a sweep over terms. Mutate in your worktree, never the clone, and put it back.",
-		"You may record a probe that proves a finding: `jig probe T-1 --seam S --file F --line N --mutation M --command C --outcome caught|survived`.",
 	)
 	wantAll(t, "the Report section of skills/review", section(t, core, "## Report\n", "## Close the round\n"),
 		"`--risk`, the rank against the intent: `high`, wrong behavior a person meets; `medium`, wrong in a case the intent names, or a broken repo rule; `low`, worth a note.",
