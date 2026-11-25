@@ -79,18 +79,18 @@ func TestSkillSentencesReviewRounds(t *testing.T) {
 
 func TestSkillSentencesBuildReadAndFix(t *testing.T) {
 	wantAll(t, "skills/build", skillFile(t, "build"),
+		"Test at the seams the brief names, with the narrowest tests that cover your change.",
 		"Read the function, not the file: find code with `grep -n` or the LSP",
 		"Make independent reads in one step; an edit's result shows it applied.",
+		"Edit files with your harness's edit tool, never with a hand-written script that rewrites source.",
 		"Fix the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches.",
-		"mutate each term the fix adds (operand, condition, constant, return) after your last edit",
-		"a survivor blocks the commit until a test catches it",
 	)
 	wantAll(t, "skills/build handoff", skillFile(t, "build", "handoff"),
+		"Test at the seams the brief names, with the narrowest tests that cover your change.",
 		"Read the function, not the file",
 		"make independent reads in one step",
+		"Edit files with your harness's edit tool, never with a hand-written script that rewrites source.",
 		"fixes the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches",
-		"mutate each term the fix adds after your last edit",
-		"a survivor blocks the commit until a test catches it",
 	)
 }
 
@@ -172,8 +172,8 @@ func TestSkillSentencesChartHandsOff(t *testing.T) {
 		"The prompt states the builder's case, which it never infers from where it finds itself.",
 		// A wave starts in one step, and so do independent commands.
 		"Start a wave's subagents in one step, and run independent commands in one step.",
-		// A fix round proves the fix's new terms as the build skill says.
-		"proving each term the fix adds as `jig skill build` says",
+		// A fix round is built and reviewed again, with no duty of its own.
+		"A round that only queues fixes: build them and have them reviewed again.",
 	)
 
 	ref := skillFile(t, "chart", "worktrees")
