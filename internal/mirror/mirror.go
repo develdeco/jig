@@ -104,8 +104,8 @@ type SyncReport struct {
 	// nothing else in the report is populated.
 	NoTracker bool
 	Created   []CreatedIssue
-	// Updated is every issue Sync brought up to date: its title, body or
-	// open/closed state changed to match the store.
+	// Updated is every issue Sync brought up to date: its title, body,
+	// open/closed state or close reason changed to match the store.
 	Updated []UpdatedIssue
 	// Recreated is every issue Sync opened again because its recorded one was
 	// gone from GitHub.
@@ -458,14 +458,14 @@ func doSync(d Deps, opts SyncOpts) (SyncReport, []item, error) {
 			return report, items, err
 		}
 	}
-	curByWhat, statusByTicket, prsByTicket, skip, err := updateIssues(ctx, d.Store, d.Cfg, client, items, &report, terms, public, opts.DryRun)
+	curByWhat, cardByWhat, prsByTicket, skip, err := updateIssues(ctx, d.Store, d.Cfg, client, items, &report, terms, public, opts.DryRun)
 	if err != nil {
 		return report, items, fmt.Errorf("mirror: update issues: %w", err)
 	}
 	if err := linkParentsAndBlockers(ctx, d.Store, client, items, curByWhat, skip, &report, opts.DryRun); err != nil {
 		return report, items, fmt.Errorf("mirror: link parents and blockers: %w", err)
 	}
-	if err := placeBoardItems(ctx, d.Store, d.Cfg, client, items, statusByTicket, prsByTicket, skip, &report, opts.DryRun); err != nil {
+	if err := placeBoardItems(ctx, d.Store, d.Cfg, client, items, cardByWhat, prsByTicket, skip, &report, opts.DryRun); err != nil {
 		return report, items, fmt.Errorf("mirror: place board items: %w", err)
 	}
 	if err := postPlanComments(ctx, d.Store, d.Cfg, client, items, skip, terms, public, opts.DryRun, &report); err != nil {

@@ -64,6 +64,7 @@ issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,
 reported and overwritten with the store's value at the next sync. A chart with an `issue:` has no issue of its own: its issue ticket is mirrored always, the tasks it lists only when the project's `trackers: github: tasks:` is true (each a full issue opening with a `Part of #n` line), and the plan is a comment posted on the issue whenever what it shows changes, never an edit.
+A ticket reads finished only on its own record: `Done` when closed as covered, landed, or one of its pull requests merged and none still open, and `Not planned` when closed as superseded or not planned. A chart whose tickets are all `Not planned` reads `Not planned`, and one with every ticket finished and at least one `Done` reads `Done`. A card never runs ahead of its issue: it reads `Done` or `Not planned` only for an issue the sync holds closed, so an unfinished issue's card reads `In review` while its own pull request is open, and else what its chart's tickets say, never a column that means closed. A closed issue whose close reason contradicts the store's is given the store's, without a reopen.
 _Avoid_: tracker as the source of tickets
 
 **Bound issue**:

@@ -1,10 +1,11 @@
 // Package github is the GitHub mirror's own GraphQL client: a thin wrapper
 // over the API the bridge proved (createIssue first; the rest of its
-// mutations and queries land with the slices that use them). A test points
-// it at a fake GraphQL server (httptest); production points it at
-// https://api.github.com/graphql with the token `gh auth token` prints. No
-// environment variable redirects either (develdeco/jig#84): both are
-// arguments, so no test ever reaches github.com.
+// mutations and queries land with the slices that use them), plus the one
+// REST write SetCloseReason makes. A test points it at a fake server
+// (httptest); production points it at https://api.github.com/graphql with the
+// token `gh auth token` prints. No environment variable redirects either
+// (develdeco/jig#84): both are arguments, so no test ever reaches
+// github.com.
 package github
 
 import (
@@ -47,6 +48,10 @@ type IssueState struct {
 	Body  string
 	// Open is false when the issue is closed, whatever its close reason.
 	Open bool
+	// StateReason is GitHub's own spelling of why a closed issue was closed
+	// ("COMPLETED", "NOT_PLANNED" or "DUPLICATE"), "" when it has none; an
+	// open issue closed once reads "REOPENED".
+	StateReason string
 	// ParentID is the node id of the issue this one is a sub-issue of, or ""
 	// when it has none.
 	ParentID string
@@ -212,6 +217,11 @@ type Client interface {
 	// ReopenIssue reopens nodeID, for an issue the store now says is not Done
 	// but GitHub (or an earlier sync) left closed.
 	ReopenIssue(ctx context.Context, nodeID string) error
+	// SetCloseReason gives owner/repo#number, a closed issue, the close reason
+	// reason (CloseReasonCompleted or CloseReasonNotPlanned) and leaves it
+	// closed, for an issue whose reason says otherwise than the store. It is a
+	// REST write, which sets the reason of an issue already closed.
+	SetCloseReason(ctx context.Context, owner, repo string, number int, reason string) error
 	// RemoveSubIssue removes subIssueID from parentID's sub-issues: the drift
 	// rule that takes a sub-issue added on GitHub to a chart's issue, when it
 	// is no ticket's issue, out again.
@@ -247,10 +257,12 @@ const (
 // giving up on a retryable failure: 4 attempts in all.
 const maxAttempts = 4
 
-// GraphQLClient is Client over GitHub's GraphQL API.
+// GraphQLClient is Client over GitHub's GraphQL API, with the one write that
+// API does not make (SetCloseReason) over its REST API.
 type GraphQLClient struct {
 	// Endpoint is the GraphQL URL: https://api.github.com/graphql in
-	// production, a fake httptest server's URL in a test.
+	// production, a fake httptest server's URL in a test. A REST write goes to
+	// the same URL without its /graphql path.
 	Endpoint string
 	// Token is sent as the bearer token on every request.
 	Token string
@@ -368,12 +380,21 @@ func (c *GraphQLClient) do(ctx context.Context, query string, variables map[stri
 		opt(&settings)
 	}
 
+	return c.attempt(mutation, func() (bool, error) {
+		return c.doOnce(ctx, query, variables, out, settings)
+	})
+}
+
+// attempt runs once until it succeeds, fails in a way not worth retrying, or
+// has run maxAttempts times, with backoff between runs. A write is paced
+// (throttle) before each run.
+func (c *GraphQLClient) attempt(write bool, once func() (retryable bool, err error)) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if mutation {
+		if write {
 			c.throttle()
 		}
-		retryable, err := c.doOnce(ctx, query, variables, out, settings)
+		retryable, err := once()
 		if err == nil {
 			return nil
 		}
@@ -429,46 +450,61 @@ func (c *GraphQLClient) backoffSleep(attempt int) {
 	time.Sleep(c.backoffBase() << (attempt - 1))
 }
 
-// doOnce sends query/variables once and decodes its response into out,
-// reporting whether the failure it returns (if any) is worth retrying: a
-// network error, a server error (5xx) or a status GitHub's rate limiting
-// uses (429, or 403 - the status a secondary rate limit answers with) is
-// retryable; anything else - a client error, a GraphQL-level error with no
-// RATE_LIMITED type - is not, since retrying it would only repeat it. A
-// non-empty "errors" array that settings.tolerateGoneNodes accepts (every
-// entry a NOT_FOUND on a nodes(ids:) element) is not a failure at all: out
-// still decodes from "data", null entries included.
-func (c *GraphQLClient) doOnce(ctx context.Context, query string, variables map[string]any, out any, settings doSettings) (retryable bool, err error) {
-	body, err := json.Marshal(graphQLRequest{Query: query, Variables: variables})
-	if err != nil {
-		return false, fmt.Errorf("github: encode request: %w", err)
+// httpClient is c.HTTPClient, or http.DefaultClient when that is nil.
+func (c *GraphQLClient) httpClient() *http.Client {
+	if c.HTTPClient != nil {
+		return c.HTTPClient
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
+	return http.DefaultClient
+}
+
+// exchange sends body to url once with c.Token through httpClient and returns
+// the 200 response's body, reporting whether the failure it returns (if any)
+// is worth retrying: a network error, a server error (5xx) or a status
+// GitHub's rate limiting uses (429, or 403 - the status a secondary rate limit
+// answers with) is retryable; any other status is not, since retrying it would
+// only repeat it.
+func (c *GraphQLClient) exchange(ctx context.Context, httpClient *http.Client, method, url string, body []byte) (raw []byte, retryable bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
-		return false, fmt.Errorf("github: build request: %w", err)
+		return nil, false, fmt.Errorf("github: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.Token != "" {
 		req.Header.Set("Authorization", "bearer "+c.Token)
 	}
 
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return true, fmt.Errorf("github: %w", err)
+		return nil, true, fmt.Errorf("github: %w", err)
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	raw, err = io.ReadAll(resp.Body)
 	if err != nil {
-		return true, fmt.Errorf("github: read response: %w", err)
+		return nil, true, fmt.Errorf("github: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		retryable := resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden
-		return retryable, fmt.Errorf("github: %s: %s", resp.Status, strings.TrimSpace(string(raw)))
+		return nil, retryable, fmt.Errorf("github: %s: %s", resp.Status, strings.TrimSpace(string(raw)))
+	}
+	return raw, false, nil
+}
+
+// doOnce sends query/variables once and decodes its response into out,
+// reporting whether the failure it returns (if any) is worth retrying: what
+// exchange says of the request, and a GraphQL-level error only when its type
+// is RATE_LIMITED. A non-empty "errors" array that settings.tolerateGoneNodes
+// accepts (every entry a NOT_FOUND on a nodes(ids:) element) is not a failure
+// at all: out still decodes from "data", null entries included.
+func (c *GraphQLClient) doOnce(ctx context.Context, query string, variables map[string]any, out any, settings doSettings) (retryable bool, err error) {
+	body, err := json.Marshal(graphQLRequest{Query: query, Variables: variables})
+	if err != nil {
+		return false, fmt.Errorf("github: encode request: %w", err)
+	}
+	raw, retryable, err := c.exchange(ctx, c.httpClient(), http.MethodPost, c.Endpoint, body)
+	if err != nil {
+		return retryable, err
 	}
 
 	var envelope struct {
@@ -796,6 +832,7 @@ const fetchIssuesQuery = `query($ids: [ID!]!) {
       title
       body
       closed
+      stateReason
       parent { id }
       subIssues(first: 100) { nodes { id } }
       blockedBy(first: 100) { nodes { id } }
@@ -811,10 +848,11 @@ func (c *GraphQLClient) FetchIssues(ctx context.Context, nodeIDs []string) (map[
 	for _, batch := range batches(nodeIDs) {
 		var resp struct {
 			Nodes []*struct {
-				Title  string `json:"title"`
-				Body   string `json:"body"`
-				Closed bool   `json:"closed"`
-				Parent *struct {
+				Title       string `json:"title"`
+				Body        string `json:"body"`
+				Closed      bool   `json:"closed"`
+				StateReason string `json:"stateReason"`
+				Parent      *struct {
 					ID string `json:"id"`
 				} `json:"parent"`
 				SubIssues struct {
@@ -839,7 +877,7 @@ func (c *GraphQLClient) FetchIssues(ctx context.Context, nodeIDs []string) (map[
 			if n == nil {
 				continue
 			}
-			state := IssueState{Title: n.Title, Body: n.Body, Open: !n.Closed}
+			state := IssueState{Title: n.Title, Body: n.Body, Open: !n.Closed, StateReason: n.StateReason}
 			if n.Parent != nil {
 				state.ParentID = n.Parent.ID
 			}
@@ -898,6 +936,34 @@ const reopenIssueMutation = `mutation($issueId: ID!) {
 func (c *GraphQLClient) ReopenIssue(ctx context.Context, nodeID string) error {
 	if err := c.do(ctx, reopenIssueMutation, map[string]any{"issueId": nodeID}, nil); err != nil {
 		return fmt.Errorf("github: reopen issue %s: %w", nodeID, err)
+	}
+	return nil
+}
+
+// The close reasons SetCloseReason takes, in the REST API's spelling.
+const (
+	CloseReasonCompleted  = "completed"
+	CloseReasonNotPlanned = "not_planned"
+)
+
+// SetCloseReason sends PATCH /repos/{owner}/{repo}/issues/{number} with the
+// closed state and reason, paced and retried as a mutation is. A redirect, which
+// a moved issue or a renamed repository answers with, fails instead of being
+// followed: Go follows it as a GET, which would answer 200 and write nothing.
+func (c *GraphQLClient) SetCloseReason(ctx context.Context, owner, repo string, number int, reason string) error {
+	body, err := json.Marshal(map[string]string{"state": "closed", "state_reason": reason})
+	if err != nil {
+		return fmt.Errorf("github: encode request: %w", err)
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", strings.TrimSuffix(c.Endpoint, "/graphql"), owner, repo, number)
+	noRedirect := *c.httpClient()
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	err = c.attempt(true, func() (bool, error) {
+		_, retryable, err := c.exchange(ctx, &noRedirect, http.MethodPatch, endpoint, body)
+		return retryable, err
+	})
+	if err != nil {
+		return fmt.Errorf("github: set the close reason of %s/%s#%d: %w", owner, repo, number, err)
 	}
 	return nil
 }
