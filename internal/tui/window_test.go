@@ -37,6 +37,42 @@ func TestAWindowNeverDrawsAnEmptyPanel(t *testing.T) {
 	}
 }
 
+// TestAWindowFollowingTheCursorNeverDrawsAnEmptyPanel: with the cursor in the
+// panel below, at every height and every row, no panel is drawn as its edges,
+// names and marks alone.
+func TestAWindowFollowingTheCursorNeverDrawsAnEmptyPanel(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	var pg page
+	for _, name := range []string{"task", "later"} {
+		pg.boxTop(name, "")
+		for i := 0; i < 8; i++ {
+			pg.boxLaid(&rowRef{kind: rowTicket, id: fmt.Sprintf("%s-%d", name, i)}, []string{fmt.Sprintf("%s %d", name, i), "  wrapped"})
+		}
+		pg.boxEnd()
+	}
+	for h := 8; h <= 24; h++ {
+		for sel := 0; sel < 16; sel++ {
+			start := g.m.windowStart(pg, sel, h, false)
+			rows, _, _ := g.m.windowRows(pg, sel, start, h, 40, "")
+			in, filled := false, false
+			for _, r := range rows {
+				switch {
+				case strings.HasPrefix(r, "  ╭─"):
+					in, filled = true, false
+				case strings.HasPrefix(r, "  ╰"):
+					if in && !filled {
+						t.Errorf("height %d, cursor %d: a panel is drawn with no row:\n%s", h, sel, strings.Join(rows, "\n"))
+					}
+					in = false
+				case in && (strings.Contains(r, "task ") || strings.Contains(r, "later ")):
+					filled = true
+				}
+			}
+		}
+	}
+}
+
 // hasMark is whether one of rows is a mark of what lies above or below, which a
 // window of boxes draws inside the box it cuts.
 func hasMark(rows []string, prefix, suffix string) bool {

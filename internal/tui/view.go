@@ -448,7 +448,10 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// The window moves down a row, and stops at the cursor's row, which is the
 		// first line of a row of its own: there e is past it.
 		s++
-		for s < n-1 && lines[s].cont {
+		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom) {
+			// Past a row's continuation rows, and past a panel's bottom edge, not
+			// onto it: the panel above has no row in the window then, and is not
+			// drawn.
 			s++
 		}
 	}
@@ -492,6 +495,11 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 	}
 	for e := min(n, s+h); e > s; e-- {
 		if e < n && lines[e].cont && !split {
+			continue
+		}
+		if e < n && (lines[e-1].box == boxTop || lines[e-1].names) && lines[e].box != boxBottom {
+			// A window does not end on a panel's top edge or names: the panel
+			// would be drawn with no row in it.
 			continue
 		}
 		bottom := 0
