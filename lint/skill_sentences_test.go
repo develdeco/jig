@@ -392,3 +392,19 @@ func TestRunFigureSentences(t *testing.T) {
 	wantAll(t, "skills/intake", skillFile(t, "intake"),
 		"the last shipped tickets' files, bytes, builder peak, reviewed rounds and return to build")
 }
+
+// TestIntakeRuleStates pins the clause that has each brief rule name the states
+// it ranges over, in every shape, and the bug and test diet rules that moved to
+// the shapes reference to make room for it.
+func TestIntakeRuleStates(t *testing.T) {
+	core := skillFile(t, "intake")
+	wantAll(t, "the Three shapes section", section(t, core, "## Three shapes", "## Seams"),
+		"In all three shapes, each brief rule names the states it ranges over, in the rule itself: what the code must handle and what the review checks, never a list of tests.",
+		"For states that come back from ticket to ticket, read what the project's own docs (its contributing guide or agent instructions) name, where they name any.",
+		"Read `jig skill intake shapes` when the work is a bug or a test diet.",
+	)
+	wantAll(t, "skills/intake/references/shapes", skillFile(t, "intake", "shapes"),
+		"A test diet is a refactor: its PR names each removed test's seam test and `go test -cover` before/after.",
+		"A bug has no REPRO slice: jig verifies a slice only when its oracle passes, so one red before any fix could never go green. The fix slice's first commit adds the repro test, red on the base; the fix commit turns it green, and the slice's oracle runs that test.",
+	)
+}
