@@ -176,7 +176,7 @@ type TrackerRecord struct {
 	// Flat is set for a record read from the flat layout, <entry>.yaml beside
 	// its link, which the next sync moves into the entry's folder.
 	Flat bool
-	// Ticket is the ticket the record names, as ResolveTicket gives it (an
+	// Ticket is the ticket the record names, as ResolveRecorded gives it (an
 	// alias in the file is followed to the ticket's current id), or "".
 	Ticket string
 	// Named is Ticket as the file spells it.
@@ -364,7 +364,7 @@ func (s *Store) TrackerRecords() ([]TrackerRecord, error) {
 }
 
 // TrackerRecordsFor reads the records that name o, in path order. A record's
-// ticket is resolved through ResolveTicket, so o.Ticket is the ticket's
+// ticket is resolved through ResolveRecorded, so o.Ticket is the ticket's
 // current id and a record written under an old id still finds it.
 func (s *Store) TrackerRecordsFor(o TrackerOwner) ([]TrackerRecord, error) {
 	idx, err := s.trackerRecordIndex()
@@ -487,7 +487,7 @@ func (s *Store) readTrackerRecord(rel string) TrackerRecord {
 	rec.Named, rec.Chart, rec.Fields = named, chart, fields
 	rec.Ticket = named
 	if named != "" {
-		if resolved, err := s.ResolveTicket(named); err == nil {
+		if resolved, err := s.ResolveRecorded(named); err == nil {
 			rec.Ticket = resolved
 		}
 	}

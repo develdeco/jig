@@ -342,7 +342,7 @@ func (l *locator) attachTicket(st *store.Store) error {
 	if w.Branch == "" {
 		return nil
 	}
-	id, how, err := st.TicketForBranch(w.Branch)
+	id, how, err := st.TicketForBranch(w.Branch, trackerRepoFor(w.StorePath, w.Branch))
 	switch {
 	case err != nil:
 		// A store that cannot say which ticket a branch leads with must not
@@ -358,6 +358,22 @@ func (l *locator) attachTicket(st *store.Store) error {
 		l.explain("ticket: %s (branch %s)", id, w.Branch)
 	}
 	return nil
+}
+
+// trackerRepoFor is the repo of the project's GitHub tracker that binding
+// branch asks about: read only for a branch an issue number leads, and from
+// the store's own config, which is where the tracker is declared, so no marker
+// is read. "" when there is none or the config cannot be read; the branch is
+// then looked up across the store.
+func trackerRepoFor(storePath, branch string) string {
+	if store.BranchLeadIssue(branch) == "" {
+		return ""
+	}
+	cfg, err := project.LoadStoreConfig(storePath)
+	if err != nil {
+		return ""
+	}
+	return cfg.TrackerRepo()
 }
 
 // claimedSlice is the slice session's latest claim line on ticket names, ""

@@ -30,7 +30,7 @@ func recordBranch(w work) (string, error) {
 	if rec.Adopted() {
 		return "", nil
 	}
-	if id, _, err := w.St.TicketForBranch(branch); err != nil || id != "" {
+	if id, _, err := w.St.TicketForBranch(branch, w.Cfg.TrackerRepo()); err != nil || id != "" {
 		return "", nil
 	}
 	if w.St.CheckAdoptableBranch(w.Ticket, branch, targetBranch(w)) != nil {

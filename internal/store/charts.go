@@ -221,6 +221,36 @@ func (s *Store) TasksUnder(container string, rec Ticket) ([]string, error) {
 	return nil, nil
 }
 
+// ListedTasksUnder is TasksUnder of the multi-task container as its charts
+// tell it: the tasks whose parent it is among the entries of the charts that
+// list it, in chart order, so no ticket those charts do not name is read. A
+// task whose record names container as its parent and that no such chart lists
+// is not found.
+func (s *Store) ListedTasksUnder(container string) ([]string, error) {
+	listings, err := s.ChartsListing(container)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range listings {
+		cf, err := s.readChartFile(l.Chart)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range cf.Tickets {
+			if e.ID == "" || seen[e.ID] {
+				continue
+			}
+			seen[e.ID] = true
+			if r, err := s.ReadTicket(e.ID); err == nil && r.Parent == container && r.KindOrDefault() == KindTask {
+				out = append(out, e.ID)
+			}
+		}
+	}
+	return out, nil
+}
+
 // ReadChart reads charts/<name>/tickets.yaml. An absent file is an error.
 func (s *Store) ReadChart(name string) ([]ChartEntry, error) {
 	path := s.ChartFile(name)

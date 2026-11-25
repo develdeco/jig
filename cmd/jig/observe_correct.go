@@ -47,7 +47,7 @@ func correctionNotes(c observe.NoteCtx) ([]observe.Note, error) {
 		Journal:    c.Journal,
 		// What the ticket is stacked on is read with no host to ask: a hook
 		// does not wait on the network.
-		Stack: func() (stack.Plan, error) { return locatedStack(nil, c.Where, c.Store, c.JigHome) },
+		Stack: func() (stack.Plan, error) { return notedStack(c.Where, c.Store, c.JigHome) },
 	})
 	notes := make([]observe.Note, len(found))
 	for i, n := range found {

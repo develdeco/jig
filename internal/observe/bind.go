@@ -1,9 +1,6 @@
 package observe
 
 import (
-	"os"
-
-	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,7 +9,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/ledger"
 	"github.com/develdeco/jig/internal/locate"
-	"github.com/develdeco/jig/internal/store"
 )
 
 // A tool call is written on the ticket it belongs to, by the first of:
@@ -279,6 +275,9 @@ func (h *handler) ticketNamed(word string) string {
 		return word // its folder says so: no ticket list is read
 	}
 	if locate.RefShaped(word) {
+		if t, ok := locate.HeldItemTicket(h.st, h.cfg, word); ok {
+			return t // the item's record says so: no other record or ticket is read
+		}
 		if it, err := locate.ResolveItem(h.st, h.cfg, word); err == nil && it != nil && it.Ticket != "" {
 			return it.Ticket
 		}
@@ -437,45 +436,18 @@ func resolveDir(dir, from, fallback string) string {
 	return dir
 }
 
-// ticketAt is the ticket the branch checked out in dir binds, "" for none.
+// ticketAt is the ticket the branch checked out in dir binds, as the branch
+// of the event's own directory is bound (TicketForBranch), "" for none.
 func (h *handler) ticketAt(dir string) string {
 	branch, ok := gitx.HeadBranch(dir)
 	if !ok || branch == "" || h.st == nil {
 		return ""
 	}
-	if lead := store.BranchLeadID(branch); lead != "" && h.st.TicketExists(lead) {
-		return lead // its folder says so: no ticket list is read
-	}
-	if lead := store.BranchLeadIssue(branch); lead != "" {
-		return h.trackerOwner(lead)
-	}
-	id, _, err := h.st.TicketForBranch(branch)
+	id, _, err := h.st.TicketForBranch(branch, h.cfg.TrackerRepo())
 	if err != nil {
 		return ""
 	}
 	return id
-}
-
-// trackerOwner is the ticket the one tracker record of issue number n names,
-// read from its own file: TicketForBranch walks every ticket and tracker file
-// to find it. A store with no GitHub tracker, a number with no record, and a
-// record that names no ticket the store holds are none.
-func (h *handler) trackerOwner(n string) string {
-	if h.cfg.GitHub == nil {
-		return ""
-	}
-	entry := store.TrackerEntry{Provider: store.ProviderGitHub, Scope: strings.ToLower(h.cfg.GitHub.Repo), ID: n}
-	data, err := os.ReadFile(h.st.TrackerRecordPath(entry))
-	if err != nil {
-		return ""
-	}
-	var rec struct {
-		Ticket string `yaml:"ticket"`
-	}
-	if yaml.Unmarshal(data, &rec) != nil || rec.Ticket == "" || !h.st.TicketExists(rec.Ticket) {
-		return ""
-	}
-	return rec.Ticket
 }
 
 // leadingCd is the directory a command line that starts with `cd <dir> &&`

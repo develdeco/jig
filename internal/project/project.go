@@ -451,6 +451,16 @@ func deriveProjectKey(name string) (string, error) {
 	return key, nil
 }
 
+// TrackerRepo is the repo of the project's GitHub tracker, owner/name, "" when
+// it has none: the repo whose tracker record settles a branch an issue number
+// leads (store.TicketForBranch).
+func (c Config) TrackerRepo() string {
+	if c.GitHub == nil {
+		return ""
+	}
+	return c.GitHub.Repo
+}
+
 // ResolveKey resolves the key to mint under: key itself when non-empty, or
 // the project's one declared key when it declares exactly one and key is
 // empty. It refuses - before anything is minted - an empty key when the

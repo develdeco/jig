@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
@@ -47,7 +48,7 @@ func TestTicketForBranch(t *testing.T) {
 		{"jig-1-lowercase", "", ""},
 		{"jig/jig/JIG-1", "", ""}, // only one prefix is stripped
 	} {
-		id, how, err := st.TicketForBranch(tc.branch)
+		id, how, err := st.TicketForBranch(tc.branch, "")
 		if err != nil {
 			t.Errorf("TicketForBranch(%q): %v", tc.branch, err)
 			continue
@@ -67,10 +68,121 @@ func TestTicketForBranchRefusesAnAmbiguousLead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	id, how, err := st.TicketForBranch("jig/T-9-foo")
+	id, how, err := st.TicketForBranch("jig/T-9-foo", "")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "TICKET_ALIAS_COLLISION" {
 		t.Fatalf("TicketForBranch = %q, %q, %v; want TICKET_ALIAS_COLLISION", id, how, err)
+	}
+}
+
+// TestTicketForBranchBindsAHeldIDWithNoDuplicateCheck: a branch led by the id
+// of a ticket the store holds binds it, whatever another ticket lists as an
+// old id; the same id typed to a command is still refused, and the whole-store
+// check still reports it. An id whose folder holds only jig's own lock and
+// temporary files is no ticket held, and is looked up across the store.
+func TestTicketForBranchBindsAHeldIDWithNoDuplicateCheck(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for id, rec := range map[string]Ticket{
+		"JIG-1": {Title: "Held"},
+		"JIG-2": {Title: "Lists the held id", Aliases: []string{"JIG-1"}},
+	} {
+		if err := st.CreateTicketRecord(id, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if id, how, err := st.TicketForBranch("JIG-1-work", ""); err != nil || id != "JIG-1" || how != "id" {
+		t.Errorf("TicketForBranch(JIG-1-work) = %q, %q, %v; want JIG-1, id", id, how, err)
+	}
+	if got := st.TicketsForBranches([]string{"jig/JIG-1"}, ""); got["jig/JIG-1"] != "JIG-1" {
+		t.Errorf("TicketsForBranches = %v, want jig/JIG-1 bound to JIG-1", got)
+	}
+	if got, err := st.ResolveRecorded("JIG-1"); err != nil || got != "JIG-1" {
+		t.Errorf("ResolveRecorded(JIG-1) = %q, %v; want JIG-1", got, err)
+	}
+	var ae *axi.Error
+	if got, err := st.ResolveTicket("JIG-1"); !errors.As(err, &ae) || ae.Code != "TICKET_ALIAS_COLLISION" {
+		t.Errorf("ResolveTicket(JIG-1) = %q, %v; want TICKET_ALIAS_COLLISION", got, err)
+	}
+	if problems, err := st.CheckAliases(); err != nil || len(problems) != 1 {
+		t.Errorf("CheckAliases = %v, %v; want the one clash", problems, err)
+	}
+
+	st = &Store{Root: t.TempDir()}
+	if err := st.CreateTicketRecord("JIG-2", Ticket{Title: "Renamed", Aliases: []string{"OLD-5"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.ResolveRecorded("OLD-5"); err != nil || got != "JIG-2" {
+		t.Errorf("ResolveRecorded(OLD-5) = %q, %v; want JIG-2", got, err)
+	}
+	// What a removed ticket leaves behind is looked up as before: its folder
+	// still claims its id, which the other ticket lists too.
+	if err := AtomicWrite(filepath.Join(st.TicketDir("OLD-5"), "ticket.yaml.lock"), nil); err != nil {
+		t.Fatal(err)
+	}
+	st.invalidateAliasClaims()
+	if id, how, err := st.TicketForBranch("OLD-5-x", ""); !errors.As(err, &ae) || ae.Code != "TICKET_ALIAS_COLLISION" {
+		t.Errorf("TicketForBranch(OLD-5-x) over a lock-only folder = %q, %q, %v; want the lookup across the store and its refusal", id, how, err)
+	}
+}
+
+// TestTicketForBranchTheProjectsRecordSettlesAnIssueNumber: the record of
+// the item in the project's own tracker repo decides an issue-led branch with
+// no other record read, so another repository's same number is no collision.
+// Every state that record does not settle is looked up across the store.
+func TestTicketForBranchTheProjectsRecordSettlesAnIssueNumber(t *testing.T) {
+	st := &Store{Root: t.TempDir()}
+	for id, rec := range map[string]Ticket{
+		"JIG-1": {Title: "Ours"},
+		"JIG-2": {Title: "Elsewhere", Aliases: []string{"OLD-9"}},
+	} {
+		if err := st.CreateTicketRecord(id, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record := func(scope, number, text string) {
+		t.Helper()
+		e := TrackerEntry{Provider: ProviderGitHub, Scope: scope, ID: number}
+		if err := AtomicWrite(st.TrackerRecordPath(e), []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+		st.ReloadTrackerTree()
+	}
+	record("acme/tracking", "48", "ticket: JIG-1\nrepo: acme/tracking\nissue: 48\n")
+	record("acme/elsewhere", "48", "ticket: JIG-2\nrepo: acme/elsewhere\nissue: 48\n")
+	if id, how, err := st.TicketForBranch("48-work", "Acme/Tracking"); err != nil || id != "JIG-1" || how != "remote" {
+		t.Errorf("TicketForBranch(48-work) = %q, %q, %v; want JIG-1, remote", id, how, err)
+	}
+	if got := st.TicketsForBranches([]string{"48-work"}, "acme/tracking"); got["48-work"] != "JIG-1" {
+		t.Errorf("TicketsForBranches = %v, want 48-work bound to JIG-1", got)
+	}
+	var ae *axi.Error
+	for _, repo := range []string{"", "acme/nowhere"} {
+		if id, how, err := st.TicketForBranch("48-work", repo); !errors.As(err, &ae) || ae.Code != "TICKET_REMOTE_ID_COLLISION" {
+			t.Errorf("TicketForBranch(48-work, %q) = %q, %q, %v; want TICKET_REMOTE_ID_COLLISION", repo, id, how, err)
+		}
+	}
+
+	for name, text := range map[string]string{
+		"names a chart":       "chart: plan\nrepo: acme/tracking\nissue: 50\n",
+		"names no ticket":     "repo: acme/tracking\nissue: 50\n",
+		"names a gone ticket": "ticket: JIG-9\nrepo: acme/tracking\nissue: 50\n",
+		"cannot be read":      "ticket: [unclosed\n",
+	} {
+		record("acme/tracking", "50", text)
+		if got, ok := st.ItemTicket("acme/tracking", "50"); ok {
+			t.Errorf("ItemTicket of a record that %s = %q, want it unsettled", name, got)
+		}
+		if id, _, err := st.TicketForBranch("50-work", "acme/tracking"); err != nil || id != "" {
+			t.Errorf("TicketForBranch over a record that %s = %q, %v; want nothing bound", name, id, err)
+		}
+	}
+	// A record written with an old id still binds its ticket, by the lookup.
+	record("acme/tracking", "51", "ticket: OLD-9\nrepo: acme/tracking\nissue: 51\n")
+	if got, ok := st.ItemTicket("acme/tracking", "51"); ok {
+		t.Errorf("ItemTicket of a record with an old id = %q, want it unsettled", got)
+	}
+	if id, how, err := st.TicketForBranch("51-work", "acme/tracking"); err != nil || id != "JIG-2" || how != "remote" {
+		t.Errorf("TicketForBranch(51-work) = %q, %q, %v; want JIG-2, remote", id, how, err)
 	}
 }
 
@@ -132,10 +244,10 @@ func TestTicketsForBranches(t *testing.T) {
 	}
 	mirrorTo(t, st, "JIG-5", "acme/two", 7)
 	branches := []string{"jig/JIG-1", "JIG-1-foo", "OLD-5-x", "main", "feature/JIG-1", "JIG-9-nobody", "102-an-issue", "jig/102-an-issue", "103-unmirrored", "7-shared"}
-	got := st.TicketsForBranches(branches)
+	got := st.TicketsForBranches(branches, "")
 	want := map[string]string{}
 	for _, b := range branches {
-		if id, _, err := st.TicketForBranch(b); err == nil && id != "" {
+		if id, _, err := st.TicketForBranch(b, ""); err == nil && id != "" {
 			want[b] = id
 		}
 	}

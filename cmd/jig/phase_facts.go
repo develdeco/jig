@@ -247,7 +247,9 @@ func phaseFactsOf(st *store.Store, ticket string, seen map[string]bool, merges m
 
 	for _, b := range rec.BlockedBy {
 		blocker := b.Ticket
-		if resolved, err := st.ResolveTicket(b.Ticket); err == nil {
+		// A file edit derives the phase: a blocker the store holds is read
+		// by its own folder, with no other ticket.
+		if resolved, err := st.ResolveRecorded(b.Ticket); err == nil {
 			blocker = resolved
 		}
 		p, err := blockerProblem(st, ticket, blocker, b.Kind, claimDeps{merges: merges, issue: issue})

@@ -59,6 +59,39 @@ func writeStoreFile(t *testing.T, st *store.Store, rel, content string) {
 	}
 }
 
+// TestToolCallTellsAStackedTicketItsParentMoved: a ticket with a stacked
+// blocker whose branch moved past the ticket's hears to restack at its next
+// tool call.
+func TestToolCallTellsAStackedTicketItsParentMoved(t *testing.T) {
+	t.Parallel()
+	fx, e, st := namedReadsRig(t, "parent-work")
+	commit := func(name string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(fx.RepoDir, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range [][]string{{"add", "--", name}, {"commit", "-q", "-m", name}} {
+			if _, err := gitx.Run(fx.RepoDir, a...); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	commit("parent.txt")
+	if _, err := gitx.Run(fx.RepoDir, "checkout", "-q", "-b", "JIG-1-child", "main"); err != nil {
+		t.Fatal(err)
+	}
+	commit("child.txt")
+	if err := st.CreateTicketRecord("JIG-2", store.Ticket{Title: "Parent", Branch: "parent-work"}); err != nil {
+		t.Fatal(err)
+	}
+	writeStoreFile(t, st, "tickets/JIG-1/ticket.yaml", "schema_version: 1\ntitle: Child\nblocked_by:\n  - ticket: JIG-2\n    kind: stacked\n")
+
+	out, code := runMain(t, e, hookPayload(t, fx, "PostToolUse", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "git status"}}), "observe", "--harness", "claude")
+	if code != 0 || !strings.Contains(out, "JIG-1 is stacked on JIG-2, whose branch moved past it: restack onto `parent-work`") {
+		t.Errorf("exit %d, the tool hook said %q; want the restack onto parent-work", code, out)
+	}
+}
+
 // TestToolCallReadsOnlyNamedTickets: a tool call reads only the tickets it
 // names. Each case plants, in a ticket or a tracker record the call does not
 // name, something that changes what the hook does if it is read.
