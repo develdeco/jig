@@ -30,7 +30,8 @@ Read `jig skill build claim` before claiming when nobody is watching, when the c
 
 - Work on this slice's goal only. Test at the seams the brief names, with the narrowest tests that cover your change.
 - Read the function, not the file: find code with `grep -n` or the LSP, read that range; for tests, the one you change and one neighbour as the pattern. Make independent reads in one step; an edit's result shows it applied.
-- A fix slice's goal names the findings it fixes. Fix the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches. Before committing, mutate each term the fix adds (operand, condition, constant, return) after your last edit, and run its oracle: a survivor blocks the commit until a test catches it.
+- Edit files with your harness's edit tool, never with a hand-written script that rewrites source.
+- A fix slice's goal names the findings it fixes. Fix the rule each finding names wherever it applies, finding its other instances first, not only where its oracle reaches.
 - Commit as you land, each commit with the trailer that ties it to the slice:
 
 ```
