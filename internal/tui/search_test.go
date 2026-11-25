@@ -164,12 +164,12 @@ func TestSearchUnfoldsFoldedGroups(t *testing.T) {
 	t.Parallel()
 	m := searchStore(t)
 	before := stripANSI(m.View())
-	if !strings.Contains(before, "▸ done (1)") || strings.Contains(before, "CLS-4") {
+	if !strings.Contains(before, "╭─ Done ") || !strings.Contains(before, "enter shows them") || strings.Contains(before, "CLS-4") {
 		t.Fatalf("the closed ticket is not folded away before the search:\n%s", before)
 	}
 	typed(m, "/drop")
 	frame := stripANSI(m.View())
-	if !strings.Contains(frame, "done (1)") || !strings.Contains(frame, "CLS-4") || strings.Contains(frame, "▸ done") || strings.Contains(frame, "enter shows them") {
+	if !strings.Contains(frame, "╭─ Done ") || !strings.Contains(frame, "CLS-4") || strings.Contains(frame, "enter shows them") {
 		t.Errorf("a hit in a folded group is not drawn under its open heading:\n%s", frame)
 	}
 	if sel := m.selected(); sel == nil || sel.id != "CLS-4" {

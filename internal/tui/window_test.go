@@ -10,6 +10,81 @@ import (
 
 // bodyOf is the rows of a frame between the header's rule and the first of the
 // tail's heading or the keys' rule.
+// TestAWindowNeverDrawsAnEmptyPanel: a window whose start falls on a panel's
+// bottom edge starts at the panel's last row, so the panel is drawn with a row
+// and its mark, never as an edge, names and a mark alone.
+func TestAWindowNeverDrawsAnEmptyPanel(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	var pg page
+	pg.boxTop("Run", "")
+	for i := 0; i < 6; i++ {
+		pg.boxLaid(nil, []string{fmt.Sprintf("task %d", i), "  wrapped"})
+	}
+	bottom := len(pg.lines)
+	pg.boxEnd()
+	pg.boxTop("Next", "")
+	for i := 0; i < 20; i++ {
+		pg.boxLaid(nil, []string{fmt.Sprintf("later %d", i)})
+	}
+	pg.boxEnd()
+	for _, start := range []int{bottom, bottom - 1} {
+		rows, from, _ := g.m.windowRows(pg, 0, start, 10, 40, "")
+		text := strings.Join(rows, "\n")
+		if from >= bottom || !strings.Contains(text, "task 5") || !strings.Contains(text, "↑ ") {
+			t.Errorf("a window starting at line %d draws from %d:\n%s", start, from, text)
+		}
+	}
+}
+
+// TestAWindowFollowingTheCursorNeverDrawsAnEmptyPanel: with the cursor in the
+// panel below, at every height and every row, no panel is drawn as its edges,
+// names and marks alone.
+func TestAWindowFollowingTheCursorNeverDrawsAnEmptyPanel(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	var pg page
+	for _, name := range []string{"task", "later"} {
+		pg.boxTop(name, "")
+		for i := 0; i < 8; i++ {
+			pg.boxLaid(&rowRef{kind: rowTicket, id: fmt.Sprintf("%s-%d", name, i)}, []string{fmt.Sprintf("%s %d", name, i), "  wrapped"})
+		}
+		pg.boxEnd()
+	}
+	for h := 8; h <= 24; h++ {
+		for sel := 0; sel < 16; sel++ {
+			start := g.m.windowStart(pg, sel, h, false)
+			rows, _, _ := g.m.windowRows(pg, sel, start, h, 40, "")
+			in, filled := false, false
+			for _, r := range rows {
+				switch {
+				case strings.HasPrefix(r, "  ╭─"):
+					in, filled = true, false
+				case strings.HasPrefix(r, "  ╰"):
+					if in && !filled {
+						t.Errorf("height %d, cursor %d: a panel is drawn with no row:\n%s", h, sel, strings.Join(rows, "\n"))
+					}
+					in = false
+				case in && (strings.Contains(r, "task ") || strings.Contains(r, "later ")):
+					filled = true
+				}
+			}
+		}
+	}
+}
+
+// hasMark is whether one of rows is a mark of what lies above or below, which a
+// window of boxes draws inside the box it cuts.
+func hasMark(rows []string, prefix, suffix string) bool {
+	for _, r := range rows {
+		inner := strings.TrimSpace(strings.Trim(strings.TrimSpace(r), "│"))
+		if strings.HasPrefix(inner, prefix) && strings.HasSuffix(inner, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func bodyOf(view string) []string {
 	lines := strings.Split(view, "\n")
 	var body []string
@@ -109,7 +184,7 @@ func TestWindowMarksWhatLiesAboveAndBelow(t *testing.T) {
 	t.Parallel()
 	g := manyTickets(t, 80, 24)
 	body := bodyOf(g.view())
-	if got := strings.TrimSpace(body[len(body)-1]); !strings.HasPrefix(got, "↓ ") || !strings.HasSuffix(got, " more") {
+	if !hasMark(body[len(body)-2:], "↓ ", " more") {
 		t.Errorf("the top of a long page does not end with a mark of what is below:\n%s", g.view())
 	}
 	for _, l := range body {
@@ -120,10 +195,10 @@ func TestWindowMarksWhatLiesAboveAndBelow(t *testing.T) {
 	g.press("down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down", "down")
 	view := g.view()
 	body = bodyOf(view)
-	if got := strings.TrimSpace(body[0]); !strings.HasPrefix(got, "↑ ") || !strings.HasSuffix(got, " more") {
+	if !hasMark(body[:3], "↑ ", " more") {
 		t.Errorf("the middle of a long page does not start with a mark of what is above:\n%s", view)
 	}
-	if got := strings.TrimSpace(body[len(body)-1]); !strings.HasPrefix(got, "↓ ") {
+	if !hasMark(body[len(body)-2:], "↓ ", "") {
 		t.Errorf("the middle of a long page does not end with a mark of what is below:\n%s", view)
 	}
 	if !strings.Contains(view, "▸") || len(strings.Split(view, "\n")) != 24 {
@@ -151,7 +226,7 @@ func TestTheReviewScreenOpenedBelowTheFoldShowsItsMark(t *testing.T) {
 	g.press("end")
 	view := g.view()
 	body := bodyOf(view)
-	if got := strings.TrimSpace(body[0]); !strings.HasPrefix(got, "↑ ") {
+	if !hasMark(body[:3], "↑ ", "") {
 		t.Errorf("the review read from its last row does not start with a mark of what is above:\n%s", view)
 	}
 }
@@ -347,7 +422,7 @@ func TestEveryWindowDrawsTheCursorsRow(t *testing.T) {
 								// A side the window cuts, with a line of text on it, says so.
 								hidden := func(a, b int) bool {
 									for _, ln := range l.pg.lines[a:b] {
-										if ln.box != boxTop && ln.box != boxBottom {
+										if ln.box != boxTop && ln.box != boxBottom && !ln.names {
 											return true
 										}
 									}

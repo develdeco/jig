@@ -451,16 +451,12 @@ var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReview
 // panel's edge stays on the screen and a tall one is filled to its foot.
 func (m *Model) activityPanel(p *page, t *ticket) {
 	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
-	shown, older := cutNewest(all, max(3, m.bodyRows()-m.taken(p)-2))
+	shown, older := cutNewest(all, max(3, m.bodyRows()-m.taken(p)-3))
 	right := ""
 	if older > 0 {
 		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
 	}
-	p.boxTop("Activity", right)
-	if len(all) == 0 {
-		p.boxAdd(m.st.dim("nothing yet"))
-	}
-	cells := make([][]string, len(shown))
+	rows := make([]listRow, len(shown))
 	for i, e := range shown {
 		tag := tagOf(e.step, e.key)
 		if e.step >= 0 {
@@ -468,31 +464,29 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		} else {
 			tag = m.st.dim(tag)
 		}
-		cells[i] = []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}
+		rows[i] = listRow{cells: []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}}
 	}
-	m.boxActivity(p, activityColumns, cells, older, max(3, m.bodyRows()-m.taken(p)-2))
-	p.boxEnd()
+	// The edges and the names take three of the rows the panel has, and the count
+	// of the older lines one more.
+	room := max(3, m.bodyRows()-m.taken(p)-3)
+	spec := listSpec{title: "Activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet", room: room}
+	if older > 0 {
+		spec.room--
+		spec.after = []string{m.olderRow(older)}
+	}
+	m.listPanel(p, spec)
 }
 
 // activityColumns are the columns of an activity line: its time, its tag and
 // what happened.
 var activityColumns = []column{{}, {gap: 1}, {free: true, gap: 1}}
 
+// activityColumnNames name the columns of an activity list.
+var activityColumnNames = []string{"time", "step", "what"}
+
 // chartActivityColumns are a chart's activity line's: its time, the ticket,
 // its tag and what happened.
 var chartActivityColumns = []column{{}, {id: true, gap: 1}, {gap: 1}, {free: true, gap: 1}}
 
-// boxActivity adds the lines of an activity panel, newest first: cells laid
-// out under cols, then the row that counts the older ones when there are any.
-// room is the rows the panel has for both.
-func (m *Model) boxActivity(p *page, cols []column, cells [][]string, older, room int) {
-	if older > 0 {
-		room--
-	}
-	for _, lines := range laidWithin(cols, cells, m.innerWidth(), room) {
-		p.boxLaid(nil, lines)
-	}
-	if older > 0 {
-		p.boxAdd(m.olderRow(older))
-	}
-}
+// chartActivityColumnNames name them.
+var chartActivityColumnNames = []string{"time", "ticket", "step", "what"}

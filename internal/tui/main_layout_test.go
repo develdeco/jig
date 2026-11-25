@@ -96,7 +96,9 @@ var layoutSizes = [][2]int{{60, 20}, {80, 24}, {230, 50}}
 
 // tallSizes are the same widths with a height that shows a screen of several
 // panels whole, for the screens that are longer than a terminal's usual height.
-var tallSizes = [][2]int{{60, 80}, {80, 70}, {230, 50}}
+// A panel's frame and the age column take five cells more than a loose list did,
+// so the narrow terminal is as wide as a long id needs beside them.
+var tallSizes = [][2]int{{64, 80}, {80, 70}, {230, 50}}
 
 // TestMainLaidOutAtThreeSizes: main draws every id whole and every title whole
 // (its words in order across the row and its continuation rows), or ending in

@@ -3,15 +3,14 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   ╭─ Map ──────────────────────────────────────────────── charts/ideas/map.md ─╮
   │  destination  A customer takes a coupon code from the cart to a discounted │
   │               order.                                                       │
-  │  decided      ✓ Codes are single use                                       │
-  │               ✓ Discounts apply before tax                                 │
+  │  decided      ✓ Codes are single use  +1 more                              │
   │  fog          ~ Stacking two codes                                         │
   │               ~ Codes in other currencies                                  │
-  │  out of scope · Gift cards                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
-  │  ·  Gift cards      fog · not graduated                                    │
-  │  ·  Loyalty points  fog · not graduated                                    │
+  │    ticket  title           steps  where it stands      age                 │
+  │  ·         Gift cards             fog · not graduated                      │
+  │  ·         Loyalty points         fog · not graduated                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────── not started ─╮
   │  next run `jig graduate ideas`                                             │
@@ -19,6 +18,7 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   ╭─ Activity ─────────────────────────────────────────────────────────────────╮
   │  nothing yet                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
+
 
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · t tail · r refresh

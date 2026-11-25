@@ -1,23 +1,23 @@
 jig  demo › JIG-2 (1 of 3)  Config loader                      ! review findings
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 3 of 5 · worked 1m 00s ─╮
-  │  ✓ 1 Brief        no brief on record                                       │
-  │  ✓ 2 Build   30s  1 slice green, each verified by jig                      │
-  │▸ ! 3 Review  30s  round 1: 2 asks wait for you        48m 00s              │
-  │  ○ 4 Publish      after a clean review                                     │
-  │  ○ 5 Land         after the publish                                        │
+  │      step    took  where it stands                                         │
+  │  ✓ 1 Brief         no brief on record                                      │
+  │  ✓ 2 Build   30s   1 slice green, each verified by jig                     │
+  │▸ ! 3 Review  30s   round 1: 2 asks wait for you        48m 00s             │
+  │  ○ 4 Publish       after a clean review                                    │
+  │  ○ 5 Land          after the publish                                       │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-  needs you
-  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      Unchecked error · a failed write would pass silently · needs a human
-  ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-      Name shadows import · the import is hidden in this scope
-
+  ╭─ Needs you ──────────────────────────────────────────────────── 2 waiting ─╮
+  │  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1                   │
+  │      Unchecked error · a failed write would pass silently · needs a human  │
+  │  ! low   beta/b.go:9   undecided  Name shadows import  r1-f2               │
+  │      Name shadows import · the import is hidden in this scope              │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ───────────────────────────────────────────────── latest 2 of 4 ─╮
+  │  time     step      what                                                   │
   │  09:11:30 review·r1 ! reviewer finished with findings                      │
-  │  09:11:00 review·r1 ◎ opened                                               │
-  │  ↓ 2 older                                                                 │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · enter open · k keep · d dismiss

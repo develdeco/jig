@@ -53,9 +53,6 @@ func (g mainGroup) name() string { return groupNames[g] }
 // folds is whether the group is one fold row until the person opens it.
 func (g mainGroup) folds() bool { return g == groupNotStarted || g == groupDone }
 
-// heading is the group's name with the number of rows it holds.
-func (g mainGroup) heading(n int) string { return groupNames[g] + " (" + strconv.Itoa(n) + ")" }
-
 // queueRow is a top-level row of the project's list: a ticket, or a chart that
 // plans no issue.
 type queueRow struct {
@@ -388,7 +385,7 @@ func (m *Model) containerRow(own queueRow, rows map[string]queueRow, drawn map[s
 // otherwise.
 func (m *Model) chartRow(name string, c *chart) queueRow {
 	row := queueRow{id: name, key: name, chart: true, group: groupCharts}
-	state, _ := m.chartStatus(c, m.chartRows(c))
+	state, _ := m.chartStatus(c, m.statusRows(c))
 	_, live := c.live(m.w, m.now())
 	for _, id := range c.ids() {
 		if t := m.w.tickets[id]; t != nil {

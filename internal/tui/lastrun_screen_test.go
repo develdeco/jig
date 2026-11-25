@@ -33,7 +33,7 @@ func TestBuildScreenSaysWhetherTheLastRunCoversTheSlicesLastCommit(t *testing.T)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", ""))).press("enter")
 	text := pageText(g)
 	for _, want := range []string{"last run: pass · covers: yes", "last run: fail · covers: no: slice's last commit is cccccccccccc"} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(readWords(text), want) {
 			t.Errorf("the build screen lacks %q:\n%s", want, text)
 		}
 	}

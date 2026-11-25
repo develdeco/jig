@@ -106,7 +106,7 @@ func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 	keys.Write([]byte("\x1b[A")) // the review step, above the publish one the cursor starts on
 	keys.Write([]byte("\r"))
 	frames.until(t, "2 probes · 1 caught · 1 survived · "+strconv.Itoa(len(*ff.Unprobed))+" ")
-	frames.until(t, "round 1  "+survivor.File+":"+strconv.Itoa(survivor.From)+"  survived")
+	frames.untilWords(t, "round 1 "+survivor.File+":"+strconv.Itoa(survivor.From)+" survived")
 	frames.until(t, hunkRow)
 	if strings.Contains(frames.String(), "caught in round 2") {
 		t.Errorf("a probe is marked superseded before a later round:\n%s", frames.String())

@@ -1,23 +1,23 @@
 jig  demo                     2 need you · 1 running · 2 waiting · 1 not started
 ────────────────────────────────────────────────────────────────────────────────
-  needs you (2)
-▸ ◇ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"
-  ? checkout  Coupons at checkout  chart  1 of 5 published · 1 needs you
-
-  running (1)
-  ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 2 green · slice s2 is
-                                           being built
-
-  waiting (2)
-  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  Brief: drafted · waiting for your
-                                           approval
-  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your
-                                           approval
-
-  ▸ not started (1) · enter shows them
-
-
-
+  ╭─ Needs you ──────────────────────────────────────────────────────────── 2 ─╮
+  │    ticket  title                steps      where it stands             age │
+  │▸ ◇ JIG-4   Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land   45m │
+  │                                            JIG-4"                          │
+  │  ? checkout  Coupons at checkout  chart  1 of 5 published · 1 needs    45m │
+  │                                          you                               │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Running ────────────────────────────────────────────────────────────── 1 ─╮
+  │    ticket  title                steps      where it stands             age │
+  │  ◐ JIG-5   Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 2 green ·       57m │
+  │                                            slice s2 is being built         │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Waiting ────────────────────────────────────────────────────────────── 2 ─╮
+  │    ticket  title                steps      where it stands             age │
+  │  ◐ JIG-6   Remove a coupon      ◐ ○ ○ ○ ○  Brief: drafted · waiting for    │
+  │                                            your approval                   │
+  │  ↓ 1 more                                                                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
 ────────────────────────────────────────────────────────────────────────────────
   q quit · ? keys · ↑↓ move · enter open · / search · say "Land JIG-4"

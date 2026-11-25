@@ -7,7 +7,7 @@ import "fmt"
 // whether one needs the person.
 func (m *Model) chartCells(name string) []string {
 	c := m.w.charts[name]
-	rows := m.chartRows(c)
+	rows := m.statusRows(c)
 	total, done, needs := chartProgress(rows)
 	state, _ := m.chartStatus(c, rows)
 	title := c.title()

@@ -191,57 +191,19 @@ func (m *Model) runSearch(c *mainCache, sc *searchCache, query string) *searchRe
 	for g := range q.byGroup {
 		q.byGroup[g] = run.keep(c.q.byGroup[g])
 	}
-	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}}
-	addRow := func(r queueRow) {
-		at := len(p.lines)
-		p.addRow(r.ref(), "")
+	// The panels are main's, drawn from the rows that match with the letters the
+	// terms matched lit over each cell.
+	p, _ := m.draftMain(q, map[string]bool{}, &searchDraw{cellOf: func(r queueRow) []string {
 		own := sc.ownOf(m, r)
-		cells := make([]string, len(c.cellsOf(m, r)))
-		for i, cell := range c.cellsOf(m, r) {
+		built := c.cellsOf(m, r)
+		cells := make([]string, len(built))
+		for i, cell := range built {
 			cells[i] = m.st.lit(cell, terms, own)
 		}
-		p.cells[at], p.chart[at] = cells, r.chart
-	}
-	rows := func(rows []queueRow) {
-		var add func(rows []queueRow)
-		add = func(rows []queueRow) {
-			for _, r := range rows {
-				addRow(r)
-				add(r.kids)
-			}
-		}
-		add(rows)
-	}
-	if q.byChart {
-		for _, s := range q.sections {
-			if len(p.lines) > 0 {
-				p.add("")
-			}
-			addRow(s)
-			rows(s.kids)
-		}
-		if n := q.rowsIn(); n > 0 {
-			if len(p.lines) > 0 {
-				p.add("")
-			}
-			p.add(m.st.dim("no chart (" + strconv.Itoa(n) + ")"))
-			for g := mainGroup(0); g < groupCount; g++ {
-				rows(q.byGroup[g])
-			}
-		}
-	} else {
-		for g := mainGroup(0); g < groupCount; g++ {
-			if len(q.byGroup[g]) == 0 {
-				continue
-			}
-			if len(p.lines) > 0 {
-				p.add("")
-			}
-			p.add(m.st.dim(g.heading(len(q.byGroup[g]))))
-			rows(q.byGroup[g])
-		}
-	}
-	if len(p.lines) == 0 {
+		return cells
+	}})
+	if len(p.cells) == 0 {
+		p = &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, names: map[int]bool{}}
 		p.add(m.st.dim("nothing matches"))
 	}
 	// The rows are laid out by the allocator, as main's are; the letters lit are

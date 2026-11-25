@@ -191,7 +191,7 @@ func TestATimePastAHundredHoursFitsItsColumn(t *testing.T) {
 		t.Errorf("span(99h59m) = %q, want 99h 59m", got)
 	}
 	g := newRig(t, "SHOP-1")
-	row := ansi.Strip(g.m.stepLines([]stepRow{{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}}, 0)[0][0])
+	row := ansi.Strip(layout(stepColumns, [][]string{g.m.stepCells(stepRow{Step: stepBuild, State: StateBuilding, Text: "slice round is being built", Took: ago(332*time.Hour + 51*time.Minute)}, true)}, g.m.innerWidth())[0][0])
 	if !strings.Contains(row, " 332h  slice round") || strings.Contains(row, "…") {
 		t.Errorf("the build row reads %q, want 332h whole before the words", row)
 	}

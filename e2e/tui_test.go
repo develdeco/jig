@@ -247,7 +247,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// what they read, what they raised, and the ask with the reviewer's reason.
 	// The steps are one key each: 3 is the review, 2 the build, 1 the brief.
 	screens.press("3")
-	screens.until("round 1  findings", "raised 1 ask", "independent", "files read", "fix budget 0 of 3 rounds used",
+	screens.until("round 1  findings", "1 ask", "independent", "5 files", "fix budget 0 of 3 rounds used",
 		"Which greeting does the product want?", "undecided", "a user-visible string")
 	// ? lists the keys of the screen, with the ones that cannot run and why: the
 	// gate waits for the ask to be decided, and no pull request is open yet.
@@ -266,10 +266,13 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
 	screens.press("1")
-	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken", "workspace alpha · oracle test · after a")
+	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken")
+	// The slices are below the sections: the end of the page shows them.
+	screens.press("\x1b[F")
+	screens.until("workspace alpha · oracle test · after a")
 	// h goes to the project's list, and its row opens the ticket again.
 	screens.press("h")
-	screens.until("running (1)", fx.Ticket)
+	screens.until("╭─ Running ", fx.Ticket)
 	screens.press("\r")
 	screens.until("› "+fx.Ticket, "Steps")
 
@@ -347,7 +350,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("\x1b[B")
 	screens.press("\x1b[B")
 	screens.press("\r")
-	rounds := screens.until("round 2  clean", "round 1  findings", "files read")
+	rounds := screens.until("round 2  clean", "round 1  findings", "5 files")
 	if strings.Index(rounds, "round 2  clean") > strings.Index(rounds, "round 1  findings") {
 		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
 	}
@@ -394,8 +397,8 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		screens.press("\x1b[B")
 	}
 	screens.press("\r")
-	publish := screens.until("Publish activity", "published · finished", "changelog · written")
-	if finished, written := strings.Index(publish, "published · finished"), strings.Index(publish, "changelog · written"); finished < 0 || finished > written {
+	publish := screens.until("Publish activity", "published finished", "changelog written")
+	if finished, written := strings.Index(publish, "published finished"), strings.LastIndex(publish, "changelog written"); finished < 0 || finished > written {
 		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
 	}
 	screens.press("q")

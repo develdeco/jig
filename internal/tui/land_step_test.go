@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -77,6 +79,7 @@ func TestLandIsTheFifthStep(t *testing.T) {
 func TestLandedLineIsFiledUnderLand(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 40})
 	g.feed(jig2()...)
 	buildTook := g.m.steps(g.m.w.tickets["JIG-2"])[stepBuild].Took
 	g.feed(

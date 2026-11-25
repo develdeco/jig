@@ -14,7 +14,7 @@ var newMark = regexp.MustCompile(`↑ \d+ new`)
 // markedRow is the row of a frame the cursor stands on.
 func markedRow(frame string) string {
 	for _, l := range strings.Split(frame, "\n") {
-		if strings.HasPrefix(l, "▸") {
+		if strings.HasPrefix(l, "▸") || strings.Contains(l, "│▸") {
 			return l
 		}
 	}
@@ -79,12 +79,20 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 		jl(at(42, 0), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 	)
 	after := body()
-	if got := strings.TrimSpace(after[0]); got != "↑ 2 new" {
-		t.Fatalf("the first row reads %q, want \"↑ 2 new\":\n%s", got, g.view())
+	// The count is a row of the box the window cuts, under its top edge and its
+	// names.
+	newAt := -1
+	for i, l := range after {
+		if strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│")) == "↑ 2 new" {
+			newAt = i
+		}
+	}
+	if newAt < 0 || newAt > 3 {
+		t.Fatalf("no row reads \"↑ 2 new\" at the top of the box:\n%s", g.view())
 	}
 	// The lines it showed stay where they were: the count took the place of the
 	// mark that said there was more above.
-	for i := 1; i < len(before)-4; i++ {
+	for i := newAt + 1; i < len(before)-4; i++ {
 		if before[i] != after[i] {
 			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i], g.view())
 		}

@@ -12,8 +12,17 @@ import (
 func drawn(m *Model, msg tea.KeyMsg) string {
 	_, _ = m.Update(msg)
 	frame := stripANSI(m.View())
+	title := ""
 	for _, l := range strings.Split(frame, "\n") {
-		if strings.HasPrefix(l, "▸ ") {
+		if strings.HasPrefix(l, "  ╭─ ") {
+			t, _, _ := strings.Cut(strings.TrimPrefix(l, "  ╭─ "), " ─")
+			title = strings.ToLower(t)
+		}
+		if l = strings.TrimPrefix(l, "  │"); strings.HasPrefix(l, "▸ ") {
+			if strings.Contains(l, "enter shows them") || strings.Contains(l, "enter folds them") {
+				// A fold's row is named by its panel.
+				return title
+			}
 			if f := strings.Fields(l); len(f) > 2 {
 				return f[2]
 			}

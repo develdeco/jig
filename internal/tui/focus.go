@@ -370,7 +370,7 @@ func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack) []field {
 		add("by", dotted(who))
 		if pub := t.publishInfo(); pub != nil {
 			add("branch", strings.Join(nonEmpty(pub.Branch, headWords(pub.Head)), " · "))
-			add("pull req", pub.PR)
+			add("pull req", m.prReading(t, pub.PR))
 		}
 	default:
 		add("held by", dotted(who))

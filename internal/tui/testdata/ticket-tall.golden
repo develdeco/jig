@@ -1,6 +1,7 @@
 jig  demo › BIG-1                                                                ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 8m 20s ─╮
+  │      step    took    where it stands                                                           │
   │  ✓ 1 Brief           no brief on record                                                        │
   │▸ ◐ 2 Build   8m 20s  8 of 12 green · slice s9 is being built · idle since 09:09                │
   │  ○ 3 Review          after the build                                                           │
@@ -8,6 +9,7 @@ jig  demo › BIG-1                                                             
   │  ○ 5 Land            after the publish                                                         │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ───────────────────────────────────────────────────────────────────────── 8 of 12 done ─╮
+  │    sub-step   detail                                                                           │
   │  ✓ slice s1   verified 1111111 · took 40s                                                      │
   │  ✓ slice s2   verified 2222222 · took 1m 00s                                                   │
   │  ✓ slice s3   verified 3333333 · took 1m 00s                                                   │
@@ -26,7 +28,8 @@ jig  demo › BIG-1                                                             
   │  ○ slice s12  ready to build                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 17 of 34 ─╮
+  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 14 of 34 ─╮
+  │  time     step     what                                                                        │
   │  09:09:20 build·s9 · verification requested for 9999999 “Slice s9”                             │
   │  09:09:00 build·s9 ◐ builder took it · Slice s9                                                │
   │  09:08:40 build·s8 ● verified 8888888                                                          │
@@ -41,10 +44,7 @@ jig  demo › BIG-1                                                             
   │  09:06:30 build·s6 ● its oracle passed                                                         │
   │  09:06:20 build·s6 · verification requested for 6666666 “Slice s6”                             │
   │  09:06:00 build·s6 ◐ builder took it · Slice s6                                                │
-  │  09:05:40 build·s5 ● verified 5555555                                                          │
-  │  09:05:30 build·s5 ● its oracle passed                                                         │
-  │  09:05:20 build·s5 · verification requested for 5555555 “Slice s5”                             │
-  │  ↓ 17 older                                                                                    │
+  │  ↓ 20 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · enter open · h main · t tail

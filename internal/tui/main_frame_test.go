@@ -112,7 +112,7 @@ func TestMainDrawsNothingBeforeTheRoster(t *testing.T) {
 	bare := New(cfg)
 	bare.w.apply(jig1())
 	// Its one ticket is nothing the roster said anything of: not started, in its fold.
-	if got := bare.View(); !strings.Contains(got, "not started (1)") || strings.Contains(got, "reading the store") {
+	if got := bare.View(); !strings.Contains(got, "Not started") || strings.Contains(got, "reading the store") {
 		t.Errorf("a model with no runner does not draw the stream:\n%s", got)
 	}
 }

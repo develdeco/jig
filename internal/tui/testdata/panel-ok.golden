@@ -1,22 +1,22 @@
 jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ↑ 7 more
-
-  round 1 findings
-  ◐ medium  alpha/a.go:12  to fix  Close the file  r1-f3
-      a leaked handle fails the next open
-  ○ low     beta/b.go:2    noted   Rename the helper  r1-f4
-      a clearer name, whenever the file is next touched
-
-  asks
-  ! high  alpha/a.go:3  undecided  Unchecked error  r1-f1
-      Unchecked error · a failed write would pass silently · needs a human
-▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2
-      Name shadows import · the import is hidden in this scope
-
+  ╭─ Findings ─────────────────────────────────────────────────────── round 1 ─╮
+  │    risk    where          outcome  title              id                   │
+  │  ↑ 2 more                                                                  │
+  │  ○ low     beta/b.go:2    noted    Rename the helper  r1-f4                │
+  │      a clearer name, whenever the file is next touched                     │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
+  │    risk  where         decision   title                id                  │
+  │  ! high  alpha/a.go:3  undecided  Unchecked error      r1-f1               │
+  │      Unchecked error · a failed write would pass silently · needs a human  │
+  │▸ ! low   beta/b.go:9   undecided  Name shadows import  r1-f2               │
+  │      Name shadows import · the import is hidden in this scope              │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Review activity ──────────────────────────────────────────────────────────╮
-  │  09:11:30 ! round 1 · reviewer finished with findings                      │
-  │  09:11:00 ◎ round 1 · opened                                               │
+  │  time     step      what                                                   │
+  │  09:11:30 ! round 1 reviewer finished with findings                        │
+  │  09:11:00 ◎ round 1 opened                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────

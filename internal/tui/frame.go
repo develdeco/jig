@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // A panel is a run of a page's lines drawn inside a rounded frame, with a
 // title on its top edge and a few words at its right: the steps of a ticket,
@@ -94,11 +98,44 @@ func (p *page) boxEnd() {
 	p.lines = append(p.lines, pline{box: boxBottom})
 }
 
+// edgeKey is a piece of a panel's border and whether the panel is focused.
+type edgeKey struct {
+	focus bool
+	text  string
+}
+
+// edgeCache holds the pieces of border a renderer has drawn, so a frame draws
+// each once however many rows share it.
+type edgeCache struct {
+	r    *lipgloss.Renderer
+	text map[edgeKey]string
+}
+
+// edge is a piece of a panel's border drawn in its color, remembered for the
+// renderer the model draws with.
+func (m *Model) edge(focus bool, text string) string {
+	if m.edges.text == nil || m.edges.r != m.st.r || len(m.edges.text) > 512 {
+		m.edges = edgeCache{r: m.st.r, text: map[edgeKey]string{}}
+	}
+	k := edgeKey{focus, text}
+	if s, ok := m.edges.text[k]; ok {
+		return s
+	}
+	s := m.st.dim(text)
+	if focus {
+		s = m.st.key(text)
+	}
+	m.edges.text[k] = s
+	return s
+}
+
 // frameLine draws a page line of a panel w cells wide, two cells in from the
 // left like every other line; marker is the cursor's mark for a row ("▸ " or
-// two spaces).
-func (m *Model) frameLine(l pline, marker string, w int) string {
+// two spaces). A line is never wider than w, whatever its text.
+func (m *Model) frameLine(l pline, marker string, w int, lit bool) string {
 	inner := w - 7 // "  │" + marker + text + " │"
+	// A focused panel's border is drawn in the key color.
+	edge := func(text string) string { return m.edge(l.focus, text) }
 	switch l.box {
 	case boxTop:
 		title := " " + m.st.bold(l.text) + " "
@@ -111,9 +148,19 @@ func (m *Model) frameLine(l pline, marker string, w int) string {
 			right = ""
 			fill = max(1, w-6-width(title))
 		}
-		return "  " + m.st.dim("╭─") + title + m.st.dim(strings.Repeat("─", fill)) + right + m.st.dim("─╮")
+		return fit("  "+edge("╭─")+title+edge(strings.Repeat("─", fill))+right+edge("─╮"), w)
 	case boxBottom:
-		return "  " + m.st.dim("╰"+strings.Repeat("─", max(0, w-4))+"╯")
+		return "  " + edge("╰"+strings.Repeat("─", max(0, w-4))+"╯")
 	}
-	return "  " + m.st.dim("│") + marker + pad(l.text, max(0, inner)) + " " + m.st.dim("│")
+	body := marker + pad(l.text, max(0, inner)) + " "
+	if lit {
+		// The row is lit from border to border.
+		body = m.st.selectedRow(body, max(0, inner)+3)
+	}
+	line := "  " + edge("│") + body + edge("│")
+	if w < 8 {
+		// A screen with no room for a row's frame cuts it.
+		return fit(line, w)
+	}
+	return line
 }

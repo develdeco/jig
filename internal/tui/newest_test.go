@@ -34,7 +34,12 @@ func panelRows(frame, title string) []string {
 		case in && strings.Contains(l, "╰"):
 			return rows
 		case in:
-			rows = append(rows, strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│")))
+			row := strings.TrimSpace(strings.Trim(strings.TrimSpace(l), "│"))
+			if strings.HasPrefix(row, "time ") {
+				// The names of the columns are no row of the list.
+				continue
+			}
+			rows = append(rows, row)
 		}
 	}
 	return rows
@@ -181,7 +186,7 @@ func TestACutActivityCountsTheOlderRowsBelow(t *testing.T) {
 		g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
 		return g.feed(jig2()...).press("up", "enter").view()
 	}()
-	frames["chart"] = chartScreenRig(t).view()
+	frames["chart"] = chartScreenOfHeight(t, 30).view()
 	titles := map[string]string{"ticket": "Activity", "step": "Publish activity", "chart": "Activity"}
 	for name, frame := range frames {
 		var latest, of int

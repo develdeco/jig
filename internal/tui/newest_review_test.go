@@ -50,11 +50,11 @@ func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 		jl(at(12, 55), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 3, "s-reviewer" }),
 	)...).press("enter")
 	text := pageText(g)
-	rounds, probes, _ := strings.Cut(text, "\nprobes\n")
+	rounds, probes, _ := strings.Cut(text, "Probes\n")
 	inOrder(t, "rounds", rounds, "round 3 ", "round 2 ", "round 1 ")
-	inOrder(t, "probes", probes,
-		"round 3  delta/d.go:1", "round 2  gamma/c.go:5", "round 2  gamma/c.go:7",
-		"round 1  beta/b.go:4", "round 1  alpha/a.go:9", "round 1  alpha/a.go:20")
+	inOrder(t, "probes", readWords(probes),
+		"round 3 delta/d.go:1", "round 2 gamma/c.go:5", "round 2 gamma/c.go:7",
+		"round 1 beta/b.go:4", "round 1 alpha/a.go:9", "round 1 alpha/a.go:20")
 }
 
 // TestTheRoundUnderWayReadsAboveTheClosedOnes: a round that is open and has no
@@ -66,8 +66,8 @@ func TestTheRoundUnderWayReadsAboveTheClosedOnes(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	rounds, _, _ := strings.Cut(pageText(g), "\nasks\n")
-	inOrder(t, "rounds", rounds, "round 2  open", "round 1  findings")
+	rounds, _, _ := strings.Cut(pageText(g), "\nAsks\n")
+	inOrder(t, "rounds", readWords(rounds), "round 2 open", "round 1 findings")
 }
 
 // TestFixSlicesSentBackReadNewestFirst: the fix slices a round sent back are
@@ -81,7 +81,7 @@ func TestFixSlicesSentBackReadNewestFirst(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	inOrder(t, "fix slices", pageText(g), "sent back to the build", "fix-2  round 2", "fix-1  round 1")
+	inOrder(t, "fix slices", readWords(pageText(g)), "Sent back", "fix-2 round 2", "fix-1 round 1")
 	var slices []string
 	for _, r := range g.m.page().refs() {
 		if r.kind == rowSlice {

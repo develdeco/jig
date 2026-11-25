@@ -30,6 +30,33 @@ func (o *tuiOut) String() string {
 	return o.buf.String()
 }
 
+// untilFold waits for the last screen's fold panel titled title to be state.
+func (o *tuiOut) untilFold(t *testing.T, title, state string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if foldState(lastScreen(o.String()), title) == state {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the fold %s never was %s; the last screen was:\n%s", title, state, lastScreen(o.String()))
+}
+
+// untilWords waits for the output to hold want as words: a panel's frame and the
+// padding of its columns are no part of what a screen says.
+func (o *tuiOut) untilWords(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(o.String(), "│", " ")), " "), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the screens never showed %q; they showed:\n%s", want, o.String())
+}
+
 // until waits for the output to hold want.
 func (o *tuiOut) until(t *testing.T, want string) {
 	t.Helper()
@@ -48,9 +75,19 @@ func (o *tuiOut) until(t *testing.T, want string) {
 // ticket has a row on the screens, and leaves the cursor on the last row.
 func showFolds(t *testing.T, keys io.Writer, out *tuiOut) {
 	t.Helper()
-	out.until(t, "done (")
+	// The end of the list is below the first screen: the cursor goes there until
+	// the done panel shows.
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(lastScreen(out.String()), "╭─ Done ") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the screens never showed the done panel; they showed:\n%s", out.String())
+		}
+		keys.Write([]byte("\x1b[F"))
+		time.Sleep(50 * time.Millisecond)
+	}
 	for _, group := range []string{"not started", "done"} {
-		if !strings.Contains(lastScreen(out.String()), "▸ "+group+" (") {
+		title := strings.ToUpper(group[:1]) + group[1:]
+		if foldState(lastScreen(out.String()), title) != "closed" {
 			continue
 		}
 		// The done group's fold row is the last row, and the other's the one
@@ -60,7 +97,7 @@ func showFolds(t *testing.T, keys io.Writer, out *tuiOut) {
 			keys.Write([]byte("\x1b[A"))
 		}
 		keys.Write([]byte("\r"))
-		out.until(t, "▾ "+group+" (")
+		out.untilFold(t, title, "open")
 	}
 	// The list is longer than the screen: the last rows are read with the
 	// cursor on the last one, the first ones from the screens before.

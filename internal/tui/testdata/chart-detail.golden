@@ -6,15 +6,15 @@ jig  demo › checkout  Coupons at checkout                                     
   │               ✓ Discounts apply before tax                                                     │
   │  fog          ~ Stacking two codes                                                             │
   │               ~ Codes in other currencies                                                      │
-  │  out of scope · Gift cards                                                                     │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────────────────────────── 1 of 5 published ─╮
-  │  ◇ JIG-4  Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"                     │
-  │▸ ◐ JIG-5  Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is being built        │
-  │  ◐ JIG-8  Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                   │
-  │  ◐ JIG-6  Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                     │
-  │  ◐ JIG-7  Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open              │
-  │  ·        Stack two coupons               fog · not graduated                                  │
+  │    ticket  title                steps      where it stands                                age  │
+  │  ◇ JIG-4   Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"               45m  │
+  │▸ ◐ JIG-5   Apply a coupon code  ✓ ◐ ○ ○ ○  Build: 1 of 3 green · slice s2 is being built  56m  │
+  │  ◐ JIG-8   Show the discount    ◐ ○ ○ ○ ○  ready · brief next                                  │
+  │  ◐ JIG-6   Remove a coupon      ◐ ○ ○ ○ ○  stacked on JIG-5                                    │
+  │  ◐ JIG-7   Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open             │
+  │  ·         Stack two coupons               fog · not graduated                                 │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────────────────────────── JIG-5 ─╮
   │  slice s2 · claimed · builder · agent 4f2a91c0                                                 │
@@ -27,10 +27,10 @@ jig  demo › checkout  Coupons at checkout                                     
   │  wave 2  JIG-6                                                                                 │
   │  ends at JIG-7 waits for JIG-4 to merge · PR #7 open                                           │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ──────────────────────────────────────────────────────────────────── latest 2 of 20 ─╮
-  │  09:14:21 JIG-4 publish·done ● finished                                                        │
-  │  09:14:20 JIG-4 publish·pr   ▲ opened PR #7                                                    │
-  │  ↓ 18 older                                                                                    │
+  ╭─ Activity ──────────────────────────────────────────────────────────────────── latest 1 of 20 ─╮
+  │  time     ticket step         what                                                             │
+  │  09:14:21 JIG-4  publish·done ● finished                                                       │
+  │  ↓ 19 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · enter open ticket · t tail · r refresh

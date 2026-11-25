@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
@@ -24,6 +25,34 @@ func (m *Model) publishPage(id string) page {
 	return p
 }
 
+// prReading is a pull request named by its address as the digest numbers it, in
+// prWords' reading ("PR #7 open into main"); an address the digest does not
+// number is shown whole.
+func (m *Model) prReading(t *ticket, url string) string {
+	for _, pr := range t.digest.prs() {
+		if pr.URL == url && pr.Number > 0 {
+			return prWords([]digestPR{pr}, true)
+		}
+	}
+	return url
+}
+
+// checkColumns are the columns of the publish screen's checklist and
+// checkColumnNames name them.
+var (
+	checkColumns     = []column{{}, {free: true, gap: 1}, {gap: 2, keep: true}}
+	checkColumnNames = []string{"", "step", "at"}
+)
+
+// publishCheck is a row of the checklist: whether it is done, what it says, when
+// it happened, and the lines of its text a person may read under it.
+type publishCheck struct {
+	done    bool
+	text    string
+	when    string
+	excerpt []string
+}
+
 // publishPageLess is publishPage with the two texts held to less rows than the
 // room the page's sizes give them.
 func (m *Model) publishPageLess(id string, less int) page {
@@ -43,27 +72,22 @@ func (m *Model) publishPageLess(id string, less int) page {
 		body, changelog = textLines(t.status.Publish.Body), textLines(t.status.Publish.Changelog)
 	}
 	// The rows the page has for the two texts: what the window holds less the
-	// checks, the rule before the activity and its floor of three lines.
-	checks := 6 + max(0, len(pub.Repos)-1)
-	activity := 2 + min(3, max(1, len(t.stepLines(stepPublish))))
-	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-m.taken(&p)-checks-1-activity-less)
+	// checklist with its edges and names, and the activity's floor of three lines
+	// with its own.
+	checks := 3 + 6 + max(0, len(pub.Repos)-1)
+	activity := 3 + min(3, max(1, len(t.stepLines(stepPublish))))
+	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-m.taken(&p)-checks-activity-less)
 
+	var list []publishCheck
 	check := func(done bool, text, when string) {
-		state := StateQueued
-		if done {
-			state = StateOK
-		} else {
-			text = m.st.dim(text)
-		}
-		if when != "" {
-			text += m.st.dim("  " + when)
-		}
-		p.add(m.st.icon(state) + " " + text)
+		list = append(list, publishCheck{done: done, text: text, when: when})
 	}
 	record := func(lines []string, n int) {
+		var ex []string
 		for _, l := range clip(lines, n) {
-			p.add("    " + m.st.dim(l))
+			ex = append(ex, "    "+m.st.dim(l))
 		}
+		list[len(list)-1].excerpt = ex
 	}
 	at := func(event string) string {
 		if i := t.latest("", event); i >= 0 {
@@ -98,13 +122,13 @@ func (m *Model) publishPageLess(id string, less int) page {
 		// A pull request for each repo of the publish.
 		for _, r := range pub.Repos {
 			if r.PR != "" {
-				check(true, strings.TrimSpace("pull request "+r.Name+"  "+firstOf(r.PROutcome, "recorded")+"  "+r.PR), atLine(r.PRAt))
+				check(true, strings.TrimSpace("pull request "+r.Name+" · "+firstOf(r.PROutcome, "recorded")+" · "+m.prReading(t, r.PR)), atLine(r.PRAt))
 			} else {
 				check(false, "pull request "+r.Name+" opened", "")
 			}
 		}
 	case pub.PR != "":
-		check(true, strings.TrimSpace("pull request "+firstOf(pub.PROutcome, "recorded")+"  "+pub.PR), at(journal.EventPr))
+		check(true, strings.TrimSpace("pull request "+firstOf(pub.PROutcome, "recorded")+" · "+m.prReading(t, pub.PR)), at(journal.EventPr))
 	default:
 		check(false, "pull request opened", "")
 	}
@@ -120,7 +144,25 @@ func (m *Model) publishPageLess(id string, less int) page {
 		check(false, "published", "")
 	}
 
-	p.add("")
+	done := 0
+	cells := make([][]string, len(list))
+	for i, c := range list {
+		state, text := StateQueued, m.st.dim(c.text)
+		if c.done {
+			state, text = StateOK, c.text
+			done++
+		}
+		cells[i] = []string{m.st.icon(state), text, m.st.dim(c.when)}
+	}
+	p.boxTop("Checklist", strconv.Itoa(done)+" of "+strconv.Itoa(len(list))+" done")
+	laid := m.laidList(&p, checkColumns, dimmed(m.st, checkColumnNames), cells, 0)
+	for i, c := range list {
+		p.boxLaid(nil, laid[i])
+		for _, l := range c.excerpt {
+			p.boxAdd(l)
+		}
+	}
+	p.boxEnd()
 	m.stepActivityPanel(&p, t, stepPublish)
 	return p
 }

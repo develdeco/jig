@@ -22,6 +22,11 @@
 // their widest cell, free columns share the rest and wrap their words under their
 // column, and a window keeps each box whole and marks what lies above and below.
 //
+// Every section of every screen is a panel, and every list in one names its
+// columns in a dim row laid out by the same call as its rows, kept under the top
+// edge when a window cuts the list (parts.go). The row under the cursor is lit
+// across its panel, and a panel can be drawn with its border lit.
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on

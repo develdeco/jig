@@ -10,10 +10,11 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// fixRow is a fix slice a round sent back: its id and its row.
+// fixRow is a fix slice a round sent back: its id and the cells of its row.
 type fixRow struct {
-	id, line string
-	at       time.Time
+	id    string
+	cells []string
+	at    time.Time
 }
 
 // fixRows are the fix slices the rounds sent back, the newest first by the line
@@ -32,13 +33,12 @@ func (m *Model) fixRows(t *ticket) []fixRow {
 		}
 		seen[l.Slice] = true
 		state := firstOf(states[l.Slice], StateQueued)
-		round := "  "
+		round := ""
 		if n := t.fixRound(l.Slice); n > 0 {
-			round = "  round " + strconv.Itoa(n) + "  "
+			round = m.st.dim("round " + strconv.Itoa(n))
 		}
-		line := m.st.icon(state) + " " + l.Slice + m.st.dim(round) + t.goals()[l.Slice]
 		at, _ := l.At()
-		out = append(out, fixRow{id: l.Slice, line: line, at: at})
+		out = append(out, fixRow{id: l.Slice, cells: []string{m.st.icon(state), l.Slice, round, t.goals()[l.Slice]}, at: at})
 	}
 	return newestFirst(out, func(f fixRow) time.Time { return f.at })
 }
@@ -63,14 +63,8 @@ func (m *Model) reviewPage(id string) page {
 	}
 
 	p.add("")
-	p.add(m.st.bold("rounds"))
-	rounds := t.rounds(m.zone)
-	if len(rounds) == 0 {
-		p.add(m.st.dim("no round yet: a fresh session reviews the change once every slice is green"))
-	}
-	for _, r := range newestFirst(rounds, func(r roundRow) time.Time { return r.Began }) {
-		m.roundRecord(&p, t, r)
-	}
+	rounds := newestFirst(t.rounds(m.zone), func(r roundRow) time.Time { return r.Began })
+	m.roundsPanel(&p, t, rounds)
 
 	asks := t.asks()
 	asking := map[string]bool{}
@@ -82,34 +76,65 @@ func (m *Model) reviewPage(id string) page {
 	m.unprobedRows(&p, t)
 
 	if fixes := m.fixRows(t); len(fixes) > 0 {
-		p.add("")
-		p.add(m.st.bold("sent back to the build"))
-		for _, f := range fixes {
-			p.addRow(rowRef{kind: rowSlice, id: f.id, ticket: id, slice: f.id}, f.line)
+		rows := make([]listRow, len(fixes))
+		for i, f := range fixes {
+			rows[i] = listRow{ref: &rowRef{kind: rowSlice, id: f.id, ticket: id, slice: f.id}, cells: f.cells}
 		}
+		m.listPanel(&p, listSpec{title: "Sent back", summary: strconv.Itoa(len(fixes)), cols: sentBackColumns, names: sentBackColumnNames, rows: rows})
 	}
 
-	p.add("")
-	p.add(m.st.bold("asks"))
-	switch {
-	case t.status == nil:
-		p.add(m.st.dim("reading the ticket's status"))
-	case len(asks) == 0:
-		p.add(m.st.dim("nothing: no finding waits for a person"))
-	}
-	for i, line := range m.askLines(asks) {
-		p.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
-		m.addAskText(&p, t, asks[i])
-	}
+	m.asksPanel(&p, t, asks)
 
-	p.add("")
 	m.stepActivityPanel(&p, t, stepReview)
 	return p
 }
 
-// roundRecord adds a round to the page: its line, who reviewed it and whether
-// they stood apart from the builders, and what range of the change it read.
-func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
+// The columns of the review screen's lists.
+var (
+	roundListColumns       = []column{{}, {gap: 1}, {gap: 2}, {gap: 2}, {gap: 2}, {gap: 2}, {gap: 2}}
+	roundListColumnNames   = []string{"", "round", "verdict", "asked", "range", "read", "at"}
+	findingListColumns     = []column{{}, {gap: 1}, {gap: 2}, {gap: 2}, {free: true, gap: 2}, {gap: 2}}
+	findingListColumnNames = []string{"", "risk", "where", "outcome", "title", "id"}
+	probeListColumns       = []column{{}, {gap: 1}, {gap: 2}, {gap: 2}}
+	probeListColumnNames   = []string{"", "round", "where", "outcome"}
+	askColumns             = []column{{}, {gap: 1}, {gap: 2}, {gap: 2}, {free: true, gap: 2}, {gap: 2}}
+	askColumnNames         = []string{"", "risk", "where", "decision", "title", "id"}
+	sentBackColumns        = []column{{}, {id: true, gap: 1}, {gap: 2}, {free: true, gap: 2}}
+	sentBackColumnNames    = []string{"", "slice", "round", "goal"}
+	unprobedColumns        = []column{{}, {free: true, gap: 1}}
+	unprobedColumnNames    = []string{"where", "note"}
+)
+
+// roundsPanel adds the rounds, newest first: a row each with its verdict, what
+// it raised, the range it read, how many files and when, and under it who
+// reviewed it and whether they stood apart from the builders, and what its
+// reviewer probed.
+func (m *Model) roundsPanel(p *page, t *ticket, rounds []roundRow) {
+	p.boxTop("Rounds", strconv.Itoa(len(rounds)))
+	if len(rounds) == 0 {
+		p.boxAdd(m.st.dim("no round yet: a fresh session reviews the change once every slice is green"))
+		p.boxEnd()
+		return
+	}
+	cells := make([][]string, len(rounds))
+	notes := make([][]string, len(rounds))
+	for i, r := range rounds {
+		cells[i], notes[i] = m.roundRecord(t, r)
+	}
+	laid := m.laidList(p, roundListColumns, dimmed(m.st, roundListColumnNames), cells, 0)
+	for i := range rounds {
+		p.boxLaid(nil, laid[i])
+		for _, l := range notes[i] {
+			p.boxAdd(l)
+		}
+	}
+	p.boxEnd()
+}
+
+// roundRecord is a round as the cells of its row, and the lines under it: who
+// reviewed it and whether they stood apart from the builders, and what its
+// reviewer probed.
+func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
 	word := map[string]string{StateReviewing: "open", StateFindings: "findings", StateReady: "clean"}[r.State]
 	if r.State == StateReady && r.Carried > 0 {
 		word += " (carried over from round " + strconv.Itoa(r.Carried) + ")"
@@ -132,19 +157,10 @@ func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
 	if rec != nil && rec.Verdict == "not-independent" {
 		state, word = StateStalled, "not clean"
 	}
-	line := m.st.icon(state) + " round " + fmt.Sprint(r.N) + "  " + m.st.state(state, pad(word, max(8, width(word))))
-	var said []string
-	if r.State == StateReviewing {
-		said = append(said, "opened "+r.At)
-	} else {
-		if rec != nil {
-			if counts := roundCounts(*rec); counts != "" {
-				said = append(said, "raised "+counts)
-			}
-		}
-		said = append(said, r.At)
+	asked := ""
+	if rec != nil && r.State != StateReviewing {
+		asked = roundCounts(*rec)
 	}
-	p.add(line + m.st.dim("  "+strings.Join(said, " · ")))
 
 	reviewer := r.Reviewer
 	if reviewer == "" && rec != nil {
@@ -179,25 +195,22 @@ func (m *Model) roundRecord(p *page, t *ticket, r roundRow) {
 		who = append(who, shortID(reviewer))
 	}
 	if len(who) > 0 {
-		for _, l := range wrap(strings.Join(who, " · "), m.width-8, 2) {
-			p.add("    " + m.st.dim(l))
+		for _, l := range wrap(strings.Join(who, " · "), m.innerWidth()-6, 2) {
+			notes = append(notes, "    "+m.st.dim(l))
 		}
 	}
+	rng, read := "", ""
 	if rec != nil {
-		var scope []string
-		if rng := shortRange(rec.Scope, rec.Base, rec.Head); rng != "" {
-			scope = append(scope, rng)
-		}
+		rng = shortRange(rec.Scope, rec.Base, rec.Head)
 		if rec.Files >= 0 {
-			scope = append(scope, strconv.Itoa(rec.Files)+" "+plural(rec.Files, "file", "files")+" read")
-		}
-		if len(scope) > 0 {
-			p.add("    " + m.st.dim(strings.Join(scope, " · ")))
+			read = strconv.Itoa(rec.Files) + " " + plural(rec.Files, "file", "files")
 		}
 		if line := ledgerCounts(*rec); line != "" {
-			p.add("    " + m.st.dim(line))
+			notes = append(notes, "    "+m.st.dim(line))
 		}
 	}
+	cells = []string{m.st.icon(state), "round " + fmt.Sprint(r.N), m.st.state(state, word), m.st.dim(asked), m.st.dim(rng), m.st.dim(read), m.st.dim(r.At)}
+	return cells, notes
 }
 
 // ledgerCounts is what a reviewer round probed, in the ledger's words:
@@ -247,38 +260,51 @@ func (m *Model) probeRows(p *page, t *ticket) {
 			later[pr.Where] = pr
 		}
 	}
-	p.add("")
-	p.add(m.st.bold("probes"))
 	p.add(m.st.dim("as recorded: a file changed since a round is not marked"))
-	for _, pr := range probes {
+	cells := make([][]string, len(probes))
+	superseded := make([]bool, len(probes))
+	outcomes := make([]string, len(probes))
+	roundW, outcomeW := width(probeListColumnNames[1]), width(probeListColumnNames[3])
+	for i, pr := range probes {
+		outcomes[i] = pr.Outcome
+		next := later[pr.Where]
+		if superseded[i] = next.Round > pr.Round; superseded[i] {
+			outcomes[i] += " · " + supersededBy(pr, next)
+		}
+		roundW = max(roundW, width("round "+strconv.Itoa(pr.Round)))
+		outcomeW = max(outcomeW, width(outcomes[i]))
+	}
+	// The path gives way, never the round or the verdict: it is cut from its front
+	// to what the screen has left beside them.
+	whereMax := max(12, m.innerWidth()-(1+1+roundW+2+2+outcomeW))
+	for i, pr := range probes {
 		state := StateOK
 		if pr.Outcome == "survived" {
 			state = StateFindings
 		}
-		lead := "round " + strconv.Itoa(pr.Round) + "  "
-		tail := "  " + pr.Outcome
-		next := later[pr.Where]
-		superseded := next.Round > pr.Round
-		if superseded {
-			tail += " · " + supersededBy(pr, next)
-		}
-		// The path gives way, never the round or the verdict.
-		head := lead + tailCut(pr.Where, m.width-4-width(lead)-width(tail))
-		if superseded {
-			p.add(m.st.icon(state) + " " + m.st.dim(head+tail))
+		where := tailCut(pr.Where, whereMax)
+		round := "round " + strconv.Itoa(pr.Round)
+		if superseded[i] {
+			cells[i] = []string{m.st.icon(state), m.st.dim(round), m.st.dim(where), m.st.dim(outcomes[i])}
 		} else {
-			p.add(m.st.icon(state) + " " + head + m.st.state(state, tail))
-		}
-		for _, l := range wrap(pr.Mutation, m.width-8, probeLines) {
-			if superseded {
-				l = m.st.dim(l)
-			}
-			p.add("    " + l)
-		}
-		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.width-8, probeLines) {
-			p.add("    " + m.st.dim(l))
+			cells[i] = []string{m.st.icon(state), round, where, m.st.state(state, outcomes[i])}
 		}
 	}
+	p.boxTop("Probes", strconv.Itoa(len(probes)))
+	laid := m.laidList(p, probeListColumns, dimmed(m.st, probeListColumnNames), cells, 0)
+	for i, pr := range probes {
+		p.boxLaid(nil, laid[i])
+		for _, l := range wrap(pr.Mutation, m.innerWidth()-6, probeLines) {
+			if superseded[i] {
+				l = m.st.dim(l)
+			}
+			p.boxAdd("    " + l)
+		}
+		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines) {
+			p.boxAdd("    " + m.st.dim(l))
+		}
+	}
+	p.boxEnd()
 }
 
 // supersededBy is what the later round found of the line a probe probed: a
@@ -330,20 +356,13 @@ func (m *Model) unprobedRows(p *page, t *ticket) {
 	if round == 0 {
 		return
 	}
-	var rows []string
+	var rows []listRow
+	hunks := 0
 	for _, h := range t.status.Unprobed {
 		if h.Round == round {
-			rows = append(rows, h.File+":"+strconv.Itoa(h.From)+"-"+strconv.Itoa(h.To))
+			hunks++
+			rows = append(rows, listRow{cells: []string{h.File + ":" + strconv.Itoa(h.From) + "-" + strconv.Itoa(h.To), ""}})
 		}
-	}
-	title := "round " + strconv.Itoa(round) + " left no hunk unprobed"
-	if len(rows) > 0 {
-		title = "round " + strconv.Itoa(round) + " left " + strconv.Itoa(len(rows)) + " " + plural(len(rows), "hunk", "hunks") + " unprobed"
-	}
-	p.add("")
-	p.add(m.st.bold(title))
-	for _, r := range rows {
-		p.add("  " + r)
 	}
 	for _, s := range t.status.ProbeSkips {
 		if s.Round != round {
@@ -353,8 +372,13 @@ func (m *Model) unprobedRows(p *page, t *ticket) {
 		if s.Range != "" && s.Range != "whole file" {
 			where += ":" + s.Range
 		}
-		p.add("  " + where + m.st.dim("  set aside: "+s.Why))
+		rows = append(rows, listRow{cells: []string{where, m.st.dim("set aside: " + s.Why)}})
 	}
+	summary := "round " + strconv.Itoa(round) + " left no hunk unprobed"
+	if hunks > 0 {
+		summary = "round " + strconv.Itoa(round) + " left " + strconv.Itoa(hunks) + " " + plural(hunks, "hunk", "hunks")
+	}
+	m.listPanel(p, listSpec{title: "Unprobed", summary: summary, cols: unprobedColumns, names: unprobedColumnNames, rows: rows, empty: "no hunk left unprobed"})
 }
 
 // roundCounts are the findings a round raised, as "1 fix · 2 asks", "" for
@@ -402,23 +426,49 @@ func (m *Model) findingRows(p *page, t *ticket, asking map[string]bool) {
 	if len(rows) == 0 {
 		return
 	}
-	p.add("")
-	p.add(m.st.bold("round " + strconv.Itoa(rows[0].Round) + " findings"))
-	riskW, whereW, wordW := 0, 0, 0
-	words := make([]string, len(rows))
-	for i, f := range rows {
-		words[i] = findingWord(f)
-		riskW, whereW, wordW = max(riskW, width(f.Risk)), max(whereW, width(f.Where)), max(wordW, width(words[i]))
-	}
+	cells := make([][]string, len(rows))
 	for i, f := range rows {
 		state := findingState(f)
-		line := fmt.Sprintf("%s %s  %s  %s  %s%s", m.st.icon(state), pad(f.Risk, riskW), pad(f.Where, whereW),
-			m.st.state(state, pad(words[i], wordW)), f.Title, m.st.dim("  "+f.ID))
-		p.addRow(rowRef{kind: rowStop, id: f.ID, ticket: t.id}, line)
-		for _, l := range wrap(f.Rationale, m.width-8, 2) {
-			p.add("    " + m.st.dim(l))
+		cells[i] = []string{m.st.icon(state), f.Risk, f.Where, m.st.state(state, findingWord(f)), f.Title, m.st.dim(f.ID)}
+	}
+	p.boxTop("Findings", "round "+strconv.Itoa(rows[0].Round))
+	laid := m.laidList(p, findingListColumns, dimmed(m.st, findingListColumnNames), cells, 0)
+	for i, f := range rows {
+		p.boxLaid(&rowRef{kind: rowStop, id: f.ID, ticket: t.id}, laid[i])
+		for _, l := range wrap(f.Rationale, m.innerWidth()-6, 2) {
+			p.boxAdd("    " + m.st.dim(l))
 		}
 	}
+	p.boxEnd()
+}
+
+// asksPanel adds the asks that wait for a person and have been decided, a row
+// each with its decision, and under it the ask's text, whole.
+func (m *Model) asksPanel(p *page, t *ticket, asks []askRow) {
+	p.boxTop("Asks", strconv.Itoa(len(asks)))
+	switch {
+	case t.status == nil:
+		p.boxAdd(m.st.dim("reading the ticket's status"))
+	case len(asks) == 0:
+		p.boxAdd(m.st.dim("nothing: no finding waits for a person"))
+	}
+	if len(asks) > 0 {
+		cells := make([][]string, len(asks))
+		for i, a := range asks {
+			state, word := askDecision(a)
+			cells[i] = []string{m.st.icon(state), a.Risk, a.Where, m.st.state(state, word), a.Title, m.st.dim(a.ID)}
+		}
+		laid := m.laidList(p, askColumns, dimmed(m.st, askColumnNames), cells, -1)
+		for i, a := range asks {
+			p.boxLaid(&rowRef{kind: rowAsk, id: a.ID, ticket: t.id}, laid[i])
+			at := len(p.lines)
+			m.addAskText(p, t, a)
+			for k := at; k < len(p.lines); k++ {
+				p.lines[k].box = boxMid
+			}
+		}
+	}
+	p.boxEnd()
 }
 
 // findingWord is what became of a finding, in a word.

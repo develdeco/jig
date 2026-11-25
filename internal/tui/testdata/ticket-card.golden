@@ -1,6 +1,7 @@
 jig  demo › SHOP-1                                                               ◐ build in progress
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────────────────────────── step 2 of 5 · worked 1m 10s ─╮
+  │      step    took    where it stands                                                           │
   │  ✓ 1 Brief           no brief on record                                                        │
   │▸ ◐ 2 Build   1m 10s  1 of 3 green · slice clamp is being built · idle since 09:02              │
   │  ○ 3 Review          after the build                                                           │
@@ -8,6 +9,7 @@ jig  demo › SHOP-1                                                            
   │  ○ 5 Land            after the publish                                                         │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────────────────────────── 1 of 3 done ─╮
+  │    sub-step     detail                                                                         │
   │  ✓ slice round  verified aaaaaaa · took 37s                                                    │
   │  ◐ slice clamp  claimed ── run ── verified                                                 33s │
   │      goal     Clamp negative quantities to zero before the total is taken, so a cart that      │
@@ -20,6 +22,7 @@ jig  demo › SHOP-1                                                            
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
   ╭─ Activity ─────────────────────────────────────────────────────────────────────────────────────╮
+  │  time     step        what                                                                     │
   │  09:02:10 build·clamp · verification requested for bbbbbbb “Clamp negative quantities”         │
   │  09:02:08 build·clamp · $ `go test ./cart/...`                                                 │
   │  09:02:05 build·clamp ✗ Run the cart tests · exit 1                                            │
@@ -31,9 +34,6 @@ jig  demo › SHOP-1                                                            
   │  09:01:30 build·round · verification requested for aaaaaaa “Round to the cent”                 │
   │  09:01:00 build·round ◐ builder took it · Round to the cent                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-
-
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -42,44 +42,67 @@ func (m *Model) briefPage(id string) page {
 	}
 
 	p.add("")
-	p.add(m.st.bold("sections") + m.st.dim("  cited by"))
 	switch {
 	case t.brief == nil:
 		p.add(m.st.dim("reading the brief's text"))
 	case t.brief.Err != "":
 		p.add(m.st.dim("the brief's text is not available: " + t.brief.Err))
 	}
-	headW := 0
-	for _, s := range b.Sections {
-		headW = max(headW, width(s.Heading))
-	}
-	headW = min(headW, max(12, m.width/2))
+	cells := make([][]string, len(b.Sections))
 	for i, s := range b.Sections {
 		cited := m.st.dim("no slice")
 		if len(s.Slices) > 0 {
 			cited = "slice " + strings.Join(s.Slices, ", ")
 		}
-		p.addRow(rowRef{kind: rowStop, id: s.Heading, ticket: id}, pad(s.Heading, headW)+"  "+cited)
-		for _, line := range wrap(t.brief.summaryOf(i, s.Heading), m.width-8, 2) {
-			p.add("    " + m.st.dim(line))
+		cells[i] = []string{s.Heading, cited}
+	}
+	p.boxTop("Sections", strconv.Itoa(len(b.Sections)))
+	if len(cells) == 0 {
+		p.boxAdd(m.st.dim("no sections"))
+	} else {
+		laid := m.laidList(&p, sectionColumns, dimmed(m.st, sectionColumnNames), cells, 0)
+		for i, s := range b.Sections {
+			p.boxLaid(&rowRef{kind: rowStop, id: s.Heading, ticket: id}, laid[i])
+			for _, line := range wrap(t.brief.summaryOf(i, s.Heading), m.innerWidth()-6, 2) {
+				p.boxAdd("    " + m.st.dim(line))
+			}
 		}
 	}
+	p.boxEnd()
 
-	p.add("")
-	p.add(m.st.bold("slices"))
-	for _, s := range t.slices(m.zone) {
-		line := m.st.icon(s.State) + " " + s.ID + "  " + firstOf(t.goals()[s.ID], m.st.dim("no goal"))
-		line, below := m.withFacts(line, sliceFacts(s, true))
-		p.addRow(rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, line)
-		if below != "" {
-			p.add("    " + spaces(width(s.ID)) + below)
+	slices := t.slices(m.zone)
+	idW := width(briefSliceColumnNames[1])
+	cells = make([][]string, len(slices))
+	for i, s := range slices {
+		idW = max(idW, width(s.ID))
+		cells[i] = []string{m.st.icon(s.State), s.ID, firstOf(t.goals()[s.ID], m.st.dim("no goal"))}
+	}
+	p.boxTop("Slices", strconv.Itoa(len(slices)))
+	if len(cells) == 0 {
+		p.boxAdd(m.st.dim("no slices yet"))
+	} else {
+		laid := m.laidList(&p, briefSliceColumns, dimmed(m.st, briefSliceColumnNames), cells, 0)
+		for i, s := range slices {
+			p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
+			if facts := sliceFacts(s, true); facts != "" {
+				p.boxAdd("    " + spaces(idW) + m.st.dim(facts))
+			}
 		}
 	}
+	p.boxEnd()
 
-	p.add("")
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
+
+// The columns of the brief's lists: a section and the slices that cite it, a
+// slice and its goal.
+var (
+	sectionColumns        = []column{{free: true}, {gap: 2}}
+	sectionColumnNames    = []string{"section", "cited by"}
+	briefSliceColumns     = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}}
+	briefSliceColumnNames = []string{"", "slice", "goal"}
+)
 
 // approvalRecord is the lines that say how the brief came to be approved: when
 // and by whom, how it was recorded, and which brief it was. They are empty
@@ -117,19 +140,6 @@ func (m *Model) approvalRecord(t *ticket, b *statusBrief) []string {
 		out = append(out, strings.Join(rest, " · "))
 	}
 	return out
-}
-
-// withFacts puts facts, drawn back, at the end of a row when they fit in the
-// width the screen has, else under it: the row, and what goes on the line below
-// ("" when the facts are on the row or there are none).
-func (m *Model) withFacts(row, facts string) (string, string) {
-	if facts == "" {
-		return row, ""
-	}
-	if 2+width(row)+2+width(facts) <= m.width {
-		return row + m.st.dim("  "+facts), ""
-	}
-	return row, m.st.dim(facts)
 }
 
 // sliceFacts is what slices.yaml says of a slice, in a line: its workspace and

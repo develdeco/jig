@@ -26,7 +26,7 @@ func TestMainColumnsAreMeasuredByKind(t *testing.T) {
 		t.Fatalf("the long chart's name is not drawn:\n%s", view)
 	}
 	row := lineWith(view, "JIG-5")
-	if !strings.Contains(row, "JIG-5  Apply a coupon code  ") {
+	if !strings.Contains(row, "JIG-5   Apply a coupon code  ") {
 		t.Errorf("the id column is widened by the chart's name, or the title wraps: %q\n%s", row, view)
 	}
 }

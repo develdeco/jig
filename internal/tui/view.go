@@ -60,7 +60,14 @@ type pline struct {
 	// cont marks a continuation row: a line a row's free text wrapped onto. It
 	// belongs to the row above it, and the cursor never stands on it.
 	cont bool
-	ask  string
+	// names marks the row of a list's column names, the first line inside its
+	// panel: no row the cursor stands on, and a window that cuts the list keeps
+	// it under the top edge.
+	names bool
+	ask   string
+	// focus draws the line with its panel border in the key color; a panel is
+	// drawn focused when every one of its lines says so.
+	focus bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -72,19 +79,6 @@ func (p *page) add(text string) { p.lines = append(p.lines, pline{text: text}) }
 
 func (p *page) addRow(ref rowRef, text string) {
 	p.lines = append(p.lines, pline{text: text, ref: &ref})
-}
-
-// addLaid adds the lines the allocator laid a row out in: the first is the
-// row, with the cursor's ref when it has one, and the rest are its
-// continuation rows.
-func (p *page) addLaid(ref *rowRef, lines []string) {
-	for i, l := range lines {
-		pl := pline{text: l, cont: i > 0}
-		if i == 0 {
-			pl.ref = ref
-		}
-		p.lines = append(p.lines, pl)
-	}
 }
 
 // refs are the selectable rows, top to bottom.
@@ -213,7 +207,7 @@ func (m *Model) View() string {
 	body, from, to := m.windowRows(l.pg, l.sel, start, l.pageH, w, above)
 	m.drawn = drawnAsks(l.pg, from, to-from)
 	m.rest(l, start)
-	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, above))
+	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, l.pageH, above))
 	if m.help != nil {
 		// The keys list is drawn over the body, and no ask is drawn under it.
 		body = m.helpBody(l.pageH, w)
@@ -361,7 +355,7 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
-		start = max(0, min(start, lastStart(len(pg.lines), h)))
+		start = clampStart(pg.lines, h, start)
 		if selLine < h {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
@@ -369,11 +363,11 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		if n > 0 && sel == n-1 {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
-			start = max(0, min(selLine, lastStart(len(pg.lines), h)))
+			start = clampStart(pg.lines, h, selLine)
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
-			start = max(0, min(m.top().scroll, lastStart(len(pg.lines), h)))
+			start = clampStart(pg.lines, h, m.top().scroll)
 		}
 	}
 	if n > 0 {
@@ -413,8 +407,22 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 	for s > 0 && lines[s].cont {
 		s--
 	}
-	if s > 0 && lines[s].box == boxMid && lines[s-1].box == boxTop {
-		s--
+	if top, _ := boxOf(lines, s); top >= 0 && s > top && s <= top+namesRows(lines, top)+1 {
+		// A window that would start on a list's first row, or in its names,
+		// starts at the box's top edge.
+		s = top
+	}
+	if s > 0 && lines[s].box == boxBottom {
+		// A window never draws a panel with no row in it: one that would start on
+		// the bottom edge starts at the panel's last row.
+		top, _ := boxOf(lines, s)
+		j := s - 1
+		for j > top && lines[j].cont {
+			j--
+		}
+		if j > top+namesRows(lines, top) {
+			s = j
+		}
 	}
 	for {
 		e := fitEnd(lines, s, h, false)
@@ -440,7 +448,10 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// The window moves down a row, and stops at the cursor's row, which is the
 		// first line of a row of its own: there e is past it.
 		s++
-		for s < n-1 && lines[s].cont {
+		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom) {
+			// Past a row's continuation rows, and past a panel's bottom edge, not
+			// onto it: the panel above has no row in the window then, and is not
+			// drawn.
 			s++
 		}
 	}
@@ -480,9 +491,15 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 		if k > 0 {
 			top++
 		}
+		top += namesAbove(lines, s, h)
 	}
 	for e := min(n, s+h); e > s; e-- {
 		if e < n && lines[e].cont && !split {
+			continue
+		}
+		if e < n && (lines[e-1].box == boxTop || lines[e-1].names) && lines[e].box != boxBottom {
+			// A window does not end on a panel's top edge or names: the panel
+			// would be drawn with no row in it.
 			continue
 		}
 		bottom := 0
@@ -510,6 +527,7 @@ func fitEnd(lines []pline, s, h int, split bool) int {
 func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 	var rows []string
 	idx := 0
+	lit := litLines(pg.lines, sel)
 	for i, l := range pg.lines {
 		marker := "  "
 		if l.ref != nil {
@@ -522,12 +540,34 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 			continue
 		}
 		if l.box != boxNone {
-			rows = append(rows, fit(m.frameLine(l, marker, w), w))
+			rows = append(rows, m.frameLine(l, marker, w, lit[i]))
+			continue
+		}
+		if lit[i] {
+			rows = append(rows, fit(m.st.selectedRow(marker+l.text, w), w))
 			continue
 		}
 		rows = append(rows, fit(marker+l.text, w))
 	}
 	return rows
+}
+
+// litLines marks the page lines of the sel-th selectable row: the row and the
+// continuation rows its free text wrapped onto, which the cursor is on too.
+func litLines(lines []pline, sel int) []bool {
+	lit := make([]bool, len(lines))
+	idx, on := 0, false
+	for i, l := range lines {
+		switch {
+		case l.ref != nil:
+			on = idx == sel
+			idx++
+		case !l.cont:
+			on = false
+		}
+		lit[i] = on
+	}
+	return lit
 }
 
 // windowRows renders the window of h rows from start and the span of page
@@ -547,20 +587,24 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if boxed {
 			l.box = boxMid
-			return fit(m.frameLine(l, "  ", w), w)
+			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
 		inBox, top, k := hiddenAbove(lines, from)
 		if inBox {
-			rows = append(rows, fit(m.frameLine(lines[top], "  ", w), w))
+			rows = append(rows, m.frameLine(lines[top], "  ", w, false))
+			// A list cut from below its first row keeps its column names.
+			for i := 1; i <= namesAbove(lines, from, h); i++ {
+				rows = append(rows, m.frameLine(lines[top+i], "  ", w, false))
+			}
 		}
 		switch {
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, fit(m.frameLine(pline{text: above, box: boxMid}, "  ", w), w))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}
@@ -569,6 +613,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		}
 	}
 	idx := 0
+	lit := litLines(lines, sel)
 	for i, l := range lines {
 		marker := "  "
 		if l.ref != nil {
@@ -581,7 +626,11 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 			continue
 		}
 		if l.box != boxNone {
-			rows = append(rows, fit(m.frameLine(l, marker, w), w))
+			rows = append(rows, m.frameLine(l, marker, w, lit[i]))
+			continue
+		}
+		if lit[i] {
+			rows = append(rows, fit(m.st.selectedRow(marker+l.text, w), w))
 			continue
 		}
 		rows = append(rows, fit(marker+l.text, w))
@@ -592,7 +641,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox))
 		}
 		if inBox {
-			rows = append(rows, fit(m.frameLine(lines[bottom], "  ", w), w))
+			rows = append(rows, m.frameLine(lines[bottom], "  ", w, false))
 		}
 	}
 	return rows, from, to
@@ -619,7 +668,7 @@ func (m *Model) header(w int) []string {
 			if t := c.title(); t != "" && t != e.chart {
 				title = t
 			}
-			state, label := m.chartStatus(c, m.chartRows(c))
+			state, label := m.chartStatus(c, m.statusRows(c))
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
 	default:
@@ -956,10 +1005,60 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-// lastStart is the furthest down a window of h rows can begin on a page of n
-// lines: the window that does not begin at the top gives a row to the mark that
-// says so, so it is one line further than a plain one.
-func lastStart(n, h int) int { return max(0, n-h+1) }
+// skipNames is the scroll position s of a page with no row for the cursor, moved
+// on over the top and names of a list a window starts in: the window keeps them
+// above the rows it draws, so a scroll that stops on them would show the page as
+// it was. A move down goes to the list's second row; one up, to the box's edge.
+func skipNames(lines []pline, s, delta, h int) int {
+	if s <= 0 || s >= len(lines) {
+		return s
+	}
+	top, _ := boxOf(lines, s)
+	if top < 0 || s <= top {
+		return s
+	}
+	k := namesRows(lines, top)
+	if k == 0 || s > top+k+1 {
+		return s
+	}
+	if delta > 0 {
+		return clampStart(lines, h, top+k+2)
+	}
+	return top
+}
+
+// clampStart is start held to the furthest a window of h rows needs to begin. A
+// start no further than a plain window's last is never cut, which is the usual
+// one and costs nothing.
+func clampStart(lines []pline, h, start int) int {
+	if start <= len(lines)-h+1 {
+		return max(0, start)
+	}
+	return max(0, min(start, lastStart(lines, h)))
+}
+
+// lastStart is the furthest down a window of h rows needs to begin on a page: the
+// first line from which the page's last line is in view. A window that does not
+// begin at the top gives rows to the mark that says so, and one that begins in a
+// box to its top edge and names, so it is further than a plain one.
+func lastStart(lines []pline, h int) int {
+	n := len(lines)
+	if n <= h {
+		return 0
+	}
+	lo, hi := 0, n-1
+	for lo < hi {
+		if mid := (lo + hi) / 2; fitEnd(lines, mid, h, false) == n {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	for lo < n-1 && lines[lo].cont {
+		lo++
+	}
+	return lo
+}
 
 // taken is how many lines p has once the text too long for the screen is wrapped,
 // which is what the panels below it have to size themselves against.
@@ -974,7 +1073,7 @@ func (m *Model) taken(p *page) int {
 func rowsIn(lines []pline, a, b int) int {
 	n := 0
 	for _, l := range lines[a:b] {
-		if !l.cont && l.box != boxTop && l.box != boxBottom {
+		if !l.cont && !l.names && l.box != boxTop && l.box != boxBottom {
 			n++
 		}
 	}
@@ -996,6 +1095,34 @@ func hiddenAbove(lines []pline, from int) (inBox bool, top, k int) {
 	}
 	return true, top, k
 }
+
+// namesRows is how many lines the names of the list in the box whose top edge is
+// line top take: one, and the lines the names wrapped onto when the list is
+// narrow.
+func namesRows(lines []pline, top int) int {
+	n := 0
+	for i := top + 1; i < len(lines) && lines[i].names; i++ {
+		n++
+	}
+	return n
+}
+
+// namesAbove is how many lines of a list's names a window that starts at line
+// from, below the first row of the list's box, draws under the top edge it
+// draws.
+// A window of fewer rows than namesMinWindow has no room for them beside the
+// marks and the edges, and leaves them out.
+func namesAbove(lines []pline, from, h int) int {
+	inBox, top, _ := hiddenAbove(lines, from)
+	if n := namesRows(lines, top); inBox && from > top+n && h >= namesMinWindow {
+		return n
+	}
+	return 0
+}
+
+// namesMinWindow is the fewest rows of a window that keep the names of a list it
+// cuts under its top edge.
+const namesMinWindow = 9
 
 // hiddenBelow is hiddenAbove for the lines below a window that ends before line
 // to: whether it ends inside a box (drawn with its bottom edge, at bottom), and
@@ -1019,7 +1146,7 @@ func hiddenBelow(lines []pline, to int) (inBox bool, bottom, k int) {
 // before its first line: the top edge of the box it starts in and the mark of
 // what lies above, or the count of what came in above in its place. A plain
 // window has none.
-func windowPrefix(lines []pline, from, to int, above string) int {
+func windowPrefix(lines []pline, from, to, h int, above string) int {
 	if from == 0 {
 		return 0
 	}
@@ -1031,5 +1158,5 @@ func windowPrefix(lines []pline, from, to int, above string) int {
 	if k > 0 || above != "" {
 		n++
 	}
-	return n
+	return n + namesAbove(lines, from, h)
 }

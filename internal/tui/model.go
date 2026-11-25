@@ -212,7 +212,9 @@ type confirmation struct {
 type Model struct {
 	cfg Config
 	st  styles
-	run classedRunner
+	// edges remembers the pieces of a panel's border the renderer drew.
+	edges edgeCache
+	run   classedRunner
 	// queue is what run goes through: one command at a time, the next by class.
 	queue *queue
 	zone  *time.Location
@@ -301,6 +303,9 @@ type Model struct {
 	// queueBuilds counts the project's list built (maincache.go): a key that
 	// moves nothing the list reads builds none, a search key included.
 	queueBuilds int
+	// rowBuilds counts the rows of the project's list built from a ticket (their
+	// cells), which a step of the clock does not do.
+	rowBuilds int
 	// detailBuilds counts the details of a ticket's row built, the words after
 	// its steps: a key of a search builds none.
 	detailBuilds int
@@ -1066,7 +1071,7 @@ func (m *Model) moveBy(delta int) {
 	n := len(pg.refs())
 	e := m.top()
 	if n == 0 {
-		e.scroll = max(0, min(e.scroll+delta, lastStart(len(pg.lines), m.bodyRows())))
+		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
 		return
 	}
 	e.follow = false
@@ -1085,10 +1090,24 @@ func (m *Model) moveBy(delta int) {
 		// up from the first row moves the page above it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
 		// its top starts at once.
-		if delta < 0 {
-			e.lead = min(e.lead-delta, 1<<20)
-		} else {
-			e.lead = max(0, e.lead-delta)
+		// A window that would start where it cannot, on the top or the names of the
+		// list it is in, is the one it was: the page goes on to the next line it
+		// can show.
+		h := m.bodyRows()
+		from := func() int {
+			f, _, _ := windowSpan(pg, e.sel, m.windowStart(pg, e.sel, h, false), h, e.lead == 0)
+			return f
+		}
+		was := from()
+		for i := 0; i < 8; i++ {
+			if delta < 0 {
+				e.lead = min(e.lead-delta, 1<<20)
+			} else {
+				e.lead = max(0, e.lead-delta)
+			}
+			if e.lead == 0 || e.lead == 1<<20 || from() != was {
+				break
+			}
 		}
 		return
 	}

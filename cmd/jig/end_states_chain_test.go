@@ -149,7 +149,7 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 			}
 		}
 		if w.word == "landed" && d != nil && len(d.PRs) > 0 {
-			if !strings.Contains(lframe, "✓") || !strings.Contains(lframe, "record · landed") {
+			if !strings.Contains(lframe, "✓") || !strings.Contains(lframe, "record landed") {
 				t.Errorf("%s: the landing is not under the land step:\n%s", id, lframe)
 			}
 		}

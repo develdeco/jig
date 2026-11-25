@@ -91,7 +91,7 @@ func TestReviewerOwnChangeSaysItOnce(t *testing.T) {
 		jl(at(12, 50), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-reviewer" }),
 	)...).press("enter")
 	text := pageText(g)
-	text, _, _ = strings.Cut(text, "asks")
+	text, _, _ = strings.Cut(text, "Asks")
 	if n := strings.Count(text, "builder reviewing its own change"); n != 1 {
 		t.Errorf("the row says it %d times, want once:\n%s", n, text)
 	}

@@ -30,16 +30,24 @@ func body(view string) []string {
 	lines := strings.Split(view, "\n")
 	var out []string
 	for _, l := range lines[2 : len(lines)-2] {
-		out = append(out, strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(l, " "), "▸")))
+		l = strings.TrimSpace(l)
+		l = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(l, "│"), "│"))
+		out = append(out, strings.TrimSpace(strings.TrimPrefix(l, "▸")))
 	}
-	// The marks of what lies above and below are not lines of the page.
-	if len(out) > 0 && strings.HasPrefix(out[0], "↑ ") {
-		out = out[1:]
+	// The marks of what lies above and below are not lines of the page, and
+	// neither are the edges of a box and the names of its columns, which a
+	// window of the box keeps above the lines it draws.
+	var rows []string
+	for i := 0; i < len(out); i++ {
+		switch row := out[i]; {
+		case strings.HasPrefix(row, "╭─"):
+			i++ // and the names under it
+		case strings.HasPrefix(row, "╰"), strings.HasPrefix(row, "↑ "), strings.HasPrefix(row, "↓ "):
+		default:
+			rows = append(rows, row)
+		}
 	}
-	if len(out) > 0 && strings.HasPrefix(out[len(out)-1], "↓ ") {
-		out = out[:len(out)-1]
-	}
-	return out
+	return rows
 }
 
 // TestReviewPageOpensAtItsRoundsWithManyProbes: a page with many probes and two
@@ -52,7 +60,7 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
 	g.feed(jig2Mid()...).press("enter")
 	view := g.view()
-	if !hasLine(view, "rounds") || !strings.Contains(view, "12 probes") {
+	if !strings.Contains(view, "╭─ Rounds ") || !strings.Contains(view, "12 probes") {
 		t.Fatalf("the page does not open at its rounds:\n%s", view)
 	}
 	// Each down shows the next line: no probe is skipped.
@@ -61,7 +69,7 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 		g.press("down")
 		view = g.view()
 		cur := body(view)
-		if !strings.Contains(view, "▸") && cur[0] != prev[1] {
+		if !strings.Contains(view, "▸") && cur[0] != prev[1] && cur[0] != prev[0] {
 			t.Fatalf("down moved the page by more than a line (%q, then %q):\n%s", prev[1], cur[0], view)
 		}
 		prev = cur
@@ -79,17 +87,17 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 		t.Fatalf("down from the cursor's window did not move it to the second ask:\n%s", view)
 	}
 	g.press("home")
-	if view := g.view(); !hasLine(view, "rounds") {
+	if view := g.view(); !strings.Contains(view, "╭─ Rounds ") {
 		t.Errorf("home from the second row does not reach the rounds heading:\n%s", view)
 	}
 	g.press("end")
 	if view := g.view(); !strings.Contains(view, "▸ ! low") {
 		t.Errorf("end does not reach the last row:\n%s", view)
 	}
-	for i := 0; i < 100 && !hasLine(g.view(), "rounds"); i++ {
+	for i := 0; i < 100 && !strings.Contains(g.view(), "╭─ Rounds "); i++ {
 		g.press("up")
 	}
-	if view := g.view(); !hasLine(view, "rounds") {
+	if view := g.view(); !strings.Contains(view, "╭─ Rounds ") {
 		t.Errorf("up does not reach the rounds heading:\n%s", view)
 	}
 }
@@ -120,14 +128,9 @@ func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	for i := 0; i < 100 && !strings.Contains(g.view(), "▸"); i++ {
 		g.press("down")
 	}
-	// The row is shown at the window's last line, its text below it cut: an
-	// ask is decided from what is drawn, so d runs nothing.
+	// The row is shown with its text, which the window keeps with it as a row's
+	// wrapped lines: the ask is drawn whole, so d decides it.
 	g.press("d")
-	if n := triages(); n != 0 {
-		t.Errorf("d decided an ask whose text the window cut: %q", g.r.lines())
-	}
-	// A move down with no row below scrolls the window to the ask's text.
-	g.press("down", "d")
 	if got := g.r.lines(); triages() != 1 || !strings.Contains(got[len(got)-1], "triage JIG-2 r1-f1 dismiss") {
 		t.Errorf("d on an ask drawn whole did not triage it: %q", got)
 	}

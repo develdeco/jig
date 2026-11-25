@@ -99,7 +99,7 @@ func TestMainGroupsAreTheQueue(t *testing.T) {
 	var seen []string
 	for _, line := range strings.Split(text, "\n") {
 		for _, name := range groupNames {
-			if strings.Contains(line, name+" (") {
+			if strings.TrimSpace(line) == strings.ToUpper(name[:1])+name[1:] {
 				seen = append(seen, name)
 			}
 		}
@@ -107,7 +107,8 @@ func TestMainGroupsAreTheQueue(t *testing.T) {
 	if order := []string{"needs you", "running", "ready", "waiting", "not started", "done"}; !reflect.DeepEqual(seen, order) {
 		t.Errorf("the groups are drawn in the order %v, want %v (a group with no rows is hidden):\n%s", seen, order, text)
 	}
-	if !strings.Contains(text, "needs you (3)") || !strings.Contains(text, "▸ not started (1) · enter shows them") || !strings.Contains(text, "▸ done (2) · enter shows them") {
+	pg := m.mainPage()
+	if summaryOf(pg, "Needs you") != "3" || summaryOf(pg, "Not started") != "1" || summaryOf(pg, "Done") != "2" || strings.Count(text, "▸ enter shows them") != 2 {
 		t.Errorf("the headings and fold rows lack their counts:\n%s", text)
 	}
 	if got := m.queueSummary(); got != "3 need you · 1 running · 1 ready · 3 waiting · 1 not started · 2 done" {
@@ -181,7 +182,7 @@ func TestMainFoldsOpenInPlace(t *testing.T) {
 	}
 	m.open()
 	after := pagesText(m.mainPage())
-	if !strings.Contains(after, "▾ done (1) · enter folds them") || !strings.Contains(after, "D-1") || strings.Contains(after, "N-1") {
+	if summaryOf(m.mainPage(), "Done") != "1" || !strings.Contains(after, "▾ enter folds them") || !strings.Contains(after, "D-1") || strings.Contains(after, "N-1") {
 		t.Errorf("enter on the done fold shows:\n%s", after)
 	}
 	if ref := m.selected(); ref == nil || ref.kind != rowFold || ref.id != "done" {

@@ -71,7 +71,7 @@ func TestEveryListReadsNewestFirst(t *testing.T) {
 	if g.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", g.m.Screen())
 	}
-	_, timeline, _ := strings.Cut(pageText(g), "timeline\n")
+	_, timeline, _ := strings.Cut(pageText(g), "Timeline\n")
 	newestOnTop(t, "slice timeline", clocksOf(strings.Split(timeline, "\n")), 4)
 	g.press("esc", "esc")
 
@@ -81,8 +81,8 @@ func TestEveryListReadsNewestFirst(t *testing.T) {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
 	text := pageText(g)
-	inOrder(t, "rounds", text, "round 2  ", "round 1  ")
-	inOrder(t, "fix slices", text, "sent back to the build", "fix-2  round 2", "fix-1  round 1")
+	inOrder(t, "rounds", readWords(text), "round 2 ", "round 1 ")
+	inOrder(t, "fix slices", readWords(text), "Sent back", "fix-2 round 2", "fix-1 round 1")
 	newestOnTop(t, "review activity", clocksOf(panelRows(g.view(), "Review activity")), 4)
 	g.press("esc")
 

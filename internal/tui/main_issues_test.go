@@ -9,7 +9,7 @@ import (
 func mainOf(t *testing.T, spec planSpec) (*rig, string) {
 	t.Helper()
 	g := planMain(t, spec)
-	g.m.height, g.m.width = 40, 110
+	g.m.height, g.m.width = 40, 170
 	return g, stripANSI(g.unfold().mainText())
 }
 
@@ -143,7 +143,7 @@ func TestMainALandedIssueFoldsIntoDone(t *testing.T) {
 	g := planMain(t, planSpec{})
 	g.m.height, g.m.width = 40, 110
 	closed := stripANSI(pagesText(g.m.mainPage()))
-	if !strings.Contains(closed, "▸ done (1) · 4 tasks in them · enter shows them") || strings.Contains(closed, "SHOP-1") {
+	if got := summaryOf(g.m.mainPage(), "Done"); got != "1 · 4 tasks in them" || !strings.Contains(closed, "▸ enter shows them") || strings.Contains(closed, "SHOP-1") {
 		t.Errorf("the closed fold:\n%s", closed)
 	}
 	if _, open := mainOf(t, planSpec{}); !strings.Contains(open, "SHOP-49") || !strings.Contains(open, "SHOP-4 ") {

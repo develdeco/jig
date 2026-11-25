@@ -1,6 +1,7 @@
 jig  demo › JIG-2 (2 of 3)  Config loader                     ◆ ready to publish
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 4 of 5 · worked 2m 36s ─╮
+  │      step    took    where it stands                                       │
   │  ✓ 1 Brief           approved by Ada                                       │
   │  ✓ 2 Build   30s     2 slices green                                        │
   │  ✓ 3 Review  1m 55s  round 1 clean                                         │
@@ -9,12 +10,11 @@ jig  demo › JIG-2 (2 of 3)  Config loader                     ◆ ready to pub
   │  ○ 5 Land            after the publish                             45m 09s │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Publish ──────────────────────────────────────────────────── 4 of 5 done ─╮
-  │  ✓ pull request  https://example.test/acme/demo/pull/7 · took 10s          │
   │  ○ changelog                                                               │
-  │  ✓ published     took 1s                                                   │
-  │  +2 more                                                                   │
+  │  +4 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
+  │  time     step         what                                                │
   │  09:14:21 publish·done ● finished                                          │
   │  09:14:20 publish·pr   ▲ opened PR #7                                      │
   │  ↓ 10 older                                                                │

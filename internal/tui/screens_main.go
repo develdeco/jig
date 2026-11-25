@@ -31,15 +31,15 @@ func (m *Model) mainPage() page {
 	return c.pg
 }
 
-// buildMain draws the queue's page: the groups in order, each under its heading.
+// buildMain draws the queue's page: the groups in order, each a panel.
 func (m *Model) buildMain(q mainQueue, open map[string]bool) (page, map[rowIdentity]rowIdentity, map[rowIdentity][]string) {
-	p, folded := m.draftMain(q, open)
+	p, folded := m.draftMain(q, open, nil)
 	return m.layMain(p), folded, p.memo
 }
 
-// mainDraft is the project's page before its rows are laid out: its headings
-// and fold rows as lines, and a line for each ticket or chart row that stands
-// for the cells the row says.
+// mainDraft is the project's page before its rows are laid out: its panels'
+// edges and fold rows as lines, and a line for each ticket or chart row that
+// stands for the cells the row says.
 type mainDraft struct {
 	page
 	// cells is the cells of the row drawn at a line, by line.
@@ -47,6 +47,11 @@ type mainDraft struct {
 	// chart says the row at a line is a chart's, laid out by its own kind of
 	// column: a chart's name is not a ticket's id.
 	chart map[int]bool
+	// names are the lines that stand for a list's names row, and whether the
+	// names are a chart's.
+	names map[int]bool
+	// cellOf, when set, gives a row's cells in place of building them.
+	cellOf func(queueRow) []string
 	// memo is the cells of every row the draft holds, by identity, which the
 	// search reads instead of building a row's cells and detail again.
 	memo map[rowIdentity][]string
@@ -54,8 +59,14 @@ type mainDraft struct {
 
 // draftMain is buildMain's page of headings and rows, the rows still to be laid
 // out by layMain.
-func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[rowIdentity]rowIdentity) {
-	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, memo: map[rowIdentity][]string{}}
+//
+// A search draws the same panels from the rows that match: its cellOf gives the
+// cells of a row, drawn already, and every group is a list, none a fold.
+func (m *Model) draftMain(q mainQueue, open map[string]bool, search *searchDraw) (*mainDraft, map[rowIdentity]rowIdentity) {
+	p := &mainDraft{cells: map[int][]string{}, chart: map[int]bool{}, names: map[int]bool{}, memo: map[rowIdentity][]string{}}
+	if search != nil {
+		p.cellOf = search.cellOf
+	}
 	var folded map[rowIdentity]rowIdentity
 	if len(q.rows) == 0 {
 		p.add(m.st.dim("no tickets yet"))
@@ -67,52 +78,50 @@ func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[ro
 	}
 	if q.byChart {
 		for _, s := range q.sections {
-			if len(p.lines) > 0 {
-				p.add("")
-			}
-			m.addQueueRow(p, s)
-			m.addQueueRows(p, s.kids)
+			n := s.tasks()
+			m.addPanel(p, s.id, strconv.Itoa(n)+" "+plural(n, "task", "tasks"), []queueRow{s})
 		}
-		if n := q.rowsIn(); n > 0 {
-			if len(p.lines) > 0 {
-				p.add("")
+		var loose []queueRow
+		for g := mainGroup(0); g < groupCount; g++ {
+			if g != groupDone {
+				loose = append(loose, q.byGroup[g]...)
 			}
-			p.add(m.st.dim("no chart (" + strconv.Itoa(n) + ")"))
+		}
+		if len(loose) > 0 {
+			m.addPanel(p, "No chart", strconv.Itoa(len(loose)), loose)
 		}
 	}
 	for g := mainGroup(0); g < groupCount; g++ {
 		rows := q.byGroup[g]
-		if len(rows) == 0 {
+		if len(rows) == 0 || (q.byChart && g != groupDone) {
 			continue
 		}
-		if q.byChart && g != groupDone {
-			m.addQueueRows(p, rows)
-			continue
-		}
-		if len(p.lines) > 0 && !q.byChart {
-			p.add("")
-		}
-		if !g.folds() {
-			p.add(m.st.dim(g.heading(len(rows))))
-			m.addQueueRows(p, rows)
+		title := strings.ToUpper(g.name()[:1]) + g.name()[1:]
+		if !g.folds() || (search != nil && !search.keepFolds) {
+			m.addPanel(p, title, strconv.Itoa(len(rows)), rows)
 			continue
 		}
 		fold := rowRef{kind: rowFold, id: g.name()}
-		if open[g.name()] {
-			p.addRow(fold, m.st.dim("▾ "+g.heading(len(rows))+" · enter folds them"))
-			m.addQueueRows(p, rows)
-			continue
-		}
+		summary := strconv.Itoa(len(rows))
 		tasks := 0
 		for _, r := range rows {
 			tasks += r.tasks()
 		}
-		with := ""
 		if tasks > 0 {
 			// The tasks of an issue are in its row, folded with it.
-			with = " · " + strconv.Itoa(tasks) + " " + plural(tasks, "task", "tasks") + " in them"
+			summary += " · " + strconv.Itoa(tasks) + " " + plural(tasks, "task", "tasks") + " in them"
 		}
-		p.addRow(fold, m.st.dim("▸ "+g.heading(len(rows))+with+" · enter shows them"))
+		if open[g.name()] {
+			p.boxTop(title, summary)
+			m.addNames(p, rows)
+			p.lines = append(p.lines, pline{text: m.st.dim("▾ enter folds them"), ref: &fold, box: boxMid})
+			m.addQueueRows(p, rows)
+			p.boxEnd()
+			continue
+		}
+		p.boxTop(title, summary)
+		p.lines = append(p.lines, pline{text: m.st.dim("▸ enter shows them"), ref: &fold, box: boxMid})
+		p.boxEnd()
 		if folded == nil {
 			folded = map[rowIdentity]rowIdentity{}
 		}
@@ -121,6 +130,40 @@ func (m *Model) draftMain(q mainQueue, open map[string]bool) (*mainDraft, map[ro
 		}
 	}
 	return p, folded
+}
+
+// searchDraw is what a search changes in the drawing of main's panels.
+type searchDraw struct {
+	cellOf func(queueRow) []string
+	// keepFolds draws the groups that fold as folds, which a step of the clock
+	// does; a search draws them as lists.
+	keepFolds bool
+}
+
+// addPanel adds a panel titled title with the rows, and the rows under them: a
+// list under the names of its columns.
+func (m *Model) addPanel(p *mainDraft, title, summary string, rows []queueRow) {
+	p.boxTop(title, summary)
+	m.addNames(p, rows)
+	m.addQueueRows(p, rows)
+	p.boxEnd()
+}
+
+// addNames adds the line the names of the columns of rows are laid out in: a
+// ticket's, or a chart's when no row of them is a ticket.
+func (m *Model) addNames(p *mainDraft, rows []queueRow) {
+	p.names[len(p.lines)] = !anyTicket(rows)
+	p.lines = append(p.lines, pline{box: boxMid, names: true})
+}
+
+// anyTicket is whether a row or a row under one is a ticket.
+func anyTicket(rows []queueRow) bool {
+	for _, r := range rows {
+		if !r.chart || anyTicket(r.kids) {
+			return true
+		}
+	}
+	return false
 }
 
 // foldRow notes that the row and the rows under it are in the fold.
@@ -147,19 +190,33 @@ func (m *Model) addQueueRows(p *mainDraft, rows []queueRow) {
 // addQueueRow adds a row of the queue as the cells it says; layMain lays them out.
 func (m *Model) addQueueRow(p *mainDraft, r queueRow) {
 	at := len(p.lines)
-	p.addRow(r.ref(), "")
+	ref := r.ref()
+	p.lines = append(p.lines, pline{ref: &ref, box: boxMid})
+	if p.cellOf != nil {
+		p.cells[at], p.chart[at] = p.cellOf(r), r.chart
+		return
+	}
 	p.cells[at], p.chart[at] = m.queueCells(r), r.chart
 	p.memo[r.ref().identity()] = p.cells[at]
 }
 
 // mainColumns are the columns of the project's rows: the state icon, the id or
-// the name, the title, the step dots (or "chart") and what stands.
-var mainColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}}
+// the name, the title, the step dots (or "chart"), what stands and the age. The
+// title is a free column, so it takes the width the others leave.
+var mainColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}, {gap: 2, keep: true}}
+
+// The names of the columns of the project's lists, a ticket's and a chart's.
+var (
+	ticketColumnNames = []string{"", "ticket", "title", "steps", "where it stands", "age"}
+	chartColumnNames  = []string{"", "name", "title", "", "done", "age"}
+)
 
 // layMain lays the draft's rows out, a column to the widest cell of its own
 // kind: the tickets' ids are measured over the tickets, and a chart's name never
 // widens them. A row that wraps keeps the cursor on its first line.
 func (m *Model) layMain(p *mainDraft) page {
+	// The names of each kind's columns are the first row of its list, so every
+	// panel's names are as wide as the cells of the whole page.
 	var tickets, charts [][]string
 	for i := range p.lines {
 		if cells, ok := p.cells[i]; ok {
@@ -171,10 +228,38 @@ func (m *Model) layMain(p *mainDraft) page {
 		}
 	}
 	m.measured += len(tickets) + len(charts)
-	w := max(1, m.width-2)
+	w := m.innerWidth()
+	dim := func(names []string) []string {
+		out := make([]string, len(names))
+		for i, n := range names {
+			out[i] = m.st.dim(n)
+		}
+		return out
+	}
+	if len(tickets) > 0 {
+		tickets = append([][]string{dim(ticketColumnNames)}, tickets...)
+	}
+	if len(charts) > 0 {
+		charts = append([][]string{dim(chartColumnNames)}, charts...)
+	}
 	laidT, laidC := layout(mainColumns, tickets, w), layout(mainColumns, charts, w)
+	var namesT, namesC []string
+	if len(laidT) > 0 {
+		namesT, laidT = laidT[0], laidT[1:]
+	}
+	if len(laidC) > 0 {
+		namesC, laidC = laidC[0], laidC[1:]
+	}
 	var out page
 	for i, l := range p.lines {
+		if chart, ok := p.names[i]; ok {
+			if chart {
+				out.boxNames(namesC)
+			} else {
+				out.boxNames(namesT)
+			}
+			continue
+		}
 		if _, ok := p.cells[i]; !ok {
 			out.lines = append(out.lines, l)
 			continue
@@ -185,7 +270,7 @@ func (m *Model) layMain(p *mainDraft) page {
 		} else {
 			lines, laidT = laidT[0], laidT[1:]
 		}
-		out.addLaid(l.ref, lines)
+		out.boxLaid(l.ref, lines)
 	}
 	return m.wrapLong(out)
 }
@@ -193,10 +278,11 @@ func (m *Model) layMain(p *mainDraft) page {
 // queueCells are a row of the queue as cells: a ticket's icon, id, title, the
 // five steps and where it stands, or a chart's.
 func (m *Model) queueCells(r queueRow) []string {
+	m.rowBuilds++
 	if r.chart {
-		return m.chartCells(r.id)
+		return append(m.chartCells(r.id), m.st.dim(m.ageOf(r.at)))
 	}
-	return []string{m.st.icon(r.cur.State), spaces(2*r.depth) + r.id, r.t.title, m.stepDots(r.steps), m.ticketDetail(r.t, r.steps)}
+	return []string{m.st.icon(r.cur.State), spaces(2*r.depth) + r.id, r.t.title, m.stepDots(r.steps), m.ticketDetail(r.t, r.steps), m.st.dim(m.ageOf(r.at))}
 }
 
 // stepDots are a ticket's steps as icons, in order.

@@ -1,14 +1,14 @@
 jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 2 of 5 · worked 1m 59s ─╮
+  │      step    took    where it stands                                       │
   │  ✓ 1 Brief           no brief on record                                    │
   │▸ ? 2 Build   1m 59s  1 of 4 green · slice c needs your answer 57m 30s      │
   │  ○ 3 Review          after the build                                       │
   │  ○ 4 Publish         after a clean review                                  │
   │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  needs you
-  ↓ 5 more
+  ↓ 4 more
   tail ─────────────────────────────────────────────────────────────────────────
   09:02:01 l tool             Bash s-builder
   09:02:00 j question       c q-001 Formal or casual? (agent) s-builder
