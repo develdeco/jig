@@ -10,8 +10,8 @@ import (
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
-// deltaPrepared is a delta round 2 over a/a.go with a recordings list,
-// an excerpt, and hunks of the whole change in a/a.go and a/other.go.
+// deltaPrepared is a delta round 2 over a/a.go with a recordings list and an
+// excerpt.
 func deltaPrepared(intent string) verifydeliver.Prepared {
 	return verifydeliver.Prepared{
 		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "delta",
@@ -20,58 +20,24 @@ func deltaPrepared(intent string) verifydeliver.Prepared {
 			Recordings:    "/rec/recordings.json",
 			IntentExcerpt: "/ex/excerpt.md",
 			MustReview:    []string{"a/a.go"},
-			Hunks: []verifydeliver.HunkEntry{
-				{File: "a/a.go", From: 2, To: 4},
-				{File: "a/other.go", From: 6, To: 8},
-			},
 		},
 	}
 }
 
-// TestADeltaRoundDropsWhatRound1Read: recordings, the whole
-// change's hunks count, unprobed hunks outside the delta and the intent
-// excerpt of a stated intent are not printed; the excerpt of intent none is.
+// TestADeltaRoundDropsWhatRound1Read: recordings and the intent excerpt of a
+// stated intent are not printed; the excerpt of intent none is.
 func TestADeltaRoundDropsWhatRound1Read(t *testing.T) {
 	t.Parallel()
 	diffs := []deltaDiff{{Base: "aaaa", Head: "bbbb", Files: []string{"a/a.go"}, Lines: 1, Text: "diff\n"}}
 	out := strings.Join(roundBlocks(deltaPrepared(verifydeliver.IntentSourceBrief), nil, true, diffs), "\n")
-	for _, unwanted := range []string{"recordings:", "hunks:", "intent_excerpt", "a/other.go"} {
+	for _, unwanted := range []string{"recordings:", "intent_excerpt"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("a delta round prints %q\n%s", unwanted, out)
-		}
-	}
-	for _, want := range []string{"unprobed: 1", "unprobed[1]{hunk}:\n  \"a/a.go:2-4\""} {
-		if !strings.Contains(out, want) {
-			t.Errorf("a delta round lacks %q\n%s", want, out)
 		}
 	}
 	none := strings.Join(roundBlocks(deltaPrepared(verifydeliver.IntentSourceNone), nil, true, diffs), "\n")
 	if !strings.Contains(none, "intent_excerpt: /ex/excerpt.md") {
 		t.Errorf("a delta round with no stated intent drops the excerpt, its only hint\n%s", none)
-	}
-}
-
-// TestAMultiRepoDeltaListsItsUnprobedHunksWithTheirRepoPrefix: each repo's
-// delta files are named <repo>/<path>, as the hunks are, so the work list
-// holds the web's hunk and not the api's, which did not move.
-func TestAMultiRepoDeltaListsItsUnprobedHunksWithTheirRepoPrefix(t *testing.T) {
-	t.Parallel()
-	p := deltaPrepared(verifydeliver.IntentSourceBrief)
-	p.Repos = []verifydeliver.PreparedRepo{
-		{Repo: "api", Head: "1", Base: "1", Scope: "delta"},
-		{Repo: "web", Head: "3", Base: "2", Scope: "delta"},
-	}
-	p.Request.Hunks = []verifydeliver.HunkEntry{
-		{File: "api/server/handler.go", From: 1, To: 5},
-		{File: "web/ui/page.go", From: 1, To: 4},
-	}
-	diffs := []deltaDiff{
-		{Repo: "api", Base: "1", Head: "1"},
-		{Repo: "web", Base: "2", Head: "3", Files: []string{"web/ui/page.go"}, Lines: 1, Text: "d\n"},
-	}
-	out := strings.Join(roundBlocks(p, nil, true, diffs), "\n")
-	if !strings.Contains(out, "unprobed[1]{hunk}:\n  \"web/ui/page.go:1-4\"") || strings.Contains(out, "handler.go") {
-		t.Errorf("the multi-repo delta's work list is not the web's hunk alone\n%s", out)
 	}
 }
 
@@ -98,9 +64,7 @@ func TestAnswersHoldTheFindingsADeltaAnswers(t *testing.T) {
 
 // TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff: the files of a
 // repo's delta are read from git and prefixed with the repo by
-// computeDeltaDiffs, so the work list of a project of several repos names the
-// moved repo's hunk, as the round's hunks do, and nothing of the repo that did
-// not move.
+// computeDeltaDiffs, and the repo that did not move has none.
 func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
 	t.Parallel()
 	mk := func(name string) (dir, base, head string) {
@@ -127,19 +91,11 @@ func TestAMultiRepoDeltaNamesItsFilesWithTheirRepoThroughTheDiff(t *testing.T) {
 		{Repo: "api", Base: apiBase, Head: apiHead, Scope: "delta"},
 		{Repo: "web", Base: webBase, Head: webHead, Scope: "delta"},
 	}
-	p.Request.Hunks = []verifydeliver.HunkEntry{
-		{File: "api/f.go", From: 1, To: 1},
-		{File: "web/f.go", From: 2, To: 2},
-	}
 	diffs, err := computeDeltaDiffs(p, map[string]string{"api": apiDir, "web": webDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(diffs) != 2 || len(diffs[0].Files) != 0 || !reflect.DeepEqual(diffs[1].Files, []string{"web/f.go"}) {
 		t.Fatalf("delta files = %+v, want none for api and web/f.go for web", diffs)
-	}
-	out := strings.Join(roundBlocks(p, nil, true, diffs), "\n")
-	if !strings.Contains(out, "unprobed[1]{hunk}:\n  \"web/f.go:2-2\"") || strings.Contains(out, "api/f.go") {
-		t.Errorf("the work list is not the web's hunk alone\n%s", out)
 	}
 }

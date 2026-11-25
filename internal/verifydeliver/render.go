@@ -1008,8 +1008,9 @@ func reviewNotesFile(repo string, several bool) string {
 // last round's own summary, every finding across every round ordered by risk
 // with how it ended, and coverage - the files the change touched
 // (touchedFiles, Publish's own diff of the ship range) against the files the
-// reviewer read (reviewedPaths), and, for a reviewer's rounds, the behavior
-// they tested (behavior, ADR 0036; nil for scripted rounds). Who reviewed
+// reviewer read (reviewedPaths), and, for a reviewer's rounds, their probes
+// current at the reviewed head (probes, ADR 0036; nil for scripted
+// rounds). Who reviewed
 // comes first: whether a reviewer built part of the change is a fact of the
 // round for whoever merges to weigh, not a condition publish checks (ADR
 // 0046). outcomes, reviewedPaths and lastSummary all come from the one pass
@@ -1018,7 +1019,7 @@ func reviewNotesFile(repo string, several bool) string {
 // approval, for the line on who approved it; approvalLine, the line on who
 // approved the publish, comes from the caller ("" for none), and so does
 // slicesSection, the rendered ## Slices (renderSlicesSection, "" for none).
-func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, behavior *behaviorCoverage, slicesSection string, storeRefs []StoreRef) error {
+func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRound int, rounds []RoundRecord, lastSummary string, outcomes []findingOutcome, others []otherFinding, reviewedPaths, touchedFiles []string, probes *[]ProbedEntry, slicesSection string, storeRefs []StoreRef) error {
 	ticketDir := st.TicketDir(ticket)
 	var b strings.Builder
 	b.WriteString("# Review Notes\n\n")
@@ -1100,33 +1101,14 @@ func writeReviewNotes(st *store.Store, ticket, name, approvalLine string, lastRo
 		b.WriteString("\n")
 	}
 
-	// The behavior the review tested: a clean verdict rests on these probes,
-	// and says nothing of the hunks no probe or skip covers.
-	if behavior != nil {
-		if len(behavior.Probes) == 0 {
+	// The probes the reviewer recorded that are current at the reviewed head.
+	if probes != nil {
+		if len(*probes) == 0 {
 			b.WriteString("Probes current at the reviewed head: none\n\n")
 		} else {
 			b.WriteString("Probes current at the reviewed head:\n\n")
-			for _, p := range behavior.Probes {
+			for _, p := range *probes {
 				fmt.Fprintf(&b, "- %s:%d %s: %s (%s; round %d)\n", p.File, p.Line, p.Outcome, p.Mutation, p.Seam, p.Round)
-			}
-			b.WriteString("\n")
-		}
-		if len(behavior.Skips) > 0 {
-			b.WriteString("Set aside as on no critical path:\n\n")
-			for _, s := range behavior.Skips {
-				where := s.File
-				if s.From != 0 {
-					where = fmt.Sprintf("%s:%d-%d", s.File, s.From, s.To)
-				}
-				fmt.Fprintf(&b, "- %s: %s\n", where, s.Why)
-			}
-			b.WriteString("\n")
-		}
-		if len(behavior.Unprobed) > 0 {
-			b.WriteString("Hunks no probe or skip covers:\n\n")
-			for _, h := range behavior.Unprobed {
-				fmt.Fprintf(&b, "- %s:%d-%d\n", h.File, h.From, h.To)
 			}
 			b.WriteString("\n")
 		}

@@ -307,12 +307,8 @@ func printGateReport(stdout io.Writer, st *store.Store, ticket string, report ve
 		kv = append(kv, [2]string{"scope", report.Scope})
 	}
 	if report.Scope != "" && report.CarriedFrom == 0 {
-		// What behavior the reviewer round tested (ADR 0036): a clean
-		// verdict that probed little shows it here.
-		kv = append(kv,
-			[2]string{"probes", strconv.Itoa(report.Probes)},
-			[2]string{"unprobed", strconv.Itoa(report.Unprobed)},
-		)
+		// How many probes the reviewer round recorded (ADR 0036).
+		kv = append(kv, [2]string{"probes", strconv.Itoa(report.Probes)})
 	}
 	// The fix budget: named only for a round that actually parked
 	// findings, saying the budget is reached and how many it parked -

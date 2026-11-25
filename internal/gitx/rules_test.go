@@ -24,51 +24,6 @@ import (
 // row of one of them states is not stated again by a test that lays out a
 // repository to reach it.
 
-// TestRuleAtParseHunks: a hunk's new side is "+start" or "+start,count"; a
-// "+++" line is a file's new path only inside its header, so a content line
-// reading "+++" is not one; a hunk that adds nothing, a deleted file and a
-// file with no hunk leave no hunk; a name holding a space or needing quotes
-// is read back as git printed it.
-func TestRuleAtParseHunks(t *testing.T) {
-	cases := []struct {
-		name    string
-		patch   string
-		want    []Hunk
-		wantErr bool
-	}{
-		{"a changed line", "diff --git a/k.txt b/k.txt\nindex 1..2 100644\n--- a/k.txt\n+++ b/k.txt\n@@ -2 +2 @@\n-b\n+B\n",
-			[]Hunk{{Path: "k.txt", From: 2, To: 2}}, false},
-		{"a hunk of several lines", "diff --git a/k.txt b/k.txt\n--- a/k.txt\n+++ b/k.txt\n@@ -2,0 +3,4 @@\n+a\n+b\n+c\n+d\n",
-			[]Hunk{{Path: "k.txt", From: 3, To: 6}}, false},
-		{"a content line that reads +++ is no path", "diff --git a/k.txt b/k.txt\n--- a/k.txt\n+++ b/k.txt\n@@ -2 +2 @@\n-b\n+B\n@@ -4 +4 @@\n-d\n+++ plus\n",
-			[]Hunk{{Path: "k.txt", From: 2, To: 2}, {Path: "k.txt", From: 4, To: 4}}, false},
-		{"a hunk that only deletes", "diff --git a/d.txt b/d.txt\n--- a/d.txt\n+++ b/d.txt\n@@ -2 +1,0 @@\n-2\n", nil, false},
-		{"a deleted file", "diff --git a/g.txt b/g.txt\ndeleted file mode 100644\n--- a/g.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n", nil, false},
-		{"a new file", "diff --git a/n.txt b/n.txt\nnew file mode 100644\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1 @@\n+o\n",
-			[]Hunk{{Path: "n.txt", From: 1, To: 1}}, false},
-		{"a binary file has no hunk", "diff --git a/b.bin b/b.bin\nindex 1..2 100644\nBinary files a/b.bin and b/b.bin differ\n", nil, false},
-		{"a name with a space", "diff --git a/with space.txt b/with space.txt\n--- a/with space.txt\t\n+++ b/with space.txt\t\n@@ -1 +1,2 @@\n 1\n+2\n",
-			[]Hunk{{Path: "with space.txt", From: 1, To: 2}}, false},
-		{"a quoted name", "diff --git \"a/q\\tx\" \"b/q\\tx\"\n--- \"a/q\\tx\"\n+++ \"b/q\\tx\"\n@@ -1 +1 @@\n-a\n+b\n",
-			[]Hunk{{Path: "q\tx", From: 1, To: 1}}, false},
-		{"carriage returns are trimmed", "diff --git a/k.txt b/k.txt\r\n--- a/k.txt\r\n+++ b/k.txt\r\n@@ -1 +1 @@\r\n",
-			[]Hunk{{Path: "k.txt", From: 1, To: 1}}, false},
-		{"a hunk header it cannot read", "diff --git a/k.txt b/k.txt\n+++ b/k.txt\n@@ nonsense @@\n", nil, true},
-		{"a path it cannot unquote", "diff --git a/k.txt b/k.txt\n+++ \"b/bad\\q\"\n@@ -1 +1 @@\n", nil, true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := parseHunks(c.patch)
-			if (err != nil) != c.wantErr {
-				t.Fatalf("parseHunks error = %v, want error %v", err, c.wantErr)
-			}
-			if !reflect.DeepEqual(got, c.want) {
-				t.Errorf("parseHunks = %+v, want %+v", got, c.want)
-			}
-		})
-	}
-}
-
 // TestRuleAtParseAdded: every "+" line after a hunk header is an added line,
 // numbered on from the header's new start; a "+" line inside a file header, in
 // a deleted file or in no file adds none.
@@ -88,6 +43,10 @@ func TestRuleAtParseAdded(t *testing.T) {
 		{"a binary file adds none", "diff --git a/b.bin b/b.bin\nBinary files a/b.bin and b/b.bin differ\n", nil, false},
 		{"a name with a space", "diff --git a/w s.txt b/w s.txt\n--- a/w s.txt\t\n+++ b/w s.txt\t\n@@ -1 +2 @@\n+2\n",
 			[]AddedLine{{Path: "w s.txt", Line: 2, Text: "2"}}, false},
+		{"a quoted name", "diff --git \"a/q\\tx\" \"b/q\\tx\"\n--- \"a/q\\tx\"\n+++ \"b/q\\tx\"\n@@ -1 +1 @@\n-a\n+b\n",
+			[]AddedLine{{Path: "q\tx", Line: 1, Text: "b"}}, false},
+		{"carriage returns are trimmed", "diff --git a/k.txt b/k.txt\r\n--- a/k.txt\r\n+++ b/k.txt\r\n@@ -1 +1 @@\r\n+B\r\n",
+			[]AddedLine{{Path: "k.txt", Line: 1, Text: "B"}}, false},
 		{"a hunk header it cannot read", "diff --git a/k.txt b/k.txt\n+++ b/k.txt\n@@ x @@\n", nil, true},
 		{"a path it cannot unquote", "diff --git a/k.txt b/k.txt\n+++ \"b/bad\\q\"\n", nil, true},
 	}

@@ -131,17 +131,6 @@ func deltaBlock(diffs []deltaDiff) string {
 	return strings.Join(append([]string{"delta:"}, lines...), "\n")
 }
 
-// deltaFileSet is the files the delta changes, as the round names them.
-func deltaFileSet(diffs []deltaDiff) map[string]bool {
-	set := map[string]bool{}
-	for _, d := range diffs {
-		for _, f := range d.Files {
-			set[f] = true
-		}
-	}
-	return set
-}
-
 // answers is what a delta reviewer looks for in the diff: every finding still
 // open or asked, and every noted finding a person has kept (a pending keep).
 // A noted finding with no decision, or one a person is dismissing, is left

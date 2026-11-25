@@ -40,12 +40,9 @@ type statusInfo struct {
 	Rounds   []statusRound
 	Findings []statusFinding
 	Publish  *statusPublish
-	// Probes, ProbeSkips and Unprobed are the status's ledger tables: every
-	// probe and skip the rounds recorded, and the hunks the latest round that
-	// recorded them left. Empty for a status that predates them.
-	Probes     []statusProbe
-	ProbeSkips []statusSkip
-	Unprobed   []statusHunk
+	// Probes is the status's probes table: every probe the rounds recorded.
+	// Empty for a status that predates it.
+	Probes []statusProbe
 	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
 	// suite by repo: what the plan screen reads. Both are empty for a task.
 	Need  string
@@ -99,30 +96,16 @@ type statusRound struct {
 	Fix, Ask, Note                    int
 	Scope, Base, Head                 string
 	Files                             int // -1 when the round has no findings.yaml
-	// Probes, Survived, Skipped and Unprobed are the round's ledger counts, -1
-	// where the status did not say (a round no reviewer ran, a status that
-	// predates the columns, and for Unprobed a round that did not record it).
-	Probes, Survived, Skipped, Unprobed int
+	// Probes and Survived are the round's probe counts, -1 where the status
+	// did not say (a round no reviewer ran, a status that predates the
+	// columns).
+	Probes, Survived int
 }
 
 // statusProbe is a row of the status's probes table, Where being file:line.
 type statusProbe struct {
 	Round                                   int
 	Outcome, Where, Seam, Mutation, Command string
-}
-
-// statusSkip is a row of the status's probe_skips table; Range is from-to or
-// "whole file".
-type statusSkip struct {
-	Round            int
-	File, Range, Why string
-}
-
-// statusHunk is a row of the status's unprobed table.
-type statusHunk struct {
-	Round    int
-	File     string
-	From, To int
 }
 
 // statusFinding is a row of the status's findings table: a finding the latest
@@ -271,19 +254,13 @@ func parseStatus(out string) *statusInfo {
 			N: atoi(r["round"]), Verdict: r["verdict"], Reviewer: dash(r["reviewer"]), Harness: dash(r["harness"]), Model: dash(r["model"]),
 			Independent: dash(r["independent"]), Fix: atoi(r["fix"]), Ask: atoi(r["ask"]), Note: atoi(r["note"]),
 			Scope: dash(r["scope"]), Base: dash(r["base"]), Head: dash(r["head"]), Files: files,
-			Probes: count(r["probes"]), Survived: count(r["survived"]), Skipped: count(r["skipped"]), Unprobed: count(r["unprobed"]),
+			Probes: count(r["probes"]), Survived: count(r["survived"]),
 		})
 	}
 	for _, r := range doc.Tables["probes"].Maps() {
 		info.Probes = append(info.Probes, statusProbe{
 			Round: atoi(r["round"]), Outcome: r["outcome"], Where: r["file:line"], Seam: r["seam"], Mutation: r["mutation"], Command: r["command"],
 		})
-	}
-	for _, r := range doc.Tables["probe_skips"].Maps() {
-		info.ProbeSkips = append(info.ProbeSkips, statusSkip{Round: atoi(r["round"]), File: r["file"], Range: r["range"], Why: r["why"]})
-	}
-	for _, r := range doc.Tables["unprobed"].Maps() {
-		info.Unprobed = append(info.Unprobed, statusHunk{Round: atoi(r["round"]), File: r["file"], From: atoi(r["from"]), To: atoi(r["to"])})
 	}
 	for _, r := range doc.Tables["findings"].Maps() {
 		info.Findings = append(info.Findings, statusFinding{
@@ -320,8 +297,8 @@ func parseStatus(out string) *statusInfo {
 	return info
 }
 
-// count is a ledger cell as a number, -1 for a cell the status left "-" or did
-// not have.
+// count is a probe count cell as a number, -1 for a cell the status left "-"
+// or did not have.
 func count(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "-" {

@@ -39,7 +39,7 @@ func deltaContext(t *testing.T, change func(t *testing.T, fx *fixture.Fixture)) 
 // TestADeltaRoundsContextHoldsOnlyItsDelta: a round 2 over one
 // changed file prints that file's diff, the kept note it answers, the file in
 // must_review and the read line, and none of the round 1 reading: no
-// recordings, no whole-change hunks count.
+// recordings, no open table. It asks for no sweep.
 func TestADeltaRoundsContextHoldsOnlyItsDelta(t *testing.T) {
 	t.Parallel()
 	_, out := deltaContext(t, func(t *testing.T, fx *fixture.Fixture) { changeBeta(t, fx) })
@@ -61,16 +61,16 @@ func TestADeltaRoundsContextHoldsOnlyItsDelta(t *testing.T) {
 			t.Errorf("a delta round's context lacks %q\n%s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"recordings:", "hunks:", "open[", "delta.diff", "this is a full round"} {
+	for _, unwanted := range []string{"recordings:", "hunks", "unprobed", "open[", "delta.diff", "this is a full round"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("a delta round's context holds %q, which round 1 read\n%s", unwanted, out)
 		}
 	}
 }
 
-// TestAFullRoundsContextHoldsItsReadLine: round 1 prints the whole change's
-// hunks count, the open table and the full read line, and no delta or answers
-// block.
+// TestAFullRoundsContextHoldsItsReadLine: round 1 prints the open table, the
+// probed table and the full read line, no hunk or unprobed count, and no delta
+// or answers block.
 func TestAFullRoundsContextHoldsItsReadLine(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
@@ -83,12 +83,12 @@ func TestAFullRoundsContextHoldsItsReadLine(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("review context: exit = %d\n%s", code, out)
 	}
-	for _, want := range []string{"scope: full", "hunks: ", "unprobed: ", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]", fullReadLine} {
+	for _, want := range []string{"scope: full", "open[0]{id,file:line,action,risk,title,decision}:", "must_review[", "probed[0]", fullReadLine} {
 		if !strings.Contains(out, want) {
 			t.Errorf("a full round's context lacks %q\n%s", want, out)
 		}
 	}
-	for _, unwanted := range []string{"delta:", "answers[", "this is a delta round"} {
+	for _, unwanted := range []string{"hunks", "unprobed", "delta:", "answers[", "this is a delta round"} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("a full round's context holds %q\n%s", unwanted, out)
 		}

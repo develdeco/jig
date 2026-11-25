@@ -232,7 +232,7 @@ func leaveOutSessionHostPaths(s string, dirs ...hostDir) string {
 // scrubReviewResult returns r with every directory of this machine in dirs
 // left out of the words the reviewer wrote that jig commits to the store: each
 // finding's title, detail and risk rationale, each probe's seam, mutation and
-// command, each skip's reason, and the summary. A finding that cites a
+// command, and the summary. A finding that cites a
 // recording by its path (the prompt asks for its scenario, step and commit
 // instead), or a probe's command run from the worktree, would otherwise commit the
 // operator's directories. The paths the result names as files are jig's to
@@ -253,13 +253,6 @@ func scrubReviewResult(r ReviewResult, dirs []hostDir) ReviewResult {
 		for i, p := range r.Probes {
 			p.Seam, p.Mutation, p.Command = scrub(p.Seam), scrub(p.Mutation), scrub(p.Command)
 			out.Probes[i] = p
-		}
-	}
-	if r.Skipped != nil {
-		out.Skipped = make([]ResultSkip, len(r.Skipped))
-		for i, s := range r.Skipped {
-			s.Why = scrub(s.Why)
-			out.Skipped[i] = s
 		}
 	}
 	out.Summary = scrub(r.Summary)
