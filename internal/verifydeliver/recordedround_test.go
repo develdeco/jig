@@ -225,44 +225,36 @@ func TestRecordedRoundKeepsTheListFromBeingWrittenThroughALink(t *testing.T) {
 	}
 }
 
-// TestRecordedRoundKeepsItsProbeLedger: a probe a round reports is kept with the
+// TestRecordedRoundKeepsItsProbes: a probe a round reports is kept with the
 // blob of the file it probed, and the next round is handed it: current while the
-// file stands as it was, stale once the branch changed it, and a skip stays a
-// skip of its hunks. The ledger a reviewer is handed names the probes the
-// reviewer had no part in writing.
-func TestRecordedRoundKeepsItsProbeLedger(t *testing.T) {
+// file stands as it was, stale once the branch changed it. The probes a
+// reviewer is handed are ones the reviewer had no part in writing.
+func TestRecordedRoundKeepsItsProbes(t *testing.T) {
 	t.Parallel()
 	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 
 	var reqs []ReviewRequest
-	var alpha, beta HunkEntry
-	skipped := ""
+	alpha, beta := "", ""
 	reviewer := func(p Prepared) ReviewResult {
 		reqs = append(reqs, p.Request)
 		result := ReviewResult{ReviewedPaths: p.Request.MustReview, Summary: "probed"}
 		if len(reqs) == 1 {
-			for _, h := range p.Request.Hunks {
+			for _, f := range p.Request.MustReview {
 				switch {
-				case alpha.File == "" && strings.HasPrefix(h.File, "alpha/"):
-					alpha = h
-				case beta.File == "" && strings.HasPrefix(h.File, "beta/"):
-					beta = h
+				case alpha == "" && strings.HasPrefix(f, "alpha/"):
+					alpha = f
+				case beta == "" && strings.HasPrefix(f, "beta/"):
+					beta = f
 				}
 			}
-			for _, h := range p.Request.Hunks {
-				if h.File != alpha.File && h.File != beta.File {
-					skipped = h.File
-				}
-			}
-			if alpha.File == "" || beta.File == "" || skipped == "" {
-				t.Fatalf("round 1 hunks = %+v, want hunks in alpha and beta and a third file", p.Request.Hunks)
+			if alpha == "" || beta == "" {
+				t.Fatalf("round 1 must_review = %v, want files in alpha and beta", p.Request.MustReview)
 			}
 			result.Probes = []ResultProbe{
-				{Seam: "alpha's path", File: alpha.File, Line: alpha.From, Mutation: "negate it", Command: "go test ./alpha", Outcome: ProbeCaught},
-				{Seam: "beta's path", File: beta.File, Line: beta.From, Mutation: "drop it", Command: "go test ./beta", Outcome: ProbeSurvived},
+				{Seam: "alpha's path", File: alpha, Line: 1, Mutation: "negate it", Command: "go test ./alpha", Outcome: ProbeCaught},
+				{Seam: "beta's path", File: beta, Line: 1, Mutation: "drop it", Command: "go test ./beta", Outcome: ProbeSurvived},
 			}
-			result.Skipped = []ResultSkip{{File: skipped, Why: "tests"}}
 		}
 		return result
 	}
@@ -272,26 +264,15 @@ func TestRecordedRoundKeepsItsProbeLedger(t *testing.T) {
 	if len(req1.Probed) != 0 {
 		t.Errorf("round 1 probed = %+v, want none", req1.Probed)
 	}
-	for _, h := range req1.Hunks {
-		if !h.Unprobed() {
-			t.Errorf("round 1 hunk %+v, want every hunk unprobed", h)
-		}
-	}
-	covered := 0
-	for _, h := range req1.Hunks {
-		if h == alpha || h == beta || h.File == skipped {
-			covered++
-		}
-	}
-	if report1.Probes != 2 || report1.Unprobed != len(req1.Hunks)-covered {
-		t.Errorf("round 1 report: probes %d, unprobed %d; want 2 and %d", report1.Probes, report1.Unprobed, len(req1.Hunks)-covered)
+	if report1.Probes != 2 {
+		t.Errorf("round 1 report: probes %d, want 2", report1.Probes)
 	}
 	ff1, ok, err := readFindingsYAML(d.Store, fx.Ticket, 1)
 	if err != nil || !ok {
 		t.Fatalf("read round 1 findings.yaml: ok=%v err=%v", ok, err)
 	}
-	if len(ff1.Probes) != 2 || len(ff1.Skipped) != 1 {
-		t.Fatalf("round 1 findings.yaml probes %+v, skipped %+v; want 2 and 1", ff1.Probes, ff1.Skipped)
+	if len(ff1.Probes) != 2 {
+		t.Fatalf("round 1 findings.yaml probes %+v, want 2", ff1.Probes)
 	}
 	for _, p := range ff1.Probes {
 		want, err := gitx.RevParse(buildLeaseDir(t, fx), req1.HeadSHA+":"+p.File)
@@ -302,7 +283,7 @@ func TestRecordedRoundKeepsItsProbeLedger(t *testing.T) {
 
 	// The branch changes the beta file and nothing else.
 	build := buildLeaseDir(t, fx)
-	path := filepath.Join(build, filepath.FromSlash(beta.File))
+	path := filepath.Join(build, filepath.FromSlash(beta))
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -328,21 +309,7 @@ func TestRecordedRoundKeepsItsProbeLedger(t *testing.T) {
 		}
 		states[p.File] = p.State
 	}
-	if states[alpha.File] != ProbeCurrent || states[beta.File] != ProbeStale {
-		t.Errorf("round 2 probed states = %v, want %s current and %s stale", states, alpha.File, beta.File)
-	}
-	var sawAlpha bool
-	for _, h := range req2.Hunks {
-		switch {
-		case h == HunkEntry{File: alpha.File, From: alpha.From, To: alpha.To, Probes: 1}:
-			sawAlpha = true
-		case h.File == skipped && h.Skip != "tests":
-			t.Errorf("round 2 hunk %+v, want it set aside as tests", h)
-		case h.File == beta.File && !h.Unprobed():
-			t.Errorf("round 2 hunk %+v of the changed file, want it unprobed", h)
-		}
-	}
-	if !sawAlpha {
-		t.Errorf("round 2 hunks = %+v, want the whole change's, with alpha's probed hunk %+v", req2.Hunks, alpha)
+	if states[alpha] != ProbeCurrent || states[beta] != ProbeStale {
+		t.Errorf("round 2 probed states = %v, want %s current and %s stale", states, alpha, beta)
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -57,11 +56,6 @@ type gateRequest struct {
 		File  string `json:"file"`
 		State string `json:"state"`
 	} `json:"probed"`
-	Hunks []struct {
-		File   string `json:"file"`
-		From   int    `json:"from"`
-		Probes int    `json:"probes"`
-	} `json:"hunks"`
 }
 
 // builtOrchestrator is the orchestrator fixture's ticket as the digester builds
@@ -340,23 +334,14 @@ func TestGateCoversEveryRepo(t *testing.T) {
 		t.Fatalf("jig finding in web: exit %d, want the draft taken\nstdout:\n%s\nstderr:\n%s", f.Code, f.Stdout, f.Stderr)
 	}
 	// A probe is named by its repo too, and one in each repo joins the drafts
-	// (ADR 0036), on the first hunk of each repo's file.
-	firstHunk := map[string]int{}
-	for _, h := range req.Hunks {
-		if _, ok := firstHunk[h.File]; !ok {
-			firstHunk[h.File] = h.From
-		}
-	}
+	// (ADR 0036).
 	probe := func(file, outcome string) []string {
-		return []string{"probe", ticket, "--seam", "the shop's total", "--file", file, "--line", strconv.Itoa(firstHunk[file]),
+		return []string{"probe", ticket, "--seam", "the shop's total", "--file", file, "--line", "1",
 			"--mutation", "drop the conversion", "--command", "go test ./...", "--outcome", outcome}
 	}
 	projRefusal(t, "jig probe with a path of no repo", rev.Jig(probe("ui/page.go", "caught")...), 1, "code: REVIEW_INVALID", "names no repo of this round")
 	for _, p := range [][2]string{{"api/server/handler.go", "caught"}, {"web/ui/page.go", "survived"}} {
-		if _, ok := firstHunk[p[0]]; !ok {
-			t.Fatalf("round 1 hunks = %+v, want one in %s", req.Hunks, p[0])
-		}
-		if f := rev.Jig(probe(p[0], p[1])...); f.Code != 0 || !strings.Contains(f.Stdout, "kind: probe") {
+		if f := rev.Jig(probe(p[0], p[1])...); f.Code != 0 || !strings.Contains(f.Stdout, "drafts: ") {
 			t.Fatalf("jig probe in %s: exit %d, want the draft taken\nstdout:\n%s\nstderr:\n%s", p[0], f.Code, f.Stdout, f.Stderr)
 		}
 	}
@@ -455,8 +440,7 @@ func TestGateCoversEveryRepo(t *testing.T) {
 		t.Errorf("round 2 must_review = %v, want web/ui/page.go alone", req2.MustReview)
 	}
 	// The api's probe is current, its repo not having moved, and the web's
-	// stale; the hunks are the whole change's in both repos, the api's still
-	// probed.
+	// stale.
 	states := map[string]string{}
 	for _, p := range req2.Probed {
 		states[p.File] = p.State
@@ -464,18 +448,10 @@ func TestGateCoversEveryRepo(t *testing.T) {
 	if want := (map[string]string{"api/server/handler.go": "current", "web/ui/page.go": "stale"}); !reflect.DeepEqual(states, want) {
 		t.Errorf("round 2 probed = %v, want %v", states, want)
 	}
-	probedIn := map[string]int{}
-	for _, h := range req2.Hunks {
-		probedIn[h.File] += h.Probes
-	}
-	if probedIn["api/server/handler.go"] != 1 || probedIn["web/ui/page.go"] != 0 {
-		t.Errorf("round 2 hunks = %+v, want the api's hunk probed once and the web's unprobed", req2.Hunks)
-	}
-	// The reviewer reads the delta round's view: the stale probe as a
-	// row, the api's current caught probe as one count, and the web's hunks as
-	// the work list.
+	// The reviewer reads the delta round's view: the stale probe as a row and
+	// the api's current caught probe as one count.
 	ctx2 := rev.Jig("review", "context", ticket)
-	for _, want := range []string{"probed[1]{round,file:line,outcome,state,seam,mutation}:", ",survived,stale,", "probed_current_caught: 1", "\"web/ui/page.go:"} {
+	for _, want := range []string{"probed[1]{round,file:line,outcome,state,seam,mutation}:", "\"web/ui/page.go:1\",survived,stale,", "probed_current_caught: 1"} {
 		if ctx2.Code != 0 || !strings.Contains(ctx2.Stdout, want) {
 			t.Errorf("jig review context of round 2: exit %d, lacks %q\n%s", ctx2.Code, want, ctx2.Stdout)
 		}

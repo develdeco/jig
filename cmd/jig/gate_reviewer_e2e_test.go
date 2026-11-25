@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -462,11 +461,11 @@ func TestFindingsDraftedWithJigFindingBecomeTheRound(t *testing.T) {
 	}
 }
 
-// TestProbesDraftedWithJigProbeJoinTheRound (ADR 0036): a reviewer records a
-// probe and a skip as it goes; each is checked as it is taken and says how many
-// hunks are left unprobed, the round counts them in its output, and
-// findings.yaml keeps them with the probed file's blob. A probe of a file not
-// at head is refused when the round is done.
+// TestProbesDraftedWithJigProbeJoinTheRound (ADR 0036): a reviewer who
+// chooses to record a probe drafts it as it goes; it is checked as it is taken,
+// the round counts it in its output, and findings.yaml keeps it with the probed
+// file's blob. Nothing asks for a probe or a skip, and jig probe takes no skip.
+// A probe of a file not at head is refused when the round is done.
 func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
@@ -487,20 +486,14 @@ func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 	if err := json.Unmarshal([]byte(ctx), &req); err != nil {
 		t.Fatalf("review context --json: %v\n%s", err, ctx)
 	}
-	if len(req.Hunks) < 2 {
-		t.Fatalf("hunks = %+v, want at least two", req.Hunks)
+	probed := req.MustReview[0]
+	view, code := runMain(t, e, "", withFlags("review", "context", ticket)...)
+	if code != 0 || !strings.Contains(view, "Optionally, record a probe that proves a finding: `jig probe "+ticket) {
+		t.Fatalf("review context: exit = %d, want 0 naming jig probe as the optional record\n%s", code, view)
 	}
-	probed, skipped := req.Hunks[0], ""
-	for _, h := range req.Hunks {
-		if h.File != probed.File {
-			skipped = h.File
-			break
-		}
-	}
-	left := 0
-	for _, h := range req.Hunks {
-		if h != probed && h.File != skipped {
-			left++
+	for _, unwanted := range []string{"unprobed", "hunks", "skip", "sweep"} {
+		if strings.Contains(strings.ToLower(view), unwanted) {
+			t.Errorf("review context says %q:\n%s", unwanted, view)
 		}
 	}
 
@@ -515,16 +508,16 @@ func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 	}
 
 	probe := func(outcome string) []string {
-		return withFlags("probe", ticket, "--seam", "the bound of a percentage", "--file", probed.File, "--line", strconv.Itoa(probed.From),
+		return withFlags("probe", ticket, "--seam", "the bound of a percentage", "--file", probed, "--line", "1",
 			"--mutation", "raise the bound", "--command", "go test ./alpha", "--outcome", outcome)
 	}
 	out, code = runMain(t, e, "", probe("killed")...)
 	if code != 1 || !strings.Contains(out, "REVIEW_INVALID") || !strings.Contains(out, "outcome") {
 		t.Fatalf("jig probe with an unknown outcome: exit = %d, want 1 and REVIEW_INVALID naming it\n%s", code, out)
 	}
-	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", skipped, "--seam", "s")...)
-	if code != 2 || !strings.Contains(out, "VALIDATION_ERROR") {
-		t.Fatalf("jig probe --skip with a probe's flags: exit = %d, want 2\n%s", code, out)
+	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", probed, "--why", "tests")...)
+	if code == 0 || !strings.Contains(out, "flag provided but not defined") {
+		t.Fatalf("jig probe with the flags it lost: exit = %d, want a refusal of the unknown flag\n%s", code, out)
 	}
 	// A draft cannot be taken back, so a probe of a file not at head is
 	// refused as it is drafted, not first when the round is done.
@@ -534,37 +527,24 @@ func TestProbesDraftedWithJigProbeJoinTheRound(t *testing.T) {
 		t.Fatalf("jig probe of a file not at head: exit = %d, want 1 naming it\n%s", code, out)
 	}
 	out, code = runMain(t, e, "", probe(verifydeliver.ProbeCaught)...)
-	if code != 0 || !strings.Contains(out, "kind: probe") || !strings.Contains(out, "drafts: 1") {
-		t.Fatalf("jig probe: exit = %d, want 0 and one draft\n%s", code, out)
-	}
-	out, code = runMain(t, e, "", withFlags("probe", ticket, "--skip", skipped, "--why", "tests")...)
-	if code != 0 || !strings.Contains(out, "kind: skip") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
-		t.Fatalf("jig probe --skip: exit = %d, want 0 and %d hunks left\n%s", code, left, out)
-	}
-	// Reading the round again says the same of what is left.
-	out, code = runMain(t, e, "", withFlags("review", "context", ticket)...)
-	if code != 0 || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
-		t.Fatalf("jig review context after the drafts: exit = %d, want %d hunks left\n%s", code, left, out)
+	if code != 0 || !strings.Contains(out, "drafts: 1") || strings.Contains(out, "unprobed") {
+		t.Fatalf("jig probe: exit = %d, want 0 and one draft, no unprobed count\n%s", code, out)
 	}
 	out, code = runMain(t, e, "", withFlags("review", "done", ticket, "--reviewed", strings.Join(req.MustReview, ","), "--summary", "probed")...)
-	if code != 0 || !strings.Contains(out, "probes: 1") || !strings.Contains(out, "unprobed: "+strconv.Itoa(left)) {
-		t.Fatalf("jig review done: exit = %d, want 0 counting one probe and %d unprobed\n%s", code, left, out)
+	if code != 0 || !strings.Contains(out, "probes: 1") || strings.Contains(out, "unprobed") {
+		t.Fatalf("jig review done: exit = %d, want 0 counting one probe and nothing unprobed\n%s", code, out)
 	}
 	var ff struct {
 		Probes []struct {
 			File string `yaml:"file"`
 			Blob string `yaml:"blob"`
 		} `yaml:"probes"`
-		Skipped []struct {
-			File string `yaml:"file"`
-			Why  string `yaml:"why"`
-		} `yaml:"skipped"`
 	}
 	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.yaml"))
 	if err != nil || yaml.Unmarshal(data, &ff) != nil {
 		t.Fatalf("read findings.yaml: %v\n%s", err, data)
 	}
-	if len(ff.Probes) != 1 || ff.Probes[0].File != probed.File || ff.Probes[0].Blob == "" || len(ff.Skipped) != 1 || ff.Skipped[0].Why != "tests" {
-		t.Fatalf("findings.yaml probes %+v and skipped %+v, want the probe with its blob and the skip", ff.Probes, ff.Skipped)
+	if len(ff.Probes) != 1 || ff.Probes[0].File != probed || ff.Probes[0].Blob == "" || strings.Contains(string(data), "skipped:") || strings.Contains(string(data), "unprobed:") {
+		t.Fatalf("findings.yaml = %s\nwant the probe with its blob and no skipped or unprobed key", data)
 	}
 }

@@ -20,7 +20,7 @@ jig review context T-1   # opens the round if none is open; --json prints the re
 jig review context T-1 --session $JIG_SESSION --model <yours> --effort <yours>
 ```
 
-It names the branch, its `copy`, `head`, `base`, `scope`, `worktree` advice and `request` file, with tables `must_review` (every file you must read), `open` and `dismissed` findings, `probed` probes, `unprobed` hunks and `oracles_passed`.
+It names the branch, its `copy`, `head`, `base`, `scope`, `worktree` advice and `request` file, with tables `must_review` (every file you must read), `open` and `dismissed` findings, `probed` probes and `oracles_passed`.
 
 Read `jig skill review rounds` when the report is refused or stale, the round has a `repos` table, you filed a note below the floor, or it lists open, answered or dismissed findings (`--prior`).
 

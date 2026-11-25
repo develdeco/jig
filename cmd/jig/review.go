@@ -21,7 +21,7 @@ const (
 	reviewModelUsage    = "the model the reviewer runs on, as it reports it; jig chooses none"
 	reviewEffortUsage   = "the reasoning effort the reviewer runs at, as it reports it"
 	reviewJSONUsage     = "print the review request as JSON (the review.json the round wrote)"
-	reviewResultUsage   = "the reviewer's whole report as a result.json (findings, still_present, reviewed_paths, summary, and optionally probes and skipped), instead of findings reported with `jig finding` and `jig probe`"
+	reviewResultUsage   = "the reviewer's whole report as a result.json (findings, still_present, reviewed_paths, summary, and optionally probes), instead of findings reported with `jig finding` and `jig probe`"
 	reviewReviewedUsage = "a repo-relative path the reviewer read, as <repo>/<path> in a project of several repos (repeat the flag, or separate with commas); every must_review path must be covered"
 	reviewSummaryUsage  = "the reviewer's summary of the round, in a sentence or two"
 	reviewStoreUsage    = "explicit store path"
@@ -74,7 +74,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	req := p.Request
 	// A delta round reads only its delta: it drops what round 1 read.
 	delta := full && roundIsDelta(p)
-	deltaFiles := deltaFileSet(deltas)
 	kv := [][2]string{
 		{"ticket", p.Ticket},
 		{"round", strconv.Itoa(p.Round)},
@@ -104,20 +103,10 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		kv = append(kv, [2]string{"recordings", req.Recordings})
 	}
 	kv = append(kv, [2]string{"must_review", strconv.Itoa(len(req.MustReview))})
-	unprobed := 0
-	for _, h := range req.Hunks {
-		if h.Unprobed() && (!delta || deltaFiles[h.File]) {
-			unprobed++
-		}
-	}
 	if delta {
-		kv = append(kv, [2]string{"unprobed", strconv.Itoa(unprobed)}, [2]string{"read", deltaReadLine})
+		kv = append(kv, [2]string{"read", deltaReadLine})
 	} else if full {
-		kv = append(kv,
-			[2]string{"hunks", strconv.Itoa(len(req.Hunks))},
-			[2]string{"unprobed", strconv.Itoa(unprobed)},
-			[2]string{"read", fullReadLine},
-		)
+		kv = append(kv, [2]string{"read", fullReadLine})
 	}
 	if p.Reviewer.Known() {
 		kv = append(kv, [2]string{"reviewer", reviewerLabel(p.Reviewer)})
@@ -173,9 +162,8 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 		oracleRows = append(oracleRows, []string{o.Slice, o.Workspace, o.Command, shortSHA(o.Commit), o.AtHead, strconv.Itoa(o.Seconds)})
 	}
 	blocks = append(blocks, axi.Table("oracles_passed", []string{"slice", "workspace", "command", "commit", "at_head", "seconds"}, oracleRows))
-	// The probe ledger (ADR 0036): what earlier rounds probed, current or
-	// stale at this head, and the hunks of the change nothing covers yet - the
-	// sweep's work list.
+	// The probes earlier rounds recorded, current or stale at this head (ADR
+	// 0036).
 	covered := 0
 	var probedRows [][]string
 	for _, pr := range req.Probed {
@@ -189,13 +177,6 @@ func roundBlocks(p verifydeliver.Prepared, moved []verifydeliver.RepoTip, full b
 	if delta {
 		blocks = append(blocks, fmt.Sprintf("probed_current_caught: %d", covered))
 	}
-	var unprobedRows [][]string
-	for _, h := range req.Hunks {
-		if h.Unprobed() && (!delta || deltaFiles[h.File]) {
-			unprobedRows = append(unprobedRows, []string{fmt.Sprintf("%s:%d-%d", h.File, h.From, h.To)})
-		}
-	}
-	blocks = append(blocks, axi.Table("unprobed", []string{"hunk"}, unprobedRows))
 	return blocks
 }
 
@@ -333,13 +314,6 @@ func cmdReviewContext(e env, args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "%s\n", data)
 		return 0
 	}
-	// The round's view counts what this round has drafted so far, as `jig
-	// probe` does: a reviewer reading the round again sees what is left.
-	drafts, err := verifydeliver.ReadDrafts(p)
-	if err != nil {
-		return renderErr(stdout, err)
-	}
-	p.Request.Hunks = verifydeliver.HunksWithDrafts(p, drafts)
 	deltas, err := computeDeltaDiffs(p, mp.Clones)
 	if err != nil {
 		return renderErr(stdout, err)

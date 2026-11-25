@@ -123,10 +123,10 @@ const (
 )
 
 // ResultProbe is one probe as the reviewer reports it in result.json (ADR
-// 0036): one term of a critical path's code mutated in the round's worktree,
-// the narrowest test command that covers it run against the mutant, and the
-// file put back. Seam names the critical path in the intent's words, Mutation
-// the edit in words.
+// 0036, as ADR 0067 keeps it): a mutation that proves one finding, one term
+// mutated in the round's worktree, the narrowest test command run against the
+// mutant, and the file put back. Seam names the path it is on in the intent's
+// words, Mutation the edit in words.
 type ResultProbe struct {
 	Seam     string `json:"seam"`
 	File     string `json:"file"`
@@ -136,24 +136,6 @@ type ResultProbe struct {
 	Outcome  string `json:"outcome"`
 }
 
-// ResultSkip is a file, or lines From to To of it, the reviewer sets aside in
-// result.json because no term of it is on a critical path: a test, a doc,
-// wiring. From and To are 0 for the whole file.
-type ResultSkip struct {
-	File string `json:"file"`
-	From int    `json:"from"`
-	To   int    `json:"to"`
-	Why  string `json:"why"`
-}
-
-// covers reports whether the skip covers lines from to to of file.
-func (s ResultSkip) covers(file string, from, to int) bool {
-	if s.File != file {
-		return false
-	}
-	return s.From == 0 || (s.From <= from && to <= s.To)
-}
-
 // ProbedEntry is one entry of review.json's probed list: an earlier round's
 // probe, and whether it is still current at this round's head.
 type ProbedEntry struct {
@@ -161,21 +143,6 @@ type ProbedEntry struct {
 	ResultProbe
 	State string `json:"state"`
 }
-
-// HunkEntry is one entry of review.json's hunks list: a hunk of the whole
-// change at this round's head, with the number of current probes whose line
-// falls inside it and the reason of a current skip that covers it.
-type HunkEntry struct {
-	File   string `json:"file"`
-	From   int    `json:"from"`
-	To     int    `json:"to"`
-	Probes int    `json:"probes"`
-	Skip   string `json:"skip,omitempty"`
-}
-
-// Unprobed reports whether no current probe falls inside the hunk and no
-// current skip covers it.
-func (h HunkEntry) Unprobed() bool { return h.Probes == 0 && h.Skip == "" }
 
 // RepoRequest is the part of a round's review.json that belongs to one repo,
 // for a round in a project of several repos: where the reviewer reads the
@@ -228,10 +195,8 @@ type ReviewRequest struct {
 	Dismissed     []DismissedFinding `json:"dismissed"`
 	MustReview    []string           `json:"must_review"`
 	// Probed is every earlier round's probes, oldest first, each current or
-	// stale at this round's head, and Hunks every hunk of the whole change at
-	// this head with the probes and skip that cover it (ADR 0036).
+	// stale at this round's head (ADR 0036).
 	Probed []ProbedEntry `json:"probed"`
-	Hunks  []HunkEntry   `json:"hunks"`
 	// StoreRefs are the lines the whole change adds that name something only
 	// the store holds (storerefs.go), in diff order. The round records them
 	// beside its verdict; the reviewer has nothing to do with them.
@@ -268,10 +233,8 @@ type ReviewResult struct {
 	StillPresent  []StillPresentEntry `json:"still_present"`
 	ReviewedPaths []string            `json:"reviewed_paths"`
 	Summary       string              `json:"summary"`
-	// Probes and Skipped are optional (ADR 0036): a result without them
-	// reports none.
-	Probes  []ResultProbe `json:"probes,omitempty"`
-	Skipped []ResultSkip  `json:"skipped,omitempty"`
+	// Probes is optional (ADR 0036): a result without it reports none.
+	Probes []ResultProbe `json:"probes,omitempty"`
 }
 
 // repo returns the entry of Repos for the repo named name, or the zero entry.
@@ -319,9 +282,6 @@ func MarshalReviewRequest(req ReviewRequest) ([]byte, error) {
 	if req.Probed == nil {
 		req.Probed = []ProbedEntry{}
 	}
-	if req.Hunks == nil {
-		req.Hunks = []HunkEntry{}
-	}
 	return json.MarshalIndent(req, "", "  ")
 }
 
@@ -344,15 +304,14 @@ func reviewInvalid(msg string) error {
 // and a JSON null does not count as the empty list it requires - there is
 // nothing for jig to fall back to when a reviewer session simply never
 // wrote either key, or wrote one as null instead of a real list; summary
-// stays optional, and so do probes and skipped, which may be left out but
-// are never null.
+// stays optional, and so do probes, which may be left out but are never
+// null.
 type reviewResultWire struct {
 	Findings      []ResultFinding     `json:"findings"`
 	StillPresent  []StillPresentEntry `json:"still_present"`
 	ReviewedPaths []string            `json:"reviewed_paths"`
 	Summary       string              `json:"summary"`
 	Probes        []ResultProbe       `json:"probes"`
-	Skipped       []ResultSkip        `json:"skipped"`
 }
 
 // ParseReviewResult parses result.json strictly and checks the rules that
@@ -412,10 +371,10 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	if err := json.Unmarshal(data, &present); err != nil {
 		return ReviewResult{}, reviewInvalid(fmt.Sprintf("not valid JSON: %v", err))
 	}
-	for _, key := range []string{"findings", "still_present", "reviewed_paths", "probes", "skipped"} {
+	for _, key := range []string{"findings", "still_present", "reviewed_paths", "probes"} {
 		raw, ok := present[key]
 		if !ok {
-			if key == "probes" || key == "skipped" {
+			if key == "probes" {
 				continue
 			}
 			return ReviewResult{}, reviewInvalid(fmt.Sprintf("missing %q", key))
@@ -437,7 +396,7 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	}
 	res := ReviewResult{
 		Findings: wire.Findings, StillPresent: wire.StillPresent, ReviewedPaths: wire.ReviewedPaths, Summary: wire.Summary,
-		Probes: wire.Probes, Skipped: wire.Skipped,
+		Probes: wire.Probes,
 	}
 
 	for i, f := range res.Findings {
@@ -452,11 +411,6 @@ func ParseReviewResult(data []byte) (ReviewResult, error) {
 	}
 	for i, p := range res.Probes {
 		if err := checkResultProbe(i, p); err != nil {
-			return ReviewResult{}, err
-		}
-	}
-	for i, s := range res.Skipped {
-		if err := checkResultSkip(i, s); err != nil {
 			return ReviewResult{}, err
 		}
 	}
@@ -532,28 +486,12 @@ func checkResultProbe(i int, p ResultProbe) error {
 	return nil
 }
 
-// checkResultSkip is checkResultFinding for skip i: a reason, a repo-relative
-// file, and lines that are the whole file (both 0) or a range in order.
-func checkResultSkip(i int, s ResultSkip) error {
-	if strings.TrimSpace(s.Why) == "" {
-		return reviewInvalid(fmt.Sprintf("skip %d has an empty why", i))
-	}
-	if (s.From == 0) != (s.To == 0) || s.From < 0 || s.To < s.From {
-		return reviewInvalid(fmt.Sprintf("skip %d lines %d to %d are not a range in order (both 0 for the whole file)", i, s.From, s.To))
-	}
-	if _, err := normalizeRepoRelPath(s.File); err != nil {
-		return reviewInvalid(fmt.Sprintf("skip %d file %q: %v", i, s.File, err))
-	}
-	return nil
-}
-
-// resultTopLevelKeys, resultFindingKeys, resultStillPresentKeys,
-// resultProbeKeys and resultSkipKeys are the exact key names
-// reviewResultWire's, ResultFinding's, StillPresentEntry's, ResultProbe's and
-// ResultSkip's own JSON tags declare - the "exact key names are required" half
-// of strict parsing.
+// resultTopLevelKeys, resultFindingKeys, resultStillPresentKeys and
+// resultProbeKeys are the exact key names reviewResultWire's, ResultFinding's,
+// StillPresentEntry's and ResultProbe's own JSON tags declare - the "exact key
+// names are required" half of strict parsing.
 var resultTopLevelKeys = map[string]bool{
-	"findings": true, "still_present": true, "reviewed_paths": true, "summary": true, "probes": true, "skipped": true,
+	"findings": true, "still_present": true, "reviewed_paths": true, "summary": true, "probes": true,
 }
 var resultFindingKeys = map[string]bool{
 	"file": true, "line": true, "title": true, "detail": true, "action": true,
@@ -563,10 +501,9 @@ var resultStillPresentKeys = map[string]bool{"prior": true, "line": true}
 var resultProbeKeys = map[string]bool{
 	"seam": true, "file": true, "line": true, "mutation": true, "command": true, "outcome": true,
 }
-var resultSkipKeys = map[string]bool{"file": true, "from": true, "to": true, "why": true}
 
 // unknownCaseVariantKey returns the first key, at the top level of data or
-// inside one of its "findings", "still_present", "probes" or "skipped"
+// inside one of its "findings", "still_present" or "probes"
 // elements, that is not exactly one of the key sets above - a case variant
 // like "FINDINGS" or "Oracle" included. "" means every key matched exactly. A
 // structurally unexpected shape (findings not an array of objects, say)
@@ -579,7 +516,6 @@ func unknownCaseVariantKey(data []byte) (string, error) {
 		listKeySpec{"findings", resultFindingKeys},
 		listKeySpec{"still_present", resultStillPresentKeys},
 		listKeySpec{"probes", resultProbeKeys},
-		listKeySpec{"skipped", resultSkipKeys},
 	)
 }
 
@@ -894,29 +830,22 @@ func validateReviewResult(req ReviewRequest, result ReviewResult, rf roundFiles,
 		}
 	}
 
-	// A probe or a skip is about code at head: its file is in a repo of the
-	// round and present there, never only deleted (ADR 0036).
-	ledgerFiles := make([]struct{ what, file string }, 0, len(result.Probes)+len(result.Skipped))
+	// A probe is of code at head: its file is in a repo of the round and
+	// present there, never only deleted (ADR 0036).
 	for i, p := range result.Probes {
-		ledgerFiles = append(ledgerFiles, struct{ what, file string }{fmt.Sprintf("probe %d", i), p.File})
-	}
-	for i, s := range result.Skipped {
-		ledgerFiles = append(ledgerFiles, struct{ what, file string }{fmt.Sprintf("skip %d", i), s.File})
-	}
-	for _, lf := range ledgerFiles {
-		norm, err := normalizeRepoRelPath(lf.file)
+		norm, err := normalizeRepoRelPath(p.File)
 		if err != nil {
-			return reviewInvalid(fmt.Sprintf("%s file %q: %v", lf.what, lf.file, err))
+			return reviewInvalid(fmt.Sprintf("probe %d file %q: %v", i, p.File, err))
 		}
 		if _, _, ok := rf.of(norm); !ok {
-			return reviewInvalid(fmt.Sprintf("%s %s", lf.what, rf.unknownRepoFile(lf.file)))
+			return reviewInvalid(fmt.Sprintf("probe %d %s", i, rf.unknownRepoFile(p.File)))
 		}
 		present, err := atHead(norm)
 		if err != nil {
 			return fmt.Errorf("verifydeliver: review: check %q at head: %w", norm, err)
 		}
 		if !present {
-			return reviewInvalid(fmt.Sprintf("%s file %q is not present at head", lf.what, lf.file))
+			return reviewInvalid(fmt.Sprintf("probe %d file %q is not present at head", i, p.File))
 		}
 	}
 
@@ -1156,10 +1085,6 @@ type Review struct {
 	// Effort is the reasoning effort this round's reviewer was dispatched
 	// with: "" when none was passed or no reviewer ran.
 	Effort string
-	// Hunks are the request's hunks of the whole change, with what earlier
-	// rounds' current probes and skips cover: with the round's own, they say
-	// how many hunks the round leaves unprobed (ADR 0036).
-	Hunks []HunkEntry
 	// StoreRefs are the request's store references, which the round records.
 	StoreRefs []StoreRef
 	// Carried is repo -> the merge of the target a delta round carried rather
@@ -1310,10 +1235,9 @@ type RoundInput struct {
 	// projection happens where the request is built, below.
 	Open      []Finding
 	Dismissed []DismissedFinding // findings bookkeeping's cumulative fold, projected (findings.go)
-	// Probes and Skips are every earlier round's probe ledger (Fold.Probes and
-	// Fold.Skips): the request says which are still current (ADR 0036).
+	// Probes is every earlier round's probes (Fold.Probes): the request says
+	// which are still current (ADR 0036).
 	Probes []ProbeRecord
-	Skips  []SkipRecord
 }
 
 // qualified reports whether the round is over the repos of a project of
@@ -1592,9 +1516,13 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		excerpt, prep.IntentNote = roundIntentExcerpt(in, prep.Repos, changed)
 	}
 
-	// The probe ledger (ADR 0036): every earlier probe, current or stale at
-	// this head, and every hunk of the whole change - from the base a full
-	// round uses, whatever this round's scope - with what covers it.
+	// Every earlier probe, current or stale at this head (ADR 0036).
+	probed, err := probedEntries(files, in.Probes)
+	if err != nil {
+		return ReviewPrep{}, err
+	}
+	// The store references of the whole change, from the base a full round
+	// uses in each repo, whatever this round's scope.
 	fullBases := map[string]string{}
 	for i, r := range repos {
 		rp := prep.Repos[i]
@@ -1605,11 +1533,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 			}
 		}
 	}
-	probed, hunks, err := requestLedger(files, fullBases, in.Probes, in.Skips)
-	if err != nil {
-		return ReviewPrep{}, err
-	}
-	// The store references of the whole change, from the same bases.
 	var refRepos []storeRefRepo
 	for i, r := range repos {
 		refRepos = append(refRepos, storeRefRepo{Name: r.Name, Dir: r.CloneDir, Base: fullBases[r.Name], Head: prep.Repos[i].Head})
@@ -1630,7 +1553,6 @@ func PrepareReviewRequest(in RoundInput) (ReviewPrep, error) {
 		Dismissed:     in.Dismissed,
 		MustReview:    prep.MustReview,
 		Probed:        probed,
-		Hunks:         hunks,
 		StoreRefs:     prep.StoreRefs,
 	}
 	if !qualified {
@@ -1756,7 +1678,7 @@ func checkReviewResult(req ReviewRequest, result ReviewResult, in RoundInput, de
 		return ReviewResult{}, err
 	}
 	result.ReviewedPaths = rf.normalizeReviewed(result.ReviewedPaths)
-	result.Probes, result.Skipped = normalizeLedger(result.Probes, result.Skipped)
+	result.Probes = normalizeProbes(result.Probes)
 	// What the reviewer wrote reaches the store: findings.yaml and findings.md,
 	// the fix slices built from a finding, and its own result.json in work/.
 	// It was told to cite a recording by scenario, step and commit, but a

@@ -14,12 +14,12 @@ import (
 )
 
 // TestReviewScreenShowsARecordedRoundsProbes follows a round's probes through
-// the real verbs: a reviewer draws a survivor, a caught probe and a skip with
-// jig probe and closes the round with jig review done; findings.yaml holds
-// them with the hunks left unprobed; jig status prints the ledger; and the
-// review screen of jig tui, on a pipe, shows the round's counts, the survivor's
-// row and the unprobed hunk. A second round that probes the survivor's line
-// again and catches it marks the first row as superseded.
+// the real verbs: a reviewer records a survivor and a caught probe with jig
+// probe and closes the round with jig review done; findings.yaml holds them;
+// jig status prints them; and the review screen of jig tui, on a pipe, shows the
+// round's counts and the survivor's row. A second round that probes the
+// survivor's line again and catches it marks the first row as superseded.
+// Neither the status nor the screen shows a skip or an unprobed hunk.
 func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{ScenarioBranch: "reviewer"})
@@ -52,52 +52,38 @@ func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 
 	must("gate", ticket)
 	req := contextOf()
-	if len(req.Hunks) < 3 {
-		t.Fatalf("hunks = %+v, want at least three", req.Hunks)
+	if len(req.MustReview) < 2 {
+		t.Fatalf("must_review = %v, want at least two files", req.MustReview)
 	}
-	survivor, caught := req.Hunks[0], req.Hunks[1]
-	skipped := ""
-	for _, h := range req.Hunks {
-		if h.File != survivor.File && h.File != caught.File {
-			skipped = h.File
-			break
-		}
-	}
-	if skipped == "" {
-		t.Fatalf("hunks = %+v, want a file apart from the two probed", req.Hunks)
-	}
-	probe(survivor.File, survivor.From, "raise the bound", verifydeliver.ProbeSurvived)
-	probe(caught.File, caught.From, "drop the guard", verifydeliver.ProbeCaught)
-	must("probe", ticket, "--skip", skipped, "--why", "set aside for the chain test")
+	survivor, caught := req.MustReview[0], req.MustReview[1]
+	probe(survivor, 1, "raise the bound", verifydeliver.ProbeSurvived)
+	probe(caught, 1, "drop the guard", verifydeliver.ProbeCaught)
 	must("review", "done", ticket, "--reviewed", strings.Join(req.MustReview, ","), "--summary", "probed")
 
 	var ff struct {
-		Probes   []struct{ File, Outcome string }
-		Skipped  []struct{ File, Why string }
-		Unprobed *[]struct {
-			File     string
-			From, To int
-		}
+		Probes []struct{ File, Outcome string }
 	}
 	data, err := os.ReadFile(filepath.Join(fx.StoreDir, "tickets", ticket, "gate", "round-1", "findings.yaml"))
 	if err != nil || yaml.Unmarshal(data, &ff) != nil {
 		t.Fatalf("read findings.yaml: %v\n%s", err, data)
 	}
-	if len(ff.Probes) != 2 || len(ff.Skipped) != 1 || ff.Unprobed == nil || len(*ff.Unprobed) == 0 {
-		t.Fatalf("findings.yaml probes %+v, skipped %+v, unprobed %+v, want two, one and the hunks left", ff.Probes, ff.Skipped, ff.Unprobed)
+	if len(ff.Probes) != 2 {
+		t.Fatalf("findings.yaml probes %+v, want two", ff.Probes)
 	}
-	hunk := (*ff.Unprobed)[0]
-	hunkRow := hunk.File + ":" + strconv.Itoa(hunk.From) + "-" + strconv.Itoa(hunk.To)
 
 	status := must("status", ticket)
 	for _, want := range []string{
 		"probes[2]{round,outcome,file:line,seam,mutation,command}:",
-		"probe_skips[1]{round,file,range,why}:",
-		"unprobed[" + strconv.Itoa(len(*ff.Unprobed)) + "]{round,file,from,to}:",
-		"," + strconv.Itoa(len(*ff.Unprobed)) + "\n", // the rounds row ends in its unprobed count
+		",probes,survived}:",
+		",2,1\n", // the rounds row ends in its probe counts
 	} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("jig status lacks %q:\n%s", want, status)
+		}
+	}
+	for _, unwanted := range []string{"skip", "unprobed"} {
+		if strings.Contains(status, unwanted) {
+			t.Errorf("jig status shows %q:\n%s", unwanted, status)
 		}
 	}
 
@@ -105,9 +91,13 @@ func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 	frames.until(t, "round 1 clean")
 	keys.Write([]byte("\x1b[A")) // the review step, above the publish one the cursor starts on
 	keys.Write([]byte("\r"))
-	frames.until(t, "2 probes · 1 caught · 1 survived · "+strconv.Itoa(len(*ff.Unprobed))+" ")
-	frames.until(t, "round 1  "+survivor.File+":"+strconv.Itoa(survivor.From)+"  survived")
-	frames.until(t, hunkRow)
+	frames.until(t, "2 probes · 1 caught · 1 survived")
+	frames.until(t, "round 1  "+survivor+":1  survived")
+	for _, unwanted := range []string{"unprobed", "set aside", "skipped"} {
+		if strings.Contains(frames.String(), unwanted) {
+			t.Errorf("the review screen shows %q:\n%s", unwanted, frames.String())
+		}
+	}
 	if strings.Contains(frames.String(), "caught in round 2") {
 		t.Errorf("a probe is marked superseded before a later round:\n%s", frames.String())
 	}
@@ -120,7 +110,7 @@ func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 	changeBeta(t, fx)
 	must("gate", ticket)
 	req2 := contextOf()
-	probe(survivor.File, survivor.From, "raise the bound again", verifydeliver.ProbeCaught)
+	probe(survivor, 1, "raise the bound again", verifydeliver.ProbeCaught)
 	must("review", "done", ticket, "--reviewed", strings.Join(req2.MustReview, ","), "--summary", "probed again")
 
 	keys, frames, wait = startTUI(t, e, ticket, "--store", fx.StoreDir)

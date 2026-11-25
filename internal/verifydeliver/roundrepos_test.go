@@ -255,7 +255,6 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
 		Probed: []ProbedEntry{{Round: 1, ResultProbe: ResultProbe{
 			Seam: "a total", File: "alpha/a.go", Line: 3, Mutation: "drop the factor", Command: "go test ./alpha -run TestA", Outcome: ProbeCaught,
 		}, State: ProbeCurrent}},
-		Hunks: []HunkEntry{{File: "alpha/a.go", From: 2, To: 4, Probes: 1}, {File: "alpha/a_test.go", From: 1, To: 9, Skip: "tests"}},
 	}
 	data, err := MarshalReviewRequest(req)
 	if err != nil {
@@ -318,21 +317,6 @@ func TestReviewRequestOfOneRepoMatchesItsGolden(t *testing.T) {
       "command": "go test ./alpha -run TestA",
       "outcome": "caught",
       "state": "current"
-    }
-  ],
-  "hunks": [
-    {
-      "file": "alpha/a.go",
-      "from": 2,
-      "to": 4,
-      "probes": 1
-    },
-    {
-      "file": "alpha/a_test.go",
-      "from": 1,
-      "to": 9,
-      "probes": 0,
-      "skip": "tests"
     }
   ]
 }`

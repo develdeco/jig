@@ -1321,15 +1321,15 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 			ticket, demoResult.ScrubbedCaptions)
 	}
 
-	// The behavior a reviewer's rounds tested, at the head they reviewed: a
-	// scripted round recorded no reviewed head, and no probe.
-	var behavior *behaviorCoverage
+	// A reviewer's probes current at the head: a scripted round recorded no
+	// reviewed head, and no probe.
+	var probes *[]ProbedEntry
 	if t.reviewedHead() != "" {
-		cov, err := publishCoverage(d.Store, t, in.dir, in.head)
+		current, err := publishProbes(d.Store, t, in.dir, in.head)
 		if err != nil {
 			return publication{}, err
 		}
-		behavior = &cov
+		probes = &current
 	}
 	journaled, err := t.readJournal(d)
 	if err != nil {
@@ -1343,7 +1343,7 @@ func renderPublication(d Deps, t *publishTarget, in renderInput) (publication, e
 		if t.reviewedHead() != "" {
 			approvalLine = publishApprovalLine(lines, t.lineRepo(), t.reviewedHead())
 		}
-		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, behavior, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes), t.storeRefs())
+		return writeReviewNotes(d.Store, ticket, t.notesName(), approvalLine, t.lastRound, rounds, lastSummary, outcomes, otherLines, reviewedPaths, in.touched, probes, renderSlicesSection(t.bodySlices(), commits, authorCommits, outcomes), t.storeRefs())
 	}
 	if err := writeNotes(journaled); err != nil {
 		return publication{}, err

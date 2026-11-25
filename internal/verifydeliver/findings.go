@@ -88,23 +88,10 @@ type findingsYAML struct {
 	// who kept it; their ids are in Cleared too.
 	KeptFixed []KeptFixed `yaml:"kept_fixed,omitempty"`
 	Summary   string      `yaml:"summary,omitempty"`
-	// Probes and Skipped are the round's own probes and skips, each with its
-	// file's blob at the round's head (ADR 0036): the behavior the round
-	// tested, beside the files it read.
-	Probes  []ProbeRecord `yaml:"probes,omitempty"`
-	Skipped []SkipRecord  `yaml:"skipped,omitempty"`
-	// Unprobed is the hunks of the whole change no current probe or skip
-	// covered when the round closed. A pointer, so a round that left none
-	// writes an empty list and a round this jig did not record has no key.
-	Unprobed *[]UnprobedHunk `yaml:"unprobed,omitempty"`
-}
-
-// UnprobedHunk is one hunk a round left unprobed, its file as the round names
-// it (<repo>/<path> in a project of several repos).
-type UnprobedHunk struct {
-	File string `yaml:"file"`
-	From int    `yaml:"from"`
-	To   int    `yaml:"to"`
+	// Probes is the round's own probes, each with its file's blob at the
+	// round's head (ADR 0036). A round recorded by an older jig may carry
+	// keys read here no more, which the decode ignores.
+	Probes []ProbeRecord `yaml:"probes,omitempty"`
 }
 
 // statusForAction maps a reviewer's action label to jig's own status: fix
@@ -707,18 +694,17 @@ type Fold struct {
 	Open      []Finding          // open, asked and noted, sorted by id: RoundInput.Open
 	Dismissed []DismissedFinding // dismissed, sorted by id: RoundInput.Dismissed
 	Probes    []ProbeRecord      // every earlier round's probes, oldest first: RoundInput.Probes
-	Skips     []SkipRecord       // every earlier round's skips, oldest first: RoundInput.Skips
 }
 
 // FoldBefore folds every gate/round-<n>/findings.yaml for ticket with
-// n < round (cumulativeFindings) and projects it into a Fold, with the probe
-// ledger of those rounds (ledgerBefore).
+// n < round (cumulativeFindings) and projects it into a Fold, with the probes
+// of those rounds (probesBefore).
 func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 	known, err := cumulativeFindings(st, ticket, round)
 	if err != nil {
 		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
 	}
-	probes, skips, err := ledgerBefore(st, ticket, round)
+	probes, err := probesBefore(st, ticket, round)
 	if err != nil {
 		return Fold{}, fmt.Errorf("verifydeliver: findings: fold before round %d: %w", round, err)
 	}
@@ -727,7 +713,6 @@ func FoldBefore(st *store.Store, ticket string, round int) (Fold, error) {
 		Open:      openAndNotedFindingsList(known),
 		Dismissed: toDismissedFindingList(dismissedFindingsList(known)),
 		Probes:    probes,
-		Skips:     skips,
 	}, nil
 }
 
@@ -759,10 +744,9 @@ func OutstandingFindings(st *store.Store, ticket string) (asks, notes []Finding,
 }
 
 // marshalFindingsYAML renders one round's findings.yaml, marshaling nil
-// reviewedPaths/findings as [] rather than null; a round with no probes or
-// skips writes neither key. A nil unprobed writes no key (the round did not
-// record it); a non-nil one, empty or not, writes the list.
-func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, keptFixed []KeptFixed, summary string, probes []ProbeRecord, skips []SkipRecord, unprobed []UnprobedHunk) ([]byte, error) {
+// reviewedPaths/findings as [] rather than null; a round with no probes writes
+// no probes key.
+func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Finding, cleared []string, keptFixed []KeptFixed, summary string, probes []ProbeRecord) ([]byte, error) {
 	if reviewedPaths == nil {
 		reviewedPaths = []string{}
 	}
@@ -777,10 +761,6 @@ func marshalFindingsYAML(scope string, reviewedPaths []string, findings []Findin
 		KeptFixed:     keptFixed,
 		Summary:       summary,
 		Probes:        probes,
-		Skipped:       skips,
-	}
-	if unprobed != nil {
-		ff.Unprobed = &unprobed
 	}
 	return yaml.Marshal(ff)
 }
