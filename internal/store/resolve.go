@@ -18,7 +18,8 @@ import (
 // Every command that takes a ticket id, the blocked_by refs jig graduate and
 // jig validate check, and the GitHub mirror's own blocked_by link and
 // "Waits for" line all resolve through this one function, so an alias is
-// read the same way everywhere jig follows a ticket id.
+// read the same way everywhere jig follows a ticket id. It reads every
+// ticket's record: what runs at every tool call asks ResolveRecorded.
 //
 // idOrAlias claimed by more than one ticket - two tickets list it under
 // aliases, or it is both one ticket's own id and another ticket's alias - is
@@ -38,6 +39,27 @@ func (s *Store) ResolveTicket(idOrAlias string) (string, error) {
 	default:
 		return "", aliasCollisionError(idOrAlias, owners)
 	}
+}
+
+// ResolveRecorded is ResolveTicket for an id a record of the store names (a
+// ticket's blocker, a tracker record's ticket): an id the store holds a ticket
+// under is that ticket's, and no other ticket is read. Only an id it holds
+// none under, an old one, is looked up across the store. It answers what
+// ResolveTicket would, except that for an id with a ticket of its own that
+// another ticket also lists as an alias it gives the id and no refusal.
+func (s *Store) ResolveRecorded(id string) (string, error) {
+	if s.holdsID(id) {
+		return id, nil
+	}
+	return s.ResolveTicket(id)
+}
+
+// holdsID reports whether the store holds a ticket under exactly id: id is
+// shaped like one (ParseTicketID, so it names one folder of tickets/) and the
+// folder holds a ticket (TicketExists). It opens no file.
+func (s *Store) holdsID(id string) bool {
+	_, _, ok := ParseTicketID(id)
+	return ok && s.TicketExists(id)
 }
 
 // aliasClaims maps every id and every alias found in the store to the

@@ -74,7 +74,7 @@ func TestBranchBindsByRemoteIDViaTheTree(t *testing.T) {
 		"55-no-such-ticket":       "",
 		"103-no-such-record":      "",
 	} {
-		id, how, err := st.TicketForBranch(branch)
+		id, how, err := st.TicketForBranch(branch, "")
 		if err != nil || id != want || (want != "" && how != "remote") {
 			t.Errorf("TicketForBranch(%q) = %q, %q, %v; want %q by a remote id", branch, id, how, err, want)
 		}
@@ -82,12 +82,12 @@ func TestBranchBindsByRemoteIDViaTheTree(t *testing.T) {
 
 	// The tree is read afresh: a record that lands now binds at once.
 	putRecord(t, st, TrackerOwner{Ticket: "JIG-2"}, "acme/tracking", 200)
-	if id, _, err := st.TicketForBranch("200-fresh"); err != nil || id != "JIG-2" {
+	if id, _, err := st.TicketForBranch("200-fresh", ""); err != nil || id != "JIG-2" {
 		t.Errorf("TicketForBranch(200-fresh) = %q, %v; want JIG-2", id, err)
 	}
 
 	putRecord(t, st, TrackerOwner{Ticket: "JIG-2"}, "acme/elsewhere", 102)
-	_, _, err := st.TicketForBranch("102-which")
+	_, _, err := st.TicketForBranch("102-which", "")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "TICKET_REMOTE_ID_COLLISION" {
 		t.Errorf("TicketForBranch(102-which) = %v, want TICKET_REMOTE_ID_COLLISION", err)

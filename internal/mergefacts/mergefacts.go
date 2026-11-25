@@ -36,6 +36,11 @@ type Reader struct {
 	// Clones maps a repo's name to its clone on this machine, as the machine
 	// mapping holds it. A repo with none is judged by its pull request alone.
 	Clones map[string]string
+	// NamedOnly keeps the reader to the tickets the one asked about names, as a
+	// tool call's reads must be: a multi-task's tasks are then those its charts
+	// list under it (store.ListedTasksUnder), not found by reading every
+	// ticket.
+	NamedOnly bool
 	// PRs says what state a pull request is in; nil reads none, so a recorded
 	// pull request is one the host could not be asked about.
 	PRs PRs
@@ -103,7 +108,7 @@ func (r *Reader) OfFor(ticket, issue string) (ready.Merge, error) {
 // PRCache reads none; the facts it has read are kept. It is for a listing that states where each of many
 // tickets stands without a host call for each.
 func (r *Reader) Cached() *Reader {
-	c := &Reader{Store: r.Store, Cfg: r.Cfg, Clones: r.Clones}
+	c := &Reader{Store: r.Store, Cfg: r.Cfg, Clones: r.Clones, NamedOnly: r.NamedOnly}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// What this reader already read stands: a fact just read is not read again.
@@ -241,7 +246,12 @@ func (r *Reader) builtIn(ticket string) ([]repoRef, error) {
 	// tasks build in (every repo while it has none placed).
 	owners := []string{ticket}
 	if rec, err := r.Store.ReadTicket(ticket); err == nil && rec.KindOrDefault() != store.KindTask {
-		if owners, err = r.Store.TasksUnder(ticket, rec); err != nil {
+		if r.NamedOnly && rec.KindOrDefault() == store.KindMultiTask {
+			owners, err = r.Store.ListedTasksUnder(ticket)
+		} else {
+			owners, err = r.Store.TasksUnder(ticket, rec)
+		}
+		if err != nil {
 			return nil, err
 		}
 		if len(owners) == 0 {
