@@ -135,6 +135,10 @@ type fakeClient struct {
 	updates     []fakeUpdate
 	closedDone  []string // node ids CloseIssueCompleted was called on
 	reopened    []string // node ids ReopenIssue was called on
+	// autoClosed is the node ids of the open issues PlaceItem closed by
+	// moving their card to Done, as a project's built-in Auto-close issue
+	// workflow does, which new projects have on.
+	autoClosed []string
 	removedSubs []fakeSubIssue
 	// itemFields simulates a board item's current Status and Store ID,
 	// keyed by item id: PlaceItem writes it, ItemFieldValues reads it back,
@@ -418,7 +422,26 @@ func (c *fakeClient) PlaceItem(_ context.Context, _ github.ProjectV2, contentID,
 		c.itemFields = map[string]fakeItemFields{}
 	}
 	c.itemFields[itemID] = fakeItemFields{Status: status, StoreID: storeID}
+	// A pull request has no entry in issues, so only an issue closes.
+	if is, ok := c.issues[contentID]; ok && is.Open && status == StatusDone {
+		is.Open, is.Reason = false, "completed"
+		c.autoClosed = append(c.autoClosed, contentID)
+	}
 	return itemID, nil
+}
+
+// closes counts how often nodeID's issue was closed, by jig's mutations or by
+// the Auto-close workflow.
+func (c *fakeClient) closes(nodeID string) int {
+	n := 0
+	for _, list := range [][]string{c.closedDone, c.closed, c.autoClosed} {
+		for _, id := range list {
+			if id == nodeID {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func (c *fakeClient) RepositoryIsPublic(_ context.Context, _, _ string) (bool, error) {
