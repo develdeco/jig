@@ -63,7 +63,9 @@ func TestFlatRecordIsStillReadWhereItsFolderHasNone(t *testing.T) {
 	if ids, err := st.TrackerIDs("JIG-1"); err != nil || ids.GitHub == nil || ids.GitHub.Number != 7 {
 		t.Errorf("TrackerIDs(JIG-1) = %+v, %v; want issue 7", ids, err)
 	}
-	if id, how, err := st.TicketForBranch("7-the-flat-one"); err != nil || id != "JIG-1" || how != "remote" {
+	// The project's own repo is declared: the flat layout has no folder for
+	// the item, so the number is looked up across the store.
+	if id, how, err := st.TicketForBranch("7-the-flat-one", "acme/tracking"); err != nil || id != "JIG-1" || how != "remote" {
 		t.Errorf("TicketForBranch(7-the-flat-one) = %q, %q, %v; want JIG-1 by a remote id", id, how, err)
 	}
 

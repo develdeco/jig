@@ -174,12 +174,31 @@ func cachedMergeReader(st *store.Store, cfg project.Config, mp project.MachinePr
 	return &mergefacts.Reader{Store: st, Cfg: cfg, Clones: mp.Clones, PRs: cache}
 }
 
+// notedStack is the stack plan the correction notes read at a tool call, a
+// prompt and a stop. Only a ticket whose record names a stacked blocker can be
+// told to restack or retarget, so any other is told from that record alone:
+// no chart file, no tracker record and no other ticket is read for it. The
+// plan of one that does reads no ticket it does not name
+// (mergefacts.Reader.NamedOnly). `jig here` keeps the full plan, container
+// rows included (locatedStack).
+func notedStack(where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
+	rec, err := st.ReadTicket(where.Ticket)
+	if err != nil {
+		return stack.Plan{}, err
+	}
+	if !stack.StackedOnAny(rec) {
+		return stack.Plan{Ticket: where.Ticket}, nil
+	}
+	return locatedStack(nil, where, st, jigHome, true)
+}
+
 // locatedStack reads the stack plan of the ticket where names, in the store st
 // it resolved: the project's repos from the store and the marker, its clones
 // from the machine mapping, and whether a parent merged from what this
-// machine knows (cachedMergeReader). A ticket stacked on nothing is told from
-// its record alone: the hook asks at every event.
-func locatedStack(m *gitx.Memo, where locate.Where, st *store.Store, jigHome string) (stack.Plan, error) {
+// machine knows (cachedMergeReader). A ticket with no stack facts
+// (hasStackFacts) has an empty plan. namedOnly is
+// mergefacts.Reader.NamedOnly, for a plan a tool call reads.
+func locatedStack(m *gitx.Memo, where locate.Where, st *store.Store, jigHome string, namedOnly bool) (stack.Plan, error) {
 	rec, err := st.ReadTicket(where.Ticket)
 	if err != nil {
 		return stack.Plan{}, err
@@ -196,7 +215,9 @@ func locatedStack(m *gitx.Memo, where locate.Where, st *store.Store, jigHome str
 		return stack.Plan{}, err
 	}
 	mp := machine[cfg.Name]
-	return stack.Read(stackInput(st, cfg, mp, cachedMergeReader(st, cfg, mp, jigHome)), where.Ticket)
+	merges := cachedMergeReader(st, cfg, mp, jigHome)
+	merges.NamedOnly = namedOnly
+	return stack.Read(stackInput(st, cfg, mp, merges), where.Ticket)
 }
 
 // hasStackFacts says the task's stack plan can say something: its record names
@@ -222,7 +243,7 @@ func hereStack(c hereCtx) (stack.Plan, bool) {
 	if c.Store == nil || c.Where.Ticket == "" {
 		return stack.Plan{}, false
 	}
-	plan, err := locatedStack(c.e.memo, c.Where, c.Store, c.JigHome)
+	plan, err := locatedStack(c.e.memo, c.Where, c.Store, c.JigHome, false)
 	if err != nil || (!plan.Stacked() && !plan.HasContainer()) {
 		return stack.Plan{}, false
 	}

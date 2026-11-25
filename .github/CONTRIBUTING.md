@@ -63,7 +63,10 @@ a list of tests.
 - Every `jig tui` screen holds at the narrowest supported width, 60
   columns, before its data has loaded, and while its data is stale.
 - A key in `jig tui` reads nothing again for each ticket.
-- A command run on every tool call reads only the tickets it names.
+- A command run on every tool call reads only the tickets it names, with two
+  exceptions: an id or issue number that leads straight to no ticket (a
+  renamed ticket's old id, say) is looked up across the store, and a stacked
+  ticket also reads every tracker record and chart file.
 
 ## Pull requests
 

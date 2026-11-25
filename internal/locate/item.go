@@ -86,6 +86,27 @@ func ResolveItem(st *store.Store, cfg project.Config, word string) (*Item, error
 	return it, nil
 }
 
+// HeldItemTicket is the ticket of the item word names when the item's own
+// record settles it (Store.ItemTicket), reading that record and no other:
+// what a tool-call hook follows a claim made by item number with. The item is
+// one of the project's tracker repo, or of the repo the ref names. ok is false
+// for a word that is no ref, a project with no GitHub tracker and every other
+// state of the record, which ResolveItem answers.
+func HeldItemTicket(st *store.Store, cfg project.Config, word string) (ticket string, ok bool) {
+	if !RefShaped(word) || cfg.GitHub == nil {
+		return "", false
+	}
+	ref, err := mirror.ParseItemRef(word)
+	if err != nil {
+		return "", false
+	}
+	repo := cfg.GitHub.Repo
+	if ref.Repo != "" {
+		repo = ref.Repo
+	}
+	return st.ItemTicket(repo, strconv.Itoa(ref.Number))
+}
+
 // AddHelp returns err with line added to its help when err is an *axi.Error
 // and line is not empty; any other error is returned as it is.
 func AddHelp(err error, line string) error {
