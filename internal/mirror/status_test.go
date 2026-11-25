@@ -13,7 +13,7 @@ import (
 )
 
 // TestTicketStatus covers the Status precedence:
-// Done (a merged pull request) outranks In review (an open one), which
+// In review (an open pull request) outranks Done (a merged one), which
 // outranks In progress (journal activity or a slice that left queued),
 // which outranks Briefed (a brief.md), which outranks Backlog.
 func TestTicketStatus(t *testing.T) {
@@ -65,13 +65,29 @@ func TestTicketStatus(t *testing.T) {
 		assertStatus(t, []PRRef{{Owner: "o", Repo: "r", Number: 1, State: "OPEN"}}, "In review")
 	})
 
-	t.Run("Done outranks In review", func(t *testing.T) {
-		prs := []PRRef{
-			{Owner: "o", Repo: "r", Number: 1, State: "OPEN"},
-			{Owner: "o", Repo: "r", Number: 2, State: "MERGED"},
-		}
-		assertStatus(t, prs, "Done")
-	})
+	// A ticket is Done from its pull requests only with one merged and none
+	// still open; a closed one and one the host no longer resolves (no State)
+	// are not open.
+	pr := func(repo string, n int, state string) PRRef {
+		return PRRef{Owner: "o", Repo: repo, Number: n, State: state}
+	}
+	for _, tc := range []struct {
+		name string
+		prs  []PRRef
+		want string
+	}{
+		{"merged", []PRRef{pr("r", 1, "MERGED")}, "Done"},
+		{"merged and closed unmerged", []PRRef{pr("r", 1, "CLOSED"), pr("r", 2, "MERGED")}, "Done"},
+		{"merged and one gone from the host", []PRRef{pr("r", 1, "MERGED"), pr("r", 2, "")}, "Done"},
+		{"an older merged one beside a newer open one", []PRRef{pr("r", 1, "MERGED"), pr("r", 2, "OPEN")}, "In review"},
+		{"one repo merged, one open", []PRRef{pr("a", 1, "MERGED"), pr("b", 1, "OPEN")}, "In review"},
+		{"closed unmerged alone", []PRRef{pr("r", 1, "CLOSED")}, "In progress"},
+		{"gone from the host alone", []PRRef{pr("r", 1, "")}, "In progress"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertStatus(t, tc.prs, tc.want)
+		})
+	}
 }
 
 // TestTicketStatusInProgressFromJournalAlone checks that a non-empty
@@ -110,7 +126,8 @@ func TestChartStatus(t *testing.T) {
 		{"one done, one backlog", []string{"Done", "Backlog"}, "In progress"},
 		{"every ticket done", []string{"Done", "Done"}, "Done"},
 		{"done or closed", []string{"Done", "Not planned"}, "Done"},
-		{"every ticket closed", []string{"Not planned", "Not planned"}, "Done"},
+		{"every ticket not planned", []string{"Not planned", "Not planned"}, "Not planned"},
+		{"one ticket, not planned", []string{"Not planned"}, "Not planned"},
 		{"closed, one backlog", []string{"Not planned", "Backlog"}, "Backlog"},
 		{"closed, one in progress", []string{"Not planned", "In progress"}, "In progress"},
 	}
@@ -200,6 +217,9 @@ func (c *prFakeClient) FetchIssues(context.Context, []string) (map[string]github
 func (c *prFakeClient) UpdateIssue(context.Context, string, string, string) error { return nil }
 func (c *prFakeClient) CloseIssueCompleted(context.Context, string) error         { return nil }
 func (c *prFakeClient) ReopenIssue(context.Context, string) error                 { return nil }
+func (c *prFakeClient) SetCloseReason(context.Context, string, string, int, string) error {
+	return nil
+}
 func (c *prFakeClient) ItemFieldValues(context.Context, []string) (map[string]github.ItemFields, error) {
 	return nil, nil
 }

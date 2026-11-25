@@ -1,5 +1,7 @@
 # The mirror carries the issue and posts the plan
 
+**Amended by [ADR 0069](0069-the-mirrors-card-never-runs-ahead-of-the-issue.md):** the rule below for an issue ticket's board Status no longer holds. A finished issue shows its own Status; an unfinished one reads `In review` while its own pull request is open, else what its chart's tickets say, never in a column that means closed.
+
 The mirror projected every ticket and every chart onto a GitHub issue, and made each ticket a sub-issue of its chart's issue. A chart with an `issue:` ([ADR 0057](0057-a-ticket-has-a-kind-and-a-chart-is-one-issues-plan.md)) is one need's plan, and the need already has an issue of its own: a second issue for the chart would be the need twice, and a sub-issue tree would make GitHub the owner of a plan the store owns.
 
 ## Decision

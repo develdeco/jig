@@ -292,6 +292,9 @@ func (s *stubGitHub) UpdateIssue(_ context.Context, nodeID, _, _ string) error {
 }
 func (s *stubGitHub) CloseIssueCompleted(context.Context, string) error { return nil }
 func (s *stubGitHub) ReopenIssue(context.Context, string) error         { return nil }
+func (s *stubGitHub) SetCloseReason(context.Context, string, string, int, string) error {
+	return nil
+}
 func (s *stubGitHub) ItemFieldValues(context.Context, []string) (map[string]github.ItemFields, error) {
 	return nil, nil
 }

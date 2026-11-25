@@ -51,8 +51,9 @@ func parseProjectURL(raw string) (ownerLogin string, isOrg bool, number int, err
 // project, creating any missing field or option and linking the issue repo
 // when it is not linked, then places every item that already has a record
 // (every ticket and chart Sync just created or found, in items' own order)
-// with its Status and Store ID (statusByTicket and chartTicketStatuses,
-// which updateIssues already derived), and each of a ticket's open or merged
+// with its card's Status (cardByWhat, which updateIssues already derived
+// beside the issue's open state, so the two never disagree) and its Store ID,
+// and each of a ticket's open or merged
 // pull requests (prsByTicket, which updateIssues already found) alongside
 // it. An item already on the board (rec.Item set from an earlier sync) has
 // its current Status and Store ID read back first, so an edit made on
@@ -67,7 +68,7 @@ func parseProjectURL(raw string) (ownerLogin string, isOrg bool, number int, err
 // create a missing field or link the issue repo the way EnsureProject does,
 // so a project that does not yet exist refuses the same way a live sync
 // would.
-func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, client github.Client, items []item, statusByTicket map[string]string, prsByTicket map[string][]PRRef, skip map[string]bool, report *SyncReport, dryRun bool) error {
+func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, client github.Client, items []item, cardByWhat map[string]string, prsByTicket map[string][]PRRef, skip map[string]bool, report *SyncReport, dryRun bool) error {
 	ownerLogin, isOrg, number, err := parseProjectURL(cfg.GitHub.Project)
 	if err != nil {
 		return err
@@ -129,18 +130,11 @@ func placeBoardItems(ctx context.Context, st *store.Store, cfg project.Config, c
 	for _, p := range todo {
 		it, rec := p.it, p.rec
 
-		var status string
+		status := cardByWhat[it.what()]
 		if it.kind == "ticket" {
-			status = statusByTicket[it.id]
 			if err := placeTicketPRs(ctx, client, proj, it.id, prsByTicket[it.id], onBoard, &rec, report, dryRun); err != nil {
 				return err
 			}
-		} else {
-			statuses, err := chartTicketStatuses(st, it.id, statusByTicket)
-			if err != nil {
-				return err
-			}
-			status = ChartStatus(statuses)
 		}
 
 		alreadyPlaced := false
@@ -243,21 +237,4 @@ func placeTicketPRs(ctx context.Context, client github.Client, proj github.Proje
 		rec.PRs = prRecs
 	}
 	return nil
-}
-
-// chartTicketStatuses returns the Status already computed (in ticketStatus)
-// for each of chart's own tickets, in its tickets.yaml order, the input
-// ChartStatus derives a chart's own Status from.
-func chartTicketStatuses(st *store.Store, chart string, ticketStatus map[string]string) ([]string, error) {
-	entries, err := st.ReadChart(chart)
-	if err != nil {
-		return nil, err
-	}
-	var statuses []string
-	for _, e := range entries {
-		if s, ok := ticketStatus[e.ID]; ok {
-			statuses = append(statuses, s)
-		}
-	}
-	return statuses, nil
 }
