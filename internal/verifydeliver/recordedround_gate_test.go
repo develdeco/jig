@@ -231,29 +231,18 @@ func TestRecordedRoundKeepsTheFixBudget(t *testing.T) {
 	}
 }
 
-// TestRecordedRoundKeepsTheProbesAndSkipsInThePullRequest: what a clean round
-// probed and set aside reaches the review notes a publish renders, with the
-// probe's file as the repo spells it.
-func TestRecordedRoundKeepsTheProbesAndSkipsInThePullRequest(t *testing.T) {
+// TestRecordedRoundKeepsTheProbesInThePullRequest: what a clean round probed
+// reaches the review notes a publish renders, with the probe's file as the repo
+// spells it.
+func TestRecordedRoundKeepsTheProbesInThePullRequest(t *testing.T) {
 	t.Parallel()
 	fx := generateBuilt(t, "rung-a")
 	d := newDeps(t, fx)
 	useGithubHost(t, &d, "", "")
 
 	report := recordedRound(t, d, GateOpts{Ticket: fx.Ticket}, func(p Prepared) ReviewResult {
-		h := p.Request.Hunks[0]
-		skipped := ""
-		for _, o := range p.Request.Hunks {
-			if o.File != h.File {
-				skipped = o.File
-			}
-		}
-		if skipped == "" {
-			t.Fatalf("hunks = %+v, want two files to probe one and set the other aside", p.Request.Hunks)
-		}
 		res := cleanReport(p)
-		res.Probes = []ResultProbe{{Seam: "the clamp", File: h.File, Line: h.From, Mutation: "upper bound 100 to 101", Command: "go test ./alpha", Outcome: ProbeCaught}}
-		res.Skipped = []ResultSkip{{File: skipped, Why: "tests"}}
+		res.Probes = []ResultProbe{{Seam: "the clamp", File: p.Request.MustReview[0], Line: 1, Mutation: "upper bound 100 to 101", Command: "go test ./alpha", Outcome: ProbeCaught}}
 		return res
 	})
 	if report.Verdict != "clean" || report.Probes != 1 {
@@ -268,7 +257,7 @@ func TestRecordedRoundKeepsTheProbesAndSkipsInThePullRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Probes current at the reviewed head:\n\n- ", "caught: upper bound 100 to 101 (the clamp; round 1)", "Set aside as on no critical path:\n\n- "} {
+	for _, want := range []string{"Probes current at the reviewed head:\n\n- ", "caught: upper bound 100 to 101 (the clamp; round 1)"} {
 		if !strings.Contains(string(notes), want) {
 			t.Errorf("the review notes do not hold %q:\n%s", want, notes)
 		}

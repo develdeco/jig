@@ -1,5 +1,7 @@
 # The reviewer probes the critical paths, and jig keeps the probes across rounds
 
+**Superseded in part by [ADR 0067](0067-a-gate-round-reads-the-whole-change-and-runs-a-test-only-to-prove-a-finding.md):** the per-term sweep, the hunk list and the skips are gone: a round reads the whole change against the intent and runs a test only to prove a finding. The probe record stays, as the optional record of such a probe.
+
 **Amended 2026-11-24:** the reach step added on 2026-11-22 (develdeco/jig#530: before probing, every round listed what the change reaches past the code it alters, and read it) was tried and taken out. On the next chart run, five tickets took 6 to 11 rounds, and the rounds after the first found 29 new medium findings, against 6 across the 14 tickets reviewed before it. They were new cases of the ticket's own rule around each fix, not repeats: each fix's reach found another one. The step's own measure was 2 rounds or fewer and no medium from the PR reader after a clean gate, and both went the wrong way. The independent PR reader that reads each pull request once after a clean gate stays; it already reads wide. A reviewer again runs a test only to probe.
 
 **Amended 2026-11-18:** a probe's `command` can be the finding's own `--oracle`: the narrowest command that covers the mutated term is the narrowest that proves its fix.

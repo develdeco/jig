@@ -56,11 +56,10 @@ func TestStringListSplitsOnCommasAndCollectsRepeats(t *testing.T) {
 	}
 }
 
-// TestReviewContextShowsTheProbeLedger (ADR 0036): the full view of an open
-// round counts the change's hunks and the unprobed ones, gives each oracle
-// that passed its seconds, lists earlier rounds' probes with their
-// state, and lists the unprobed hunks as the sweep's work list.
-func TestReviewContextShowsTheProbeLedger(t *testing.T) {
+// TestReviewContextShowsTheProbes (ADR 0036): the full view of an open round
+// gives each oracle that passed its seconds and lists earlier rounds' probes
+// with their state, and counts no hunk and no unprobed one.
+func TestReviewContextShowsTheProbes(t *testing.T) {
 	p := verifydeliver.Prepared{
 		Ticket: "T-1", Round: 2, Branch: "T-1-b", Copy: "the clone's", Head: "bbbb", Base: "aaaa", Scope: "full",
 		Request: verifydeliver.ReviewRequest{
@@ -70,26 +69,20 @@ func TestReviewContextShowsTheProbeLedger(t *testing.T) {
 				{Round: 1, ResultProbe: verifydeliver.ResultProbe{Seam: "a total", File: "a/a.go", Line: 3, Mutation: "drop the factor", Outcome: verifydeliver.ProbeCaught}, State: verifydeliver.ProbeCurrent},
 				{Round: 1, ResultProbe: verifydeliver.ResultProbe{Seam: "a total", File: "a/b.go", Line: 7, Mutation: "negate it", Outcome: verifydeliver.ProbeSurvived}, State: verifydeliver.ProbeStale},
 			},
-			Hunks: []verifydeliver.HunkEntry{
-				{File: "a/a.go", From: 2, To: 4, Probes: 1},
-				{File: "a/a_test.go", From: 1, To: 9, Skip: "tests"},
-				{File: "a/b.go", From: 6, To: 8},
-			},
 		},
 	}
 	out := strings.Join(roundBlocks(p, nil, true, nil), "\n")
 	for _, want := range []string{
-		"hunks: 3",
-		"unprobed: 1",
 		"oracles_passed[1]{slice,workspace,command,commit,at_head,seconds}:\n  s1,a,go test ./a/...,cccccccccccc,no,4",
 		"probed[2]{round,file:line,outcome,state,seam,mutation}:\n  1,\"a/a.go:3\",caught,current,a total,drop the factor\n  1,\"a/b.go:7\",survived,stale,a total,negate it",
-		"unprobed[1]{hunk}:\n  \"a/b.go:6-8\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the round's view lacks %q\n%s", want, out)
 		}
 	}
-	if brief := strings.Join(roundBlocks(p, nil, false, nil), "\n"); strings.Contains(brief, "unprobed") {
-		t.Errorf("the short view of a round counts unprobed hunks, want only the full one to\n%s", brief)
+	for _, unwanted := range []string{"hunk", "unprobed"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("the round's view says %q\n%s", unwanted, out)
+		}
 	}
 }

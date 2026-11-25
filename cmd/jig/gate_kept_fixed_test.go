@@ -88,7 +88,8 @@ func TestKeptAskTheClosingRoundNoLongerReportsAtAMovedHeadReadsFixed(t *testing.
 			break
 		}
 	}
-	if cells := strings.Split(round2, ","); round2 == "" || cells[len(cells)-5] != "1" {
+	// The row ends in kept_fixed, probes and survived.
+	if cells := strings.Split(round2, ","); round2 == "" || cells[len(cells)-3] != "1" {
 		t.Fatalf("status rounds row for round 2 does not count the spent keep (kept_fixed 1):\n%s", st)
 	}
 }

@@ -431,7 +431,6 @@ func (r *gateRun) roundInput() RoundInput {
 		Open:       r.fold.Open,
 		Dismissed:  r.fold.Dismissed,
 		Probes:     r.fold.Probes,
-		Skips:      r.fold.Skips,
 	}
 	if !r.qualified {
 		gr := r.repos[0]
@@ -697,23 +696,15 @@ func (r *gateRun) finish(round Round, ok bool, info finishInfo) (GateReport, err
 		for _, fs := range fixSlices {
 			report.FixSlices = append(report.FixSlices, fs.ID)
 		}
-		// The round's probes and skips join the ledger with their files'
-		// blobs at the head it reviewed (ADR 0036), and the hunks they and the
-		// earlier rounds' current ones leave uncovered are counted.
+		// The round's probes are kept with their files' blobs at the head it
+		// reviewed (ADR 0036).
 		result := round.Review.Result
-		probes, skips, err := recordLedger(files, result.Probes, result.Skipped)
+		probes, err := recordProbes(files, result.Probes)
 		if err != nil {
 			return GateReport{}, err
 		}
 		report.Probes = len(probes)
-		left := unprobedHunks(coverHunks(round.Review.Hunks, result.Probes, result.Skipped))
-		report.Unprobed = len(left)
-		// Never nil: an empty list says the round recorded that it left none.
-		unprobed := make([]UnprobedHunk, 0, len(left))
-		for _, h := range left {
-			unprobed = append(unprobed, UnprobedHunk{File: h.File, From: h.From, To: h.To})
-		}
-		if err := writeReviewerRound(d, ticket, n, report, report.Scope, result.ReviewedPaths, routed, cleared, result.Summary, probes, skips, unprobed); err != nil {
+		if err := writeReviewerRound(d, ticket, n, report, report.Scope, result.ReviewedPaths, routed, cleared, result.Summary, probes); err != nil {
 			return GateReport{}, err
 		}
 		event := journal.EventGateRound

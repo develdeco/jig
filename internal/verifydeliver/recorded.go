@@ -539,20 +539,18 @@ func originTip(dir, branch string) (string, error) {
 }
 
 // Draft is one entry of a round's findings drafts: a finding the reviewer
-// reports, an earlier finding it confirms is still present, or a probe or a
-// skip (ADR 0036). A round's drafts are its ReviewResult, said a piece at a
-// time.
+// reports, an earlier finding it confirms is still present, or a probe (ADR
+// 0036). A round's drafts are its ReviewResult, said a piece at a time.
 type Draft struct {
 	Finding      *ResultFinding     `json:"finding,omitempty"`
 	StillPresent *StillPresentEntry `json:"still_present,omitempty"`
 	Probe        *ResultProbe       `json:"probe,omitempty"`
-	Skip         *ResultSkip        `json:"skip,omitempty"`
 }
 
 // kinds counts the parts of the draft that are set: exactly one is.
 func (dr Draft) kinds() int {
 	n := 0
-	for _, set := range []bool{dr.Finding != nil, dr.StillPresent != nil, dr.Probe != nil, dr.Skip != nil} {
+	for _, set := range []bool{dr.Finding != nil, dr.StillPresent != nil, dr.Probe != nil} {
 		if set {
 			n++
 		}
@@ -562,14 +560,14 @@ func (dr Draft) kinds() int {
 
 // AppendDraft checks d against the open round and appends it to the round's
 // findings drafts. What it checks is what needs no other draft: the fields
-// ParseReviewResult checks of a finding, a probe or a skip, a prior that names a finding under open or
-// dismissed, and a file of a probe or a skip in a repo of the round. That the
-// file exists at the head, that no two drafts share a prior and that the
-// reviewed paths cover must_review are checked when the round is done. It
-// returns how many drafts the round has now.
+// ParseReviewResult checks of a finding or a probe, a prior that names a
+// finding under open or dismissed, and a probe's file, in a repo of the round
+// and at its head. That no two drafts share a prior, that every probe's file is
+// still at the head and that the reviewed paths cover must_review are checked
+// when the round is done. It returns how many drafts the round has now.
 func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 	if dr.kinds() != 1 {
-		return 0, &axi.Error{Msg: "a draft is one of a finding, a still_present entry, a probe or a skip", Code: "VALIDATION_ERROR"}
+		return 0, &axi.Error{Msg: "a draft is one of a finding, a still_present entry or a probe", Code: "VALIDATION_ERROR"}
 	}
 	existing, err := ReadDrafts(p)
 	if err != nil {
@@ -604,14 +602,7 @@ func AppendDraft(d Deps, p Prepared, dr Draft) (int, error) {
 		if err := checkResultProbe(len(existing), *dr.Probe); err != nil {
 			return 0, err
 		}
-		if err := p.roundInput(d).requestFiles(p.Request).placeLedgerFile(dr.Probe.File); err != nil {
-			return 0, err
-		}
-	case dr.Skip != nil:
-		if err := checkResultSkip(len(existing), *dr.Skip); err != nil {
-			return 0, err
-		}
-		if err := p.roundInput(d).requestFiles(p.Request).placeLedgerFile(dr.Skip.File); err != nil {
+		if err := p.roundInput(d).requestFiles(p.Request).placeProbeFile(dr.Probe.File); err != nil {
 			return 0, err
 		}
 	default:
@@ -664,6 +655,11 @@ func ReadDrafts(p Prepared) ([]Draft, error) {
 		if err := json.Unmarshal(line, &dr); err != nil {
 			return nil, fmt.Errorf("verifydeliver: findings draft %d is not valid JSON: %w", i+1, err)
 		}
+		// A draft of a part jig no longer takes, which an older jig drafted
+		// into a round still open, is left out: the round still closes.
+		if dr.kinds() == 0 {
+			continue
+		}
 		out = append(out, dr)
 	}
 	return out, nil
@@ -684,15 +680,12 @@ func DraftResult(drafts []Draft, reviewed []string, summary string) ReviewResult
 		if dr.Probe != nil {
 			res.Probes = append(res.Probes, *dr.Probe)
 		}
-		if dr.Skip != nil {
-			res.Skipped = append(res.Skipped, *dr.Skip)
-		}
 	}
 	res.ReviewedPaths = append(res.ReviewedPaths, reviewed...)
 	return res
 }
 
-// marshalResult renders a ReviewResult as result.json, with the three lists as
+// marshalResult renders a ReviewResult as result.json, with its required lists as
 // [] and never null (ParseReviewResult refuses null).
 func marshalResult(r ReviewResult) ([]byte, error) {
 	if r.Findings == nil {
@@ -856,7 +849,7 @@ func GateFinish(d Deps, p Prepared, rr ReviewResult, prov Provenance) (report Ga
 	review := &Review{
 		Changed: diff.Changed, Deleted: diff.Deleted, MustReview: p.Request.MustReview,
 		Result: rr, Intent: p.Intent, IntentSHA256: p.IntentSHA256, IntentNote: p.IntentNote,
-		Effort: prov.Effort, Hunks: p.Request.Hunks, StoreRefs: p.Request.StoreRefs,
+		Effort: prov.Effort, StoreRefs: p.Request.StoreRefs,
 		Carried: carriedOfCovered(covered),
 	}
 	if qualified {
