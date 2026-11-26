@@ -204,7 +204,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 				need = len(dl)
 			}
 			db = max(min(len(dl), avail-total), need)
-			db = min(db, avail-listsLeast)
+			db = max(min(db, avail-listMin), min(len(dl), detailPeek))
 			lb = avail - db
 			if db < min(len(dl), detailLeast) {
 				lb = avail - 1 // the line that says the detail has no room

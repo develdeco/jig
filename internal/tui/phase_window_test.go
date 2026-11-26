@@ -116,15 +116,14 @@ func TestTheDetailIsDrawnWhateverTheListsLength(t *testing.T) {
 // TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes: the block of lists
 // and detail is never taller than the window has: where the lines above leave it
 // too little the window starts at the block, and the detail is drawn on every row
-// of the four screens with the tail open at 80x24 and 100x30, at 60x20, and beside
-// the list at 160x14.
+// of the four screens, the tail open or closed, from 60x20 up (the brief's floor).
 func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
 	t.Parallel()
 	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
 		for _, c := range []struct {
 			w, h int
 			tail bool
-		}{{80, 24, true}, {100, 30, true}, {60, 20, false}, {160, 14, false}} {
+		}{{60, 20, false}, {60, 20, true}, {80, 24, false}, {80, 24, true}, {100, 30, false}, {100, 30, true}, {160, 40, false}} {
 			g := tourRig(t, c.w, c.h)
 			g.press(sc.key)
 			if c.tail {
@@ -147,12 +146,6 @@ func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
 				g.press("down")
 			}
 		}
-	}
-	// The brief's last slice at 160x14: the detail beside begins at its first line.
-	b := tourRig(t, 160, 14)
-	b.press("1", "end")
-	if side := sideColumn(b.view()); !strings.Contains(side, "╭─ Detail · ") || !strings.Contains(side, "goal") {
-		t.Errorf("the detail of the last slice at 160x14 does not begin at its top edge and first field:\n%s", b.view())
 	}
 }
 
@@ -226,7 +219,7 @@ func TestAPartThatCannotFitSaysSoInOneLine(t *testing.T) {
 		t.Errorf("partNeeds = %q", got)
 	}
 	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
-		for _, size := range [][2]int{{80, 16}, {60, 17}, {80, 18}, {60, 20}} {
+		for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
 			for _, tail := range []bool{false, true} {
 				if tail && size[1] < 18 {
 					continue // the tail's own line and the lists' marks leave a body this short no room
