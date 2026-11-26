@@ -20,6 +20,8 @@ const (
 	sibSlices sibKind = iota + 1
 	sibTickets
 	sibCharts
+	sibFindings
+	sibRounds
 )
 
 // noun is one sibling, in the words a reason says it.
@@ -29,6 +31,10 @@ func (k sibKind) noun() string {
 		return "slice"
 	case sibCharts:
 		return "chart"
+	case sibFindings:
+		return "finding"
+	case sibRounds:
+		return "round"
 	}
 	return "ticket"
 }
@@ -73,7 +79,16 @@ func (m *Model) readSibs() *sibSet {
 		}
 		s.at = slices.Index(s.ids, e.slice)
 		return s
-	case screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenLand:
+	case screenFinding:
+		return m.findingSibs(e)
+	case screenReview, screenTicket, screenBrief, screenBuild, screenPublish, screenLand:
+		if e.screen == screenReview {
+			// The round is the review screen's subject: its siblings are the
+			// rounds, and a ticket with fewer than two has the ticket's own.
+			if s := m.roundSibs(e); s != nil {
+				return s
+			}
+		}
 		// The ticket's own screen is the lowest of the run of its screens; the
 		// list is the screen under it.
 		i := len(m.nav) - 1
@@ -145,6 +160,14 @@ func (m *Model) place() string {
 	return ""
 }
 
+// sibKindOf is what the siblings of the screen on top are, 0 when it has none.
+func (m *Model) sibKindOf() sibKind {
+	if s := m.sibs(); s != nil {
+		return s.kind
+	}
+	return 0
+}
+
 // siblingNoun is what the siblings of the screen on top are, in a word.
 func (m *Model) siblingNoun() string {
 	if s := m.sibs(); s != nil {
@@ -175,10 +198,24 @@ func (e *navEntry) subjectName() string {
 	switch e.screen {
 	case screenSlice:
 		return "slice " + e.slice
+	case screenFinding:
+		return "finding " + e.finding
 	case screenChart:
 		return e.chart
 	}
 	return e.ticket
+}
+
+// cursorUnder puts the cursor of the screen under the one on top on the row match
+// names, so esc from the sibling that replaces the top lands on it.
+func (m *Model) cursorUnder(match func(rowRef) bool) {
+	if len(m.nav) < 2 {
+		return
+	}
+	saved := m.nav
+	m.nav = m.nav[: len(m.nav)-1 : len(m.nav)-1]
+	m.cursorToRow(match)
+	m.nav = saved
 }
 
 // openSibling is `[` and `]`: the neighbor opens as the screen the person is
@@ -191,8 +228,16 @@ func (m *Model) openSibling(delta int) tea.Cmd {
 	e := m.top()
 	id := s.ids[s.at+delta]
 	m.forgetSibs()
-	if s.kind == sibSlices {
+	switch s.kind {
+	case sibSlices:
+		m.cursorUnder(func(r rowRef) bool { return r.kind == rowSlice && r.id == id })
 		return m.goTo(len(m.nav)-1, nil, navEntry{screen: screenSlice, ticket: e.ticket, slice: id})
+	case sibFindings:
+		m.cursorUnder(func(r rowRef) bool { return r.kind == rowFinding && r.id == id })
+		return m.goTo(len(m.nav)-1, nil, navEntry{screen: screenFinding, ticket: e.ticket, finding: id})
+	case sibRounds:
+		m.goToRound(id)
+		return nil
 	}
 	// The list's cursor is on the neighbor, which esc lands on.
 	list := &m.nav[s.list]

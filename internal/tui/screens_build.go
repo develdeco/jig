@@ -197,10 +197,16 @@ func (m *Model) buildDetail(t *ticket, s sliceRow, full statusSlice) detailSpec 
 		if !q.Open {
 			state = StateOK
 		}
-		add(detailRow{label: label, icon: state, text: q.ID + " " + q.Text})
+		// A question, open or answered, is a row, shown whole with its answer and
+		// who gave it; enter does what it does on the question anywhere.
+		add(detailRow{label: label, icon: state, text: q.ID + " " + q.Text, ref: &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: s.ID}})
 		label = ""
 		if !q.Open && q.Answer != "" {
-			add(detailRow{indent: 2, text: "→ " + q.Answer})
+			answer := "→ " + q.Answer
+			if by := m.byWhom(t, q.Provenance, q.AnswerSession); by != "" {
+				answer += " · answered by " + by
+			}
+			add(detailRow{indent: 2, text: answer})
 		}
 	}
 	m.commitRows(t, s, &d, "tries")
@@ -230,6 +236,11 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 		earlier, commits = n, commits[:buildCommits]
 	}
 	failed, failedOK := t.lastRunFailed(s.ID)
+	var newestEarlier string
+	if earlier > 0 {
+		all := newestFirst(t.sliceCommits(s.ID), func(c commitRecord) time.Time { return c.Began })
+		newestEarlier = all[buildCommits].SHA
+	}
 	for _, c := range commits {
 		// How the commit stands is the status's word: its verification state
 		// as internal/phase tells it, with the command that clears it. A commit
@@ -249,7 +260,7 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 		if when := m.commitWhen(c); when != "" {
 			line += "  " + when
 		}
-		add(detailRow{label: label, icon: icon, text: line})
+		add(detailRow{label: label, icon: icon, text: line, ref: &rowRef{kind: rowTry, id: c.SHA, ticket: t.id, slice: s.ID}})
 		label = ""
 		for _, run := range newestFirst(c.Runs, func(l events.Envelope) time.Time { at, _ := l.At(); return at }) {
 			state := StateGreen
@@ -277,7 +288,10 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 		}
 	}
 	if earlier > 0 {
-		add(detailRow{dim: true, text: "+" + strconv.Itoa(earlier) + " earlier " + plural(earlier, "commit", "commits")})
+		// A row: enter opens the slice screen, where every commit is listed, on the
+		// newest of the earlier ones.
+		add(detailRow{dim: true, text: "+" + strconv.Itoa(earlier) + " earlier " + plural(earlier, "commit", "commits"),
+			ref: &rowRef{kind: rowTry, id: newestEarlier, ticket: t.id, slice: s.ID, container: "earlier"}})
 	}
 }
 

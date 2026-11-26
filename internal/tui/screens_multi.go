@@ -325,7 +325,7 @@ func (m *Model) multiPage(t *ticket) page {
 	if branch != "" {
 		words = branch
 	}
-	m.stageLines(&p, t.id, t, words, rows, nil, phase.Prompt(phase.Publish, t.id), true, 0)
+	m.stageLines(&p, t.id, t, words, rows, nil, nil, phase.Prompt(phase.Publish, t.id), true, 0)
 	p.boxEnd()
 	m.chartActivityPanel(&p, "multi:"+t.id, rows, nil)
 	return p

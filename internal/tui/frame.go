@@ -67,14 +67,6 @@ func (m *Model) innerWidth() int {
 	return max(1, m.width-7)
 }
 
-// boxRows lays rows out under cols in the panel's width and adds them to it.
-// None is a row the cursor can stand on.
-func (m *Model) boxRows(p *page, cols []column, rows [][]string) {
-	for _, row := range layoutMarked(cols, rows, m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(rows)), false) {
-		p.boxRow(nil, row)
-	}
-}
-
 // wholePane is the rows of a pane with no cursor rows laid out whole when the
 // person has expanded the pane: every row of it, else none.
 func (m *Model) wholePane(pane string, n int) []bool {
@@ -88,7 +80,7 @@ func (m *Model) wholePane(pane string, n int) []bool {
 	return whole
 }
 
-// boxHeight is how many lines boxRows would add to the pane titled pane.
+// boxHeight is how many lines rows laid out under cols take in the pane titled pane.
 func (m *Model) boxHeight(pane string, cols []column, rows [][]string) int {
 	n := 0
 	for _, row := range layoutMarked(cols, rows, m.innerWidth(), wrapRows, m.wholePane(pane, len(rows)), false) {

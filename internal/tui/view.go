@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,8 +24,9 @@ const (
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
-	// rowRound is a gate round on the review screen: it opens nothing, and the
-	// detail under the list is its own.
+	// rowRound is a gate round on the review screen, whose detail under the list is
+	// its own; named from another screen (a slice's Finding panel) it opens the
+	// review screen with the Rounds cursor on it.
 	rowRound = "round"
 	// rowCheck is a check of the publish screen's checklist and rowSection a
 	// section of the brief: each opens nothing, and the detail under the list is
@@ -54,6 +56,18 @@ const (
 	// rowFold is the fold row of a group of the project's list: enter opens the
 	// rows it holds in place, and folds them again.
 	rowFold = "fold"
+	// rowFinding is a finding a round raised: enter opens its screen. rowCarry is
+	// the line of a round that carries an earlier round's verdict, its id the
+	// number of that round: enter moves the Rounds cursor to it.
+	rowFinding = "finding"
+	rowCarry   = "carried"
+	// rowSuite is a failed run of an issue's suite on its plan screen: id is the
+	// fix task it names, the newest, and empty when none was added yet.
+	rowSuite = "suite"
+	// rowTry is a commit of a slice with its runs, id its sha: enter on the build
+	// screen's Detail opens it on the slice screen, where it is whole. The build
+	// Detail's count of the earlier ones is a try too, the newest of them.
+	rowTry = "try"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
@@ -137,6 +151,9 @@ type page struct {
 	// its cursor, the rows it has all told, so the keys move over the ones it
 	// does not draw (panes.go).
 	windowed map[string][]rowRef
+	// narrowed holds the panes whose rows were narrowed by the pane's query when
+	// their list was built, over every row it has and not the ones a window draws.
+	narrowed map[string]bool
 	// allPanes are the titles of every pane of the screen on a page that draws
 	// only the zoomed one (zoom.go).
 	allPanes []string
@@ -324,6 +341,8 @@ func (m *Model) rawPage() page {
 		return m.publishPage(e.ticket)
 	case screenLand:
 		return m.landPage(e.ticket)
+	case screenFinding:
+		return m.findingPage(e.ticket, e.finding)
 	case screenChart:
 		return m.chartPage(e.chart)
 	}
@@ -943,7 +962,7 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
-		if e.screen != screenSlice {
+		if k := m.sibKindOf(); e.screen != screenSlice && k != sibFindings && k != sibRounds {
 			crumbs += m.st.dim(m.place())
 		}
 		idCrumb = crumbs
@@ -962,6 +981,24 @@ func (m *Model) header(w int) []string {
 			crumbs += " › 2 build"
 		case screenReview:
 			crumbs += " › 3 review"
+			if m.sibKindOf() == sibRounds {
+				// The place among the rounds, the screen's own siblings.
+				crumbs += m.st.dim(m.place())
+			}
+		case screenFinding:
+			round := "?"
+			if f := t.findingNamed(e.finding); f != nil {
+				round = strconv.Itoa(f.Round)
+			}
+			// The review step gives way first when the line is too long for the size.
+			full := crumbs + " › 3 review › round " + round + " › " + m.st.bold(e.finding) + m.st.dim(m.place())
+			short := crumbs + " › round " + round + " › " + m.st.bold(e.finding) + m.st.dim(m.place())
+			crumbs = full
+			if f := t.findingNamed(e.finding); f != nil {
+				if st, word, _ := t.findingStanding(*f); width(full)+width(m.st.icon(st)+" "+word)+1 > w {
+					crumbs = short
+				}
+			}
 		case screenPublish:
 			crumbs += " › 4 publish"
 		case screenLand:
@@ -984,6 +1021,11 @@ func (m *Model) header(w int) []string {
 						state, label = s.State, s.State
 					}
 				}
+			}
+			if f := t.findingNamed(e.finding); e.screen == screenFinding && f != nil {
+				// A finding's screen says how the finding stands.
+				state, _, _ = t.findingStanding(*f)
+				_, label, _ = t.findingStanding(*f)
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}

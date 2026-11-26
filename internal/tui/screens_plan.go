@@ -101,7 +101,7 @@ func (m *Model) issuesOf(id string) []string {
 func (m *Model) upFrom() string {
 	e := m.top()
 	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand:
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand, screenFinding:
 		if t := m.w.tickets[e.ticket]; t != nil && !t.awaiting {
 			return e.ticket
 		}
@@ -346,7 +346,7 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 			branch += m.st.dim(" · from " + is.Stack[0].StartFrom)
 		}
 	}
-	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), is.Prompt, suiteMet(is, issue, suite), is.ungraduated())
+	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), suiteRefs(is.Ticket, suite), is.Prompt, suiteMet(is, issue, suite), is.ungraduated())
 	p.boxEnd()
 }
 
@@ -354,7 +354,7 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 // tasks landed, the suite lines it has (none for a multi-task), its own pull
 // request and its landing. prompt is what opens the pull request, and suiteOK
 // says no suite holds it back.
-func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite [][]string, prompt string, suiteOK bool, ungraduated int) {
+func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite [][]string, suiteRefs []*rowRef, prompt string, suiteOK bool, ungraduated int) {
 	cells := [][]string{m.planLine(StateOK, "branch", branch)}
 
 	landed, total := planProgress(rows)
@@ -375,7 +375,12 @@ func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []
 	cells = append(cells, m.planLine(prState, "PR", prWords))
 	landState, landWords := m.planLanding(id, t)
 	cells = append(cells, m.planLine(landState, "landing", landWords))
-	m.boxRows(p, planColumns, cells)
+	// The rows a person can open (a failed suite) take the cursor; the others are lines.
+	refs := make([]*rowRef, len(cells))
+	copy(refs[2:], suiteRefs)
+	for i, row := range layoutMarked(planColumns, cells, m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(cells)), false) {
+		p.boxRow(refs[i], row)
+	}
 }
 
 // suiteLines are the suite of the issue in words, one line for each row of its
@@ -410,6 +415,25 @@ func lastSuiteRows(suite []statusSuite) map[string]int {
 	out := map[string]int{}
 	for i, s := range suite {
 		out[s.Repo] = i
+	}
+	return out
+}
+
+// suiteRefs are the rows the cursor can stand on among the suite lines of the
+// issue, one for each row of its status: a failed run is one, and enter opens the
+// fix task it names, the newest when it names several, and none when none was
+// added yet (the row's id is then empty).
+func suiteRefs(issue string, suite []statusSuite) []*rowRef {
+	out := make([]*rowRef, len(suite))
+	for i, s := range suite {
+		if s.Standing != land.SuiteFail {
+			continue
+		}
+		fix := ""
+		if n := len(s.Fixes); n > 0 {
+			fix = s.Fixes[n-1]
+		}
+		out[i] = &rowRef{kind: rowSuite, id: fix, ticket: issue, container: s.Repo + "@" + s.Tip}
 	}
 	return out
 }

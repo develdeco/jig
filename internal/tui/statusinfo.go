@@ -113,13 +113,16 @@ type statusProbe struct {
 	Outcome, Where, Seam, Mutation, Command string
 }
 
-// statusFinding is a row of the status's findings table: a finding the latest
-// round raised, and the decision pending for it.
+// statusFinding is a row of the status's findings table: a finding one recorded
+// round raised, and the decision pending for it. Detail is the finding's detail
+// whole and Triage who sorted it (human or auto), "" for a status that predates
+// the two columns or a finding nobody has sorted.
 type statusFinding struct {
 	ID                                 string
 	Round                              int
 	Action, Risk, Where, Title, Status string
 	Rationale, Decision, DecidedBy     string
+	Detail, Triage                     string
 }
 
 // statusPublish is the status's publish block: what the publish has written.
@@ -287,6 +290,7 @@ func parseStatus(out string) *statusInfo {
 		info.Findings = append(info.Findings, statusFinding{
 			ID: r["id"], Round: atoi(r["round"]), Action: r["action"], Risk: r["risk"], Where: r["file:line"], Title: r["title"],
 			Status: r["status"], Rationale: r["rationale"], Decision: r["decision"], DecidedBy: r["decided_by"],
+			Detail: r["detail"], Triage: dash(r["triage"]),
 		})
 	}
 	if kv, ok := doc.KV["publish"]; ok {

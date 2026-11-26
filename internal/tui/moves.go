@@ -14,12 +14,12 @@ import (
 
 // navKey names a screen a person can leave and come back to.
 type navKey struct {
-	screen               screenKind
-	ticket, slice, chart string
+	screen                        screenKind
+	ticket, slice, chart, finding string
 }
 
 func keyOf(e navEntry) navKey {
-	return navKey{screen: e.screen, ticket: e.ticket, slice: e.slice, chart: e.chart}
+	return navKey{screen: e.screen, ticket: e.ticket, slice: e.slice, chart: e.chart, finding: e.finding}
 }
 
 // cut leaves every screen above the first n, keeping where the cursor stood on
@@ -92,11 +92,27 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		// What the review screen is for, when something waits, is deciding it:
 		// the cursor is on the ask it was opened from, else the first one, unless
 		// the person left it somewhere.
+		if ref != nil && ref.kind == rowAsk {
+			// Opened from an ask: a search or a zoom the screen was left with would
+			// hide it, and the review is for deciding it.
+			e.zoom, e.psearch = "", paneSearch{}
+		}
 		if !restored || (ref != nil && ref.kind == rowAsk) {
 			pg := m.page()
 			e.sel, e.seenSet = m.askRow(pg, ref), false
 			m.syncPanes(pg)
 		}
+	}
+	if e.screen == screenReview && ref != nil {
+		// A round named from another screen, by its row or by a line about it: its
+		// row has the Rounds cursor.
+		if n := roundNamed(*ref); n != "" {
+			m.goToRound(n)
+		}
+	}
+	if e.screen == screenSlice && ref != nil && ref.kind == rowTry {
+		// A try named from the build screen: the slice's Commits pane is on it.
+		m.cursorToRow(func(r rowRef) bool { return r.kind == rowTry && r.id == ref.id })
 	}
 	var cmds []tea.Cmd
 	if e.screen == screenChart {

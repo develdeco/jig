@@ -112,7 +112,7 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the nine screens is showing.
+// screenKind is which of the ten screens is showing.
 type screenKind int
 
 const (
@@ -125,6 +125,7 @@ const (
 	screenPublish                   // a ticket's publish: body, approval, pull request
 	screenChart                     // a chart: its map, tickets, run and activity
 	screenLand                      // a ticket's land: its pull requests, the merges to make and the landings
+	screenFinding                   // one finding of a gate round, whole, with the fix slices it became
 )
 
 func (s screenKind) String() string {
@@ -147,6 +148,8 @@ func (s screenKind) String() string {
 		return "chart"
 	case screenLand:
 		return "land"
+	case screenFinding:
+		return "finding"
 	}
 	return "?"
 }
@@ -158,7 +161,9 @@ type navEntry struct {
 	ticket string
 	slice  string
 	chart  string
-	sel    int
+	// finding is the id of the finding a finding screen is of.
+	finding string
+	sel     int
 	// part is the row of the brief screen's Parts list the screen is opened on,
 	// by identity (a section by its place, a slice by its id); partSet is false
 	// when it is opened for no part and begins on its first row.
@@ -246,7 +251,7 @@ type confirmation struct {
 	run    func() tea.Cmd
 }
 
-// Model is the TUI: nine screens over the event stream and the verbs. It is a
+// Model is the TUI: ten screens over the event stream and the verbs. It is a
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
@@ -1436,6 +1441,10 @@ func (m *Model) open() tea.Cmd {
 		m.beginAnswer()
 		return nil
 	}
+	if ref.kind == rowCarry {
+		m.goToRound(ref.id)
+		return nil
+	}
 	if ref.kind == rowIllustration {
 		// The illustration opens in the browser, not in a screen.
 		m.openIllustration(ref.ticket)
@@ -1457,6 +1466,8 @@ func (m *Model) open() tea.Cmd {
 const (
 	logNamesNothing    = "this line names no question, slice, round or step to open"
 	commitOpensNothing = "a store commit opens nothing"
+	noFixTaskYet       = "no fix task was added for this failed suite yet"
+	tryIsWhole         = "this try is whole here: its runs, their output and recordings are under it"
 )
 
 // opensNothing is why the row ref opens nothing, "" for a row that does open
@@ -1465,6 +1476,10 @@ func opensNothing(ref rowRef) string {
 	switch {
 	case ref.kind == rowCommit:
 		return commitOpensNothing
+	case ref.kind == rowSuite && ref.id == "":
+		return noFixTaskYet
+	case ref.kind == rowTry:
+		return tryIsWhole
 	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
 		return logNamesNothing
 	}
@@ -1499,6 +1514,19 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowFinding:
+		next = navEntry{screen: screenFinding, ticket: ref.ticket, finding: ref.id}
+	case rowTry:
+		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+	case rowRound:
+		// A round the slice screen's Finding panel names: the review screen, with
+		// the Rounds cursor on it.
+		next = navEntry{screen: screenReview, ticket: ref.ticket}
+	case rowSuite:
+		if ref.id == "" {
+			return next, false
+		}
+		return m.openTarget(rowRef{kind: rowTicket, id: ref.id, ticket: ref.id})
 	case rowIssue:
 		// An issue's screen is its plan, the screen of the chart that plans it.
 		chart := m.planOf(ref.id)
@@ -1538,7 +1566,7 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		return next, false
 	}
 	top := m.top()
-	same := next.screen == top.screen && next.ticket == top.ticket && next.slice == top.slice && next.chart == top.chart
+	same := next.screen == top.screen && next.ticket == top.ticket && next.slice == top.slice && next.chart == top.chart && next.finding == top.finding
 	return next, !same
 }
 

@@ -127,9 +127,9 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 		p.boxTop("Questions", strconv.Itoa(len(qs)))
 		refs := make([]*rowRef, len(qs))
 		for i, q := range qs {
-			if q.Open {
-				refs[i] = &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}
-			}
+			// Every question is a row, open or answered: the cursor stands on it and
+			// its text and answer are drawn whole under it.
+			refs[i] = &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}
 		}
 		laid := m.laidListFor(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0, refs)
 		for i, q := range qs {
@@ -310,11 +310,24 @@ func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
 	}
 	full := t.statusSlice(s.ID)
 	p.boxTop("Finding", "round "+strconv.Itoa(round))
-	if len(full.Findings) > 0 {
-		m.factRows(p, []factRow{{label: "findings", value: strings.Join(full.Findings, ", ")}})
+	// The round and each finding the slice answers are rows: the round opens the
+	// review screen on it, a finding opens its own screen.
+	n := strconv.Itoa(round)
+	rows := []factRow{{label: "round", value: n, ref: &rowRef{kind: rowRound, id: n, ticket: t.id, slice: s.ID}}}
+	label := "findings"
+	for _, id := range full.Findings {
+		value := id
+		if f := t.findingNamed(id); f != nil {
+			value += " " + f.Title
+		}
+		rows = append(rows, factRow{label: label, value: value, ref: &rowRef{kind: rowFinding, id: id, ticket: t.id, slice: s.ID, round: n}})
+		label = ""
 	}
-	for _, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
-		p.boxAdd(l)
+	m.factRows(p, rows)
+	// The goal's lines are rows the cursor passes over, so a pane of rows followed
+	// by text is read to its end and zoomed whole.
+	for i, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
+		p.boxRow(&rowRef{kind: rowStop, id: "goal-" + strconv.Itoa(i), ticket: t.id, slice: s.ID}, laidRow{lines: []string{l}})
 	}
 	p.boxEnd()
 }
@@ -373,9 +386,13 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 	p.boxTop("Commits", strconv.Itoa(len(commits)))
 	// A commit's subject is never cut, and a column nothing is written in has no
 	// name.
-	laid := m.laidListFor(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1, nil)
+	tryRefs := make([]*rowRef, len(commits))
 	for i, c := range commits {
-		p.boxRow(nil, laid[i])
+		tryRefs[i] = &rowRef{kind: rowTry, id: c.SHA, ticket: t.id, slice: slice}
+	}
+	laid := m.laidListFor(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1, tryRefs)
+	for i, c := range commits {
+		p.boxRow(tryRefs[i], laid[i])
 		row, hasRow := t.status.verificationOf(slice, c.SHA)
 		switch {
 		case t.status == nil:

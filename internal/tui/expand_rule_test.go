@@ -340,6 +340,15 @@ func TestEveryLineAPaneDrawsCarriesItsHolder(t *testing.T) {
 		"review": func(w, h int) *rig { return reviewFixRound(t, w, h) },
 		"brief":  func(w, h int) *rig { return briefRigWith(t, w, h, statusJIG1Brief(), briefTextJIG1()) },
 		"chart":  func(w, h int) *rig { return sized(longChartRig(t, 30), w, h).openChart("checkout") },
+		"finding": func(w, h int) *rig {
+			g := threeRounds(t, w, h, 0)
+			g.cursorOn(rowRound, "1").cursorOn(rowFinding, "r1-f1")
+			return g.press("enter")
+		},
+		"slice": func(w, h int) *rig {
+			g := threeRoundsWith(t, w, h, longGoalStatus())
+			return g.onSlice("fix-1-alpha")
+		},
 	}
 	for name, mk := range screens {
 		for _, size := range [][2]int{{80, 44}, {100, 30}} {

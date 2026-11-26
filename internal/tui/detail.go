@@ -77,6 +77,8 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 			case r.ref != nil && i == 0:
 				ref := *r.ref
 				l.ref = &ref
+			case r.ref != nil:
+				l.cont = true
 			case d.walk:
 				l.ref = &rowRef{kind: rowStop, id: "line-" + strconv.Itoa(n)}
 			}
@@ -219,6 +221,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		avail = max(room-1, floor)
 	}
 	dl := m.detailLines(*d, m.width)
+	cur := m.detailCursor(dl)
 
 	// The room each takes: the detail has what the lists leave, at least its peek
 	// (the whole of an ask's, which is decided from, while the lists keep their
@@ -231,6 +234,11 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		}
 		db = max(min(len(dl), avail-total), need)
 		db = max(min(db, avail-listMin), min(len(dl), detailPeek))
+		if cur >= 0 {
+			// The focus is in the Detail: it takes what the lists need least, a mark
+			// each, the list of its row too.
+			db = max(min(len(dl), avail-collapsed*len(lists)), min(len(dl), detailPeek))
+		}
 		lb = avail - db
 		if db < min(len(dl), detailLeast) {
 			lb = avail - 1 // the line that says the detail has no room
@@ -254,7 +262,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 			}
 		}
 		row := 0
-		if lb-others < listMin {
+		if lb-others < listMin || cur >= 0 {
 			keep, others, row = collapsed, 0, -1
 			for i, f := range full {
 				if i != cl {
@@ -270,7 +278,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		cut := make([][]pline, len(full))
 		draw := func(i int) {
 			at := row
-			if i == cl {
+			if i == cl && cur < 0 {
 				at = cr
 			}
 			cut[i] = m.windowList(full[i], at, budget[i])
@@ -296,13 +304,13 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 			left = append(left, cut[i]...)
 		}
 	}
-	right, cut := cutDetail(m, dl, db)
+	right, cut := cutDetailAround(m, dl, db, cur)
 	if spare := avail - len(left); spare < min(len(dl), detailLeast) {
 		// What the lists leave is less than the detail's least: one line says so,
 		// in the detail's place.
-		right, cut = []pline{{text: m.st.dim(partNeeds("Detail", min(len(dl), detailLeast), spare)), ask: d.ask}}, true
+		right, cut = []pline{{text: m.st.dim(partNeeds("Detail", min(len(dl), detailLeast), spare)), ask: d.ask, hiddenRefs: refsOf(dl)}}, true
 	} else if len(left) > lb {
-		right, cut = cutDetail(m, dl, spare)
+		right, cut = cutDetailAround(m, dl, spare, cur)
 	}
 	if cut && d.ask != "" {
 		if p.cutAsks == nil {
@@ -418,11 +426,96 @@ func cutDetail(m *Model, dl []pline, budget int) ([]pline, bool) {
 	}
 	out := append([]pline(nil), dl[:1]...)
 	out = append(out, rows[:keep]...)
-	mark := pline{text: m.st.dim("↓ " + strconv.Itoa(len(rows)-keep) + " more"), box: boxMid}
+	mark := pline{text: m.st.dim("↓ " + strconv.Itoa(len(rows)-keep) + " more"), box: boxMid, hiddenRefs: refsOf(rows[keep:])}
 	if len(rows) > 0 {
 		mark.ask = rows[0].ask // an ask cut is an ask on the page, drawn cut
 	}
 	out = append(out, mark)
+	return append(out, dl[len(dl)-1]), true
+}
+
+// refsOf are the rows the cursor can stand on among lines, the ones a mark stands
+// for included.
+func refsOf(lines []pline) []rowRef {
+	var out []rowRef
+	for _, l := range lines {
+		out = append(out, l.hiddenRefs...)
+		if l.ref != nil {
+			out = append(out, *l.ref)
+		}
+	}
+	return out
+}
+
+// detailCursor is the place, among the rows of the Detail panel dl the cursor can
+// stand on, of the row its cursor is on when the Detail has the focus, and -1
+// when it has not or has no such row.
+func (m *Model) detailCursor(dl []pline) int {
+	refs := refsOf(dl)
+	if len(refs) == 0 || m.top().paneFocus != dl[0].text {
+		return -1
+	}
+	ids := make([]rowIdentity, len(refs))
+	for i, r := range refs {
+		ids[i] = r.identity()
+	}
+	return m.paneCursorIn(dl[0].text, ids, 0)
+}
+
+// cutDetailAround is cutDetail for a Detail whose cursor stands on its cur-th row:
+// the lines it draws are the window around that row's first line, with a mark that
+// counts the lines above and one that counts the lines below, so the row is always
+// drawn and nothing is cut unmarked. A Detail with no cursor in it (cur < 0) is
+// cut at its end.
+func cutDetailAround(m *Model, dl []pline, budget, cur int) ([]pline, bool) {
+	if len(dl) <= budget {
+		return dl, false
+	}
+	rows := dl[1 : len(dl)-1]
+	var starts []int
+	for i, l := range rows {
+		if l.ref != nil {
+			starts = append(starts, i)
+		}
+	}
+	if cur < 0 || cur >= len(starts) {
+		return cutDetail(m, dl, budget)
+	}
+	// The window is a run of lines, [from, to), that holds the cursor row's first
+	// line; every line outside it is counted in a mark, above or below. It grows
+	// over the cursor row's own lines first, then below it, then above it.
+	n := len(rows)
+	room := max(budget-2, 1)
+	cost := func(from, to int) int {
+		c := to - from
+		if from > 0 {
+			c++
+		}
+		if to < n {
+			c++
+		}
+		return c
+	}
+	from, to := starts[cur], starts[cur]+1
+	for grew := true; grew; {
+		grew = false
+		switch {
+		case to < n && cost(from, to+1) <= room:
+			to++
+			grew = true
+		case from > 0 && cost(from-1, to) <= room:
+			from--
+			grew = true
+		}
+	}
+	out := append([]pline(nil), dl[:1]...)
+	if from > 0 {
+		out = append(out, pline{text: m.st.dim("↑ " + strconv.Itoa(from) + " more"), box: boxMid, hiddenRefs: refsOf(rows[:from])})
+	}
+	out = append(out, rows[from:to]...)
+	if to < n {
+		out = append(out, pline{text: m.st.dim("↓ " + strconv.Itoa(n-to) + " more"), box: boxMid, hiddenRefs: refsOf(rows[to:])})
+	}
 	return append(out, dl[len(dl)-1]), true
 }
 
@@ -477,8 +570,9 @@ func (m *Model) zoomedBlock(p *page, d *detailSpec, at int, lists []listSpec) {
 		}
 	}
 	dl := m.detailLines(*d, m.width)
+	cur := m.detailCursor(dl)
 	if z != dl[0].text {
-		dl, _ = cutDetail(m, dl, detailLeast)
+		dl, _ = cutDetailAround(m, dl, detailLeast, cur)
 	}
 	detailAt := len(p.lines)
 	p.lines = append(p.lines, dl...)

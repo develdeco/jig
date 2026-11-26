@@ -14,7 +14,7 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs
   │  oracle    unit                                                            │
   │  workspace app                                                             │
   │  questions ✓ q-000 Trim the name?                                          │
-  │              → Yes, trim it.                                               │
+  │              → Yes, trim it. · answered by you                             │
   │  tries     ● aaaaaaa “Greet the person by name” 09:00:21                   │
   │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯

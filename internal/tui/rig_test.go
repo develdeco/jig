@@ -243,7 +243,7 @@ func statusJIG2() string {
 // findings tables.
 var (
 	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed", "probes", "survived"}
-	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by"}
+	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by", "detail", "triage"}
 )
 
 // statusJIG2Done is `jig status JIG-2` once the clean round has folded the
