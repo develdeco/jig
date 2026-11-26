@@ -173,6 +173,31 @@ func TestAWindowNeverBeginsOnARowsDetail(t *testing.T) {
 	}
 }
 
+// TestASlicesWindowNeverBeginsOnARecordWithItsSliceHidden: on the build screen,
+// under the count of the slices above stands a slice's row, never one of the
+// records a slice has under it.
+func TestASlicesWindowNeverBeginsOnARecordWithItsSliceHidden(t *testing.T) {
+	t.Parallel()
+	for h := 12; h <= 30; h++ {
+		g := newRig(t, "JIG-1")
+		g.send(tea.WindowSizeMsg{Width: 80, Height: h})
+		g.feed(jig1()...)
+		g.press("enter")
+		if g.m.Screen() != "build" {
+			t.Fatalf("on %s, want build", g.m.Screen())
+		}
+		for _, keys := range [][]string{{"down"}, {"down"}, {"down"}, {"end"}} {
+			g.press(keys...)
+			lines := strings.Split(g.view(), "\n")
+			for i := 0; i+1 < len(lines); i++ {
+				if strings.Contains(lines[i], "│  ↑ ") && strings.Contains(lines[i], " more") && strings.HasPrefix(lines[i+1], "  │     ") {
+					t.Errorf("height %d after %v: a slice's record stands under the mark:\n%s", h, keys, strings.Join(lines, "\n"))
+				}
+			}
+		}
+	}
+}
+
 // TestAPanesCursorMovesInsideItsWindow: a down on a pane that draws a window of its
 // rows keeps the newest line in view; the window moves only when the cursor would
 // leave it.
