@@ -74,7 +74,7 @@ func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 		t.Errorf("the parts are %q, want %q", names, want)
 	}
 	// A section says which slices cite it, a slice its state.
-	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone slice c, d") || !strings.Contains(got, "slice c ? needs-input Pick the tone") {
+	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone cited by 2") || !strings.Contains(got, "slice c Pick the tone ? needs-input") {
 		t.Errorf("the rows do not say where each part stands:\n%s", got)
 	}
 	// A section opens nothing and a slice opens its screen.
@@ -169,7 +169,7 @@ func TestASectionSaysWhetherItChangedSinceTheApproval(t *testing.T) {
 	g := briefRigWith(t, 100, 60, sinceStatus("same", "changed", "same", "-"), briefTextJIG1())
 	view := g.view()
 	rows := strings.Join(rowsOf(view, "Parts"), "\n")
-	if !strings.Contains(rows, "section Greeting slice a · changed") || strings.Contains(rows, "Goal no slice · changed") {
+	if !strings.Contains(rows, "section Greeting cited by 1 · changed") || strings.Contains(rows, "Goal no slice · changed") {
 		t.Errorf("only the section that changed says so in its row:\n%s", rows)
 	}
 	if d := readWords(between(view, "╭─ Detail · Goal", "╰")); !strings.Contains(d, "this section is as it was approved") {

@@ -32,7 +32,7 @@ func TestAnIssueIsARowWithItsNeedWholeAndTheTasksPlace(t *testing.T) {
 	t.Parallel()
 	g := taskBrief(t, planSpec{}, "SHOP-2")
 	rows := rowsOf(g.view(), "Parts")
-	if len(rows) < 2 || !strings.HasPrefix(strings.TrimPrefix(rows[1], "▸ "), "issue SHOP-49 ready Review rounds stop repeating work") {
+	if len(rows) < 2 || !strings.HasPrefix(strings.TrimPrefix(rows[1], "▸ "), "issue SHOP-49 Review rounds stop repeating work ready") {
 		t.Fatalf("the first part is not the issue, ready:\n%s", g.view())
 	}
 	if ref := g.m.selected(); ref == nil || ref.kind != rowIssue || ref.id != "SHOP-49" {
@@ -118,7 +118,7 @@ func TestATaskOfTwoIssuesHasARowForEach(t *testing.T) {
 	t.Parallel()
 	g := taskBrief(t, planSpec{second: true}, "SHOP-1")
 	rows := rowsOf(g.view(), "Parts")
-	if len(rows) < 3 || !strings.Contains(rows[1], "issue SHOP-49") || !strings.Contains(rows[2], "issue SHOP-50 ready Another issue") {
+	if len(rows) < 3 || !strings.Contains(rows[1], "issue SHOP-49") || !strings.Contains(rows[2], "issue SHOP-50 Another issue") {
 		t.Fatalf("the first two parts are not the two issues:\n%s", g.view())
 	}
 	g.press("down")

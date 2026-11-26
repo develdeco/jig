@@ -34,10 +34,6 @@ type column struct {
 	// keep marks a measured column that is never cut, a clock that must always
 	// show: the words give way to it, and never the reverse.
 	keep bool
-	// whole marks a free column whose longest word is not broken while it can be
-	// helped: the free columns are given at least that much each, and when they
-	// do not fit side by side the later ones stack under the first.
-	whole bool
 	// gap is the spaces drawn before the column, unless it is the first one
 	// drawn.
 	gap int
@@ -118,26 +114,10 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 		return out
 	}
 
-	// The longest word of each column that asks for its words whole.
-	longest := make([]int, len(cols))
-	for _, r := range rows {
-		for c := range cols {
-			if c < len(r) && cols[c].whole {
-				for _, wd := range strings.Fields(ansi.Strip(r[c])) {
-					longest[c] = max(longest[c], width0(wd))
-				}
-			}
-		}
-	}
 	if len(free) > 1 {
 		got := share(width-gaps()-measured(), natural, free)
-		sideBySide := 0
-		for _, c := range free {
-			sideBySide += min(natural[c], max(longest[c], 0))
-		}
-		fits := sideBySide <= width-gaps()-measured()
 		for i := range free {
-			if got[i] < min(natural[free[i]], freeMin) || !fits {
+			if got[i] < min(natural[free[i]], freeMin) {
 				for _, o := range free[1:] {
 					stacked[o] = true
 				}
@@ -174,7 +154,7 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 	}
 
 	act := active()
-	got := shareWhole(width-gaps()-measured(), natural, longest, act)
+	got := share(width-gaps()-measured(), natural, act)
 	for i, c := range act {
 		w[c] = max(1, got[i])
 	}
@@ -203,20 +183,12 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 			}
 			return extra
 		}
-		// A column that asks for its words whole is never cut with an ellipsis
-		// either: it takes the rows its words need.
-		rowsOf := func(c int) int {
-			if cols[c].whole {
-				return 1 << 20
-			}
-			return maxRows
-		}
 		lines := map[int][]string{}
 		for _, c := range visible {
 			switch {
 			case stacked[c]:
 			case cols[c].free:
-				lines[c] = wrapCell(cell(c), w[c]+room(c), rowsOf(c))
+				lines[c] = wrapCell(cell(c), w[c]+room(c), maxRows)
 			default:
 				lines[c] = []string{cutCell(cell(c), w[c])}
 			}
@@ -225,7 +197,7 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 			head := act[0]
 			for _, c := range visible {
 				if stacked[c] {
-					lines[head] = append(lines[head], wrapCell(cell(c), w[head], rowsOf(c))...)
+					lines[head] = append(lines[head], wrapCell(cell(c), w[head], maxRows)...)
 				}
 			}
 		}
@@ -281,32 +253,6 @@ func share(room int, natural []int, cols []int) []int {
 		each := room / (len(order) - k)
 		out[i] = min(natural[cols[i]], each)
 		room -= out[i]
-	}
-	return out
-}
-
-// shareWhole is share with each column first given its longest word (floor, 0
-// for a column that does not ask), when all of them fit, and the rest shared as
-// water fills it.
-func shareWhole(room int, natural, floor []int, cols []int) []int {
-	base := make([]int, len(cols))
-	total := 0
-	for i, c := range cols {
-		base[i] = min(natural[c], floor[c])
-		total += base[i]
-	}
-	if total == 0 || total > room {
-		return share(room, natural, cols)
-	}
-	rest := make([]int, len(natural))
-	copy(rest, natural)
-	for i, c := range cols {
-		rest[c] = natural[c] - base[i]
-	}
-	extra := share(room-total, rest, cols)
-	out := make([]int, len(cols))
-	for i := range cols {
-		out[i] = base[i] + extra[i]
 	}
 	return out
 }

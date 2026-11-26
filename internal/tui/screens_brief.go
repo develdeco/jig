@@ -54,10 +54,11 @@ func (m *Model) briefPage(id string) page {
 		slices = nil
 	}
 	for i, s := range b.Sections {
-		// The slices that cite a section can grow: they are free text, which wraps.
+		// The slices that cite a section can grow: the row says how many, and the
+		// detail names them whole.
 		stands := m.st.dim("no slice")
-		if len(s.Slices) > 0 {
-			stands = "slice " + strings.Join(s.Slices, ", ")
+		if n := len(s.Slices); n > 0 {
+			stands = "cited by " + strconv.Itoa(n)
 		}
 		if s.Since == sinceChangedWord {
 			stands += " · " + m.st.state(StateFindings, "changed")
@@ -66,14 +67,15 @@ func (m *Model) briefPage(id string) page {
 		rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: id}, cells: []string{"section", s.Heading, stands}})
 	}
 	for _, s := range slices {
-		// A slice's id is a measured column, whole; its state and goal are free text.
-		stands := m.st.icon(s.State) + " " + m.st.state(s.State, s.State)
+		// A slice's name is its id and its goal, free text: the id is a word and
+		// wraps whole; where it stands is its state.
+		part := s.ID
 		if g := goals[s.ID]; g != "" {
-			stands += "  " + m.st.dim(g)
+			part += "  " + m.st.dim(g)
 		}
 		rows = append(rows, listRow{
 			ref:   &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID},
-			cells: []string{"slice", s.ID, stands},
+			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
 		})
 	}
 	if hasIllustration {
@@ -151,12 +153,11 @@ const (
 )
 
 // The columns of the brief's list: what the part is, its name and where it
-// stands. The name holds headings and ids and the last column the state, the goal
-// and the slices that cite a section: both are free text the allocator shares the
-// room between, so nothing is cut with an ellipsis, a word wraps whole and an id
-// is broken only when it is wider than the column alone.
+// stands. The name is the list's free column and wraps; where a part stands is a
+// few words (a state, a count of the slices that cite a section), and the detail
+// of the row under the cursor names the rest whole.
 var (
-	partColumns     = []column{{}, {free: true, whole: true, gap: 2}, {free: true, whole: true, gap: 2}}
+	partColumns     = []column{{}, {free: true, gap: 2}, {gap: 2}}
 	partColumnNames = []string{"kind", "part", "stands at"}
 )
 

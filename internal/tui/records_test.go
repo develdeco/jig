@@ -113,7 +113,7 @@ func TestBriefScreenShowsTheHeadingsWhenTheTextIsNotThere(t *testing.T) {
 	g.r.answer("brief show JIG-1 --text --store /s", "error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2)
 	g.feed(jig1()...).press("up", "enter").sized(100, 60)
 	text := readWords(pageText(g))
-	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "heading Goal"} {
+	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "cited by 2", "heading Goal"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}

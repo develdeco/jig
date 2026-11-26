@@ -69,21 +69,34 @@ func citedByFive() (status, text string) {
 	return status, text
 }
 
-// TestAnIdIsNeverBrokenMidWord: an id is a measured column or text that wraps at
-// its spaces, never cut inside: the section cited by five slices names them whole
-// in its row, and a slice's row and its detail have its id whole.
+// TestAnIdIsNeverBrokenMidWord: an id is a word that wraps whole, never cut
+// inside: the row of a section cited by five slices counts them, its Detail names
+// the five whole, the Detail of the first row is drawn at the floor, and a slice's
+// row has its id whole.
 func TestAnIdIsNeverBrokenMidWord(t *testing.T) {
 	t.Parallel()
 	ids := []string{"approval-records-sections", "parts-list-and-section-text", "section-slice-links", "approval-part", "issue-part"}
 	status, text := citedByFive()
 	for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
 		g := briefRigWith(t, size[0], size[1], status, text)
-		words := readWords(between(g.view(), "╭─ Parts", "╰"))
-		for _, id := range ids[:1] {
-			if !strings.Contains(words, id) {
-				t.Errorf("%v: the section's row does not name %q whole:\n%s", size, id, g.view())
+		view := g.view()
+		// The brief opens with the Detail of its first row, at the floor too.
+		if !strings.Contains(view, "╭─ Detail · Rules") {
+			t.Errorf("%v: the brief opens with no Detail of its first row:\n%s", size, view)
+		}
+		// The row says how many slices cite the section, and the Detail names the
+		// five whole.
+		if !strings.Contains(readWords(between(view, "╭─ Parts", "╰")), "section Rules cited by 5") {
+			t.Errorf("%v: the section's row does not count its slices:\n%s", size, view)
+		}
+		g.tabTo("Detail · Rules").press("z")
+		detail := readWords(g.view())
+		for _, id := range ids {
+			if !strings.Contains(detail, id+" · queued") {
+				t.Errorf("%v: the Detail does not name %q whole:\n%s", size, id, g.view())
 			}
 		}
+		g.press("z")
 		// A long heading wraps whole, with no ellipsis.
 		g.focus("section-2")
 		panel := between(g.view(), "╭─ Parts", "╰")

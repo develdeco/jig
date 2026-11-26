@@ -5,12 +5,12 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
   ╭─ Parts ────────────────────────────────────────────────────────── 9 parts ─╮
   │  kind      part                       stands at                            │
   │▸ section   Goal                       no slice                             │
-  │  section   Greeting                   slice a                              │
-  │  section   Farewell                   slice b                              │
-  │  section   Tone                       slice c, d                           │
-  │  slice     a                          ● green  Greet by name               │
-  │  slice     b                          ✗ fail  Say goodbye, politely        │
-  │  slice     c                          ? needs-input  Pick the tone         │
+  │  section   Greeting                   cited by 1                           │
+  │  section   Farewell                   cited by 1                           │
+  │  section   Tone                       cited by 2                           │
+  │  slice     a  Greet by name           ● green                              │
+  │  slice     b  Say goodbye, politely   ✗ fail                               │
+  │  slice     c  Pick the tone           ? needs-input                        │
   │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮

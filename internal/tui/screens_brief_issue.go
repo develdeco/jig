@@ -46,10 +46,11 @@ func (m *Model) issueRow(t *ticket, issue string) listRow {
 	if n := len(t.blockers); n > 0 {
 		stands = m.st.state(StateNeedsInput, "waits for "+strconv.Itoa(n))
 	}
+	name := issue
 	if it := m.w.tickets[issue]; it != nil && it.title != "" {
-		stands += "  " + m.st.dim(it.title)
+		name += "  " + m.st.dim(it.title)
 	}
-	return listRow{ref: &rowRef{kind: rowIssue, id: issue, ticket: t.id}, cells: []string{"issue", issue, stands}}
+	return listRow{ref: &rowRef{kind: rowIssue, id: issue, ticket: t.id}, cells: []string{"issue", name, stands}}
 }
 
 // issueDetail is the detail of an issue's row: its need, whole, and the task's
