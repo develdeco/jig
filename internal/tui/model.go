@@ -88,6 +88,12 @@ type Config struct {
 	// `o`: the command gives it only on a terminal. Nil opens nothing, and the
 	// key says the address instead.
 	Open func(url string) error
+	// Viewer serves a ticket's illustration and says where it is: its address on
+	// the loopback interface, or its path in a session whose browser cannot
+	// reach it. It is the one action the screens take outside a verb (a verb that
+	// serves it blocks), writes nothing, and the command gives it. Nil serves
+	// nothing, and the key says so.
+	Viewer func(ticket string) (string, error)
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -249,6 +255,9 @@ type Model struct {
 	ask    *confirmation
 	last   *outcome
 	notice string
+	// served is the address each ticket's illustration was given when the person
+	// opened it, so opening it again reuses the address.
+	served map[string]string
 	tail   bool
 	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
 	// a key has been taken in since that View: a key that acts on an ask acts
@@ -1397,6 +1406,11 @@ func (m *Model) open() tea.Cmd {
 	if m.promptFor(*ref) != "" {
 		// An open question's subject is the prompt that answers it.
 		m.beginAnswer()
+		return nil
+	}
+	if ref.kind == rowIllustration {
+		// The illustration opens in the browser, not in a screen.
+		m.openIllustration(ref.ticket)
 		return nil
 	}
 	next, ok := m.openTarget(*ref)

@@ -34,6 +34,9 @@ const (
 	// rowIssue is the issue that plans a task, among the parts of the task's
 	// brief: enter opens the issue's plan.
 	rowIssue = "issue"
+	// rowIllustration is the brief's illustration among its parts: enter serves
+	// it in the browser.
+	rowIllustration = "illustration"
 	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
 	// is its key, slice the slice a slice sub-step names, container the step.
 	rowSub = "substep"

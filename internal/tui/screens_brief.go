@@ -35,13 +35,11 @@ func (m *Model) briefPage(id string) page {
 		p.add(m.st.dim("this ticket has no brief"))
 		return p
 	}
-	if t.brief != nil && t.brief.Illustration {
-		p.add(m.st.dim("  it has an illustration: `jig brief show " + id + "` serves it"))
-	}
 
 	slices := t.slices(m.zone)
 	goals := t.goals()
 	issues := m.issuesOfTask(id)
+	hasIllustration := t.brief != nil && t.brief.Illustration
 	rows := make([]listRow, 0, len(issues)+len(b.Sections)+len(slices)+1)
 	for _, issue := range issues {
 		rows = append(rows, m.issueRow(t, issue))
@@ -67,6 +65,9 @@ func (m *Model) briefPage(id string) page {
 			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
 		})
 	}
+	if hasIllustration {
+		rows = append(rows, m.illustrationRow(t))
+	}
 	rows = append(rows, listRow{ref: &rowRef{kind: rowApproval, id: "approval", ticket: id}, cells: []string{"approval", "the approval of the brief", m.approvalStands(b)}})
 	list := listSpec{title: partsTitle, summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
 	var detail *detailSpec
@@ -80,6 +81,8 @@ func (m *Model) briefPage(id string) page {
 			d = m.sectionDetail(t, at-len(issues))
 		case at-len(issues) < len(b.Sections)+len(slices):
 			d = m.briefSliceDetail(t, at-len(issues)-len(b.Sections))
+		case hasIllustration && at-len(issues) == len(b.Sections)+len(slices):
+			d = m.illustrationDetail(t)
 		default:
 			d = m.approvalDetail(t, step)
 		}

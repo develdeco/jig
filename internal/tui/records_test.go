@@ -132,9 +132,9 @@ func TestBriefScreenSaysWhenTheBriefHasAnIllustration(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
 	g.r.answer("brief show JIG-1 --text --store /s", strings.Replace(briefTextJIG1(), "illustration: no", "illustration: yes", 1), 0)
-	g.feed(jig1()...).press("up", "enter")
-	if text := pageText(g); !strings.Contains(text, "it has an illustration: `jig brief show JIG-1` serves it") {
-		t.Errorf("the screen does not point at the illustration:\n%s", text)
+	g.feed(jig1()...).press("up", "enter").sized(100, 60)
+	if text := readWords(pageText(g)); !strings.Contains(text, "illustration the brief's illustration not served yet") {
+		t.Errorf("the screen does not list the illustration as a part:\n%s", text)
 	}
 }
 
