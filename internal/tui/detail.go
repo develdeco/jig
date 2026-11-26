@@ -226,6 +226,11 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		}
 		db = max(min(len(dl), avail-total), need)
 		db = max(min(db, avail-listMin), min(len(dl), detailPeek))
+		if cur >= 0 {
+			// The focus is in the Detail: it takes what the lists need least, a mark
+			// each, the list of its row too.
+			db = max(min(len(dl), avail-collapsed*len(lists)), min(len(dl), detailPeek))
+		}
 		lb = avail - db
 		if db < min(len(dl), detailLeast) {
 			lb = avail - 1 // the line that says the detail has no room
@@ -248,7 +253,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 				others += min(len(f), keep)
 			}
 		}
-		if lb-others < listMin {
+		if lb-others < listMin || cur >= 0 {
 			keep, others = 0, 0
 			for i, f := range full {
 				if i != cl {
@@ -258,7 +263,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		}
 		for i, f := range full {
 			switch {
-			case i == cl:
+			case i == cl && cur < 0:
 				left = append(left, m.windowList(f, cr, max(lb-others, listMin))...)
 			case keep > 0:
 				left = append(left, m.windowList(f, 0, keep)...)
@@ -426,10 +431,10 @@ func (m *Model) detailCursor(dl []pline) int {
 }
 
 // cutDetailAround is cutDetail for a Detail whose cursor stands on its cur-th row:
-// the rows it draws are the window around that row, with a mark of what is above
-// and one of what is below, so the row is always drawn. A row owns the lines under
-// it up to the next row; the lines before the first row go with it. A Detail with
-// no cursor in it (cur < 0) is cut at its end.
+// the lines it draws are the window around that row's first line, with a mark that
+// counts the lines above and one that counts the lines below, so the row is always
+// drawn and nothing is cut unmarked. A Detail with no cursor in it (cur < 0) is
+// cut at its end.
 func cutDetailAround(m *Model, dl []pline, budget, cur int) ([]pline, bool) {
 	if len(dl) <= budget {
 		return dl, false
@@ -444,52 +449,40 @@ func cutDetailAround(m *Model, dl []pline, budget, cur int) ([]pline, bool) {
 	if cur < 0 || cur >= len(starts) {
 		return cutDetail(m, dl, budget)
 	}
-	// A row owns its line and the lines under it up to the next row; the lines
-	// before the first row (the preamble) are drawn when there is room left.
-	end := func(k int) int {
-		if k+1 < len(starts) {
-			return starts[k+1]
-		}
-		return len(rows)
-	}
+	// The window is a run of lines, [from, to), that holds the cursor row's first
+	// line; every line outside it is counted in a mark, above or below. It grows
+	// over the cursor row's own lines first, then below it, then above it.
+	n := len(rows)
 	room := max(budget-2, 1)
-	cost := func(lo, hi int) int {
-		n := end(hi) - starts[lo]
-		if lo > 0 {
-			n++
+	cost := func(from, to int) int {
+		c := to - from
+		if from > 0 {
+			c++
 		}
-		if hi < len(starts)-1 {
-			n++
+		if to < n {
+			c++
 		}
-		return n
+		return c
 	}
-	lo, hi := cur, cur
+	from, to := starts[cur], starts[cur]+1
 	for grew := true; grew; {
 		grew = false
-		if hi+1 < len(starts) && cost(lo, hi+1) <= room {
-			hi++
+		switch {
+		case to < n && cost(from, to+1) <= room:
+			to++
+			grew = true
+		case from > 0 && cost(from-1, to) <= room:
+			from--
 			grew = true
 		}
-		if lo > 0 && cost(lo-1, hi) <= room {
-			lo--
-			grew = true
-		}
-	}
-	body := rows[starts[lo]:end(hi)]
-	if n := cost(lo, hi); n > room {
-		// The cursor's row alone is more than the room: its first lines.
-		marks := n - len(body)
-		body = body[:max(room-marks, 1)]
 	}
 	out := append([]pline(nil), dl[:1]...)
-	if lo > 0 {
-		out = append(out, pline{text: m.st.dim("↑ " + strconv.Itoa(lo) + " more"), box: boxMid, hiddenRefs: refsOf(rows[:starts[lo]])})
-	} else if spare := room - cost(lo, hi); spare > 0 {
-		out = append(out, rows[:min(starts[0], spare)]...)
+	if from > 0 {
+		out = append(out, pline{text: m.st.dim("↑ " + strconv.Itoa(from) + " more"), box: boxMid, hiddenRefs: refsOf(rows[:from])})
 	}
-	out = append(out, body...)
-	if hi < len(starts)-1 {
-		out = append(out, pline{text: m.st.dim("↓ " + strconv.Itoa(len(starts)-1-hi) + " more"), box: boxMid, hiddenRefs: refsOf(rows[end(hi):])})
+	out = append(out, rows[from:to]...)
+	if to < n {
+		out = append(out, pline{text: m.st.dim("↓ " + strconv.Itoa(n-to) + " more"), box: boxMid, hiddenRefs: refsOf(rows[to:])})
 	}
 	return append(out, dl[len(dl)-1]), true
 }

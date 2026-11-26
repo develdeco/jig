@@ -315,8 +315,10 @@ func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
 		label = ""
 	}
 	m.factRows(p, rows)
-	for _, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
-		p.boxAdd(l)
+	// The goal's lines are rows the cursor passes over, so a pane of rows followed
+	// by text is read to its end and zoomed whole.
+	for i, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
+		p.lines = append(p.lines, pline{text: l, box: boxMid, ref: &rowRef{kind: rowStop, id: "goal-" + strconv.Itoa(i), ticket: t.id, slice: s.ID}})
 	}
 	p.boxEnd()
 }

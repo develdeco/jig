@@ -103,9 +103,12 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 			m.syncPanes(pg)
 		}
 	}
-	if e.screen == screenReview && ref != nil && ref.kind == rowRound {
-		// A round named from another screen: its row has the Rounds cursor.
-		m.goToRound(ref.id)
+	if e.screen == screenReview && ref != nil {
+		// A round named from another screen, by its row or by a line about it: its
+		// row has the Rounds cursor.
+		if n := roundNamed(*ref); n != "" {
+			m.goToRound(n)
+		}
 	}
 	if e.screen == screenSlice && ref != nil && ref.kind == rowTry {
 		// A try named from the build screen: the slice's Commits pane is on it.

@@ -22,8 +22,9 @@ const (
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
-	// rowRound is a gate round on the review screen: it opens nothing, and the
-	// detail under the list is its own.
+	// rowRound is a gate round on the review screen, whose detail under the list is
+	// its own; named from another screen (a slice's Finding panel) it opens the
+	// review screen with the Rounds cursor on it.
 	rowRound = "round"
 	// rowCheck is a check of the publish screen's checklist and rowSection a
 	// section of the brief: each opens nothing, and the detail under the list is
@@ -904,7 +905,7 @@ func (m *Model) header(w int) []string {
 			short := crumbs + " › round " + round + " › " + m.st.bold(e.finding) + m.st.dim(m.place())
 			crumbs = full
 			if f := t.findingNamed(e.finding); f != nil {
-				if width(full)+width(m.st.icon(findingState(*f))+" "+findingWord(*f))+1 > w {
+				if st, word, _ := t.findingStanding(*f); width(full)+width(m.st.icon(st)+" "+word)+1 > w {
 					crumbs = short
 				}
 			}
@@ -933,7 +934,8 @@ func (m *Model) header(w int) []string {
 			}
 			if f := t.findingNamed(e.finding); e.screen == screenFinding && f != nil {
 				// A finding's screen says how the finding stands.
-				state, label = findingState(*f), findingWord(*f)
+				state, _, _ = t.findingStanding(*f)
+				_, label, _ = t.findingStanding(*f)
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}

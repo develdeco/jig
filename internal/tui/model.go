@@ -112,7 +112,7 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the nine screens is showing.
+// screenKind is which of the ten screens is showing.
 type screenKind int
 
 const (
@@ -239,7 +239,7 @@ type confirmation struct {
 	run    func() tea.Cmd
 }
 
-// Model is the TUI: nine screens over the event stream and the verbs. It is a
+// Model is the TUI: ten screens over the event stream and the verbs. It is a
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {

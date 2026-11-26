@@ -206,6 +206,18 @@ func (e *navEntry) subjectName() string {
 	return e.ticket
 }
 
+// cursorUnder puts the cursor of the screen under the one on top on the row match
+// names, so esc from the sibling that replaces the top lands on it.
+func (m *Model) cursorUnder(match func(rowRef) bool) {
+	if len(m.nav) < 2 {
+		return
+	}
+	saved := m.nav
+	m.nav = m.nav[: len(m.nav)-1 : len(m.nav)-1]
+	m.cursorToRow(match)
+	m.nav = saved
+}
+
 // openSibling is `[` and `]`: the neighbor opens as the screen the person is
 // on, replacing the screens above its list, and the list puts its cursor on it.
 func (m *Model) openSibling(delta int) tea.Cmd {
@@ -218,8 +230,10 @@ func (m *Model) openSibling(delta int) tea.Cmd {
 	m.forgetSibs()
 	switch s.kind {
 	case sibSlices:
+		m.cursorUnder(func(r rowRef) bool { return r.kind == rowSlice && r.id == id })
 		return m.goTo(len(m.nav)-1, nil, navEntry{screen: screenSlice, ticket: e.ticket, slice: id})
 	case sibFindings:
+		m.cursorUnder(func(r rowRef) bool { return r.kind == rowFinding && r.id == id })
 		return m.goTo(len(m.nav)-1, nil, navEntry{screen: screenFinding, ticket: e.ticket, finding: id})
 	case sibRounds:
 		m.goToRound(id)

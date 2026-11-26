@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/develdeco/jig/internal/journal"
 )
 
 // A finding's screen: one finding a gate round raised, whole and wrapped, and
@@ -28,6 +30,44 @@ func (t *ticket) findingNamed(id string) *statusFinding {
 		}
 	}
 	return nil
+}
+
+// findingStanding is how a finding stands now, as its screen says it: the state
+// it is drawn in, a word, and a sentence for an ask. A finding the round recorded
+// as an ask waits for a person only while the status lists it among the
+// outstanding asks; once a person decided it, it says what was decided, and once
+// a later round applied the decision, that too.
+func (t *ticket) findingStanding(f statusFinding) (state, word, note string) {
+	if f.Status != "asked" {
+		return findingState(f), findingWord(f), ""
+	}
+	for _, a := range t.asks() {
+		if a.ID != f.ID {
+			continue
+		}
+		if a.Decision == "" {
+			return StateAsk, "ask", "It waits for a person: decide it on the review screen's Asks list, with k to keep it and d to dismiss it. This screen decides nothing."
+		}
+		state, word = askDecision(a)
+		return state, word, "It was an ask and it was " + word + "; the next round applies it. This screen decides nothing."
+	}
+	outcome, by := t.triageOf(f.ID)
+	if outcome == "" {
+		return StateOK, "decided", "It was an ask: a person decided it and a later round applied it."
+	}
+	state, word = askDecision(askRow{Decision: outcome, DecidedBy: by})
+	return state, word, "It was an ask and it was " + word + "; a later round applied it."
+}
+
+// triageOf is what the journal's last triage line of the finding decided and who
+// decided it, "" when none did.
+func (t *ticket) triageOf(id string) (outcome, by string) {
+	for _, l := range t.lines {
+		if l.Event == journal.EventTriage && l.Ref == id {
+			outcome, by = l.Outcome, l.Provenance
+		}
+	}
+	return outcome, by
 }
 
 // fixSlicesOf are the slices whose findings column names the finding, in plan order.
@@ -63,7 +103,7 @@ func (m *Model) findingPage(id, finding string) page {
 		p.add(m.st.dim("finding " + finding + " is not in the status"))
 		return p
 	}
-	state := findingState(*f)
+	state, word, note := t.findingStanding(*f)
 	var rows []factRow
 	add := func(label, value string) {
 		if value != "" {
@@ -75,7 +115,7 @@ func (m *Model) findingPage(id, finding string) page {
 	add("risk", f.Risk)
 	add("why", f.Rationale)
 	add("action", f.Action)
-	add("became", m.st.icon(state)+" "+m.st.state(state, findingWord(*f)))
+	add("became", m.st.icon(state)+" "+m.st.state(state, word))
 	if f.Triage != "" {
 		add("sorted by", map[string]string{"human": "a person", "auto": "the gate"}[f.Triage])
 	}
@@ -88,10 +128,10 @@ func (m *Model) findingPage(id, finding string) page {
 			p.boxAdd(l)
 		}
 	}
-	if f.Status == "asked" {
+	if note != "" {
 		p.boxAdd("")
-		for _, l := range wrapWhole("It waits for a person: decide it on the review screen's Asks list, with k to keep it and d to dismiss it. This screen decides nothing.", m.innerWidth()) {
-			p.boxAdd(m.st.state(StateAsk, l))
+		for _, l := range wrapWhole(note, m.innerWidth()) {
+			p.boxAdd(m.st.state(state, l))
 		}
 	}
 	p.boxEnd()
@@ -116,6 +156,17 @@ func (m *Model) findingPage(id, finding string) page {
 	return p
 }
 
+// roundNamed is the number of the round a row names, "" for a row that names none.
+func roundNamed(ref rowRef) string {
+	switch ref.kind {
+	case rowRound, rowCarry:
+		return ref.id
+	case rowSub, rowLog:
+		return ref.round
+	}
+	return ""
+}
+
 // goToRound puts the Rounds list's cursor on round n of the review screen on top
 // and gives it the focus, so the Detail below is that round's.
 func (m *Model) goToRound(n string) {
@@ -124,18 +175,37 @@ func (m *Model) goToRound(n string) {
 	}
 }
 
-// cursorToRow puts the cursor of the screen on top on the first row match names,
-// and gives the pane that holds it the focus, so what follows the cursor (a
-// Detail) is the row's.
+// cursorToRow is the one way a screen is put on a row: the cursor of the screen
+// on top stands on the first row match names, its pane has the focus, and the
+// window is the one around it from the next frame, nothing after it moving it
+// (the focus is the pane's already, so the first draw has none to move). A zoom
+// or a search the screen was left with that hides the row is cleared first.
 func (m *Model) cursorToRow(match func(rowRef) bool) {
 	e := m.top()
-	pg := m.page()
-	for i, r := range pg.refs() {
-		if match(r) {
-			e.sel, e.seenSet, e.follow, e.lead = i, false, false, 0
-			m.syncPanes(pg)
-			return
+	find := func() (page, int) {
+		pg := m.page()
+		for i, r := range pg.refs() {
+			if match(r) {
+				return pg, i
+			}
 		}
+		return pg, -1
+	}
+	pg, i := find()
+	if i < 0 && (e.zoom != "" || e.psearch.applied()) {
+		e.zoom, e.psearch = "", paneSearch{}
+		pg, i = find()
+	}
+	if i < 0 {
+		return
+	}
+	refs := pg.refs()
+	e.sel, e.follow, e.lead = i, false, 0
+	e.seenSel, e.seenSet = i, true
+	if at := paneOfRow(pg.panes(), i); at >= 0 {
+		p := pg.panes()[at]
+		e.paneFocus, e.textFocus = p.title, false
+		e.rememberPane(pg, p, refs)
 	}
 }
 
