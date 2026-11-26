@@ -53,6 +53,17 @@ var (
 	askTwo = [3]string{"r1-f2", "Name shadows import", "-"}
 )
 
+// holdsWholeAsk is whether a review screen has every word of askOne's detail: its title, the reason and why it waits, each as the detail wraps it.
+func holdsWholeAsk(view string) bool {
+	words := readWords(view)
+	for _, piece := range []string{longAskTitle, longAskReason, longAskWhy} {
+		if !strings.Contains(words, readWords(piece)) {
+			return false
+		}
+	}
+	return true
+}
+
 // wholeAskText is what a person decides askOne from.
 var wholeAskText = longAskTitle + " · " + longAskReason + " · " + longAskWhy
 
@@ -70,12 +81,18 @@ func TestAskWholeOnTicketAndReview(t *testing.T) {
 				t.Fatalf("at %d columns the screen is %s, want %s", w, g.m.Screen(), screen)
 			}
 			words := readWords(view)
-			for _, want := range []string{wholeAskText, "Name shadows import"} {
+			// The ticket screen says an ask as one text; the review screen's detail
+			// says its title, its reason and why it waits one to a row of its own.
+			texts := []string{wholeAskText, "Name shadows import"}
+			if screen == "review" {
+				texts = []string{longAskTitle, longAskReason, longAskWhy, "Name shadows import"}
+			}
+			for _, want := range texts {
 				if !strings.Contains(words, readWords(want)) {
 					t.Errorf("at %d columns the %s screen lacks the ask text %q:\n%s", w, screen, want, view)
 				}
 			}
-			heading := map[string]string{"ticket": "\n  Needs you\n", "review": "\n  Asks\n"}[screen]
+			heading := map[string]string{"ticket": "\n  Needs you\n", "review": "\n  Detail · r1-f1"}[screen]
 			for _, l := range strings.Split(between(view, heading, "ctivity"), "\n") {
 				if strings.HasPrefix(l, "      ") && strings.Contains(l, "…") {
 					t.Errorf("at %d columns the %s screen cuts the ask at %q:\n%s", w, screen, l, view)
@@ -251,7 +268,7 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 func TestAskDrawnReadsTheWindowAsItIsDrawn(t *testing.T) {
 	t.Parallel()
 	whole, cut := 0, 0
-	for height := 9; height <= 22; height++ {
+	for height := 9; height <= 34; height++ {
 		w, c := scrollAskDrawn(t, height)
 		whole, cut = whole+w, cut+c
 	}
@@ -272,7 +289,7 @@ func scrollAskDrawn(t *testing.T, height int) (whole, cut int) {
 	}
 	for i := 0; i < 80; i++ {
 		view := g.view()
-		want := strings.Contains(readWords(view), readWords(wholeAskText))
+		want := holdsWholeAsk(view)
 		state, onPage := g.m.drawn["r1-f1"]
 		if (state == askWhole) != want || !onPage {
 			t.Fatalf("scrolled %d lines: the record says %d (on the page %v), the screen holds the ask whole: %v:\n%s", i, state, onPage, want, view)

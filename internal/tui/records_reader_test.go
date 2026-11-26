@@ -6,7 +6,22 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 )
+
+// manyRoundsEvents is JIG-2 after twelve gate rounds, the first with two asks
+// waiting: the rounds list is long, so the first ask is below the first screenful.
+func manyRoundsEvents() []events.Envelope {
+	out := jig2Mid()
+	for n := 2; n <= 12; n++ {
+		n := n
+		out = append(out,
+			jl(at(20+n, 0), "JIG-2", "", journal.EventGateOpen),
+			jl(at(20+n, 30), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = n, "s-reviewer" }))
+	}
+	return out
+}
 
 // manyProbesTwoAsks is a review status with a round that took 12 caught probes
 // and two asks waiting after them.
@@ -58,9 +73,9 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
-	g.feed(jig2Mid()...).press("enter")
+	g.feed(manyRoundsEvents()...).press("enter")
 	view := g.view()
-	if !strings.Contains(view, "╭─ Rounds ") || !strings.Contains(view, "12 probes") {
+	if !strings.Contains(view, "╭─ Rounds ") || !strings.Contains(view, "12 rounds") {
 		t.Fatalf("the page does not open at its rounds:\n%s", view)
 	}
 	// Each down shows the next line: no probe is skipped.
@@ -108,7 +123,7 @@ func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
-	g.feed(jig2Mid()...).press("enter")
+	g.feed(manyRoundsEvents()...).press("enter")
 	if view := g.view(); strings.Contains(view, "▸") {
 		t.Fatalf("the cursor's row is shown on the opened page, the test needs it hidden:\n%s", view)
 	}
@@ -128,8 +143,18 @@ func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	for i := 0; i < 100 && !strings.Contains(g.view(), "▸"); i++ {
 		g.press("down")
 	}
-	// The row is shown with its text, which the window keeps with it as a row's
-	// wrapped lines: the ask is drawn whole, so d decides it.
+	// The row is shown, and its text is in the detail below the lists, which is not
+	// drawn whole yet: d does not decide it from a cut text.
+	g.press("d")
+	if n := triages(); n != 0 {
+		t.Errorf("d decided an ask whose detail was cut: %q", g.r.lines())
+	}
+	for i := 0; i < 100 && !strings.Contains(readWords(g.view()), "decision ! undecided"); i++ {
+		g.press("down")
+	}
+	if view := g.view(); !strings.Contains(view, "▸ ! high") || !strings.Contains(readWords(view), "decision ! undecided") {
+		t.Fatalf("reading down did not bring the first ask's whole detail on the cursor's row:\n%s", view)
+	}
 	g.press("d")
 	if got := g.r.lines(); triages() != 1 || !strings.Contains(got[len(got)-1], "triage JIG-2 r1-f1 dismiss") {
 		t.Errorf("d on an ask drawn whole did not triage it: %q", got)

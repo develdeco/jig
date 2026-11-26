@@ -1,24 +1,24 @@
 jig  demo › JIG-2 (1 of 3)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ↑ 3 more
-  ╭─ Rounds ─────────────────────────────────────────────────────────────── 1 ─╮
-  │    round    verdict   asked             range            read     at       │
-  │  ! round 1  findings  1 fix · 2 asks …  full 0000000..…  4 files  09:11:30 │
-  │      reviewer (Claude Code · Opus 5) · independent · s-review              │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Findings ─────────────────────────────────────────────────────── round 1 ─╮
-  │    risk    where          outcome  title              id                   │
-  │  ◐ medium  alpha/a.go:12  to fix   Close the file     r1-f3                │
-  │      a leaked handle fails the next open                                   │
-  │  ○ low     beta/b.go:2    noted    Rename the helper  r1-f4                │
-  │      a clearer name, whenever the file is next touched                     │
+  ! round 1: 2 asks wait for you
+    fix budget 1 of 3 rounds used
+
+  ╭─ Rounds ───────────────────────────────────────────────────────── 1 round ─╮
+  │    round    verdict   asked                    range             at        │
+  │  ! round 1  findings  1 fix · 2 asks · 1 note  0000000..ccccccc  09:11:30  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
   │    risk  where         decision   title                id                  │
   │▸ ! high  alpha/a.go:3  undecided  Unchecked error      r1-f1               │
-  │      Unchecked error · a failed write would pass silently · needs a human  │
-  │  ↓ 1 more                                                                  │
+  │  ! low   beta/b.go:9   undecided  Name shadows import  r1-f2               │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail · r1-f1 ─────────────────────────────────────────────── undecided ─╮
+  │  finding       high · alpha/a.go:3 · Unchecked error                       │
+  │  reason        a failed write would pass silently                          │
+  │  waits because needs a human                                               │
+  │  decision      ! undecided                                                 │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 2 more
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps
   [ ] sibling · h main · t tail

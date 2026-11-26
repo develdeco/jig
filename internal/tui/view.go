@@ -20,6 +20,9 @@ const (
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
+	// rowRound is a gate round on the review screen: it opens nothing, and the
+	// detail under the list is its own.
+	rowRound = "round"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
@@ -369,8 +372,12 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		}
 		n++
 	}
-	// room is whether a page that begins at its top shows a row of its detail.
+	// room is whether a page that begins at its top shows a row of its detail, and
+	// the whole of it when it is an ask's, which is not decided from a cut text.
 	room := from >= 0 && from+2 < h
+	for i := max(from, 0); room && to > h && i < to; i++ {
+		room = pg.lines[i].ask == ""
+	}
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
@@ -385,9 +392,16 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			start = clampStart(pg.lines, h, selLine)
 		}
 		if n > 0 && from >= 0 && !room {
-			// The list leaves no room for its detail: the window starts as low as
-			// the cursor's row lets it, to show the detail.
-			start = clampStart(pg.lines, h, min(selLine, max(0, to-h)))
+			// The list leaves no room for its detail: the window starts at the top
+			// of the cursor's list when that and the detail fit, else as low as the
+			// cursor's row lets it, to show the detail.
+			top, _ := boxOf(pg.lines, selLine)
+			switch {
+			case top >= 0 && to-top <= h:
+				start = top
+			default:
+				start = clampStart(pg.lines, h, min(selLine, max(0, to-h)))
+			}
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.

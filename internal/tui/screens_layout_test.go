@@ -25,8 +25,9 @@ func wantNothingCut(t *testing.T, view string, w int, texts ...string) {
 	t.Helper()
 	wantNoRowWider(t, strings.Split(view, "\n"), w)
 	flat := squeeze(view)
+	side := squeeze(sideColumn(view))
 	for _, text := range texts {
-		whole := strings.Contains(flat, squeeze(text))
+		whole := strings.Contains(flat, squeeze(text)) || strings.Contains(side, squeeze(text))
 		switch {
 		case whole:
 		case w >= 100:
@@ -35,6 +36,31 @@ func wantNothingCut(t *testing.T, view string, w int, texts ...string) {
 			t.Errorf("at %d wide %q is cut early:\n%s", w, text, view)
 		}
 	}
+}
+
+// sideColumn is the columns of a screen from its Detail panel on, when the panel
+// is drawn beside the list: read down, a text wrapped in it is one text, which
+// the whole lines of the screen interleave with the list's cells. "" for a screen
+// that has no Detail beside a list.
+func sideColumn(view string) string {
+	lines := strings.Split(view, "\n")
+	col := -1
+	for _, l := range lines {
+		if i := strings.Index(l, "╮  ╭─ Detail"); i >= 0 {
+			col = len([]rune(l[:i])) + 3
+			break
+		}
+	}
+	if col < 0 {
+		return ""
+	}
+	var out []string
+	for _, l := range lines {
+		if r := []rune(l); len(r) > col {
+			out = append(out, string(r[col:]))
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // TestBuildReviewSliceScreensCutNothingWhileWidthAllows: the Build, Review,
@@ -71,7 +97,7 @@ func TestBuildReviewSliceScreensCutNothingWhileWidthAllows(t *testing.T) {
 		"review": func() (*rig, []string) {
 			g := newRig(t, "JIG-2")
 			g.r.answer("status JIG-2 --store /s", strings.ReplaceAll(manyProbesTwoAsks(), "Unchecked error", layoutFinding), 0)
-			g.feed(jig2Mid()...).press("enter", "end")
+			g.feed(jig2Mid()...).press("enter") // the cursor opens on the first ask, whose detail is its finding whole
 			return g, []string{layoutFinding}
 		},
 	}

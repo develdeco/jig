@@ -129,18 +129,24 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	)
 	g.press("down", "enter") // from the build, the current step, to the review
 	v := g.view()
-	for _, want := range []string{"Sent back", "fix-1 round 1 alpha/a.go:3 Unchecked error", "fixes sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
+	for _, want := range []string{"fixes sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
 		if !strings.Contains(readWords(v), want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
 	}
-	// The goal's other lines never reach a row: every screen keeps its height.
-	for _, keys := range [][]string{{"esc"}, {"up", "enter"}} {
-		g.press(keys...)
-		v := g.view()
-		if strings.Contains(v, "The error is dropped.") || strings.Count(v, "\n")+1 != 24 {
-			t.Errorf("after %v a fix slice's goal spills over its row:\n%s", keys, v)
-		}
+	if strings.Contains(v, "Sent back") {
+		t.Errorf("the review screen has a panel of the fix slices sent back:\n%s", v)
+	}
+	// The goal's other lines never reach a row: the list says its first line, and
+	// the detail of the slice under the cursor says all of it.
+	g.press("esc", "up", "enter") // the build screen
+	v = g.view()
+	if list := between(v, "Slices", "╰"); strings.Contains(list, "The error is dropped.") || !strings.Contains(readWords(list), "fix-1 queued 0 tries round 1 · alpha/a.go:3 Unchecked error") {
+		t.Errorf("a fix slice's row is not its finding's line:\n%s", v)
+	}
+	g.press("down")
+	if detail := between(g.view(), "╭─ Detail · fix-1", "╰"); !strings.Contains(readWords(detail), "The error is dropped.") || strings.Count(g.view(), "\n")+1 != 24 {
+		t.Errorf("the detail of a fix slice does not say its goal whole:\n%s", g.view())
 	}
 }
 

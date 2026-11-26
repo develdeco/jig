@@ -48,9 +48,9 @@ func (m *Model) buildPage(id string) page {
 		}
 		tries := strconv.Itoa(s.Attempts) + " " + plural(s.Attempts, "try", "tries")
 		goal := firstOf(goals[s.ID], m.st.dim("no goal"))
-		if s.FromGate > 0 && goals[s.ID] != "" {
+		if round := t.fixRound(s.ID); round > 0 && goals[s.ID] != "" {
 			// A fix slice reads as its finding, by the round it came from.
-			goal = "round " + strconv.Itoa(s.FromGate) + " · " + goals[s.ID]
+			goal = "round " + strconv.Itoa(round) + " · " + goals[s.ID]
 		}
 		spent := ""
 		if d := work.of(stepBuild, "slice:"+s.ID); d > 0 {
@@ -66,9 +66,9 @@ func (m *Model) buildPage(id string) page {
 	if t.status != nil && at < len(t.status.Slices) {
 		full = t.status.Slices[at]
 	}
-	m.listAndDetail(&p,
-		listSpec{title: "Slices", summary: strconv.Itoa(green) + " of " + strconv.Itoa(len(slices)) + " green", cols: sliceColumns, names: sliceColumnNames, rows: rows},
-		m.buildDetail(t, slices[at], full))
+	detail := m.buildDetail(t, slices[at], full)
+	m.listAndDetail(&p, &detail,
+		listSpec{title: "Slices", summary: strconv.Itoa(green) + " of " + strconv.Itoa(len(slices)) + " green", cols: sliceColumns, names: sliceColumnNames, rows: rows})
 
 	if rows := m.sessionRows(t, roleBuilder); len(rows) > 0 {
 		m.listPanel(&p, listSpec{title: "Sessions", summary: strconv.Itoa(len(rows)), cols: sessionColumns, names: sessionColumnNames, rows: rows})
@@ -141,8 +141,8 @@ func (m *Model) buildDetail(t *ticket, s sliceRow, full statusSlice) detailSpec 
 	if s.BlockedBy != "" {
 		add(detailRow{label: "waits for", text: strings.ReplaceAll(s.BlockedBy, "+", ", ")})
 	}
-	if s.FromGate > 0 {
-		from := strconv.Itoa(s.FromGate)
+	if round := t.fixRound(s.ID); round > 0 {
+		from := strconv.Itoa(round)
 		if len(full.Findings) > 0 {
 			from += " · " + strings.Join(full.Findings, ", ")
 		}

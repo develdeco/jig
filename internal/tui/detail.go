@@ -24,6 +24,9 @@ type detailRow struct {
 	// indent is cells the whole row stands in, for a line that belongs to the
 	// one above it.
 	indent int
+	// apart is a row that is not part of the text an ask is decided from (the
+	// decision so far): the window may cut it and the ask is still drawn whole.
+	apart bool
 }
 
 // detailSpec is a Detail panel: the title is the row's own id or name, drawn after
@@ -34,6 +37,9 @@ type detailSpec struct {
 	rows           []detailRow
 	// empty is said when there are no rows.
 	empty string
+	// ask, when it is set, is the ask the detail is of: every line of it carries
+	// the ask, so the window can tell whether it was drawn whole.
+	ask string
 }
 
 // within runs build with panels drawn w cells wide, as the side of a screen is.
@@ -54,8 +60,12 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 		labelW = max(labelW, width(r.label))
 	}
 	for _, r := range d.rows {
+		ask := d.ask
+		if r.apart {
+			ask = ""
+		}
 		for _, text := range m.detailRowLines(r, labelW, inner) {
-			lines = append(lines, pline{text: text, box: boxMid})
+			lines = append(lines, pline{text: text, box: boxMid, ask: ask})
 		}
 	}
 	if len(d.rows) == 0 && d.empty != "" {
@@ -108,21 +118,33 @@ func (m *Model) detailRowLines(r detailRow, labelW, inner int) []string {
 	return out
 }
 
-// listAndDetail adds the list panel and, with it, the Detail panel of the row the
-// cursor is on: under the list, or from sideMinWidth columns beside it, both
-// boxes as tall as the taller.
-func (m *Model) listAndDetail(p *page, list listSpec, d detailSpec) {
+// listAndDetail adds the list panels and, with them, the Detail panel of the row
+// the cursor is on: under the lists, or from sideMinWidth columns beside them,
+// both boxes as tall as the taller. A screen with no row to detail passes none.
+func (m *Model) listAndDetail(p *page, d *detailSpec, lists ...listSpec) {
+	if d == nil {
+		for _, l := range lists {
+			m.listPanel(p, l)
+		}
+		return
+	}
 	first := len(p.lines)
 	if m.width < sideMinWidth {
-		m.listPanel(p, list)
+		for _, l := range lists {
+			m.listPanel(p, l)
+		}
 		first = len(p.lines)
-		p.lines = append(p.lines, m.detailLines(d, m.width)...)
+		p.lines = append(p.lines, m.detailLines(*d, m.width)...)
 	} else {
 		listW := m.width * 3 / 5
 		sideW := m.width - listW
 		var left page
-		m.within(listW, func() { m.listPanel(&left, list) })
-		p.lines = append(p.lines, m.zipSides(left.lines, m.detailLines(d, sideW), sideW)...)
+		m.within(listW, func() {
+			for _, l := range lists {
+				m.listPanel(&left, l)
+			}
+		})
+		p.lines = append(p.lines, m.zipSides(left.lines, m.detailLines(*d, sideW), sideW)...)
 	}
 	p.lines[first].hold |= holdFrom
 	p.lines[len(p.lines)-1].hold |= holdTo
@@ -144,6 +166,7 @@ func (m *Model) zipSides(left, right []pline, sideW int) []pline {
 	for i, l := range left {
 		l.side = m.frameLine(right[i], "  ", sideW, false)
 		l.sideW = sideW
+		l.ask = right[i].ask
 		out[i] = l
 	}
 	return out

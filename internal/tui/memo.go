@@ -38,9 +38,11 @@ type ticketMemo struct {
 	questions *[]questionRow
 	landed    *[]landedAt
 	publish   *publishInfo
-	phase     *phase.Ticket
-	clocks    *clocks
-	clocksAt  int64
+	// fixes is the round the journal places each fix slice in (fixRounds).
+	fixes    map[string]int
+	phase    *phase.Ticket
+	clocks   *clocks
+	clocksAt int64
 }
 
 // memoFor is the readings of t as it stands now: those of the last ask while

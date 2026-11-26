@@ -14,6 +14,9 @@ import (
 type listRow struct {
 	ref   *rowRef
 	cells []string
+	// notes are lines under the row that belong to it: the cursor on the row is on
+	// them too, and a window never cuts them from it.
+	notes []string
 }
 
 // listSpec is a list panel.
@@ -55,6 +58,9 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		}
 		for i, lines := range m.laidList(p, s.cols, names, cells, s.room) {
 			p.boxLaid(s.rows[i].ref, lines)
+			for _, note := range s.rows[i].notes {
+				p.lines = append(p.lines, pline{text: note, box: boxMid, cont: true})
+			}
 		}
 	}
 	for _, l := range s.after {
