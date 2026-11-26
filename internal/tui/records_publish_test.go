@@ -63,42 +63,42 @@ func TestPublishScreenFitsTheWindowWhateverTheTextsAre(t *testing.T) {
 	}
 }
 
-// TestAPageWithNoRowToStandOnIsScrolledByTheArrowKeys: on a terminal too short
-// for the publish screen, the arrow keys move the window down the page and
-// back, and home and end go to its ends.
-func TestAPageWithNoRowToStandOnIsScrolledByTheArrowKeys(t *testing.T) {
+// TestAScreenLongerThanItsWindowIsReadByTheArrowKeysFromItsTop: on a terminal too
+// short for the publish screen, which opens at its top, the arrow keys first
+// move the window down the page and back, line by line, and home and end go to
+// its ends.
+func TestAScreenLongerThanItsWindowIsReadByTheArrowKeysFromItsTop(t *testing.T) {
 	t.Parallel()
 	g := publishRig(t, 6, 6, 14)
 	// The page ends with the activity's bottom edge, the second the page has.
-	if view := g.view(); !strings.Contains(view, "✓ pull request opened ·") || strings.Count(view, "╰") > 1 {
-		t.Fatalf("the short screen does not begin at the top of the page:\n%s", view)
+	top := g.view()
+	if !strings.Contains(top, "✓ pull request opened ·") || strings.Count(top, "╰") > 1 {
+		t.Fatalf("the short screen does not begin at the top of the page:\n%s", top)
 	}
 	g.press("end")
 	if view := g.view(); !strings.Contains(view, "╰") || strings.Contains(view, "✓ pull request opened ·") {
 		t.Errorf("end did not go to the end of the page:\n%s", view)
 	}
 	g.press("home")
-	if view := g.view(); !strings.Contains(view, "✓ pull request opened ·") {
+	if view := g.view(); view != top {
 		t.Errorf("home did not go back to the top:\n%s", view)
 	}
 	g.press("down", "down", "down")
-	// A window that starts inside a list keeps the list's names above it, so a
-	// move over them goes on to the next line there is to show.
-	three := g.m.top().scroll
-	if view := g.view(); !strings.Contains(view, "↑ ") || three < 3 {
-		t.Errorf("three downs left the window at %d:\n%s", g.m.top().scroll, g.view())
+	three := g.view()
+	if three == top || !strings.Contains(three, "↑ ") {
+		t.Errorf("three downs left the window where it was:\n%s", three)
 	}
 	g.press("up")
-	if g.m.top().scroll >= three {
-		t.Errorf("up left the window at %d, want it above %d", g.m.top().scroll, three)
+	if g.view() == three {
+		t.Errorf("up left the window where three downs put it:\n%s", three)
 	}
 	g.press("home", "up")
-	if g.m.top().scroll != 0 {
-		t.Errorf("up at the top left the window at %d", g.m.top().scroll)
+	if g.view() != top {
+		t.Errorf("up at the top left the window off the top:\n%s", g.view())
 	}
 	g.press("esc", "enter")
-	if g.m.top().scroll != 0 {
-		t.Errorf("a screen opened again begins at %d, want the top", g.m.top().scroll)
+	if g.view() != top {
+		t.Errorf("a screen opened again does not begin at the top:\n%s", g.view())
 	}
 }
 

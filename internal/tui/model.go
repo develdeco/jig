@@ -1094,8 +1094,11 @@ func (m *Model) moveBy(delta int) {
 		return
 	}
 	e.follow = false
-	if m.moveWindowed(pg, delta) {
-		return
+	if e.lead == 0 || delta <= -(1<<19) || delta >= 1<<19 {
+		// A page held above its cursor's window is read a line at a time first.
+		if m.moveWindowed(pg, delta) {
+			return
+		}
 	}
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {

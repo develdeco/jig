@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -74,30 +75,92 @@ func (m *Model) logRefs(t *ticket, all []placedLine) []rowRef {
 	seen := make(map[string]int, len(all))
 	refs := make([]rowRef, len(all))
 	for i, e := range all {
-		l := e.l
-		id := strings.Join([]string{l.TS, l.Src, l.Event, l.Session, l.Slice, l.Ref}, "|")
-		k := seen[id]
-		seen[id]++
-		if k > 0 {
-			// Lines that are the same in every one of these keep their order.
-			id += "#" + strconv.Itoa(k)
-		}
-		r := rowRef{kind: rowLog, id: id, ticket: t.id, slice: l.Slice}
-		if l.Event == journal.EventQuestion || l.Event == journal.EventAnswer {
-			r.question = l.Ref
-		}
-		if s, ok := strings.CutPrefix(e.key, "slice:"); ok {
-			r.slice = s
-		}
-		if n, ok := strings.CutPrefix(e.key, "round:"); ok {
-			r.round = n
-		}
-		if e.step >= 0 {
-			r.container = strings.ToLower(stepNames[e.step])
-		}
-		refs[i] = r
+		refs[i] = logRef(t.id, e.l, e.key, e.step, "", seen)
 	}
 	return refs
+}
+
+// logRef is the row of the line l of ticket, whose place is the step and the
+// sub-step key key (step -1 for none). A line is told from the others by its
+// instant, source, event, session, slice and subject, and from a line that is the
+// same in all of these by its order, which seen counts; prefix puts something
+// before them when the rows of several tickets stand together.
+func logRef(ticket string, l events.Envelope, key string, step int, prefix string, seen map[string]int) rowRef {
+	id := prefix + strings.Join([]string{l.TS, l.Src, l.Event, l.Session, l.Slice, l.Ref}, "|")
+	k := seen[id]
+	seen[id]++
+	if k > 0 {
+		id += "#" + strconv.Itoa(k)
+	}
+	r := rowRef{kind: rowLog, id: id, ticket: ticket, slice: l.Slice}
+	if l.Event == journal.EventQuestion || l.Event == journal.EventAnswer {
+		r.question = l.Ref
+	}
+	if s, ok := strings.CutPrefix(key, "slice:"); ok {
+		r.slice = s
+	}
+	if n, ok := strings.CutPrefix(key, "round:"); ok {
+		r.round = n
+	}
+	if step >= 0 {
+		r.container = strings.ToLower(stepNames[step])
+	}
+	return r
+}
+
+// stepActivityPanel adds the activity of step to p as a pane, for the step's own
+// screen, newest first: a row for every line of the step, of which it draws the
+// window around the cursor that the rows left below what p holds allow,
+// activityLines at most and three at least, so the newest line and the panel's
+// edge stay on the screen. Each line names the sub-step it advances and opens
+// what it is about, as the ticket screen's does.
+func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
+	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	title := stepNames[step] + " activity"
+	room := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-m.taken(p)-3))
+	if r, ok := m.zoomRoom(title); ok {
+		room = r
+	}
+	seen := make(map[string]int, len(all))
+	refs := make([]rowRef, len(all))
+	ids := make([]rowIdentity, len(all))
+	for i, l := range all {
+		refs[i] = logRef(t.id, l, t.subKey(l), step, "", seen)
+		ids[i] = refs[i].identity()
+	}
+	if p.windowed == nil {
+		p.windowed = map[string][]rowRef{}
+	}
+	p.windowed[title] = refs
+	cur := m.paneCursorIn(title, ids, 0)
+	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
+	right := ""
+	switch {
+	case to-from == len(all):
+	case from == 0:
+		right = fmt.Sprintf("latest %d of %d", to, len(all))
+	default:
+		right = fmt.Sprintf("%d-%d of %d", from+1, to, len(all))
+	}
+	labels := m.subLabelsOf(t)
+	rows := make([]listRow, 0, to-from)
+	for i := from; i < to; i++ {
+		rows = append(rows, listRow{ref: &refs[i], cells: m.activityCells(t, labels, all[i])})
+	}
+	spec := listSpec{title: title, summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet",
+		room: room - markLines(from, to, len(all), merged)}
+	switch {
+	case merged:
+		spec.after = []string{m.st.dim(fmt.Sprintf("↑ %d newer · ↓ %d older", from, len(all)-to))}
+	default:
+		if from > 0 {
+			spec.before = []string{m.st.dim(fmt.Sprintf("↑ %d newer", from))}
+		}
+		if to < len(all) {
+			spec.after = []string{m.olderRow(len(all) - to)}
+		}
+	}
+	m.listPanel(p, spec)
 }
 
 // chartActivityPanel adds the activity of the chart to p as a pane, newest first:

@@ -12,14 +12,17 @@ import (
 
 // onLog tabs to the Activity pane and puts its cursor on the first line whose
 // row says ok; it fails when no line does.
-func (g *rig) onLog(ok func(rowRef) bool) rowRef {
+func (g *rig) onLog(ok func(rowRef) bool) rowRef { g.t.Helper(); return g.onLine("Activity", ok) }
+
+// onLine is onLog for the pane titled title.
+func (g *rig) onLine(title string, ok func(rowRef) bool) rowRef {
 	g.t.Helper()
-	g.tabTo("Activity")
-	full := g.m.page().windowed["Activity"]
+	g.tabTo(title)
+	full := g.m.page().windowed[title]
 	for i, r := range full {
 		if ok(r) {
 			e := g.m.top()
-			e.paneCurs["Activity"] = paneCursor{id: r.identity(), idx: i, set: true}
+			e.paneCurs[title] = paneCursor{id: r.identity(), idx: i, set: true}
 			got := g.m.selected()
 			if got == nil || *got != r {
 				g.t.Fatalf("the cursor is on %+v, want the line %+v", got, r)
@@ -27,7 +30,7 @@ func (g *rig) onLog(ok func(rowRef) bool) rowRef {
 			return r
 		}
 	}
-	g.t.Fatalf("no line of the activity matches; its %d rows are %+v", len(full), full)
+	g.t.Fatalf("no line of %s matches; its %d rows are %+v", title, len(full), full)
 	return rowRef{}
 }
 

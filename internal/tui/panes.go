@@ -291,6 +291,14 @@ func (m *Model) moveWindowed(pg page, delta int) bool {
 	pc.id, pc.idx, pc.set = ids[to], to, true
 	e.paneCurs[e.paneFocus] = pc
 	e.follow, e.lead = false, 0
+	if delta <= -(1 << 19) {
+		// Home goes to the page's top when the pane's first row is the page's.
+		for _, p := range pg.panes() {
+			if p.title == e.paneFocus && p.first == 0 {
+				e.lead = 1 << 20
+			}
+		}
+	}
 	return true
 }
 
@@ -316,6 +324,11 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 		e.follow, e.lead = false, 0
 	}
 	e.paneFocus = p.title
+	if !moving && e.screen != screenTicket && e.screen != screenChart {
+		// A step's screen opens at its top, so what is above its first row is read
+		// before the rows are: the first move reads the page a line at a time.
+		e.lead = 1 << 20
+	}
 	if p.rows == 0 {
 		// A pane of text is read from where it was left, the first time from its
 		// top edge.

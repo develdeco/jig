@@ -1,8 +1,11 @@
 jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
+  ↑ 5 more
   ╭─ Findings ─────────────────────────────────────────────────────── round 1 ─╮
   │    risk    where          outcome  title              id                   │
-  │  ↑ 3 more                                                                  │
+  │  ◐ medium  alpha/a.go:12  to fix   Close the file     r1-f3                │
+  │      a leaked handle fails the next open                                   │
+  │  ○ low     beta/b.go:2    noted    Rename the helper  r1-f4                │
   │      a clearer name, whenever the file is next touched                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
@@ -12,12 +15,9 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
   │▸ - low   beta/b.go:9   dismissed by you  Name shadows import  r1-f2        │
   │      Name shadows import · the import is hidden in this scope              │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Review activity ────────────────────────────────────────── latest 2 of 4 ─╮
-  │  time     step   what                                                      │
-  │  09:11:41 - asks you dismissed “Name shadows import”                       │
-  │  09:11:40 + asks you kept “Unchecked error”                                │
-  │  ↓ 2 older                                                                 │
-  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
+
+
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · tab next pane: Review activity · ↑↓ move in Asks

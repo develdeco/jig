@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/phase"
 )
 
@@ -342,30 +340,6 @@ func subState(step int, s phase.Sub) string {
 		return StateBuilding
 	}
 	return StateQueued
-}
-
-// stepActivityPanel adds a panel of the latest lines of step to p, for the
-// step's own screen: as many as
-// the rows left below what p holds allow, activityLines at most and three at
-// least, so the newest line and the panel's edge stay on the screen. Each
-// line names the sub-step it advances.
-func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
-	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
-	lines, older := cutNewest(all, min(activityCap(m.bodyRows()), max(3, m.bodyRows()-m.taken(p)-3)))
-	right := ""
-	if older > 0 {
-		right = fmt.Sprintf("latest %d of %d", len(lines), len(all))
-	}
-	labels := m.subLabelsOf(t)
-	rows := make([]listRow, len(lines))
-	for i, l := range lines {
-		rows[i] = listRow{cells: m.activityCells(t, labels, l)}
-	}
-	spec := listSpec{title: stepNames[step] + " activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet"}
-	if older > 0 {
-		spec.after = []string{m.olderRow(older)}
-	}
-	m.listPanel(p, spec)
 }
 
 // questionLine is an open question as a row: who asked about which slice, and
