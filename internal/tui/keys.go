@@ -167,8 +167,8 @@ func canOpen(m *Model, sub subject) (bool, string) {
 
 // keyRows is the table. Its order is the hint line's and `?`'s.
 func keyRows() []keyRow {
-	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenSlice)
-	scrolls := onScreens(screenPublish, screenLand)
+	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice)
+	scrolls := onScreens(screenLand)
 	step := func(delta int) func(*Model, string) tea.Cmd {
 		return func(m *Model, _ string) tea.Cmd { m.move(delta); return nil }
 	}

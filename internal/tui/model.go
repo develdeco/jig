@@ -1086,16 +1086,15 @@ func (m *Model) moveBy(delta int) {
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
-		// Home: the first row, with the page held at its top.
-		e.sel, e.lead = 0, 1<<20
+		// Home: the first row; the window follows it.
+		e.sel, e.lead = 0, 0
 		return
 	case delta >= 1<<19:
 		e.sel, e.lead = n-1, 0
 		return
-	case e.lead > 0 || (delta < 0 && e.sel == 0):
-		// A page held above its cursor's window is read a line at a time, from
-		// whatever row the cursor is on, until it is back at the window; and
-		// up from the first row moves the page above it. The window clamps lead
+	case delta < 0 && e.sel == 0:
+		// Up from the first row moves the page above it; any other move is the
+		// cursor's, and the window follows it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
 		// its top starts at once.
 		// A window that would start where it cannot, on the top or the names of the
@@ -1321,6 +1320,7 @@ func (m *Model) rowShown(pg page, sel int) bool {
 	from, to, _ := windowSpan(pg, sel, start, h, m.top().lead == 0 || (m.top().fresh != 0 && start != 0))
 	n := 0
 	for i, l := range pg.lines {
+		n += len(l.hiddenRefs)
 		if l.ref == nil {
 			continue
 		}

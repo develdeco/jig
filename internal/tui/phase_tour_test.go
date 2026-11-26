@@ -116,8 +116,8 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 				if len(refs) != sc.rows {
 					t.Fatalf("%d rows to stand on, want %d (a row for each thing): %+v", len(refs), sc.rows, refs)
 				}
-				if w == 60 && (sc.name == "brief" || sc.name == "publish") {
-					// Fourteen rows hold the brief's two lists or the checklist and
+				if w == 60 && sc.name != "build" {
+					// Fifteen rows hold the review's two lists, the brief's two or the checklist and
 					// nothing more: the detail is under the first screenful.
 					return
 				}

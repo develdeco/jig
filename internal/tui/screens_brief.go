@@ -70,7 +70,8 @@ func (m *Model) briefPage(id string) page {
 		}
 	}
 	var detail *detailSpec
-	if at := m.cursorAmong(len(sections) + len(rows)); len(sections)+len(rows) > 0 {
+	at := m.cursorAmong(len(sections) + len(rows))
+	if len(sections)+len(rows) > 0 {
 		var d detailSpec
 		if at < len(sections) {
 			d = m.sectionDetail(t, at)
@@ -79,7 +80,7 @@ func (m *Model) briefPage(id string) page {
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail,
+	m.listAndDetail(&p, detail, at,
 		listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"},
 		listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"})
 

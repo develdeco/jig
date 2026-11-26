@@ -16,9 +16,6 @@ import (
 type listRow struct {
 	ref   *rowRef
 	cells []string
-	// notes are lines under the row that belong to it: the cursor on the row is on
-	// them too, and a window never cuts them from it.
-	notes []string
 }
 
 // listSpec is a list panel.
@@ -60,9 +57,6 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		}
 		for i, lines := range m.laidList(p, s.cols, names, cells, s.room) {
 			p.boxLaid(s.rows[i].ref, lines)
-			for _, note := range s.rows[i].notes {
-				p.lines = append(p.lines, pline{text: note, box: boxMid, cont: true})
-			}
 		}
 	}
 	for _, l := range s.after {
@@ -99,10 +93,6 @@ func (m *Model) laidList(p *page, cols []column, names []string, cells [][]strin
 	all = append(all, cells...)
 	laid := m.laidOnce(cols, all, room, func() [][]string {
 		switch {
-		case room == oneRow:
-			// A list that gives up what it can for room: each row is one line, and
-			// the detail beside or under it has the text whole.
-			return layoutRows(cols, all, m.innerWidth(), 1)
 		case room < 0:
 			// What a person decides on is never cut: its free text wraps as far as it
 			// goes.
@@ -115,9 +105,6 @@ func (m *Model) laidList(p *page, cols []column, names []string, cells [][]strin
 	p.boxNames(laid[0])
 	return laid[1:]
 }
-
-// oneRow is the room of a list whose rows are one line each.
-const oneRow = -2
 
 // laidOnce is the layout of the cells under cols in room, as the allocator last
 // gave it for the same cells at the same width: a frame that moves the cursor

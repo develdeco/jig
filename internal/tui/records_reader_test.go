@@ -117,47 +117,28 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 	}
 }
 
-// TestReviewPageKeysActOnlyOnAShownRow: the keys that decide the row under the
-// cursor act on a row the window shows with its marker, never on one it hides.
+// TestReviewPageKeysActOnlyOnAShownRow: with twelve rounds before the asks the
+// cursor's row and its ask are still on the opened screen, the keys that decide
+// act on the ask drawn whole, and on a screen too short to draw it whole they run
+// nothing.
 func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
 	g.feed(manyRoundsEvents()...).press("enter")
-	if view := g.view(); strings.Contains(view, "▸") {
-		t.Fatalf("the cursor's row is shown on the opened page, the test needs it hidden:\n%s", view)
-	}
-	triages := func() int {
-		n := 0
-		for _, l := range g.r.lines() {
-			if strings.HasPrefix(l, "triage ") {
-				n++
-			}
-		}
-		return n
-	}
-	g.press("d", "k")
-	if n := triages(); n != 0 {
-		t.Errorf("d and k decided a row the screen did not show: %q", g.r.lines())
-	}
-	for i := 0; i < 100 && !strings.Contains(g.view(), "▸"); i++ {
-		g.press("down")
-	}
-	// The row is shown, and its text is in the detail below the lists, which is not
-	// drawn whole yet: d does not decide it from a cut text.
-	g.press("d")
-	if n := triages(); n != 0 {
-		t.Errorf("d decided an ask whose detail was cut: %q", g.r.lines())
-	}
-	for i := 0; i < 100 && !strings.Contains(readWords(g.view()), "decision ! undecided"); i++ {
-		g.press("down")
-	}
 	if view := g.view(); !strings.Contains(view, "▸ ! high") || !strings.Contains(readWords(view), "decision ! undecided") {
-		t.Fatalf("reading down did not bring the first ask's whole detail on the cursor's row:\n%s", view)
+		t.Fatalf("the opened screen does not show the cursor's ask whole:\n%s", view)
 	}
 	g.press("d")
-	if got := g.r.lines(); triages() != 1 || !strings.Contains(got[len(got)-1], "triage JIG-2 r1-f1 dismiss") {
-		t.Errorf("d on an ask drawn whole did not triage it: %q", got)
+	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 dismiss") {
+		t.Errorf("d on an ask drawn whole ran %q", got)
+	}
+	short := newRig(t, "JIG-2")
+	short.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
+	short.feed(manyRoundsEvents()...).press("enter").sized(80, 12)
+	short.press("d", "k")
+	if got := triaged(short); len(got) != 0 {
+		t.Errorf("d and k decided an ask the screen did not draw whole: %q", got)
 	}
 }
 

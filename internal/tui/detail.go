@@ -1,5 +1,7 @@
 package tui
 
+import "strconv"
+
 // The detail part. A phase screen is a list of its things and, under the list or
 // beside it, the Detail panel: the row under the cursor, whole. One function
 // draws it for the four phase screens, so what a field is and how it wraps is
@@ -118,62 +120,241 @@ func (m *Model) detailRowLines(r detailRow, labelW, inner int) []string {
 	return out
 }
 
+// holdFrom marks the first line of a Detail panel (pline.hold): the page is read
+// with the list and its detail together.
+const holdFrom = 1
+
+// detailPeek is the least lines of a Detail panel the lists leave it: its top
+// edge, two rows, the mark of what is cut and its bottom edge. listMin is the
+// least a list keeps when the detail takes room from it: its edges, its names,
+// the cursor's row and the marks of what is hidden.
+const (
+	detailPeek = 5
+	listMin    = 5
+	collapsed  = 3
+)
+
 // listAndDetail adds the list panels and, with them, the Detail panel of the row
-// the cursor is on: under the lists, or from sideMinWidth columns beside them,
-// both boxes as tall as the taller. A screen with no row to detail passes none.
-func (m *Model) listAndDetail(p *page, d *detailSpec, lists ...listSpec) {
+// the cursor is on, at the place at among the rows of the lists in order: under
+// the lists, or from sideMinWidth columns beside them, both boxes as tall as the
+// taller. The lists and the detail share the room the screen leaves them: what
+// does not fit is cut where it is, a list around its cursor's row and a detail at
+// its end, each with a mark of what it hides inside its own box, so the detail is
+// always drawn. A screen with no row to detail passes none.
+func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec) {
 	if d == nil {
 		for _, l := range lists {
 			m.listPanel(p, l)
 		}
 		return
 	}
-	first := len(p.lines)
-	if m.width < sideMinWidth {
-		// The lists are laid out as they are asked to be. When what is above the
-		// detail leaves it no room, the rows of a list that can give up lines
-		// take one line each: the detail has each field whole.
-		var list page
-		for pass := 0; pass < 2; pass++ {
-			list = page{}
-			for _, l := range lists {
-				if pass == 1 && l.room == 0 {
-					l.room = oneRow
-				}
-				m.listPanel(&list, l)
+	first := m.taken(p)               // the lines above are wrapped as they will be drawn
+	avail := m.bodyRows() - first - 1 // and the mark of what lies below
+	side := m.width >= sideMinWidth
+	if side {
+		avail = max(avail, collapsed+3)
+	} else {
+		avail = max(avail, detailPeek+listMin)
+	}
+	listW, sideW := m.width, m.width
+	if side {
+		listW = m.width * 3 / 5
+		sideW = m.width - listW
+	}
+	full := make([][]pline, len(lists))
+	total := 0
+	m.within(listW, func() {
+		for i, l := range lists {
+			var q page
+			m.listPanel(&q, l)
+			full[i] = q.lines
+			total += len(q.lines)
+		}
+	})
+	dl := m.detailLines(*d, sideW)
+
+	// The room each takes. Beside each other both have all of it; under it the
+	// detail has what the lists leave, at least its peek (the whole of an ask's,
+	// which is decided from, while the lists keep their minimum).
+	lb, db := avail, avail
+	if !side {
+		lb, db = total, len(dl)
+		if total+len(dl) > avail {
+			need := min(len(dl), detailPeek)
+			if d.ask != "" {
+				need = len(dl)
 			}
-			if first+len(list.lines)+detailPeek <= m.bodyRows() {
-				break
+			db = max(min(len(dl), avail-total), need)
+			db = max(min(db, avail-listMin), min(len(dl), detailPeek))
+			lb = avail - db
+		}
+	}
+
+	// The lists, each windowed around the cursor's row when it is in it, the
+	// others to what they need up to a few lines.
+	cl, cr := 0, at
+	for i, l := range lists {
+		if cr < len(l.rows) {
+			cl = i
+			break
+		}
+		cr -= len(l.rows)
+		cl = i + 1
+	}
+	var left []pline
+	if lb >= total {
+		for _, f := range full {
+			left = append(left, f...)
+		}
+	} else {
+		// A list the cursor is not in keeps what it needs up to a few lines, and
+		// when that leaves the cursor's list less than its minimum it is a mark.
+		keep, others := detailPeek, 0
+		for i, f := range full {
+			if i != cl {
+				others += min(len(f), keep)
 			}
 		}
-		p.lines = append(p.lines, list.lines...)
-		first = len(p.lines)
-		p.lines = append(p.lines, m.detailLines(*d, m.width)...)
-	} else {
-		listW := m.width * 3 / 5
-		sideW := m.width - listW
-		var left page
-		m.within(listW, func() {
-			for _, l := range lists {
-				m.listPanel(&left, l)
+		if lb-others < listMin {
+			keep, others = 0, 0
+			for i, f := range full {
+				if i != cl {
+					others += min(len(f), collapsed)
+				}
 			}
-		})
-		p.lines = append(p.lines, m.zipSides(left.lines, m.detailLines(*d, sideW), sideW)...)
+		}
+		for i, f := range full {
+			switch {
+			case i == cl:
+				left = append(left, m.windowList(f, cr, max(lb-others, listMin))...)
+			case keep > 0:
+				left = append(left, m.windowList(f, 0, keep)...)
+			default:
+				left = append(left, m.windowList(f, -1, collapsed)...)
+			}
+		}
+	}
+	if !side && len(left) > lb {
+		// The lists could not give up as much as they were asked to: the detail
+		// has what is left, its edges and a mark at least.
+		db = max(avail-len(left), 3)
+	}
+	right, cut := cutDetail(m, dl, db)
+	if cut && d.ask != "" {
+		if p.cutAsks == nil {
+			p.cutAsks = map[string]bool{}
+		}
+		p.cutAsks[d.ask] = true
+	}
+	if side {
+		p.lines = append(p.lines, m.zipSides(left, right, sideW)...)
+	} else {
+		p.lines = append(p.lines, left...)
+		first = len(p.lines)
+		p.lines = append(p.lines, right...)
 	}
 	p.lines[first].hold |= holdFrom
-	p.lines[len(p.lines)-1].hold |= holdTo
 }
 
-// The marks on the first and the last line of a Detail panel (pline.hold).
-const (
-	holdFrom = 1 << iota
-	holdTo
-)
+// windowList is the lines of a list panel f cut to budget lines around the row
+// at row, as many rows as fit with the marks of those above and below inside its
+// box. The rows a mark stands for keep their places among the page's rows. A list
+// that fits, or has no row, is as it is.
+func (m *Model) windowList(f []pline, row, budget int) []pline {
+	if len(f) <= budget || len(f) < 3 {
+		return f
+	}
+	head := 1
+	for head < len(f)-1 && f[head].names {
+		head++
+	}
+	body := f[head : len(f)-1]
+	var starts []int
+	for i, l := range body {
+		if l.ref != nil {
+			starts = append(starts, i)
+		}
+	}
+	if len(starts) == 0 {
+		return f
+	}
+	end := func(k int) int { // the line after row k
+		if k+1 < len(starts) {
+			return starts[k+1]
+		}
+		return len(body)
+	}
+	if row < 0 {
+		// A list with no room: its edges and one mark for all its rows.
+		var all []rowRef
+		for _, s := range starts {
+			all = append(all, *body[s].ref)
+		}
+		mark := pline{text: m.st.dim(strconv.Itoa(len(all)) + " " + plural(len(all), "row", "rows")), box: boxMid, hiddenRefs: all}
+		return []pline{f[0], mark, f[len(f)-1]}
+	}
+	row = max(0, min(row, len(starts)-1))
+	lo, hi := row, row
+	need := func(lo, hi int) int {
+		n := head + 1 + end(hi) - starts[lo]
+		if lo > 0 {
+			n++
+		}
+		if hi < len(starts)-1 {
+			n++
+		}
+		return n
+	}
+	for grew := true; grew; {
+		grew = false
+		if hi+1 < len(starts) && need(lo, hi+1) <= budget {
+			hi++
+			grew = true
+		}
+		if lo > 0 && need(lo-1, hi) <= budget {
+			lo--
+			grew = true
+		}
+	}
+	refs := func(a, b int) []rowRef {
+		var out []rowRef
+		for k := a; k < b; k++ {
+			out = append(out, *body[starts[k]].ref)
+		}
+		return out
+	}
+	out := append([]pline(nil), f[:head]...)
+	if lo > 0 {
+		out = append(out, pline{text: m.st.dim("↑ " + strconv.Itoa(lo) + " more"), box: boxMid, hiddenRefs: refs(0, lo)})
+	}
+	out = append(out, body[starts[lo]:end(hi)]...)
+	if hi < len(starts)-1 {
+		out = append(out, pline{text: m.st.dim("↓ " + strconv.Itoa(len(starts)-1-hi) + " more"), box: boxMid, hiddenRefs: refs(hi+1, len(starts))})
+	}
+	return append(out, f[len(f)-1])
+}
 
-// detailPeek is the lines of a Detail panel a window must reach when the page
-// begins at its top for the list above it to leave the detail room: its top
-// edge, two rows of it, the mark of what is cut and its bottom edge.
-const detailPeek = 5
+// cutDetail is the lines of a Detail panel cut to budget lines: its top edge, as
+// many rows as fit, a mark of how many it hides and its bottom edge. It says
+// whether it cut.
+func cutDetail(m *Model, dl []pline, budget int) ([]pline, bool) {
+	if len(dl) <= budget {
+		return dl, false
+	}
+	keep := max(budget-3, 0)
+	rows := dl[1 : len(dl)-1]
+	if keep > len(rows) {
+		keep = len(rows)
+	}
+	out := append([]pline(nil), dl[:1]...)
+	out = append(out, rows[:keep]...)
+	mark := pline{text: m.st.dim("↓ " + strconv.Itoa(len(rows)-keep) + " more"), box: boxMid}
+	if len(rows) > 0 {
+		mark.ask = rows[0].ask // an ask cut is an ask on the page, drawn cut
+	}
+	out = append(out, mark)
+	return append(out, dl[len(dl)-1]), true
+}
 
 // zipSides puts the lines of a panel drawn in right beside the lines of left,
 // line by line: the shorter of the two is given blank rows inside its frame,

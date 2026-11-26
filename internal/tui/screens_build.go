@@ -50,7 +50,7 @@ func (m *Model) buildPage(id string) page {
 		goal := firstOf(goals[s.ID], m.st.dim("no goal"))
 		if round := t.fixRound(s.ID); round > 0 && goals[s.ID] != "" {
 			// A fix slice reads as its finding, by the round it came from.
-			goal = "round " + strconv.Itoa(round) + " · " + goals[s.ID]
+			goal = "round " + strconv.Itoa(round) + " · " + findingTitleFirst(goals[s.ID])
 		}
 		spent := ""
 		if d := work.of(stepBuild, "slice:"+s.ID); d > 0 {
@@ -67,7 +67,7 @@ func (m *Model) buildPage(id string) page {
 		full = t.status.Slices[at]
 	}
 	detail := m.buildDetail(t, slices[at], full)
-	m.listAndDetail(&p, &detail,
+	m.listAndDetail(&p, &detail, at,
 		listSpec{title: "Slices", summary: strconv.Itoa(green) + " of " + strconv.Itoa(len(slices)) + " green", cols: sliceColumns, names: sliceColumnNames, rows: rows})
 
 	if rows := m.sessionRows(t, roleBuilder); len(rows) > 0 {
@@ -76,6 +76,17 @@ func (m *Model) buildPage(id string) page {
 
 	m.stepActivityPanel(&p, t, stepBuild)
 	return p
+}
+
+// findingTitleFirst is a finding's line, "dir/file.go:12 The title", with its path
+// cut to the file before its title is: a row that has no room for all of it keeps
+// the title.
+func findingTitleFirst(line string) string {
+	path, title, ok := strings.Cut(line, " ")
+	if !ok || !strings.Contains(path, "/") {
+		return line
+	}
+	return path[strings.LastIndex(path, "/")+1:] + " " + title
 }
 
 // cursorAmong is the row of a list of n rows the cursor stands on: the way the

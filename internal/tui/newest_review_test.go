@@ -62,7 +62,7 @@ func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 func TestTheRoundUnderWayReadsAboveTheClosedOnes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(backwards(append(jig2Mid(), jl(at(13, 0), "JIG-2", "", journal.EventGateOpen)))...).press("enter")
+	g.feed(backwards(append(jig2Mid(), jl(at(13, 0), "JIG-2", "", journal.EventGateOpen)))...).press("enter").sized(100, 60)
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}

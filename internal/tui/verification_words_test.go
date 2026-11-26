@@ -91,7 +91,7 @@ func TestCommitStatesReadAsThePhaseWritesThem(t *testing.T) {
 
 		g := newRig(t, "JIG-1")
 		g.r.answer("status JIG-1 --store /s", status, 0)
-		g.feed(mine...).press("enter")
+		g.feed(mine...).press("enter").sized(100, 80)
 		if g.m.Screen() != "build" {
 			t.Fatalf("on %s, want build", g.m.Screen())
 		}

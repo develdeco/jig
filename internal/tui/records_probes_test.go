@@ -22,8 +22,8 @@ func probeRound(n, probes, survived string) []string {
 	return []string{n, "clean", "s-reviewer", "-", "-", "true", "0", "0", "0", "full", sha('0'), sha('c'), "4", "0", probes, survived}
 }
 
-// TestReviewScreenShowsEachRoundsProbes: a reviewer round says how many probes
-// it recorded, a round that recorded none says so, and the probes block has a
+// TestReviewScreenShowsEachRoundsProbes: the probes section says how many probes
+// the rounds recorded, and the probes block has a
 // row for each probe, a survivor first within its round, with a long mutation
 // wrapped whole and the seam and command beneath it.
 func TestReviewScreenShowsEachRoundsProbes(t *testing.T) {
@@ -50,7 +50,6 @@ func TestReviewScreenShowsEachRoundsProbes(t *testing.T) {
 	text := pageText(g)
 	for _, want := range []string{
 		"3 probes · 2 caught · 1 survived",
-		"no probes",
 		"as recorded: a file changed since a round is not marked",
 		"round 1 beta/b.go:4 survived",
 		"round 1 alpha/a.go:9 caught",
@@ -59,9 +58,6 @@ func TestReviewScreenShowsEachRoundsProbes(t *testing.T) {
 		if !strings.Contains(readWords(text), want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
-	}
-	if rounds, _, _ := strings.Cut(text, "Probes\n"); strings.Count(rounds, " caught · ") != 1 || strings.Count(rounds, "no probes") != 1 {
-		t.Errorf("want a counts line for each reviewer round and none for the round no reviewer ran:\n%s", text)
 	}
 	if strings.Index(text, "beta/b.go:4") > strings.Index(text, "alpha/a.go:9") {
 		t.Errorf("the survivor is not listed first in its round:\n%s", text)

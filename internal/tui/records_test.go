@@ -108,7 +108,7 @@ func TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives(t *testing.T) {
 	if n := g.r.reads("brief"); n != 0 {
 		t.Fatalf("the ticket screen read the brief %d times, want none", n)
 	}
-	g.press("up", "enter")
+	g.sized(100, 60).press("up", "enter")
 	if g.m.Screen() != "brief" || g.r.reads("brief") != 1 {
 		t.Fatalf("on %s after %d reads, want the brief screen after one", g.m.Screen(), g.r.reads("brief"))
 	}
@@ -151,7 +151,7 @@ func TestBriefScreenShowsTheHeadingsWhenTheTextIsNotThere(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
 	g.r.answer("brief show JIG-1 --text --store /s", "error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2)
-	g.feed(jig1()...).press("up", "enter")
+	g.feed(jig1()...).press("up", "enter").sized(100, 60)
 	text := pageText(g)
 	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "heading Goal"} {
 		if !strings.Contains(text, want) {
@@ -202,7 +202,7 @@ func TestBuildScreenListsTheLastCommitsAndCountsTheEarlier(t *testing.T) {
 			jl(at(i, 0), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha(d), "", fmt.Sprintf("attempt %d", i+1), "", "")),
 			jl(at(i, 30), "JIG-1", "a", journal.EventOracle, with("", sha(d), "fail", "boom "+string(d), "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./...", 30 }))
 	}
-	g.feed(lines...).press("enter")
+	g.feed(lines...).press("enter").sized(100, 80)
 	text, _, _ := strings.Cut(pageText(g), "activity") // the records, not the activity under them
 	if !strings.Contains(text, "+2 earlier commits") {
 		t.Errorf("the screen does not count the commits it left out:\n%s", text)

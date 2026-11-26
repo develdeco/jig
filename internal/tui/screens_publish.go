@@ -68,13 +68,14 @@ func (m *Model) publishPage(id string) page {
 		}
 		rows[i] = listRow{ref: &rowRef{kind: rowCheck, id: c.key, ticket: id}, cells: []string{m.st.icon(state), text, m.st.dim(c.when)}}
 	}
-	c := list[m.cursorAmong(len(list))]
+	at := m.cursorAmong(len(list))
+	c := list[at]
 	summary := "not done"
 	if c.done {
 		summary = strings.TrimSpace("done " + c.when)
 	}
 	detail := detailSpec{title: c.name, summary: summary, rows: c.rows}
-	m.listAndDetail(&p, &detail,
+	m.listAndDetail(&p, &detail, at,
 		listSpec{title: "Checklist", summary: strconv.Itoa(done) + " of " + strconv.Itoa(len(list)) + " done", cols: checkColumns, names: checkColumnNames, rows: rows})
 	m.stepActivityPanel(&p, t, stepPublish)
 	return p
@@ -162,7 +163,8 @@ func (m *Model) publishChecks(t *ticket) []publishCheck {
 		if outcome != "" {
 			rows = append(rows, detailRow{label: "outcome", text: outcome})
 		}
-		check(key, name, true, strings.TrimSpace("pull request "+repo+" · "+firstOf(outcome, "recorded")+" · "+m.prReading(t, url)), when, rows...)
+		said := strings.Join(strings.Fields("pull request "+repo), " ")
+		check(key, name, true, said+" · "+firstOf(outcome, "recorded")+" · "+m.prReading(t, url), when, rows...)
 	}
 	switch {
 	case len(pub.Repos) > 0:

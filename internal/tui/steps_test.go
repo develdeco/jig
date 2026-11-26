@@ -141,7 +141,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	// the detail of the slice under the cursor says all of it.
 	g.press("esc", "up", "enter") // the build screen
 	v = g.view()
-	if list := between(v, "Slices", "╰"); strings.Contains(list, "The error is dropped.") || !strings.Contains(readWords(list), "fix-1 queued 0 tries round 1 · alpha/a.go:3 Unchecked error") {
+	if list := between(v, "Slices", "╰"); strings.Contains(list, "The error is dropped.") || !strings.Contains(readWords(list), "fix-1 queued 0 tries round 1 · a.go:3 Unchecked error") {
 		t.Errorf("a fix slice's row is not its finding's line:\n%s", v)
 	}
 	g.press("down")

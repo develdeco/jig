@@ -11,14 +11,14 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   │    https://example.test/acme/api/pull/7                                    │
   │  ✓ pull request web · opened ·                                    09:14:21 │
   │    https://example.test/acme/web/pull/3                                    │
-  │  ✓ changelog written                                                       │
-  │  ✓ published                                                      09:14:22 │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · body ──────────────────────────────────────────── done 09:14:01 ─╮
   │  written for api ccccccc, web ddddddd                                      │
   │  files       api tickets/JIG-2/pr/api.md                                   │
-  │  ↓ 1 more                                                                  │
+  │              web tickets/JIG-2/pr/web.md                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps
+  esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 1-5 steps
   [ ] sibling · h main · t tail

@@ -81,16 +81,22 @@ type pline struct {
 	// (a mark the window adds) has a blank one.
 	side  string
 	sideW int
-	// hold marks the first and the last line of a Detail panel (detail.go): the
-	// page is read down to it with the list above it, so a cursor on a row of the
-	// list leaves the window where it begins while the detail has room, instead of
-	// moving it down to what follows the row.
+	// hiddenRefs are the rows of a list a mark line stands for, in the order they
+	// come in: a list windowed around its cursor (detail.go) keeps the places of
+	// the rows it hides, so the cursor's index counts them.
+	hiddenRefs []rowRef
+	// hold marks the first line of a Detail panel (detail.go): the page is read with
+	// the list and its detail together, so a cursor on a row of the list leaves the
+	// window where it begins instead of moving it down to what follows the row.
 	hold int
 }
 
 // page is a screen's body before it is windowed and framed.
 type page struct {
 	lines []pline
+	// cutAsks are the asks whose detail was cut to fit the screen: none of them is
+	// drawn whole, whatever lines are left of it.
+	cutAsks map[string]bool
 }
 
 func (p *page) add(text string) { p.lines = append(p.lines, pline{text: text}) }
@@ -103,6 +109,7 @@ func (p *page) addRow(ref rowRef, text string) {
 func (p page) refs() []rowRef {
 	var out []rowRef
 	for _, l := range p.lines {
+		out = append(out, l.hiddenRefs...)
 		if l.ref != nil {
 			out = append(out, *l.ref)
 		}
@@ -334,7 +341,7 @@ func drawnAsks(pg page, start, h int) map[string]int {
 	out := make(map[string]int, len(total))
 	for id, n := range total {
 		out[id] = askCut
-		if shown[id] == n {
+		if shown[id] == n && !pg.cutAsks[id] {
 			out[id] = askWhole
 		}
 	}
@@ -361,14 +368,12 @@ func (m *Model) bodyRows() int {
 // page opened at its top lessens what is held as it is read down.
 func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	selLine, n := 0, 0
-	from, to := -1, -1
+	detailed := false
 	for i, l := range pg.lines {
 		if l.hold&holdFrom != 0 {
-			from = i
+			detailed = true
 		}
-		if l.hold&holdTo != 0 {
-			to = i + 1
-		}
+		n += len(l.hiddenRefs)
 		if l.ref == nil {
 			continue
 		}
@@ -377,18 +382,6 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		}
 		n++
 	}
-	// peek is how far into its detail a page that begins at its top must reach for
-	// the list to leave room for it: the top edge, two rows, the mark that says
-	// what is cut and the bottom edge. The whole of it when it is an ask's, which
-	// is not decided from a cut text.
-	peek := min(to, from+detailPeek)
-	for i := max(from, 0); i < to; i++ {
-		if pg.lines[i].ask != "" {
-			peek = to
-			break
-		}
-	}
-	room := from >= 0 && peek <= h
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
@@ -397,23 +390,10 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
 		}
-		if n > 0 && sel == n-1 && !(room && selLine < h) {
+		if n > 0 && sel == n-1 && !(detailed && selLine < h) {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
 			start = clampStart(pg.lines, h, selLine)
-		}
-		if n > 0 && from >= 0 && !room {
-			// The list leaves no room for its detail: the window starts at the top
-			// of the cursor's list when that and the detail fit, else as low as the
-			// cursor's row lets it, to show as much of the detail as the cursor's
-			// row leaves room for.
-			top, _ := boxOf(pg.lines, selLine)
-			switch {
-			case top >= 0 && to-top <= h:
-				start = top
-			default:
-				start = clampStart(pg.lines, h, min(selLine, max(0, peek-h)))
-			}
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
@@ -445,6 +425,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 	}
 	selLine, k := -1, 0
 	for i, l := range lines {
+		k += len(l.hiddenRefs)
 		if l.ref == nil {
 			continue
 		}
@@ -579,6 +560,7 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 	idx := 0
 	lit := litLines(pg.lines, sel)
 	for i, l := range pg.lines {
+		idx += len(l.hiddenRefs)
 		marker := "  "
 		if l.ref != nil {
 			if idx == sel {
@@ -608,6 +590,7 @@ func litLines(lines []pline, sel int) []bool {
 	lit := make([]bool, len(lines))
 	idx, on := 0, false
 	for i, l := range lines {
+		idx += len(l.hiddenRefs)
 		switch {
 		case l.ref != nil:
 			on = idx == sel
@@ -672,6 +655,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	idx := 0
 	lit := litLines(lines, sel)
 	for i, l := range lines {
+		idx += len(l.hiddenRefs)
 		marker := "  "
 		if l.ref != nil {
 			if idx == sel {

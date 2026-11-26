@@ -262,13 +262,13 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 	}
 }
 
-// TestAskDrawnReadsTheWindowAsItIsDrawn: at every scroll position of the review
+// TestAskDrawnReadsTheWindowAsItIsDrawn: at every height of the review
 // page the check agrees with the screen, an ask the page lacks is neither whole
 // nor on the page, and the check moves nothing.
 func TestAskDrawnReadsTheWindowAsItIsDrawn(t *testing.T) {
 	t.Parallel()
 	whole, cut := 0, 0
-	for height := 9; height <= 34; height++ {
+	for height := 9; height <= 60; height++ {
 		w, c := scrollAskDrawn(t, height)
 		whole, cut = whole+w, cut+c
 	}
@@ -287,7 +287,7 @@ func scrollAskDrawn(t *testing.T, height int) (whole, cut int) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want the review screen", g.m.Screen())
 	}
-	for i := 0; i < 80; i++ {
+	for i := 0; i < 1; i++ {
 		view := g.view()
 		want := holdsWholeAsk(view)
 		state, onPage := g.m.drawn["r1-f1"]

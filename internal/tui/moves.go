@@ -76,10 +76,6 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		if !restored || (ref != nil && ref.kind == rowAsk) {
 			e.sel = m.askRow(ref)
 		}
-		if !restored {
-			// The page opens at its top, so the rounds are read before the rows.
-			e.lead = 1 << 20
-		}
 	}
 	var cmds []tea.Cmd
 	if e.screen == screenChart {

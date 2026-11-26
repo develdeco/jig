@@ -124,7 +124,7 @@ func TestReviewScreenListsWhatTheRoundFoundBesideTheAsks(t *testing.T) {
 		{"r1-f2", "1", "fix", "medium", "alpha/a.go:12", "Close the file", "open", "a leaked handle fails the next open", "", ""},
 		{"r1-f3", "1", "note", "low", "beta/b.go:2", "Rename the helper", "dismissed", "a clearer name", "", ""},
 	}), 0)
-	g.feed(jig2Mid()...).press("enter")
+	g.feed(jig2Mid()...).press("enter").sized(100, 60)
 	// The cursor opens on the ask, whose detail is its finding whole and why it
 	// waits.
 	if ask := readWords(pageText(g)); !strings.Contains(ask, "finding high · alpha/a.go:3 · Unchecked error reason a failed write would pass silently waits because the fix budget is reached") {

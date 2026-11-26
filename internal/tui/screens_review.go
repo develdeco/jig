@@ -29,9 +29,11 @@ func (m *Model) reviewPage(id string) page {
 
 	p.add("")
 	rounds := newestFirst(t.rounds(m.zone), func(r roundRow) time.Time { return r.Began })
+	rounds = withStatusRounds(t, rounds)
 	asks := t.asks()
 	var detail *detailSpec
-	if at := m.cursorAmong(len(rounds) + len(asks)); len(rounds)+len(asks) > 0 {
+	at := m.cursorAmong(len(rounds) + len(asks))
+	if len(rounds)+len(asks) > 0 {
 		var d detailSpec
 		if at < len(rounds) {
 			d = m.roundDetail(t, rounds[at])
@@ -40,11 +42,41 @@ func (m *Model) reviewPage(id string) page {
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail, m.roundsSpec(t, rounds), m.asksSpec(t, asks))
+	m.listAndDetail(&p, detail, at, m.roundsSpec(t, rounds), m.asksSpec(t, asks))
 	m.probeRows(&p, t)
 
 	m.stepActivityPanel(&p, t, stepReview)
 	return p
+}
+
+// withStatusRounds is rounds with a row for each round the status names that the
+// journal has no row for (a ticket whose journal is under an earlier name), so
+// what the status carries of a round is shown under it; the rows stay newest first
+// by round.
+func withStatusRounds(t *ticket, rounds []roundRow) []roundRow {
+	if t.status == nil {
+		return rounds
+	}
+	have := map[int]bool{}
+	for _, r := range rounds {
+		have[r.N] = true
+	}
+	added := false
+	for _, rec := range t.status.Rounds {
+		if have[rec.N] {
+			continue
+		}
+		state := StateFindings
+		if rec.Verdict == "clean" {
+			state = StateReady
+		}
+		rounds = append(rounds, roundRow{N: rec.N, State: state})
+		added = true
+	}
+	if added {
+		sort.SliceStable(rounds, func(i, j int) bool { return rounds[i].N > rounds[j].N })
+	}
+	return rounds
 }
 
 // The columns of the review screen's lists.
@@ -67,13 +99,6 @@ func (m *Model) roundsSpec(t *ticket, rounds []roundRow) listSpec {
 		rows[i] = listRow{
 			ref:   &rowRef{kind: rowRound, id: strconv.Itoa(r.N), ticket: t.id},
 			cells: []string{m.st.icon(v.state), "round " + strconv.Itoa(r.N), m.st.state(v.state, v.word), m.st.dim(v.asked), m.st.dim(v.rng), m.st.dim(r.At)},
-		}
-		// What the round's reviewer recorded of its probes stays under the row, as
-		// the probes section below it draws them.
-		if v.rec != nil {
-			if line := probeCounts(*v.rec); line != "" {
-				rows[i].notes = []string{"    " + m.st.dim(line)}
-			}
 		}
 	}
 	return listSpec{
@@ -274,21 +299,19 @@ func (m *Model) askDetail(t *ticket, asks []askRow, i int) detailSpec {
 	return d
 }
 
-// probeCounts is what a reviewer round recorded of its probes: "27 probes ·
-// 25 caught · 2 survived". A round that recorded none says so, so it reads as
-// one; a round no reviewer ran, or one whose status has no probe columns, says
-// nothing.
-func probeCounts(r statusRound) string {
-	if r.Files < 0 || r.Probes < 0 {
-		return ""
-	}
-	if r.Probes == 0 {
-		return "no probes"
+// probeCounts is what the probes say of themselves: "27 probes · 25 caught · 2
+// survived".
+func probeCounts(probes []statusProbe) string {
+	survived := 0
+	for _, pr := range probes {
+		if pr.Outcome == "survived" {
+			survived++
+		}
 	}
 	return strings.Join([]string{
-		strconv.Itoa(r.Probes) + " " + plural(r.Probes, "probe", "probes"),
-		strconv.Itoa(max(0, r.Probes-r.Survived)) + " caught",
-		strconv.Itoa(max(0, r.Survived)) + " survived",
+		strconv.Itoa(len(probes)) + " " + plural(len(probes), "probe", "probes"),
+		strconv.Itoa(len(probes)-survived) + " caught",
+		strconv.Itoa(survived) + " survived",
 	}, " · ")
 }
 
@@ -315,7 +338,7 @@ func (m *Model) probeRows(p *page, t *ticket) {
 			later[pr.Where] = pr
 		}
 	}
-	p.add(m.st.dim("as recorded: a file changed since a round is not marked"))
+	p.add(m.st.dim(probeCounts(probes) + " · as recorded: a file changed since a round is not marked"))
 	cells := make([][]string, len(probes))
 	superseded := make([]bool, len(probes))
 	outcomes := make([]string, len(probes))
