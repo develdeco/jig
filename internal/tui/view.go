@@ -108,6 +108,10 @@ type pline struct {
 	// sits within the line's text, and the whole value it stands for. A mark's
 	// holder is the row the line belongs to.
 	cuts []cutMark
+
+	// fits marks a line already wrapped for the width the page is drawn at: a
+	// cached body is wrapped once, and a frame does not measure it again.
+	fits bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -216,7 +220,6 @@ func (m *Model) wrapLong(pg page) page { return m.wrapLongIn(m.top(), pg) }
 // cut registers the cut as a mark.
 func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	var out []pline
-	m.measured += len(pg.lines)
 	pane := ""
 	// withRows are the panes that have rows the cursor stands on.
 	withRows := map[string]bool{}
@@ -226,6 +229,11 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	// owner is the row whose lines the ones under it are: they are expanded with it.
 	var owner *rowRef
 	for _, l := range pg.lines {
+		if l.fits {
+			out = append(out, l)
+			continue
+		}
+		m.measured++
 		w := max(1, m.width-2)
 		if l.box != boxNone {
 			w = m.innerWidth()

@@ -6,6 +6,7 @@ import (
 	"github.com/develdeco/jig/internal/axi"
 	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // init registers `jig here`'s verification section (sections.go). `jig here`
@@ -73,9 +74,9 @@ func hereVerifyHead(c hereCtx) (*hereVerifyHeadInfo, error) {
 		return nil, nil
 	}
 	info := &hereVerifyHeadInfo{Slice: c.Where.Slice, Commit: head, State: v.State, Attempt: v.Attempt, Seconds: v.Seconds, Summary: v.Summary, Light: v.LightWords(), NotCounted: v.NotCounted()}
-	info.CPUSeconds = cpuWords(v.CPUMs)
-	if info.PeakMemory = memoryWords(v.PeakBytes); info.PeakMemory != "" {
-		info.PeakBasis = basisWords(v.PeakBasis)
+	info.CPUSeconds = verify.CPUWords(v.CPUMs)
+	if info.PeakMemory = verify.MemoryWords(v.PeakBytes); info.PeakMemory != "" {
+		info.PeakBasis = verify.BasisWords(v.PeakBasis)
 	}
 	return info, nil
 }

@@ -345,6 +345,8 @@ type Model struct {
 	laid map[string][]laidRow
 	// laidBuilds counts the lists the allocator laid out and the memo did not hold.
 	laidBuilds int
+	// sliceBuilds counts the slice screens' bodies built and the memo did not hold.
+	sliceBuilds int
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
 	// rowMemo holds the rows of the chart screens built for the world as it

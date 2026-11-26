@@ -48,8 +48,8 @@ func TestBuildReviewSliceScreensCutNothingWhileWidthAllows(t *testing.T) {
 		lines := jig1Records()
 		for i := range lines {
 			switch lines[i].Event {
-			case journal.EventVerifyPending:
-				lines[i].Summary = layoutSubject
+			case journal.EventOracle:
+				lines[i].Subject = layoutSubject
 			case journal.EventQuestion:
 				lines[i].Summary = layoutQuestion
 			}

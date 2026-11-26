@@ -224,7 +224,7 @@ func (m *Model) buildDetail(t *ticket, s sliceRow, full statusSlice) detailSpec 
 // in phase's words with the command that clears it; the older ones are counted.
 func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 	add := func(r detailRow) { d.rows = append(d.rows, r) }
-	commits := newestFirst(t.commits(s.ID), func(c commitRecord) time.Time { return c.Began })
+	commits := newestFirst(t.sliceCommits(s.ID), func(c commitRecord) time.Time { return c.Began })
 	earlier := 0
 	if n := len(commits) - buildCommits; n > 0 {
 		earlier, commits = n, commits[:buildCommits]
@@ -260,7 +260,7 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 			case run.Outcome != "pass":
 				state = StateStalled
 			}
-			add(detailRow{indent: 2, icon: state, dim: true, text: oracleWords(run, s.Oracle)})
+			add(detailRow{indent: 2, icon: state, dim: true, text: m.runWords(t, run, s.Oracle)})
 			if failedOK && run.TS == failed.TS && run.Commit == failed.Commit {
 				m.failureRows(d, run)
 			}
@@ -281,39 +281,25 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 	}
 }
 
-// commitWhen is when a commit's latest word came: its verification, or the run
-// or the request that is the latest thing on record about it.
-func (m *Model) commitWhen(c commitRecord) string {
-	var last events.Envelope
-	switch {
-	case c.State == StateGreen:
-		last = c.Verified
-	case c.Error != nil:
-		last = *c.Error
-	case len(c.Runs) > 0:
-		last = c.Runs[len(c.Runs)-1]
-	default:
-		last = c.At
+// failureOutput is the end of the output of a run that failed, as the oracle line
+// recorded it ("" when it recorded none), and the note that says where the rest
+// is, or where to read it when there is none. The line carries the last 600
+// bytes of the output at most; the machine that ran the check has the rest in its
+// verify log.
+func failureOutput(run events.Envelope) (output, note string) {
+	if output = firstOf(run.Summary, run.Signature); output == "" {
+		return "", "no output was recorded: the verify log on the machine that ran it has it"
 	}
-	if last.TS == "" {
-		return ""
-	}
-	return clock(last, m.zone)
+	return output, "the end of its output; all of it is in the verify log on the machine that ran it"
 }
 
-// failureRows adds the end of the output of a run that failed, as the oracle
-// line recorded it, or where to read it when the line recorded none. The line
-// carries the last 600 bytes of the output at most; the machine that ran the
-// check has the rest in its verify log.
+// failureRows adds the end of the output of a run that failed to d.
 func (m *Model) failureRows(d *detailSpec, run events.Envelope) {
-	tail := firstOf(run.Summary, run.Signature)
-	if tail == "" {
-		d.rows = append(d.rows, detailRow{indent: 4, dim: true, text: "no output was recorded: the verify log on the machine that ran it has it"})
-		return
+	output, note := failureOutput(run)
+	if output != "" {
+		d.rows = append(d.rows, detailRow{indent: 4, state: StateStalled, text: output})
 	}
-	d.rows = append(d.rows,
-		detailRow{indent: 4, state: StateStalled, text: tail},
-		detailRow{indent: 4, dim: true, text: "the end of its output; all of it is in the verify log on the machine that ran it"})
+	d.rows = append(d.rows, detailRow{indent: 4, dim: true, text: note})
 }
 
 // sessionRows are the sessions of the ticket that played role, a row each:

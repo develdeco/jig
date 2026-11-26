@@ -45,7 +45,13 @@
 // stands, the columns keeping the widths the folded rows gave them, and space
 // folds it back; a row taller than its room is read by lines. An expansion is
 // kept by the holder's identity and lasts as long as its screen
-// (expand.go, tall.go, lastcmd.go).
+// (expand.go, fit.go, lastcmd.go).
+//
+// The slice screen tells the whole story of one slice, top to bottom: its
+// finding when it is a fix slice, its goal, oracle and facts, every commit with
+// its runs, the questions asked about it, the calls its holder made and its
+// timeline. A run and a commit are worded once (records.go) for it and for the
+// build screen's detail.
 //
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen

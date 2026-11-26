@@ -1,5 +1,7 @@
 package tui
 
+import "strconv"
+
 // A cut the TUI makes leaves its "…" as a mark that belongs to a holder: the row
 // whose cell was cut. `space`, or a click on the mark, lays the holder's cut
 // cells out whole where it stands, and `space` again folds it back. What is
@@ -11,6 +13,19 @@ package tui
 type expKey struct {
 	pane string
 	id   rowIdentity
+}
+
+// expansionKey names what the screen has expanded, for a cache of lines laid
+// out under it: the folded layout and each change of the expansions are told
+// apart.
+func (e *navEntry) expansionKey() string {
+	if len(e.expanded) == 0 {
+		return ""
+	}
+	if e.suppress {
+		return "folded"
+	}
+	return strconv.Itoa(e.expGen)
 }
 
 // isExpanded says whether the row ref in the pane titled pane is expanded.
