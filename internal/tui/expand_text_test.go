@@ -157,7 +157,7 @@ func TestAClippedBodyLineRegistersItsCut(t *testing.T) {
 		t.Fatalf("a clipped line wider than the pane registered %d marks, want 1", marked)
 	}
 	g.tabTo("Detail · body")
-	if text := pagesText(g.m.page()); !strings.Contains(text, "body line 1")  {
+	if text := pagesText(g.m.page()); !strings.Contains(text, "body line 1") {
 		t.Errorf("the Detail does not read the body:\n%s", text)
 	}
 	if g.m.keysOn.cut {
