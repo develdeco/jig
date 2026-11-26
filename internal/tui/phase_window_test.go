@@ -209,10 +209,10 @@ func TestTheTailGivesWayToAFixRowThatWraps(t *testing.T) {
 	}
 }
 
-// TestAPartThatCannotFitSaysSoInOneLine: where the body has 13 rows or fewer, the
-// Detail is drawn or, below its least room, is one line that names it, the rows
-// it needs and the rows it was left, and the lists keep their edges; an open tail
-// that has no room says the same of itself. No such line names the body's total.
+// TestAPartThatCannotFitSaysSoInOneLine: at the sizes from 60x20 up the Detail is
+// drawn or, below its least room, is one line that names it, the rows it needs and
+// the rows it was left, and the lists keep their edges; an open tail that has no
+// room says the same of itself, with the rows it was given No such line names the body's total.
 func TestAPartThatCannotFitSaysSoInOneLine(t *testing.T) {
 	t.Parallel()
 	if got := partNeeds("tail", 8, 6); got != "the tail needs 8 rows; 6 are left" {
@@ -221,9 +221,6 @@ func TestAPartThatCannotFitSaysSoInOneLine(t *testing.T) {
 	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
 		for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
 			for _, tail := range []bool{false, true} {
-				if tail && size[1] < 18 {
-					continue // the tail's own line and the lists' marks leave a body this short no room
-				}
 				g := tourRig(t, size[0], size[1])
 				g.press(sc.key)
 				if tail {
@@ -252,6 +249,25 @@ func TestAPartThatCannotFitSaysSoInOneLine(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestTheTailsLineNamesTheRowsItWasGiven: one function says the tail's rows on
+// every screen, and the line names those rows: a screen with no need of its own
+// has its tail as half the body, a phase screen the rows its page leaves.
+func TestTheTailsLineNamesTheRowsItWasGiven(t *testing.T) {
+	t.Parallel()
+	g := tourRig(t, 80, 20)
+	g.press("t")
+	if g.m.Screen() != "ticket" || !strings.Contains(g.view(), "tail ─") || strings.Contains(g.view(), "the tail needs") {
+		t.Errorf("a ticket screen of 15 body rows has its tail as half of them:\n%s", g.view())
+	}
+	g.press("2")
+	rows, bound := g.m.tailRows(15)
+	view := g.view()
+	want := partNeeds("tail", tailMinRows, rows)
+	if !bound || !strings.Contains(view, want) {
+		t.Errorf("the build screen's line is not %q (bound %v):\n%s", want, bound, view)
 	}
 }
 

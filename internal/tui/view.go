@@ -299,7 +299,8 @@ func (m *Model) layout() screenLayout {
 	pageH, tailH, note := m.tailSplit(bodyH)
 	l.pageH, l.tailH = pageH, tailH
 	if note {
-		l.tailNote = partNeeds("tail", tailMinRows, m.tailLeft(bodyH))
+		rows, _ := m.tailRows(bodyH)
+		l.tailNote = partNeeds("tail", tailMinRows, rows)
 	}
 	return l
 }
@@ -313,10 +314,15 @@ func partNeeds(part string, need, left int) string {
 	return fmt.Sprintf("the %s needs %d rows; %d are left", part, need, max(left, 0))
 }
 
-// tailLeft is the rows a tail is left in a body of bodyH rows: what the page does
-// not need, less the tail's heading.
-func (m *Model) tailLeft(bodyH int) int {
-	return bodyH - m.phaseNeed() - 1
+// tailRows is the rows the tail is given in a body of bodyH rows, the one answer on
+// every screen: half of the body, less what the page needs of it. bound says the
+// page's need is what shortened it.
+func (m *Model) tailRows(bodyH int) (rows int, bound bool) {
+	rows = bodyH / 2
+	if left := bodyH - 1 - m.phaseNeed(); left < rows {
+		rows, bound = max(left, 0), true
+	}
+	return rows, bound
 }
 
 // What View drew of an ask: some of its lines, or all of them. An ask the page
@@ -366,22 +372,16 @@ func (m *Model) bodyRows() int {
 // edges and marks, the cursor's row and the first lines of its detail. When the
 // tail is left less than it needs, it is the one line that says so (note).
 func (m *Model) tailSplit(bodyH int) (pageH, tailH int, note bool) {
-	switch {
-	case m.tail && bodyH >= tailMinRows:
-		tailH = bodyH / 2
-		pageH = bodyH - tailH - 1
-		if need := m.phaseNeed(); pageH < need {
-			pageH = min(need, bodyH-1)
-			tailH = bodyH - pageH - 1
-		}
-		if tailH < tailMinRows {
-			return bodyH - 1, 0, true
-		}
-		return pageH, tailH, false
-	case m.tail && bodyH >= 2:
-		return bodyH - 1, 0, true
+	if !m.tail {
+		return bodyH, 0, false
 	}
-	return bodyH, 0, false
+	// The tail is drawn when the body has the rows for it, and, where the page's need
+	// is what shortened it, when what is left is the tail's own least.
+	rows, bound := m.tailRows(bodyH)
+	if bodyH >= tailMinRows && (!bound || rows >= tailMinRows) {
+		return bodyH - rows - 1, rows, false
+	}
+	return max(bodyH-1, 1), 0, bodyH >= 2
 }
 
 // phaseNeed is the rows the page of the screen on top needs, for a screen that is
