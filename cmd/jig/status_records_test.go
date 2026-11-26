@@ -132,9 +132,9 @@ func TestStatusSlicesNameTheirWorkspaceOracleAndRound(t *testing.T) {
 	}
 	got := block(statusOf(t, fx, st), "slices[")
 	want := []string{
-		"slices[5]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:",
-		"  a,queued,0,-,-,Fix Clamp so TestClamp passes.,alpha,test,-",
-		"  fix-1,queued,0,a,-,Fix the finding,alpha,go test ./...,2",
+		"slices[5]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate,findings}:",
+		"  a,queued,0,-,-,Fix Clamp so TestClamp passes.,alpha,test,-,-",
+		"  fix-1,queued,0,a,-,Fix the finding,alpha,go test ./...,2,-",
 	}
 	if len(got) != 6 || got[0] != want[0] || got[1] != want[1] || got[5] != want[2] {
 		t.Errorf("slices block:\n%s\nwant it to start %q and end %q", strings.Join(got, "\n"), want[:2], want[2])
