@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -43,6 +44,86 @@ func firstFrames(t *testing.T, w, h int) {
 func TestTheDetailIsTheFocusedListsRowInEveryFrame(t *testing.T) {
 	t.Parallel()
 	firstFrames(t, 100, 30)
+}
+
+var detailNameRe = regexp.MustCompile(`Detail · (\S+)`)
+
+// detailNamed is the name the Detail of a frame is titled with.
+func detailNamed(frame string) string {
+	if m := detailNameRe.FindStringSubmatch(frame); m != nil {
+		return m[1]
+	}
+	return "<none>"
+}
+
+// reviewOfAsks is the review of a ticket with two asks, at 100 columns and h rows.
+func reviewOfAsks(t *testing.T, h int) *rig {
+	t.Helper()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", askStatus(askOne, askTwo), 0)
+	g.send(tea.WindowSizeMsg{Width: 100, Height: h})
+	g.feed(jig2Mid()...)
+	g.press("3")
+	return g
+}
+
+// firstRowOf is the terminal row of the first data row inside the pane titled
+// title, past its names.
+func firstRowOf(frame, title string) int {
+	lines := strings.Split(frame, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "╭─ "+title) {
+			for j := i + 1; j < len(lines); j++ {
+				if !strings.Contains(lines[j], "─") && !strings.Contains(lines[j], "time     step") && strings.TrimSpace(strings.Trim(lines[j], "│ ")) != "" {
+					return j
+				}
+			}
+		}
+	}
+	return -1
+}
+
+// TestTheDetailIsTheRowAClickOrAReopenPutTheCursorOn: the Detail is the row of the
+// focused list's own cursor, found by identity over all its rows: a click in a
+// zoomed pane, a click with a search that narrows the lists, and a reopen from an
+// ask with the search kept leave it on the cursor's row, in the first frame too.
+func TestTheDetailIsTheRowAClickOrAReopenPutTheCursorOn(t *testing.T) {
+	t.Parallel()
+	for _, h := range []int{30, 50} {
+		// A click in a zoomed pane, and the screen drawn again.
+		g := reviewOfAsks(t, h)
+		g.tabTo("Review activity")
+		g.press("z", "down")
+		click(g, firstRowOf(g.view(), "Review activity"))
+		g.press("esc")
+		if got := detailNamed(g.view()); got != "r1-f1" {
+			t.Errorf("100x%d: after a click in the zoomed activity the Detail is %s, want r1-f1", h, got)
+		}
+
+		// A click with a search that narrows the lists.
+		n := reviewOfAsks(t, h)
+		n.press("/")
+		typeText(n, "shadows")
+		n.press("enter")
+		n.tabTo("Rounds")
+		click(n, firstRowOf(n.view(), "Review activity"))
+		if got := n.view(); !strings.Contains(got, "Detail · round 1") {
+			t.Errorf("100x%d: after a click with the lists narrowed the Detail is %s, want round 1:\n%s", h, detailNamed(got), got)
+		}
+
+		// A reopen from an ask with the search kept: the first frame is the ask's.
+		n.tabTo("Rounds")
+		n.press("2", "esc")
+		n.tabTo("Needs you")
+		n.press("home")
+		n.m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		first := n.m.View()
+		sel := n.m.selected()
+		second := n.m.View()
+		if sel == nil || detailNamed(first) != sel.id || detailNamed(first) != detailNamed(second) {
+			t.Errorf("100x%d: the first frame of a reopen has the Detail %s, the cursor is %+v, the second frame has %s:\n%s", h, detailNamed(first), sel, detailNamed(second), first)
+		}
+	}
 }
 
 // TestTheFirstFrameDrawsTheCursorRowsDetail: the same at 100x30 and 100x40.

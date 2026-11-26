@@ -78,7 +78,9 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		// the cursor is on the ask it was opened from, else the first one, unless
 		// the person left it somewhere.
 		if !restored || (ref != nil && ref.kind == rowAsk) {
-			e.sel = m.askRow(ref)
+			pg := m.page()
+			e.sel, e.seenSet = m.askRow(pg, ref), false
+			m.syncPanes(pg)
 		}
 	}
 	var cmds []tea.Cmd

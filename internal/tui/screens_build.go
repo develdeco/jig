@@ -109,16 +109,6 @@ func (m *Model) cursorAmong(lists ...listSpec) int {
 	if n == 0 {
 		return 0
 	}
-	if !e.seenSet || e.sel != e.seenSel {
-		// A cursor the panes have not adopted yet (a screen just opened on a row) is
-		// the page's: the list it falls in, and its row, as they will take it.
-		for i, l := range lists {
-			if e.sel >= offs[i] && e.sel < offs[i]+len(l.rows) {
-				e.listFocus = l.title
-				return e.sel
-			}
-		}
-	}
 	if k >= 0 {
 		e.listFocus = e.paneFocus
 	} else if i := slices.IndexFunc(lists, func(l listSpec) bool { return len(l.rows) > 0 && l.title == e.listFocus }); i >= 0 {

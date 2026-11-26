@@ -1486,9 +1486,9 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 
 // askRow is the position, among the rows of the review screen on top, of the
 // ask ref names, else of the first ask; 0 when it holds none.
-func (m *Model) askRow(ref *rowRef) int {
+func (m *Model) askRow(pg page, ref *rowRef) int {
 	first := -1
-	for i, r := range m.page().refs() {
+	for i, r := range pg.refs() {
 		if r.kind != rowAsk {
 			continue
 		}
