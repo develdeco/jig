@@ -285,7 +285,7 @@ func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
 	// The round and each finding the slice answers are rows: the round opens the
 	// review screen on it, a finding opens its own screen.
 	n := strconv.Itoa(round)
-	rows := []factRow{{label: "round", value: "round " + n, ref: &rowRef{kind: rowRound, id: n, ticket: t.id, slice: s.ID}}}
+	rows := []factRow{{label: "round", value: n, ref: &rowRef{kind: rowRound, id: n, ticket: t.id, slice: s.ID}}}
 	label := "findings"
 	for _, id := range full.Findings {
 		value := id

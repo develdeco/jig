@@ -14,7 +14,19 @@ import (
 // findings and sent a fix slice back, round 2 raised one more fix, round 3 was
 // clean. carried, when it is not 0, is the round the third carries over.
 func threeRoundsEvents(carried int) []events.Envelope {
-	return append(reviewFixRoundEvents(),
+	base := reviewFixRoundEvents()
+	// The first fix slice's first try failed and its second passed: the two runs sit
+	// between its claim and its verification.
+	tries := []events.Envelope{
+		jl(at(12, 25), "JIG-2", "fix-1-alpha", journal.EventOracle, with("", sha('b'), "fail", "TestClose: the handle leaked", "", ""), func(l *journal.Line) {
+			l.Command, l.Seconds, l.Subject = "go test ./alpha/...", 7, "Close the file on the happy path"
+		}),
+		jl(at(12, 35), "JIG-2", "fix-1-alpha", journal.EventOracle, with("", sha('d'), "pass", "", "", ""), func(l *journal.Line) {
+			l.Command, l.Seconds, l.Subject = "go test ./alpha/...", 8, "Close the file on every path"
+		}),
+	}
+	base = append(base[:6:6], append(tries, base[6:]...)...)
+	return append(base,
 		jl(at(13, 50), "JIG-2", "fix-2-alpha", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 		jl(at(13, 55), "JIG-2", "fix-2-alpha", journal.EventVerified, with("", sha('e'), "", "", "", "")),
 		jl(at(14, 0), "JIG-2", "", journal.EventGateOpen),

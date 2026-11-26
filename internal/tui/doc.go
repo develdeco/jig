@@ -44,6 +44,11 @@
 // timeline. A run and a commit are worded once (records.go) for it and for the
 // build screen's detail.
 //
+// A record is a row and enter opens it, by the ids the row carries: a round's
+// finding opens its own screen with the fix slices it became, a fix slice leads
+// back to its finding and round, a try opens on its slice screen, a question
+// does what it does everywhere, and a failed suite opens the fix task it added.
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on
