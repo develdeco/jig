@@ -296,13 +296,10 @@ func (m *Model) layout() screenLayout {
 	}
 
 	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
-	switch {
-	case m.tail && bodyH >= tailMinRows:
-		l.tailH = bodyH / 2
-		l.pageH = bodyH - l.tailH - 1
-	case m.tail && bodyH >= 2:
+	pageH, tailH, note := m.tailSplit(bodyH)
+	l.pageH, l.tailH = pageH, tailH
+	if note {
 		l.tailNote = tailNeeds(bodyH)
-		l.pageH = bodyH - 1
 	}
 	return l
 }
@@ -353,13 +350,49 @@ func drawnAsks(pg page, start, h int) map[string]int {
 // it is open.
 func (m *Model) bodyRows() int {
 	h := m.height - 2 - len(m.footer(m.width)) - len(m.panel(m.width))
+	pageH, _, _ := m.tailSplit(h)
+	return pageH
+}
+
+// tailSplit divides a body of bodyH rows between the page and the tail: the tail
+// has half of it, the page the rest and the tail's heading, and the tail never
+// takes the room the page needs: a phase screen's lists and detail keep their
+// edges and marks, the cursor's row and the first lines of its detail. When the
+// tail is left less than it needs, it is the one line that says so (note).
+func (m *Model) tailSplit(bodyH int) (pageH, tailH int, note bool) {
 	switch {
-	case m.tail && h >= tailMinRows:
-		h = h - h/2 - 1
-	case m.tail && h >= 2:
-		h--
+	case m.tail && bodyH >= tailMinRows:
+		tailH = bodyH / 2
+		pageH = bodyH - tailH - 1
+		if need := m.phaseNeed(); pageH < need {
+			pageH = min(need, bodyH-1)
+			tailH = bodyH - pageH - 1
+		}
+		if tailH < tailMinRows {
+			return bodyH - 1, 0, true
+		}
+		return pageH, tailH, false
+	case m.tail && bodyH >= 2:
+		return bodyH - 1, 0, true
 	}
-	return h
+	return bodyH, 0, false
+}
+
+// phaseNeed is the rows the page of the screen on top needs, for a screen that is
+// a list and a detail, else 0: the lines above them, the cursor's list with its
+// row three lines tall, the others as a mark each, the detail's edges, a first row
+// and a mark, and the marks of what lies above and below.
+func (m *Model) phaseNeed() int {
+	lists := 0
+	switch m.top().screen {
+	case screenBuild, screenPublish:
+		lists = 1
+	case screenReview, screenBrief:
+		lists = 2
+	default:
+		return 0
+	}
+	return 4 + listMin + 2 + collapsed*(lists-1) + 4 + 2
 }
 
 // windowStart is the first page line a window of h rows shows with the sel-th

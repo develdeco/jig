@@ -156,6 +156,66 @@ func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
 	}
 }
 
+// TestTheTailGivesWayToTheListsAndTheDetail: with the tail open the body keeps
+// every list's edges, its row under the cursor whole and the first lines of its
+// detail; the tail has what is left, and when none is left it is the one line
+// that says so.
+func TestTheTailGivesWayToTheListsAndTheDetail(t *testing.T) {
+	t.Parallel()
+	titles := map[string][]string{
+		"build": {"Slices"}, "review": {"Rounds", "Asks"}, "brief": {"Sections", "Slices"}, "publish": {"Checklist"},
+	}
+	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
+		for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
+			g := tourRig(t, size[0], size[1])
+			g.press(sc.key, "t")
+			if g.m.Screen() != sc.name || !g.m.tail {
+				t.Fatalf("on %s with the tail %v, want %s open", g.m.Screen(), g.m.tail, sc.name)
+			}
+			e := g.m.top()
+			e.sel, e.lead, e.follow = 0, 0, false
+			g.m.noteCursor()
+			for i, n := 0, len(g.m.page().refs()); i < n; i++ {
+				view := g.view()
+				where := func() string {
+					return sc.name + " " + strconv.Itoa(size[0]) + "x" + strconv.Itoa(size[1]) + " row " + strconv.Itoa(i)
+				}
+				if !strings.Contains(view, "╭─ Detail · ") || !strings.Contains(view, "▸") {
+					t.Fatalf("%s: no detail or no cursor:\n%s", where(), view)
+				}
+				for _, title := range titles[sc.name] {
+					if !strings.Contains(view, "╭─ "+title+" ") {
+						t.Errorf("%s: the %s list is not drawn:\n%s", where(), title, view)
+					}
+				}
+				// The tail is a pane of at least eight rows or the line that says it has none.
+				tail, note := strings.Contains(view, "\n  tail ─"), strings.Contains(view, "the tail needs")
+				if tail == note {
+					t.Errorf("%s: want the tail or its one line, got tail %v and line %v:\n%s", where(), tail, note, view)
+				}
+				g.press("down")
+			}
+		}
+	}
+}
+
+// TestTheTailGivesWayToAFixRowThatWraps: with the tail open at 80x24 a fix slice
+// whose finding title wraps to three lines keeps its three-line row and its detail.
+func TestTheTailGivesWayToAFixRowThatWraps(t *testing.T) {
+	t.Parallel()
+	goal := "Fix these gate findings:\n\nalpha/c.go:7 Where the room under the lines above is short, the lists and the Detail are sized past the window, which then drops the Detail"
+	g := newRig(t, "JIG-1")
+	g.r.answer("status JIG-1 --store /s", slicesStatus(
+		[]string{"a", "green", "1", "-", "-", "Greet", "app", "unit", "-"},
+		[]string{"fix-2", "queued", "0", "-", "-", goal, "app", "unit", "2"},
+	), 0)
+	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", ""))).press("enter", "t", "down").sized(80, 24)
+	view := g.view()
+	if !strings.Contains(view, "╭─ Detail · fix-2") || !strings.Contains(readWords(between(view, "╭─ Slices", "╰")), "round 2 · c.go:7 Where the room under the lines above is short") {
+		t.Errorf("the fix row lost its title or its detail is not drawn:\n%s", view)
+	}
+}
+
 // TestDownMovesTheCursorOnEveryScreenWithRows: down moves the cursor from the
 // first row to the last on each phase screen, a row at a time, and the window
 // follows it; the page is not scrolled instead.

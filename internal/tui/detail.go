@@ -135,9 +135,6 @@ const (
 	detailPeek = 5
 	listMin    = 5
 	collapsed  = 3
-	// tightLeast is the least a block can be when the lists give way: the cursor's
-	// list as three lines and the detail's four.
-	tightLeast = 7
 )
 
 // listAndDetail adds the list panels and, with them, the Detail panel of the row
@@ -166,21 +163,9 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 	}
 	room := m.bodyRows() - 1 // the mark of what lies below
 	avail := room - first
-	shifted, tight := false, false
-	if avail < least {
-		switch {
-		case room-1 >= least:
-			shifted, avail = true, room-1
-		case !side:
-			// Too short for all of it: the lists the cursor is not in give way
-			// altogether, and its own is its row between its edges.
-			tight = true
-			if avail < tightLeast {
-				shifted, avail = true, max(room-1, tightLeast)
-			}
-		default:
-			shifted, avail = true, max(room-1, least)
-		}
+	shifted := avail < least
+	if shifted {
+		avail = max(room-1, least)
 	}
 	listW, sideW := m.width, m.width
 	if side {
@@ -228,28 +213,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		cl = i + 1
 	}
 	var left []pline
-	if tight {
-		var pending []rowRef
-		for i, f := range full {
-			switch {
-			case i == cl:
-				ls := windowTight(f, cr)
-				ls[0].hiddenRefs = append(pending, ls[0].hiddenRefs...)
-				pending = nil
-				left = append(left, ls...)
-			default:
-				for _, l := range f {
-					if l.ref != nil {
-						pending = append(pending, *l.ref)
-					}
-				}
-			}
-		}
-		if len(pending) > 0 {
-			last := &left[len(left)-1]
-			last.hiddenRefs = append(last.hiddenRefs, pending...)
-		}
-	} else if lb >= total {
+	if lb >= total {
 		for _, f := range full {
 			left = append(left, f...)
 		}
@@ -281,7 +245,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 			}
 		}
 	}
-	if !side && (tight || len(left) > lb) {
+	if !side && len(left) > lb {
 		// The lists could not give up as much as they were asked to: the detail
 		// has what is left, its edges and a mark at least.
 		db = max(avail-len(left), 4)
@@ -384,43 +348,6 @@ func (m *Model) windowList(f []pline, row, budget int) []pline {
 		out = append(out, pline{text: m.st.dim("↓ " + strconv.Itoa(len(starts)-1-hi) + " more"), box: boxMid, hiddenRefs: refs(hi+1, len(starts))})
 	}
 	return append(out, f[len(f)-1])
-}
-
-// windowTight is a list panel f as its edges and the lines of the row at row and
-// nothing else: the rows it hides stand in its edges, those above in the top one
-// and those below in the bottom one, so the cursor still counts them.
-func windowTight(f []pline, row int) []pline {
-	head := 1
-	for head < len(f)-1 && f[head].names {
-		head++
-	}
-	body := f[head : len(f)-1]
-	var starts []int
-	for i, l := range body {
-		if l.ref != nil {
-			starts = append(starts, i)
-		}
-	}
-	if len(starts) == 0 {
-		return []pline{f[0], f[len(f)-1]}
-	}
-	row = max(0, min(row, len(starts)-1))
-	end := len(body)
-	if row+1 < len(starts) {
-		end = starts[row+1]
-	}
-	top, bottom := f[0], f[len(f)-1]
-	for k, s := range starts {
-		switch {
-		case k < row:
-			top.hiddenRefs = append(top.hiddenRefs, *body[s].ref)
-		case k > row:
-			bottom.hiddenRefs = append(bottom.hiddenRefs, *body[s].ref)
-		}
-	}
-	out := []pline{top}
-	out = append(out, body[starts[row]:end]...)
-	return append(out, bottom)
 }
 
 // cutDetail is the lines of a Detail panel cut to budget lines: its top edge, as
