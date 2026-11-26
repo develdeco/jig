@@ -69,7 +69,7 @@ func (m *Model) briefPage(id string) page {
 			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
 		})
 	}
-	list := listSpec{title: "Parts", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
+	list := listSpec{title: partsTitle, summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
 	var detail *detailSpec
 	at := m.cursorAmong(list)
 	if len(rows) > 0 {
@@ -87,6 +87,9 @@ func (m *Model) briefPage(id string) page {
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
+
+// partsTitle is the title of the brief screen's list of its parts.
+const partsTitle = "Parts"
 
 // sectionID is the identity of the brief's section at i, told by its place in
 // the brief.
@@ -112,7 +115,7 @@ var (
 // approval and the text the brief read gives of it, drawn whole.
 func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 	s := t.status.Brief.Sections[i]
-	d := detailSpec{title: s.Heading, summary: "no slice cites it"}
+	d := detailSpec{title: s.Heading, summary: "no slice cites it", walk: true}
 	if n := len(s.Slices); n > 0 {
 		d.summary = "cited by " + strconv.Itoa(n) + " " + plural(n, "slice", "slices")
 	}
@@ -123,7 +126,7 @@ func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 	}
 	label := "cited by"
 	for _, id := range s.Slices {
-		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read")})
+		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read"), ref: &rowRef{kind: rowSlice, id: id, ticket: t.id, slice: id}})
 		label = ""
 	}
 	// Only an approval has something to be changed since.

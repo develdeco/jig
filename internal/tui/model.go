@@ -153,6 +153,11 @@ type navEntry struct {
 	slice  string
 	chart  string
 	sel    int
+	// part is the row of the brief screen's Parts list the screen is opened on,
+	// by identity (a section by its place, a slice by its id); partSet is false
+	// when it is opened for no part and begins on its first row.
+	part    rowIdentity
+	partSet bool
 	// cur is the row the main screen's cursor stands on, by identity, found
 	// again on each draw wherever the page now has it; curSet is false until
 	// the page has had a row to stand on.
@@ -1452,6 +1457,9 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowSection:
+		// A line that names a section opens the brief at it.
+		next = navEntry{screen: screenBrief, ticket: ref.ticket, part: ref.identity(), partSet: true}
 	case rowSub, rowLog:
 		// A sub-step or a line of the log opens the most specific thing it names:
 		// its slice, its round (the review screen, which has no screen of a round's

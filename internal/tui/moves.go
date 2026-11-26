@@ -51,6 +51,18 @@ func (m *Model) arrive(e *navEntry) bool {
 	return ok
 }
 
+// standOn puts the cursor of the brief screen e is opening on the part it was
+// opened for, whatever a visit before left: the Parts pane has the focus and
+// keeps the cursor on the part's identity, found again on each draw, so a screen
+// that has not read its status yet still opens there.
+func (e *navEntry) standOn() {
+	e.sel, e.scroll, e.lead, e.zoom, e.textFocus = 0, 0, 0, "", false
+	e.paneFocus, e.listFocus = partsTitle, partsTitle
+	e.paneCurs = map[string]paneCursor{partsTitle: {id: e.part, set: true}}
+	// The cursor is the pane's own, not something that put it on a row.
+	e.seenSel, e.seenSet = 0, true
+}
+
 // clampCursor keeps the cursor of the screen on top inside the rows it has now.
 func (m *Model) clampCursor() {
 	if n := len(m.page().refs()); n > 0 {
@@ -66,6 +78,9 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 	restored := false
 	for i := range entries {
 		restored = m.arrive(&entries[i])
+		if entries[i].partSet {
+			entries[i].standOn()
+		}
 		m.nav = append(m.nav, entries[i])
 	}
 	m.last = nil

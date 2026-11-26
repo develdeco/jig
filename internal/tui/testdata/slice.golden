@@ -8,6 +8,10 @@ jig  demo › JIG-1  Greeting copy › 2 build › slice c (3 of 4)      ? needs
   │▸ ? q-001     open   asked by builder at 09:02:30                           │
   │      Formal or casual?                                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Brief sections ─────────────────────────────────────────────────────── 1 ─╮
+  │  section                                                                   │
+  │  Tone                                                                      │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Timeline ───────────────────────────────────────────────────────────── 1 ─╮
   │  time     what                                                             │
   │  09:02:30 ? builder asks: Formal or casual?                                │
@@ -15,10 +19,6 @@ jig  demo › JIG-1  Greeting copy › 2 build › slice c (3 of 4)      ? needs
 
 
 
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Timeline · ↑↓ move in Questions
-  a answer · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Brief sections
+  ↑↓ move in Questions · a answer · 1-5 steps · [ ] sibling · h main · t tail

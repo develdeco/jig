@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -131,6 +132,25 @@ func (m *Model) slicePage(id, slice string) page {
 		p.boxEnd()
 	}
 
+	// The sections of the brief that cite the slice: each a row that opens the
+	// brief at it.
+	if t.status != nil && t.status.Brief != nil {
+		var rows []listRow
+		for i, s := range t.status.Brief.Sections {
+			if !slices.Contains(s.Slices, slice) {
+				continue
+			}
+			changed := ""
+			if s.Since == sinceChangedWord {
+				changed = m.st.state(StateFindings, "changed since the approval")
+			}
+			rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: id}, cells: []string{s.Heading, changed}})
+		}
+		if len(rows) > 0 {
+			m.listPanel(&p, listSpec{title: "Brief sections", summary: strconv.Itoa(len(rows)), cols: briefSectionColumns, names: briefSectionColumnNames, rows: rows})
+		}
+	}
+
 	var lines []int
 	for i, l := range t.lines {
 		if l.Slice == slice {
@@ -163,6 +183,8 @@ var (
 	verificationColumnNames = []string{"", "commit", "state"}
 	questionColumns         = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
 	questionColumnNames     = []string{"", "question", "state", "asked"}
+	briefSectionColumns     = []column{{free: true}, {gap: 2}}
+	briefSectionColumnNames = []string{"section", ""}
 	timelineColumns         = []column{{}, {free: true, gap: 1}}
 	timelineColumnNames     = []string{"time", "what"}
 )

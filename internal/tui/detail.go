@@ -17,6 +17,9 @@ type detailRow struct {
 	// row has (detailRoom): drawn as they are, with their indents and their
 	// blank lines, in place of text.
 	lines []string
+	// ref, when it is set, makes the row's first line a row the cursor can stand
+	// on, opening what ref names (see detailSpec.walk).
+	ref *rowRef
 	// icon, when it is set, is the state drawn before the text; the lines the
 	// text wraps to stand under it.
 	icon string
@@ -42,6 +45,11 @@ type detailSpec struct {
 	// ask, when it is set, is the ask the detail is of: every line of it carries
 	// the ask, so the window can tell whether it was drawn whole.
 	ask string
+	// walk makes every line of the detail a row the cursor can stand on: a row
+	// with a ref opens what it names, the others open nothing. The Detail is then
+	// a pane with a cursor that walks down its text, and the window follows it,
+	// where a Detail of text is only scrolled.
+	walk bool
 }
 
 // detailLines are the lines of the Detail panel d drawn in a panel w cells wide:
@@ -53,13 +61,23 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 	for _, r := range d.rows {
 		labelW = max(labelW, width(r.label))
 	}
+	n := 0
 	for _, r := range d.rows {
 		ask := d.ask
 		if r.apart {
 			ask = ""
 		}
-		for _, text := range m.detailRowLines(r, labelW, inner) {
-			lines = append(lines, pline{text: text, box: boxMid, ask: ask})
+		for i, text := range m.detailRowLines(r, labelW, inner) {
+			l := pline{text: text, box: boxMid, ask: ask}
+			switch {
+			case r.ref != nil && i == 0:
+				ref := *r.ref
+				l.ref = &ref
+			case d.walk:
+				l.ref = &rowRef{kind: rowStop, id: "line-" + strconv.Itoa(n)}
+			}
+			n++
+			lines = append(lines, l)
 		}
 	}
 	if len(d.rows) == 0 && d.empty != "" {
