@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,29 +28,14 @@ func (m *Model) slicePage(id, slice string) page {
 			row = &s
 		}
 	}
-	if g := t.goals()[slice]; g != "" {
-		p.add(m.st.bold(g))
-	}
-	if row == nil && t.status == nil {
+	switch {
+	case row == nil && t.status == nil:
 		p.add(m.st.dim("reading the ticket's status"))
-	} else if row == nil {
+	case row == nil:
 		p.add(m.st.dim("slice " + slice + " has no lines yet"))
-	} else {
-		facts := []string{m.st.icon(row.State) + " " + m.st.state(row.State, row.State), strconv.Itoa(row.Attempts) + " " + plural(row.Attempts, "try", "tries")}
-		if row.BlockedBy != "" {
-			facts = append(facts, "after slice "+strings.ReplaceAll(row.BlockedBy, "+", " and "))
-		}
-		if holder, ok := claimHolder(t, slice); ok {
-			verb := "held by "
-			if row.State == StateGreen {
-				verb = "built by "
-			}
-			facts = append(facts, verb+firstOf(m.whoWith(t, holder), "a session"))
-		}
-		p.add(strings.Join(facts, m.st.dim(" · ")))
-		if where := sliceFacts(*row, false); where != "" {
-			p.add(m.st.dim(where))
-		}
+	default:
+		m.findingPanel(&p, t, *row)
+		m.slicePanel(&p, t, *row)
 	}
 
 	if t.status != nil {
@@ -175,4 +161,135 @@ func claimHolder(t *ticket, slice string) (string, bool) {
 		return "", false
 	}
 	return t.lines[claim].Session, true
+}
+
+// factRow is a row of the slice's panel: a label, its value, and the slice the
+// value names, if it names one.
+type factRow struct {
+	label, value string
+	ref          *rowRef
+}
+
+// slicePanel adds the slice's own panel: its id, with what it stands at, and a
+// grid of what is known of it, each field whole. A fact with nothing to say is
+// not drawn.
+func (m *Model) slicePanel(p *page, t *ticket, s sliceRow) {
+	var rows []factRow
+	add := func(label, value string) {
+		if value != "" {
+			rows = append(rows, factRow{label: label, value: value})
+		}
+	}
+	full := t.statusSlice(s.ID)
+	if t.fixRound(s.ID) == 0 {
+		// A fix slice's goal is its finding, drawn above in a panel of its own.
+		add("goal", strings.Join(strings.Fields(full.Goal), " "))
+	}
+	add("oracle", s.Oracle)
+	add("state", m.st.icon(s.State)+" "+m.st.state(s.State, s.State))
+	add("tries", strconv.Itoa(s.Attempts))
+	if holder, ok := claimHolder(t, s.ID); ok {
+		verb := "held by"
+		if s.State == StateGreen {
+			verb = "built by"
+		}
+		// A session that claimed the slice is its builder, whatever else it did
+		// on the ticket.
+		add(verb, firstOf(m.whoWithAs(t, holder, roleBuilder), "a session"))
+	}
+	all := t.slices(m.zone)
+	named := func(label string, ids []string) {
+		for i, id := range ids {
+			state := ""
+			for _, o := range all {
+				if o.ID == id {
+					state = o.State
+				}
+			}
+			value := id
+			if state != "" {
+				value = m.st.icon(state) + " " + id
+			}
+			if i > 0 {
+				label = ""
+			}
+			rows = append(rows, factRow{label: label, value: value, ref: &rowRef{kind: rowSlice, id: id, ticket: t.id, slice: id}})
+		}
+	}
+	if s.BlockedBy != "" {
+		named("after", strings.Split(s.BlockedBy, "+"))
+	}
+	var waiting []string
+	for _, o := range all {
+		if o.BlockedBy != "" && slices.Contains(strings.Split(o.BlockedBy, "+"), s.ID) {
+			waiting = append(waiting, o.ID)
+		}
+	}
+	named("needed by", waiting)
+	add("workspace", s.Workspace)
+
+	summary := m.st.icon(s.State) + " " + m.st.state(s.State, s.State) + " · " + strconv.Itoa(s.Attempts) + " " + plural(s.Attempts, "try", "tries")
+	if d := m.clocksOf(t).work.of(stepBuild, "slice:"+s.ID); d > 0 {
+		summary += " · " + span(d)
+	}
+	p.boxTop("Slice "+s.ID, summary)
+	m.factRows(p, rows)
+	p.boxEnd()
+}
+
+// factRows adds the rows of a grid of facts to the panel: a dim label column and
+// the value after it, wrapped whole by the allocator.
+func (m *Model) factRows(p *page, rows []factRow) {
+	cells := make([][]string, len(rows))
+	for i, r := range rows {
+		cells[i] = []string{m.st.dim(r.label), r.value}
+	}
+	// A fact is never cut: its free text wraps as far as it goes.
+	for i, lines := range layoutRows(runColumns, cells, m.innerWidth(), 1<<20) {
+		p.boxLaid(rows[i].ref, lines)
+	}
+}
+
+// findingPanel adds, for a fix slice, the panel that says why the slice exists:
+// the round that sent it back, the findings it answers and the goal jig wrote
+// for the builder, whole and as written, from its first line that is not a
+// heading on. A slice that is no fix slice has none.
+func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
+	round := t.fixRound(s.ID)
+	if round == 0 {
+		return
+	}
+	full := t.statusSlice(s.ID)
+	p.boxTop("Finding", "round "+strconv.Itoa(round))
+	if len(full.Findings) > 0 {
+		m.factRows(p, []factRow{{label: "findings", value: strings.Join(full.Findings, ", ")}})
+	}
+	for _, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
+		p.boxAdd(l)
+	}
+	p.boxEnd()
+}
+
+// goalBody is a goal from its first line that is not a heading (blank, or ending
+// in a colon) on, its own line breaks kept.
+func goalBody(goal string) string {
+	lines := strings.Split(strings.ReplaceAll(goal, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasSuffix(l, ":") {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return ""
+}
+
+// statusSlice is the status's row of the slice, empty before the status is read.
+func (t *ticket) statusSlice(id string) statusSlice {
+	if t.status != nil {
+		for _, s := range t.status.Slices {
+			if s.ID == id {
+				return s
+			}
+		}
+	}
+	return statusSlice{}
 }

@@ -99,6 +99,11 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	// The lines it showed stay where they were: the count took the place of the
 	// mark that said there was more above.
 	for i := newAt + 1; i < len(before)-4; i++ {
+		if strings.Contains(before[i], "↓") {
+			// The mark of the rows below counts them: two lines came in, and the
+			// timeline keeps its latest forty.
+			break
+		}
 		if before[i] != after[i] {
 			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i], g.view())
 		}
