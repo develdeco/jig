@@ -55,15 +55,7 @@ func (m *Model) innerWidth() int {
 	return max(1, m.width-7)
 }
 
-// boxRows lays rows out under cols in the panel's width and adds them to it.
-// None is a row the cursor can stand on.
-func (m *Model) boxRows(p *page, cols []column, rows [][]string) {
-	for _, lines := range layout(cols, rows, m.innerWidth()) {
-		p.boxLaid(nil, lines)
-	}
-}
-
-// boxHeight is how many lines boxRows would add.
+// boxHeight is how many lines the rows laid out under cols take in the panel.
 func (m *Model) boxHeight(cols []column, rows [][]string) int {
 	n := 0
 	for _, lines := range layout(cols, rows, m.innerWidth()) {
