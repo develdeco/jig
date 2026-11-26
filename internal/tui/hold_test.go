@@ -99,16 +99,20 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	// The lines it showed stay where they were: the count took the place of the
 	// mark that said there was more above.
 	for i := newAt + 1; i < len(before)-4; i++ {
+		if strings.Contains(before[i], "↓") {
+			// The mark of the rows below counts them, and two lines came in.
+			break
+		}
 		if before[i] != after[i] {
 			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i], g.view())
 		}
 	}
 	// Read to its end with the mark up, the page still shows its last row: the
-	// count of the older lines the timeline left out.
+	// oldest line of the timeline, which has no cap.
 	for i := 0; i < 200; i++ {
 		g.press("down")
 	}
-	if v := g.view(); !newMark.MatchString(v) || !strings.Contains(v, "↓ 2 older") {
+	if v := g.view(); !newMark.MatchString(v) || !strings.Contains(v, "09:00:00") {
 		t.Errorf("the end of the page is not in view under the mark:\n%s", v)
 	}
 	for i := 0; i < 300; i++ {

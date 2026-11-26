@@ -186,7 +186,7 @@ func TestACutActivityCountsTheOlderRowsBelow(t *testing.T) {
 		// under them is what is cut.
 		g := newRig(t, "JIG-1")
 		g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
-		return g.feed(jig1Records()...).press("enter").sized(140, 40).view()
+		return g.feed(jig1Records()...).press("enter").sized(140, 37).view()
 	}()
 	frames["chart"] = chartScreenOfHeight(t, 30).view()
 	titles := map[string]string{"ticket": "Activity", "step": "Build activity", "chart": "Activity"}

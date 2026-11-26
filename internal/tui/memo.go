@@ -46,6 +46,9 @@ type ticketMemo struct {
 	// placed are the log's lines each with its place (log.go): a reading of every
 	// line the ticket has.
 	placed *[]placedLine
+	// sliceBody is the lines of a slice screen under the slice's own panel, by
+	// slice and width: its commits, questions, calls and timeline.
+	sliceBody map[string][]pline
 }
 
 // memoFor is the readings of t as it stands now: those of the last ask while
