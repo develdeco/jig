@@ -24,7 +24,7 @@ func threeRoundsEvents(carried int) []events.Envelope {
 
 // threeRoundsStatus is `jig status JIG-2` for threeRoundsEvents: the findings of
 // rounds 1 and 2, the fix slice each fix finding became, and a clean round 3.
-func threeRoundsStatus() string {
+func threeRoundsStatus(fix1 string) string {
 	findingCols := findingColumns
 	return strings.Join([]string{
 		"ticket: JIG-2",
@@ -32,7 +32,7 @@ func threeRoundsStatus() string {
 		"fix_budget: 2 of 3 rounds used",
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate", "findings"}, [][]string{
 			{"a", "green", "1", "-", "-", "Load the config", "alpha", "unit", "-", "-"},
-			{"fix-1-alpha", "green", "2", "-", "-", "Fix these gate findings:\n\nalpha/a.go:12 Close the file", "alpha", "unit", "1", "r1-f1"},
+			{"fix-1-alpha", "green", "2", "-", "-", "Fix these gate findings:\n\nalpha/a.go:12 Close the file", "alpha", "unit", "1", fix1},
 			{"fix-2-alpha", "green", "1", "-", "-", "Fix these gate findings:\n\nalpha/c.go:7 Check the returned error", "alpha", "unit", "2", "r2-f1"},
 		}),
 		"questions: none",
@@ -54,9 +54,14 @@ func threeRoundsStatus() string {
 
 // threeRounds is the review screen of JIG-2 after three rounds at w x h.
 func threeRounds(t *testing.T, w, h, carried int) *rig {
+	return threeRoundsFixing(t, w, h, carried, "r1-f1")
+}
+
+// threeRoundsFixing is threeRounds with the findings the first fix slice answers.
+func threeRoundsFixing(t *testing.T, w, h, carried int, fix1 string) *rig {
 	t.Helper()
 	g := newRig(t, "JIG-2")
-	g.r.answer("status JIG-2 --store /s", threeRoundsStatus(), 0)
+	g.r.answer("status JIG-2 --store /s", threeRoundsStatus(fix1), 0)
 	g.feed(threeRoundsEvents(carried)...).press("3")
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())

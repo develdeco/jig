@@ -50,6 +50,9 @@ const (
 	// number of that round: enter moves the Rounds cursor to it.
 	rowFinding = "finding"
 	rowCarry   = "carried"
+	// rowSuite is a failed run of an issue's suite on its plan screen: id is the
+	// fix task it names, the newest, and empty when none was added yet.
+	rowSuite = "suite"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and

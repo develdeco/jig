@@ -1421,6 +1421,7 @@ func (m *Model) open() tea.Cmd {
 const (
 	logNamesNothing    = "this line names no question, slice, round or step to open"
 	commitOpensNothing = "a store commit opens nothing"
+	noFixTaskYet       = "no fix task was added for this failed suite yet"
 )
 
 // opensNothing is why the row ref opens nothing, "" for a row that does open
@@ -1429,6 +1430,8 @@ func opensNothing(ref rowRef) string {
 	switch {
 	case ref.kind == rowCommit:
 		return commitOpensNothing
+	case ref.kind == rowSuite && ref.id == "":
+		return noFixTaskYet
 	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
 		return logNamesNothing
 	}
@@ -1465,6 +1468,15 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowFinding:
 		next = navEntry{screen: screenFinding, ticket: ref.ticket, finding: ref.id}
+	case rowRound:
+		// A round the slice screen's Finding panel names: the review screen, with
+		// the Rounds cursor on it.
+		next = navEntry{screen: screenReview, ticket: ref.ticket}
+	case rowSuite:
+		if ref.id == "" {
+			return next, false
+		}
+		return m.openTarget(rowRef{kind: rowTicket, id: ref.id, ticket: ref.id})
 	case rowSub, rowLog:
 		// A sub-step or a line of the log opens the most specific thing it names:
 		// its slice, its round (the review screen, which has no screen of a round's

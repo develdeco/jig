@@ -284,9 +284,20 @@ func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
 	}
 	full := t.statusSlice(s.ID)
 	p.boxTop("Finding", "round "+strconv.Itoa(round))
-	if len(full.Findings) > 0 {
-		m.factRows(p, []factRow{{label: "findings", value: strings.Join(full.Findings, ", ")}})
+	// The round and each finding the slice answers are rows: the round opens the
+	// review screen on it, a finding opens its own screen.
+	n := strconv.Itoa(round)
+	rows := []factRow{{label: "round", value: "round " + n, ref: &rowRef{kind: rowRound, id: n, ticket: t.id, slice: s.ID}}}
+	label := "findings"
+	for _, id := range full.Findings {
+		value := id
+		if f := t.findingNamed(id); f != nil {
+			value += " " + f.Title
+		}
+		rows = append(rows, factRow{label: label, value: value, ref: &rowRef{kind: rowFinding, id: id, ticket: t.id, slice: s.ID, round: n}})
+		label = ""
 	}
+	m.factRows(p, rows)
 	for _, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
 		p.boxAdd(l)
 	}

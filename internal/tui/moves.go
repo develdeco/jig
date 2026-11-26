@@ -83,6 +83,10 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 			m.syncPanes(pg)
 		}
 	}
+	if e.screen == screenReview && ref != nil && ref.kind == rowRound {
+		// A round named from another screen: its row has the Rounds cursor.
+		m.goToRound(ref.id)
+	}
 	var cmds []tea.Cmd
 	if e.screen == screenChart {
 		cmds = append(cmds, m.enterChart(e)...)
