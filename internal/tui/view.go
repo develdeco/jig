@@ -237,6 +237,10 @@ func (m *Model) View() string {
 	m.followSel()
 	l := m.layout()
 	m.settle(&l)
+	// The row a frame cannot hold whole is drawn by lines; what the next frame is
+	// settled against is the page as it was laid out.
+	laid := l.pg
+	m.tallRow(&l)
 
 	var tailPane []string
 	switch {
@@ -255,7 +259,9 @@ func (m *Model) View() string {
 	}
 	body, from, to := m.windowRows(l.pg, l.sel, start, l.pageH, w, above)
 	m.drawn = drawnAsks(l.pg, from, to-from)
-	m.rest(l, start)
+	l2 := l
+	l2.pg = laid
+	m.rest(l2, start)
 	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, l.pageH, above))
 	if m.help != nil {
 		// The keys list is drawn over the body, and no ask is drawn under it.

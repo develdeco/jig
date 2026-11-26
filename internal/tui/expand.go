@@ -88,6 +88,8 @@ func (m *Model) expandHolder(fold bool) bool {
 	default:
 		return false
 	}
+	// The row is read where it stands, from its first line.
+	e.lead, e.rowScroll = 0, 0
 	m.expandMoved()
 	return true
 }

@@ -201,11 +201,15 @@ type navEntry struct {
 	// expanded are the holders laid out whole (expand.go), by pane and the row's
 	// identity; expGen counts their changes. A screen opened again is folded: the
 	// screen memory (arrive) keeps cursors, never these.
-	expanded  map[expKey]bool
-	expGen    int
-	seenSel   int
-	seenSet   bool
-	textFocus bool
+	expanded map[expKey]bool
+	expGen   int
+	// rowScroll is how many lines of the expanded row rowScrollOf are held above
+	// the part of it the window draws (tall.go).
+	rowScroll   int
+	rowScrollOf rowIdentity
+	seenSel     int
+	seenSet     bool
+	textFocus   bool
 }
 
 // textInput is a line a person is typing: an answer.
@@ -306,6 +310,9 @@ type Model struct {
 	keysOn subject
 	// hit is what the last frame drew of the body, for a click (mouse.go).
 	hit *hitMap
+	// tall is the row the last frame drew by lines, nil when it drew none
+	// (tall.go).
+	tall *tallInfo
 	// sibMemo is the siblings of the screen on top as one frame or one message
 	// read them, once read (sibs).
 	sibMemo *sibSet
@@ -1108,6 +1115,10 @@ func (m *Model) moveBy(delta int) {
 	hi := lo + cnt - 1
 	if n == 0 || e.textFocus {
 		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
+		return
+	}
+	if m.scrollTall(pg, delta) {
+		// The row under the cursor is read by lines before the cursor leaves it.
 		return
 	}
 	e.follow = false
