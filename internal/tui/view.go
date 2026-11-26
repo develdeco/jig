@@ -120,15 +120,24 @@ type page struct {
 	// its cursor, the rows it has all told, so the keys move over the ones it
 	// does not draw (panes.go).
 	windowed map[string][]rowRef
-	// rooms holds, for a pane that was given a room, the most lines one of its
-	// rows may take: an expanded row is read by lines inside it.
-	rooms map[string]int
 	// allPanes are the titles of every pane of the screen on a page that draws
 	// only the zoomed one (zoom.go).
 	allPanes []string
 	// marks are the rows, among the page's rows, that the cursors of the panes
 	// that have not the focus stand on: drawn marked and not lit.
 	marks []int
+	// fold, on a page with a row expanded, is the page laid out folded, of as many
+	// lines: the window is taken on it, so what the page shows outside the pane of
+	// the expanded row is what it showed folded.
+	fold []pline
+}
+
+// shaped is pg with the lines its window is taken on.
+func (pg page) shaped() page {
+	if pg.fold != nil {
+		pg.lines = pg.fold
+	}
+	return pg
 }
 
 // marker is the cursor's mark for the idx-th row of the page: the key color on
@@ -164,7 +173,26 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top: its lines, with the text of any
 // line too long for the width wrapped onto continuation rows.
+//
+// What the person expanded never changes the page's height: the page is laid
+// out folded, and the pane that holds the cursor's expanded row is drawn into
+// the height it had folded (fit.go).
 func (m *Model) page() page {
+	pg := m.pageOf()
+	m.tall = nil
+	if e := m.top(); len(e.expanded) > 0 {
+		e.suppress, m.nav[0].suppress = true, true
+		m.main, m.mainF = m.mainF, m.main
+		folded := m.pageOf()
+		m.main, m.mainF = m.mainF, m.main
+		e.suppress, m.nav[0].suppress = false, false
+		pg = m.fitPane(pg, folded)
+	}
+	return pg
+}
+
+// pageOf is the page as the screen on top lays it out now.
+func (m *Model) pageOf() page {
 	if m.top().screen == screenMain {
 		// The project's list is wrapped when it is built, once for what it reads.
 		return m.rawPage()
@@ -305,10 +333,6 @@ func (m *Model) View() string {
 	m.followSel()
 	l := m.layout()
 	m.settle(&l)
-	// The row a frame cannot hold whole is drawn by lines; what the next frame is
-	// settled against is the page as it was laid out.
-	laid := l.pg
-	m.tallRow(&l)
 
 	var tailPane []string
 	switch {
@@ -327,9 +351,7 @@ func (m *Model) View() string {
 	}
 	body, from, to := m.windowRows(l.pg, l.sel, start, l.pageH, w, above)
 	m.drawn = drawnAsks(l.pg, from, to-from)
-	l2 := l
-	l2.pg = laid
-	m.rest(l2, start)
+	m.rest(l, start)
 	m.recordHit(l, from, to, windowPrefix(l.pg.lines, from, to, l.pageH, above))
 	if m.help != nil {
 		// The keys list is drawn over the body, and no ask is drawn under it.
@@ -530,6 +552,7 @@ func (m *Model) phaseNeed() int {
 // (lead). With clamp, lead is cut to the lines there are above the window, so a
 // page opened at its top lessens what is held as it is read down.
 func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
+	pg = pg.shaped()
 	selLine, n := 0, 0
 	detailed, block := false, -1
 	for i, l := range pg.lines {
@@ -610,7 +633,7 @@ func lastRowOfPanel(lines []pline, i int) bool {
 // row stays in the span, which moves down as the marks cost it rows; without
 // it, a row the page holds out of view stays out.
 func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool) {
-	lines := pg.lines
+	lines := pg.shaped().lines
 	n := len(lines)
 	if n <= h {
 		return 0, n, false

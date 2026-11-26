@@ -15,7 +15,7 @@ type expKey struct {
 
 // isExpanded says whether the row ref in the pane titled pane is expanded.
 func (e *navEntry) isExpanded(pane string, ref *rowRef) bool {
-	if ref == nil || len(e.expanded) == 0 {
+	if ref == nil || len(e.expanded) == 0 || e.suppress {
 		return false
 	}
 	return e.expanded[expKey{pane, ref.identity()}]
@@ -25,7 +25,7 @@ func (e *navEntry) isExpanded(pane string, ref *rowRef) bool {
 // is, so a screen with nothing expanded lays out as it always did. first is the
 // number of rows in the list before refs (a names row).
 func (e *navEntry) wholeOf(pane string, first int, refs []*rowRef) []bool {
-	if len(e.expanded) == 0 {
+	if len(e.expanded) == 0 || e.suppress {
 		return nil
 	}
 	var whole []bool
@@ -60,15 +60,15 @@ func (p page) paneTitle() string {
 	return ""
 }
 
-// holdsCut says whether the sel-th row of the page, with the continuation rows
-// and the lines under it that belong to it, carries a cut mark.
-func (p page) holdsCut(sel int) bool {
-	n, in := -1, false
+// holdsCut says whether the row of identity id, with the continuation rows and the
+// lines under it that belong to it, carries a cut mark. A row is found by its
+// identity: the place among the rows moves when a list counts the ones it leaves out.
+func (p page) holdsCut(id rowIdentity) bool {
+	in := false
 	for _, l := range p.lines {
 		switch {
 		case l.ref != nil:
-			n++
-			in = n == sel
+			in = l.ref.identity() == id
 			if in && len(l.cuts) > 0 {
 				return true
 			}
@@ -92,7 +92,7 @@ func (p page) holdsCut(sel int) bool {
 // paneOpen says whether the pane titled title, which has no cursor rows, is
 // expanded: every cut line it has is laid out whole.
 func (e *navEntry) paneOpen(title string) bool {
-	return len(e.expanded) > 0 && e.expanded[expKey{pane: title}]
+	return len(e.expanded) > 0 && !e.suppress && e.expanded[expKey{pane: title}]
 }
 
 // paneExpanded says whether the pane titled title on the screen on top is

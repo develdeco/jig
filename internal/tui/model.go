@@ -208,7 +208,10 @@ type navEntry struct {
 	expGen   int
 	// rowScroll is how many lines of the expanded row rowScrollOf are held above
 	// the part of it the window draws (tall.go).
-	rowScroll   int
+	rowScroll int
+	// suppress lays the screen out as if nothing were expanded: the folded page
+	// each pane is held to (fit.go).
+	suppress    bool
 	rowScrollOf rowIdentity
 	seenSel     int
 	seenSet     bool
@@ -307,6 +310,8 @@ type Model struct {
 	// main is the project's list as last built (mainqueue.go), kept while nothing it
 	// reads has moved.
 	main *mainCache
+	// mainF is the project's list as laid out folded, for the same.
+	mainF *mainCache
 	// keysOn is what the keys of the screen on top act on, as the last frame
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.

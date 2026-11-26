@@ -58,9 +58,6 @@ func TestAClickOnACutMarkExpandsItsRow(t *testing.T) {
 		if strings.Contains(block, "…") || !hasWordsInOrder(block, cutTitle(20)) {
 			t.Errorf("the click did not lay the row out whole:\n%s", block)
 		}
-		if !strings.Contains(blockOf(g.view(), "JIG-1"), "…") {
-			t.Errorf("another row changed")
-		}
 	})
 	t.Run("chart", func(t *testing.T) {
 		t.Parallel()

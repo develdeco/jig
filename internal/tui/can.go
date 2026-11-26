@@ -116,7 +116,7 @@ func (m *Model) subjectOf(pg page) subject {
 	}
 	if ref != nil {
 		s.row, s.hasRow = *ref, true
-		s.cut = pg.holdsCut(e.sel)
+		s.cut = pg.holdsCut(ref.identity())
 		s.pane = pg.paneOf(e.sel, e.paneFocus)
 		s.expanded = e.isExpanded(s.pane, ref)
 	} else if e.textFocus && e.paneFocus != "" {

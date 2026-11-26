@@ -4,6 +4,7 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review           ! review find
     fix budget 1 of 3 rounds used
 
   ╭─ Rounds ───────────────────────────────────────────────────────── 1 round ─╮
+  │  ! round 1  findings  1 fix · 2 asks · 1 note  0000000..ccccccc  09:11:30  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
   │    risk  where         decision   title                id                  │
@@ -17,7 +18,6 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review           ! review find
   │  decision      ! undecided                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 2 more
-
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · tab next pane: Detail · r1-f1 · ↑↓ move in Asks
   k keep · d dismiss · 1-5 steps · [ ] sibling · h main · t tail

@@ -213,23 +213,47 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 				others += min(len(f), keep)
 			}
 		}
+		row := 0
 		if lb-others < listMin {
-			keep, others = 0, 0
+			keep, others, row = collapsed, 0, -1
 			for i, f := range full {
 				if i != cl {
-					others += min(len(f), collapsed)
+					others += min(len(f), keep)
 				}
 			}
 		}
-		for i, f := range full {
-			switch {
-			case i == cl:
-				left = append(left, m.windowList(f, cr, max(lb-others, listMin))...)
-			case keep > 0:
-				left = append(left, m.windowList(f, 0, keep)...)
-			default:
-				left = append(left, m.windowList(f, -1, collapsed)...)
+		budget := make([]int, len(full))
+		for i := range full {
+			budget[i] = keep
+		}
+		budget[cl] = max(lb-others, listMin)
+		cut := make([][]pline, len(full))
+		draw := func(i int) {
+			at := row
+			if i == cl {
+				at = cr
 			}
+			cut[i] = m.windowList(full[i], at, budget[i])
+		}
+		size := 0
+		for i := range full {
+			draw(i)
+			size += len(cut[i])
+		}
+		// The lines the cursor's list does not use go to the other lists, which draw
+		// more of their rows with them.
+		for i := range full {
+			was := len(cut[i])
+			for b := budget[i] + 1; i != cl && b <= budget[i]+lb-size && was < len(full[i]); b++ {
+				if got := m.windowList(full[i], 0, b); len(got) > was && size+len(got)-was <= lb {
+					size += len(got) - was
+					cut[i], budget[i] = got, b
+					break
+				}
+			}
+		}
+		for i := range full {
+			left = append(left, cut[i]...)
 		}
 	}
 	right, cut := cutDetail(m, dl, db)

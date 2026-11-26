@@ -71,14 +71,9 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	cur := m.paneCursorIn(title, ids, homeSub(subs, focus))
 	from, to, openRows, merged := m.subWindow(title, t, step, subs, cur, focus, room)
 	if focus >= from && focus < to && m.subWhole(t, step, subs[focus]) {
-		// The open sub-step the person expanded takes every row it needs, read by
-		// lines inside the room the pane has: when it needs more than the room
-		// leaves beside the others it is drawn alone with a count of them.
+		// The open sub-step the person expanded takes every row it needs; the page
+		// holds the pane to the height it had folded (fit.go).
 		openRows = max(openRows, m.openWant(t, step, subs[focus]))
-		if cur == focus && openRows > room-markLines(from, to, len(subs), merged) {
-			from, to, merged = focus, focus+1, false
-		}
-		p.rooms = map[string]int{title: max(1, room-markLines(from, to, len(subs), merged))}
 	}
 
 	var picked []int

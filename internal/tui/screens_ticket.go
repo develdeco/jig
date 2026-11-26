@@ -160,7 +160,7 @@ func (m *Model) ticketPage(id string) page {
 	gapActivity := blank()
 
 	p.lines = append(p.lines, block.lines...)
-	p.windowed, p.rooms = block.windowed, block.rooms
+	p.windowed = block.windowed
 	for i, g := range groups {
 		if (i == 0 && gapBefore) || (i > 0 && gapBetween) {
 			p.add("")

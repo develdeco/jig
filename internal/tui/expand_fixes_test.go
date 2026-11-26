@@ -51,8 +51,13 @@ func TestAnOpenSubstepsOneRowFieldsRegisterTheirCut(t *testing.T) {
 		}
 		everyCutHasAHolder(t, "the open sub-step", subjectCard(t, size[0], size[1], 30).tabTo("Build"))
 		g.press("space")
+		// The pane keeps its height: the field is read by lines to its end.
 		open := stripANSI(g.view())
-		if commit := between(paneBlock(t, open, "Build"), "commit", "now"); strings.Contains(commit, "…") || !hasWordsInOrder(commit, cutTitle(30)) {
+		for i := 0; i < 100 && !strings.Contains(paneBlock(t, open, "Build"), "w030") && atCursor(g) == "slice:clamp"; i++ {
+			g.press("down")
+			open = stripANSI(g.view())
+		}
+		if block := paneBlock(t, open, "Build"); strings.Contains(block, "…") || !strings.Contains(block, "w030”") {
 			t.Errorf("%dx%d: space did not lay the commit field out whole:\n%s", size[0], size[1], open)
 		}
 	}
@@ -391,7 +396,7 @@ func TestAnExpandedRowStaysInsideItsPane(t *testing.T) {
 // last word inside the pane's room, the cursor staying on it.
 func TestAnExpandedRowIsReadByLinesToItsEnd(t *testing.T) {
 	t.Parallel()
-	for _, size := range [][2]int{{80, 24}} {
+	for _, size := range [][2]int{{60, 20}, {80, 23}, {80, 24}} {
 		g := longCard(t, size[0], size[1])
 		for i := 0; i < 12; i++ {
 			g.feed(toolOn("SHOP-1", at(3, i), "s-b", "git commit -m "+cutTitle(60), exit(0)))

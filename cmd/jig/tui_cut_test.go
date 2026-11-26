@@ -54,7 +54,10 @@ func TestTUIPipeExpandsACutRow(t *testing.T) {
 		t.Fatalf("the ticket's row is not cut in the first frame:\n%s", folded)
 	}
 	keys.Write([]byte(" "))
-	open := screenWhere(t, out, "the title whole", func(f string) bool { return strings.Contains(f, "w060") })
+	screenWhere(t, out, "the row expanded", func(f string) bool { return strings.Contains(f, "space fold") })
+	// The pane keeps its height: the title is read by lines to its end.
+	keys.Write([]byte(strings.Repeat("\x1b[B", 12)))
+	open := screenWhere(t, out, "the title to its end", func(f string) bool { return strings.Contains(f, "w060") })
 	if strings.Contains(open, "…") {
 		t.Errorf("space did not lay the title out whole:\n%s", open)
 	}

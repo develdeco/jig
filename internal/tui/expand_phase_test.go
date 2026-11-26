@@ -64,8 +64,14 @@ func TestABuildRowExpandsItsCutSubjectWhole(t *testing.T) {
 				t.Errorf("the hint line does not offer space on the slice:\n%s", before)
 			}
 			g.press("space")
+			// The pane keeps its height: the subject is read by lines to its end.
 			open := stripANSI(g.view())
-			if panel := panelText(t, open, "Slices"); strings.Contains(panel, "…") || !hasWordsInOrder(panel, subjectWords(n)) {
+			last := fmt.Sprintf("w%03d", n)
+			for i := 0; i < 200 && !strings.Contains(panelText(t, open, "Slices"), last) && atCursor(g) == "s1"; i++ {
+				g.press("down")
+				open = stripANSI(g.view())
+			}
+			if panel := panelText(t, open, "Slices"); strings.Contains(panel, "…") || !strings.Contains(panel, last) || atCursor(g) != "s1" {
 				t.Errorf("space did not lay the subject out whole:\n%s", open)
 			}
 			g.press("space")

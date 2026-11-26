@@ -34,9 +34,6 @@ type listSpec struct {
 	// cap. A list short of room asks its free text for fewer rows before it
 	// drops one.
 	room int
-	// tight says the room is the floor the screen asked for and the body has less:
-	// a row cannot be read by lines in it.
-	tight bool
 	// before are lines inside the panel over the rows, under the names, such as
 	// the count of the newer ones; after are lines under the rows, such as the
 	// count of the older ones.
@@ -61,128 +58,18 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		for i, r := range s.rows {
 			cells[i], refs[i] = r.cells, r.ref
 		}
-		raw := m.laidList(p, s.cols, names, cells, s.room, refs, false)
-		laid := raw[1:]
-		from, to, cap := 0, len(laid), s.room
-		if s.room > 0 && linesOf(laid) > s.room && slices.ContainsFunc(s.rows, func(r listRow) bool { return r.ref != nil && m.top().isExpanded(p.paneTitle(), r.ref) }) {
-			// An expanded row never grows its pane past its room: the row the cursor
-			// is on is read by lines in what the folded pane held; when it is not
-			// the cursor's, or that is under three lines, the rows are folded.
-			folded := m.laidList(p, s.cols, names, cells, s.room, refs, true)
-			from, to, cap = m.rowsInRoom(p, s, laid, linesOf(folded[1:]))
-			if to-from == len(laid) {
-				raw, laid = folded, folded[1:]
-			}
-		}
-		p.boxNames(raw[0].lines)
-		alone := to-from < len(laid)
-		before, after := s.before, s.after
-		var marks []countMark
-		if alone {
-			// The row drawn alone is read by lines in the room the pane has, the
-			// counts of the rows around it taking a line each when there is the
-			// room for them.
-			before, after = nil, nil
-			if cap >= 5 {
-				if from > 0 {
-					marks = append(marks, countMark{"↑ " + strconv.Itoa(from) + " more", 0, from, true})
-					cap--
-				}
-				if to < len(laid) {
-					marks = append(marks, countMark{"↓ " + strconv.Itoa(len(laid)-to) + " more", to, len(laid), false})
-					cap--
-				}
-			}
-		}
-		for _, l := range before {
+		laid := m.laidListFor(p, s.cols, names, cells, s.room, refs)
+		for _, l := range s.before {
 			p.boxAdd(l)
 		}
-		for _, mk := range marks {
-			if mk.above {
-				p.lines = append(p.lines, mk.line(m, s.rows))
-			}
-		}
-		for i := from; i < to; i++ {
-			p.boxRow(s.rows[i].ref, laid[i])
-		}
-		for _, mk := range marks {
-			if !mk.above {
-				p.lines = append(p.lines, mk.line(m, s.rows))
-			}
-		}
-		for _, l := range after {
-			p.boxAdd(l)
-		}
-		s.after = nil
-		if s.room > 0 {
-			if p.rooms == nil {
-				p.rooms = map[string]int{}
-			}
-			p.rooms[s.title] = cap
+		for i, row := range laid {
+			p.boxRow(s.rows[i].ref, row)
 		}
 	}
 	for _, l := range s.after {
 		p.boxAdd(l)
 	}
 	p.boxEnd()
-}
-
-// linesOf is the lines the rows take.
-func linesOf(rows []laidRow) int {
-	n := 0
-	for _, r := range rows {
-		n += len(r.lines)
-	}
-	return n
-}
-
-// countMark is the line that counts the rows of a list from lo to hi-1 a pane
-// drew none of: it stands for them, so the cursor passes over them.
-type countMark struct {
-	text   string
-	lo, hi int
-	above  bool
-}
-
-func (c countMark) line(m *Model, rows []listRow) pline {
-	var hidden []rowRef
-	for _, r := range rows[c.lo:c.hi] {
-		if r.ref != nil {
-			hidden = append(hidden, *r.ref)
-		}
-	}
-	return pline{text: m.st.dim(c.text), box: boxMid, hiddenRefs: hidden}
-}
-
-// rowsInRoom is the rows of a list the pane draws, from from to to-1, and the
-// most lines one of them may take (cap). An expanded row never grows its pane:
-// when the rows laid out take more lines than the room the pane was given, the
-// row the cursor stands on, when it is expanded, is drawn alone with
-// a count of the rows left out, and read by lines in the room that is left.
-func (m *Model) rowsInRoom(p *page, s listSpec, laid []laidRow, foldedLines int) (from, to, cap int) {
-	from, to, cap = 0, len(laid), s.room
-	// The pane never takes more than it took folded.
-	avail := min(s.room, foldedLines) + len(s.before) + len(s.after)
-	if s.tight {
-		avail = min(avail, 2)
-	}
-	if avail < 2 {
-		// Under two lines a row cannot be read by lines: it stays folded.
-		return from, to, cap
-	}
-	e := m.top()
-	// Only the row the cursor stands on can be drawn alone: the cursor must stay
-	// on a row the page has.
-	pick := -1
-	for i, r := range s.rows {
-		if r.ref != nil && e.isExpanded(p.paneTitle(), r.ref) && e.paneCurs[s.title].set && e.paneCurs[s.title].id == r.ref.identity() {
-			pick = i
-		}
-	}
-	if pick < 0 {
-		return from, to, cap
-	}
-	return pick, pick + 1, avail
 }
 
 // ageOf is how long ago at was, in its largest whole unit: "42s", "4m", "3h",
@@ -210,16 +97,12 @@ func (m *Model) ageOf(at time.Time) string {
 // refs, when given, are the rows' places for the cursor, in the order of cells:
 // a row the screen has expanded (expand.go) is laid out whole. A list with no
 // refs is the pane's own, which is laid out whole when the pane is expanded.
-func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef, folded bool) []laidRow {
+func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
 	pane := p.paneTitle()
 	whole := m.top().wholeOf(pane, 1, refs)
-	if folded {
-		// The rows are laid out as they are folded, whatever is expanded.
-		whole = nil
-	}
 	if !slices.ContainsFunc(refs, func(r *rowRef) bool { return r != nil }) {
 		whole = m.wholePane(pane, len(all))
 		if whole != nil {
@@ -235,7 +118,7 @@ func (m *Model) laidList(p *page, cols []column, names []string, cells [][]strin
 			switch {
 			case r != nil:
 				above = r
-			case above == nil || !folded && m.top().isExpanded(pane, above):
+			case above == nil || m.top().isExpanded(pane, above):
 				if whole == nil {
 					whole = make([]bool, len(all))
 				}
@@ -260,7 +143,7 @@ func (m *Model) laidList(p *page, cols []column, names []string, cells [][]strin
 // laidListFor is laidList with the names row added to the panel p and the rows
 // given back without it.
 func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
-	laid := m.laidList(p, cols, names, cells, room, refs, false)
+	laid := m.laidList(p, cols, names, cells, room, refs)
 	p.boxNames(laid[0].lines)
 	return laid[1:]
 }
