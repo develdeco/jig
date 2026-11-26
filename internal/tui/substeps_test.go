@@ -60,7 +60,7 @@ func shop1Rig(t *testing.T) *rig {
 func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := shop1Rig(t)
-	golden(t, "ticket-substeps", g.view())
+	goldenCuts(t, "ticket-substeps", shop1Rig(t)) // a rig of its own: the check expands and folds its marks
 
 	steps, subs := 0, 0
 	for _, r := range g.m.page().refs() {

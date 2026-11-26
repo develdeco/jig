@@ -34,6 +34,15 @@
 // cursor and counts the rest, a row opens what it is about, and z draws the
 // focused pane over the whole body (panes.go, zoom.go).
 //
+// Nothing a screen cuts is lost: a cut registers a cut mark, the cell its "…" is
+// drawn on with the holder that owns the cut (a row with its lines and fields, a
+// pane with no cursor rows, or the last command line) and the whole text it
+// stands for. space, or a click on the mark, lays the holder out whole where it
+// stands, the columns keeping the widths the folded rows gave them, and space
+// folds it back; a row taller than its room is read by lines. An expansion is
+// kept by the holder's identity and lasts as long as its screen
+// (expand.go, tall.go, lastcmd.go).
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on
