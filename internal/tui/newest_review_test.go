@@ -62,7 +62,7 @@ func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 func TestTheRoundUnderWayReadsAboveTheClosedOnes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(backwards(append(jig2Mid(), jl(at(13, 0), "JIG-2", "", journal.EventGateOpen)))...).press("enter")
+	g.feed(backwards(append(jig2Mid(), jl(at(13, 0), "JIG-2", "", journal.EventGateOpen)))...).press("enter").sized(100, 60)
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
@@ -70,30 +70,36 @@ func TestTheRoundUnderWayReadsAboveTheClosedOnes(t *testing.T) {
 	inOrder(t, "rounds", readWords(rounds), "round 2 open", "round 1 findings")
 }
 
-// TestFixSlicesSentBackReadNewestFirst: the fix slices a round sent back are
-// listed with the latest on top, and each row still opens its slice.
-func TestFixSlicesSentBackReadNewestFirst(t *testing.T) {
+// TestFixSlicesSentBackAreRowsOfTheBuildWhateverTheOrderOfTheLines: the fix
+// slices a round sent back are rows of the build screen's list, each reading its
+// own round whatever order the lines came in, and each row still opens its slice;
+// the review screen has no panel of them.
+func TestFixSlicesSentBackAreRowsOfTheBuildWhateverTheOrderOfTheLines(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-6")
 	g.r.answer("status JIG-6 --store /s", fixSliceStatus(true), 0)
 	g.feed(backwards(fixSliceLines())...)
-	g.press("down", "enter")
-	if g.m.Screen() != "review" {
-		t.Fatalf("on %s, want review", g.m.Screen())
+	g.press("enter")
+	if g.m.Screen() != "build" {
+		t.Fatalf("on %s, want build", g.m.Screen())
 	}
-	inOrder(t, "fix slices", readWords(pageText(g)), "Sent back", "fix-2 round 2", "fix-1 round 1")
+	inOrder(t, "fix slices", readWords(pageText(g)), "round 1 · Fix round one", "round 2 · Fix round two")
 	var slices []string
 	for _, r := range g.m.page().refs() {
 		if r.kind == rowSlice {
 			slices = append(slices, r.id)
 		}
 	}
-	if strings.Join(slices, " ") != "fix-2 fix-1" {
-		t.Errorf("the rows that open a slice are %v, want fix-2 then fix-1", slices)
+	if strings.Join(slices, " ") != "a fix-1 fix-2" {
+		t.Errorf("the rows that open a slice are %v, want a, fix-1 and fix-2", slices)
 	}
-	g.press("enter")
-	if g.m.Screen() != "slice" {
-		t.Errorf("a fix slice's row opens %s, want slice", g.m.Screen())
+	g.press("down", "enter")
+	if g.m.Screen() != "slice" || g.m.top().slice != "fix-1" {
+		t.Errorf("a fix slice's row opens %s %q, want the slice screen of fix-1", g.m.Screen(), g.m.top().slice)
+	}
+	g.press("esc", "esc", "down", "enter")
+	if g.m.Screen() != "review" || strings.Contains(pageText(g), "Sent back") {
+		t.Errorf("the review screen has a Sent back panel:\n%s", pageText(g))
 	}
 }
 

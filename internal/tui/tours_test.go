@@ -25,7 +25,7 @@ func TestToursCutNothingWhileWidthAllows(t *testing.T) {
 			view := stripANSI(g.view())
 			wantNoRowWider(t, strings.Split(view, "\n"), w)
 			wantBoxesClosed(t, view)
-			if !strings.Contains(view, "tail ─") && !strings.Contains(view, "the tail needs 8 body rows, this screen has ") {
+			if !strings.Contains(view, "tail ─") && !strings.Contains(view, "the tail needs 8 rows; ") {
 				t.Errorf("%s with the tail open shows neither the tail nor why it cannot: \n%s", what, view)
 			}
 			return view

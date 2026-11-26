@@ -27,7 +27,7 @@ func TestATrysRunsAndASlicesTriesReadNewestFirst(t *testing.T) {
 		pending(0, 0, 'a'), run(0, 30, 'a', "fail", "first run"),
 		pending(1, 0, 'b'), pending(1, 0, 'c'), run(1, 30, 'b', "fail", "only run"), // one instant: c was written after b
 		run(3, 0, 'a', "fail", "second run"), // the first commit is run again, after the others began
-	).press("enter")
+	).press("enter").sized(100, 60)
 	text := pageText(g)
 	order := []string{"ccccccc", "bbbbbbb", "aaaaaaa", "`second run`", "`first run`"}
 	last := -1

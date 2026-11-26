@@ -77,7 +77,7 @@ func TestParseStatusReadsTheTablesJigStatusPrints(t *testing.T) {
 	if info.Err != nil || info.State != "green" {
 		t.Fatalf("info = %+v", info)
 	}
-	if want := (statusSlice{ID: "a", State: "green", Attempts: 1, Goal: "Load the config", Workspace: "alpha", Oracle: "unit"}); len(info.Slices) != 1 || info.Slices[0] != want {
+	if want := (statusSlice{ID: "a", State: "green", Attempts: 1, Goal: "Load the config", Workspace: "alpha", Oracle: "unit"}); len(info.Slices) != 1 || !reflect.DeepEqual(info.Slices[0], want) {
 		t.Errorf("slices = %+v, want %+v: green after 1 try, with no blocker or question", info.Slices, want)
 	}
 	if len(info.Asks) != 2 || info.Asks[0] != (statusAsk{ID: "r1-f1", Risk: "high", Where: "alpha/a.go:3", Title: "Unchecked error", Why: "needs a human"}) {

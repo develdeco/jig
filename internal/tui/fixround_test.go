@@ -42,7 +42,7 @@ func fixSliceLines() []events.Envelope {
 	}
 }
 
-// TestFixRowsRoundFromGate: a fix slice reads the round that queued it, from
+// TestFixRowsRoundFromGate: a fix slice's row on the build screen reads the round that queued it, from
 // the status's from_gate and from the journal alone, and two fix slices of
 // different rounds each read their own.
 func TestFixRowsRoundFromGate(t *testing.T) {
@@ -51,11 +51,11 @@ func TestFixRowsRoundFromGate(t *testing.T) {
 		g := newRig(t, "JIG-6")
 		g.r.answer("status JIG-6 --store /s", fixSliceStatus(fromGate), 0)
 		g.feed(fixSliceLines()...)
-		g.press("down", "enter")
-		v := g.view()
-		for _, want := range []string{"fix-1  round 1  Fix round one", "fix-2  round 2  Fix round two"} {
+		g.press("enter") // the build screen: its rows read a fix slice by its round
+		v := readWords(g.view())
+		for _, want := range []string{"fix-1 green 1 try round 1 · Fix round one", "fix-2 queued 0 tries round 2 · Fix round two"} {
 			if !strings.Contains(v, want) {
-				t.Errorf("%s: the review screen lacks %q:\n%s", name, want, v)
+				t.Errorf("%s: the build screen lacks %q:\n%s", name, want, v)
 			}
 		}
 	}

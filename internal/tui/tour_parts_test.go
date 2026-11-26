@@ -15,8 +15,8 @@ var listNames = map[string]string{
 	"Steps": "step", "Tickets": "ticket", "Tasks": "ticket", "Activity": "time",
 	"Brief activity": "time", "Build activity": "time", "Review activity": "time",
 	"Publish activity": "time", "Land activity": "time", "Slices": "slice",
-	"Sessions": "harness", "Sections": "section", "Rounds": "round", "Findings": "risk",
-	"Probes": "round", "Sent back": "slice", "Asks": "risk",
+	"Sessions": "harness", "Sections": "section", "Rounds": "round",
+	"Probes": "round", "Asks": "risk",
 	"Checklist": "step", "Pull requests": "repo", "Verification": "commit",
 	"Questions": "question", "Timeline": "time",
 	"Needs you": "ticket", "Running": "ticket", "Ready": "ticket", "Waiting": "ticket",
@@ -53,7 +53,7 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 			if title == "" || strings.ToUpper(title[:1]) != title[:1] {
 				t.Errorf("%s: the panel %q has no capital", where, title)
 			}
-			if !strings.HasSuffix(l, "─╮") {
+			if !strings.HasSuffix(l, "─╮") && !strings.Contains(l, "─╮  ") { // or closed before a panel drawn beside it
 				t.Errorf("%s: the top edge of %s is not closed: %q", where, title, l)
 			}
 		case strings.HasPrefix(l, "  ╰"):
@@ -83,13 +83,20 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 		}
 		cells, lit := litCells(l)
 		first, last := -1, -1
+		var borders []int
 		for i, cell := range cells {
 			if cell == "│" {
 				if first < 0 {
 					first = i
 				}
 				last = i
+				borders = append(borders, i)
 			}
+		}
+		if len(borders) == 4 {
+			// A list with its detail beside it: the row is lit across the list's
+			// own panel, not the detail's.
+			last = borders[1]
 		}
 		for i := first + 1; i < last; i++ {
 			if !lit[i] {

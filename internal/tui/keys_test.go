@@ -31,6 +31,11 @@ func hintPairs(frame string) []string {
 	for _, l := range strings.Split(footerKeys(frame), "\n") {
 		for _, p := range strings.Split(l, " · ") {
 			if p = strings.TrimSpace(p); p != "" {
+				if n := len(out); n > 0 && strings.HasSuffix(out[n-1], "Detail") {
+					// The Detail pane's title is "Detail · <row>", which holds the separator.
+					out[n-1] += " · " + p
+					continue
+				}
 				out = append(out, p)
 			}
 		}
@@ -154,8 +159,8 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 			[]string{"g gate now", "k keep now", "d dismiss now"},
 			[]string{"p publish", "u requeue"}},
 		{"publish", func(t *testing.T) *rig { return can1(t, reviewReady()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenPublish, ticket: "JIG-2"}) },
-			[]string{"↑↓ scroll now", "p publish not now: the publish is not ready: after a clean review"},
-			[]string{"g gate", "enter open"}},
+			[]string{"↑↓ move in Checklist now", "p publish not now: the publish is not ready: after a clean review"},
+			[]string{"g gate"}},
 		{"land", func(t *testing.T) *rig { return can1(t, landStop()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenLand, ticket: "JIG-2"}) },
 			[]string{"↑↓ scroll now", "esc back now", "1-5 steps now", "h main now"},
 			[]string{"g gate", "p publish", "k keep"}},

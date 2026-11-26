@@ -63,6 +63,7 @@ func TestEveryPhaseScreenIsATourOfItsPanes(t *testing.T) {
 			rowsSeen := 0
 			for _, title := range panes {
 				g.tabTo(title)
+				title = g.m.focusedPane() // the Detail's is named for the row beside it
 				ref := g.m.selected()
 				g.press("z")
 				zoomed := g.view()

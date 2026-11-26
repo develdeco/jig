@@ -44,6 +44,7 @@ func (m *Model) arrive(e *navEntry) bool {
 	if ok {
 		e.sel, e.scroll, e.follow = k.sel, k.scroll, k.follow
 		e.paneFocus, e.paneCurs, e.textFocus, e.zoom = k.paneFocus, k.paneCurs, k.textFocus, k.zoom
+		e.listFocus = k.listFocus
 		e.lead, e.psearch = k.lead, k.psearch
 		e.seenSel, e.seenSet = k.seenSel, k.seenSet
 	}
@@ -77,11 +78,9 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		// the cursor is on the ask it was opened from, else the first one, unless
 		// the person left it somewhere.
 		if !restored || (ref != nil && ref.kind == rowAsk) {
-			e.sel = m.askRow(ref)
-		}
-		if !restored {
-			// The page opens at its top, so the rounds are read before the rows.
-			e.lead = 1 << 20
+			pg := m.page()
+			e.sel, e.seenSet = m.askRow(pg, ref), false
+			m.syncPanes(pg)
 		}
 	}
 	var cmds []tea.Cmd

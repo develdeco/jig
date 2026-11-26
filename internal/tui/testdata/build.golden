@@ -2,23 +2,23 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs
 ────────────────────────────────────────────────────────────────────────────────
   ? 1 of 4 green · slice c needs your answer
 
-  ╭─ Slices ─────────────────────────────────────────────────────────────── 4 ─╮
-  │    slice  state        tries    goal                                       │
-  │▸ ● a      green        1 try    Greet by name  workspace app · oracle unit │
-  │           ● aaaaaaa “Greet the person by name”  09:00:21                   │
-  │             ● `go test ./...` passed in 15s · jig ran it                   │
-  │           ✓ q-000 Trim the name? → Yes, trim it.                           │
-  │  ✗ b      fail         2 tries  Say goodbye, politely                      │
-  │           workspace app · oracle unit                                      │
-  │           ✗ eeeeeee “Say goodbye, politely”  09:02:15                      │
-  │             ✗ `go test ./...` failed in 25s · jig ran it                   │
-  │               --- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL     │
-  │               exit status 1                                                │
-  │               the end of its output; all of it is in the verify log on     │
-  │               the machine that ran it                                      │
-  │           ✗ bbbbbbb “Say goodbye”  09:01:40                                │
-  │  ↓ 6 more                                                                  │
+  ╭─ Slices ──────────────────────────────────────────────────── 1 of 4 green ─╮
+  │    slice  state        tries    took    goal                               │
+  │▸ ● a      green        1 try    19s     Greet by name                      │
+  │  ✗ b      fail         2 tries  1m 54s  Say goodbye, politely              │
+  │  ? c      needs-input  1 try    15s     Pick the tone                      │
+  │  ○ d      queued       0 tries          Ship the copy                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail · a ─────────────────────────────────────────────────────── green ─╮
+  │  goal      Greet by name                                                   │
+  │  oracle    unit                                                            │
+  │  workspace app                                                             │
+  │  questions ✓ q-000 Trim the name?                                          │
+  │              → Yes, trim it.                                               │
+  │  tries     ● aaaaaaa “Greet the person by name” 09:00:21                   │
+  │              ● `go test ./...` passed in 15s · jig ran it                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Sessions · ↑↓ move in Slices
+  esc back · q quit · ? keys · tab next pane: Detail · a · ↑↓ move in Slices
   enter open · 1-5 steps · [ ] sibling · h main · t tail

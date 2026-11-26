@@ -37,6 +37,7 @@ func (p page) panes() []pane {
 		case l.box != boxNone && len(out) > 0:
 			cur := &out[len(out)-1]
 			cur.bottom = i
+			cur.rows += len(l.hiddenRefs)
 			if l.ref != nil {
 				if l.home {
 					cur.home = cur.rows
@@ -44,6 +45,7 @@ func (p page) panes() []pane {
 				cur.rows++
 			}
 		}
+		row += len(l.hiddenRefs)
 		if l.ref != nil {
 			row++
 		}
@@ -366,7 +368,7 @@ func (m *Model) moveWindowed(pg page, delta int) bool {
 	if delta <= -(1 << 19) {
 		// Home goes to the page's top when the pane's first row is the page's.
 		for _, p := range pg.panes() {
-			if p.title == e.paneFocus && p.first == 0 {
+			if p.title == e.paneFocus && p.first == 0 && !pg.follows() {
 				e.lead = 1 << 20
 			}
 		}
@@ -396,9 +398,10 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 		e.follow, e.lead = false, 0
 	}
 	e.paneFocus = p.title
-	if !moving && e.screen != screenTicket && e.screen != screenChart {
+	if !moving && e.screen != screenTicket && e.screen != screenChart && !pg.follows() {
 		// A step's screen opens at its top, so what is above its first row is read
-		// before the rows are: the first move reads the page a line at a time.
+		// before the rows are: the first move reads the page a line at a time. A
+		// page with a Detail (detail.go) follows its cursor from the first move.
 		e.lead = 1 << 20
 	}
 	if p.rows == 0 {
@@ -475,6 +478,7 @@ func (m *Model) focusPane(title string) {
 func (m *Model) paneSpan(pg page) (first, n int) {
 	refs := 0
 	for _, l := range pg.lines {
+		refs += len(l.hiddenRefs)
 		if l.ref != nil {
 			refs++
 		}
@@ -512,4 +516,16 @@ func (m *Model) paneMarks(pg *page) {
 			pg.marks = append(pg.marks, p.first+pc.find(p, refs, pg.windowed[p.title]))
 		}
 	}
+}
+
+// follows says the page is a list and the Detail of the row under its cursor
+// (detail.go): its window follows the cursor and is never held at the top, while
+// a page with no Detail is held until it is read a line at a time.
+func (p page) follows() bool {
+	for _, l := range p.lines {
+		if l.hold&holdFrom != 0 {
+			return true
+		}
+	}
+	return false
 }

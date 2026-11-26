@@ -109,12 +109,13 @@ func (t *ticket) lastRunFailed(slice string) (events.Envelope, bool) {
 	return t.lines[i], true
 }
 
-// oracleWords is an oracle run as a line says it: "`go test ./...` passed in
-// 15s", and who ran it when the line says.
-func oracleWords(l events.Envelope) string {
-	cmd := "its oracle"
-	if l.Command != "" {
-		cmd = "`" + l.Command + "`"
+// oracleWords is an oracle run as a line says it: "passed in 15s", and who ran it
+// when the line says. The command stands in place of "oracle" only when it is not
+// the one the screen already says: "`go test ./pkg` passed in 15s".
+func oracleWords(l events.Envelope, oracle string) string {
+	cmd := "oracle "
+	if l.Command != "" && l.Command != oracle {
+		cmd = "`" + l.Command + "` "
 	}
 	word := l.Outcome
 	switch l.Outcome {
@@ -131,7 +132,7 @@ func oracleWords(l events.Envelope) string {
 	case "":
 		word = "ran"
 	}
-	text := cmd + " " + word + took(l.Seconds)
+	text := cmd + word + took(l.Seconds)
 	switch l.Source {
 	case "jig":
 		text += " · jig ran it"

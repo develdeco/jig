@@ -4,21 +4,21 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
     approved 2026-10-23 09:00 by an agent, as Ada Lovelace
     recorded by the session that drafted it · brief 0123456789ab
 
-  ╭─ Sections ───────────────────────────────────────────────────────────── 4 ─╮
+  ╭─ Sections ──────────────────────────────────────────────────── 4 sections ─╮
   │  section   cited by                                                        │
   │▸ Goal      no slice                                                        │
-  │      Say hello and goodbye to a person by name, in the tone the product    │
-  │      has.                                                                  │
   │  Greeting  slice a                                                         │
-  │      Use the first name. Fall back to "friend" when there is none.         │
   │  Farewell  slice b                                                         │
-  │      Say goodbye politely, and never twice.                                │
   │  Tone      slice c, d                                                      │
-  │      Casual or formal: the owner decides. Until then neither is shipped,   │
-  │      so the copy waits for the answer.                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ↓ 9 more
-
+  ╭─ Slices ──────────────────────────────────────────────────────── 4 slices ─╮
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮
+  │  heading Goal                                                              │
+  │  text    Say hello and goodbye to a person by name, in the tone the        │
+  │          product has.                                                      │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 1 more
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · tab next pane: Slices · ↑↓ move in Sections
   1-5 steps · [ ] sibling · h main · t tail

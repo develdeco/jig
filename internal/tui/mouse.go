@@ -31,7 +31,9 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 	n := 0
 	for _, line := range l.pg.lines {
 		if line.ref == nil {
+			// The rows a mark stands for are rows the cursor passes over.
 			h.sel = append(h.sel, -1)
+			n += len(line.hiddenRefs)
 			continue
 		}
 		h.sel = append(h.sel, n)

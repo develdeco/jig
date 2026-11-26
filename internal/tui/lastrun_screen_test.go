@@ -11,7 +11,8 @@ import (
 // TestBuildScreenSaysWhetherTheLastRunCoversTheSlicesLastCommit: the status's
 // last_runs table tells the screen each slice's last run and whether it covers
 // the slice's last commit, and the build screen says it in the same words
-// under the slice's commits; a slice with no run says nothing of one.
+// in the detail of the slice under its commits; a slice with no run says nothing
+// of one.
 func TestBuildScreenSaysWhetherTheLastRunCoversTheSlicesLastCommit(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
@@ -31,13 +32,15 @@ func TestBuildScreenSaysWhetherTheLastRunCoversTheSlicesLastCommit(t *testing.T)
 	}, "\n") + "\n"
 	g.r.answer("status JIG-1 --store /s", status, 0)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", ""))).press("enter")
-	text := pageText(g)
-	for _, want := range []string{"last run: pass · covers: yes", "last run: fail · covers: no: slice's last commit is cccccccccccc"} {
-		if !strings.Contains(readWords(text), want) {
-			t.Errorf("the build screen lacks %q:\n%s", want, text)
+	// The detail of the slice under the cursor says it, so the cursor goes to each.
+	for i, want := range []string{"pass · covers: yes", "fail · covers: no: slice's last commit is cccccccccccc", ""} {
+		text := readWords(pageText(g))
+		if want != "" && !(strings.Contains(text, "last run") && strings.Contains(text, want)) {
+			t.Errorf("the detail of slice %d lacks %q:\n%s", i, want, text)
 		}
-	}
-	if strings.Count(text, "last run:") != 2 {
-		t.Errorf("a slice with no run says something of one:\n%s", text)
+		if want == "" && strings.Contains(text, "last run") {
+			t.Errorf("a slice with no run says something of one:\n%s", text)
+		}
+		g.press("down")
 	}
 }

@@ -567,11 +567,11 @@ func (g *rig) view() string { return g.m.View() }
 func (g *rig) tabTo(title string) *rig {
 	g.t.Helper()
 	g.view()
-	for i := 0; i < 12 && g.m.focusedPane() != title; i++ {
+	for i := 0; i < 12 && !samePane(g.m.focusedPane(), title); i++ {
 		g.press("tab")
 		g.view()
 	}
-	if g.m.focusedPane() != title {
+	if !samePane(g.m.focusedPane(), title) {
 		g.t.Fatalf("tab did not reach the pane %q: panes %v, focus %q", title, g.m.panesNow, g.m.focusedPane())
 	}
 	return g
@@ -587,10 +587,17 @@ func (g *rig) onRow(id string) *rig {
 // focus is onRow with the folds as they are.
 func (g *rig) focus(id string) *rig {
 	g.t.Helper()
-	for i, r := range g.m.page().refs() {
+	pg := g.m.page()
+	for i, r := range pg.refs() {
 		if r.id == id {
 			e := g.m.top()
 			e.sel, e.lead, e.follow = i, 0, false
+			// The pane that holds the row has the focus and keeps the cursor.
+			if at := paneOfRow(pg.panes(), i); at >= 0 {
+				p := pg.panes()[at]
+				e.paneFocus, e.textFocus = p.title, false
+				e.rememberPane(pg, p, pg.refs())
+			}
 			g.m.noteCursor()
 			return g
 		}
@@ -858,4 +865,10 @@ func (t *ticket) guessSliceState(slice string) string {
 		return StateBuilding
 	}
 	return StateQueued
+}
+
+// samePane says two pane titles are one pane: the Detail pane is named for the row
+// under the cursor of the list beside it, so its title changes as that cursor moves.
+func samePane(a, b string) bool {
+	return a == b || strings.HasPrefix(a, "Detail · ") && strings.HasPrefix(b, "Detail · ")
 }

@@ -9,9 +9,13 @@ import (
 	"github.com/develdeco/jig/internal/phase"
 )
 
-// briefPage is the brief: the record of its approval, its sections with the
-// first lines of each and the slices that cite it, the slices it was cut into
-// with the workspace and oracle of each, and the brief's activity.
+// briefPage is the brief: the record of its approval, a list of its sections (each
+// with the slices that cite it) and of the slices it was cut into, one cursor
+// down the sections and then the slices, the detail of the row it is on, and the
+// brief's activity. A section's detail has its heading, the slices that cite it
+// and the text the brief read gives; a slice's its goal and oracle whole, where
+// it builds, what it waits for and the sections that cite it. A section opens
+// nothing, and a slice opens its slice screen.
 //
 // The sections' words come from `jig brief show --text` (brieftext.go) and the
 // rest from the status, so a status that lists no text still shows the headings.
@@ -48,61 +52,106 @@ func (m *Model) briefPage(id string) page {
 	case t.brief.Err != "":
 		p.add(m.st.dim("the brief's text is not available: " + t.brief.Err))
 	}
-	cells := make([][]string, len(b.Sections))
+	slices := t.slices(m.zone)
+	goals := t.goals()
+	sections := make([]listRow, len(b.Sections))
 	for i, s := range b.Sections {
 		cited := m.st.dim("no slice")
 		if len(s.Slices) > 0 {
 			cited = "slice " + strings.Join(s.Slices, ", ")
 		}
-		cells[i] = []string{s.Heading, cited}
+		sections[i] = listRow{ref: &rowRef{kind: rowSection, id: s.Heading, ticket: id}, cells: []string{s.Heading, cited}}
 	}
-	p.boxTop("Sections", strconv.Itoa(len(b.Sections)))
-	if len(cells) == 0 {
-		p.boxAdd(m.st.dim("no sections"))
-	} else {
-		laid := m.laidList(&p, sectionColumns, dimmed(m.st, sectionColumnNames), cells, 0)
-		for i, s := range b.Sections {
-			p.boxLaid(&rowRef{kind: rowStop, id: s.Heading, ticket: id}, laid[i])
-			for _, line := range wrap(t.brief.summaryOf(i, s.Heading), m.innerWidth()-6, 2) {
-				p.boxUnder("    " + m.st.dim(line))
-			}
-		}
-	}
-	p.boxEnd()
-
-	slices := t.slices(m.zone)
-	idW := width(briefSliceColumnNames[1])
-	cells = make([][]string, len(slices))
+	rows := make([]listRow, len(slices))
 	for i, s := range slices {
-		idW = max(idW, width(s.ID))
-		cells[i] = []string{m.st.icon(s.State), s.ID, firstOf(t.goals()[s.ID], m.st.dim("no goal"))}
-	}
-	p.boxTop("Slices", strconv.Itoa(len(slices)))
-	if len(cells) == 0 {
-		p.boxAdd(m.st.dim("no slices yet"))
-	} else {
-		laid := m.laidList(&p, briefSliceColumns, dimmed(m.st, briefSliceColumnNames), cells, 0)
-		for i, s := range slices {
-			p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
-			if facts := sliceFacts(s, true); facts != "" {
-				p.boxUnder("    " + spaces(idW) + m.st.dim(facts))
-			}
+		rows[i] = listRow{
+			ref:   &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID},
+			cells: []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), firstOf(goals[s.ID], m.st.dim("no goal"))},
 		}
 	}
-	p.boxEnd()
+	var detail *detailSpec
+	sectionList := listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"}
+	sliceList := listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"}
+	at := m.cursorAmong(sectionList, sliceList)
+	if len(sections)+len(rows) > 0 {
+		var d detailSpec
+		if at < len(sections) {
+			d = m.sectionDetail(t, at)
+		} else {
+			d = m.briefSliceDetail(t, at-len(sections))
+		}
+		detail = &d
+	}
+	m.listAndDetail(&p, detail, at, sectionList, sliceList)
 
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
 
 // The columns of the brief's lists: a section and the slices that cite it, a
-// slice and its goal.
+// slice with its state and goal.
 var (
 	sectionColumns        = []column{{free: true}, {gap: 2}}
 	sectionColumnNames    = []string{"section", "cited by"}
-	briefSliceColumns     = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}}
-	briefSliceColumnNames = []string{"", "slice", "goal"}
+	briefSliceColumns     = []column{{}, {id: true, gap: 1}, {gap: 2}, {free: true, gap: 2}}
+	briefSliceColumnNames = []string{"", "slice", "state", "goal"}
 )
+
+// sectionDetail is the detail of the brief's section at i: its heading, the
+// slices that cite it with the state each is in, and the text the brief read
+// gives of it, whole.
+func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
+	s := t.status.Brief.Sections[i]
+	d := detailSpec{title: s.Heading, summary: "no slice cites it"}
+	if n := len(s.Slices); n > 0 {
+		d.summary = "cited by " + strconv.Itoa(n) + " " + plural(n, "slice", "slices")
+	}
+	d.rows = append(d.rows, detailRow{label: "heading", text: s.Heading})
+	states := map[string]string{}
+	for _, sl := range t.slices(m.zone) {
+		states[sl.ID] = sl.State
+	}
+	label := "cited by"
+	for _, id := range s.Slices {
+		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read")})
+		label = ""
+	}
+	if text := t.brief.summaryOf(i, s.Heading); text != "" {
+		d.rows = append(d.rows, detailRow{label: "text", text: text})
+	}
+	return d
+}
+
+// briefSliceDetail is the detail of the slice at i of the ticket's slices, in
+// the brief's words: its goal and oracle whole, where it builds, what it waits
+// for and the sections of the brief that cite it.
+func (m *Model) briefSliceDetail(t *ticket, i int) detailSpec {
+	row := t.slices(m.zone)[i]
+	d := detailSpec{title: row.ID, summary: row.State}
+	add := func(r detailRow) { d.rows = append(d.rows, r) }
+	if i < len(t.status.Slices) && t.status.Slices[i].Goal != "" {
+		add(detailRow{label: "goal", text: t.status.Slices[i].Goal})
+	}
+	if row.Oracle != "" {
+		add(detailRow{label: "oracle", text: row.Oracle})
+	}
+	if row.Workspace != "" {
+		add(detailRow{label: "workspace", text: row.Workspace})
+	}
+	if row.BlockedBy != "" {
+		add(detailRow{label: "waits for", text: strings.ReplaceAll(row.BlockedBy, "+", ", ")})
+	}
+	label := "cited in"
+	for _, s := range t.status.Brief.Sections {
+		for _, id := range s.Slices {
+			if id == row.ID {
+				add(detailRow{label: label, text: s.Heading})
+				label = ""
+			}
+		}
+	}
+	return d
+}
 
 // approvalRecord is the lines that say how the brief came to be approved: when
 // and by whom, how it was recorded, and which brief it was. They are empty

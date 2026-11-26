@@ -75,7 +75,7 @@ func TestTUIPipeFramesUseOneSetOfParts(t *testing.T) {
 
 	// A task's build screen is a Slices panel under its names.
 	keys.Write([]byte("\x1b[H\r2"))
-	out.untilWords(t, "slice state tries goal")
+	out.untilWords(t, "slice state tries took goal")
 	if build := lastScreen(out.String()); !strings.Contains(build, "╭─ Slices ") {
 		t.Errorf("the build screen has no Slices panel:\n%s", build)
 	}

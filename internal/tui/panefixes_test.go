@@ -134,14 +134,23 @@ func TestUnzoomingShowsNothingNewWhenNoLineCameIn(t *testing.T) {
 
 // TestTheLastRowBringsThePanelsBelowIntoView: a cursor on its panel's last row
 // shows the panels that follow as far as the room allows, with no blank lines.
+// On a phase screen the Detail of the row comes first, then the panels below it:
+// the room the list and the Detail leave is theirs, and a mark says what lies
+// below.
 func TestTheLastRowBringsThePanelsBelowIntoView(t *testing.T) {
 	t.Parallel()
 	g := slicesRig(t, 9, 6, 80, 24)
 	g.press("enter")
 	g.tabTo("Slices").press("end")
 	v := g.view()
-	if !strings.Contains(v, "╭─ Build activity") {
-		t.Errorf("the cursor on the last slice does not bring the activity below into view:\n%s", v)
+	if !strings.Contains(v, "╭─ Detail · s9") || !strings.Contains(v, "↓ ") {
+		t.Errorf("the cursor on the last slice does not bring its detail into view, with a mark of what is below:\n%s", v)
+	}
+	roomy := slicesRig(t, 2, 2, 100, 40)
+	roomy.press("enter")
+	roomy.tabTo("Slices").press("end")
+	if view := roomy.view(); !strings.Contains(view, "╭─ Build activity") {
+		t.Errorf("the cursor on the last slice does not bring the activity below into view when the room is there:\n%s", view)
 	}
 	lines := strings.Split(v, "\n")
 	for i := 3; i < len(lines)-4; i++ {

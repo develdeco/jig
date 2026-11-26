@@ -3,22 +3,22 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review             ◇ waits t
   ✓ round 2 clean · by reviewer
     fix budget 1 of 3 rounds used
 
-  ╭─ Rounds ─────────────────────────────────────────────────────────────── 2 ─╮
-  │    round    verdict   asked             range            read     at       │
-  │  ✓ round 2  clean                       delta ccccccc.…  2 files  09:13:30 │
-  │      reviewer (Claude Code · Opus 5) · independent · s-review              │
-  │  ! round 1  findings  1 fix · 2 asks …  full 0000000..…  4 files  09:11:30 │
-  │      reviewer (Claude Code · Opus 5) · independent · s-review              │
+  ╭─ Rounds ──────────────────────────────────────────────────────── 2 rounds ─╮
+  │    round    verdict   asked                    range             at        │
+  │▸ ✓ round 2  clean                              ccccccc..ddddddd  09:13:30  │
+  │  ! round 1  findings  1 fix · 2 asks · 1 note  0000000..ccccccc  09:11:30  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 0 ─╮
   │  nothing: no finding waits for a person                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Review activity ────────────────────────────────────────── latest 2 of 6 ─╮
-  │  time     step      what                                                   │
-  │▸ 09:13:30 ● round 2 reviewer finished: clean                               │
-  │  ↓ 2 more                                                                  │
+  ╭─ Detail · round 2 ───────────────────────────────────────────────── clean ─╮
+  │  reviewed by reviewer (Claude Code · Opus 5) · independent · s-review      │
+  │  range       delta ccccccc..ddddddd · 2 files read                         │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
+
+
+
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Rounds
-  ↑↓ move in Review activity · say "Land JIG-2" · 1-5 steps · [ ] sibling
-  h main · t tail
+  esc back · q quit · ? keys · tab next pane: Asks · ↑↓ move in Rounds
+  say "Land JIG-2" · 1-5 steps · [ ] sibling · h main · t tail

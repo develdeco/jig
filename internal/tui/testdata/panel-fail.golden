@@ -1,24 +1,24 @@
 jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review findings
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Findings ─────────────────────────────────────────────────────── round 1 ─╮
-  │    risk    where          outcome  title              id                   │
-  │  ↑ 2 more                                                                  │
-  │  ○ low     beta/b.go:2    noted    Rename the helper  r1-f4                │
-  │      a clearer name, whenever the file is next touched                     │
+  ! round 1's asks are decided · round 2 applies them
+    fix budget 1 of 3 rounds used
+
+  ╭─ Rounds ───────────────────────────────────────────────────────── 1 round ─╮
+  │    round    verdict   asked                    range             at        │
+  │  ! round 1  findings  1 fix · 2 asks · 1 note  0000000..ccccccc  09:11:30  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
   │    risk  where         decision          title                id           │
   │  + high  alpha/a.go:3  kept by you       Unchecked error      r1-f1        │
-  │      Unchecked error · a failed write would pass silently · needs a human  │
   │▸ - low   beta/b.go:9   dismissed by you  Name shadows import  r1-f2        │
-  │      Name shadows import · the import is hidden in this scope              │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Review activity ────────────────────────────────────────── latest 2 of 4 ─╮
-  │  time     step   what                                                      │
-  │  09:11:41 - asks you dismissed “Name shadows import”                       │
-  │  ↓ 2 more                                                                  │
+  ╭─ Detail · r1-f2 ──────────────────────────────────────── dismissed by you ─╮
+  │  finding  low · beta/b.go:9 · Name shadows import                          │
+  │  reason   the import is hidden in this scope                               │
+  │  decision - dismissed by you                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Review activity · ↑↓ move in Asks
+  esc back · q quit · ? keys · tab next pane: Detail · r1-f2 · ↑↓ move in Asks
   k keep · d dismiss · g gate · 1-5 steps · [ ] sibling · h main · t tail

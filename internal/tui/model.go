@@ -173,9 +173,9 @@ type navEntry struct {
 	// screen longer than its window can be read to its end.
 	scroll int
 	// lead is how many lines a page with rows is held above the window its
-	// cursor gives, so the lines above the first row can be read: set high when
-	// a screen opens at its top, raised by a move up from the first row, and
-	// cleared by any move of the cursor.
+	// cursor gives, so the lines above the first row can be read: raised by a move
+	// up from the first row, by lines coming in above (hold.go) and cleared by any
+	// move of the cursor.
 	lead int
 	// fresh is how many rows came in above the window of a page read below its
 	// top, which its first row counts; it is cleared once the window is back at
@@ -193,6 +193,9 @@ type navEntry struct {
 	// a row by anything else gives its pane the focus. textFocus says the focused
 	// pane is text only: it scrolls by lines and has no row under a cursor.
 	paneFocus string
+	// listFocus is the title of the list of a phase screen that had the focus last:
+	// a focus on a pane that is not one of the lists leaves the Detail on its row.
+	listFocus string
 	// zoom is the title of the pane drawn over the whole body, "" for none.
 	zoom string
 	// psearch is the query narrowing one pane (searchpane.go).
@@ -315,6 +318,11 @@ type Model struct {
 	panesNow []string
 	// help is the `?` overlay while it is up.
 	help *helpView
+	// laid holds the layouts the allocator gave lists, by what they were made of
+	// (laidOnce), so a frame that reads the same lists measures none.
+	laid map[string][][]string
+	// laidBuilds counts the lists the allocator laid out and the memo did not hold.
+	laidBuilds int
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
 	// rowMemo holds the rows of the chart screens built for the world as it
@@ -1115,9 +1123,10 @@ func (m *Model) moveBy(delta int) {
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
-		// Home: the first row, with the page held at its top.
+		// Home: the focused pane's first row; the window follows it, and a page that
+		// has no Detail is held at its top.
 		e.sel, e.lead = lo, 0
-		if lo == 0 {
+		if lo == 0 && !pg.follows() {
 			e.lead = 1 << 20
 		}
 		return
@@ -1126,8 +1135,10 @@ func (m *Model) moveBy(delta int) {
 		return
 	case e.lead > 0 || (delta < 0 && e.sel == 0 && lo == 0):
 		// A page held above its cursor's window is read a line at a time, from
-		// whatever row the cursor is on, until it is back at the window; and
-		// up from the first row moves the page above it. The window clamps lead
+		// whatever row the cursor is on, until it is back at the window: where the
+		// focused pane has no row to move to the page is read, not the cursor moved.
+		// Up from the first row moves the page above it; any other move is the
+		// cursor's, and the window follows it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
 		// its top starts at once.
 		// A window that would start where it cannot, on the top or the names of the
@@ -1351,6 +1362,7 @@ func (m *Model) rowShown(pg page, sel int) bool {
 	from, to, _ := windowSpan(pg, sel, start, h, m.top().lead == 0 || (m.top().fresh != 0 && start != 0))
 	n := 0
 	for i, l := range pg.lines {
+		n += len(l.hiddenRefs)
 		if l.ref == nil {
 			continue
 		}
@@ -1471,9 +1483,9 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 
 // askRow is the position, among the rows of the review screen on top, of the
 // ask ref names, else of the first ask; 0 when it holds none.
-func (m *Model) askRow(ref *rowRef) int {
+func (m *Model) askRow(pg page, ref *rowRef) int {
 	first := -1
-	for i, r := range m.page().refs() {
+	for i, r := range pg.refs() {
 		if r.kind != rowAsk {
 			continue
 		}
