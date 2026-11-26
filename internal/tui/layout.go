@@ -422,12 +422,17 @@ func laidWithin(cols []column, cells [][]string, width, room int) [][]string {
 // laidWithinMarked is laidWithin with the rows whole says laid out whole.
 func laidWithinMarked(cols []column, cells [][]string, width, room int, whole []bool) []laidRow {
 	for rows := wrapRows; ; rows-- {
-		laid := layoutMarked(cols, cells, width, rows, whole)
+		// The room is spent on the rows as they are folded: an expanded row takes
+		// more than its room and gives no other row up.
+		laid := layoutMarked(cols, cells, width, rows, nil)
 		used := 0
 		for _, r := range laid {
 			used += len(r.lines)
 		}
 		if used <= room || rows <= 1 {
+			if whole != nil {
+				laid = layoutMarked(cols, cells, width, rows, whole)
+			}
 			return laid
 		}
 	}
