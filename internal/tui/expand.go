@@ -40,6 +40,16 @@ func (e *navEntry) wholeOf(pane string, first int, refs []*rowRef) []bool {
 	return whole
 }
 
+// paneOf is the title of the pane the sel-th row of the page is in, def when it
+// is in none.
+func (p page) paneOf(sel int, def string) string {
+	ps := p.panes()
+	if i := paneOfRow(ps, sel); i >= 0 {
+		return ps[i].title
+	}
+	return def
+}
+
 // paneTitle is the title of the panel the page is adding to: the last top edge.
 func (p page) paneTitle() string {
 	for i := len(p.lines) - 1; i >= 0; i-- {
@@ -121,6 +131,9 @@ func (m *Model) expandHolder(fold bool) bool {
 		e.expanded = map[expKey]bool{}
 	}
 	k := expKey{pane: e.paneFocus}
+	if sub.hasRow {
+		k.pane = sub.pane
+	}
 	if sub.hasRow {
 		k.id = sub.row.identity()
 	}
