@@ -88,6 +88,12 @@ type Config struct {
 	// `o`: the command gives it only on a terminal. Nil opens nothing, and the
 	// key says the address instead.
 	Open func(url string) error
+	// Viewer serves a ticket's illustration and says where it is: its address on
+	// the loopback interface, or its path in a session whose browser cannot
+	// reach it. It is the one action the screens take outside a verb (a verb that
+	// serves it blocks), writes nothing, and the command gives it. Nil serves
+	// nothing, and the key says so.
+	Viewer func(ticket string) (string, error)
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -158,6 +164,11 @@ type navEntry struct {
 	// finding is the id of the finding a finding screen is of.
 	finding string
 	sel     int
+	// part is the row of the brief screen's Parts list the screen is opened on,
+	// by identity (a section by its place, a slice by its id); partSet is false
+	// when it is opened for no part and begins on its first row.
+	part    rowIdentity
+	partSet bool
 	// cur is the row the main screen's cursor stands on, by identity, found
 	// again on each draw wherever the page now has it; curSet is false until
 	// the page has had a row to stand on.
@@ -249,6 +260,9 @@ type Model struct {
 	ask    *confirmation
 	last   *outcome
 	notice string
+	// served is the address each ticket's illustration was given when the person
+	// opened it, so opening it again reuses the address.
+	served map[string]string
 	tail   bool
 	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
 	// a key has been taken in since that View: a key that acts on an ask acts
@@ -1405,6 +1419,11 @@ func (m *Model) open() tea.Cmd {
 		m.goToRound(ref.id)
 		return nil
 	}
+	if ref.kind == rowIllustration {
+		// The illustration opens in the browser, not in a screen.
+		m.openIllustration(ref.ticket)
+		return nil
+	}
 	next, ok := m.openTarget(*ref)
 	if !ok {
 		if why := opensNothing(*ref); why != "" {
@@ -1482,6 +1501,16 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 			return next, false
 		}
 		return m.openTarget(rowRef{kind: rowTicket, id: ref.id, ticket: ref.id})
+	case rowIssue:
+		// An issue's screen is its plan, the screen of the chart that plans it.
+		chart := m.planOf(ref.id)
+		if chart == "" {
+			return next, false
+		}
+		next = navEntry{screen: screenChart, chart: chart, follow: true}
+	case rowSection:
+		// A line that names a section opens the brief at it.
+		next = navEntry{screen: screenBrief, ticket: ref.ticket, part: ref.identity(), partSet: true}
 	case rowSub, rowLog:
 		// A sub-step or a line of the log opens the most specific thing it names:
 		// its slice, its round (the review screen, which has no screen of a round's
@@ -1495,6 +1524,10 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 			next = navEntry{screen: screenReview, ticket: ref.ticket}
 		case i >= 0:
 			next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
+			if next.screen == screenBrief && ref.kind == rowSub {
+				// A brief sub-step opens the part it is about, else the first row.
+				next.part, next.partSet = m.briefPartOf(ref.ticket, ref.id)
+			}
 		default:
 			return next, false
 		}

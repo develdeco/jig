@@ -45,7 +45,9 @@ type statusInfo struct {
 	Probes []statusProbe
 	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
 	// suite by repo: what the plan screen reads. Both are empty for a task.
-	Need  string
+	Need string
+	// md is Need drawn for a width (needLines).
+	md    map[mdKey][]string
 	Suite []statusSuite
 	// Standing, Prompt, Waits and Unmet are an issue's or multi-task's own pull
 	// request as `jig next` derives it: waiting, ready, published or landed, what
@@ -136,15 +138,24 @@ type statusPublish struct {
 
 // statusBrief is the brief block of a status: whether the brief as it is now
 // is the approved one (none, current or changed), who approved it, when and
-// how, and its sections with the slices that cite each.
+// how, and its sections with the slices that cite each. Removed are the
+// headings the approved brief had and the brief now lacks; Illustration says
+// how the illustration stands against the approval (none, same, changed,
+// added or removed), "" when the approval did not record it.
 type statusBrief struct {
 	Approval, ApprovedBy, ApprovedAt, Provenance string
 	Sections                                     []statusBriefSection
+	Removed                                      []string
+	Illustration                                 string
 }
 
+// statusBriefSection is a section's heading, the slices that cite it and how
+// it stands against the approval (same or changed), "" when the approval
+// recorded no sections.
 type statusBriefSection struct {
 	Heading string
 	Slices  []string
+	Since   string
 }
 
 // statusVerification is a row of the status's verification_states table. Commit
@@ -310,8 +321,12 @@ func parseStatus(out string) *statusInfo {
 			if c := dash(r["slices"]); c != "" {
 				cited = strings.Split(c, "+")
 			}
-			b.Sections = append(b.Sections, statusBriefSection{Heading: r["heading"], Slices: cited})
+			b.Sections = append(b.Sections, statusBriefSection{Heading: r["heading"], Slices: cited, Since: dash(r["since_approval"])})
 		}
+		for _, r := range doc.Tables["brief_removed"].Maps() {
+			b.Removed = append(b.Removed, r["heading"])
+		}
+		b.Illustration = dash(kv["illustration_since_approval"])
 		info.Brief = b
 	}
 	for _, r := range doc.Tables["outstanding_asks"].Maps() {
