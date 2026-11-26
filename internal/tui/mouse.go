@@ -94,6 +94,11 @@ func onCut(cuts []cutMark, x int) bool {
 // click puts the cursor on the row drawn at terminal row y, when one is, and
 // expands the row's holder when x is on a cut mark of its lines.
 func (m *Model) click(x, y int) {
+	if k := m.lastMark; k != nil && y == k.y && (x == k.x || x == k.x-1) {
+		// The last command line's mark is the screen's, not a row's.
+		m.toggleLast(false)
+		return
+	}
 	h := m.hit
 	if m.help != nil || h == nil || y < h.top || y >= h.top+h.rows {
 		return

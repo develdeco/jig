@@ -297,6 +297,13 @@ func (m *Model) View() string {
 	for len(body) < l.pageH {
 		body = append(body, "")
 	}
+	m.lastMark = nil
+	if m.last != nil && m.help == nil {
+		// The last command's cut mark is where the panel draws it.
+		if v, _ := m.lastShown(w); v.cut >= l.panelDrop && v.cut-l.panelDrop < len(l.panel) {
+			m.lastMark = &lastMarkAt{y: len(l.head) + len(body) + len(tailPane) + v.cut - l.panelDrop, x: width(v.lines[v.cut]) - 1}
+		}
+	}
 	out := append(append(append(append(l.head, body...), tailPane...), l.panel...), l.foot...)
 	for i, line := range out {
 		out[i] = strings.TrimRight(line, " ")
@@ -312,6 +319,8 @@ type screenLayout struct {
 	sel               int
 	head, foot, panel []string
 	pageH, tailH      int
+	// panelDrop is how many rows of the panel the layout gave up to keep the body its minimum.
+	panelDrop int
 	// tailNote is the line that stands where the tail would be when the body is
 	// too short for it, and takes a row of the body.
 	tailNote string
@@ -356,18 +365,19 @@ func (m *Model) layout() screenLayout {
 
 	head := m.header(w)
 	foot := m.footer(w)
-	panel := m.panel(w)
+	panel, drop := m.panel(w), 0
 	bodyH := h - len(head) - len(foot) - len(panel)
 	if bodyH < minBodyRows && len(panel) > 0 {
 		// The last command goes first: the notice says what to do.
-		panel = panel[min(len(panel), minBodyRows-bodyH):]
+		drop = min(len(panel), minBodyRows-bodyH)
+		panel = panel[drop:]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
 		bodyH = 1
 	}
 
-	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
+	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, panelDrop: drop, pageH: bodyH}
 	switch {
 	case m.tail && bodyH >= tailMinRows:
 		l.tailH = bodyH / 2
@@ -911,7 +921,8 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		out = append(out, m.lastLines(m.last, w)...)
+		v, _ := m.lastShown(w)
+		out = append(out, v.lines...)
 	}
 	if m.notice != "" {
 		// Drawn whole, in the rows it needs: what it tells the person is the
@@ -927,23 +938,6 @@ func (m *Model) panel(w int) []string {
 // shown whole: a sentence of the verb's own is never this long.
 const helpWrapRows = 6
 
-// lastLines are the panel's rows for a key's command: the one line, and for a
-// verb that leaves the next move to someone else the help line it printed, whole
-// and wrapped, beneath the command. The words are the verb's own; the TUI adds
-// none. They are part of the line and expire with it.
-func (m *Model) lastLines(o *outcome, w int) []string {
-	if s := o.shown(); o.leavesTheMove() && s.Code == 0 {
-		if help, ok := firstHelp(s.Out); ok {
-			out := []string{fit("  "+m.st.icon(StateOK)+" "+m.st.bold(m.shownLine(s.Args)), w)}
-			for _, l := range wrap(help, w-4, helpWrapRows) {
-				out = append(out, "    "+m.st.dim(l))
-			}
-			return out
-		}
-	}
-	return []string{m.lastLine(o, w)}
-}
-
 // firstHelp is the first line of the help a verb printed, false when it printed
 // none.
 func firstHelp(out string) (string, bool) {
@@ -954,28 +948,6 @@ func firstHelp(out string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// lastLine is a key's command as typed and what the verb said of it: its own
-// first sentence when it worked, its error and code when it did not. The step
-// that failed is the one shown, so a chain that stopped reads as the failure.
-// The raw output is not printed, and a line too long for the screen is cut.
-func (m *Model) lastLine(o *outcome, w int) string {
-	s := o.shown()
-	state, said := StateOK, firstSentence(s.Out)
-	if s.Code != 0 {
-		state, said = StateFail, errorSentence(s.Out)
-	}
-	line := "  " + m.st.icon(state) + " " + m.st.bold(m.shownLine(s.Args))
-	if said != "" {
-		if state == StateFail {
-			said = m.st.state(StateFail, said)
-		} else {
-			said = m.st.dim(said)
-		}
-		line += "  " + said
-	}
-	return fit(line, w)
 }
 
 // firstSentence is what a verb that worked says of it: the first line of its

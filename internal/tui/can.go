@@ -49,6 +49,9 @@ type subject struct {
 	cut, expanded bool
 	// textPane says the focused pane has no cursor rows and is the holder.
 	textPane bool
+	// lastCut and lastExpanded say the same of the last command line, which the
+	// screen holds: `space` reaches it when the focus holds nothing cut.
+	lastCut, lastExpanded bool
 }
 
 // same says whether o is the subject s is, whatever row the cursor is on: the
@@ -120,6 +123,7 @@ func (m *Model) subjectOf(pg page) subject {
 		s.expanded = e.paneOpen(e.paneFocus)
 	}
 	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()
+	s.lastCut, s.lastExpanded = m.lastState()
 	return s
 }
 

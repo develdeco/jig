@@ -103,12 +103,18 @@ func (p page) holdsCutIn(title string) bool {
 // pane when it has no cursor rows.
 func (s subject) holder() bool { return s.hasRow || s.textPane }
 
+// holds says the focus has a holder that holds a cut or is expanded: `space`
+// acts on it before it reaches the last command line.
+func (s subject) holds() bool { return s.holder() && (s.cut || s.expanded) }
+
 // expandHolder expands the holder under the cursor, or folds it when it is
 // expanded and fold is set; it says whether anything changed.
 func (m *Model) expandHolder(fold bool) bool {
 	sub := m.subjectNow()
-	if !sub.holder() || !(sub.cut || sub.expanded) {
-		return false
+	if !sub.holds() {
+		// A row's own cut comes first; with none, `space` reaches the screen's last
+		// command. A click that found no holder does nothing.
+		return fold && m.toggleLast(fold)
 	}
 	e := m.top()
 	if e.expanded == nil {

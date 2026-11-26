@@ -310,6 +310,11 @@ type Model struct {
 	keysOn subject
 	// hit is what the last frame drew of the body, for a click (mouse.go).
 	hit *hitMap
+	// lastOpen is the last command when the person has expanded its line (lastcmd.go);
+	// it is the screen's, so it goes with the line, which a new command replaces.
+	lastOpen *outcome
+	// lastMark is where the last frame drew the last command's cut mark, for a click.
+	lastMark *lastMarkAt
 	// tall is the row the last frame drew by lines, nil when it drew none
 	// (tall.go).
 	tall *tallInfo
