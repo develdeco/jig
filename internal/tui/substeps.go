@@ -15,6 +15,10 @@ func subRef(ticket string, step int, s phase.Sub) rowRef {
 	if id, ok := strings.CutPrefix(s.Key, "slice:"); ok {
 		r.slice = id
 	}
+	if n, ok := strings.CutPrefix(s.Key, "round:"); ok {
+		// A round's sub-step names its round, as every row that opens one does.
+		r.round = n
+	}
 	return r
 }
 

@@ -25,6 +25,36 @@ func threeRoundsWith(t *testing.T, w, h int, status string, extra ...string) *ri
 	return g.sized(w, h)
 }
 
+// TestARoundSubStepOnTheTicketScreenOpensTheReviewOnItsRow: a round's sub-step on the
+// ticket screen names its round, and enter opens the review with the Rounds cursor
+// on that round, not on the latest.
+func TestARoundSubStepOnTheTicketScreenOpensTheReviewOnItsRow(t *testing.T) {
+	t.Parallel()
+	g := threeRounds(t, 100, 40, 0)
+	g.m.back()
+	if g.m.Screen() != "ticket" {
+		t.Fatalf("on %s, want the ticket screen", g.m.Screen())
+	}
+	g.m.cursorToRow(func(r rowRef) bool { return r.kind == rowReview })
+	g.view()
+	g.m.cursorToRow(func(r rowRef) bool { return r.kind == rowSub && r.id == "round:1" })
+	ref := g.m.selected()
+	if ref == nil || ref.kind != rowSub || ref.round != "1" {
+		t.Fatalf("the cursor is on %+v, want the sub-step of round 1 naming its round", ref)
+	}
+	g.press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("enter opened %s, want the review", g.m.Screen())
+	}
+	g.view()
+	if ref := g.m.selected(); ref == nil || ref.kind != rowRound || ref.id != "1" {
+		t.Errorf("the review opens with the cursor on %+v, want round 1", ref)
+	}
+	if !strings.Contains(g.view(), "╭─ Detail · round 1") {
+		t.Errorf("the Detail is not round 1's:\n%s", g.view())
+	}
+}
+
 // TestADecidedAskOfAnEarlierRoundDoesNotSayItWaits: a finding round 1 recorded as
 // an ask and a person decided, which a later round applied, says what was decided
 // and that it was applied, not that it waits for a person.
