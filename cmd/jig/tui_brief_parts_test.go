@@ -146,7 +146,15 @@ func TestTUIPipeFramesOpenTheBriefPartByPart(t *testing.T) {
 	if words = screenWords(screen); !strings.Contains(words, "Steps changed since the approval") {
 		t.Errorf("the slice screen does not list the section that cites it, changed:\n%s", screen)
 	}
-	keys.Write([]byte("\t\r")) // tab to the Brief sections pane, enter on its row
+	// tab to the Brief sections pane and enter on its row; a frame that reads the
+	// store again can hand the focus back, so the pair is pressed until the brief
+	// is open.
+	for i := 0; i < 20 && !strings.Contains(lastScreen(out.String()), "╭─ Parts"); i++ {
+		keys.Write([]byte("\t"))
+		time.Sleep(150 * time.Millisecond)
+		keys.Write([]byte("\r"))
+		time.Sleep(300 * time.Millisecond)
+	}
 	screen = out.untilScreen(t, "the brief back at the section", func(s string) bool {
 		return strings.Contains(s, "╭─ Parts") && strings.Contains(s, "╭─ Detail · Steps")
 	})
