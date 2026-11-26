@@ -1,17 +1,17 @@
 jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ✓ approved by an agent, as Ada Lovelace · 4 sections, 4 slices
-    approved 2026-10-23 09:00 by an agent, as Ada Lovelace
-    recorded by the session that drafted it · brief 0123456789ab
 
-  ╭─ Sections ──────────────────────────────────────────────────── 4 sections ─╮
-  │  section   cited by                                                        │
-  │▸ Goal      no slice                                                        │
-  │  Greeting  slice a                                                         │
-  │  Farewell  slice b                                                         │
-  │  Tone      slice c, d                                                      │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Slices ──────────────────────────────────────────────────────── 4 slices ─╮
+  ╭─ Parts ────────────────────────────────────────────────────────── 9 parts ─╮
+  │  kind      part                       stands at                            │
+  │▸ section   Goal                       no slice                             │
+  │  section   Greeting                   cited by 1                           │
+  │  section   Farewell                   cited by 1                           │
+  │  section   Tone                       cited by 2                           │
+  │  slice     a  Greet by name           ● green                              │
+  │  slice     b  Say goodbye, politely   ✗ fail                               │
+  │  slice     c  Pick the tone           ? needs-input                        │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮
   │  heading Goal                                                              │
@@ -20,5 +20,5 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 1 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Slices · ↑↓ move in Sections
+  esc back · q quit · ? keys · tab next pane: Detail · Goal · ↑↓ move in Parts
   1-5 steps · [ ] sibling · h main · t tail

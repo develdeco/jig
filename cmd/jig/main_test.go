@@ -64,12 +64,12 @@ func TestRenderStatus(t *testing.T) {
 		"questions: none\n" +
 		"brief:\n" +
 		"  approval: none\n" +
-		"brief_sections[5]{heading,slices}:\n" +
-		"  Goal,-\n" +
-		"  Slice A - failing clamp,a\n" +
-		"  Slice B - clamp callers,b\n" +
-		"  Slice C - greeting decision,c\n" +
-		"  Slice D - rig smoke,d\n" +
+		"brief_sections[5]{heading,slices,since_approval}:\n" +
+		"  Goal,-,-\n" +
+		"  Slice A - failing clamp,a,-\n" +
+		"  Slice B - clamp callers,b,-\n" +
+		"  Slice C - greeting decision,c,-\n" +
+		"  Slice D - rig smoke,d,-\n" +
 		"help[1]:\n" +
 		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1\n"
 

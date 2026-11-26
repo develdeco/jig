@@ -272,8 +272,12 @@ func wordLines(text string, w int) []string {
 	cur := ""
 	for _, word := range strings.Fields(text) {
 		for width(word) > w {
-			head := ansi.Truncate(word, w, "")
-			if head == "" {
+			// A word wider than a line is cut by its cells, not its bytes: the
+			// text is cut as text and the styles it carries go with each piece,
+			// each closed, so no character is lost and none bleeds.
+			full := width(word)
+			head, rest := ansi.Cut(word, 0, w), ansi.Cut(word, w, full)
+			if head == "" || rest == "" && full > w {
 				word = ""
 				break
 			}
@@ -281,8 +285,8 @@ func wordLines(text string, w int) []string {
 				lines = append(lines, cur)
 				cur = ""
 			}
-			lines = append(lines, head)
-			word = word[len(head):]
+			lines = append(lines, closed(head))
+			word = rest
 		}
 		if word == "" {
 			continue
@@ -301,6 +305,15 @@ func wordLines(text string, w int) []string {
 		lines = append(lines, cur)
 	}
 	return lines
+}
+
+// closed is s with its styles ended when it holds any, so a piece cut from a
+// styled word does not carry its color onto what follows it.
+func closed(s string) string {
+	if strings.Contains(s, "\x1b[") && !strings.HasSuffix(s, "\x1b[0m") && !strings.HasSuffix(s, "\x1b[m") {
+		return s + "\x1b[0m"
+	}
+	return s
 }
 
 // shortRange is a reviewed range as the review screen says it: "full 1a2b3c4..5d6e7f8".

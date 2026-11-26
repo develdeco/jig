@@ -3,25 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/develdeco/jig/internal/events"
-	"github.com/develdeco/jig/internal/journal"
 )
-
-// briefRig is the brief screen of JIG-1 at w x h.
-func briefRig(t *testing.T, w, h int) *rig {
-	t.Helper()
-	g := newRig(t, "JIG-1")
-	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
-	g.r.answer("brief show JIG-1 --text --store /s", briefTextJIG1(), 0)
-	g.feed(append([]events.Envelope{
-		jl(at(0, 0), "JIG-1", "", journal.EventApproval, with("s-planner", "", "", "Ada Lovelace <ada@example.invalid>", "0123456789ab", "agent")),
-	}, jig1Records()...)...).press("up", "enter")
-	if g.m.Screen() != "brief" {
-		t.Fatalf("on %s, want brief", g.m.Screen())
-	}
-	return g.sized(w, h)
-}
 
 // publishScreen is the publish screen of a ticket published in one repo, its
 // body and changelog 12 lines each, at w x h.
@@ -34,57 +16,6 @@ func publishScreen(t *testing.T, w, h int) *rig {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}
 	return g.sized(w, h)
-}
-
-// TestBriefScreenIsARowPerSectionAndSliceAndTheCursorPartWhole: the sections and
-// the slices are one list of rows, sections first, and the detail under them is
-// the part the cursor is on: a section's heading, who cites it and its text; a
-// slice's goal, oracle, workspace and the sections that cite it. A section opens
-// nothing and a slice opens its screen.
-func TestBriefScreenIsARowPerSectionAndSliceAndTheCursorPartWhole(t *testing.T) {
-	t.Parallel()
-	g := briefRig(t, 100, 40)
-	view := g.view()
-	for _, want := range []string{"Goal", "Greeting", "Farewell", "Tone"} {
-		if !strings.Contains(between(view, "Sections", "╰"), want) {
-			t.Errorf("the Sections list has no row for %q:\n%s", want, view)
-		}
-	}
-	for _, id := range []string{"a", "b", "c", "d"} {
-		if !strings.Contains(between(view, "Slices", "╰"), " "+id+" ") {
-			t.Errorf("the Slices list has no row for slice %s:\n%s", id, view)
-		}
-	}
-	if d := readWords(between(view, "╭─ Detail · Goal", "╰")); !strings.Contains(d, "Say hello and goodbye to a person by name, in the tone the product has.") {
-		t.Errorf("the detail of the first section lacks its text:\n%s", view)
-	}
-	// Opening a section opens nothing.
-	g.press("enter")
-	if g.m.Screen() != "brief" {
-		t.Errorf("a section row opened %s", g.m.Screen())
-	}
-	g.press("down", "down", "down") // the last section
-	d := readWords(between(g.view(), "╭─ Detail · Tone", "╰"))
-	for _, want := range []string{"heading Tone", "cited by", "c · needs-input", "d · queued", "Casual or formal: the owner decides. Until then neither is shipped, so the copy waits for the answer."} {
-		if !strings.Contains(d, want) {
-			t.Errorf("the detail of the last section lacks %q:\n%s", want, g.view())
-		}
-	}
-	g.tabTo("Slices") // the first slice
-	d = readWords(between(g.view(), "╭─ Detail · a", "╰"))
-	for _, want := range []string{"goal Greet by name", "oracle unit", "workspace app", "cited in Greeting"} {
-		if !strings.Contains(d, want) {
-			t.Errorf("the detail of the first slice lacks %q:\n%s", want, g.view())
-		}
-	}
-	g.press("down", "down", "down") // slice d, which waits for b and c
-	if d := readWords(between(g.view(), "╭─ Detail · d", "╰")); !strings.Contains(d, "waits for b, c") || !strings.Contains(d, "cited in Tone") {
-		t.Errorf("the detail of slice d lacks what it waits for and who cites it:\n%s", g.view())
-	}
-	g.press("enter")
-	if g.m.Screen() != "slice" {
-		t.Errorf("a slice row opened %s, want slice", g.m.Screen())
-	}
 }
 
 // TestPublishScreenIsARowPerCheckAndTheCursorCheckWhole: the checklist is a row

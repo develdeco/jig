@@ -142,7 +142,6 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 		}
 		p.boxEnd()
 	}
-
 	m.callsPanel(&p, t, slice, row)
 
 	var lines []int
@@ -160,18 +159,38 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 		}
 		m.listPanel(&p, listSpec{title: "Timeline", summary: strconv.Itoa(len(lines)), cols: timelineColumns, names: timelineColumnNames, rows: rows})
 	}
+	// The sections of the brief that cite the slice: each a row that opens the
+	// brief at it.
+	if t.status != nil && t.status.Brief != nil {
+		var rows []listRow
+		for i, s := range t.status.Brief.Sections {
+			if !slices.Contains(s.Slices, slice) {
+				continue
+			}
+			changed := ""
+			if s.Since == sinceChangedWord {
+				changed = m.st.state(StateFindings, "changed since the approval")
+			}
+			rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: t.id}, cells: []string{s.Heading, changed}})
+		}
+		if len(rows) > 0 {
+			m.listPanel(&p, listSpec{title: "Brief sections", summary: strconv.Itoa(len(rows)), cols: briefSectionColumns, names: briefSectionColumnNames, rows: rows})
+		}
+	}
 	return m.keepLines(memo, key, p)
 }
 
 // The columns of the slice screen's lists: a commit, a question, and a line of
 // the timeline or of the calls.
 var (
-	commitColumns       = []column{{}, {gap: 1}, {free: true, gap: 2}, {gap: 2}}
-	commitColumnNames   = []string{"", "commit", "subject", "time"}
-	questionColumns     = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
-	questionColumnNames = []string{"", "question", "state", "asked"}
-	timelineColumns     = []column{{}, {free: true, gap: 1}}
-	timelineColumnNames = []string{"time", "what"}
+	commitColumns           = []column{{}, {gap: 1}, {free: true, gap: 2}, {gap: 2}}
+	commitColumnNames       = []string{"", "commit", "subject", "time"}
+	questionColumns         = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
+	questionColumnNames     = []string{"", "question", "state", "asked"}
+	briefSectionColumns     = []column{{free: true}, {gap: 2}}
+	briefSectionColumnNames = []string{"section", ""}
+	timelineColumns         = []column{{}, {free: true, gap: 1}}
+	timelineColumnNames     = []string{"time", "what"}
 )
 
 // lastClaimant is the session of the slice's latest claim line, whoever has let

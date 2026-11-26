@@ -319,10 +319,10 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The detail of a section has its text: down to the section of slice A.
 	screens.press("\x1b[B")
 	screens.until("╭─ Detail · Slice A - failing clamp", "`alpha.Clamp` is committed broken")
-	// The slices are a pane below the sections: tab reaches it and the end of it
-	// is the last slice, and two up is slice b, which waits for a.
-	screens.press("\t")
+	// The slices are the parts after the sections and before the approval: the end
+	// of the list is the approval, and three up is slice b, which waits for a.
 	screens.press("\x1b[F")
+	screens.press("\x1b[A")
 	screens.press("\x1b[A")
 	screens.press("\x1b[A")
 	screens.until("╭─ Detail · b", "workspace alpha", "oracle    test", "waits for a")

@@ -30,6 +30,10 @@
 // A phase screen (build, review, brief, publish) is a list and
 // the detail of the row under the cursor: a Detail panel, drawn by one part
 // (detail.go), holds that row's fields whole under the list at every width.
+// The brief screen is a list of the brief's parts: the issue that plans the task,
+// each section, each slice, the illustration and the approval. A section's text
+// is drawn as markdown (briefmd.go), the slices that cite it and the sections that
+// cite a slice are rows that open, and the illustration is served to the browser.
 //
 // Every panel is a pane with its own cursor and scroll: tab and shift+tab move
 // the focus, the keys that move and act read the focused pane's row, the focused
