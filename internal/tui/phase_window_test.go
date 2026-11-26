@@ -113,6 +113,49 @@ func TestTheDetailIsDrawnWhateverTheListsLength(t *testing.T) {
 	}
 }
 
+// TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes: the block of lists
+// and detail is never taller than the window has: where the lines above leave it
+// too little the window starts at the block, and the detail is drawn on every row
+// of the four screens with the tail open at 80x24 and 100x30, at 60x20, and beside
+// the list at 160x14.
+func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
+	t.Parallel()
+	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
+		for _, c := range []struct {
+			w, h int
+			tail bool
+		}{{80, 24, true}, {100, 30, true}, {60, 20, false}, {160, 14, false}} {
+			g := tourRig(t, c.w, c.h)
+			g.press(sc.key)
+			if c.tail {
+				g.press("t")
+			}
+			if g.m.Screen() != sc.name {
+				t.Fatalf("on %s, want %s", g.m.Screen(), sc.name)
+			}
+			e := g.m.top()
+			e.sel, e.lead, e.follow = 0, 0, false
+			g.m.noteCursor()
+			for i, n := 0, len(g.m.page().refs()); i < n; i++ {
+				view := g.view()
+				if !strings.Contains(view, "╭─ Detail · ") || !strings.Contains(view, "▸") {
+					t.Fatalf("%s %dx%d tail %v row %d: no detail or no cursor:\n%s", sc.name, c.w, c.h, c.tail, i, view)
+				}
+				if c.w >= 160 && !strings.Contains(sideColumn(view), "╭─ Detail · ") {
+					t.Errorf("%s %dx%d row %d: the detail beside the list begins below its top edge:\n%s", sc.name, c.w, c.h, i, view)
+				}
+				g.press("down")
+			}
+		}
+	}
+	// The brief's last slice at 160x14: the detail beside begins at its first line.
+	b := tourRig(t, 160, 14)
+	b.press("1", "end")
+	if side := sideColumn(b.view()); !strings.Contains(side, "╭─ Detail · ") || !strings.Contains(side, "goal") {
+		t.Errorf("the detail of the last slice at 160x14 does not begin at its top edge and first field:\n%s", b.view())
+	}
+}
+
 // TestDownMovesTheCursorOnEveryScreenWithRows: down moves the cursor from the
 // first row to the last on each phase screen, a row at a time, and the window
 // follows it; the page is not scrolled instead.

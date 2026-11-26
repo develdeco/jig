@@ -173,9 +173,9 @@ type navEntry struct {
 	// screen longer than its window can be read to its end.
 	scroll int
 	// lead is how many lines a page with rows is held above the window its
-	// cursor gives, so the lines above the first row can be read: set high when
-	// a screen opens at its top, raised by a move up from the first row, and
-	// cleared by any move of the cursor.
+	// cursor gives, so the lines above the first row can be read: raised by a move
+	// up from the first row, by lines coming in above (hold.go) and cleared by any
+	// move of the cursor.
 	lead int
 	// fresh is how many rows came in above the window of a page read below its
 	// top, which its first row counts; it is cleared once the window is back at

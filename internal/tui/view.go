@@ -368,10 +368,13 @@ func (m *Model) bodyRows() int {
 // page opened at its top lessens what is held as it is read down.
 func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	selLine, n := 0, 0
-	detailed := false
+	detailed, block := false, -1
 	for i, l := range pg.lines {
 		if l.hold&holdFrom != 0 {
 			detailed = true
+		}
+		if l.hold&holdBlock != 0 {
+			block = i
 		}
 		n += len(l.hiddenRefs)
 		if l.ref == nil {
@@ -394,6 +397,11 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
 			start = clampStart(pg.lines, h, selLine)
+		}
+		if block >= 0 {
+			// The lines above leave a list and its detail less than they need: the
+			// window starts at them, the lines above behind a mark.
+			start = block
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
