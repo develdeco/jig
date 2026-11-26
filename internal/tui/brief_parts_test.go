@@ -74,7 +74,7 @@ func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 		t.Errorf("the parts are %q, want %q", names, want)
 	}
 	// A section says which slices cite it, a slice its state.
-	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone slice c, d") || !strings.Contains(got, "slice c Pick the tone ! needs-input") {
+	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone slice c, d") || !strings.Contains(got, "slice c Pick the tone ? needs-input") {
 		t.Errorf("the rows do not say where each part stands:\n%s", got)
 	}
 	// A section opens nothing and a slice opens its screen.
@@ -142,7 +142,7 @@ func TestASectionsDetailIsItsTextRenderedWhole(t *testing.T) {
 	if !strings.Contains(between(view, "╭─ Detail · Greeting", "╰"), "↓ ") {
 		t.Errorf("a text taller than its room is not marked as cut:\n%s", view)
 	}
-	g.press("z")
+	g.tabTo("Detail · Greeting").press("z")
 	if !strings.Contains(g.view(), "See the style guide (https://example.test/style).") {
 		t.Errorf("the text is not whole when zoomed:\n%s", g.view())
 	}

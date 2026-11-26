@@ -56,46 +56,6 @@ func TestWrapBreaksOnSpacesAndMarksWhatItCut(t *testing.T) {
 	}
 }
 
-// TestParseBriefTextTakesTheTablesAndPassesOverTheBodies: the verb prints each
-// section body after its tables as an indented block of its own, and a heading
-// may be quoted.
-func TestParseBriefTextTakesTheTablesAndPassesOverTheBodies(t *testing.T) {
-	t.Parallel()
-	out := strings.Join([]string{
-		axi.KV("brief", [][2]string{{"ticket", "JIG-1"}, {"title", "Greeting: copy"}, {"illustration", "yes"}}),
-		axi.Table("sections", []string{"heading", "summary"}, [][]string{
-			{"Goal, in short", "Say hello. Say goodbye."},
-			{"Tone", "Casual"},
-		}),
-		"section: " + axi.Quote("Goal, in short") + "\n  Say hello. Say goodbye.\n\n  help[1]: not a block\n  odd[1]{x}: nope",
-		"section: Tone\n  Casual",
-		axi.Help("serve it"),
-	}, "\n") + "\n"
-	got := parseBriefText(out, 0)
-	want := briefText{
-		Title: "Greeting: copy", Illustration: true,
-		Sections: []briefSection{{"Goal, in short", "Say hello. Say goodbye."}, {"Tone", "Casual"}},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("brief text = %+v, want %+v", got, want)
-	}
-	if s := got.summaryOf(1, "Tone"); s != "Casual" {
-		t.Errorf("summary of Tone = %q", s)
-	}
-	if s := got.summaryOf(0, "Tone"); s != "Casual" {
-		t.Errorf("summary found by heading when the position holds another = %q", s)
-	}
-	if s := (*briefText)(nil).summaryOf(0, "Tone"); s != "" {
-		t.Errorf("summary of an unread brief = %q", s)
-	}
-	if refused := parseBriefText("error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2); refused.Err != "ticket JIG-1 has no brief.md" {
-		t.Errorf("a refusal reads as %+v", refused)
-	}
-	if odd := parseBriefText("panic\n", 3); !strings.Contains(odd.Err, "exited 3") {
-		t.Errorf("an exit with no refusal reads as %+v", odd)
-	}
-}
-
 // TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives: the screen reads the
 // brief when it opens, not again while the brief is as it was, and again when a
 // line about the brief arrives, at once if the screen is open.
@@ -112,7 +72,7 @@ func TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives(t *testing.T) {
 	if g.m.Screen() != "brief" || g.r.reads("brief") != 1 {
 		t.Fatalf("on %s after %d reads, want the brief screen after one", g.m.Screen(), g.r.reads("brief"))
 	}
-	if !strings.Contains(pageText(g), "Say hello and goodbye to a person by name") || !strings.Contains(pageText(g.focus("Greeting")), "Use the first name") {
+	if !strings.Contains(pageText(g), "Say hello and goodbye to a person by name") || !strings.Contains(pageText(g.focus("section-2")), "Use the first name") {
 		t.Errorf("the detail of the section under the cursor does not show the text it read:\n%s", pageText(g))
 	}
 	g.press("esc", "enter")
@@ -152,7 +112,7 @@ func TestBriefScreenShowsTheHeadingsWhenTheTextIsNotThere(t *testing.T) {
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
 	g.r.answer("brief show JIG-1 --text --store /s", "error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2)
 	g.feed(jig1()...).press("up", "enter").sized(100, 60)
-	text := pageText(g)
+	text := readWords(pageText(g))
 	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "heading Goal"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)

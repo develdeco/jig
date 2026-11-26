@@ -155,7 +155,7 @@ func TestBriefMarkdownKeepsBackticksInAPlainFrame(t *testing.T) {
 	if !strings.Contains(line, "\x1b[1m") {
 		t.Errorf("bold carries no bold code: %q", line)
 	}
-	if !strings.Contains(line, "\x1b[38;5;6m") {
+	if !strings.Contains(line, "\x1b[36m") {
 		t.Errorf("a code span carries no key color: %q", line)
 	}
 	if bare := stripANSI(line); bare != "Run jig status and read the whole thing twice." {

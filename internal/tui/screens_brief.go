@@ -45,61 +45,71 @@ func (m *Model) briefPage(id string) page {
 		p.add(m.st.dim("  it has an illustration: `jig brief show " + id + "` serves it"))
 	}
 
-	p.add("")
-	switch {
-	case t.brief == nil:
-		p.add(m.st.dim("reading the brief's text"))
-	case t.brief.Err != "":
-		p.add(m.st.dim("the brief's text is not available: " + t.brief.Err))
-	}
 	slices := t.slices(m.zone)
 	goals := t.goals()
-	sections := make([]listRow, len(b.Sections))
+	rows := make([]listRow, 0, len(b.Sections)+len(slices))
 	for i, s := range b.Sections {
-		cited := m.st.dim("no slice")
+		stands := m.st.dim("no slice")
 		if len(s.Slices) > 0 {
-			cited = "slice " + strings.Join(s.Slices, ", ")
+			stands = "slice " + strings.Join(s.Slices, ", ")
 		}
-		sections[i] = listRow{ref: &rowRef{kind: rowSection, id: s.Heading, ticket: id}, cells: []string{s.Heading, cited}}
+		if s.Since == sinceChangedWord {
+			stands += " · " + m.st.state(StateFindings, "changed")
+		}
+		// A section is told by its place: headings may repeat.
+		rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: id}, cells: []string{"section", s.Heading, stands}})
 	}
-	rows := make([]listRow, len(slices))
-	for i, s := range slices {
-		rows[i] = listRow{
+	for _, s := range slices {
+		part := s.ID
+		if g := goals[s.ID]; g != "" {
+			part += "  " + m.st.dim(g)
+		}
+		rows = append(rows, listRow{
 			ref:   &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID},
-			cells: []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), firstOf(goals[s.ID], m.st.dim("no goal"))},
-		}
+			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
+		})
 	}
+	list := listSpec{title: "Parts", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
 	var detail *detailSpec
-	sectionList := listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"}
-	sliceList := listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"}
-	at := m.cursorAmong(sectionList, sliceList)
-	if len(sections)+len(rows) > 0 {
+	at := m.cursorAmong(list)
+	if len(rows) > 0 {
 		var d detailSpec
-		if at < len(sections) {
+		if at < len(b.Sections) {
 			d = m.sectionDetail(t, at)
 		} else {
-			d = m.briefSliceDetail(t, at-len(sections))
+			d = m.briefSliceDetail(t, at-len(b.Sections))
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail, at, sectionList, sliceList)
+	p.add("")
+	m.listAndDetail(&p, detail, at, list)
 
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
 
-// The columns of the brief's lists: a section and the slices that cite it, a
-// slice with its state and goal.
+// sectionID is the identity of the brief's section at i, told by its place in
+// the brief.
+func sectionID(i int) string { return "section-" + strconv.Itoa(i+1) }
+
+// What the status's brief block says: no approval yet, and of a section whose
+// text was edited since the approval or is new, that it changed.
+const (
+	briefNone        = "none"
+	sinceChangedWord = "changed"
+)
+
+// The columns of the brief's list: what the part is, its name and where it
+// stands. A slice's name carries its goal, and a section's place says which
+// slices cite it and whether it changed since the approval.
 var (
-	sectionColumns        = []column{{free: true}, {gap: 2}}
-	sectionColumnNames    = []string{"section", "cited by"}
-	briefSliceColumns     = []column{{}, {id: true, gap: 1}, {gap: 2}, {free: true, gap: 2}}
-	briefSliceColumnNames = []string{"", "slice", "state", "goal"}
+	partColumns     = []column{{}, {free: true, gap: 2}, {gap: 2}}
+	partColumnNames = []string{"kind", "part", "stands at"}
 )
 
 // sectionDetail is the detail of the brief's section at i: its heading, the
-// slices that cite it with the state each is in, and the text the brief read
-// gives of it, whole.
+// slices that cite it with the state each is in, whether it changed since the
+// approval and the text the brief read gives of it, drawn whole.
 func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 	s := t.status.Brief.Sections[i]
 	d := detailSpec{title: s.Heading, summary: "no slice cites it"}
@@ -116,9 +126,37 @@ func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read")})
 		label = ""
 	}
-	if text := t.brief.summaryOf(i, s.Heading); text != "" {
-		d.rows = append(d.rows, detailRow{label: "text", text: text})
+	// Only an approval has something to be changed since.
+	if t.status.Brief.Approval != briefNone {
+		switch s.Since {
+		case "same":
+			d.rows = append(d.rows, detailRow{label: "approval", text: "this section is as it was approved"})
+		case sinceChangedWord:
+			d.rows = append(d.rows, detailRow{label: "approval", text: "this section changed since the approval", state: StateFindings})
+		default:
+			d.rows = append(d.rows, detailRow{label: "approval", text: "which sections changed was not recorded for this approval", dim: true})
+		}
 	}
+	labelW := 0
+	for _, r := range d.rows {
+		labelW = max(labelW, width(r.label))
+	}
+	labelW = max(labelW, width("text"))
+	text := detailRow{label: "text"}
+	at, read := t.brief.sectionAt(i, s.Heading)
+	switch {
+	case t.brief == nil:
+		text.text, text.dim = "reading the brief's text", true
+	case t.brief.Err != "":
+		text.text, text.dim = "the brief's text is not available: "+t.brief.Err, true
+	case !read:
+		text.text, text.dim = "the brief's text has no section of this heading", true
+	case strings.TrimSpace(t.brief.Sections[at].Body) != "":
+		text.lines = t.brief.rendered(at, m.detailRoom(labelW), m.st)
+	default:
+		text.text, text.dim = "this section has no text", true
+	}
+	d.rows = append(d.rows, text)
 	return d
 }
 

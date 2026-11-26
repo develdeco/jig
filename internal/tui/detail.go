@@ -13,6 +13,10 @@ import "strconv"
 type detailRow struct {
 	label string
 	text  string
+	// lines, when it is set, are the text laid out by the caller for the room the
+	// row has (detailRoom): drawn as they are, with their indents and their
+	// blank lines, in place of text.
+	lines []string
 	// icon, when it is set, is the state drawn before the text; the lines the
 	// text wraps to stand under it.
 	icon string
@@ -64,6 +68,12 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 	return append(lines, pline{box: boxBottom})
 }
 
+// detailRoom is the cells a row's text has in a Detail panel drawn across the
+// screen, when its label is labelW wide: what detailRowLines wraps to.
+func (m *Model) detailRoom(labelW int) int {
+	return max(1, max(1, m.width-7)-labelW-1)
+}
+
 // detailRowLines is a field as lines, its text broken at words into the room
 // the label, the icon and the indent leave and none of it cut.
 func (m *Model) detailRowLines(r detailRow, labelW, inner int) []string {
@@ -78,7 +88,11 @@ func (m *Model) detailRowLines(r detailRow, labelW, inner int) []string {
 	}
 	room = max(1, room-mark)
 	var out []string
-	for i, line := range wrapWhole(r.text, room) {
+	laid := r.lines
+	if laid == nil {
+		laid = wrapWhole(r.text, room)
+	}
+	for i, line := range laid {
 		switch {
 		case r.state != "":
 			line = m.st.state(r.state, line)

@@ -4,21 +4,21 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
     approved 2026-10-23 09:00 by an agent, as Ada Lovelace
     recorded by the session that drafted it · brief 0123456789ab
 
-  ╭─ Sections ──────────────────────────────────────────────────── 4 sections ─╮
-  │  section   cited by                                                        │
-  │▸ Goal      no slice                                                        │
-  │  Greeting  slice a                                                         │
-  │  Farewell  slice b                                                         │
-  │  Tone      slice c, d                                                      │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Slices ──────────────────────────────────────────────────────── 4 slices ─╮
+  ╭─ Parts ────────────────────────────────────────────────────────── 8 parts ─╮
+  │  kind     part                      stands at                              │
+  │▸ section  Goal                      no slice                               │
+  │  section  Greeting                  slice a                                │
+  │  section  Farewell                  slice b                                │
+  │  section  Tone                      slice c, d                             │
+  │  slice    a  Greet by name          ● green                                │
+  │  ↓ 3 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮
-  │  heading Goal                                                              │
-  │  text    Say hello and goodbye to a person by name, in the tone the        │
-  │          product has.                                                      │
+  │  heading  Goal                                                             │
+  │  approval which sections changed was not recorded for this approval        │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 1 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Slices · ↑↓ move in Sections
+  esc back · q quit · ? keys · tab next pane: Detail · Goal · ↑↓ move in Parts
   1-5 steps · [ ] sibling · h main · t tail
