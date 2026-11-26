@@ -33,7 +33,7 @@ func wantPanels(t *testing.T, where string, view string, names map[string]string
 			title = ""
 		case strings.HasPrefix(l, "  │"):
 			inside++
-			if want, ok := names[title]; ok && inside == 1 && !strings.Contains(l, want) && !strings.Contains(l, "↑") && !strings.Contains(l, "nothing yet") {
+			if want, ok := names[title]; ok && inside == 1 && !strings.Contains(l, want) && !strings.Contains(l, "↑") && !strings.Contains(l, "nothing yet") && !strings.Contains(l, "…") {
 				t.Errorf("%s: the first line of %s is %q, want the names with %q", where, title, l, want)
 			}
 		case strings.HasPrefix(l, "▸"):

@@ -70,6 +70,11 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	p.windowed = map[string][]rowRef{title: refs}
 	cur := m.paneCursorIn(title, ids, homeSub(subs, focus))
 	from, to, openRows, merged := m.subWindow(title, t, step, subs, cur, focus, room)
+	if focus >= from && focus < to && m.subWhole(t, step, subs[focus]) {
+		// The open sub-step the person expanded takes every row it needs; the page
+		// holds the pane to the height it had folded (fit.go).
+		openRows = max(openRows, m.openWant(t, step, subs[focus]))
+	}
 
 	var picked []int
 	for i := from; i < to; i++ {
@@ -89,14 +94,14 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	for i := from; i < to; i++ {
 		at := len(p.lines)
 		if i == focus && openRows > 0 {
-			var lines []string
-			for _, line := range m.openLines(t, step, subs[i], subs, labelW, openRows, c) {
+			open := m.openLines(t, step, subs[i], subs, labelW, openRows, c)
+			for k, line := range open.lines {
 				// The block counts a row for each of these, so each is cut to one.
-				lines = append(lines, fit(line, m.innerWidth()))
+				open.lines[k] = fit(line, m.innerWidth())
 			}
-			p.boxLaid(&refs[i], lines)
+			p.boxRow(&refs[i], open)
 		} else {
-			p.boxLaid(&refs[i], laid[next])
+			p.boxRow(&refs[i], laid[next])
 			next++
 		}
 		if i == cur {
@@ -156,15 +161,23 @@ func (m *Model) subWindow(title string, t *ticket, step int, subs []phase.Sub, c
 // order, each a line or more: the line of the columns' names laid out by the
 // same call, and the lines of each. A detail wraps to as many rows as it needs; a
 // block short of room asks for fewer rows of each before it gives up a row.
-func (m *Model) foldedFit(t *ticket, step int, subs []phase.Sub, picked []int, labelW int, c clocks, room int) (names []string, laid [][]string) {
+func (m *Model) foldedFit(t *ticket, step int, subs []phase.Sub, picked []int, labelW int, c clocks, room int) (names []string, laid []laidRow) {
 	cells := make([][]string, len(picked)+1)
 	cells[0] = make([]string, len(subColumnNames))
 	for i, n := range subColumnNames {
 		cells[0][i] = m.st.dim(n)
 	}
+	// A sub-step the person has expanded is laid out whole, after the names.
+	var whole []bool
 	for i, j := range picked {
 		cells[i+1] = m.foldedCells(t, step, subs[j], labelW, c)
+		if m.subWhole(t, step, subs[j]) {
+			if whole == nil {
+				whole = make([]bool, len(picked)+1)
+			}
+			whole[i+1] = true
+		}
 	}
-	all := laidWithin(subColumns, cells, m.innerWidth(), room+1)
-	return all[0], all[1:]
+	all := laidWithinMarked(subColumns, cells, m.innerWidth(), room+1, whole, true)
+	return all[0].lines, all[1:]
 }

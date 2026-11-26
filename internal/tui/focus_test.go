@@ -115,7 +115,7 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	t.Parallel()
 	g := cardRig(t, 100, 40)
 	v := g.view()
-	golden(t, "ticket-card", v)
+	goldenCuts(t, "ticket-card", cardRig(t, 100, 40)) // a rig of its own: the check expands and folds its marks
 	rows := strings.Split(v, "\n")
 	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{

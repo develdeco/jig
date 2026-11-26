@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,5 +32,42 @@ func TestTUIPipeFramesCutNothingAt100(t *testing.T) {
 	keys.Write([]byte("q"))
 	if wait() != 0 {
 		t.Fatalf("jig tui TK-1 exited non-zero\n%s", out.String())
+	}
+}
+
+// TestTUIPipeExpandsACutRow: `jig tui` on a pipe over a real store whose ticket
+// has a title of 300 cells draws the row ending in a cut mark at 100 by 30;
+// space lays the title out whole under its column in the next frame and space
+// again gives back the row that ends in the mark.
+func TestTUIPipeExpandsACutRow(t *testing.T) {
+	r := newChartRig(t)
+	r.ticket(t, "SHOP-1", "", false)
+	words := make([]string, 60)
+	for i := range words {
+		words[i] = fmt.Sprintf("w%03d", i+1)
+	}
+	r.put(t, "tickets/SHOP-1/ticket.yaml", "schema_version: 1\ntitle: "+strings.Join(words, " ")+"\n")
+
+	keys, out, wait := startTUI(t, r.env(), "--store", r.root)
+	folded := screenWith(t, out, "w001")
+	if !strings.Contains(folded, "…") || strings.Contains(folded, "w060") {
+		t.Fatalf("the ticket's row is not cut in the first frame:\n%s", folded)
+	}
+	keys.Write([]byte(" "))
+	screenWhere(t, out, "the row expanded", func(f string) bool { return strings.Contains(f, "space fold") })
+	// The pane keeps its height: the title is read by lines to its end.
+	keys.Write([]byte(strings.Repeat("\x1b[B", 12)))
+	open := screenWhere(t, out, "the title to its end", func(f string) bool { return strings.Contains(f, "w060") })
+	if strings.Contains(open, "…") {
+		t.Errorf("space did not lay the title out whole:\n%s", open)
+	}
+	keys.Write([]byte(" "))
+	again := screenWhere(t, out, "the folded row", func(f string) bool { return !strings.Contains(f, "w060") && strings.Contains(f, "…") })
+	if again != folded {
+		t.Errorf("space again does not give the first frame back:\n--- first\n%s\n--- again\n%s", folded, again)
+	}
+	keys.Write([]byte("q"))
+	if wait() != 0 {
+		t.Fatalf("jig tui exited non-zero\n%s", out.String())
 	}
 }

@@ -219,7 +219,7 @@ func (m *Model) planPage(c *chart) page {
 		return 2 + n
 	}
 	run := m.runRows(c.info)
-	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight(run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
+	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight("Run", run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		run = trimRuns(run, len(run)-min(-spare, len(run)-1))
 	}
 	p.boxTop("Run", runWord(c.info))
@@ -378,8 +378,8 @@ func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []
 	// The rows a person can open (a failed suite) take the cursor; the others are lines.
 	refs := make([]*rowRef, len(cells))
 	copy(refs[2:], suiteRefs)
-	for i, lines := range layout(planColumns, cells, m.innerWidth()) {
-		p.boxLaid(refs[i], lines)
+	for i, row := range layoutMarked(planColumns, cells, m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(cells)), false) {
+		p.boxRow(refs[i], row)
 	}
 }
 

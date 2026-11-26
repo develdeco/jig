@@ -42,7 +42,7 @@ func (m *Model) sliceRowOf(t *ticket, slice string) *sliceRow {
 // what they read; a key within the second draws them again and builds nothing.
 func (m *Model) sliceHead(t *ticket, slice string) []pline {
 	memo := t.memoFor()
-	key := "head|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String() + "|" + strconv.FormatInt(m.now().Unix(), 10)
+	key := "head|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String() + "|" + strconv.FormatInt(m.now().Unix(), 10) + "|" + m.top().expansionKey()
 	if lines, ok := memo.sliceBody[key]; ok {
 		return lines
 	}
@@ -88,7 +88,7 @@ func (m *Model) keepLines(memo *ticketMemo, key string, p page) []pline {
 // the cursor draws them again and builds nothing.
 func (m *Model) sliceBody(t *ticket, slice string) []pline {
 	memo := t.memoFor()
-	key := "body|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String()
+	key := "body|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String() + "|" + m.top().expansionKey()
 	if lines, ok := memo.sliceBody[key]; ok {
 		return lines
 	}
@@ -125,11 +125,15 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 			cells[i] = []string{m.st.icon(state), q.ID, m.st.state(state, word), asked}
 		}
 		p.boxTop("Questions", strconv.Itoa(len(qs)))
-		laid := m.laidList(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0)
+		refs := make([]*rowRef, len(qs))
 		for i, q := range qs {
 			// Every question is a row, open or answered: the cursor stands on it and
 			// its text and answer are drawn whole under it.
-			p.boxLaid(&rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}, laid[i])
+			refs[i] = &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}
+		}
+		laid := m.laidListFor(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0, refs)
+		for i, q := range qs {
+			p.boxRow(refs[i], laid[i])
 			for _, l := range m.panelLines(q.Text) {
 				p.boxUnder("    " + l)
 			}
@@ -285,8 +289,13 @@ func (m *Model) factRows(p *page, rows []factRow) {
 		cells[i] = []string{m.st.dim(r.label), r.value}
 	}
 	// A fact is never cut: its free text wraps as far as it goes.
-	for i, lines := range layoutRows(runColumns, cells, m.innerWidth(), 1<<20) {
-		p.boxLaid(rows[i].ref, lines)
+	refs := make([]*rowRef, len(rows))
+	for i, r := range rows {
+		refs[i] = r.ref
+	}
+	laid := m.laidList(p, runColumns, make([]string, len(runColumns)), cells, -1, refs)
+	for i := range rows {
+		p.boxRow(rows[i].ref, laid[i+1])
 	}
 }
 
@@ -318,7 +327,7 @@ func (m *Model) findingPanel(p *page, t *ticket, s sliceRow) {
 	// The goal's lines are rows the cursor passes over, so a pane of rows followed
 	// by text is read to its end and zoomed whole.
 	for i, l := range wrapWhole(goalBody(full.Goal), m.innerWidth()) {
-		p.lines = append(p.lines, pline{text: l, box: boxMid, ref: &rowRef{kind: rowStop, id: "goal-" + strconv.Itoa(i), ticket: t.id, slice: s.ID}})
+		p.boxRow(&rowRef{kind: rowStop, id: "goal-" + strconv.Itoa(i), ticket: t.id, slice: s.ID}, laidRow{lines: []string{l}})
 	}
 	p.boxEnd()
 }
@@ -377,9 +386,13 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 	p.boxTop("Commits", strconv.Itoa(len(commits)))
 	// A commit's subject is never cut, and a column nothing is written in has no
 	// name.
-	laid := m.laidList(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1)
+	tryRefs := make([]*rowRef, len(commits))
 	for i, c := range commits {
-		p.boxLaid(&rowRef{kind: rowTry, id: c.SHA, ticket: t.id, slice: slice}, laid[i])
+		tryRefs[i] = &rowRef{kind: rowTry, id: c.SHA, ticket: t.id, slice: slice}
+	}
+	laid := m.laidListFor(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1, tryRefs)
+	for i, c := range commits {
+		p.boxRow(tryRefs[i], laid[i])
 		row, hasRow := t.status.verificationOf(slice, c.SHA)
 		switch {
 		case t.status == nil:

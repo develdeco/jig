@@ -98,7 +98,7 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	}
 	// The lines it showed stay where they were: the count took the place of the
 	// mark that said there was more above.
-	for i := newAt + 1; i < len(before)-4; i++ {
+	for i := newAt + 1; i < len(before)-5; i++ {
 		if strings.Contains(before[i], "↓") {
 			// The mark of the rows below counts them, and two lines came in.
 			break

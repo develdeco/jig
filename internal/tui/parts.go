@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,15 +54,16 @@ func (m *Model) listPanel(p *page, s listSpec) {
 			names[i] = m.st.dim(n)
 		}
 		cells := make([][]string, len(s.rows))
+		refs := make([]*rowRef, len(s.rows))
 		for i, r := range s.rows {
-			cells[i] = r.cells
+			cells[i], refs[i] = r.cells, r.ref
 		}
-		laid := m.laidList(p, s.cols, names, cells, s.room)
+		laid := m.laidListFor(p, s.cols, names, cells, s.room, refs)
 		for _, l := range s.before {
 			p.boxAdd(l)
 		}
-		for i, lines := range laid {
-			p.boxLaid(s.rows[i].ref, lines)
+		for i, row := range laid {
+			p.boxRow(s.rows[i].ref, row)
 		}
 	}
 	for _, l := range s.after {
@@ -88,36 +90,71 @@ func (m *Model) ageOf(at time.Time) string {
 	return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 }
 
-// laidList lays the cells of a list out under cols with its names, in one call of
-// the allocator, adds the names row to the panel p and gives back the lines of
-// each row. room, when it is more than 0, is the most lines the rows may take,
-// and when it is less than 0 the rows are not cut at all.
-func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int) [][]string {
+// laidListFor lays the cells of a list out under cols with its names, in one call
+// of the allocator, adds the names row to the panel p and gives back each row
+// with the cut marks it carries. room, when it is more than 0, is the most lines
+// the rows may take, and when it is less than 0 the rows are not cut at all.
+// refs, when given, are the rows' places for the cursor, in the order of cells:
+// a row the screen has expanded (expand.go) is laid out whole. A list with no
+// refs is the pane's own, which is laid out whole when the pane is expanded.
+func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
-	laid := m.laidOnce(cols, all, room, func() [][]string {
+	pane := p.paneTitle()
+	whole := m.top().wholeOf(pane, 1, refs)
+	if !slices.ContainsFunc(refs, func(r *rowRef) bool { return r != nil }) {
+		whole = m.wholePane(pane, len(all))
+		if whole != nil {
+			// The names are the first row of the list and are never cut.
+			whole[0] = false
+		}
+	} else {
+		// A row the cursor cannot stand on sits under the cursor row above it: that
+		// row holds its cut, and expanding it lays the two out whole. Above the
+		// first row nothing holds it, and it is never cut.
+		var above *rowRef
+		for i, r := range refs {
+			switch {
+			case r != nil:
+				above = r
+			case above == nil || m.top().isExpanded(pane, above):
+				if whole == nil {
+					whole = make([]bool, len(all))
+				}
+				whole[1+i] = true
+			}
+		}
+	}
+	laid := m.laidOnce(cols, all, room, whole, func() []laidRow {
 		switch {
 		case room < 0:
 			// What a person decides on is never cut: its free text wraps as far as it
 			// goes.
-			return layoutRows(cols, all, m.innerWidth(), 1<<20)
+			return layoutMarked(cols, all, m.innerWidth(), wholeRows, whole, true)
 		case room > 0:
-			return laidWithin(cols, all, m.innerWidth(), room+1)
+			return laidWithinMarked(cols, all, m.innerWidth(), room+1, whole, true)
 		}
-		return layout(cols, all, m.innerWidth())
+		return layoutMarked(cols, all, m.innerWidth(), wrapRows, whole, true)
 	})
-	p.boxNames(laid[0])
+	return laid
+}
+
+// laidListFor is laidList with the names row added to the panel p and the rows
+// given back without it.
+func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
+	laid := m.laidList(p, cols, names, cells, room, refs)
+	p.boxNames(laid[0].lines)
 	return laid[1:]
 }
 
-// laidOnce is the layout of the cells under cols in room, as the allocator last
-// gave it for the same cells at the same width: a frame that moves the cursor
-// reads the same lists and measures none of them again. The lines it gives back
-// are the memo's, and nothing changes them.
-func (m *Model) laidOnce(cols []column, all [][]string, room int, lay func() [][]string) [][]string {
+// laidOnce is the layout of the cells under cols in room, with the rows whole
+// says are expanded, as the allocator last gave it for the same cells at the same
+// width: a frame that moves the cursor reads the same lists and measures none of
+// them again. The rows it gives back are the memo's, and nothing changes them.
+func (m *Model) laidOnce(cols []column, all [][]string, room int, whole []bool, lay func() []laidRow) []laidRow {
 	var k strings.Builder
-	fmt.Fprintf(&k, "%d|%d|%v", room, m.innerWidth(), cols)
+	fmt.Fprintf(&k, "%d|%d|%v|%v", room, m.innerWidth(), cols, whole)
 	for _, row := range all {
 		for _, c := range row {
 			k.WriteString(c)
@@ -130,7 +167,7 @@ func (m *Model) laidOnce(cols []column, all [][]string, room int, lay func() [][
 		return laid
 	}
 	if m.laid == nil || len(m.laid) > 128 {
-		m.laid = map[string][][]string{}
+		m.laid = map[string][]laidRow{}
 	}
 	m.laidBuilds++
 	laid := lay()
@@ -154,6 +191,12 @@ func (p *page) intoPanel(at int, title, summary string) {
 	p.boxTop(title, summary)
 	for _, l := range body {
 		l.box = boxMid
+		// A loose line becomes the panel's: it takes the holder of the row above it.
+		if l.ref != nil {
+			l.holder, l.held = p.holderNow(l.ref)
+		} else {
+			l.holder, l.held = p.holderNow(nil)
+		}
 		p.lines = append(p.lines, l)
 	}
 	p.boxEnd()

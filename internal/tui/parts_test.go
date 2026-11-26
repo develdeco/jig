@@ -122,7 +122,7 @@ func TestTicketScreenSectionsArePanels(t *testing.T) {
 					title = ""
 				case strings.HasPrefix(l, "  │"):
 					inside++
-					if want, ok := names[title]; ok && inside == 1 && !strings.Contains(l, want) && !strings.Contains(l, "took") {
+					if want, ok := names[title]; ok && inside == 1 && !strings.Contains(l, want) && !strings.Contains(l, "took") && !strings.Contains(l, "…") {
 						t.Errorf("%s %v: the first line of %s is %q, want the names with %q", name, size, title, l, want)
 					}
 				case strings.HasPrefix(l, "▸"):

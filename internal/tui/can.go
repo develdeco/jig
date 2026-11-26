@@ -43,6 +43,17 @@ type subject struct {
 	// pane is narrowed by a query.
 	zoom   string
 	search bool
+	// cut says the row under the cursor holds a cut mark, and expanded that its
+	// holder is laid out whole: what `space` expands or folds. Like the row they
+	// are not part of what the page is sized by.
+	cut, expanded bool
+	// textPane says the focused pane has no cursor rows and is the holder.
+	textPane bool
+	// pane is the title of the pane the row under the cursor is in.
+	pane string
+	// lastCut and lastExpanded say the same of the last command line, which the
+	// screen holds: `space` reaches it when the focus holds nothing cut.
+	lastCut, lastExpanded bool
 }
 
 // same says whether o is the subject s is, whatever row the cursor is on: the
@@ -105,8 +116,21 @@ func (m *Model) subjectOf(pg page) subject {
 	}
 	if ref != nil {
 		s.row, s.hasRow = *ref, true
+		k, _ := pg.holderOfSel(e.sel)
+		if k.pane == "" {
+			k = expKey{pane: e.paneFocus, id: ref.identity()}
+		}
+		s.cut = pg.holdsCut(k)
+		s.pane = k.pane
+		s.expanded = e.isExpanded(s.pane, ref)
+	} else if e.textFocus && e.paneFocus != "" {
+		// A pane with no cursor rows is its own holder.
+		s.textPane = true
+		s.cut = pg.holdsCut(expKey{pane: e.paneFocus})
+		s.expanded = e.paneOpen(e.paneFocus)
 	}
 	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()
+	s.lastCut, s.lastExpanded = m.lastState()
 	return s
 }
 

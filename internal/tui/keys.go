@@ -130,7 +130,10 @@ func (m *Model) rowsOn() []*keyRow {
 // pairs: the rows its hint line carries that avail lets run now, a family once.
 // The key back and the key quit come first, so a line that wraps never strands
 // them.
-func (m *Model) keyHints() []string {
+//
+// full lists space whether or not it can run: it is the screen's whole key set,
+// which the footer's height is decided by.
+func (m *Model) keyHints(full bool) []string {
 	sub := m.keysOn
 	var flat []string
 	seen := map[string]bool{}
@@ -138,7 +141,7 @@ func (m *Model) keyHints() []string {
 		if r.quiet || (r.hinted != 0 && !r.hinted.has(m.top().screen)) {
 			continue
 		}
-		if ok, _ := r.avail(m, sub); !ok {
+		if ok, _ := r.avail(m, sub); !ok && !(full && r.label == "space") {
 			continue
 		}
 		key, text := r.label, r.wordsFor(m, sub)
@@ -246,6 +249,23 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.toggleZoom(); return nil }},
+		{names: []string{" ", "space"}, label: "space", words: "expand", screens: onAllScreens,
+			// The footer is as tall as its full key set, space among them, whatever
+			// the body cuts (footer in view.go), so the body is laid out once; the
+			// key shows in it only while a cut can open.
+			say: func(_ *Model, sub subject) string {
+				if sub.holds() && sub.expanded || !sub.holds() && sub.lastExpanded {
+					return "fold"
+				}
+				return "expand"
+			},
+			can: func(_ *Model, sub subject) (bool, string) {
+				if sub.holds() || sub.lastCut || sub.lastExpanded {
+					return true, ""
+				}
+				return false, "nothing is cut here"
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.expandHolder(true); return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
 			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {
