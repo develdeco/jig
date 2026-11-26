@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/develdeco/jig/internal/fixture"
 	"github.com/develdeco/jig/internal/verifydeliver"
@@ -46,8 +47,23 @@ func TestTUIPipeFramesShowAPhaseAsAListAndItsDetail(t *testing.T) {
 	}
 
 	keys, frames, wait := startTUI(t, e, ticket, "--store", fx.StoreDir)
-	frames.untilWords(t, "4 of 5 green") // the digest was read: the step keys open
-	keys.Write([]byte("2"))              // the build screen
+	// The step keys open once the roster has been read, which is after the status
+	// the steps already show: a key before then says it is still reading, so it is
+	// pressed again until the screen opens.
+	openStep := func(key, want string) {
+		t.Helper()
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+			keys.Write([]byte(key))
+			for i := 0; i < 40; i++ {
+				if strings.Contains(lastScreen(frames.String()), want) {
+					return
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+		t.Fatalf("the key %s never opened %q; the screens showed:\n%s", key, want, frames.String())
+	}
+	openStep("2", "╭─ Slices")
 	frames.untilWords(t, "slice state tries took goal")
 	build := lastScreen(frames.String())
 	for _, id := range []string{"a", "b", "c", "d"} {
@@ -65,8 +81,7 @@ func TestTUIPipeFramesShowAPhaseAsAListAndItsDetail(t *testing.T) {
 	keys.Write([]byte("\x1b[B")) // down: the next slice
 	frames.until(t, "╭─ Detail · b")
 
-	keys.Write([]byte("3")) // the review screen
-	frames.until(t, "╭─ Rounds")
+	openStep("3", "╭─ Rounds") // the review screen
 	review := lastScreen(frames.String())
 	if strings.Contains(review, "Sent back") {
 		t.Errorf("the review screen has a panel of the fix slices sent back:\n%s", review)
