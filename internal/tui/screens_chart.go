@@ -61,7 +61,7 @@ func (m *Model) chartPage(name string) page {
 			run = m.runningRows(run, c.info, age)
 		}
 	}
-	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight(detail)) - frame(m.runHeight(run)) - activityFloor
+	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight("Detail", detail)) - frame(m.runHeight("Run", run)) - activityFloor
 	if spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		cut := min(-spare, len(run)-1)
 		run = trimRuns(run, len(run)-cut)

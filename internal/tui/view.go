@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/develdeco/jig/internal/events"
 )
 
@@ -156,13 +158,22 @@ func (m *Model) page() page {
 // screen wrote whole is not cut where the window ends. A row's cursor, and the
 // ask it belongs to, stay with its first line. A line that fits is untouched,
 // and so is a line of an ask, which its screen wraps whole.
-func (m *Model) wrapLong(pg page) page {
+func (m *Model) wrapLong(pg page) page { return m.wrapLongIn(m.top(), pg) }
+
+// wrapLongIn is wrapLong for the screen e holds: a line it has expanded, or one
+// in a pane with no cursor rows it has expanded, wraps whole; a line that is
+// cut registers the cut as a mark.
+func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	var out []pline
 	m.measured += len(pg.lines)
+	pane := ""
 	for _, l := range pg.lines {
 		w := max(1, m.width-2)
 		if l.box != boxNone {
 			w = m.innerWidth()
+		}
+		if l.box == boxTop {
+			pane = l.text
 		}
 		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
 			out = append(out, l)
@@ -178,15 +189,22 @@ func (m *Model) wrapLong(pg page) page {
 			// What a person decides on is never cut.
 			rows = 1 << 20
 		}
+		if l.ref != nil && e.isExpanded(pane, l.ref) || l.ref == nil && !l.cont && e.paneOpen(pane) {
+			rows = wholeRows
+		}
 		// Every row, the first too, is wrapped to the room the continuation rows
 		// have under their indent, so none is wider than the line may be.
-		lines := wrapCell(l.text[indent:], max(1, w-lead), rows)
+		lines, cut := wrapCellCut(l.text[indent:], max(1, w-lead), rows)
 		for i, text := range lines {
 			next := l
 			next.text = spaces(indent) + text
 			if i > 0 {
 				next.ref, next.cont = nil, true
 				next.text = spaces(lead) + text
+			}
+			next.cuts = nil
+			if cut && i == len(lines)-1 {
+				next.cuts = []cutMark{{x: width(next.text) - 1, value: ansi.Strip(l.text)}}
 			}
 			out = append(out, next)
 		}

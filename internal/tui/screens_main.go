@@ -279,7 +279,7 @@ func (m *Model) layMain(p *mainDraft) page {
 		}
 		out.boxRow(l.ref, row)
 	}
-	return m.wrapLong(out)
+	return m.wrapLongIn(&m.nav[0], out)
 }
 
 // queueCells are a row of the queue as cells: a ticket's icon, id, title, the

@@ -254,7 +254,7 @@ func keyRows() []keyRow {
 				return "expand"
 			},
 			can: func(_ *Model, sub subject) (bool, string) {
-				if sub.hasRow && (sub.cut || sub.expanded) {
+				if sub.holder() && (sub.cut || sub.expanded) {
 					return true, ""
 				}
 				return false, "nothing is cut here"

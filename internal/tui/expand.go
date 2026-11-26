@@ -68,18 +68,50 @@ func (p page) holdsCut(sel int) bool {
 	return false
 }
 
+// paneOpen says whether the pane titled title, which has no cursor rows, is
+// expanded: every cut line it has is laid out whole.
+func (e *navEntry) paneOpen(title string) bool {
+	return len(e.expanded) > 0 && e.expanded[expKey{pane: title}]
+}
+
+// paneExpanded says whether the pane titled title on the screen on top is
+// expanded.
+func (m *Model) paneExpanded(title string) bool { return m.top().paneOpen(title) }
+
+// holdsCutIn says whether a line of the pane titled title carries a cut mark.
+func (p page) holdsCutIn(title string) bool {
+	for _, pn := range p.panes() {
+		if pn.title != title {
+			continue
+		}
+		for _, l := range p.lines[pn.top : pn.bottom+1] {
+			if len(l.cuts) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// holder is what `space` acts on: the row under the cursor, or the focused
+// pane when it has no cursor rows.
+func (s subject) holder() bool { return s.hasRow || s.textPane }
+
 // expandHolder expands the holder under the cursor, or folds it when it is
 // expanded and fold is set; it says whether anything changed.
 func (m *Model) expandHolder(fold bool) bool {
 	sub := m.subjectNow()
-	if !sub.hasRow || !(sub.cut || sub.expanded) {
+	if !sub.holder() || !(sub.cut || sub.expanded) {
 		return false
 	}
 	e := m.top()
 	if e.expanded == nil {
 		e.expanded = map[expKey]bool{}
 	}
-	k := expKey{e.paneFocus, sub.row.identity()}
+	k := expKey{pane: e.paneFocus}
+	if sub.hasRow {
+		k.id = sub.row.identity()
+	}
 	switch {
 	case e.expanded[k] && fold:
 		delete(e.expanded, k)

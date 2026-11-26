@@ -17,7 +17,7 @@ import (
 // window it has; past that they end in an ellipsis, and the files hold the rest.
 func (m *Model) publishPage(id string) page {
 	p := m.publishPageLess(id, 0)
-	if over := len(p.lines) - m.bodyRows(); over > 0 {
+	if over := len(p.lines) - m.bodyRows(); over > 0 && !m.paneExpanded("Checklist") {
 		// A check that wrapped took rows the sizes did not count: the texts give
 		// them up, so the page ends where the window does.
 		p = m.publishPageLess(id, over)
@@ -51,6 +51,9 @@ type publishCheck struct {
 	text    string
 	when    string
 	excerpt []string
+	// cutValue is the whole text of an excerpt that was clipped, "" when it was
+	// not: its last line ends in the cut mark.
+	cutValue string
 }
 
 // publishPageLess is publishPage with the two texts held to less rows than the
@@ -77,6 +80,10 @@ func (m *Model) publishPageLess(id string, less int) page {
 	checks := 3 + 6 + max(0, len(pub.Repos)-1)
 	activity := 3 + min(3, max(1, len(t.stepLines(stepPublish))))
 	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-m.taken(&p)-checks-activity-less)
+	if m.paneExpanded("Checklist") {
+		// An expanded checklist holds the texts whole; the page is read by lines.
+		bodyN, changelogN = len(body), len(changelog)
+	}
 
 	var list []publishCheck
 	check := func(done bool, text, when string) {
@@ -88,6 +95,9 @@ func (m *Model) publishPageLess(id string, less int) page {
 			ex = append(ex, "    "+m.st.dim(l))
 		}
 		list[len(list)-1].excerpt = ex
+		if n > 0 && len(lines) > n {
+			list[len(list)-1].cutValue = strings.Join(lines, "\n")
+		}
 	}
 	at := func(event string) string {
 		if i := t.latest("", event); i >= 0 {
@@ -158,8 +168,12 @@ func (m *Model) publishPageLess(id string, less int) page {
 	laid := m.laidList(&p, checkColumns, dimmed(m.st, checkColumnNames), cells, 0)
 	for i, c := range list {
 		p.boxLaid(nil, laid[i])
-		for _, l := range c.excerpt {
+		for i, l := range c.excerpt {
 			p.boxUnder(l)
+			if c.cutValue != "" && i == len(c.excerpt)-1 {
+				// The clip's own ellipsis is the mark: it is the line's last cell.
+				p.lines[len(p.lines)-1].cuts = []cutMark{{x: width(l) - 1, value: c.cutValue}}
+			}
 		}
 	}
 	p.boxEnd()

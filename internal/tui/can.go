@@ -47,6 +47,8 @@ type subject struct {
 	// holder is laid out whole: what `space` expands or folds. Like the row they
 	// are not part of what the page is sized by.
 	cut, expanded bool
+	// textPane says the focused pane has no cursor rows and is the holder.
+	textPane bool
 }
 
 // same says whether o is the subject s is, whatever row the cursor is on: the
@@ -111,6 +113,11 @@ func (m *Model) subjectOf(pg page) subject {
 		s.row, s.hasRow = *ref, true
 		s.cut = pg.holdsCut(e.sel)
 		s.expanded = e.isExpanded(e.paneFocus, ref)
+	} else if e.textFocus && e.paneFocus != "" {
+		// A pane with no cursor rows is its own holder.
+		s.textPane = true
+		s.cut = pg.holdsCutIn(e.paneFocus)
+		s.expanded = e.paneOpen(e.paneFocus)
 	}
 	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()
 	return s

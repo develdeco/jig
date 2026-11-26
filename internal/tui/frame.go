@@ -68,16 +68,29 @@ func (m *Model) innerWidth() int { return max(1, m.width-7) }
 // boxRows lays rows out under cols in the panel's width and adds them to it.
 // None is a row the cursor can stand on.
 func (m *Model) boxRows(p *page, cols []column, rows [][]string) {
-	for _, lines := range layout(cols, rows, m.innerWidth()) {
-		p.boxLaid(nil, lines)
+	for _, row := range layoutMarked(cols, rows, m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(rows))) {
+		p.boxRow(nil, row)
 	}
 }
 
-// boxHeight is how many lines boxRows would add.
-func (m *Model) boxHeight(cols []column, rows [][]string) int {
+// wholePane is the rows of a pane with no cursor rows laid out whole when the
+// person has expanded the pane: every row of it, else none.
+func (m *Model) wholePane(pane string, n int) []bool {
+	if !m.paneExpanded(pane) {
+		return nil
+	}
+	whole := make([]bool, n)
+	for i := range whole {
+		whole[i] = true
+	}
+	return whole
+}
+
+// boxHeight is how many lines boxRows would add to the pane titled pane.
+func (m *Model) boxHeight(pane string, cols []column, rows [][]string) int {
 	n := 0
-	for _, lines := range layout(cols, rows, m.innerWidth()) {
-		n += len(lines)
+	for _, row := range layoutMarked(cols, rows, m.innerWidth(), wrapRows, m.wholePane(pane, len(rows))) {
+		n += len(row.lines)
 	}
 	return n
 }
@@ -99,17 +112,19 @@ func (m *Model) runCells(rows []runRow) [][]string {
 // A row that is an ask carries the ask on every line it wraps to, so the
 // window can tell whether the ask was drawn whole.
 func (m *Model) runBoxRows(p *page, rows []runRow) {
-	for i, lines := range layout(runColumns, m.runCells(rows), m.innerWidth()) {
+	for i, row := range layoutMarked(runColumns, m.runCells(rows), m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(rows))) {
 		at := len(p.lines)
-		p.boxLaid(nil, lines)
+		p.boxRow(nil, row)
 		for k := at; k < len(p.lines); k++ {
 			p.lines[k].ask = rows[i].ask
 		}
 	}
 }
 
-// runHeight is the lines runBoxRows adds for rows.
-func (m *Model) runHeight(rows []runRow) int { return m.boxHeight(runColumns, m.runCells(rows)) }
+// runHeight is the lines runBoxRows adds for rows in the pane titled pane.
+func (m *Model) runHeight(pane string, rows []runRow) int {
+	return m.boxHeight(pane, runColumns, m.runCells(rows))
+}
 
 // boxEnd closes the panel.
 func (p *page) boxEnd() {

@@ -117,6 +117,10 @@ func (m *Model) click(x, y int) {
 			for _, p := range h.panes {
 				if line >= p.top && line <= p.bottom {
 					m.focusPane(p.title)
+					if p.rows == 0 && onCut(h.cuts[line], x) {
+						// A mark of a pane with no cursor rows is the pane's own.
+						m.expandHolder(false)
+					}
 					break
 				}
 			}
