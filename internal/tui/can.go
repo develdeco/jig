@@ -39,15 +39,17 @@ type subject struct {
 	// them too.
 	panes []string
 	focus string
-	// zoom is the pane drawn over the whole body, "" for none.
-	zoom string
+	// zoom is the pane drawn over the whole body, "" for none, and search says a
+	// pane is narrowed by a query.
+	zoom   string
+	search bool
 }
 
 // same says whether o is the subject s is, whatever row the cursor is on: the
 // page is sized by the keys of a subject, not by the row.
 func (s subject) same(o subject) bool {
 	return s.ticket == o.ticket && s.slice == o.slice && s.onSlice == o.onSlice &&
-		s.focus == o.focus && s.zoom == o.zoom && slices.Equal(s.panes, o.panes)
+		s.focus == o.focus && s.zoom == o.zoom && s.search == o.search && slices.Equal(s.panes, o.panes)
 }
 
 // paneSide is the title of the pane delta places from the focused one, wrapping.
@@ -94,7 +96,7 @@ func (m *Model) subjectOf(pg page) subject {
 	if ref != nil {
 		s.row, s.hasRow = *ref, true
 	}
-	s.panes, s.focus, s.zoom = m.panesNow, m.focusedPane(), e.zoom
+	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()
 	return s
 }
 

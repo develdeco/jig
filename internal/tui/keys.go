@@ -106,7 +106,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "z", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "z", "/", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -190,12 +190,20 @@ func keyRows() []keyRow {
 	return []keyRow{
 		{names: []string{"esc", "left", "backspace"}, label: "esc", words: "back", screens: onAllScreens &^ onScreens(screenMain),
 			say: func(_ *Model, sub subject) string {
-				if sub.zoom != "" {
+				switch {
+				case sub.search:
+					return "clear search"
+				case sub.zoom != "":
 					return "unzoom"
 				}
 				return "back"
 			},
 			run: func(m *Model, _ string) tea.Cmd {
+				if m.top().psearch.applied() {
+					// A narrowed pane is widened before anything else.
+					m.clearPaneSearch()
+					return nil
+				}
 				if m.top().zoom != "" {
 					// A zoomed pane is left before the screen is.
 					m.setZoom("")
@@ -276,6 +284,18 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.beginSearch(); return nil }},
+		{names: []string{"/"}, label: "/", words: "search", quiet: true, screens: onAllScreens &^ onScreens(screenMain),
+			say: func(_ *Model, sub subject) string { return inPane("search", sub) },
+			can: func(m *Model, sub subject) (bool, string) {
+				switch {
+				case sub.focus == "":
+					return false, "this screen has no pane to search"
+				case m.top().textFocus:
+					return false, sub.focus + " is text: it has no rows to search"
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.beginPaneSearch(); return nil }},
 		{names: []string{"a"}, label: "a", words: "answer", act: actAnswer, screens: onScreens(screenMain, screenChart, screenTicket, screenSlice),
 			run: func(m *Model, _ string) tea.Cmd { m.beginAnswer(); return nil }},
 		{names: []string{"k"}, label: "k", words: "keep", act: actKeep, screens: onScreens(screenTicket, screenReview),

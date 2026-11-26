@@ -23,6 +23,13 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		room = r
 	}
 	refs := m.logRefs(t, all)
+	total := len(all)
+	keep, searched := m.narrowIdx("Activity", total, func(i int) string {
+		return clock(all[i].l, m.zone) + " " + tagOf(all[i].step, all[i].key) + " " + m.moveText(t, all[i].l)
+	})
+	if searched {
+		all, refs = pick(all, keep), pick(refs, keep)
+	}
 	ids := make([]rowIdentity, len(refs))
 	for i, r := range refs {
 		ids[i] = r.identity()
@@ -33,14 +40,7 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 	p.windowed["Activity"] = refs
 	cur := m.paneCursorIn("Activity", ids, 0)
 	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
-	right := ""
-	switch {
-	case to-from == len(all):
-	case from == 0:
-		right = fmt.Sprintf("latest %d of %d", to, len(all))
-	default:
-		right = fmt.Sprintf("%d-%d of %d", from+1, to, len(all))
-	}
+	right := activityRight(searched, total, from, to, len(all))
 	rows := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
 		e := all[i]
@@ -52,7 +52,7 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		}
 		rows = append(rows, listRow{ref: &refs[i], cells: []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}})
 	}
-	spec := listSpec{title: "Activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet",
+	spec := listSpec{title: "Activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: emptyActivity(searched),
 		room: room - markLines(from, to, len(all), merged)}
 	switch {
 	case merged:
@@ -66,6 +66,29 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		}
 	}
 	m.listPanel(p, spec)
+}
+
+// activityRight is the words at the right of an activity pane's edge: how many of
+// its n rows a search kept of the total there are, else how many of the rows the
+// window from from to to-1 draws, the latest when it begins at the newest.
+func activityRight(searched bool, total, from, to, n int) string {
+	switch {
+	case searched:
+		return fmt.Sprintf("%d of %d", n, total)
+	case to-from == n:
+		return ""
+	case from == 0:
+		return fmt.Sprintf("latest %d of %d", to, n)
+	}
+	return fmt.Sprintf("%d-%d of %d", from+1, to, n)
+}
+
+// emptyActivity is what an activity pane with no row says.
+func emptyActivity(searched bool) string {
+	if searched {
+		return "no row matches"
+	}
+	return "nothing yet"
 }
 
 // logRefs are the rows of the log's lines, newest first: each is told from the
@@ -123,10 +146,18 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	}
 	seen := make(map[string]int, len(all))
 	refs := make([]rowRef, len(all))
-	ids := make([]rowIdentity, len(all))
 	for i, l := range all {
 		refs[i] = logRef(t.id, l, t.subKey(l), step, "", seen)
-		ids[i] = refs[i].identity()
+	}
+	labels := m.subLabelsOf(t)
+	total := len(all)
+	keep, searched := m.narrowIdx(title, total, func(i int) string { return strings.Join(m.activityCells(t, labels, all[i]), " ") })
+	if searched {
+		all, refs = pick(all, keep), pick(refs, keep)
+	}
+	ids := make([]rowIdentity, len(refs))
+	for i, r := range refs {
+		ids[i] = r.identity()
 	}
 	if p.windowed == nil {
 		p.windowed = map[string][]rowRef{}
@@ -134,33 +165,31 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	p.windowed[title] = refs
 	cur := m.paneCursorIn(title, ids, 0)
 	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
-	right := ""
-	switch {
-	case to-from == len(all):
-	case from == 0:
-		right = fmt.Sprintf("latest %d of %d", to, len(all))
-	default:
-		right = fmt.Sprintf("%d-%d of %d", from+1, to, len(all))
-	}
-	labels := m.subLabelsOf(t)
 	rows := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
 		rows = append(rows, listRow{ref: &refs[i], cells: m.activityCells(t, labels, all[i])})
 	}
-	spec := listSpec{title: title, summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet",
+	spec := listSpec{title: title, summary: activityRight(searched, total, from, to, len(all)), cols: activityColumns, names: activityColumnNames, rows: rows, empty: emptyActivity(searched),
 		room: room - markLines(from, to, len(all), merged)}
+	m.paneMarksOf(&spec, from, to, len(all), merged)
+	m.listPanel(p, spec)
+}
+
+// paneMarksOf puts the counts of the rows a window leaves out above and below it
+// into spec: the newer ones over the rows and the older ones under them, in one
+// line when merged.
+func (m *Model) paneMarksOf(spec *listSpec, from, to, n int, merged bool) {
 	switch {
 	case merged:
-		spec.after = []string{m.st.dim(fmt.Sprintf("↑ %d newer · ↓ %d older", from, len(all)-to))}
+		spec.after = []string{m.st.dim(fmt.Sprintf("↑ %d newer · ↓ %d older", from, n-to))}
 	default:
 		if from > 0 {
 			spec.before = []string{m.st.dim(fmt.Sprintf("↑ %d newer", from))}
 		}
-		if to < len(all) {
-			spec.after = []string{m.olderRow(len(all) - to)}
+		if to < n {
+			spec.after = []string{m.olderRow(n - to)}
 		}
 	}
-	m.listPanel(p, spec)
 }
 
 // chartActivityPanel adds the activity of the chart to p as a pane, newest first:
@@ -193,6 +222,17 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		room = r
 	}
 	refs := m.chartLogRefs(all)
+	total := len(all)
+	keep, searched := m.narrowIdx("Activity", total, func(i int) string {
+		e := all[i]
+		if e.commit != nil {
+			return clockAt(e.at, m.zone) + " " + e.id + " " + e.tag() + " " + e.commit.SHA + " " + e.commit.Subject
+		}
+		return clock(e.l, m.zone) + " " + e.id + " " + e.tag() + " " + m.moveText(e.t, e.l)
+	})
+	if searched {
+		all, refs = pick(all, keep), pick(refs, keep)
+	}
 	ids := make([]rowIdentity, len(refs))
 	for i, r := range refs {
 		ids[i] = r.identity()
@@ -203,14 +243,6 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	p.windowed["Activity"] = refs
 	cur := m.paneCursorIn("Activity", ids, 0)
 	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
-	right := ""
-	switch {
-	case to-from == len(all):
-	case from == 0:
-		right = fmt.Sprintf("latest %d of %d", to, len(all))
-	default:
-		right = fmt.Sprintf("%d-%d of %d", from+1, to, len(all))
-	}
 	items := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
 		e := all[i]
@@ -226,19 +258,9 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 		}
 		items = append(items, listRow{ref: &refs[i], cells: []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}})
 	}
-	spec := listSpec{title: "Activity", summary: right, cols: chartActivityColumns, names: chartActivityColumnNames, rows: items, empty: "nothing yet",
+	spec := listSpec{title: "Activity", summary: activityRight(searched, total, from, to, len(all)), cols: chartActivityColumns, names: chartActivityColumnNames, rows: items, empty: emptyActivity(searched),
 		room: room - markLines(from, to, len(all), merged)}
-	switch {
-	case merged:
-		spec.after = []string{m.st.dim(fmt.Sprintf("↑ %d newer · ↓ %d older", from, len(all)-to))}
-	default:
-		if from > 0 {
-			spec.before = []string{m.st.dim(fmt.Sprintf("↑ %d newer", from))}
-		}
-		if to < len(all) {
-			spec.after = []string{m.olderRow(len(all) - to)}
-		}
-	}
+	m.paneMarksOf(&spec, from, to, len(all), merged)
 	m.listPanel(p, spec)
 }
 

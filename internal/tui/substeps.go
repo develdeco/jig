@@ -39,7 +39,19 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	// folded ones keep one column.
 	labelW = max(labelW, width(subColumnNames[1]))
 	title := stepNames[step]
-	p.boxTop(title, fmt.Sprintf("%d of %d done", done, len(subs)))
+	right := fmt.Sprintf("%d of %d done", done, len(subs))
+	if keep, searched := m.narrowIdx(title, len(subs), func(i int) string {
+		return subs[i].Label + " " + m.subDetail(t, subs[i]) + " " + subs[i].Detail
+	}); searched {
+		right = fmt.Sprintf("%d of %d", len(keep), len(subs))
+		subs = pick(subs, keep)
+	}
+	p.boxTop(title, right)
+	if len(subs) == 0 {
+		p.boxAdd(m.st.dim("no row matches"))
+		p.boxEnd()
+		return p
+	}
 	room := height - 2
 	// The names of the columns take a line of the room when there is one to
 	// spare for them and a row.

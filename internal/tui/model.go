@@ -194,7 +194,9 @@ type navEntry struct {
 	// pane is text only: it scrolls by lines and has no row under a cursor.
 	paneFocus string
 	// zoom is the title of the pane drawn over the whole body, "" for none.
-	zoom      string
+	zoom string
+	// psearch is the query narrowing one pane (searchpane.go).
+	psearch   paneSearch
 	paneCurs  map[string]paneCursor
 	seenSel   int
 	seenSet   bool
@@ -1060,6 +1062,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		if m.nav[0].search.open {
 			return m.searchKey(k)
 		}
+	} else if m.top().psearch.open {
+		return m.paneSearchKey(k)
 	}
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session

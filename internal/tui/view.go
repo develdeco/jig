@@ -138,7 +138,7 @@ func (m *Model) page() page {
 		// The project's list is wrapped when it is built, once for what it reads.
 		return m.rawPage()
 	}
-	pg := m.wrapLong(m.rawPage())
+	pg := m.narrowPage(m.wrapLong(m.rawPage()))
 	if m.top().zoom != "" {
 		pg = m.zoomPage(pg)
 	}
@@ -806,6 +806,8 @@ func (m *Model) footer(w int) []string {
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
 	case m.top().screen == screenMain && m.nav[0].search.open:
 		return append([]string{rule}, m.searchFooter(w)...)
+	case m.top().screen != screenMain && m.top().psearch.open:
+		return append([]string{rule}, m.paneSearchFooter(w)...)
 	case m.help != nil:
 		return append([]string{rule}, m.hintLines(w, "esc", "close", "↑↓", "scroll", "q", "quit")...)
 	}
