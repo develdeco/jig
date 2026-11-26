@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +66,7 @@ func briefPartsRig(t *testing.T) chartRig {
 			hash = s.Hash
 		}
 	}
+	r.put(t, "tickets/TK-2/"+store.IllustrationFile, "<p>the picture</p>")
 	r.put(t, "tickets/TK-2/slices.yaml", "slices:\n  - id: a\n    workspace: alpha\n    goal: Build a.\n    oracle: test\n    blocked_by: []\n    from_brief: [\""+hash+"\"]\n")
 	return r
 }
@@ -112,6 +116,24 @@ func TestTUIPipeFramesOpenTheBriefPartByPart(t *testing.T) {
 	screen = out.untilScreen(t, "the approval", func(s string) bool { return strings.Contains(s, "╭─ Detail · approval") })
 	if words = screenWords(screen); !strings.Contains(words, "changed Steps") {
 		t.Errorf("the approval's detail does not name the section that changed:\n%s", screen)
+	}
+
+	// enter on the illustration serves it on the loopback address: a pipe has no
+	// opener, so the notice carries the address, and the address answers with the
+	// file.
+	keys.Write([]byte(up + "\r"))
+	screen = out.untilScreen(t, "the illustration's address", func(s string) bool {
+		return strings.Contains(s, "http://127.0.0.1:") && strings.Contains(s, "/illustration.html")
+	})
+	addr := regexp.MustCompile(`http://127\.0\.0\.1:\d+/illustration\.html`).FindString(screen)
+	if resp, err := http.Get(addr); err != nil {
+		t.Errorf("GET %s: %v", addr, err)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "<p>the picture</p>" {
+			t.Errorf("the address serves %q, want the illustration", body)
+		}
 	}
 
 	// enter on a cited slice opens the slice screen, whose section row opens the

@@ -8,15 +8,15 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs
   │  section   Greeting                   slice a                              │
   │  section   Farewell                   slice b                              │
   │  section   Tone                       slice c, d                           │
-  │  slice     a  Greet by name           ● green                              │
-  │  slice     b  Say goodbye, politely   ✗ fail                               │
-  │  slice     c  Pick the tone           ? needs-input                        │
+  │  slice     a                          ● green  Greet by name               │
+  │  slice     b                          ✗ fail  Say goodbye, politely        │
+  │  slice     c                          ? needs-input  Pick the tone         │
   │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮
-  │  heading  Goal                                                             │
-  │  approval which sections changed was not recorded for this approval        │
-  │  ↓ 2 more                                                                  │
+  │  heading Goal                                                              │
+  │  text    Say hello and goodbye to a person by name, in the tone the        │
+  │          product has.                                                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 1 more
 ────────────────────────────────────────────────────────────────────────────────

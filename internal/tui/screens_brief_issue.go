@@ -42,15 +42,14 @@ func (m *Model) readIssues(id string) []tea.Cmd {
 // issueRow is the row of the Parts list for the issue that plans t: its id and
 // title, and whether the task waits in its plan.
 func (m *Model) issueRow(t *ticket, issue string) listRow {
-	part := issue
-	if it := m.w.tickets[issue]; it != nil && it.title != "" {
-		part += "  " + m.st.dim(it.title)
-	}
 	stands := m.st.state(StateOK, "ready")
 	if n := len(t.blockers); n > 0 {
 		stands = m.st.state(StateNeedsInput, "waits for "+strconv.Itoa(n))
 	}
-	return listRow{ref: &rowRef{kind: rowIssue, id: issue, ticket: t.id}, cells: []string{"issue", part, stands}}
+	if it := m.w.tickets[issue]; it != nil && it.title != "" {
+		stands += "  " + m.st.dim(it.title)
+	}
+	return listRow{ref: &rowRef{kind: rowIssue, id: issue, ticket: t.id}, cells: []string{"issue", issue, stands}}
 }
 
 // issueDetail is the detail of an issue's row: its need, whole, and the task's

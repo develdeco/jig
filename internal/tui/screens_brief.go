@@ -30,21 +30,31 @@ func (m *Model) briefPage(id string) page {
 	b := t.status.Brief
 	step := m.steps(t)[stepBrief]
 	p.add(m.st.icon(step.State) + " " + m.st.state(step.State, step.Text))
+	issues := m.issuesOfTask(id)
 	if b == nil {
-		p.add("")
-		p.add(m.st.dim("this ticket has no brief"))
-		return p
+		// A ticket with no brief has no section, slice or approval to list, but
+		// its issue is still the issue that plans it.
+		if len(issues) == 0 {
+			p.add("")
+			p.add(m.st.dim("this ticket has no brief"))
+			return p
+		}
+		b = &statusBrief{Approval: briefNone}
 	}
+	hasBrief := t.status.Brief != nil
 
 	slices := t.slices(m.zone)
 	goals := t.goals()
-	issues := m.issuesOfTask(id)
-	hasIllustration := t.brief != nil && t.brief.Illustration
+	hasIllustration := hasBrief && t.brief != nil && t.brief.Illustration
 	rows := make([]listRow, 0, len(issues)+len(b.Sections)+len(slices)+1)
 	for _, issue := range issues {
 		rows = append(rows, m.issueRow(t, issue))
 	}
+	if !hasBrief {
+		slices = nil
+	}
 	for i, s := range b.Sections {
+		// The slices that cite a section can grow: they are free text, which wraps.
 		stands := m.st.dim("no slice")
 		if len(s.Slices) > 0 {
 			stands = "slice " + strings.Join(s.Slices, ", ")
@@ -56,19 +66,22 @@ func (m *Model) briefPage(id string) page {
 		rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: id}, cells: []string{"section", s.Heading, stands}})
 	}
 	for _, s := range slices {
-		part := s.ID
+		// A slice's id is a measured column, whole; its state and goal are free text.
+		stands := m.st.icon(s.State) + " " + m.st.state(s.State, s.State)
 		if g := goals[s.ID]; g != "" {
-			part += "  " + m.st.dim(g)
+			stands += "  " + m.st.dim(g)
 		}
 		rows = append(rows, listRow{
 			ref:   &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID},
-			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
+			cells: []string{"slice", s.ID, stands},
 		})
 	}
 	if hasIllustration {
 		rows = append(rows, m.illustrationRow(t))
 	}
-	rows = append(rows, listRow{ref: &rowRef{kind: rowApproval, id: "approval", ticket: id}, cells: []string{"approval", "the approval of the brief", m.approvalStands(b)}})
+	if hasBrief {
+		rows = append(rows, listRow{ref: &rowRef{kind: rowApproval, id: "approval", ticket: id}, cells: []string{"approval", "the approval of the brief", m.approvalStands(b)}})
+	}
 	list := listSpec{title: partsTitle, summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
 	var detail *detailSpec
 	at := m.cursorAmong(list)
@@ -89,6 +102,9 @@ func (m *Model) briefPage(id string) page {
 		detail = &d
 	}
 	p.add("")
+	if !hasBrief {
+		p.add(m.st.dim("this ticket has no brief"))
+	}
 	m.listAndDetail(&p, detail, at, list)
 
 	m.stepActivityPanel(&p, t, stepBrief)
@@ -97,12 +113,13 @@ func (m *Model) briefPage(id string) page {
 
 // briefPartOf is the part of the ticket's brief the sub-step key is about: brief
 // drafted is the first section, slices written the first slice, brief approved
-// the approval. ok is false when the part does not exist (no section yet, no
-// slice), and the brief then opens on its first row.
+// the approval. A part that does not exist (no section yet, no
+// slice) is the zero identity, which the brief opens on its first row, whatever a
+// visit before left.
 func (m *Model) briefPartOf(ticket, key string) (rowIdentity, bool) {
 	t := m.w.tickets[ticket]
 	if t == nil || t.status == nil || t.status.Brief == nil {
-		return rowIdentity{}, false
+		return rowIdentity{}, true
 	}
 	switch key {
 	case "drafted":
@@ -116,7 +133,7 @@ func (m *Model) briefPartOf(ticket, key string) (rowIdentity, bool) {
 	case "approved":
 		return rowIdentity{kind: rowApproval, id: "approval"}, true
 	}
-	return rowIdentity{}, false
+	return rowIdentity{}, true
 }
 
 // partsTitle is the title of the brief screen's list of its parts.
@@ -137,7 +154,7 @@ const (
 // stands. A slice's name carries its goal, and a section's place says which
 // slices cite it and whether it changed since the approval.
 var (
-	partColumns     = []column{{}, {free: true, gap: 2}, {gap: 2}}
+	partColumns     = []column{{}, {gap: 2}, {free: true, gap: 2}}
 	partColumnNames = []string{"kind", "part", "stands at"}
 )
 
@@ -161,7 +178,7 @@ func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 		label = ""
 	}
 	// Only an approval has something to be changed since.
-	if t.status.Brief.Approval != briefNone {
+	if t.status.Brief.Approval == "changed" {
 		switch s.Since {
 		case "same":
 			d.rows = append(d.rows, detailRow{label: "approval", text: "this section is as it was approved"})

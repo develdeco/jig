@@ -74,7 +74,7 @@ func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 		t.Errorf("the parts are %q, want %q", names, want)
 	}
 	// A section says which slices cite it, a slice its state.
-	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone slice c, d") || !strings.Contains(got, "slice c Pick the tone ? needs-input") {
+	if got := strings.Join(rows, "\n"); !strings.Contains(got, "section Tone slice c, d") || !strings.Contains(got, "slice c ? needs-input Pick the tone") {
 		t.Errorf("the rows do not say where each part stands:\n%s", got)
 	}
 	// A section opens nothing and a slice opens its screen.
@@ -156,7 +156,8 @@ func sinceStatus(since ...string) string {
 	for i, s := range since {
 		rows[i] += s
 	}
-	return strings.Replace(statusJIG1Brief(), old, "brief_sections[4]{heading,slices,since_approval}:\n  "+strings.Join(rows, "\n  ")+"\n", 1)
+	status := strings.Replace(statusJIG1Brief(), old, "brief_sections[4]{heading,slices,since_approval}:\n  "+strings.Join(rows, "\n  ")+"\n", 1)
+	return strings.Replace(status, "approval: current", "approval: changed", 1)
 }
 
 // TestASectionSaysWhetherItChangedSinceTheApproval: a section edited or added
@@ -184,7 +185,7 @@ func TestASectionSaysWhetherItChangedSinceTheApproval(t *testing.T) {
 	}
 
 	// A brief nobody approved has nothing to be changed since.
-	none := strings.Replace(sinceStatus("-", "-", "-", "-"), "approval: current", "approval: none", 1)
+	none := strings.Replace(sinceStatus("-", "-", "-", "-"), "approval: changed", "approval: none", 1)
 	g = briefRigWith(t, 100, 60, none, briefTextJIG1()).focus("section-2")
 	if d := readWords(between(g.view(), "╭─ Detail · Greeting", "╰")); strings.Contains(d, "changed") || strings.Contains(d, "approved") {
 		t.Errorf("a brief nobody approved says something of the approval:\n%s", g.view())

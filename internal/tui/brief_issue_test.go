@@ -32,7 +32,7 @@ func TestAnIssueIsARowWithItsNeedWholeAndTheTasksPlace(t *testing.T) {
 	t.Parallel()
 	g := taskBrief(t, planSpec{}, "SHOP-2")
 	rows := rowsOf(g.view(), "Parts")
-	if len(rows) < 2 || !strings.HasPrefix(strings.TrimPrefix(rows[1], "▸ "), "issue SHOP-49 Review rounds stop repeating work ready") {
+	if len(rows) < 2 || !strings.HasPrefix(strings.TrimPrefix(rows[1], "▸ "), "issue SHOP-49 ready Review rounds stop repeating work") {
 		t.Fatalf("the first part is not the issue, ready:\n%s", g.view())
 	}
 	if ref := g.m.selected(); ref == nil || ref.kind != rowIssue || ref.id != "SHOP-49" {
@@ -49,6 +49,18 @@ func TestAnIssueIsARowWithItsNeedWholeAndTheTasksPlace(t *testing.T) {
 		if !strings.Contains(d, want) {
 			t.Errorf("the detail of the issue lacks %q:\n%s", want, g.view())
 		}
+	}
+	// A task whose brief is not written yet still has its issue, above the line
+	// that says so.
+	nb := planMain(t, planSpec{})
+	nb.r.answer("status SHOP-2 --store /s", "ticket: SHOP-2\nstate: queued\n", 0)
+	nb.sized(100, 60).onRow("SHOP-2").press("enter", "1")
+	nbRows := rowsOf(nb.view(), "Parts")
+	if nb.m.Screen() != "brief" || len(nbRows) < 2 || !strings.Contains(nbRows[1], "issue SHOP-49") || !strings.Contains(nb.view(), "this ticket has no brief") {
+		t.Errorf("a task with no brief has no issue row:\n%s", nb.view())
+	}
+	if d := issueDetailOf(nb, "SHOP-49"); !strings.Contains(d, "need Review rounds repeat the same findings.") {
+		t.Errorf("the issue's need is not shown for a task with no brief:\n%s", nb.view())
 	}
 	// The sections follow it.
 	if got := strings.Join(rows, "\n"); strings.Index(got, "issue SHOP-49") > strings.Index(got, "section Goal") {
@@ -106,7 +118,7 @@ func TestATaskOfTwoIssuesHasARowForEach(t *testing.T) {
 	t.Parallel()
 	g := taskBrief(t, planSpec{second: true}, "SHOP-1")
 	rows := rowsOf(g.view(), "Parts")
-	if len(rows) < 3 || !strings.Contains(rows[1], "issue SHOP-49") || !strings.Contains(rows[2], "issue SHOP-50 Another issue") {
+	if len(rows) < 3 || !strings.Contains(rows[1], "issue SHOP-49") || !strings.Contains(rows[2], "issue SHOP-50 ready Another issue") {
 		t.Fatalf("the first two parts are not the two issues:\n%s", g.view())
 	}
 	g.press("down")

@@ -74,6 +74,21 @@ func TestASubstepWithNoPartOpensTheFirstRow(t *testing.T) {
 				t.Errorf("%v %s: the brief opened on %+v, want its first row, the approval, the only part there is", size, sub, ref)
 			}
 		}
+
+		// A second visit: the brief has sections and no slice; it was left on its
+		// third section, and the sub-step with no part opens the first row, not
+		// where the visit before left the cursor.
+		status := noPartsStatus() + axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{{"Goal", "-"}, {"Greeting", "-"}, {"Farewell", "-"}})
+		g := briefSubsRig(t, size[0], size[1], status, briefTextJIG1())
+		g.tabTo("Brief").focus("drafted")
+		g.press("enter", "down", "down", "esc")
+		g.view()
+		g.tabTo("Brief").focus("slices")
+		g.press("enter")
+		g.view()
+		if ref := g.m.selected(); g.m.Screen() != "brief" || ref == nil || ref.id != "section-1" {
+			t.Errorf("%v: a sub-step with no part reopened the brief on %+v, want its first row, section-1", size, ref)
+		}
 	}
 }
 

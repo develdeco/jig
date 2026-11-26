@@ -128,6 +128,13 @@ func TestBriefMarkdownRendersWhatTheBrowserPageRenders(t *testing.T) {
 			t.Errorf("line %q is %d cells, over the room", l, width(l))
 		}
 	}
+	// A tab in a fence or a table row is spaces to the next stop: a tab counts no
+	// cell where it is measured and a terminal draws it wide.
+	for _, l := range plainStyles().briefMarkdown("```go\nif x {\n\treturn\t1\n}\n```\n\n|\ta\t| b |", 20) {
+		if strings.Contains(l, "\t") || width(l) > 20 {
+			t.Errorf("line %q holds a tab or is over the room", l)
+		}
+	}
 	// A line of code or a table row wider than the room goes on the next line,
 	// whole.
 	long := plainStyles().briefMarkdown("```\n"+strings.Repeat("x", 25)+"\n```", 12)

@@ -8,7 +8,7 @@ import "strings"
 // illustrationRow is the Parts row of t's illustration.
 func (m *Model) illustrationRow(t *ticket) listRow {
 	stands := m.st.dim("not served yet")
-	if addr := m.served[t.id]; addr != "" {
+	if servedAddress(m.served[t.id]) {
 		stands = m.st.state(StateOK, "served")
 	}
 	if s := t.status.Brief.Illustration; s == "changed" || s == "added" {
@@ -17,19 +17,28 @@ func (m *Model) illustrationRow(t *ticket) listRow {
 	return listRow{ref: &rowRef{kind: rowIllustration, id: "illustration", ticket: t.id}, cells: []string{"illustration", "the brief's illustration", stands}}
 }
 
+// servedAddress says addr is an address a browser can reach, not the path the
+// viewer names in a session whose browser cannot.
+func servedAddress(addr string) bool {
+	return strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://")
+}
+
 // illustrationDetail is the detail of the illustration: where it stands, whether
 // it changed since the approval, and what enter does.
 func (m *Model) illustrationDetail(t *ticket) detailSpec {
 	d := detailSpec{title: "illustration", summary: "not served yet"}
 	add := func(r detailRow) { d.rows = append(d.rows, r) }
-	if addr := m.served[t.id]; addr != "" {
+	if addr := m.served[t.id]; servedAddress(addr) {
 		d.summary = "served"
 		add(detailRow{label: "served", text: addr})
+	} else if addr != "" {
+		// A path is where the file is: nothing listens for a browser.
+		add(detailRow{label: "served", text: "not served: the file is at " + addr, dim: true})
 	} else {
 		add(detailRow{label: "served", text: "not yet: enter serves it in the browser", dim: true})
 	}
 	b := t.status.Brief
-	if b.Approval != briefNone {
+	if b.Approval == "changed" {
 		switch b.Illustration {
 		case "same":
 			add(detailRow{label: "approval", text: "the illustration is as it was approved"})

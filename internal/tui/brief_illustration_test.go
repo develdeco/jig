@@ -119,4 +119,13 @@ func TestEnterAgainOnTheIllustrationReusesTheAddress(t *testing.T) {
 	if len(*sent) != 0 || !strings.Contains(r.m.notice, "the illustration is at /store/tickets/JIG-1/illustration.html") {
 		t.Errorf("a path was sent to the opener %v, notice %q", *sent, r.m.notice)
 	}
+	// Nothing listens in that session: the row and the detail never say served.
+	view := r.view()
+	rows := rowsOf(view, "Parts")
+	if row := rows[len(rows)-2]; strings.Contains(row, "served ") && !strings.Contains(row, "not served") {
+		t.Errorf("the row says a path is served: %q", row)
+	}
+	if d := readWords(between(view, "╭─ Detail · illustration", "╰")); !strings.Contains(d, "not served: the file is at /store/tickets/JIG-1/illustration.html") || strings.Contains(d, "served /store") {
+		t.Errorf("the detail says a path is served:\n%s", view)
+	}
 }

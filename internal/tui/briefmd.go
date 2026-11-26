@@ -207,7 +207,7 @@ func hangLines(prefix, words string, w int) []string {
 // written: a table row or a line of code keeps its spaces.
 func wrapCells(prefix, line string, w int) []string {
 	room := max(1, w-width(prefix))
-	line = strings.TrimRight(line, " \t")
+	line = expandTabs(strings.TrimRight(line, " \t"))
 	if width(line) <= room {
 		return []string{prefix + line}
 	}
@@ -216,6 +216,28 @@ func wrapCells(prefix, line string, w int) []string {
 		out = append(out, prefix+l)
 	}
 	return out
+}
+
+// expandTabs is line with each tab as the spaces to the next stop four cells on:
+// a tab counts no cell where it is measured and a terminal draws it as several,
+// which would push the right edge of the box out.
+func expandTabs(line string) string {
+	if !strings.Contains(line, "\t") {
+		return line
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range line {
+		if r == '\t' {
+			n := 4 - col%4
+			b.WriteString(spaces(n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col += width(string(r))
+	}
+	return b.String()
 }
 
 // inline is text with its bold, code spans and links drawn, a single space
