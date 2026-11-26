@@ -84,7 +84,7 @@ func (m *Model) slicePage(id, slice string) page {
 			for i, v := range states {
 				p.boxLaid(nil, laid[i])
 				if v.Clear != "" {
-					p.boxAdd("    " + m.st.dim(v.Clear))
+					p.boxUnder("    " + m.st.dim(v.Clear))
 				}
 			}
 			p.boxEnd()
@@ -122,10 +122,10 @@ func (m *Model) slicePage(id, slice string) page {
 			}
 			p.boxLaid(ref, laid[i])
 			for _, l := range m.panelLines(q.Text) {
-				p.boxAdd("    " + l)
+				p.boxUnder("    " + l)
 			}
 			if !q.Open && q.Answer != "" {
-				p.boxAdd("    " + m.st.state(StateOK, "answer: ") + q.Answer)
+				p.boxUnder("    " + m.st.state(StateOK, "answer: ") + q.Answer)
 			}
 		}
 		p.boxEnd()

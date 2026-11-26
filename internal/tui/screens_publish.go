@@ -159,7 +159,7 @@ func (m *Model) publishPageLess(id string, less int) page {
 	for i, c := range list {
 		p.boxLaid(nil, laid[i])
 		for _, l := range c.excerpt {
-			p.boxAdd(l)
+			p.boxUnder(l)
 		}
 	}
 	p.boxEnd()

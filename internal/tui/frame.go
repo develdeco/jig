@@ -30,6 +30,12 @@ func (p *page) boxAdd(text string) {
 	p.lines = append(p.lines, pline{text: text, box: boxMid})
 }
 
+// boxUnder adds a line inside the panel that a list draws under its row: the
+// row's detail. A window that moves with a cursor never begins on one.
+func (p *page) boxUnder(text string) {
+	p.lines = append(p.lines, pline{text: text, box: boxMid, under: true})
+}
+
 // boxLaid adds the lines the allocator laid a row out in, inside the panel:
 // the first is the row, standing for ref when the cursor can stand on it, and
 // the rest are its continuation rows.

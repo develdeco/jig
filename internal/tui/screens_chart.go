@@ -150,7 +150,7 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 		p.boxLaid(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
 			for _, l := range sub(r) {
-				p.boxAdd(l)
+				p.boxUnder(l)
 			}
 		}
 	}

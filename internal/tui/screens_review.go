@@ -122,7 +122,7 @@ func (m *Model) roundsPanel(p *page, t *ticket, rounds []roundRow) {
 	for i := range rounds {
 		p.boxLaid(nil, laid[i])
 		for _, l := range notes[i] {
-			p.boxAdd(l)
+			p.boxUnder(l)
 		}
 	}
 	p.boxEnd()
@@ -289,10 +289,10 @@ func (m *Model) probeRows(p *page, t *ticket) {
 			if superseded[i] {
 				l = m.st.dim(l)
 			}
-			p.boxAdd("    " + l)
+			p.boxUnder("    " + l)
 		}
 		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines) {
-			p.boxAdd("    " + m.st.dim(l))
+			p.boxUnder("    " + m.st.dim(l))
 		}
 	}
 	p.boxEnd()
@@ -386,7 +386,7 @@ func (m *Model) findingRows(p *page, t *ticket, asking map[string]bool) {
 	for i, f := range rows {
 		p.boxLaid(&rowRef{kind: rowStop, id: f.ID, ticket: t.id}, laid[i])
 		for _, l := range wrap(f.Rationale, m.innerWidth()-6, 2) {
-			p.boxAdd("    " + m.st.dim(l))
+			p.boxUnder("    " + m.st.dim(l))
 		}
 	}
 	p.boxEnd()

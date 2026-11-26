@@ -85,6 +85,33 @@ func TestZShowsATextPaneWholeNotAsTheScreenCutIt(t *testing.T) {
 	}
 }
 
+// TestAZoomedRunScrollsToItsLastEnd: a pane of text is read by lines through every
+// line it has, whatever the line begins with: a Run that ends at a dozen tickets
+// draws the last of them when read down.
+func TestAZoomedRunScrollsToItsLastEnd(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "")
+	lines, status := chartTickets()
+	var ends []map[string]any
+	for i := 20; i < 32; i++ {
+		ends = append(ends, map[string]any{"ticket": fmt.Sprintf("JIG-%d", i), "blocker": "JIG-4", "kind": "merged", "fact": "its PR is open"})
+	}
+	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(func(v map[string]any) { v["ends"] = ends }), status)
+	g.feed(lines...)
+	g.openChart("checkout")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 16})
+	g.tabTo("Run")
+	g.press("z")
+	var last string
+	for i := 0; i < 20; i++ {
+		g.press("down")
+		last = g.view()
+	}
+	if !strings.Contains(last, "JIG-31") {
+		t.Errorf("reading the zoomed Run down never draws its last end:\n%s", last)
+	}
+}
+
 // TestUnzoomingShowsNothingNewWhenNoLineCameIn: what a zoom changes in what a
 // pane draws is not read as lines that came in.
 func TestUnzoomingShowsNothingNewWhenNoLineCameIn(t *testing.T) {
