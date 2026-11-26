@@ -42,6 +42,7 @@ func waitingOnAnswer(g *rig, id string, n int) {
 	d.Slices = &slices
 	g.pin(id, &d)
 	g.m.w.tickets[id].digest = &d
+	g.m.w.gen++
 }
 
 // TestNeedsYouIsHeldBackWhileASessionIsLive: a ledger line of a session bound to

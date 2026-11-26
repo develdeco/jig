@@ -56,6 +56,7 @@ func TestEndStatesReadApart(t *testing.T) {
 			tk.lines = tk.lines[:len(tk.lines)-1]
 		}
 		tk.digest = d
+		g.m.w.gen++
 		icon := lookOf(state).Icon
 		if prev, dup := icons[icon]; dup {
 			t.Errorf("%s and %s share the icon %s", prev, state, icon)
@@ -99,6 +100,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 		d.Closed = "not planned"
 		g := chartRig(t)
 		g.m.w.tickets["JIG-4"].digest = d
+		g.m.w.gen++
 		tk := g.m.w.tickets["JIG-4"]
 
 		steps := g.m.steps(tk)

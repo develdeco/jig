@@ -135,15 +135,17 @@ type chartRow struct {
 // "reading" and nothing else. The verb's entry adds only the chart's own facts
 // (its problem, the entries with no ticket).
 func (m *Model) chartRows(c *chart) []chartRow {
-	var rows []chartRow
-	for _, id := range c.ids() {
-		if verb := c.verbOf(id); verb != nil {
-			rows = append(rows, m.rowOf(id, verb.Title, verb))
-		} else {
-			rows = append(rows, m.rowOf(id, "", nil))
+	return m.rowsOf("chart:"+c.listing.Name, func() []chartRow {
+		var rows []chartRow
+		for _, id := range c.ids() {
+			if verb := c.verbOf(id); verb != nil {
+				rows = append(rows, m.rowOf(id, verb.Title, verb))
+			} else {
+				rows = append(rows, m.rowOf(id, "", nil))
+			}
 		}
-	}
-	return rows
+		return rows
+	})
 }
 
 // statusRows are the rows a chart's status is counted from: for the chart that
@@ -155,13 +157,21 @@ func (m *Model) statusRows(c *chart) []chartRow {
 	if c.issueID() == "" {
 		return rows
 	}
-	is := c.planIssue()
-	return m.planRows(rows, is.Ticket, is.Branch)
+	return m.planRowsOf(c)
+}
+
+// planRowsOf are the rows of the plan of the issue chart c plans.
+func (m *Model) planRowsOf(c *chart) []chartRow {
+	return m.rowsOf("plan:"+c.listing.Name, func() []chartRow {
+		is := c.planIssue()
+		return m.planRows(m.chartRows(c), is.Ticket, is.Branch)
+	})
 }
 
 // rowOf is the row of ticket id as the screens show it, under title when the
 // chart names one.
 func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
+	m.rowReads++
 	r := chartRow{id: id, title: title, verb: verb}
 	if t := m.w.tickets[id]; t != nil {
 		r.t, r.title = t, firstOf(title, t.title)

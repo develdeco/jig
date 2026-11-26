@@ -69,7 +69,7 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	}
 	p.windowed = map[string][]rowRef{title: refs}
 	cur := m.paneCursorIn(title, ids, homeSub(subs, focus))
-	from, to, openRows, merged := m.subWindow(t, step, subs, cur, focus, room)
+	from, to, openRows, merged := m.subWindow(title, t, step, subs, cur, focus, room)
 
 	var picked []int
 	for i := from; i < to; i++ {
@@ -133,12 +133,12 @@ func homeSub(subs []phase.Sub, focus int) int {
 // does not reach an end of the list gives a line to the count of what is past
 // it. The open sub-step takes what the others leave, as many rows as there are
 // room for before it takes more than its three lines.
-func (m *Model) subWindow(t *ticket, step int, subs []phase.Sub, cur, focus, room int) (from, to, openRows int, merged bool) {
+func (m *Model) subWindow(title string, t *ticket, step int, subs []phase.Sub, cur, focus, room int) (from, to, openRows int, merged bool) {
 	n := len(subs)
 	if focus >= 0 {
 		lo, hi := min(cur, focus), max(cur, focus)+1
 		if windowCost(n, lo, hi, openMin-1, room) <= room {
-			from, to, merged = windowAround(n, lo, hi, openMin-1, room)
+			from, to, merged = m.paneWindow(title, n, lo, hi, openMin-1, room)
 			// The open sub-step is not worth the rows of the others: it opens when
 			// it can stay beside two of them, as it always has.
 			if to-from >= min(n, 3) {
@@ -148,7 +148,7 @@ func (m *Model) subWindow(t *ticket, step int, subs []phase.Sub, cur, focus, roo
 			}
 		}
 	}
-	from, to, merged = windowAround(n, cur, cur+1, 0, room)
+	from, to, merged = m.paneWindow(title, n, cur, cur+1, 0, room)
 	return from, to, 0, merged
 }
 

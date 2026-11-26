@@ -223,8 +223,9 @@ func (m *Model) stepCells(s stepRow, current bool) []string {
 // which.
 func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 	e := m.top()
-	if pf := e.paneFocus; pf != "" && pf != "Steps" && !e.follow {
-		// The panes show the step the Steps cursor is on, whichever has the focus.
+	if !e.follow {
+		// The panes show the step the Steps cursor is on, whichever has the focus,
+		// read by its row.
 		if pc := e.paneCurs["Steps"]; pc.set {
 			for i, s := range steps {
 				if s.Kind == pc.id.kind {
@@ -232,6 +233,8 @@ func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 				}
 			}
 		}
+	}
+	if e.paneFocus != "" && e.paneFocus != "Steps" {
 		return currentStep(steps)
 	}
 	switch {

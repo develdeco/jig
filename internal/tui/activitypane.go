@@ -39,7 +39,7 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 	}
 	p.windowed["Activity"] = refs
 	cur := m.paneCursorIn("Activity", ids, 0)
-	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
+	from, to, merged := m.paneWindow("Activity", len(all), cur, cur+1, 0, room)
 	right := activityRight(searched, total, from, to, len(all))
 	rows := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
@@ -164,7 +164,7 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	}
 	p.windowed[title] = refs
 	cur := m.paneCursorIn(title, ids, 0)
-	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
+	from, to, merged := m.paneWindow(title, len(all), cur, cur+1, 0, room)
 	rows := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
 		rows = append(rows, listRow{ref: &refs[i], cells: m.activityCells(t, labels, all[i])})
@@ -198,30 +198,38 @@ func (m *Model) paneMarksOf(spec *listSpec, from, to, n int, merged bool) {
 // newest first), of which it draws the window around its cursor that the rows
 // below what p holds allow, as the ticket screen's does. A line opens its
 // ticket; a commit opens nothing.
-func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
-	var all []chartLine
-	for _, r := range rows {
-		if r.t == nil {
-			continue
+func (m *Model) chartActivityPanel(p *page, name string, rows []chartRow, history []chartCommit) {
+	log := m.chartLogOf(name, func() *chartLog {
+		var all []chartLine
+		for _, r := range rows {
+			if r.t == nil {
+				continue
+			}
+			for _, pl := range m.placed(r.t, r.d) {
+				at, _ := pl.l.At()
+				all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
+			}
 		}
-		for _, pl := range m.placed(r.t, r.d) {
-			at, _ := pl.l.At()
-			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
+		// The commits come after the tickets' lines, oldest first, so that at one
+		// instant the stable sort keeps git's order (the newer above the older) and
+		// a commit stands above a ticket's line.
+		for i := len(history) - 1; i >= 0; i-- {
+			all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
 		}
-	}
-	// The commits come after the tickets' lines, oldest first, so that at one
-	// instant the stable sort keeps git's order (the newer above the older) and
-	// a commit stands above a ticket's line.
-	for i := len(history) - 1; i >= 0; i-- {
-		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
-	}
-	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
+		all = newestFirst(all, func(c chartLine) time.Time { return c.at })
+		refs := m.chartLogRefs(all)
+		ids := make([]rowIdentity, len(refs))
+		for i, r := range refs {
+			ids[i] = r.identity()
+		}
+		return &chartLog{all: all, refs: refs, ids: ids}
+	})
+	all, refs, ids := log.all, log.refs, log.ids
 	// The edges and the names take three of the rows the panel has.
 	room := max(activityFloor-3, m.bodyRows()-m.taken(p)-3)
 	if r, ok := m.zoomRoom("Activity"); ok {
 		room = r
 	}
-	refs := m.chartLogRefs(all)
 	total := len(all)
 	keep, searched := m.narrowIdx("Activity", total, func(i int) string {
 		e := all[i]
@@ -232,17 +240,17 @@ func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartComm
 	})
 	if searched {
 		all, refs = pick(all, keep), pick(refs, keep)
-	}
-	ids := make([]rowIdentity, len(refs))
-	for i, r := range refs {
-		ids[i] = r.identity()
+		ids = make([]rowIdentity, len(refs))
+		for i, r := range refs {
+			ids[i] = r.identity()
+		}
 	}
 	if p.windowed == nil {
 		p.windowed = map[string][]rowRef{}
 	}
 	p.windowed["Activity"] = refs
 	cur := m.paneCursorIn("Activity", ids, 0)
-	from, to, merged := windowAround(len(all), cur, cur+1, 0, room)
+	from, to, merged := m.paneWindow("Activity", len(all), cur, cur+1, 0, room)
 	items := make([]listRow, 0, to-from)
 	for i := from; i < to; i++ {
 		e := all[i]

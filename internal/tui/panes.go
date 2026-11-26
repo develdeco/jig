@@ -70,6 +70,9 @@ type paneCursor struct {
 	idx    int
 	set    bool
 	scroll int
+	// top is the first row a pane that draws a window of its rows drew, among all
+	// of them: the window moves only when the cursor would leave it.
+	top int
 }
 
 // focusedPane is the title of the pane that has the focus on the screen on top,
@@ -204,6 +207,27 @@ func (e *navEntry) rememberPane(pg page, p pane, refs []rowRef) {
 	e.paneCurs[p.title] = pc
 }
 
+// rememberMove notes the row the focused pane's cursor has moved to as the pane's
+// own at once, so what follows a cursor (the Detail of a ticket, the sub-steps of a
+// step) reads it by its row in the next frame, not the one after. A pane that
+// draws a window of its rows noted it when it moved.
+func (m *Model) rememberMove(pg page) {
+	e := m.top()
+	if e.screen == screenMain || e.textFocus {
+		return
+	}
+	if _, ok := pg.windowed[e.paneFocus]; ok {
+		return
+	}
+	for _, p := range pg.panes() {
+		if p.title == e.paneFocus {
+			e.rememberPane(pg, p, pg.refs())
+			e.seenSel, e.seenSet = e.sel, true
+			return
+		}
+	}
+}
+
 // paneCursorIn is the place, among ids, of the row the pane titled title keeps
 // its cursor on: by identity, else the place it was at, else def. The builder
 // of a pane that draws only a window of its rows reads it to draw the window
@@ -257,6 +281,54 @@ func windowAround(n, f, e, extra, room int) (from, to int, merged bool) {
 			return f, e, f > 0 && e < n && e-f+extra+2 > room
 		}
 	}
+}
+
+// windowKeep is the window of rows of n that holds the rows f to e-1 (the cursor's)
+// and keeps the place it had: it begins where the pane's window began (hint) and
+// draws as many rows as the room holds. A cursor below the window moves it just
+// far enough to be its last row; one above it begins it.
+func windowKeep(n, hint, f, e, extra, room int) (from, to int, merged bool) {
+	e = min(e, n)
+	f = min(f, e)
+	from = min(max(hint, 0), f)
+	to = e
+	cost := func(f, e int) int {
+		k := e - f + extra
+		return k + markLines(f, e, n, f > 0 && e < n && k+2 > room)
+	}
+	if cost(from, to) <= room || from == f {
+		for to < n && cost(from, to+1) <= room {
+			to++
+		}
+		return from, to, from > 0 && to < n && to-from+extra+2 > room
+	}
+	// The cursor is below the window: it is the window's last row.
+	from = f
+	for from > 0 && cost(from-1, to) <= room {
+		from--
+	}
+	return from, to, from > 0 && to < n && to-from+extra+2 > room
+}
+
+// paneWindow is windowKeep for the pane titled title, which keeps where its window
+// began.
+func (m *Model) paneWindow(title string, n, f, e, extra, room int) (from, to int, merged bool) {
+	ent := m.top()
+	pc := ent.paneCurs[title]
+	if pc.set {
+		from, to, merged = windowKeep(n, pc.top, f, e, extra, room)
+	} else {
+		// A cursor nobody has moved: the window is the one around the row it is on.
+		from, to, merged = windowAround(n, f, e, extra, room)
+	}
+	if pc.top != from {
+		pc.top = from
+		if ent.paneCurs == nil {
+			ent.paneCurs = map[string]paneCursor{}
+		}
+		ent.paneCurs[title] = pc
+	}
+	return from, to, merged
 }
 
 // windowCost is how many lines the window of rows from to to-1 takes with extra
@@ -362,10 +434,13 @@ func (m *Model) switchPane(delta int) {
 	e := m.top()
 	zoomed := e.zoom != ""
 	if zoomed {
-		m.syncPanes(m.page())
+		m.syncPanes(m.geometry())
 		m.setZoom("")
 	}
-	pg := m.page()
+	pg := m.geometry()
+	if zoomed {
+		pg = m.page()
+	}
 	m.syncPanes(pg)
 	ps := pg.panes()
 	if len(ps) < 2 {
@@ -386,7 +461,7 @@ func (m *Model) switchPane(delta int) {
 
 // focusPane gives the focus to the pane titled title, when the screen has it.
 func (m *Model) focusPane(title string) {
-	pg := m.page()
+	pg := m.geometry()
 	m.syncPanes(pg)
 	ps := pg.panes()
 	if i := slices.IndexFunc(ps, func(p pane) bool { return p.title == title }); i >= 0 && title != m.top().paneFocus {

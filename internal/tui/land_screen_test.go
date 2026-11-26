@@ -257,6 +257,7 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	for state, d := range digests {
 		c := chartRig(t)
 		c.m.w.tickets["JIG-4"].digest = d
+		c.m.w.gen++
 		ch := c.m.w.charts["checkout"]
 		row := c.m.chartRows(ch)[0]
 		want := state == StateWaitsToLand

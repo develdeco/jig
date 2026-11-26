@@ -40,7 +40,10 @@ func (m *Model) chartPage(name string) page {
 	detailID := ""
 	if len(rows) > 0 {
 		r := rows[m.ticketsCursor(rows, "Tickets")]
-		detail, detailID = trimRuns(m.chartDetailRows(r), detailMax), r.id
+		detail, detailID = m.chartDetailRows(r), r.id
+		if !m.zoomed("Detail") {
+			detail = trimRuns(detail, detailMax)
+		}
 	}
 	// The heights: the tickets, the Detail and Run panels and the activity at
 	// its floor come first, and the Run panel's detail goes before the Detail
@@ -59,18 +62,21 @@ func (m *Model) chartPage(name string) page {
 		}
 	}
 	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight(detail)) - frame(m.runHeight(run)) - activityFloor
-	if spare < 0 && len(run) > 1 {
+	if spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		cut := min(-spare, len(run)-1)
 		run = trimRuns(run, len(run)-cut)
 		spare += cut
 	}
-	if spare < 0 {
+	if spare < 0 && !m.zoomed("Detail") {
 		var cut int
 		detail, cut = shortenRuns(detail, -spare)
 		spare += cut
 	}
 	var mapPanel page
 	if c.info != nil {
+		if m.zoomed("Map") {
+			spare = m.bodyRows()
+		}
 		m.mapPanel(&mapPanel, c, spare)
 	}
 	p.lines = append(p.lines, mapPanel.lines...)
@@ -87,7 +93,7 @@ func (m *Model) chartPage(name string) page {
 	if c.info != nil {
 		history = c.info.History
 	}
-	m.chartActivityPanel(&p, rows, history)
+	m.chartActivityPanel(&p, "chart:"+c.listing.Name, rows, history)
 	return p
 }
 
@@ -519,11 +525,9 @@ func (c chartLine) tag() string {
 func (m *Model) ticketsCursor(rows []chartRow, title string) int {
 	e := m.top()
 	last := max(len(rows)-1, 0)
-	if f := e.paneFocus; f == "" || f == title {
-		return min(max(e.sel, 0), last)
-	}
 	pc := e.paneCurs[title]
 	if !pc.set {
+		// The first frame: the cursor has not been read as a row yet.
 		return min(max(e.sel, 0), last)
 	}
 	for i, r := range rows {

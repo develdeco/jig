@@ -18,6 +18,10 @@ func (m *Model) zoomRoom(title string) (int, bool) {
 	return max(3, m.bodyRows()-3), true
 }
 
+// zoomed says the pane titled title is the one drawn over the whole body: a pane
+// of text is then built whole, not as the allocator cuts it to share the body.
+func (m *Model) zoomed(title string) bool { return m.top().zoom == title }
+
 // zoomPage is pg cut down to the zoomed pane. A pane the screen no longer has
 // ends the zoom.
 func (m *Model) zoomPage(pg page) page {
@@ -43,7 +47,7 @@ func (m *Model) zoomPage(pg page) page {
 // screen is drawn again.
 func (m *Model) toggleZoom() {
 	e := m.top()
-	m.syncPanes(m.page())
+	m.syncPanes(m.geometry())
 	if e.zoom != "" {
 		m.setZoom("")
 		return
@@ -59,6 +63,9 @@ func (m *Model) setZoom(title string) {
 	e := m.top()
 	was := e.zoom
 	e.zoom = title
+	// What the pane draws has changed: what the last frame held is not what a new
+	// line is read against.
+	m.seen = nil
 	e.seenSel, e.seenSet = e.sel, true
 	if e.textFocus {
 		// A pane of text is read from its top edge in either view.

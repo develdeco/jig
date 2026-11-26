@@ -412,6 +412,9 @@ func (g *rig) syncDigests() {
 	for _, id := range order {
 		t := g.m.w.tickets[id]
 		if d, ok := g.pinned[id]; ok {
+			if t.digest != d {
+				g.m.w.gen++
+			}
 			t.digest = d
 			continue
 		}

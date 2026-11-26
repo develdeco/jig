@@ -90,5 +90,7 @@ func (m *Model) click(y int) {
 	}
 	e := m.top()
 	e.sel, e.follow, e.lead = h.sel[line], false, 0
+	// The pane clicked has the focus, and its cursor is the row clicked, at once.
+	m.syncPanes(m.geometry())
 	m.noteCursor()
 }

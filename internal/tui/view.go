@@ -282,17 +282,27 @@ type screenLayout struct {
 // layout lays the screen on top out as View draws it.
 func (m *Model) layout() screenLayout {
 	w, h := m.width, m.height
+	if e := m.top(); len(m.panesNow) > 0 && e.screen != screenMain {
+		// The hint line is cut for what the keys have just moved: the focus, the
+		// zoom, a search. The page is sized by it once, not again for the move.
+		m.keysOn.focus, m.keysOn.zoom, m.keysOn.search = e.paneFocus, e.zoom, e.psearch.applied()
+	}
 	pg := m.page()
 	sub := m.subjectOf(pg)
-	changed := !sub.same(m.keysOn)
-	m.keysOn = sub
-	if changed {
-		// The page was sized by a hint line cut for another subject: it is
-		// built again, once, for this one.
-		pg = m.page()
+	if changed := !sub.same(m.keysOn); changed {
+		// The page was sized by a hint line cut for another subject: it is built
+		// again, once, when the line for this one has another height.
+		before := len(m.footer(w))
+		m.keysOn = sub
+		if len(m.footer(w)) != before {
+			pg = m.page()
+		}
 	}
+	m.keysOn = sub
 	m.syncPanes(pg)
 	m.paneMarks(&pg)
+	m.shown = &shownPage{pg: pg, gen: m.w.gen, w: m.width, h: m.height, depth: len(m.nav), at: keyOf(*m.top()),
+		zoom: m.top().zoom, search: string(m.top().psearch.query), tail: m.tail}
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -409,9 +419,9 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
 		}
-		if n > 0 && sel == n-1 {
-			// On the last row, show as much of what follows it as fits
-			// with the row still in view: a panel of activity is below.
+		if n > 0 && (sel == n-1 || (m.top().screen != screenMain && lastRowOfPanel(pg.lines, selLine))) {
+			// On the last row of its panel, show as much of what follows it as
+			// fits with the row still in view: the panels below come into view.
 			start = clampStart(pg.lines, h, selLine)
 		}
 		if n == 0 || m.top().textFocus {
@@ -429,6 +439,20 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		start = max(0, start-lead)
 	}
 	return start
+}
+
+// lastRowOfPanel says the row at line i is the last row of the panel it is in:
+// no other row stands between it and the panel's bottom edge.
+func lastRowOfPanel(lines []pline, i int) bool {
+	if i < 0 || i >= len(lines) || lines[i].box == boxNone {
+		return false
+	}
+	for j := i + 1; j < len(lines) && lines[j].box != boxBottom && lines[j].box != boxNone; j++ {
+		if lines[j].ref != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // windowSpan is the page lines the window of h rows from start draws, from the

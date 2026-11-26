@@ -52,6 +52,9 @@ type keyRow struct {
 	hintKey, hintText string
 	// quiet keeps the row off the hint line; `?` still lists it.
 	quiet bool
+	// noRow says the row's availability reads no row of the screen: it is asked of
+	// the subject the last frame was drawn for, and a key builds no page for it.
+	noRow bool
 	// screens are the screens the row works on; hinted, when not zero, are the
 	// ones whose hint line carries it.
 	screens, hinted screenSet
@@ -221,15 +224,15 @@ func keyRows() []keyRow {
 			run: func(m *Model, _ string) tea.Cmd { m.clearSearch(); return nil }},
 		{names: []string{"?"}, label: "?", words: "keys", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { m.help = &helpView{}; return nil }},
-		{names: []string{"tab"}, label: "tab", words: "next pane", screens: onAllScreens,
-			say: func(_ *Model, sub subject) string { return "next pane: " + sub.paneSide(1) },
+		{names: []string{"tab"}, label: "tab", words: "next pane", noRow: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return sub.paneWords("next pane", 1) },
 			can: canSwitchPane,
 			run: func(m *Model, _ string) tea.Cmd { m.switchPane(1); return nil }},
-		{names: []string{"shift+tab"}, label: "shift+tab", words: "previous pane", quiet: true, screens: onAllScreens,
-			say: func(_ *Model, sub subject) string { return "previous pane: " + sub.paneSide(-1) },
+		{names: []string{"shift+tab"}, label: "shift+tab", words: "previous pane", quiet: true, noRow: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return sub.paneWords("previous pane", -1) },
 			can: canSwitchPane,
 			run: func(m *Model, _ string) tea.Cmd { m.switchPane(-1); return nil }},
-		{names: []string{"z"}, label: "z", words: "zoom", quiet: true, screens: onAllScreens,
+		{names: []string{"z"}, label: "z", words: "zoom", quiet: true, noRow: true, screens: onAllScreens,
 			say: func(_ *Model, sub subject) string {
 				if sub.zoom != "" {
 					return "unzoom"
@@ -284,7 +287,7 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.beginSearch(); return nil }},
-		{names: []string{"/"}, label: "/", words: "search", quiet: true, screens: onAllScreens &^ onScreens(screenMain),
+		{names: []string{"/"}, label: "/", words: "search", quiet: true, noRow: true, screens: onAllScreens &^ onScreens(screenMain),
 			say: func(_ *Model, sub subject) string { return inPane("search", sub) },
 			can: func(m *Model, sub subject) (bool, string) {
 				switch {
@@ -410,7 +413,10 @@ func (m *Model) runKey(key string) tea.Cmd {
 			return m.refuseAction(r)
 		}
 		if r.needsSubject() {
-			sub := m.subjectNow()
+			sub := m.keysOn
+			if !r.noRow {
+				sub = m.subjectNow()
+			}
 			m.keysOn = sub
 			if ok, why := r.avail(m, sub); !ok {
 				m.notice = why

@@ -62,6 +62,16 @@ func (s subject) paneSide(delta int) string {
 	return s.panes[((i+delta)%n+n)%n]
 }
 
+// paneWords is what a key that goes to the pane delta places on says: its words and
+// the pane's name, or the words alone on a screen with no other pane to go to
+// (the key's row gives the reason).
+func (s subject) paneWords(words string, delta int) string {
+	if len(s.panes) < 2 {
+		return words
+	}
+	return words + ": " + s.paneSide(delta)
+}
+
 // canSwitchPane is the availability of the pane keys: a screen of one pane has
 // none to move to.
 func canSwitchPane(_ *Model, sub subject) (bool, string) {

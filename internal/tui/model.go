@@ -317,6 +317,13 @@ type Model struct {
 	help *helpView
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
+	// rowMemo holds the rows of the chart screens built for the world as it
+	// stands (chartcache.go).
+	rowMemo *rowsMemo
+	// shown is the page the last frame drew (chartcache.go).
+	shown *shownPage
+	// rowReads counts the tickets read into a row of a chart screen.
+	rowReads int
 	// queueBuilds counts the project's list built (maincache.go): a key that
 	// moves nothing the list reads builds none, a search key included.
 	queueBuilds int
@@ -1081,12 +1088,13 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
 	m.moveBy(delta)
+	m.rememberMove(m.geometry())
 	m.noteCursor()
 }
 
 func (m *Model) moveBy(delta int) {
 	m.followSel()
-	pg := m.page()
+	pg := m.geometry()
 	n := len(pg.refs())
 	e := m.top()
 	m.syncPanes(pg)

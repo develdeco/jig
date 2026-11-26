@@ -328,8 +328,12 @@ type placedLine struct {
 // placed are the log's lines of a ticket that stands as d says, oldest first,
 // each with its place.
 func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
-	out, _ := m.placedIn(t, d)
-	return out
+	memo := t.memoFor()
+	if memo.placed == nil {
+		out, _ := m.placedIn(t, d)
+		memo.placed = &out
+	}
+	return *memo.placed
 }
 
 // placedIn is placed with the windows the places came from.

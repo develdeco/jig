@@ -41,6 +41,9 @@ type ticketMemo struct {
 	phase     *phase.Ticket
 	clocks    *clocks
 	clocksAt  int64
+	// placed are the log's lines each with its place (log.go): a reading of every
+	// line the ticket has.
+	placed *[]placedLine
 }
 
 // memoFor is the readings of t as it stands now: those of the last ask while
