@@ -20,9 +20,9 @@ func TestReviewSectionsArePanels(t *testing.T) {
 		w, h := size[0], size[1]
 		for _, rows := range []int{h, 100} {
 			g := newRig(t, "JIG-2")
-			g.r.answer("status JIG-2 --store /s", ledgerStatus([][]string{
-				ledgerRound("1", "3", "1", "0", "1"),
-				ledgerRound("2", "2", "0", "0", "0"),
+			g.r.answer("status JIG-2 --store /s", probeStatus([][]string{
+				probeRound("1", "3", "1"),
+				probeRound("2", "2", "0"),
 			},
 				axi.Table("probes", probeColumns, [][]string{
 					{"1", "caught", "alpha/a.go:9", "the parser", "flip the guard", "go test ./alpha"},

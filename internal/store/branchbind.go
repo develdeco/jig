@@ -63,15 +63,26 @@ func BranchLeadIssue(branch string) string {
 //     KEY-N keys (Jira's) would be asked for the first shape too, through
 //     remoteLeads; none is mirrored to yet.
 //
+// trackerRepo is the repo of the project's own GitHub tracker, "" for a
+// project with none. A tool-call hook binds a branch at every call, so two
+// leads settle the branch with no other ticket read, and no refusal whatever
+// another ticket or record says (ADR 0068): a KEY-N the store holds a ticket
+// under, which is that ticket; and a number whose record under trackerRepo
+// names such a ticket (ItemTicket), which reads that one record. Every other
+// lead is looked up across the store.
+//
 // how says what bound it: "id" when the lead is a ticket's own id, "alias"
 // when it is one of a ticket's aliases, "remote" when it is a tracker's id for
 // the ticket. A branch that leads with no id, or with one no ticket claims,
-// binds to nothing: id and how are empty and err is nil. A lead claimed by
-// more than one ticket is refused: TICKET_ALIAS_COLLISION for an id or alias
-// (the refusal ResolveTicket gives), TICKET_REMOTE_ID_COLLISION for a
-// tracker's id.
-func (s *Store) TicketForBranch(branch string) (id, how string, err error) {
+// binds to nothing: id and how are empty and err is nil. A lead looked up
+// across the store and claimed by more than one ticket is refused:
+// TICKET_ALIAS_COLLISION for an id or alias (the refusal ResolveTicket gives),
+// TICKET_REMOTE_ID_COLLISION for a tracker's id.
+func (s *Store) TicketForBranch(branch, trackerRepo string) (id, how string, err error) {
 	if lead := BranchLeadID(branch); lead != "" {
+		if s.holdsID(lead) {
+			return lead, "id", nil
+		}
 		claims, err := s.aliasClaims()
 		if err != nil {
 			return "", "", err
@@ -89,6 +100,9 @@ func (s *Store) TicketForBranch(branch string) (id, how string, err error) {
 		return id, "alias", nil
 	}
 	if issue := BranchLeadIssue(branch); issue != "" {
+		if id, ok := s.ItemTicket(trackerRepo, issue); ok {
+			return id, "remote", nil
+		}
 		return s.ticketForRemoteLead(issue)
 	}
 	return "", "", nil
@@ -111,24 +125,29 @@ func (s *Store) ticketForRemoteLead(lead string) (id, how string, err error) {
 }
 
 // TicketsForBranches binds many branch names at once: the ticket each binds
-// to, as TicketForBranch would say, for the branches that bind to one. A
-// branch that binds to nothing, or whose binding is refused (a collision), is
-// left out. The tracker's ids are read once for all of them, not once for each
-// branch that leads with an issue number, which a clone with many such
-// branches would otherwise pay for on every call.
-func (s *Store) TicketsForBranches(branches []string) map[string]string {
+// to, as TicketForBranch would say for the project whose GitHub tracker repo
+// is trackerRepo, for the branches that bind to one. A branch that binds to
+// nothing, or whose binding is refused (a collision), is left out. The
+// tracker's ids are read once for all of them, not once for each branch that
+// leads with an issue number the project's record does not settle, which a
+// clone with many such branches would otherwise pay for on every call.
+func (s *Store) TicketsForBranches(branches []string, trackerRepo string) map[string]string {
 	out := map[string]string{}
 	var leads map[string][]string
 	leadsRead := false
 	for _, branch := range branches {
 		if lead := BranchLeadID(branch); lead != "" {
-			if id, _, err := s.TicketForBranch(branch); err == nil && id != "" {
+			if id, _, err := s.TicketForBranch(branch, trackerRepo); err == nil && id != "" {
 				out[branch] = id
 			}
 			continue
 		}
 		issue := BranchLeadIssue(branch)
 		if issue == "" {
+			continue
+		}
+		if id, ok := s.ItemTicket(trackerRepo, issue); ok {
+			out[branch] = id
 			continue
 		}
 		if !leadsRead {

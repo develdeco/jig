@@ -23,9 +23,9 @@ Before round one run `jig recall <the work, briefly>`. It lists open tickets and
 | bug | repro, expected-vs-actual, regression window, seams | the fix slice, its first commit the repro test, red on the base | the repro test, unchanged |
 | refactor | behavior contract, current coverage, seams | GUARDRAIL slice: missing coverage lands green first | guardrails staying green |
 
-A test diet is a refactor: its PR names each removed test's seam test and `go test -cover` before/after.
+In all three shapes, each brief rule names the states it ranges over, in the rule itself: what the code must handle and what the review checks, never a list of tests. For states that come back from ticket to ticket, read what the project's own docs (its contributing guide or agent instructions) name, where they name any.
 
-A bug has no REPRO slice: jig verifies a slice only when its oracle passes, so one red before any fix could never go green. The fix slice's first commit adds the repro test, red on the base; the fix commit turns it green, and the slice's oracle runs that test.
+Read `jig skill intake shapes` when the work is a bug or a test diet.
 
 ## Seams
 

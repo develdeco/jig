@@ -204,10 +204,9 @@ type GateReport struct {
 	// meaningful only alongside BudgetParked > 0.
 	BudgetParked            int
 	BudgetUsed, BudgetLimit int
-	// Probes is how many probes a reviewer round recorded, and Unprobed how
-	// many hunks of the whole change it left with no current probe inside and
-	// no current skip over them (ADR 0036): 0 for a scripted round.
-	Probes, Unprobed int
+	// Probes is how many probes a reviewer round recorded (ADR 0036): 0 for a
+	// scripted round.
+	Probes int
 	// CarriedFrom is the number of the round whose verdict this clean round
 	// carries over: 0 for a round a reviewer read.
 	CarriedFrom int
@@ -468,14 +467,14 @@ func appendFixSlices(d Deps, ticket string, n int, slices []store.Slice) error {
 }
 
 // writeReviewerRound writes a reviewer round's files: findings.yaml (with the
-// round's probes, skips and unprobed hunks), findings.md rendered from it, report.yaml (with
+// round's probes), findings.md rendered from it, report.yaml (with
 // ReviewedSHA), and diff-changelog.md.
-func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord, skips []SkipRecord, unprobed []UnprobedHunk) error {
+func writeReviewerRound(d Deps, ticket string, n int, report GateReport, scope string, reviewedPaths []string, findings []Finding, cleared []string, summary string, probes []ProbeRecord) error {
 	dir := gateRoundDir(d.Store, ticket, n)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("verifydeliver: gate: create round dir: %w", err)
 	}
-	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, report.KeptFixed, summary, probes, skips, unprobed)
+	yamlData, err := marshalFindingsYAML(scope, reviewedPaths, findings, cleared, report.KeptFixed, summary, probes)
 	if err != nil {
 		return fmt.Errorf("verifydeliver: gate: marshal findings.yaml: %w", err)
 	}

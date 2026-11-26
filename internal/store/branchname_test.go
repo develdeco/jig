@@ -260,7 +260,7 @@ func TestTicketForBranchBindsAnIssueNumber(t *testing.T) {
 		{"feature/102-upload", "", ""},
 		{"main", "", ""},
 	} {
-		id, how, err := st.TicketForBranch(tc.branch)
+		id, how, err := st.TicketForBranch(tc.branch, "")
 		if err != nil {
 			t.Errorf("TicketForBranch(%q): %v", tc.branch, err)
 			continue
@@ -282,13 +282,13 @@ func TestTicketForBranchRefusesAnIssueNumberTwoTicketsHave(t *testing.T) {
 	}
 	mirrorTo(t, st, "JIG-1", "acme/one", 5)
 	mirrorTo(t, st, "JIG-2", "acme/two", 5)
-	id, how, err := st.TicketForBranch("5-shared")
+	id, how, err := st.TicketForBranch("5-shared", "")
 	var ae *axi.Error
 	if !errors.As(err, &ae) || ae.Code != "TICKET_REMOTE_ID_COLLISION" {
 		t.Fatalf("TicketForBranch = %q, %q, %v; want TICKET_REMOTE_ID_COLLISION", id, how, err)
 	}
 	// The ticket's own id still binds the branch.
-	if id, how, err := st.TicketForBranch("JIG-2-shared"); err != nil || id != "JIG-2" || how != "id" {
+	if id, how, err := st.TicketForBranch("JIG-2-shared", ""); err != nil || id != "JIG-2" || how != "id" {
 		t.Errorf("TicketForBranch(JIG-2-shared) = %q, %q, %v; want JIG-2, id", id, how, err)
 	}
 }
@@ -302,11 +302,11 @@ func TestTicketForBranchBindsAnOldJigBranchByItsAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, branch := range []string{"jig/T-12", "jig/T-12-follow-up", "T-12-upload-item-gallery"} {
-		if id, how, err := st.TicketForBranch(branch); err != nil || id != "STORE-4" || how != "alias" {
+		if id, how, err := st.TicketForBranch(branch, ""); err != nil || id != "STORE-4" || how != "alias" {
 			t.Errorf("TicketForBranch(%q) = %q, %q, %v; want STORE-4, alias", branch, id, how, err)
 		}
 	}
-	if id, how, err := st.TicketForBranch("STORE-4-upload-item-gallery"); err != nil || id != "STORE-4" || how != "id" {
+	if id, how, err := st.TicketForBranch("STORE-4-upload-item-gallery", ""); err != nil || id != "STORE-4" || how != "id" {
 		t.Errorf("TicketForBranch(STORE-4-upload-item-gallery) = %q, %q, %v; want STORE-4, id", id, how, err)
 	}
 }
@@ -378,7 +378,7 @@ func TestBrokenTrackerRecordCostsOnlyItsOwnTicket(t *testing.T) {
 	}
 	mirrorTo(t, st, "JIG-1", "acme/tracking", 102)
 	writeTrackerRecord(t, st, "JIG-2", "repo: [unclosed\n")
-	if id, how, err := st.TicketForBranch("102-upload-item-gallery"); err != nil || id != "JIG-1" || how != "remote" {
+	if id, how, err := st.TicketForBranch("102-upload-item-gallery", ""); err != nil || id != "JIG-1" || how != "remote" {
 		t.Errorf("TicketForBranch = %q, %q, %v; want JIG-1, remote", id, how, err)
 	}
 	if _, err := st.TicketBranch("JIG-2", "main"); err == nil {

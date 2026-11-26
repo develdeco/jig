@@ -1594,7 +1594,7 @@ func scanOverlaps(st *store.Store, cfg project.Config, mp project.MachineProject
 				}
 				names = append(names, name)
 			}
-			boundTo := st.TicketsForBranches(names)
+			boundTo := st.TicketsForBranches(names, cfg.TrackerRepo())
 			for i, name := range names {
 				if name == target || name == "HEAD" || name == "origin" {
 					continue

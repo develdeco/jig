@@ -73,7 +73,6 @@ func (m *Model) reviewPage(id string) page {
 	}
 	m.findingRows(&p, t, asking)
 	m.probeRows(&p, t)
-	m.unprobedRows(&p, t)
 
 	if fixes := m.fixRows(t); len(fixes) > 0 {
 		rows := make([]listRow, len(fixes))
@@ -101,8 +100,6 @@ var (
 	askColumnNames         = []string{"", "risk", "where", "decision", "title", "id"}
 	sentBackColumns        = []column{{}, {id: true, gap: 1}, {gap: 2}, {free: true, gap: 2}}
 	sentBackColumnNames    = []string{"", "slice", "round", "goal"}
-	unprobedColumns        = []column{{}, {free: true, gap: 1}}
-	unprobedColumnNames    = []string{"where", "note"}
 )
 
 // roundsPanel adds the rounds, newest first: a row each with its verdict, what
@@ -205,7 +202,7 @@ func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
 		if rec.Files >= 0 {
 			read = strconv.Itoa(rec.Files) + " " + plural(rec.Files, "file", "files")
 		}
-		if line := ledgerCounts(*rec); line != "" {
+		if line := probeCounts(*rec); line != "" {
 			notes = append(notes, "    "+m.st.dim(line))
 		}
 	}
@@ -213,28 +210,22 @@ func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
 	return cells, notes
 }
 
-// ledgerCounts is what a reviewer round probed, in the ledger's words:
-// "27 probes · 25 caught · 2 survived · 3 hunks unprobed · 1 skipped". A round
-// that probed nothing says so, so it reads as one; a round no reviewer ran, or
-// one whose status has no ledger columns, says nothing.
-func ledgerCounts(r statusRound) string {
+// probeCounts is what a reviewer round recorded of its probes: "27 probes ·
+// 25 caught · 2 survived". A round that recorded none says so, so it reads as
+// one; a round no reviewer ran, or one whose status has no probe columns, says
+// nothing.
+func probeCounts(r statusRound) string {
 	if r.Files < 0 || r.Probes < 0 {
 		return ""
 	}
-	var parts []string
 	if r.Probes == 0 {
-		parts = append(parts, "no probes")
-	} else {
-		parts = append(parts, strconv.Itoa(r.Probes)+" "+plural(r.Probes, "probe", "probes"),
-			strconv.Itoa(max(0, r.Probes-r.Survived))+" caught", strconv.Itoa(max(0, r.Survived))+" survived")
+		return "no probes"
 	}
-	if r.Unprobed >= 0 {
-		parts = append(parts, strconv.Itoa(r.Unprobed)+" "+plural(r.Unprobed, "hunk", "hunks")+" unprobed")
-	}
-	if r.Skipped > 0 {
-		parts = append(parts, strconv.Itoa(r.Skipped)+" skipped")
-	}
-	return strings.Join(parts, " · ")
+	return strings.Join([]string{
+		strconv.Itoa(r.Probes) + " " + plural(r.Probes, "probe", "probes"),
+		strconv.Itoa(max(0, r.Probes-r.Survived)) + " caught",
+		strconv.Itoa(max(0, r.Survived)) + " survived",
+	}, " · ")
 }
 
 // probeRows adds every round's probes as plain rows, the newest round first
@@ -339,47 +330,6 @@ func tailCut(s string, w int) string {
 // probeLines is how many lines a probe's text may take: more than any probe
 // has, so a long one wraps and is never cut.
 const probeLines = 100
-
-// unprobedRows adds what the latest round that recorded its unprobed hunks left
-// uncovered, as file:from-to rows, and the skips that round set aside with
-// their reasons. A status whose rounds recorded none shows no block.
-func (m *Model) unprobedRows(p *page, t *ticket) {
-	if t.status == nil {
-		return
-	}
-	round := 0
-	for _, r := range t.status.Rounds {
-		if r.Files >= 0 && r.Unprobed >= 0 {
-			round = r.N
-		}
-	}
-	if round == 0 {
-		return
-	}
-	var rows []listRow
-	hunks := 0
-	for _, h := range t.status.Unprobed {
-		if h.Round == round {
-			hunks++
-			rows = append(rows, listRow{cells: []string{h.File + ":" + strconv.Itoa(h.From) + "-" + strconv.Itoa(h.To), ""}})
-		}
-	}
-	for _, s := range t.status.ProbeSkips {
-		if s.Round != round {
-			continue
-		}
-		where := s.File
-		if s.Range != "" && s.Range != "whole file" {
-			where += ":" + s.Range
-		}
-		rows = append(rows, listRow{cells: []string{where, m.st.dim("set aside: " + s.Why)}})
-	}
-	summary := "round " + strconv.Itoa(round) + " left no hunk unprobed"
-	if hunks > 0 {
-		summary = "round " + strconv.Itoa(round) + " left " + strconv.Itoa(hunks) + " " + plural(hunks, "hunk", "hunks")
-	}
-	m.listPanel(p, listSpec{title: "Unprobed", summary: summary, cols: unprobedColumns, names: unprobedColumnNames, rows: rows, empty: "no hunk left unprobed"})
-}
 
 // roundCounts are the findings a round raised, as "1 fix · 2 asks", "" for
 // none.

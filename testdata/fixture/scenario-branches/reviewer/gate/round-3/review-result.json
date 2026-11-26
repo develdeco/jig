@@ -22,13 +22,5 @@
       "command": "go test ./alpha -run TestClampPercent",
       "outcome": "caught"
     }
-  ],
-  "skipped": [
-    {
-      "file": "alpha/percent_test.go",
-      "from": 0,
-      "to": 0,
-      "why": "tests"
-    }
   ]
 }

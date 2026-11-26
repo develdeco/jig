@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/gitx"
 	"github.com/develdeco/jig/internal/verifydeliver"
 )
 
@@ -38,30 +37,15 @@ func deltaRepo(t *testing.T, base, change map[string]string) (dir, baseSHA, head
 
 // realDeltaContext runs the code a delta round's context runs - the diff and
 // its files from git (computeDeltaDiffs), then the render (roundBlocks) - over
-// repos, with the round's hunks read from git as the gate reads them, named
-// with the repo as the round names them. qualified is false for a single repo.
+// repos. qualified is false for a single repo.
 func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, clones map[string]string, qualified bool) (string, []deltaDiff) {
 	t.Helper()
 	p := deltaPrepared(verifydeliver.IntentSourceBrief)
 	p.RequestPath = filepath.Join(t.TempDir(), "review.json")
-	p.Request.Hunks = nil
 	if qualified {
 		p.Repos = repos
 	} else {
 		p.Base, p.Head = repos[0].Base, repos[0].Head
-	}
-	for _, r := range repos {
-		hunks, err := gitx.DiffHunks(clones[r.Repo], r.Base, r.Head)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, h := range hunks {
-			name := h.Path
-			if qualified {
-				name = r.Repo + "/" + name
-			}
-			p.Request.Hunks = append(p.Request.Hunks, verifydeliver.HunkEntry{File: name, From: h.From, To: h.To})
-		}
 	}
 	diffs, err := computeDeltaDiffs(p, clones)
 	if err != nil {
@@ -70,33 +54,20 @@ func realDeltaContext(t *testing.T, repos []verifydeliver.PreparedRepo, clones m
 	return strings.Join(roundBlocks(p, nil, true, diffs), "\n"), diffs
 }
 
-// TestASingleRepoDeltaListsItsModifiedFilesHunksThroughGit: in a single repo
-// the delta's files carry no repo prefix, so the unprobed work list holds
-// exactly the modified file's hunk.
-func TestASingleRepoDeltaListsItsModifiedFilesHunksThroughGit(t *testing.T) {
+// TestASingleRepoDeltaNamesTheFilesItChangesAndAddsThroughGit: in a single
+// repo the delta's files carry no repo prefix: the modified and the added file,
+// not the one it left alone.
+func TestASingleRepoDeltaNamesTheFilesItChangesAndAddsThroughGit(t *testing.T) {
 	t.Parallel()
 	dir, base, head := deltaRepo(t,
 		map[string]string{"beta/beta.go": "package beta\n", "beta/other.go": "package beta\n"},
-		map[string]string{"beta/beta.go": "package beta\n// changed\n"})
-	out, _ := realDeltaContext(t, []verifydeliver.PreparedRepo{{Base: base, Head: head, Scope: "delta"}}, map[string]string{"": dir}, false)
-	if want := "unprobed[1]{hunk}:\n  \"beta/beta.go:2-2\"\n"; !strings.Contains(out+"\n", want) {
-		t.Errorf("the work list is not exactly beta/beta.go:2-2\n%s", out)
-	}
-}
-
-// TestADeltaThatAddsAFileListsItsHunksThroughGit: a file the delta adds is in
-// the delta's files, so its hunk is in the work list beside the modified one.
-func TestADeltaThatAddsAFileListsItsHunksThroughGit(t *testing.T) {
-	t.Parallel()
-	dir, base, head := deltaRepo(t,
-		map[string]string{"beta/beta.go": "package beta\n"},
 		map[string]string{"beta/beta.go": "package beta\n// changed\n", "beta/new.go": "package beta\n// new\n"})
 	out, diffs := realDeltaContext(t, []verifydeliver.PreparedRepo{{Base: base, Head: head, Scope: "delta"}}, map[string]string{"": dir}, false)
 	if len(diffs) != 1 || strings.Join(diffs[0].Files, ",") != "beta/beta.go,beta/new.go" {
 		t.Errorf("delta files = %+v, want beta/beta.go and beta/new.go", diffs)
 	}
-	if want := "unprobed[2]{hunk}:\n  \"beta/beta.go:2-2\"\n  \"beta/new.go:1-2\"\n"; !strings.Contains(out+"\n", want) {
-		t.Errorf("the work list is not exactly the modified and the added file's hunks\n%s", out)
+	if !strings.Contains(out, "  files: 2\n") {
+		t.Errorf("the delta block does not count its two files\n%s", out)
 	}
 }
 

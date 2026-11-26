@@ -64,6 +64,7 @@ issue and a GitHub Project board, from inside the command that made the
 checkpoint, best-effort: a GitHub failure warns rather than failing the
 command. An edit made on the tracker side of a jig-owned field is drift,
 reported and overwritten with the store's value at the next sync. A chart with an `issue:` has no issue of its own: its issue ticket is mirrored always, the tasks it lists only when the project's `trackers: github: tasks:` is true (each a full issue opening with a `Part of #n` line), and the plan is a comment posted on the issue whenever what it shows changes, never an edit.
+A ticket reads finished only on its own record: `Done` when closed as covered, landed, or one of its pull requests merged and none still open, and `Not planned` when closed as superseded or not planned. A chart whose tickets are all `Not planned` reads `Not planned`, and one with every ticket finished and at least one `Done` reads `Done`. A card never runs ahead of its issue: it reads `Done` or `Not planned` only for an issue the sync holds closed, so an unfinished issue's card reads `In review` while its own pull request is open, and else what its chart's tickets say, never a column that means closed. A closed issue whose close reason contradicts the store's is given the store's, without a reopen.
 _Avoid_: tracker as the source of tickets
 
 **Bound issue**:
@@ -311,16 +312,8 @@ The files a reviewer actually read in a round, reported as `reviewed_paths`. jig
 _Avoid_: reviewed scope, read set
 
 **Probe**:
-One term of a critical path's changed code that a gate reviewer mutated in the round's worktree, with the narrowest test command that covers it run against the mutant and the file put back: `caught` when the command failed or timed out, `survived` when it passed. Every round probes the terms no earlier probe still covers, so round 1 sweeps them all. A probe is kept in the round's `findings.yaml` with its file's blob at the round's head, and stays *current* while a later head has the same blob and no later round probed the same line, *stale* once the file changed or the line was probed again; a survivor is probed again every round, since only a caught probe covers its term (ADR 0036).
+A mutation that proves one finding: a gate reviewer changes one term in the round's worktree, runs the narrowest test command against the mutant and puts the file back: `caught` when the command failed or timed out, `survived` when it passed. Recording it with `jig probe` is the reviewer's choice. A recorded probe is kept in the round's `findings.yaml` with its file's blob at the round's head, and stays *current* while a later head has the same blob and no later round probed the same line, *stale* once the file changed or the line was probed again (ADR 0036, ADR 0067).
 _Avoid_: mutation check, mutant test
-
-**Skip**:
-A file, or lines of it, a gate reviewer sets aside as holding no term on a critical path (a test, a doc, wiring), with its reason; current or stale like a probe.
-_Avoid_: waiver, exclusion
-
-**Unprobed hunk**:
-A hunk of the whole change at a round's head that no current probe falls inside and no current skip covers: the sweep's work list, counted in the gate report and listed in the review notes. A count, not a verdict: one probe makes a hunk probed. The round keeps the list it left in its `findings.yaml`, and `jig status` and the review screen show it.
-_Avoid_: uncovered line, coverage gap
 
 **Repo-qualified file**:
 In a project of several repos, how a gate round names a file: `<repo>/<path>`, the repo being one the ticket's slices build in. A finding's file, `reviewed_paths` and `must_review` are all named so; in a project of one repo a file is a path in the repo. A finding's workspace is named `<repo>/<id>` the same way, as a slice's is.

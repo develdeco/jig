@@ -16,7 +16,7 @@ var listNames = map[string]string{
 	"Brief activity": "time", "Build activity": "time", "Review activity": "time",
 	"Publish activity": "time", "Land activity": "time", "Slices": "slice",
 	"Sessions": "harness", "Sections": "section", "Rounds": "round", "Findings": "risk",
-	"Probes": "round", "Sent back": "slice", "Asks": "risk", "Unprobed": "where",
+	"Probes": "round", "Sent back": "slice", "Asks": "risk",
 	"Checklist": "step", "Pull requests": "repo", "Verification": "commit",
 	"Questions": "question", "Timeline": "time",
 	"Needs you": "ticket", "Running": "ticket", "Ready": "ticket", "Waiting": "ticket",

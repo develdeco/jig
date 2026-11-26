@@ -283,7 +283,7 @@ func ReadFor(in Input, ticket, issue string) (Plan, error) {
 			continue
 		}
 		id := b.Ticket
-		if resolved, err := in.Store.ResolveTicket(b.Ticket); err == nil {
+		if resolved, err := in.Store.ResolveRecorded(b.Ticket); err == nil {
 			id = resolved
 		}
 		prec, err := in.Store.ReadTicket(id)
@@ -356,7 +356,7 @@ func ReadFor(in Input, ticket, issue string) (Plan, error) {
 				continue
 			}
 			id := b.Ticket
-			if resolved, err := in.Store.ResolveTicket(id); err == nil {
+			if resolved, err := in.Store.ResolveRecorded(id); err == nil {
 				id = resolved
 			}
 			// Only a dependency of this container merged into its branch: one

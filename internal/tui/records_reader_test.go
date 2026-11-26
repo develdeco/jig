@@ -15,7 +15,7 @@ func manyProbesTwoAsks() string {
 	for i := 1; i <= 12; i++ {
 		probes = append(probes, []string{"1", "caught", "alpha/a.go:" + strconv.Itoa(i), "seam", "mutation " + strconv.Itoa(i), "go test ./alpha"})
 	}
-	out := ledgerStatus([][]string{ledgerRound("1", "12", "0", "0", "0")}, axi.Table("probes", probeColumns, probes))
+	out := probeStatus([][]string{probeRound("1", "12", "0")}, axi.Table("probes", probeColumns, probes))
 	out = strings.Replace(out, "outstanding_asks[1]", "outstanding_asks[2]", 1)
 	first := "  r1-f1,high,\"alpha/a.go:3\",Unchecked error,the fix budget is reached\n"
 	if !strings.Contains(out, first) {
@@ -142,7 +142,7 @@ func TestProbeRowKeepsItsRoundAtNarrowWidth(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	long := "internal/some/very/deeply/nested/package/with/a/long/name/and_a_long_file_name_too.go:1234"
-	g.r.answer("status JIG-2 --store /s", ledgerStatus([][]string{ledgerRound("1", "2", "1", "0", "0"), ledgerRound("2", "1", "0", "0", "0")},
+	g.r.answer("status JIG-2 --store /s", probeStatus([][]string{probeRound("1", "2", "1"), probeRound("2", "1", "0")},
 		axi.Table("probes", probeColumns, [][]string{
 			{"1", "survived", long, "s", "m", "c"},
 			{"1", "caught", long + "5", "s", "m", "c"},

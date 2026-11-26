@@ -55,6 +55,19 @@ oracle runs when its builder runs `jig verify`, and a ticket's last run is
   not in a repo file.
   `lint.TestADRNumbersAreUnique` fails when two ADR files share a number.
 
+## States every change holds
+
+A brief's rules range over these, and the review checks them. They are not
+a list of tests.
+
+- Every `jig tui` screen holds at the narrowest supported width, 60
+  columns, before its data has loaded, and while its data is stale.
+- A key in `jig tui` reads nothing again for each ticket.
+- A command run on every tool call reads only the tickets it names, with two
+  exceptions: an id or issue number that leads straight to no ticket (a
+  renamed ticket's old id, say) is looked up across the store, and a stacked
+  ticket also reads every tracker record and chart file.
+
 ## Pull requests
 
 - Keep a pull request to one concern. If a reviewer would need a map to

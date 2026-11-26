@@ -428,68 +428,9 @@ func DiffPatch(dir, base, head string) (string, error) {
 	return stdout.String(), nil
 }
 
-// Hunk is one hunk of a diff as its new side reads: Path is the file's path
-// at head, From and To the hunk's first and last line there (1-based,
-// inclusive).
-type Hunk struct {
-	Path     string
-	From, To int
-}
-
-// DiffHunks returns every hunk base..head adds or changes lines in, in dir,
-// in diff order, with renames off as in DiffNameOnly, so a renamed file is
-// all new lines at its new path. A hunk that only deletes lines leaves no line
-// at head and is left out, and a binary file and a submodule have no hunks.
-// Paths come back repo-relative with forward slashes, unquoted.
-func DiffHunks(dir, base, head string) ([]Hunk, error) {
-	args := []string{"-c", "core.quotepath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv",
-		"--no-renames", "--ignore-submodules=all", "--src-prefix=a/", "--dst-prefix=b/", base, head}
-	var stdout, stderr bytes.Buffer
-	if err := run(dir, nil, false, &stdout, &stderr, args); err != nil {
-		return nil, callError(args, stderr.String(), err)
-	}
-	return parseHunks(stdout.String())
-}
-
-// hunkHeaderRe is a hunk header's new side: "+start" or "+start,count".
-var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
-
-// parseHunks reads DiffHunks's patch. A file's header runs from its "diff
-// --git" line to its first hunk; only there is a "+++ " line its new path,
-// since a content line of a hunk can begin with "+++" too.
-func parseHunks(patch string) ([]Hunk, error) {
-	var hunks []Hunk
-	path, inHeader := "", false
-	for _, line := range strings.Split(patch, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			path, inHeader = "", true
-		case inHeader && strings.HasPrefix(line, "+++ "):
-			name, err := newSidePath(line)
-			if err != nil {
-				return nil, fmt.Errorf("gitx: diff hunks: %w", err)
-			}
-			path = name
-		case strings.HasPrefix(line, "@@ "):
-			inHeader = false
-			m := hunkHeaderRe.FindStringSubmatch(line)
-			if m == nil {
-				return nil, fmt.Errorf("gitx: diff hunks: unreadable hunk header %q", line)
-			}
-			from, _ := strconv.Atoi(m[1])
-			count := 1
-			if m[2] != "" {
-				count, _ = strconv.Atoi(m[2])
-			}
-			if path == "" || count == 0 {
-				continue
-			}
-			hunks = append(hunks, Hunk{Path: path, From: from, To: from + count - 1})
-		}
-	}
-	return hunks, nil
-}
+// hunkHeaderRe is a hunk header; its group is the start line of the new side,
+// written "+start" or "+start,count".
+var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
 // newSidePath reads a file header's "+++ " line: the file's path at head, or
 // "" for /dev/null (a deleted file).
@@ -535,7 +476,9 @@ func DiffAdded(dir, base, head string) ([]AddedLine, error) {
 
 // parseAdded reads DiffAdded's patch, which has no context lines: after a hunk
 // header every "+" line is an added one, numbered on from the header's new
-// start.
+// start. A file's header runs from its "diff --git" line to its first hunk;
+// only there is a "+++ " line its new path, since a content line of a hunk can
+// begin with "+++" too.
 func parseAdded(patch string) ([]AddedLine, error) {
 	var added []AddedLine
 	path, inHeader, next := "", false, 0

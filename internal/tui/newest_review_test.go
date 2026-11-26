@@ -29,10 +29,10 @@ func inOrder(t *testing.T, what, text string, wants ...string) {
 func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.r.answer("status JIG-2 --store /s", ledgerStatus([][]string{
-		ledgerRound("1", "3", "1", "0", "0"),
-		ledgerRound("2", "2", "0", "0", "0"),
-		ledgerRound("3", "1", "0", "0", "0"),
+	g.r.answer("status JIG-2 --store /s", probeStatus([][]string{
+		probeRound("1", "3", "1"),
+		probeRound("2", "2", "0"),
+		probeRound("3", "1", "0"),
 	},
 		axi.Table("probes", probeColumns, [][]string{
 			{"1", "caught", "alpha/a.go:9", "the parser", "flip the guard", "go test ./alpha"},

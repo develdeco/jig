@@ -143,8 +143,9 @@ func TestMirrorTasksOnCarriesEachTaskAsAFullIssue(t *testing.T) {
 }
 
 // TestMirrorTasksIssueStatusFollowsItsTasks: the issue ticket's board Status
-// is ChartStatus over the chart's tickets, mirrored or not; its issue stays
-// open until its own ticket closes, even when they are all Done.
+// is ChartStatus over the chart's tickets, mirrored or not, but In progress
+// where they would say Done; its issue stays open until its own ticket closes,
+// even when they are all Done.
 func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 	w := newTasksWorld(t)
 	_, client := w.sync(false)
@@ -171,8 +172,8 @@ func TestMirrorTasksIssueStatusFollowsItsTasks(t *testing.T) {
 		}
 	}
 	w.sync(false)
-	if got := statusOf("DEMO-1"); got != "Done" {
-		t.Fatalf("Status with every task done = %q, want Done", got)
+	if got := statusOf("DEMO-1"); got != "In progress" {
+		t.Fatalf("Status with every task done = %q, want In progress", got)
 	}
 	// The need's issue follows its own ticket, not its chart: it stays open
 	// while DEMO-1 is open, and closes once DEMO-1 is closed.
@@ -234,23 +235,21 @@ func TestMirrorTasksLegacyChartIssueClosesWithItsTickets(t *testing.T) {
 }
 
 // TestMirrorTasksIssueStatusSeesACarriedTasksPullRequest: with tasks on, a
-// task's merged pull request counts toward the need's Status though the need
-// is made before the task.
+// task's pull request counts toward the need's Status though the need is made
+// before the task: one task's merged pull request, which only the host knows,
+// moves the need off Backlog.
 func TestMirrorTasksIssueStatusSeesACarriedTasksPullRequest(t *testing.T) {
 	w := newTasksWorld(t)
 	_, client := w.sync(true)
 	client.prs = map[string][]github.PullRequest{
 		"example/demo@2-first-task": {{Number: 5, NodeID: "PR_5", State: "MERGED"}},
 	}
-	if err := w.st.CloseTicket("DEMO-3", store.Closed{Reason: store.CloseCovered, By: "example/demo#1", At: "2026-01-01"}); err != nil {
-		t.Fatal(err)
-	}
 	w.sync(true)
 	if got := placedStatus(client, "DEMO-2"); got != "Done" {
 		t.Fatalf("the task's Status = %q, want Done from its merged pull request", got)
 	}
-	if got := placedStatus(client, "DEMO-1"); got != "Done" {
-		t.Errorf("the need's Status = %q, want Done once both tasks are", got)
+	if got := placedStatus(client, "DEMO-1"); got != "In progress" {
+		t.Errorf("the need's Status = %q, want In progress from its task's pull request", got)
 	}
 }
 

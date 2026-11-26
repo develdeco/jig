@@ -1,29 +1,25 @@
 package verifydeliver
 
-// The probe ledger (ADR 0036): every round the reviewer probes each term of
-// the critical paths' changed code - mutates it in the round's worktree, runs
-// the narrowest test command that covers it, puts the file back - unless an
-// earlier round's probe of it is current, and sets aside with a skip the code
-// on no critical path. jig keeps each probe and skip in the round's
-// findings.yaml with the git blob of its file at the round's head, and hands
-// the next round every earlier probe as current or stale and every hunk of the
-// whole change with what covers it. Which terms matter and whether a survivor
-// is a problem stay the reviewer's judgment (ADR 0007): jig checks shape and
-// compares blobs.
+// The probe record (ADR 0036, as ADR 0067 keeps it): a probe is a mutation that
+// proves one finding - one term mutated in the round's worktree, the narrowest
+// test command run against it, the file put back - and recording it is the
+// reviewer's choice. jig keeps each probe in the round's findings.yaml with the
+// git blob of its file at the round's head, and hands the next round every
+// earlier probe as current or stale. Whether a survivor is a problem stays the
+// reviewer's judgment (ADR 0007): jig checks shape and compares blobs.
 
 import (
 	"fmt"
 	"sort"
 
 	"github.com/develdeco/jig/internal/gitx"
-	"github.com/develdeco/jig/internal/scopebase"
 	"github.com/develdeco/jig/internal/store"
 )
 
 // ProbeRecord is one probe as findings.yaml keeps it: what the reviewer
 // reported, and the git blob of its file at the round's head, which says
 // whether a later head still has the code it probed. Round is the round that
-// made it, set when the ledger is read back and never written.
+// made it, set when the probes are read back and never written.
 type ProbeRecord struct {
 	Round    int    `yaml:"-"`
 	Seam     string `yaml:"seam"`
@@ -40,49 +36,26 @@ func (p ProbeRecord) result() ResultProbe {
 	return ResultProbe{Seam: p.Seam, File: p.File, Line: p.Line, Mutation: p.Mutation, Command: p.Command, Outcome: p.Outcome}
 }
 
-// SkipRecord is one skip as findings.yaml keeps it, with its file's blob at
-// the round's head; Round as for a ProbeRecord.
-type SkipRecord struct {
-	Round int    `yaml:"-"`
-	File  string `yaml:"file"`
-	From  int    `yaml:"from,omitempty"`
-	To    int    `yaml:"to,omitempty"`
-	Why   string `yaml:"why"`
-	Blob  string `yaml:"blob"`
-}
-
-// result is the skip as the reviewer reported it.
-func (s SkipRecord) result() ResultSkip {
-	return ResultSkip{File: s.File, From: s.From, To: s.To, Why: s.Why}
-}
-
-// normalizeLedger normalizes the file of each probe and skip, once the result
-// has passed validateReviewResult: what findings.yaml keeps is the file as the
+// normalizeProbes normalizes the file of each probe, once the result has
+// passed validateReviewResult: what findings.yaml keeps is the file as the
 // round names it.
-func normalizeLedger(probes []ResultProbe, skips []ResultSkip) ([]ResultProbe, []ResultSkip) {
-	var outP []ResultProbe
+func normalizeProbes(probes []ResultProbe) []ResultProbe {
+	var out []ResultProbe
 	for _, p := range probes {
 		if norm, err := normalizeRepoRelPath(p.File); err == nil {
 			p.File = norm
 		}
-		outP = append(outP, p)
+		out = append(out, p)
 	}
-	var outS []ResultSkip
-	for _, s := range skips {
-		if norm, err := normalizeRepoRelPath(s.File); err == nil {
-			s.File = norm
-		}
-		outS = append(outS, s)
-	}
-	return outP, outS
+	return out
 }
 
-// placeLedgerFile refuses the file of a drafted probe or skip when it names
-// no repo of the round or is not present at head there. It is checked as the
-// draft is taken, not only when the round is done: a probe is always of code
-// at head, and a draft cannot be taken back, so one mistyped file would
-// otherwise leave the round unable to close.
-func (rf roundFiles) placeLedgerFile(file string) error {
+// placeProbeFile refuses the file of a drafted probe when it names no repo of
+// the round or is not present at head there. It is checked as the draft is
+// taken, not only when the round is done: a probe is always of code at head,
+// and a draft cannot be taken back, so one mistyped file would otherwise leave
+// the round unable to close.
+func (rf roundFiles) placeProbeFile(file string) error {
 	norm, err := normalizeRepoRelPath(file)
 	if err != nil {
 		return reviewInvalid(fmt.Sprintf("file %q: %v", file, err))
@@ -98,21 +71,6 @@ func (rf roundFiles) placeLedgerFile(file string) error {
 		return reviewInvalid(fmt.Sprintf("file %q is not present at head", file))
 	}
 	return nil
-}
-
-// HunksWithDrafts is the hunks of the open round p with its drafted probes and
-// skips counted beside the earlier rounds' current ones: where the sweep
-// stands.
-func HunksWithDrafts(p Prepared, drafts []Draft) []HunkEntry {
-	res := DraftResult(drafts, nil, "")
-	probes, skips := normalizeLedger(res.Probes, res.Skipped)
-	return coverHunks(p.Request.Hunks, probes, skips)
-}
-
-// UnprobedAfter is the hunks of HunksWithDrafts that are still unprobed: what
-// is left of the sweep.
-func UnprobedAfter(p Prepared, drafts []Draft) []HunkEntry {
-	return unprobedHunks(HunksWithDrafts(p, drafts))
 }
 
 // headBlobs is the blob of each of files at the commit under review in its
@@ -151,46 +109,38 @@ func uniqueSorted(list []string) []string {
 	return out
 }
 
-// recordLedger is a round's probes and skips as findings.yaml keeps them: each
-// with its file's blob at the head the round reviewed.
-func recordLedger(rf roundFiles, probes []ResultProbe, skips []ResultSkip) ([]ProbeRecord, []SkipRecord, error) {
-	if len(probes) == 0 && len(skips) == 0 {
-		return nil, nil, nil
+// recordProbes is a round's probes as findings.yaml keeps them: each with its
+// file's blob at the head the round reviewed.
+func recordProbes(rf roundFiles, probes []ResultProbe) ([]ProbeRecord, error) {
+	if len(probes) == 0 {
+		return nil, nil
 	}
 	var files []string
 	for _, p := range probes {
 		files = append(files, p.File)
 	}
-	for _, s := range skips {
-		files = append(files, s.File)
-	}
 	blobs, err := rf.headBlobs(files)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	var outP []ProbeRecord
+	var out []ProbeRecord
 	for _, p := range probes {
-		outP = append(outP, ProbeRecord{
+		out = append(out, ProbeRecord{
 			Seam: p.Seam, File: p.File, Line: p.Line, Mutation: p.Mutation, Command: p.Command, Outcome: p.Outcome,
 			Blob: blobs[p.File],
 		})
 	}
-	var outS []SkipRecord
-	for _, s := range skips {
-		outS = append(outS, SkipRecord{File: s.File, From: s.From, To: s.To, Why: s.Why, Blob: blobs[s.File]})
-	}
-	return outP, outS, nil
+	return out, nil
 }
 
-// ledgerBefore reads the probes and skips of every gate/round-<n>/findings.yaml
-// for ticket with n < round, oldest first, each with its round.
-func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []SkipRecord, error) {
+// probesBefore reads the probes of every gate/round-<n>/findings.yaml for
+// ticket with n < round, oldest first, each with its round.
+func probesBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, error) {
 	var probes []ProbeRecord
-	var skips []SkipRecord
 	for r := 1; r < round; r++ {
 		ff, ok, err := readFindingsYAML(st, ticket, r)
 		if err != nil {
-			return nil, nil, fmt.Errorf("verifydeliver: probes: read round %d findings.yaml: %w", r, err)
+			return nil, fmt.Errorf("verifydeliver: probes: read round %d findings.yaml: %w", r, err)
 		}
 		if !ok {
 			continue
@@ -199,21 +149,17 @@ func ledgerBefore(st *store.Store, ticket string, round int) ([]ProbeRecord, []S
 			p.Round = r
 			probes = append(probes, p)
 		}
-		for _, s := range ff.Skipped {
-			s.Round = r
-			skips = append(skips, s)
-		}
 	}
-	return probes, skips, nil
+	return probes, nil
 }
 
-// currentLedger splits the ledger by its files' blobs at the head under
-// review: probed is every probe, current or stale, and current and skips are
-// the probes and skips that are current. A probe is current while its file's
-// blob is the one it recorded and no later round probed the same line: the
-// latest round to probe a line says what it is now, so a survivor that a
-// later round probed again after its fix does not still read as current.
-func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (probed []ProbedEntry, current []ResultProbe, currentSkips []ResultSkip, err error) {
+// probedEntries is each of probes, current or stale at the head under review,
+// as review.json's probed list has them: empty, never nil, as the request read
+// back from review.json has it. A probe is current while its file's blob is the
+// one it recorded and no later round probed the same line: the latest round to
+// probe a line says what it is now, so a survivor that a later round probed
+// again after its fix does not still read as current.
+func probedEntries(rf roundFiles, probes []ProbeRecord) ([]ProbedEntry, error) {
 	var files []string
 	latest := map[string]int{}
 	for _, p := range probes {
@@ -222,167 +168,47 @@ func currentLedger(rf roundFiles, probes []ProbeRecord, skips []SkipRecord) (pro
 			latest[at] = p.Round
 		}
 	}
-	for _, s := range skips {
-		files = append(files, s.File)
-	}
 	blobs, err := rf.headBlobs(files)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
+	probed := []ProbedEntry{}
 	for _, p := range probes {
 		state := ProbeStale
 		if b, ok := blobs[p.File]; ok && b == p.Blob && p.Round == latest[fmt.Sprintf("%s:%d", p.File, p.Line)] {
 			state = ProbeCurrent
-			current = append(current, p.result())
 		}
 		probed = append(probed, ProbedEntry{Round: p.Round, ResultProbe: p.result(), State: state})
 	}
-	for _, s := range skips {
-		if b, ok := blobs[s.File]; ok && b == s.Blob {
-			currentSkips = append(currentSkips, s.result())
-		}
-	}
-	return probed, current, currentSkips, nil
+	return probed, nil
 }
 
-// changeHunks is every hunk of the whole change at the head under review in
-// each repo of rf, from bases[repo], the base a full round of the ticket uses:
-// the files named as the round names them.
-func changeHunks(rf roundFiles, bases map[string]string) ([]HunkEntry, error) {
-	var hunks []HunkEntry
-	for _, r := range rf.repos {
-		got, err := gitx.DiffHunks(r.Dir, bases[r.Name], r.Head)
-		if err != nil {
-			return nil, inRepo(rf.qualified, r.Name, fmt.Errorf("verifydeliver: probes: diff the change's hunks: %w", err))
-		}
-		for _, h := range got {
-			hunks = append(hunks, HunkEntry{File: rf.qualify(r.Name, h.Path), From: h.From, To: h.To})
-		}
-	}
-	return hunks, nil
-}
-
-// coverHunks is hunks with probes and skips added: each hunk counts the probes
-// of its file whose line falls inside it, and takes the reason of the first
-// skip that covers it when it has none yet.
-func coverHunks(hunks []HunkEntry, probes []ResultProbe, skips []ResultSkip) []HunkEntry {
-	out := make([]HunkEntry, len(hunks))
-	for i, h := range hunks {
-		for _, p := range probes {
-			if p.File == h.File && h.From <= p.Line && p.Line <= h.To {
-				h.Probes++
-			}
-		}
-		for _, s := range skips {
-			if h.Skip == "" && s.covers(h.File, h.From, h.To) {
-				h.Skip = s.Why
-			}
-		}
-		out[i] = h
-	}
-	return out
-}
-
-// unprobedHunks is the hunks no probe falls inside and no skip covers.
-func unprobedHunks(hunks []HunkEntry) []HunkEntry {
-	var out []HunkEntry
-	for _, h := range hunks {
-		if h.Unprobed() {
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
-// behaviorCoverage is what a repo's review notes say of the behavior its
-// review tested (ADR 0036): the probes current at the reviewed head, the skips
-// current there, and the hunks of the change neither covers, with files named
-// as paths in the repo.
-type behaviorCoverage struct {
-	Probes   []ProbedEntry
-	Skips    []ResultSkip
-	Unprobed []HunkEntry
-}
-
-// publishCoverage is t's behavior coverage at head, read in the repository at dir:
-// every round's probes and skips up to the last, current by their files' blobs
-// at head, against the hunks of the change from its merge base with the
-// target. The probes and skips of the ticket's other repos are left out.
-func publishCoverage(st *store.Store, t *publishTarget, dir, head string) (behaviorCoverage, error) {
-	probes, skips, err := ledgerBefore(st, t.ticket, t.lastRound+1)
+// publishProbes is what t's review notes say of the probes: every round's, up to
+// the last, that are current at the reviewed head, read in the repository at
+// dir, with files named as paths in the repo. The probes of the ticket's other
+// repos are left out.
+func publishProbes(st *store.Store, t *publishTarget, dir, head string) ([]ProbedEntry, error) {
+	probes, err := probesBefore(st, t.ticket, t.lastRound+1)
 	if err != nil {
-		return behaviorCoverage{}, err
+		return nil, err
 	}
 	rf := roundFiles{qualified: t.qualified, repos: []roundRepo{{Name: t.repoName, Dir: dir, Head: head}}}
-	var mineP []ProbeRecord
+	var mine []ProbeRecord
 	for _, p := range probes {
 		if _, _, ok := rf.of(p.File); ok {
-			mineP = append(mineP, p)
+			mine = append(mine, p)
 		}
 	}
-	var mineS []SkipRecord
-	for _, s := range skips {
-		if _, _, ok := rf.of(s.File); ok {
-			mineS = append(mineS, s)
-		}
-	}
-	probed, current, currentSkips, err := currentLedger(rf, mineP, mineS)
+	probed, err := probedEntries(rf, mine)
 	if err != nil {
-		return behaviorCoverage{}, err
+		return nil, err
 	}
-	// The whole change is measured from the container's branch for a ticket
-	// with one that is not stacked on an unmerged parent, as the gate does.
-	scopeBranch := t.target
-	if t.stack.Container != "" && !t.stack.Shared() {
-		scopeBranch = scopebase.BranchFor(dir, t.target, t.stack.PRTarget)
-	}
-	base, err := gitx.MergeBase(dir, "origin/"+scopeBranch, head)
-	if err != nil {
-		return behaviorCoverage{}, fmt.Errorf("verifydeliver: publish: merge-base origin/%s %s: %w", scopeBranch, head, err)
-	}
-	hunks, err := changeHunks(rf, map[string]string{t.repoName: base})
-	if err != nil {
-		return behaviorCoverage{}, err
-	}
-	rel := func(file string) string {
-		_, r, _ := rf.of(file)
-		return r
-	}
-	var cov behaviorCoverage
+	var current []ProbedEntry
 	for _, pr := range probed {
 		if pr.State == ProbeCurrent {
-			pr.File = rel(pr.File)
-			cov.Probes = append(cov.Probes, pr)
+			_, pr.File, _ = rf.of(pr.File)
+			current = append(current, pr)
 		}
 	}
-	for _, s := range currentSkips {
-		s.File = rel(s.File)
-		cov.Skips = append(cov.Skips, s)
-	}
-	for _, h := range unprobedHunks(coverHunks(hunks, current, currentSkips)) {
-		h.File = rel(h.File)
-		cov.Unprobed = append(cov.Unprobed, h)
-	}
-	return cov, nil
-}
-
-// requestLedger works out review.json's probed and hunks lists for a round
-// whose repos rf reads at the heads under review: the earlier rounds' probes,
-// current or stale, and the hunks of the whole change from fullBases with the
-// current probes and skips that cover them.
-func requestLedger(rf roundFiles, fullBases map[string]string, probes []ProbeRecord, skips []SkipRecord) ([]ProbedEntry, []HunkEntry, error) {
-	probed, current, currentSkips, err := currentLedger(rf, probes, skips)
-	if err != nil {
-		return nil, nil, err
-	}
-	hunks, err := changeHunks(rf, fullBases)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Both lists are empty, never nil, as the request read back from
-	// review.json has them.
-	if probed == nil {
-		probed = []ProbedEntry{}
-	}
-	return probed, coverHunks(hunks, current, currentSkips), nil
+	return current, nil
 }

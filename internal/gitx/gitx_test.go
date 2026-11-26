@@ -400,22 +400,6 @@ func TestDiffAdded(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DiffAdded = %+v, want %+v", got, want)
 	}
-
-	// The hunks the same changes make: the added lines grouped by run, and
-	// the rename, deletion, binary file and submodule as in DiffAdded.
-	hunks, err := DiffHunks(dir, base, "HEAD")
-	if err != nil {
-		t.Fatalf("DiffHunks: %v", err)
-	}
-	wantHunks := []Hunk{
-		{Path: "keep.txt", From: 2, To: 2},
-		{Path: "keep.txt", From: 4, To: 4},
-		{Path: "new.txt", From: 1, To: 1},
-		{Path: "with space.txt", From: 2, To: 2},
-	}
-	if !reflect.DeepEqual(hunks, wantHunks) {
-		t.Fatalf("DiffHunks = %+v, want %+v", hunks, wantHunks)
-	}
 }
 
 // TestBlobsAtRev checks that a file at rev maps to its blob, that a

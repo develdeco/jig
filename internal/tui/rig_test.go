@@ -233,7 +233,7 @@ func statusJIG2() string {
 // roundColumns and findingColumns are the columns of `jig status`'s rounds and
 // findings tables.
 var (
-	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed", "probes", "survived", "skipped", "unprobed"}
+	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed", "probes", "survived"}
 	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by"}
 )
 
