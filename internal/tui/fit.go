@@ -39,7 +39,9 @@ type group struct {
 func groupsOf(lines []pline) []group {
 	var out []group
 	for _, l := range lines {
-		start := l.ref != nil || len(l.hiddenRefs) > 0 || (!l.cont && !l.under) || len(out) == 0
+		// A line of the row above, by its stamp, belongs to it.
+		same := len(out) > 0 && l.held && out[len(out)-1].row && l.holder.id == out[len(out)-1].id
+		start := l.ref != nil || len(l.hiddenRefs) > 0 || (!l.cont && !l.under && !same) || len(out) == 0
 		if start {
 			g := group{}
 			if l.ref != nil {
@@ -98,35 +100,28 @@ func (m *Model) fitPane(pg, folded page) page {
 		}
 		keys = append(keys, k)
 	}
+	// A pane draws expanded the row its own cursor stands on: a row expanded
+	// earlier, with the cursor elsewhere in its pane, is folded.
+	owned := func(k expKey) bool {
+		if e.screen == screenMain {
+			return e.curSet && k.id == e.cur
+		}
+		pc := e.paneCurs[k.pane]
+		return pc.set && pc.id == k.id
+	}
 	live := func(k expKey) bool {
 		return curOK && k.id == curID && (e.screen == screenMain || k.pane == curPane)
 	}
 	sort.Slice(keys, func(a, b int) bool {
-		if la, lb := live(keys[a]), live(keys[b]); la != lb {
-			return la
-		}
 		if keys[a].pane != keys[b].pane {
 			return keys[a].pane < keys[b].pane
 		}
 		return keys[a].id.id < keys[b].id.id
 	})
-	// The pane the cursor is in draws the cursor's row: a row expanded earlier in
-	// that pane is folded while the cursor is elsewhere in it.
-	cursorPane := curPane
-	if curOK && e.screen == screenMain {
-		for i, l := range folded.lines {
-			if l.ref != nil && l.ref.identity() == curID {
-				if p := paneAround(folded.lines, i); p.top >= 0 {
-					cursorPane = folded.lines[p.top].text
-				}
-				break
-			}
-		}
-	}
 	out, fitted := folded, map[string]bool{}
 	windowed := false
 	for _, k := range keys {
-		if fitted[k.pane] || (curOK && k.pane == cursorPane && !live(k)) {
+		if fitted[k.pane] || !owned(k) {
 			continue
 		}
 		if next, w, ok := m.fitOne(pg, out, folded, k, live(k)); ok {
@@ -204,7 +199,11 @@ func (m *Model) fitOne(pg, cur, folded page, key expKey, live bool) (page, bool,
 		}
 		start := m.windowStart(folded, sel, h, false)
 		if from, to, plain := windowSpan(folded, sel, start, h, e.lead == 0); !plain {
-			lo, hi = min(max(from, b0), at), max(min(to, b1), at+1)
+			lo, hi = max(from, b0), min(to, b1)
+			if at < lo || at >= hi {
+				// A row whose first line the window does not show stays folded.
+				return cur, false, false
+			}
 		}
 	}
 	held := func(ls []pline) []pline {

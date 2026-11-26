@@ -88,7 +88,8 @@ func (m *Model) markOnCursor(k registeredMark) bool {
 		return false
 	}
 	line := h.start + k.y - h.top
-	return line >= 0 && line < len(h.owner) && h.owner[line] == m.top().sel
+	sel, ok := h.rowOf[h.holder[min(max(line, 0), len(h.holder)-1)]]
+	return line >= 0 && line < len(h.holder) && h.held[line] && ok && sel == m.top().sel
 }
 
 // lastShownValue is what the last command's mark stands for.

@@ -17,11 +17,13 @@ type hitMap struct {
 	top, rows, start int
 	// sel is, for each line of the page, its place among the rows, else -1.
 	sel []int
-	// owner is, for each line of the page, the place among the rows of the row
-	// the line belongs to (itself, or the row a continuation row hangs from), else
-	// -1; cuts are the cut marks the line carries.
-	owner []int
-	cuts  [][]cutMark
+	// holder is, for each line of the page, the holder it is stamped with (itself,
+	// or the row a continuation row hangs from), and rowOf the place among the
+	// rows of each holder that has one; cuts are the cut marks the line carries.
+	holder []expKey
+	held   []bool
+	rowOf  map[expKey]int
+	cuts   [][]cutMark
 	// panes are the panes of the page, for a click on one to focus it.
 	panes []pane
 }
@@ -33,24 +35,23 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 		return
 	}
 	h := &hitMap{top: len(l.head) + prefix, rows: to - from, start: from, panes: l.pg.panes()}
-	n, cur := 0, -1
+	h.rowOf = map[expKey]int{}
+	n, pane := 0, ""
 	for _, line := range l.pg.lines {
+		if line.box == boxTop {
+			pane = line.text
+		}
+		k, ok := line.holderIn(pane)
 		h.cuts = append(h.cuts, line.cuts)
+		h.holder, h.held = append(h.holder, k), append(h.held, ok)
 		if line.ref == nil {
 			// The rows a mark stands for are rows the cursor passes over.
 			h.sel = append(h.sel, -1)
-			if line.box != boxMid || line.names {
-				// An edge, the names, or a line outside every pane ends the row above;
-				// any other line of the pane sits under the cursor row above it.
-				cur = -1
-			}
-			h.owner = append(h.owner, cur)
 			n += len(line.hiddenRefs)
 			continue
 		}
 		h.sel = append(h.sel, n)
-		h.owner = append(h.owner, n)
-		cur = n
+		h.rowOf[k] = n
 		n++
 	}
 	m.hit = h
@@ -110,10 +111,10 @@ func (m *Model) click(x, y int) {
 	if line < 0 || line >= len(h.sel) {
 		return
 	}
-	if h.sel[line] < 0 && h.owner[line] >= 0 {
+	if sel, ok := h.rowOf[h.holder[line]]; h.sel[line] < 0 && h.held[line] && ok {
 		// A row's continuation row is the row's own: a click on it selects the
 		// row, and one on a mark of it expands the row.
-		m.selectRow(h.owner[line])
+		m.selectRow(sel)
 		if onCut(h.cuts[line], x) {
 			m.expandHolder(false)
 		}

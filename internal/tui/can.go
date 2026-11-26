@@ -116,13 +116,17 @@ func (m *Model) subjectOf(pg page) subject {
 	}
 	if ref != nil {
 		s.row, s.hasRow = *ref, true
-		s.cut = pg.holdsCut(ref.identity())
-		s.pane = pg.paneOf(e.sel, e.paneFocus)
+		k, _ := pg.holderOfSel(e.sel)
+		if k.pane == "" {
+			k = expKey{pane: e.paneFocus, id: ref.identity()}
+		}
+		s.cut = pg.holdsCut(k)
+		s.pane = k.pane
 		s.expanded = e.isExpanded(s.pane, ref)
 	} else if e.textFocus && e.paneFocus != "" {
 		// A pane with no cursor rows is its own holder.
 		s.textPane = true
-		s.cut = pg.holdsCutIn(e.paneFocus)
+		s.cut = pg.holdsCut(expKey{pane: e.paneFocus})
 		s.expanded = e.paneOpen(e.paneFocus)
 	}
 	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()

@@ -1,6 +1,9 @@
 package tui
 
-import "strconv"
+import (
+	"sort"
+	"strings"
+)
 
 // A cut the TUI makes leaves its "…" as a mark that belongs to a holder: the row
 // whose cell was cut. `space`, or a click on the mark, lays the holder's cut
@@ -25,7 +28,14 @@ func (e *navEntry) expansionKey() string {
 	if e.suppress {
 		return "folded"
 	}
-	return strconv.Itoa(e.expGen)
+	// What is expanded, not a count of changes: a count restarts with each visit
+	// to a screen and would name another visit's lines.
+	keys := make([]string, 0, len(e.expanded))
+	for k := range e.expanded {
+		keys = append(keys, k.pane+"\x00"+k.id.id+"\x00"+k.id.container+"\x00"+k.id.kind)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, "\x01")
 }
 
 // isExpanded says whether the row ref in the pane titled pane is expanded.
@@ -55,16 +65,6 @@ func (e *navEntry) wholeOf(pane string, first int, refs []*rowRef) []bool {
 	return whole
 }
 
-// paneOf is the title of the pane the sel-th row of the page is in, def when it
-// is in none.
-func (p page) paneOf(sel int, def string) string {
-	ps := p.panes()
-	if i := paneOfRow(ps, sel); i >= 0 {
-		return ps[i].title
-	}
-	return def
-}
-
 // paneTitle is the title of the panel the page is adding to: the last top edge.
 func (p page) paneTitle() string {
 	for i := len(p.lines) - 1; i >= 0; i-- {
@@ -75,33 +75,85 @@ func (p page) paneTitle() string {
 	return ""
 }
 
-// holdsCut says whether the row of identity id, with the continuation rows and the
-// lines under it that belong to it, carries a cut mark. A row is found by its
-// identity: the place among the rows moves when a list counts the ones it leaves out.
-func (p page) holdsCut(id rowIdentity) bool {
-	in := false
+// holderNow is the holder the next line added to the panel p stands for: the
+// row ref when the cursor can stand on it, else the holder of the line above in
+// the panel, else the panel itself. A line outside every panel has none.
+func (p *page) holderNow(ref *rowRef) (expKey, bool) {
+	pane := p.paneTitle()
+	if ref != nil {
+		return expKey{pane: pane, id: ref.identity()}, true
+	}
+	for i := len(p.lines) - 1; i >= 0; i-- {
+		l := p.lines[i]
+		if l.box == boxTop {
+			return expKey{pane: l.text}, true
+		}
+		if l.box == boxNone || l.box == boxBottom {
+			return expKey{}, false
+		}
+		if l.held {
+			return l.holder, true
+		}
+		if l.ref != nil {
+			return expKey{pane: pane, id: l.ref.identity()}, true
+		}
+	}
+	return expKey{}, false
+}
+
+// holderIn is the holder the line stands for, in the pane titled pane: the stamp
+// it carries, else its row's, else the pane's own for a line inside it.
+func (l pline) holderIn(pane string) (expKey, bool) {
+	switch {
+	case l.held:
+		return l.holder, true
+	case l.ref != nil:
+		return expKey{pane: pane, id: l.ref.identity()}, true
+	case l.box == boxMid && !l.names:
+		return expKey{pane: pane}, true
+	}
+	return expKey{}, false
+}
+
+// holdsCut says whether a line the holder k stands for carries a cut mark. A
+// holder is found by its stamp: the place among the rows moves when a list counts
+// the ones it leaves out.
+func (p page) holdsCut(k expKey) bool {
+	pane := ""
 	for _, l := range p.lines {
-		switch {
-		case l.ref != nil:
-			in = l.ref.identity() == id
-			if in && len(l.cuts) > 0 {
-				return true
-			}
-		case l.cont || l.under:
-			if in && len(l.cuts) > 0 {
-				return true
-			}
-		case l.box != boxMid:
-			// An edge, or a line outside every pane, ends the row; any other line
-			// of the pane sits under the cursor row above it.
-			in = false
-		default:
-			if in && len(l.cuts) > 0 {
-				return true
-			}
+		if l.box == boxTop {
+			pane = l.text
+		}
+		if len(l.cuts) == 0 {
+			continue
+		}
+		if h, ok := l.holderIn(pane); ok && h == k {
+			return true
 		}
 	}
 	return false
+}
+
+// holderOfSel is the holder of the sel-th row of the page, whether a line carries
+// it or it stands in a count of the rows left out.
+func (p page) holderOfSel(sel int) (expKey, bool) {
+	pane, n := "", 0
+	for _, l := range p.lines {
+		if l.box == boxTop {
+			pane = l.text
+		}
+		if sel >= n && sel < n+len(l.hiddenRefs) {
+			return expKey{pane: pane, id: l.hiddenRefs[sel-n].identity()}, true
+		}
+		n += len(l.hiddenRefs)
+		if l.ref != nil {
+			if n == sel {
+				return l.holderIn(pane)
+			}
+			n++
+		}
+	}
+	return expKey{}, false
 }
 
 // paneOpen says whether the pane titled title, which has no cursor rows, is
@@ -113,21 +165,6 @@ func (e *navEntry) paneOpen(title string) bool {
 // paneExpanded says whether the pane titled title on the screen on top is
 // expanded.
 func (m *Model) paneExpanded(title string) bool { return m.top().paneOpen(title) }
-
-// holdsCutIn says whether a line of the pane titled title carries a cut mark.
-func (p page) holdsCutIn(title string) bool {
-	for _, pn := range p.panes() {
-		if pn.title != title {
-			continue
-		}
-		for _, l := range p.lines[pn.top : pn.bottom+1] {
-			if len(l.cuts) > 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // holder is what `space` acts on: the row under the cursor, or the focused
 // pane when it has no cursor rows.
@@ -192,12 +229,13 @@ func (m *Model) underWrap(p *page, owner *rowRef, first, pre, text string, w, mo
 		most = wholeRows
 	}
 	lines, cut := wrapCut(text, w, most)
+	holder, held := p.holderNow(owner)
 	for i, l := range lines {
 		line := pre + style(l)
 		if i == 0 {
 			line = first + style(l)
 		}
-		p.lines = append(p.lines, pline{text: line, box: boxMid, under: true})
+		p.lines = append(p.lines, pline{text: line, box: boxMid, under: true, holder: holder, held: held})
 		if cut && i == len(lines)-1 {
 			p.lines[len(p.lines)-1].cuts = []cutMark{{x: width(line) - 1, value: text}}
 		}

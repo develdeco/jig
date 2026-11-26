@@ -27,21 +27,26 @@ func (p *page) boxTop(title, right string) {
 
 // boxAdd adds a line inside the panel.
 func (p *page) boxAdd(text string) {
-	p.lines = append(p.lines, pline{text: text, box: boxMid})
+	l := pline{text: text, box: boxMid}
+	l.holder, l.held = p.holderNow(nil)
+	p.lines = append(p.lines, l)
 }
 
 // boxUnder adds a line inside the panel that a list draws under its row: the
 // row's detail. A window that moves with a cursor never begins on one.
 func (p *page) boxUnder(text string) {
-	p.lines = append(p.lines, pline{text: text, box: boxMid, under: true})
+	l := pline{text: text, box: boxMid, under: true}
+	l.holder, l.held = p.holderNow(nil)
+	p.lines = append(p.lines, l)
 }
 
 // boxRow adds the lines the allocator laid a row out in, inside the panel: the
 // first is the row, standing for ref when the cursor can stand on it, and the
 // rest are its continuation rows, with the cuts the row carries.
 func (p *page) boxRow(ref *rowRef, r laidRow) {
+	holder, held := p.holderNow(ref)
 	for i, l := range r.lines {
-		pl := pline{text: l, box: boxMid, cont: i > 0}
+		pl := pline{text: l, box: boxMid, cont: i > 0, holder: holder, held: held}
 		if i == 0 {
 			pl.ref = ref
 		}

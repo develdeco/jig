@@ -108,6 +108,11 @@ type pline struct {
 	// sits within the line's text, and the whole value it stands for. A mark's
 	// holder is the row the line belongs to.
 	cuts []cutMark
+	// holder is the holder every line of a row stands for, stamped where the line
+	// is made: the lines of a row, the lines under it and the lines of its pane
+	// that no row holds take the stamp of the row above. held says it is set.
+	holder expKey
+	held   bool
 
 	// fits marks a line already wrapped for the width the page is drawn at: a
 	// cached body is wrapped once, and a frame does not measure it again.
@@ -226,9 +231,10 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	for _, p := range pg.panes() {
 		withRows[p.title] = p.rows > 0
 	}
-	// owner is the row whose lines the ones under it are: they are expanded with it.
-	var owner *rowRef
 	for _, l := range pg.lines {
+		if l.box == boxTop {
+			pane = l.text
+		}
 		if l.fits {
 			out = append(out, l)
 			continue
@@ -238,17 +244,7 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 		if l.box != boxNone {
 			w = m.innerWidth()
 		}
-		if l.box == boxTop {
-			pane = l.text
-		}
-		switch {
-		case l.ref != nil:
-			owner = l.ref
-		case l.box != boxMid:
-			// A line that is in no pane, or an edge, belongs to no row; a line of a
-			// pane that is none's own sits under the cursor row above it.
-			owner = nil
-		}
+		holder, held := l.holderIn(pane)
 		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
 			out = append(out, l)
 			continue
@@ -264,9 +260,10 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 			rows = 1 << 20
 		}
 		switch {
-		case owner != nil && e.isExpanded(pane, owner), owner == nil && e.paneOpen(pane):
+		case held && holder.id != (rowIdentity{}) && !e.suppress && e.expanded[holder],
+			held && holder.id == (rowIdentity{}) && e.paneOpen(pane):
 			rows = wholeRows
-		case owner == nil && (withRows[pane] || l.box == boxNone):
+		case !held || withRows[pane]:
 			// A line no cursor row holds, in a pane of rows or outside every pane,
 			// has no holder to expand it: it is never cut.
 			rows = wholeRows
@@ -282,6 +279,7 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 		}
 		for i, text := range lines {
 			next := l
+			next.holder, next.held = holder, held
 			next.text = spaces(indent) + text
 			if i > 0 {
 				next.ref, next.cont = nil, true
