@@ -44,6 +44,9 @@ func TestAStyledWordBrokenAtItsColumnLosesNoCharacter(t *testing.T) {
 
 // citedByFive is a status of JIG-1 whose section Rules is cited by five slices
 // with ids as long as the ones a real store has.
+// longHeading is a heading as long as the ones a real brief has.
+const longHeading = "The ticket screen's Brief sub-steps open their part"
+
 func citedByFive() (status, text string) {
 	ids := []string{"approval-records-sections", "parts-list-and-section-text", "section-slice-links", "approval-part", "issue-part"}
 	var rows [][]string
@@ -55,12 +58,12 @@ func citedByFive() (status, text string) {
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, rows),
 		"questions: none",
 		axi.KV("brief", [][2]string{{"approval", "current"}, {"approved_by", "Ada Lovelace"}, {"identity", "Ada Lovelace"}, {"approved_at", "2026-10-23T09:00:00Z"}, {"provenance", "person"}}),
-		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{{"Rules", strings.Join(ids, "+")}}),
+		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{{"Rules", strings.Join(ids, "+")}, {longHeading, "-"}}),
 		axi.Help("Run `jig next JIG-1`"),
 	}, "\n") + "\n"
 	text = strings.Join([]string{
 		axi.KV("brief", [][2]string{{"ticket", "JIG-1"}, {"title", "Greeting copy"}, {"illustration", "no"}}),
-		axi.Table("sections", []string{"heading", "summary"}, [][]string{{"Rules", "Rules."}}),
+		axi.Table("sections", []string{"heading", "summary"}, [][]string{{"Rules", "Rules."}, {longHeading, "Long."}}),
 		"section: Rules\n  Rules.", axi.Help("serve it"),
 	}, "\n") + "\n"
 	return status, text
@@ -73,7 +76,7 @@ func TestAnIdIsNeverBrokenMidWord(t *testing.T) {
 	t.Parallel()
 	ids := []string{"approval-records-sections", "parts-list-and-section-text", "section-slice-links", "approval-part", "issue-part"}
 	status, text := citedByFive()
-	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+	for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
 		g := briefRigWith(t, size[0], size[1], status, text)
 		words := readWords(between(g.view(), "╭─ Parts", "╰"))
 		for _, id := range ids[:1] {
@@ -81,8 +84,23 @@ func TestAnIdIsNeverBrokenMidWord(t *testing.T) {
 				t.Errorf("%v: the section's row does not name %q whole:\n%s", size, id, g.view())
 			}
 		}
+		// A long heading wraps whole, with no ellipsis.
+		g.focus("section-2")
+		panel := between(g.view(), "╭─ Parts", "╰")
+		heading := false
+		for _, line := range strings.Split(panel, "\n") {
+			// The heading is in the part column: the text of its lines from the
+			// "section" row on, up to the next column's words.
+			heading = heading || strings.Contains(line, "The ticket screen's Brief")
+		}
+		if !heading || !strings.Contains(panel, "sub-steps open") && !strings.Contains(panel, "sub-steps") || strings.Contains(panel, "…") {
+			t.Errorf("%v: the long heading is cut:\n%s", size, g.view())
+		}
 		for _, id := range ids {
 			g.focus(id)
+			if strings.Contains(between(g.view(), "╭─ Parts", "╰"), "…") {
+				t.Errorf("%v: the row of slice %s is cut with an ellipsis:\n%s", size, id, g.view())
+			}
 			row := readWords(between(g.view(), "╭─ Parts", "╰"))
 			if !strings.Contains(row, "slice "+id) {
 				t.Errorf("%v: the row of slice %s has its id broken:\n%s", size, id, g.view())

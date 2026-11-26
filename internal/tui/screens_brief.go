@@ -151,10 +151,12 @@ const (
 )
 
 // The columns of the brief's list: what the part is, its name and where it
-// stands. A slice's name carries its goal, and a section's place says which
-// slices cite it and whether it changed since the approval.
+// stands. The name holds headings and ids and the last column the state, the goal
+// and the slices that cite a section: both are free text the allocator shares the
+// room between, so nothing is cut with an ellipsis, a word wraps whole and an id
+// is broken only when it is wider than the column alone.
 var (
-	partColumns     = []column{{}, {gap: 2}, {free: true, gap: 2}}
+	partColumns     = []column{{}, {free: true, whole: true, gap: 2}, {free: true, whole: true, gap: 2}}
 	partColumnNames = []string{"kind", "part", "stands at"}
 )
 

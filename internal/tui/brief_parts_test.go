@@ -43,7 +43,7 @@ func rowsOf(view, title string) []string {
 // is under the list.
 func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 	t.Parallel()
-	for _, size := range [][2]int{{100, 30}, {160, 40}} {
+	for _, size := range [][2]int{{60, 20}, {100, 30}, {160, 40}} {
 		g := briefRigWith(t, size[0], size[1], statusJIG1Brief(), briefTextJIG1())
 		view := g.view()
 		if strings.Contains(view, "╭─ Sections") || strings.Contains(view, "╭─ Slices") {
