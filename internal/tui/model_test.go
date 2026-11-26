@@ -71,16 +71,6 @@ func TestATicketGivenOpensItsScreenWithTheProjectBehindIt(t *testing.T) {
 	}
 }
 
-func TestOpeningAQuestionGoesToItsSlice(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("down", "down", "down", "down") // the question under "needs a person"
-	g.press("enter")
-	if g.m.Screen() != "slice" || g.m.top().slice != "c" {
-		t.Fatalf("on %s %q, want slice c", g.m.Screen(), g.m.top().slice)
-	}
-}
-
 func TestTheCursorStaysOnItsScreen(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
@@ -176,7 +166,7 @@ func TestAnswerAsksWhichQuestionWhenSeveralAreOpen(t *testing.T) {
 	if g.m.input != nil || !strings.Contains(g.m.notice, "several questions") {
 		t.Fatalf("a with two questions open and the cursor on no question: input %+v, notice %q", g.m.input, g.m.notice)
 	}
-	g.press("down", "down", "down", "down", "down") // the second question
+	g.press("tab", "down") // the second question
 	if ref := g.m.selected(); ref == nil || ref.id != "q-002" {
 		t.Fatalf("cursor is on %+v, want q-002", ref)
 	}

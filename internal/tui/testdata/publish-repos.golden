@@ -16,9 +16,9 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Publish activity ───────────────────────────────────────── latest 2 of 7 ─╮
   │  time     step               what                                          │
-  │  09:14:22 ● published        finished                                      │
+  │▸ 09:14:22 ● published        finished                                      │
   │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Checklist · ↑↓ scroll
+  say "Land JIG-2" · 1-5 steps · [ ] sibling · h main · t tail

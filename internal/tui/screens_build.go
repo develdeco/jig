@@ -68,7 +68,7 @@ func (m *Model) buildPage(id string) page {
 		at := len(p.lines)
 		m.sliceRecords(&p, t, s, idW, below[i])
 		for k := at; k < len(p.lines); k++ {
-			p.lines[k].box = boxMid
+			p.lines[k].box, p.lines[k].under = boxMid, true
 		}
 	}
 	p.boxEnd()

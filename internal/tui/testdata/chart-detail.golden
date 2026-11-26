@@ -2,8 +2,7 @@ jig  demo › checkout  Coupons at checkout                                     
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ╭─ Map ───────────────────────────────────────────────────────────────── charts/checkout/map.md ─╮
   │  destination  A customer takes a coupon code from the cart to a discounted order.              │
-  │  decided      ✓ Codes are single use                                                           │
-  │               ✓ Discounts apply before tax                                                     │
+  │  decided      ✓ Codes are single use  +1 more                                                  │
   │  fog          ~ Stacking two codes                                                             │
   │               ~ Codes in other currencies                                                      │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -33,4 +32,5 @@ jig  demo › checkout  Coupons at checkout                                     
   │  ↓ 19 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open ticket · t tail · r refresh
+  esc back · q quit · ? keys · tab next pane: Detail · ↑↓ move in Tickets · enter open ticket
+  t tail · r refresh

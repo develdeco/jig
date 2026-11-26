@@ -64,7 +64,7 @@ func (m *Model) briefPage(id string) page {
 		for i, s := range b.Sections {
 			p.boxLaid(&rowRef{kind: rowStop, id: s.Heading, ticket: id}, laid[i])
 			for _, line := range wrap(t.brief.summaryOf(i, s.Heading), m.innerWidth()-6, 2) {
-				p.boxAdd("    " + m.st.dim(line))
+				p.boxUnder("    " + m.st.dim(line))
 			}
 		}
 	}
@@ -85,7 +85,7 @@ func (m *Model) briefPage(id string) page {
 		for i, s := range slices {
 			p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
 			if facts := sliceFacts(s, true); facts != "" {
-				p.boxAdd("    " + spaces(idW) + m.st.dim(facts))
+				p.boxUnder("    " + spaces(idW) + m.st.dim(facts))
 			}
 		}
 	}

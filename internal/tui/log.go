@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -329,8 +328,12 @@ type placedLine struct {
 // placed are the log's lines of a ticket that stands as d says, oldest first,
 // each with its place.
 func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
-	out, _ := m.placedIn(t, d)
-	return out
+	memo := t.memoFor()
+	if memo.placed == nil {
+		out, _ := m.placedIn(t, d)
+		memo.placed = &out
+	}
+	return *memo.placed
 }
 
 // placedIn is placed with the windows the places came from.
@@ -445,37 +448,6 @@ func tagOf(step int, key string) string {
 
 // stepTagState is the state whose color tags a step's lines.
 var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing, StatePublishing}
-
-// activityPanel adds the ticket's activity log to p, newest first: as many
-// lines as the rows left below what p holds allow, three at least, so the
-// panel's edge stays on the screen and a tall one is filled to its foot.
-func (m *Model) activityPanel(p *page, t *ticket) {
-	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
-	shown, older := cutNewest(all, max(3, m.bodyRows()-m.taken(p)-3))
-	right := ""
-	if older > 0 {
-		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
-	}
-	rows := make([]listRow, len(shown))
-	for i, e := range shown {
-		tag := tagOf(e.step, e.key)
-		if e.step >= 0 {
-			tag = m.st.state(stepTagState[e.step], tag)
-		} else {
-			tag = m.st.dim(tag)
-		}
-		rows[i] = listRow{cells: []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}}
-	}
-	// The edges and the names take three of the rows the panel has, and the count
-	// of the older lines one more.
-	room := max(3, m.bodyRows()-m.taken(p)-3)
-	spec := listSpec{title: "Activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: "nothing yet", room: room}
-	if older > 0 {
-		spec.room--
-		spec.after = []string{m.olderRow(older)}
-	}
-	m.listPanel(p, spec)
-}
 
 // activityColumns are the columns of an activity line: its time, its tag and
 // what happened.

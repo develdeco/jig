@@ -31,9 +31,10 @@ type listSpec struct {
 	// cap. A list short of room asks its free text for fewer rows before it
 	// drops one.
 	room int
-	// after are lines inside the panel under the rows, such as the count of
-	// the older ones.
-	after []string
+	// before are lines inside the panel over the rows, under the names, such as
+	// the count of the newer ones; after are lines under the rows, such as the
+	// count of the older ones.
+	before, after []string
 }
 
 // listPanel adds a list panel to p: the top edge with the title and the summary,
@@ -53,7 +54,11 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		for i, r := range s.rows {
 			cells[i] = r.cells
 		}
-		for i, lines := range m.laidList(p, s.cols, names, cells, s.room) {
+		laid := m.laidList(p, s.cols, names, cells, s.room)
+		for _, l := range s.before {
+			p.boxAdd(l)
+		}
+		for i, lines := range laid {
 			p.boxLaid(s.rows[i].ref, lines)
 		}
 	}

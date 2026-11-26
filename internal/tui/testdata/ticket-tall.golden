@@ -28,7 +28,7 @@ jig  demo › BIG-1                                                             
   │  ○ slice s12  ready to build                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 14 of 34 ─╮
+  ╭─ Activity ─────────────────────────────────────────────────────────────────── latest 13 of 34 ─╮
   │  time     step     what                                                                        │
   │  09:09:20 build·s9 · verification requested for 9999999 “Slice s9”                             │
   │  09:09:00 build·s9 ◐ builder took it · Slice s9                                                │
@@ -43,8 +43,8 @@ jig  demo › BIG-1                                                             
   │  09:06:40 build·s6 ● verified 6666666                                                          │
   │  09:06:30 build·s6 ● its oracle passed                                                         │
   │  09:06:20 build·s6 · verification requested for 6666666 “Slice s6”                             │
-  │  09:06:00 build·s6 ◐ builder took it · Slice s6                                                │
-  │  ↓ 20 older                                                                                    │
+  │  ↓ 21 older                                                                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Build · ↑↓ move in Steps · enter open · h main
+  t tail

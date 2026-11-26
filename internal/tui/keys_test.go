@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +94,14 @@ func TestKeyTableDrivesHandlerAndHints(t *testing.T) {
 		for i := range g.m.table {
 			row := &g.m.table[i]
 			for _, name := range row.names {
+				// Two rows can share a key on screens that differ (`esc` and `/` on
+				// the project's list and on the others): the key runs the first the
+				// screen has, which is the row tested on that screen.
+				if first := slices.IndexFunc(g.m.table, func(r keyRow) bool {
+					return slices.Contains(r.names, name) && r.screens.has(g.m.top().screen)
+				}); first >= 0 && &g.m.table[first] != row {
+					continue
+				}
 				var ran []string
 				orig := row.run
 				row.run = func(_ *Model, key string) tea.Cmd { ran = append(ran, key); return nil }
@@ -152,7 +161,7 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 			[]string{"g gate", "p publish", "k keep"}},
 	} {
 		for _, wd := range []int{80, 100} {
-			g := sized(c.rig(t), wd, 24)
+			g := sized(c.rig(t), wd, 28)
 			c.nav(g)
 			screen, depth := g.m.Screen(), len(g.m.nav)
 			body := g.view()

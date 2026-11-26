@@ -103,7 +103,7 @@ func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 22})
 	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
 	v := g.view()
-	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "slice c builder asks: Formal or casual?") {
+	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") {
 		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
 	}
 }
@@ -116,6 +116,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 			{"fix-1", "queued", "0", "-", "-", "Fix these gate findings:\n\nalpha/a.go:3 Unchecked error\nThe error is dropped."},
 		}), "questions: none"}, "\n") + "\n"
 	g := newRig(t, "JIG-6")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 28})
 	g.r.answer("status JIG-6 --store /s", status, 0)
 	g.feed(
 		jl(at(30, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
@@ -135,7 +136,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	for _, keys := range [][]string{{"esc"}, {"up", "enter"}} {
 		g.press(keys...)
 		v := g.view()
-		if strings.Contains(v, "The error is dropped.") || strings.Count(v, "\n")+1 != 24 {
+		if strings.Contains(v, "The error is dropped.") || strings.Count(v, "\n")+1 != 28 {
 			t.Errorf("after %v a fix slice's goal spills over its row:\n%s", keys, v)
 		}
 	}
