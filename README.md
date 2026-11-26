@@ -191,6 +191,13 @@ under the cursor is about (a slice from the build's sub-steps, the slice, round
 or question an activity line names). `z` shows the focused pane over the whole
 screen and `z` or `esc` brings the screen back.
 
+What the screen cuts ends in `…`, and nothing cut is lost: `space` lays the row
+under the cursor out whole where it stands (a pane with no rows lays out every
+line it cut, and with nothing cut in the focus the last command's line), and
+`space` again folds it back. A click on the `…` does what `space` does. A row
+taller than its pane is read by lines with `up` and `down`, and `z` gives it the
+whole body. What is expanded lasts as long as its screen.
+
 `/` on the main screen opens a search line: type, and the list narrows as you type to the
 rows whose words start with every word you typed, in any order - an id (`shop-11`) or its number
 (`11`), a word of the title, a kind (`issue`), a chart, a state (`waiting`, `landed`, `closed`) or a

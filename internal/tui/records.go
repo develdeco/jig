@@ -230,11 +230,19 @@ func (c commitRecord) words() []events.Envelope {
 // maxLines of them; when it cut, the last line ends in an ellipsis. A word wider
 // than a line is cut. Text with no room gives no lines.
 func wrap(text string, w, maxLines int) []string {
+	lines, _ := wrapCut(text, w, maxLines)
+	return lines
+}
+
+// wrapCut is wrap that also says whether it cut: the last line then ends in the
+// cut's ellipsis.
+func wrapCut(text string, w, maxLines int) ([]string, bool) {
 	if w < 1 || maxLines < 1 {
-		return nil
+		return nil, false
 	}
 	lines := wordLines(text, w)
-	if len(lines) > maxLines {
+	cut := len(lines) > maxLines
+	if cut {
 		lines = lines[:maxLines]
 		last := lines[len(lines)-1]
 		if width(last)+1 > w {
@@ -243,7 +251,7 @@ func wrap(text string, w, maxLines int) []string {
 		}
 		lines[len(lines)-1] = last + "…"
 	}
-	return lines
+	return lines, cut
 }
 
 // wrapWhole breaks text into lines of at most w cells and cuts none of it: it

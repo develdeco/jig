@@ -25,8 +25,18 @@ import (
 // update rewrites the golden files: go test ./internal/tui -update.
 var update = flag.Bool("update", false, "rewrite the golden files")
 
-// golden compares got with testdata/<name>.golden.
+// golden compares got with testdata/<name>.golden. A frame that holds a cut is
+// written through goldenCuts, which reads its marks: golden refuses its name.
 func golden(t *testing.T, name, got string) {
+	t.Helper()
+	if cutGoldens[name] {
+		t.Fatalf("the golden %s holds a cut: write it through goldenCuts", name)
+	}
+	goldenFile(t, name, got)
+}
+
+// goldenFile compares got with testdata/<name>.golden.
+func goldenFile(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name+".golden")
 	if *update {

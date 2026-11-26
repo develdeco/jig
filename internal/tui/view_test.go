@@ -109,7 +109,7 @@ func TestReviewScreen(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	golden(t, "review", g.view())
+	goldenCuts(t, "review", g)
 }
 
 func TestReviewScreenPublished(t *testing.T) {
@@ -120,7 +120,7 @@ func TestReviewScreenPublished(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	golden(t, "review-published", g.view())
+	goldenCuts(t, "review-published", g)
 }
 
 func TestPublishScreen(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPublishScreen(t *testing.T) {
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}
-	golden(t, "publish", g.view())
+	goldenCuts(t, "publish", g)
 }
 
 func TestBriefScreen(t *testing.T) {
@@ -181,7 +181,7 @@ func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 		"help[1]:", "  The next round applies it: run `jig gate JIG-2`",
 	}, "\n")+"\n", 0)
 	g.feed(jig2Mid()...).press("enter", "down", "d") // the review, then r1-f2
-	golden(t, "panel-ok", g.view())
+	goldenCuts(t, "panel-ok", panelOKRig(t))         // a rig of its own: the check expands and folds its marks
 
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
 	g.feed(decided()...) // both asks decided: the gate that applies them can run

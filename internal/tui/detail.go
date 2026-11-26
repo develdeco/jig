@@ -56,7 +56,11 @@ type detailSpec struct {
 // its top edge, every field wrapped whole, and its bottom edge.
 func (m *Model) detailLines(d detailSpec, w int) []pline {
 	inner := max(1, w-7)
-	lines := []pline{{text: "Detail · " + d.title, right: d.summary, box: boxTop}}
+	title := "Detail · " + d.title
+	lines := []pline{{text: title, right: d.summary, box: boxTop}}
+	// Every line carries the holder it stands for: its row, else the row above it,
+	// else the panel.
+	stamp := expKey{pane: title}
 	labelW := 0
 	for _, r := range d.rows {
 		labelW = max(labelW, width(r.label))
@@ -76,12 +80,16 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 			case d.walk:
 				l.ref = &rowRef{kind: rowStop, id: "line-" + strconv.Itoa(n)}
 			}
+			if l.ref != nil {
+				stamp = expKey{pane: title, id: l.ref.identity()}
+			}
+			l.holder, l.held = stamp, true
 			n++
 			lines = append(lines, l)
 		}
 	}
 	if len(d.rows) == 0 && d.empty != "" {
-		lines = append(lines, pline{text: m.st.dim(d.empty), box: boxMid})
+		lines = append(lines, pline{text: m.st.dim(d.empty), box: boxMid, holder: stamp, held: true})
 	}
 	return append(lines, pline{box: boxBottom})
 }
@@ -245,23 +253,47 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 				others += min(len(f), keep)
 			}
 		}
+		row := 0
 		if lb-others < listMin {
-			keep, others = 0, 0
+			keep, others, row = collapsed, 0, -1
 			for i, f := range full {
 				if i != cl {
-					others += min(len(f), collapsed)
+					others += min(len(f), keep)
 				}
 			}
 		}
-		for i, f := range full {
-			switch {
-			case i == cl:
-				left = append(left, m.windowList(f, cr, max(lb-others, listMin))...)
-			case keep > 0:
-				left = append(left, m.windowList(f, 0, keep)...)
-			default:
-				left = append(left, m.windowList(f, -1, collapsed)...)
+		budget := make([]int, len(full))
+		for i := range full {
+			budget[i] = keep
+		}
+		budget[cl] = max(lb-others, listMin)
+		cut := make([][]pline, len(full))
+		draw := func(i int) {
+			at := row
+			if i == cl {
+				at = cr
 			}
+			cut[i] = m.windowList(full[i], at, budget[i])
+		}
+		size := 0
+		for i := range full {
+			draw(i)
+			size += len(cut[i])
+		}
+		// The lines the cursor's list does not use go to the other lists, which draw
+		// more of their rows with them.
+		for i := range full {
+			was := len(cut[i])
+			for b := budget[i] + 1; i != cl && b <= budget[i]+lb-size && was < len(full[i]); b++ {
+				if got := m.windowList(full[i], 0, b); len(got) > was && size+len(got)-was <= lb {
+					size += len(got) - was
+					cut[i], budget[i] = got, b
+					break
+				}
+			}
+		}
+		for i := range full {
+			left = append(left, cut[i]...)
 		}
 	}
 	right, cut := cutDetail(m, dl, db)

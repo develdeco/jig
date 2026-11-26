@@ -42,6 +42,15 @@
 // cursor and counts the rest, a row opens what it is about, and z draws the
 // focused pane over the whole body (panes.go, zoom.go).
 //
+// Nothing a screen cuts is lost: a cut registers a cut mark, the cell its "…" is
+// drawn on with the holder that owns the cut (a row with its lines and fields, a
+// pane with no cursor rows, or the last command line) and the whole text it
+// stands for. space, or a click on the mark, lays the holder out whole where it
+// stands, the columns keeping the widths the folded rows gave them, and space
+// folds it back; a row taller than its room is read by lines. An expansion is
+// kept by the holder's identity and lasts as long as its screen
+// (expand.go, fit.go, lastcmd.go).
+//
 // The slice screen tells the whole story of one slice, top to bottom: its
 // finding when it is a fix slice, its goal, oracle and facts, every commit with
 // its runs, the questions asked about it, the calls its holder made and its

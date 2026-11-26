@@ -14,11 +14,11 @@ jig  demo › JIG-2 (1 of 3)  Config loader                      ! review findin
   │  ! low   beta/b.go:9   undecided  Name shadows import  r1-f2               │
   │      Name shadows import · the import is hidden in this scope              │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 4 ─╮
-  │  time     step      what                                                   │
-  │  09:11:30 review·r1 ! reviewer finished with findings                      │
-  │  ↓ 2 more                                                                  │
-  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
+
+
+
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · tab next pane: Needs you · ↑↓ move in Steps
   enter open · k keep · d dismiss · 1-5 steps · [ ] sibling · h main · t tail
+

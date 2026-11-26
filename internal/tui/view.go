@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/develdeco/jig/internal/events"
 )
 
@@ -110,6 +112,16 @@ type pline struct {
 	// home marks the row a pane's cursor stands on before the person has put it
 	// anywhere: the sub-step that matters now.
 	home bool
+	// cuts are the cut marks the line carries: where a "…" the allocator drew
+	// sits within the line's text, and the whole value it stands for. A mark's
+	// holder is the row the line belongs to.
+	cuts []cutMark
+	// holder is the holder every line of a row stands for, stamped where the line
+	// is made: the lines of a row, the lines under it and the lines of its pane
+	// that no row holds take the stamp of the row above. held says it is set.
+	holder expKey
+	held   bool
+
 	// fits marks a line already wrapped for the width the page is drawn at: a
 	// cached body is wrapped once, and a frame does not measure it again.
 	fits bool
@@ -131,6 +143,18 @@ type page struct {
 	// marks are the rows, among the page's rows, that the cursors of the panes
 	// that have not the focus stand on: drawn marked and not lit.
 	marks []int
+	// fold, on a page with a row expanded, is the page laid out folded, of as many
+	// lines: the window is taken on it, so what the page shows outside the pane of
+	// the expanded row is what it showed folded.
+	fold []pline
+}
+
+// shaped is pg with the lines its window is taken on.
+func (pg page) shaped() page {
+	if pg.fold != nil {
+		pg.lines = pg.fold
+	}
+	return pg
 }
 
 // marker is the cursor's mark for the idx-th row of the page: the key color on
@@ -166,7 +190,26 @@ func (p page) refs() []rowRef {
 
 // page builds the body of the screen on top: its lines, with the text of any
 // line too long for the width wrapped onto continuation rows.
+//
+// What the person expanded never changes the page's height: the page is laid
+// out folded, and the pane that holds the cursor's expanded row is drawn into
+// the height it had folded (fit.go).
 func (m *Model) page() page {
+	pg := m.pageOf()
+	m.tall = nil
+	if e := m.top(); len(e.expanded) > 0 {
+		e.suppress, m.nav[0].suppress = true, true
+		m.main, m.mainF = m.mainF, m.main
+		folded := m.pageOf()
+		m.main, m.mainF = m.mainF, m.main
+		e.suppress, m.nav[0].suppress = false, false
+		pg = m.fitPane(pg, folded)
+	}
+	return pg
+}
+
+// pageOf is the page as the screen on top lays it out now.
+func (m *Model) pageOf() page {
 	if m.top().screen == screenMain {
 		// The project's list is wrapped when it is built, once for what it reads.
 		return m.rawPage()
@@ -183,9 +226,23 @@ func (m *Model) page() page {
 // screen wrote whole is not cut where the window ends. A row's cursor, and the
 // ask it belongs to, stay with its first line. A line that fits is untouched,
 // and so is a line of an ask, which its screen wraps whole.
-func (m *Model) wrapLong(pg page) page {
+func (m *Model) wrapLong(pg page) page { return m.wrapLongIn(m.top(), pg) }
+
+// wrapLongIn is wrapLong for the screen e holds: a line it has expanded, or one
+// in a pane with no cursor rows it has expanded, wraps whole; a line that is
+// cut registers the cut as a mark.
+func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	var out []pline
+	pane := ""
+	// withRows are the panes that have rows the cursor stands on.
+	withRows := map[string]bool{}
+	for _, p := range pg.panes() {
+		withRows[p.title] = p.rows > 0
+	}
 	for _, l := range pg.lines {
+		if l.box == boxTop {
+			pane = l.text
+		}
 		if l.fits {
 			out = append(out, l)
 			continue
@@ -195,6 +252,7 @@ func (m *Model) wrapLong(pg page) page {
 		if l.box != boxNone {
 			w = m.innerWidth()
 		}
+		holder, held := l.holderIn(pane)
 		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
 			out = append(out, l)
 			continue
@@ -209,15 +267,36 @@ func (m *Model) wrapLong(pg page) page {
 			// What a person decides on is never cut.
 			rows = 1 << 20
 		}
+		switch {
+		case held && holder.id != (rowIdentity{}) && !e.suppress && e.expanded[holder],
+			held && holder.id == (rowIdentity{}) && e.paneOpen(pane):
+			rows = wholeRows
+		case !held || withRows[pane]:
+			// A line no cursor row holds, in a pane of rows or outside every pane,
+			// has no holder to expand it: it is never cut.
+			rows = wholeRows
+		}
 		// Every row, the first too, is wrapped to the room the continuation rows
 		// have under their indent, so none is wider than the line may be.
-		lines := wrapCell(l.text[indent:], max(1, w-lead), rows)
+		lines, cut := wrapCellCut(l.text[indent:], max(1, w-lead), rows)
+		// A line that came with a mark of its own (a clipped text) keeps it on the
+		// last row it wraps to, which is where its ellipsis lands.
+		carried := ""
+		if len(l.cuts) > 0 {
+			carried = l.cuts[0].value
+		}
 		for i, text := range lines {
 			next := l
+			next.holder, next.held = holder, held
 			next.text = spaces(indent) + text
 			if i > 0 {
 				next.ref, next.cont = nil, true
 				next.text = spaces(lead) + text
+			}
+			next.cuts = nil
+			if (cut || carried != "") && i == len(lines)-1 {
+				value := firstOf(carried, ansi.Strip(l.text))
+				next.cuts = []cutMark{{x: width(next.text) - 1, value: value}}
 			}
 			out = append(out, next)
 		}
@@ -296,6 +375,13 @@ func (m *Model) View() string {
 	for len(body) < l.pageH {
 		body = append(body, "")
 	}
+	m.lastMark = nil
+	if m.last != nil && m.help == nil {
+		// The last command's cut mark is where the panel draws it.
+		if v, _ := m.lastShown(w); v.cut >= l.panelDrop && v.cut-l.panelDrop < len(l.panel) {
+			m.lastMark = &lastMarkAt{y: len(l.head) + len(body) + len(tailPane) + v.cut - l.panelDrop, x: width(v.lines[v.cut]) - 1}
+		}
+	}
 	out := append(append(append(append(l.head, body...), tailPane...), l.panel...), l.foot...)
 	for i, line := range out {
 		out[i] = strings.TrimRight(line, " ")
@@ -311,6 +397,8 @@ type screenLayout struct {
 	sel               int
 	head, foot, panel []string
 	pageH, tailH      int
+	// panelDrop is how many rows of the panel the layout gave up to keep the body its minimum.
+	panelDrop int
 	// tailNote is the line that stands where the tail would be when the body is
 	// too short for it, and takes a row of the body.
 	tailNote string
@@ -355,18 +443,19 @@ func (m *Model) layout() screenLayout {
 
 	head := m.header(w)
 	foot := m.footer(w)
-	panel := m.panel(w)
+	panel, drop := m.panel(w), 0
 	bodyH := h - len(head) - len(foot) - len(panel)
 	if bodyH < minBodyRows && len(panel) > 0 {
 		// The last command goes first: the notice says what to do.
-		panel = panel[min(len(panel), minBodyRows-bodyH):]
+		drop = min(len(panel), minBodyRows-bodyH)
+		panel = panel[drop:]
 		bodyH = h - len(head) - len(foot) - len(panel)
 	}
 	if bodyH < 1 {
 		bodyH = 1
 	}
 
-	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, pageH: bodyH}
+	l := screenLayout{pg: pg, sel: sel, head: head, foot: foot, panel: panel, panelDrop: drop, pageH: bodyH}
 	pageH, tailH, note := m.tailSplit(bodyH)
 	l.pageH, l.tailH = pageH, tailH
 	if note {
@@ -477,6 +566,7 @@ func (m *Model) phaseNeed() int {
 // (lead). With clamp, lead is cut to the lines there are above the window, so a
 // page opened at its top lessens what is held as it is read down.
 func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
+	pg = pg.shaped()
 	selLine, n := 0, 0
 	detailed, block := false, -1
 	for i, l := range pg.lines {
@@ -557,7 +647,7 @@ func lastRowOfPanel(lines []pline, i int) bool {
 // row stays in the span, which moves down as the marks cost it rows; without
 // it, a row the page holds out of view stays out.
 func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool) {
-	lines := pg.lines
+	lines := pg.shaped().lines
 	n := len(lines)
 	if n <= h {
 		return 0, n, false
@@ -766,7 +856,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
-		inBox, top, k := hiddenAbove(lines, from)
+		inBox, top, k := hiddenAbove(pg.shaped().lines, from)
 		edge := -1
 		if inBox {
 			edge = top
@@ -811,7 +901,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		rows = append(rows, fit(marker+l.text, w))
 	}
 	if to < len(lines) {
-		inBox, bottom, k := hiddenBelow(lines, to)
+		inBox, bottom, k := hiddenBelow(pg.shaped().lines, to)
 		if k > 0 {
 			edge := -1
 			if inBox {
@@ -945,13 +1035,25 @@ func (m *Model) footer(w int) []string {
 	}
 	// The hint is at most hintLinesMax lines, so a narrow screen keeps its body: the
 	// keys that do not fit are the last of the table, and ? lists them all.
-	pairs := m.keyHints()
+	// The footer is as tall as the screen's full key set, decided before the body
+	// is laid out and whatever it cuts: the keys that can run fill it, and what
+	// is left of its height stays empty, never padded with a key that cannot run.
+	lines := m.hintFit(w, m.keyHints(false))
+	for len(lines) < len(m.hintFit(w, m.keyHints(true))) {
+		lines = append(lines, "")
+	}
+	return append([]string{rule}, lines...)
+}
+
+// hintFit is the hint lines of pairs, the last pairs left out while they take
+// more than hintLinesMax lines.
+func (m *Model) hintFit(w int, pairs []string) []string {
 	lines := m.hintLines(w, pairs...)
 	for len(lines) > hintLinesMax && len(pairs) > 6 {
 		pairs = pairs[:len(pairs)-2]
 		lines = m.hintLines(w, pairs...)
 	}
-	return append([]string{rule}, lines...)
+	return lines
 }
 
 // hintLinesMax is the most lines the hint under a screen takes.
@@ -984,7 +1086,8 @@ func (m *Model) hintLines(w int, pairs ...string) []string {
 func (m *Model) panel(w int) []string {
 	var out []string
 	if m.last != nil {
-		out = append(out, m.lastLines(m.last, w)...)
+		v, _ := m.lastShown(w)
+		out = append(out, v.lines...)
 	}
 	if m.notice != "" {
 		// Drawn whole, in the rows it needs: what it tells the person is the
@@ -1000,23 +1103,6 @@ func (m *Model) panel(w int) []string {
 // shown whole: a sentence of the verb's own is never this long.
 const helpWrapRows = 6
 
-// lastLines are the panel's rows for a key's command: the one line, and for a
-// verb that leaves the next move to someone else the help line it printed, whole
-// and wrapped, beneath the command. The words are the verb's own; the TUI adds
-// none. They are part of the line and expire with it.
-func (m *Model) lastLines(o *outcome, w int) []string {
-	if s := o.shown(); o.leavesTheMove() && s.Code == 0 {
-		if help, ok := firstHelp(s.Out); ok {
-			out := []string{fit("  "+m.st.icon(StateOK)+" "+m.st.bold(m.shownLine(s.Args)), w)}
-			for _, l := range wrap(help, w-4, helpWrapRows) {
-				out = append(out, "    "+m.st.dim(l))
-			}
-			return out
-		}
-	}
-	return []string{m.lastLine(o, w)}
-}
-
 // firstHelp is the first line of the help a verb printed, false when it printed
 // none.
 func firstHelp(out string) (string, bool) {
@@ -1027,28 +1113,6 @@ func firstHelp(out string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// lastLine is a key's command as typed and what the verb said of it: its own
-// first sentence when it worked, its error and code when it did not. The step
-// that failed is the one shown, so a chain that stopped reads as the failure.
-// The raw output is not printed, and a line too long for the screen is cut.
-func (m *Model) lastLine(o *outcome, w int) string {
-	s := o.shown()
-	state, said := StateOK, firstSentence(s.Out)
-	if s.Code != 0 {
-		state, said = StateFail, errorSentence(s.Out)
-	}
-	line := "  " + m.st.icon(state) + " " + m.st.bold(m.shownLine(s.Args))
-	if said != "" {
-		if state == StateFail {
-			said = m.st.state(StateFail, said)
-		} else {
-			said = m.st.dim(said)
-		}
-		line += "  " + said
-	}
-	return fit(line, w)
 }
 
 // firstSentence is what a verb that worked says of it: the first line of its

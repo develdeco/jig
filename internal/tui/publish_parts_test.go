@@ -91,7 +91,7 @@ func TestAPullRequestReadsByNumberStateAndTarget(t *testing.T) {
 	one := can1(t, task("land", false, "done|a", "done|b", "done|c", "done|published", "current|waits for a merge"))
 	one.m.w.tickets["JIG-2"].digest.PRs = []digestPR{{Repo: "demo", Number: 7, URL: "https://example.test/acme/demo/pull/7", State: "open", Target: "main"}}
 	var got string
-	for _, f := range one.m.subFields(one.m.w.tickets["JIG-2"], phase.Sub{Key: "pr"}, subTrack{}) {
+	for _, f := range one.m.subFields(one.m.w.tickets["JIG-2"], phase.Sub{Key: "pr"}, subTrack{}, false) {
 		if f.label == "pull req" {
 			got = strings.Join(f.rows, " ")
 		}

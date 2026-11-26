@@ -370,18 +370,15 @@ func (m *Model) probeRows(p *page, t *ticket) {
 		}
 	}
 	p.boxTop("Probes", strconv.Itoa(len(probes)))
-	laid := m.laidList(p, probeListColumns, dimmed(m.st, probeListColumnNames), cells, 0)
+	laid := m.laidListFor(p, probeListColumns, dimmed(m.st, probeListColumnNames), cells, 0, nil)
 	for i, pr := range probes {
-		p.boxLaid(nil, laid[i])
-		for _, l := range wrap(pr.Mutation, m.innerWidth()-6, probeLines) {
-			if superseded[i] {
-				l = m.st.dim(l)
-			}
-			p.boxUnder("    " + l)
+		p.boxRow(nil, laid[i])
+		plain := func(l string) string { return l }
+		if superseded[i] {
+			plain = m.st.dim
 		}
-		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines) {
-			p.boxUnder("    " + m.st.dim(l))
-		}
+		m.underWrap(p, nil, "    ", "    ", pr.Mutation, m.innerWidth()-6, probeLines, plain)
+		m.underWrap(p, nil, "    ", "    ", pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines, m.st.dim)
 	}
 	p.boxEnd()
 }

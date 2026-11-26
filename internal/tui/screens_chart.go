@@ -61,7 +61,7 @@ func (m *Model) chartPage(name string) page {
 			run = m.runningRows(run, c.info, age)
 		}
 	}
-	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight(detail)) - frame(m.runHeight(run)) - activityFloor
+	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight("Detail", detail)) - frame(m.runHeight("Run", run)) - activityFloor
 	if spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		cut := min(-spare, len(run)-1)
 		run = trimRuns(run, len(run)-cut)
@@ -138,24 +138,33 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 			}
 		}
 	}
-	var laid [][]string
+	var laid []laidRow
 	if len(cells) > 0 {
 		names := make([]string, len(ticketColumnNames))
 		for i, n := range ticketColumnNames {
 			names[i] = m.st.dim(n)
 		}
-		laid = m.laidList(&p, ticketColumns, names, cells, 0)
+		refs := make([]*rowRef, len(cells))
+		for i, r := range rows {
+			refs[i] = &rowRef{kind: rowTicket, id: r.id, ticket: r.id}
+		}
+		laid = m.laidListFor(&p, ticketColumns, names, cells, 0, refs)
 	}
 	for i, r := range rows {
-		p.boxLaid(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
+		p.boxRow(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
 			for _, l := range sub(r) {
 				p.boxUnder(l)
 			}
 		}
 	}
-	for _, lines := range laid[len(rows):] {
-		p.boxLaid(nil, lines)
+	for _, row := range laid[len(rows):] {
+		// A fog entry sits under the cursor row above it, which a window keeps it with.
+		at := len(p.lines)
+		p.boxRow(nil, row)
+		for k := at; k < len(p.lines); k++ {
+			p.lines[k].under = true
+		}
 	}
 	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
 		n := c.listing.Ungraduated
@@ -384,8 +393,18 @@ func (m *Model) mapPanel(p *page, c *chart, room int) {
 	if mp == nil {
 		p.boxAdd(m.st.dim("no map.md yet"))
 	} else {
-		for _, l := range m.mapLines(mp, m.width-7, room-2) {
+		// An expanded Map is every line it has, whatever room it was given.
+		whole := m.paneExpanded("Map")
+		n := room - 2
+		if whole {
+			n = wholeRows
+		}
+		lines, cuts := m.mapLinesMarked(mp, m.width-7, n, whole)
+		for i, l := range lines {
 			p.boxAdd(l)
+			if c, ok := cuts[i]; ok {
+				p.lines[len(p.lines)-1].cuts = []cutMark{c}
+			}
 		}
 	}
 	p.boxEnd()
@@ -396,12 +415,17 @@ func (m *Model) mapPanel(p *page, c *chart, room int) {
 // scope. When they do not all fit the out-of-scope lines go first, then the
 // decisions and the fog shrink to their first item and a count, then the
 // destination to one line, then the decisions and the fog go.
-func (m *Model) mapLines(mp *chartMap, w, n int) []string {
+//
+// whole gives the destination every row it needs; the lines that end in a cut
+// come back with the mark that stands for them, by their place in the lines.
+func (m *Model) mapLinesMarked(mp *chartMap, w, n int, whole bool) ([]string, map[int]cutMark) {
 	textW := max(1, w-mapLabelW-1)
 	type section struct {
 		label string
 		full  []string // every line, at its fullest
 		one   []string // one line, the rest counted
+		// fullCut and oneCut say the last of the lines ends in a cut.
+		fullCut, oneCut bool
 	}
 	items := func(label, glyph string, list []string, most int, tint func(string) string) section {
 		s := section{label: label}
@@ -424,9 +448,15 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 	}
 	plain := func(s string) string { return s }
 	dest := section{label: "destination"}
+	destText := ""
 	if text := strings.Join(mp.Destination, " "); text != "" {
-		dest.full = wrap(text, textW, 2)
-		dest.one = wrap(text, textW, 1)
+		most := 2
+		if whole {
+			most = wholeRows
+		}
+		dest.full, dest.fullCut = wrapCut(text, textW, most)
+		dest.one, dest.oneCut = wrapCut(text, textW, 1)
+		destText = text
 	}
 	secs := []section{
 		dest,
@@ -476,11 +506,12 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 		}
 		return total
 	}
-	by := lines(0)
+	by, used := lines(0), 0
 	for level := 1; level <= reductions && count(by) > n; level++ {
-		by = lines(level)
+		by, used = lines(level), level
 	}
 	var out []string
+	cuts := map[int]cutMark{}
 	for i, l := range by {
 		for j, text := range l {
 			label := spaces(mapLabelW)
@@ -488,9 +519,13 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 				label = m.st.dim(pad(secs[i].label, mapLabelW))
 			}
 			out = append(out, label+" "+text)
+			if i == 0 && j == len(l)-1 && (used > oneDest && dest.oneCut || used <= oneDest && dest.fullCut) {
+				// The destination's ellipsis is the cut the whole text stands for.
+				cuts[len(out)-1] = cutMark{x: width(out[len(out)-1]) - 1, value: destText}
+			}
 		}
 	}
-	return out[:min(len(out), n)]
+	return out[:min(len(out), n)], cuts
 }
 
 // chartLine is a line of the chart's activity: a ticket's log line, or (commit

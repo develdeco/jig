@@ -210,11 +210,23 @@ type navEntry struct {
 	// zoom is the title of the pane drawn over the whole body, "" for none.
 	zoom string
 	// psearch is the query narrowing one pane (searchpane.go).
-	psearch   paneSearch
-	paneCurs  map[string]paneCursor
-	seenSel   int
-	seenSet   bool
-	textFocus bool
+	psearch  paneSearch
+	paneCurs map[string]paneCursor
+	// expanded are the holders laid out whole (expand.go), by pane and the row's
+	// identity; expGen counts their changes. A screen opened again is folded: the
+	// screen memory (arrive) keeps cursors, never these.
+	expanded map[expKey]bool
+	expGen   int
+	// rowScroll is how many lines of the expanded row rowScrollOf are held above
+	// the part of it the window draws (tall.go).
+	rowScroll int
+	// suppress lays the screen out as if nothing were expanded: the folded page
+	// each pane is held to (fit.go).
+	suppress    bool
+	rowScrollOf rowIdentity
+	seenSel     int
+	seenSet     bool
+	textFocus   bool
 }
 
 // textInput is a line a person is typing: an answer.
@@ -312,12 +324,22 @@ type Model struct {
 	// main is the project's list as last built (mainqueue.go), kept while nothing it
 	// reads has moved.
 	main *mainCache
+	// mainF is the project's list as laid out folded, for the same.
+	mainF *mainCache
 	// keysOn is what the keys of the screen on top act on, as the last frame
 	// found it: the hint line is cut by it, and a key reads it again before it
 	// runs.
 	keysOn subject
 	// hit is what the last frame drew of the body, for a click (mouse.go).
 	hit *hitMap
+	// lastOpen is the last command when the person has expanded its line (lastcmd.go);
+	// it is the screen's, so it goes with the line, which a new command replaces.
+	lastOpen *outcome
+	// lastMark is where the last frame drew the last command's cut mark, for a click.
+	lastMark *lastMarkAt
+	// tall is the row the last frame drew by lines, nil when it drew none
+	// (tall.go).
+	tall *tallInfo
 	// sibMemo is the siblings of the screen on top as one frame or one message
 	// read them, once read (sibs).
 	sibMemo *sibSet
@@ -334,7 +356,7 @@ type Model struct {
 	help *helpView
 	// laid holds the layouts the allocator gave lists, by what they were made of
 	// (laidOnce), so a frame that reads the same lists measures none.
-	laid map[string][][]string
+	laid map[string][]laidRow
 	// laidBuilds counts the lists the allocator laid out and the memo did not hold.
 	laidBuilds int
 	// sliceBuilds counts the slice screens' bodies built and the memo did not hold.
@@ -1127,6 +1149,10 @@ func (m *Model) moveBy(delta int) {
 	hi := lo + cnt - 1
 	if n == 0 || e.textFocus {
 		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
+		return
+	}
+	if m.scrollTall(pg, delta) {
+		// The row under the cursor is read by lines before the cursor leaves it.
 		return
 	}
 	e.follow = false

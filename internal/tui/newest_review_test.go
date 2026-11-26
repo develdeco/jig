@@ -28,7 +28,7 @@ func inOrder(t *testing.T, what, text string, wants ...string) {
 // round's in the order recorded with a survivor first.
 func TestRoundsAndTheirProbesReadNewestFirst(t *testing.T) {
 	t.Parallel()
-	g := newRig(t, "JIG-2")
+	g := sized(newRig(t, "JIG-2"), 80, 30)
 	g.r.answer("status JIG-2 --store /s", probeStatus([][]string{
 		probeRound("1", "3", "1"),
 		probeRound("2", "2", "0"),

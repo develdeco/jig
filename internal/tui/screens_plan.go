@@ -219,7 +219,7 @@ func (m *Model) planPage(c *chart) page {
 		return 2 + n
 	}
 	run := m.runRows(c.info)
-	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight(run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
+	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight("Run", run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		run = trimRuns(run, len(run)-min(-spare, len(run)-1))
 	}
 	p.boxTop("Run", runWord(c.info))

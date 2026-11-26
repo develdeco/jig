@@ -218,6 +218,24 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if !strings.Contains(activity, "latest ") {
 		t.Errorf("the ticket's Activity pane cuts none of its lines at 100x30:\n%s", activity)
 	}
+	// A line the pane cut to its first word ends in a mark: space on it lays
+	// the line out whole where it stands, and space again folds it back.
+	if !strings.Contains(activity, "●…") {
+		t.Fatalf("the Activity pane has no cut line at 100x30:\n%s", activity)
+	}
+	screens.press("\x1b[B")
+	screens.until("↑↓ move in Activity", "space expand")
+	screens.press(" ")
+	whole := screens.until("space fold")
+	if strings.Contains(whole, "●…") {
+		t.Errorf("space on the cut line did not show it whole:\n%s", whole)
+	}
+	screens.press(" ")
+	if folded := screens.until("space expand"); !strings.Contains(folded, "●…") {
+		t.Errorf("space again did not fold the line back:\n%s", folded)
+	}
+	screens.press("\x1b[A")
+	screens.until("↑↓ move in Activity")
 	screens.press("\r")
 	screens.until("slice ")
 	screens.press("\x7f")
