@@ -40,9 +40,6 @@ func (m *Model) paneTerms(title string) []string {
 	return searchTerms(string(s.query))
 }
 
-// searchedPane says whether the pane titled title is narrowed by a query.
-func (m *Model) searchedPane(title string) bool { return len(m.paneTerms(title)) > 0 }
-
 // plainWords are the words of text as a person reads it: its colors gone.
 func plainWords(text string) []string { return wordsOf(ansi.Strip(text)) }
 
