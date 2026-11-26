@@ -31,6 +31,9 @@ const (
 	rowSection = "section"
 	// rowApproval is the approval of the brief among its parts: it opens nothing.
 	rowApproval = "approval"
+	// rowIssue is the issue that plans a task, among the parts of the task's
+	// brief: enter opens the issue's plan.
+	rowIssue = "issue"
 	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
 	// is its key, slice the slice a slice sub-step names, container the step.
 	rowSub = "substep"

@@ -41,7 +41,11 @@ func (m *Model) briefPage(id string) page {
 
 	slices := t.slices(m.zone)
 	goals := t.goals()
-	rows := make([]listRow, 0, len(b.Sections)+len(slices))
+	issues := m.issuesOfTask(id)
+	rows := make([]listRow, 0, len(issues)+len(b.Sections)+len(slices)+1)
+	for _, issue := range issues {
+		rows = append(rows, m.issueRow(t, issue))
+	}
 	for i, s := range b.Sections {
 		stands := m.st.dim("no slice")
 		if len(s.Slices) > 0 {
@@ -70,10 +74,12 @@ func (m *Model) briefPage(id string) page {
 	if len(rows) > 0 {
 		var d detailSpec
 		switch {
-		case at < len(b.Sections):
-			d = m.sectionDetail(t, at)
-		case at < len(b.Sections)+len(slices):
-			d = m.briefSliceDetail(t, at-len(b.Sections))
+		case at < len(issues):
+			d = m.issueDetail(t, issues[at])
+		case at-len(issues) < len(b.Sections):
+			d = m.sectionDetail(t, at-len(issues))
+		case at-len(issues) < len(b.Sections)+len(slices):
+			d = m.briefSliceDetail(t, at-len(issues)-len(b.Sections))
 		default:
 			d = m.approvalDetail(t, step)
 		}

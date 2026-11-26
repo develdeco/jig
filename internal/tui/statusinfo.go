@@ -45,7 +45,9 @@ type statusInfo struct {
 	Probes []statusProbe
 	// Need is the body of an issue or a multi-task, whole, and Suite an issue's
 	// suite by repo: what the plan screen reads. Both are empty for a task.
-	Need  string
+	Need string
+	// md is Need drawn for a width (needLines).
+	md    map[mdKey][]string
 	Suite []statusSuite
 	// Standing, Prompt, Waits and Unmet are an issue's or multi-task's own pull
 	// request as `jig next` derives it: waiting, ready, published or landed, what

@@ -1457,6 +1457,13 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowIssue:
+		// An issue's screen is its plan, the screen of the chart that plans it.
+		chart := m.planOf(ref.id)
+		if chart == "" {
+			return next, false
+		}
+		next = navEntry{screen: screenChart, chart: chart, follow: true}
 	case rowSection:
 		// A line that names a section opens the brief at it.
 		next = navEntry{screen: screenBrief, ticket: ref.ticket, part: ref.identity(), partSet: true}

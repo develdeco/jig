@@ -107,6 +107,7 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 	}
 	if e.screen == screenBrief {
 		cmds = append(cmds, m.loadBrief(e.ticket))
+		cmds = append(cmds, m.readIssues(e.ticket)...)
 	}
 	return tea.Batch(cmds...)
 }
