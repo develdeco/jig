@@ -13,11 +13,11 @@ import (
 func TestMainListsTheRosterOnly(t *testing.T) {
 	t.Parallel()
 	m := New(quietConfig())
-	m.w.apply(append(jig1(), jl(at(3, 0), "TRACK-1", "", "note")))
+	m.w.apply(append(jig1(), jl(at(3, 0), "OLD-9", "", "note")))
 	m.w.apply([]events.Envelope{jl(at(3, 1), "T-22", "a", "claim")})
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2")}, seq: 1})
 	frame := m.View()
-	if strings.Contains(frame, "T-22") || strings.Contains(frame, "TRACK-1") || !strings.Contains(frame, "1 need you · 1 running") {
+	if strings.Contains(frame, "T-22") || strings.Contains(frame, "OLD-9") || !strings.Contains(frame, "1 need you · 1 running") {
 		t.Errorf("main lists what the roster does not, or counts it:\n%s", frame)
 	}
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-1"), listed("JIG-2"), listed("JIG-3")}, seq: 2})
