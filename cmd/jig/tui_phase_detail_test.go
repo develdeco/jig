@@ -75,7 +75,7 @@ func TestTUIPipeFramesShowAPhaseAsAListAndItsDetail(t *testing.T) {
 	if strings.Count(first, "oracle") != 1 || !strings.Contains(first, "workspace") {
 		t.Errorf("the detail of the first slice does not say its oracle and workspace once:\n%s", build)
 	}
-	if !strings.Contains(build, "round 1 · alpha/") {
+	if !strings.Contains(build, "round 1 · alpha.go:1 ") {
 		t.Errorf("the fix slice's row does not read as its finding by round:\n%s", build)
 	}
 	keys.Write([]byte("\x1b[B")) // down: the next slice
