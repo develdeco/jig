@@ -1369,8 +1369,8 @@ func (m *Model) open() tea.Cmd {
 	}
 	next, ok := m.openTarget(*ref)
 	if !ok {
-		if ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "" {
-			m.notice = logNamesNothing
+		if why := opensNothing(*ref); why != "" {
+			m.notice = why
 		}
 		return nil
 	}
@@ -1378,8 +1378,24 @@ func (m *Model) open() tea.Cmd {
 }
 
 // logNamesNothing is why enter opens nothing on an activity line that names no
-// question, slice, round or step.
-const logNamesNothing = "this line names no question, slice, round or step to open"
+// question, slice, round or step, and commitOpensNothing why it opens nothing on
+// a store commit.
+const (
+	logNamesNothing    = "this line names no question, slice, round or step to open"
+	commitOpensNothing = "a store commit opens nothing"
+)
+
+// opensNothing is why the row ref opens nothing, "" for a row that does open
+// something or whose reason is the usual one.
+func opensNothing(ref rowRef) string {
+	switch {
+	case ref.kind == rowCommit:
+		return commitOpensNothing
+	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
+		return logNamesNothing
+	}
+	return ""
+}
 
 // openTarget is the screen enter on the row ref opens: none when the row opens
 // nothing, or opens the screen the person is on (an ask on the review screen,

@@ -42,7 +42,7 @@ func termRow(frame, text string) int {
 func TestWheelMovesTheCursor(t *testing.T) {
 	t.Parallel()
 	g := planRig(t, planSpec{multi: true})
-	rows := len(g.m.page().refs())
+	_, rows := g.m.paneSpan(g.m.page()) // the rows of the pane that has the focus
 	if rows < 5 {
 		t.Fatalf("the plan has %d rows", rows)
 	}

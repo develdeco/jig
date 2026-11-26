@@ -39,7 +39,7 @@ func (m *Model) chartPage(name string) page {
 	var detail []runRow
 	detailID := ""
 	if len(rows) > 0 {
-		r := rows[min(max(m.top().sel, 0), len(rows)-1)]
+		r := rows[m.ticketsCursor(rows, "Tickets")]
 		detail, detailID = trimRuns(m.chartDetailRows(r), detailMax), r.id
 	}
 	// The heights: the tickets, the Detail and Run panels and the activity at
@@ -513,55 +513,25 @@ func (c chartLine) tag() string {
 	return tagOf(c.step, c.key)
 }
 
-// chartActivityPanel adds the latest lines of the chart to p, newest first:
-// every ticket's, each with the ticket and the step it belongs to, and the
-// commits of the chart's folder in the store (history, newest first), as many
-// as the rows left below p allow, two at least.
-func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
-	var all []chartLine
-	for _, r := range rows {
-		if r.t == nil {
-			continue
+// ticketsCursor is the place among rows of the ticket the cursor of the pane
+// titled title stands on, whatever pane has the focus: the cursor itself when
+// the pane has the focus, else the row it was left on. It reads no page.
+func (m *Model) ticketsCursor(rows []chartRow, title string) int {
+	e := m.top()
+	last := max(len(rows)-1, 0)
+	if f := e.paneFocus; f == "" || f == title {
+		return min(max(e.sel, 0), last)
+	}
+	pc := e.paneCurs[title]
+	if !pc.set {
+		return min(max(e.sel, 0), last)
+	}
+	for i, r := range rows {
+		if r.id == pc.id.id {
+			return i
 		}
-		for _, pl := range m.placed(r.t, r.d) {
-			at, _ := pl.l.At()
-			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
-		}
 	}
-	// The commits come after the tickets' lines, oldest first, so that at one
-	// instant the stable sort keeps git's order (the newer above the older) and
-	// a commit stands above a ticket's line.
-	for i := len(history) - 1; i >= 0; i-- {
-		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
-	}
-	all = newestFirst(all, func(c chartLine) time.Time { return c.at })
-	// The edges and the names take three of the rows the panel has.
-	room := max(activityFloor-3, m.bodyRows()-m.taken(p)-3)
-	shown, older := cutNewest(all, room)
-	right := ""
-	if older > 0 {
-		right = fmt.Sprintf("latest %d of %d", len(shown), len(all))
-	}
-	items := make([]listRow, len(shown))
-	for i, e := range shown {
-		tag := e.tag()
-		if e.commit != nil {
-			items[i] = listRow{cells: []string{m.st.dim(clockAt(e.at, m.zone)), e.id, m.st.dim(tag), m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject}}
-			continue
-		}
-		if e.step >= 0 {
-			tag = m.st.state(stepTagState[e.step], tag)
-		} else {
-			tag = m.st.dim(tag)
-		}
-		items[i] = listRow{cells: []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}}
-	}
-	spec := listSpec{title: "Activity", summary: right, cols: chartActivityColumns, names: chartActivityColumnNames, rows: items, empty: "nothing yet", room: room}
-	if older > 0 {
-		spec.room--
-		spec.after = []string{m.olderRow(older)}
-	}
-	m.listPanel(p, spec)
+	return min(max(pc.idx, 0), last)
 }
 
 // chartFirstOpen is the position, among a chart screen's rows, of the first

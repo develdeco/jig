@@ -27,6 +27,8 @@ const (
 	// rowLog is a line of an activity pane: id tells it from the others, and
 	// question, slice, round and container (the step) say what it is about.
 	rowLog = "activity"
+	// rowCommit is a store commit among a chart's activity: it opens nothing.
+	rowCommit = "commit"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
