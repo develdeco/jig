@@ -39,22 +39,6 @@ type column struct {
 	gap int
 }
 
-// layout draws rows of cells under cols in width cells. Each row comes back as
-// the lines it takes: its first line, and the continuation rows of a free cell
-// that wrapped, aligned under their column. A column no row has a cell for is
-// not drawn. Cells may carry color; it is kept on every line a cell wraps to.
-//
-// Measured columns are as wide as their widest cell. They are cut only when
-// they and freeMin cells for the free text leave no room: then the widest one
-// that is not an id gives way first, each ending in an ellipsis, and ids last.
-//
-// Free columns share the rest. When any free column would get fewer than
-// freeMin cells it needs, the free columns after the first stack under the
-// first's left edge instead of sitting beside it.
-func layout(cols []column, rows [][]string, width int) [][]string {
-	return layoutRows(cols, rows, width, wrapRows)
-}
-
 // wholeRows is how many rows a cell of an expanded row may take: no limit a row
 // can reach.
 const wholeRows = 1 << 20
@@ -74,30 +58,24 @@ type laidRow struct {
 	cuts  [][]cutMark
 }
 
-// cut says whether the row holds a cut.
-func (r laidRow) cut() bool {
-	for _, c := range r.cuts {
-		if len(c) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// layoutRows is layout with free cells held to at most maxRows rows each: a list
-// short of room asks for fewer than wrapRows before it drops a row.
-func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
-	laid := layoutMarked(cols, rows, width, maxRows, nil)
-	out := make([][]string, len(laid))
-	for i, r := range laid {
-		out[i] = r.lines
-	}
-	return out
-}
-
-// layoutMarked is layoutRows that also says where each row was cut, and lays a
-// row whole when whole says so: every cell of it that would be cut wraps at
-// words in its own column with no limit on rows, a word wider than the column
+// layoutMarked draws rows of cells under cols in width cells. Each row comes
+// back as the lines it takes: its first line, and the continuation rows of a
+// free cell that wrapped, aligned under their column, with the cut marks of
+// each line. A column no row has a cell for is not drawn. Cells may carry
+// color; it is kept on every line a cell wraps to.
+//
+// Measured columns are as wide as their widest cell. They are cut only when
+// they and freeMin cells for the free text leave no room: then the widest one
+// that is not an id gives way first, each ending in an ellipsis, and ids last.
+//
+// Free columns share the rest. When any free column would get fewer than
+// freeMin cells it needs, the free columns after the first stack under the
+// first's left edge instead of sitting beside it. They are held to at most
+// maxRows rows each: a list short of room asks for fewer than wrapRows before
+// it drops a row.
+//
+// A row whole says is laid out whole: every cell of it that would be cut wraps
+// at words in its own column with no limit on rows, a word wider than the column
 // broken at it. The columns are the widths the folded rows give them, so
 // expanding a row moves no other cell of any row.
 func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bool) []laidRow {
