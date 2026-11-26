@@ -86,6 +86,10 @@ type pline struct {
 	// home marks the row a pane's cursor stands on before the person has put it
 	// anywhere: the sub-step that matters now.
 	home bool
+	// cuts are the cut marks the line carries: where a "…" the allocator drew
+	// sits within the line's text, and the whole value it stands for. A mark's
+	// holder is the row the line belongs to.
+	cuts []cutMark
 }
 
 // page is a screen's body before it is windowed and framed.

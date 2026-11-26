@@ -138,24 +138,28 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 			}
 		}
 	}
-	var laid [][]string
+	var laid []laidRow
 	if len(cells) > 0 {
 		names := make([]string, len(ticketColumnNames))
 		for i, n := range ticketColumnNames {
 			names[i] = m.st.dim(n)
 		}
-		laid = m.laidList(&p, ticketColumns, names, cells, 0)
+		refs := make([]*rowRef, len(rows))
+		for i, r := range rows {
+			refs[i] = &rowRef{kind: rowTicket, id: r.id, ticket: r.id}
+		}
+		laid = m.laidListFor(&p, ticketColumns, names, cells, 0, refs)
 	}
 	for i, r := range rows {
-		p.boxLaid(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
+		p.boxRow(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
 			for _, l := range sub(r) {
 				p.boxUnder(l)
 			}
 		}
 	}
-	for _, lines := range laid[len(rows):] {
-		p.boxLaid(nil, lines)
+	for _, row := range laid[len(rows):] {
+		p.boxRow(nil, row)
 	}
 	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
 		n := c.listing.Ungraduated

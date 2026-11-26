@@ -51,15 +51,16 @@ func (m *Model) listPanel(p *page, s listSpec) {
 			names[i] = m.st.dim(n)
 		}
 		cells := make([][]string, len(s.rows))
+		refs := make([]*rowRef, len(s.rows))
 		for i, r := range s.rows {
-			cells[i] = r.cells
+			cells[i], refs[i] = r.cells, r.ref
 		}
-		laid := m.laidList(p, s.cols, names, cells, s.room)
+		laid := m.laidListFor(p, s.cols, names, cells, s.room, refs)
 		for _, l := range s.before {
 			p.boxAdd(l)
 		}
-		for i, lines := range laid {
-			p.boxLaid(s.rows[i].ref, lines)
+		for i, row := range laid {
+			p.boxRow(s.rows[i].ref, row)
 		}
 	}
 	for _, l := range s.after {
@@ -91,21 +92,34 @@ func (m *Model) ageOf(at time.Time) string {
 // each row. room, when it is more than 0, is the most lines the rows may take,
 // and when it is less than 0 the rows are not cut at all.
 func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int) [][]string {
+	laid := m.laidListFor(p, cols, names, cells, room, nil)
+	out := make([][]string, len(laid))
+	for i, r := range laid {
+		out[i] = r.lines
+	}
+	return out
+}
+
+// laidListFor is laidList that gives each row with the cut marks it carries.
+// refs, when given, are the rows' places for the cursor, in the order of cells:
+// a row the screen has expanded (expand.go) is laid out whole.
+func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
-	var laid [][]string
+	whole := m.top().wholeOf(p.paneTitle(), 1, refs)
+	var laid []laidRow
 	switch {
 	case room < 0:
 		// What a person decides on is never cut: its free text wraps as far as it
 		// goes.
-		laid = layoutRows(cols, all, m.innerWidth(), 1<<20)
+		laid = layoutMarked(cols, all, m.innerWidth(), wholeRows, whole)
 	case room > 0:
-		laid = laidWithin(cols, all, m.innerWidth(), room+1)
+		laid = laidWithinMarked(cols, all, m.innerWidth(), room+1, whole)
 	default:
-		laid = layout(cols, all, m.innerWidth())
+		laid = layoutMarked(cols, all, m.innerWidth(), wrapRows, whole)
 	}
-	p.boxNames(laid[0])
+	p.boxNames(laid[0].lines)
 	return laid[1:]
 }
 

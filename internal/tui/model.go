@@ -196,8 +196,13 @@ type navEntry struct {
 	// zoom is the title of the pane drawn over the whole body, "" for none.
 	zoom string
 	// psearch is the query narrowing one pane (searchpane.go).
-	psearch   paneSearch
-	paneCurs  map[string]paneCursor
+	psearch  paneSearch
+	paneCurs map[string]paneCursor
+	// expanded are the holders laid out whole (expand.go), by pane and the row's
+	// identity; expGen counts their changes. A screen opened again is folded: the
+	// screen memory (arrive) keeps cursors, never these.
+	expanded  map[expKey]bool
+	expGen    int
 	seenSel   int
 	seenSet   bool
 	textFocus bool

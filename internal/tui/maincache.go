@@ -14,6 +14,9 @@ type mainCache struct {
 	width  int
 	bucket int64
 	folds  string
+	// exp counts the changes of what the list has expanded (expand.go): a row
+	// expanded is laid out again from the cells built, and builds nothing.
+	exp int
 	// flip is the first moment a session's sign goes out of its window, which
 	// moves a row between groups: until then a step of the clock changes the
 	// ages only. Zero when nothing flips.
@@ -68,7 +71,7 @@ func (m *Model) mainBuilt() *mainCache {
 	now := m.now()
 	bucket := now.Unix() / 5
 	if c := m.main; c != nil && c.gen == m.w.gen && c.width == m.width && c.folds == folds {
-		if c.bucket == bucket {
+		if c.bucket == bucket && c.exp == m.nav[0].expGen {
 			return c
 		}
 		if c.flip.IsZero() || now.Before(c.flip) {
@@ -77,7 +80,7 @@ func (m *Model) mainBuilt() *mainCache {
 		}
 	}
 	m.queueBuilds++
-	c := &mainCache{gen: m.w.gen, width: m.width, bucket: bucket, folds: folds, flip: m.nextFlip(now)}
+	c := &mainCache{gen: m.w.gen, width: m.width, bucket: bucket, folds: folds, exp: m.nav[0].expGen, flip: m.nextFlip(now)}
 	c.q = m.mainRows()
 	c.pg, c.folded, c.cells = m.buildMain(c.q, open)
 	c.refs = c.pg.refs()
@@ -123,7 +126,7 @@ func (m *Model) clockStep(c *mainCache, open map[string]bool, bucket int64) {
 		age(c.q.byGroup[g])
 	}
 	p, folded := m.draftMain(c.q, open, &searchDraw{cellOf: func(r queueRow) []string { return c.cellsOf(m, r) }, keepFolds: true})
-	c.pg, c.folded, c.bucket = m.layMain(p), folded, bucket
+	c.pg, c.folded, c.bucket, c.exp = m.layMain(p), folded, bucket, m.nav[0].expGen
 	c.refs = c.pg.refs()
 	if c.srch != nil {
 		c.srch.res = nil

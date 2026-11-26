@@ -40,14 +40,26 @@ func (p *page) boxUnder(text string) {
 // the first is the row, standing for ref when the cursor can stand on it, and
 // the rest are its continuation rows.
 func (p *page) boxLaid(ref *rowRef, lines []string) {
-	for i, l := range lines {
+	p.boxRow(ref, laidRow{lines: lines})
+}
+
+// boxRow is boxLaid for a row laid out with the cuts it carries.
+func (p *page) boxRow(ref *rowRef, r laidRow) {
+	for i, l := range r.lines {
 		pl := pline{text: l, box: boxMid, cont: i > 0}
 		if i == 0 {
 			pl.ref = ref
 		}
+		if i < len(r.cuts) {
+			pl.cuts = r.cuts[i]
+		}
 		p.lines = append(p.lines, pl)
 	}
 }
+
+// frameLead is the cells a panel's line has before its text: the margin, the
+// edge and the cursor's mark.
+const frameLead = 5
 
 // innerWidth is the cells a panel's text has: the width less the frame, the
 // cursor's mark and the space before the right edge.

@@ -55,9 +55,52 @@ func layout(cols []column, rows [][]string, width int) [][]string {
 	return layoutRows(cols, rows, width, wrapRows)
 }
 
+// wholeRows is how many rows a cell of an expanded row may take: no limit a row
+// can reach.
+const wholeRows = 1 << 20
+
+// cutMark is the cut a laid-out line carries: the cell its "…" sits on within
+// the line's text, and the whole value the cut text stands for. Only a cut the
+// allocator made registers one; a word that has its own "…" is no mark.
+type cutMark struct {
+	x     int
+	value string
+}
+
+// laidRow is a row as the allocator laid it out: its lines, and the cut marks
+// each line carries (cuts[i] belongs to lines[i]).
+type laidRow struct {
+	lines []string
+	cuts  [][]cutMark
+}
+
+// cut says whether the row holds a cut.
+func (r laidRow) cut() bool {
+	for _, c := range r.cuts {
+		if len(c) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // layoutRows is layout with free cells held to at most maxRows rows each: a list
 // short of room asks for fewer than wrapRows before it drops a row.
 func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
+	laid := layoutMarked(cols, rows, width, maxRows, nil)
+	out := make([][]string, len(laid))
+	for i, r := range laid {
+		out[i] = r.lines
+	}
+	return out
+}
+
+// layoutMarked is layoutRows that also says where each row was cut, and lays a
+// row whole when whole says so: every cell of it that would be cut wraps at
+// words in its own column with no limit on rows, a word wider than the column
+// broken at it. The columns are the widths the folded rows give them, so
+// expanding a row moves no other cell of any row.
+func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bool) []laidRow {
 	natural := make([]int, len(cols))
 	for _, r := range rows {
 		for c := range cols {
@@ -159,8 +202,27 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 		w[c] = max(1, got[i])
 	}
 
-	out := make([][]string, len(rows))
+	// start is the cell each drawn column begins at within a line.
+	start := make([]int, len(cols))
+	at := 0
+	for _, c := range visible {
+		if stacked[c] {
+			continue
+		}
+		if at > 0 {
+			at += cols[c].gap
+		}
+		start[c] = at
+		at += w[c]
+	}
+
+	out := make([]laidRow, len(rows))
 	for ri, r := range rows {
+		rowMax := maxRows
+		isWhole := ri < len(whole) && whole[ri]
+		if isWhole {
+			rowMax = wholeRows
+		}
 		cell := func(c int) string {
 			if c < len(r) {
 				return r[c]
@@ -184,20 +246,40 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 			return extra
 		}
 		lines := map[int][]string{}
+		// cuts are the row's cuts: the column whose line it is on, the line and
+		// the whole value.
+		type cutAt struct {
+			col, line int
+			value     string
+		}
+		var cuts []cutAt
 		for _, c := range visible {
 			switch {
 			case stacked[c]:
 			case cols[c].free:
-				lines[c] = wrapCell(cell(c), w[c]+room(c), maxRows)
+				l, cut := wrapCellCut(cell(c), w[c]+room(c), rowMax)
+				lines[c] = l
+				if cut {
+					cuts = append(cuts, cutAt{c, len(l) - 1, cell(c)})
+				}
+			case isWhole:
+				lines[c] = wrapCell(cell(c), w[c], wholeRows)
 			default:
 				lines[c] = []string{cutCell(cell(c), w[c])}
+				if width0(cell(c)) > w[c] {
+					cuts = append(cuts, cutAt{c, 0, cell(c)})
+				}
 			}
 		}
 		if len(act) > 0 {
 			head := act[0]
 			for _, c := range visible {
 				if stacked[c] {
-					lines[head] = append(lines[head], wrapCell(cell(c), w[head], maxRows)...)
+					l, cut := wrapCellCut(cell(c), w[head], rowMax)
+					if cut {
+						cuts = append(cuts, cutAt{head, len(lines[head]) + len(l) - 1, cell(c)})
+					}
+					lines[head] = append(lines[head], l...)
 				}
 			}
 		}
@@ -205,7 +287,11 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 		for _, l := range lines {
 			n = max(n, len(l))
 		}
-		out[ri] = make([]string, n)
+		out[ri] = laidRow{lines: make([]string, n), cuts: make([][]cutMark, n)}
+		for _, k := range cuts {
+			x := start[k.col] + width0(lines[k.col][k.line]) - 1
+			out[ri].cuts[k.line] = append(out[ri].cuts[k.line], cutMark{x: x, value: ansi.Strip(k.value)})
+		}
 		for i := 0; i < n; i++ {
 			var b strings.Builder
 			first := true
@@ -224,7 +310,7 @@ func layoutRows(cols []column, rows [][]string, width, maxRows int) [][]string {
 				b.WriteString(text)
 				b.WriteString(spaces(w[c] - width0(text)))
 			}
-			out[ri][i] = fit(strings.TrimRight(b.String(), " "), width)
+			out[ri].lines[i] = fit(strings.TrimRight(b.String(), " "), width)
 		}
 	}
 	return out
@@ -269,12 +355,18 @@ func cutCell(s string, w int) string {
 // maxRows of them, the last ending in an ellipsis when s goes on. A word wider
 // than w is broken at w. Color open at a break is reopened on the next row.
 func wrapCell(s string, w, maxRows int) []string {
+	lines, _ := wrapCellCut(s, w, maxRows)
+	return lines
+}
+
+// wrapCellCut is wrapCell that also says whether it cut s.
+func wrapCellCut(s string, w, maxRows int) ([]string, bool) {
 	if s == "" {
-		return nil
+		return nil, false
 	}
 	w = max(w, 1)
 	if width(s) <= w {
-		return []string{s}
+		return []string{s}, false
 	}
 	// A hyphen is always a place Wrap may break at, which would split an id or a
 	// branch name; a non-breaking one is not, and is put back after.
@@ -282,7 +374,8 @@ func wrapCell(s string, w, maxRows int) []string {
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(strings.ReplaceAll(l, nonBreaking, "-"), " ")
 	}
-	if len(lines) > maxRows {
+	cut := len(lines) > maxRows
+	if cut {
 		lines = lines[:maxRows]
 		last := ansi.Truncate(lines[maxRows-1], w-1, "")
 		lines[maxRows-1] = last + "…"
@@ -296,7 +389,7 @@ func wrapCell(s string, w, maxRows int) []string {
 		}
 		lines[i] = l
 	}
-	return lines
+	return lines, cut
 }
 
 var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
@@ -318,11 +411,21 @@ func openStyle(s string) string {
 // lines: free text wraps to as many rows as it needs, and a list short of room
 // asks for fewer rows of each before it gives up a row.
 func laidWithin(cols []column, cells [][]string, width, room int) [][]string {
+	laid := laidWithinMarked(cols, cells, width, room, nil)
+	out := make([][]string, len(laid))
+	for i, r := range laid {
+		out[i] = r.lines
+	}
+	return out
+}
+
+// laidWithinMarked is laidWithin with the rows whole says laid out whole.
+func laidWithinMarked(cols []column, cells [][]string, width, room int, whole []bool) []laidRow {
 	for rows := wrapRows; ; rows-- {
-		laid := layoutRows(cols, cells, width, rows)
+		laid := layoutMarked(cols, cells, width, rows, whole)
 		used := 0
-		for _, lines := range laid {
-			used += len(lines)
+		for _, r := range laid {
+			used += len(r.lines)
 		}
 		if used <= room || rows <= 1 {
 			return laid

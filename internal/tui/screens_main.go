@@ -218,12 +218,18 @@ func (m *Model) layMain(p *mainDraft) page {
 	// The names of each kind's columns are the first row of its list, so every
 	// panel's names are as wide as the cells of the whole page.
 	var tickets, charts [][]string
+	// wholeT and wholeC say which rows of each list the person has expanded
+	// (expand.go), after the names row each list starts with.
+	wholeT, wholeC := []bool{false}, []bool{false}
 	for i := range p.lines {
 		if cells, ok := p.cells[i]; ok {
+			open := m.nav[0].isExpanded("", p.lines[i].ref)
 			if p.chart[i] {
 				charts = append(charts, cells)
+				wholeC = append(wholeC, open)
 			} else {
 				tickets = append(tickets, cells)
+				wholeT = append(wholeT, open)
 			}
 		}
 	}
@@ -242,13 +248,14 @@ func (m *Model) layMain(p *mainDraft) page {
 	if len(charts) > 0 {
 		charts = append([][]string{dim(chartColumnNames)}, charts...)
 	}
-	laidT, laidC := layout(mainColumns, tickets, w), layout(mainColumns, charts, w)
+	laidT := layoutMarked(mainColumns, tickets, w, wrapRows, wholeT)
+	laidC := layoutMarked(mainColumns, charts, w, wrapRows, wholeC)
 	var namesT, namesC []string
 	if len(laidT) > 0 {
-		namesT, laidT = laidT[0], laidT[1:]
+		namesT, laidT = laidT[0].lines, laidT[1:]
 	}
 	if len(laidC) > 0 {
-		namesC, laidC = laidC[0], laidC[1:]
+		namesC, laidC = laidC[0].lines, laidC[1:]
 	}
 	var out page
 	for i, l := range p.lines {
@@ -264,13 +271,13 @@ func (m *Model) layMain(p *mainDraft) page {
 			out.lines = append(out.lines, l)
 			continue
 		}
-		var lines []string
+		var row laidRow
 		if p.chart[i] {
-			lines, laidC = laidC[0], laidC[1:]
+			row, laidC = laidC[0], laidC[1:]
 		} else {
-			lines, laidT = laidT[0], laidT[1:]
+			row, laidT = laidT[0], laidT[1:]
 		}
-		out.boxLaid(l.ref, lines)
+		out.boxRow(l.ref, row)
 	}
 	return m.wrapLong(out)
 }

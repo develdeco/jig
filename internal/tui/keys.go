@@ -246,6 +246,20 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.toggleZoom(); return nil }},
+		{names: []string{" ", "space"}, label: "space", words: "expand", screens: onAllScreens,
+			say: func(_ *Model, sub subject) string {
+				if sub.expanded {
+					return "fold"
+				}
+				return "expand"
+			},
+			can: func(_ *Model, sub subject) (bool, string) {
+				if sub.hasRow && (sub.cut || sub.expanded) {
+					return true, ""
+				}
+				return false, "nothing is cut here"
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.expandHolder(true); return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
 			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {

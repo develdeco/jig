@@ -43,6 +43,10 @@ type subject struct {
 	// pane is narrowed by a query.
 	zoom   string
 	search bool
+	// cut says the row under the cursor holds a cut mark, and expanded that its
+	// holder is laid out whole: what `space` expands or folds. Like the row they
+	// are not part of what the page is sized by.
+	cut, expanded bool
 }
 
 // same says whether o is the subject s is, whatever row the cursor is on: the
@@ -105,6 +109,8 @@ func (m *Model) subjectOf(pg page) subject {
 	}
 	if ref != nil {
 		s.row, s.hasRow = *ref, true
+		s.cut = pg.holdsCut(e.sel)
+		s.expanded = e.isExpanded(e.paneFocus, ref)
 	}
 	s.panes, s.focus, s.zoom, s.search = m.panesNow, m.focusedPane(), e.zoom, e.psearch.applied()
 	return s
