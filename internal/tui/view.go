@@ -89,11 +89,6 @@ type pline struct {
 	// focus draws the line with its panel border in the key color; a panel is
 	// drawn focused when every one of its lines says so.
 	focus bool
-	// side is the line of a panel drawn beside this one, as it is to be drawn, and
-	// sideW the cells it takes; a line of the panel with no side line of its own
-	// (a mark the window adds) has a blank one.
-	side  string
-	sideW int
 	// hiddenRefs are the rows of a list a mark line stands for, in the order they
 	// come in: a list windowed around its cursor (detail.go) keeps the places of
 	// the rows it hides, so the cursor's index counts them.
@@ -745,13 +740,12 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if plain {
 		return m.plainRows(pg, sel, from, to, w), from, to
 	}
-	// mark is a line of words inside the panel at edge, or loose; a panel drawn
-	// beside another has the other's blank row beside it, and the mark of a
+	// mark is a line of words inside the panel at edge, or loose; the mark of a
 	// focused panel has its border lit with it.
 	mark := func(text string, edge int) string {
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if edge >= 0 {
-			l.box, l.sideW, l.focus = boxMid, lines[edge].sideW, lines[edge].focus
+			l.box, l.focus = boxMid, lines[edge].focus
 			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
@@ -762,19 +756,16 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		if inBox {
 			edge = top
 			rows = append(rows, m.frameLine(lines[top], "  ", w, false))
-			// A list cut from below its first row keeps its column names, with
-			// nothing beside them: what is beside them is a row it has not drawn.
+			// A list cut from below its first row keeps its column names.
 			for i := 1; i <= namesAbove(lines, from, h); i++ {
-				names := lines[top+i]
-				names.side = ""
-				rows = append(rows, m.frameLine(names, "  ", w, false))
+				rows = append(rows, m.frameLine(lines[top+i], "  ", w, false))
 			}
 		}
 		switch {
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, sideW: lines[edge].sideW, focus: lines[edge].focus}, "  ", w, false))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, focus: lines[edge].focus}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}

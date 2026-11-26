@@ -52,9 +52,6 @@ func (p *page) boxLaid(ref *rowRef, lines []string) {
 // innerWidth is the cells a panel's text has: the width less the frame, the
 // cursor's mark and the space before the right edge.
 func (m *Model) innerWidth() int {
-	if m.panelW > 0 {
-		return max(1, m.panelW-7)
-	}
 	return max(1, m.width-7)
 }
 
@@ -144,16 +141,6 @@ func (m *Model) edge(focus bool, text string) string {
 // left like every other line; marker is the cursor's mark for a row ("▸ " or
 // two spaces). A line is never wider than w, whatever its text.
 func (m *Model) frameLine(l pline, marker string, w int, lit bool) string {
-	if l.sideW > 0 {
-		// A panel drawn beside another: the line is the left one's, and the right
-		// one's line is what stands at its side.
-		side, sideW := l.side, l.sideW
-		if side == "" {
-			side = m.blankSide(sideW)
-		}
-		l.side, l.sideW = "", 0
-		return m.frameLine(l, marker, w-sideW, lit) + side
-	}
 	inner := w - 7 // "  │" + marker + text + " │"
 	// A focused panel's border is drawn in the key color.
 	edge := func(text string) string { return m.edge(l.focus, text) }

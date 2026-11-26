@@ -26,34 +26,29 @@ func manySlicesBrief(n int) string {
 		axi.Table("brief_sections", []string{"heading", "slices"}, [][]string{{"Goal", "-"}, {"Greeting", "s1"}, {"Farewell", "s2"}, {"Tone", "s3+s4"}})+"\n", 1)
 }
 
-// TestADetailBesideItsListIsMarkedWhereTheWindowCutsIt: from 160 columns the list
-// and the detail are cut each by its own box, so a list says what it hides of its
-// own rows and the detail what it hides of its own, and a detail is never the
-// empty rows of a list's padding.
-func TestADetailBesideItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
+// TestADetailUnderItsListIsMarkedWhereTheWindowCutsIt: the list and the detail are
+// cut each by its own box, so a list says what it hides of its own rows and the
+// detail what it hides of its own, at any width.
+func TestADetailUnderItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
 	t.Parallel()
 	g := tourRig(t, 160, 16)
 	g.press("2", "down")
 	view := g.view()
-	list, detail := view, ""
-	if i := strings.Index(view, "╭─ Detail"); i >= 0 {
-		detail = view
-	}
+	detail := between(view, "╭─ Detail", "╰")
 	if detail == "" {
-		t.Fatalf("no detail beside the list:\n%s", view)
+		t.Fatalf("no detail under the list:\n%s", view)
 	}
-	side := sideColumn(view)
-	if !strings.Contains(side, "↓ ") || !strings.Contains(side, "goal") {
-		t.Errorf("the detail beside the list is cut with no mark of its own, or lost its first field:\n%s", view)
+	if !strings.Contains(detail, "↓ ") || !strings.Contains(detail, "goal") {
+		t.Errorf("the detail under the list is cut with no mark of its own, or lost its first field:\n%s", view)
 	}
-	if strings.Contains(strings.Split(list, "╮  ╭─ Detail")[0], "↓ 4 more") {
+	if strings.Contains(between(view, "╭─ Slices", "╰"), "↓ 4 more") {
 		t.Errorf("the list marks rows it has not got:\n%s", view)
 	}
 
 	// The brief with the cursor on the last slice: the detail has its goal.
 	b := tourRig(t, 160, 20)
 	b.press("1").tabTo("Slices").press("end")
-	if side := sideColumn(b.view()); !strings.Contains(side, "goal") {
+	if !strings.Contains(between(b.view(), "╭─ Detail", "╰"), "goal") {
 		t.Errorf("the detail of the last slice lost its first field:\n%s", b.view())
 	}
 
@@ -65,7 +60,7 @@ func TestADetailBesideItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
 		many.press("down")
 	}
 	view = many.view()
-	if !strings.Contains(sideColumn(view), "Goal of slice s56") || !strings.Contains(view, "▸") {
+	if !strings.Contains(between(view, "╭─ Detail", "╰"), "Goal of slice s56") || !strings.Contains(view, "▸") {
 		t.Errorf("with 70 slices the cursor's row or its detail is not drawn:\n%s", view)
 	}
 }
@@ -139,9 +134,6 @@ func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
 				view := g.view()
 				if !strings.Contains(view, "╭─ Detail · ") || !strings.Contains(view, "▸") {
 					t.Fatalf("%s %dx%d tail %v row %d: no detail or no cursor:\n%s", sc.name, c.w, c.h, c.tail, i, view)
-				}
-				if c.w >= 160 && !strings.Contains(sideColumn(view), "╭─ Detail · ") {
-					t.Errorf("%s %dx%d row %d: the detail beside the list begins below its top edge:\n%s", sc.name, c.w, c.h, i, view)
 				}
 				g.press("down")
 			}

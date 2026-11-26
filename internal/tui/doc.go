@@ -29,8 +29,7 @@
 //
 // A phase screen (build, review, brief, publish) is a list and
 // the detail of the row under the cursor: a Detail panel, drawn by one part
-// (detail.go), holds that row's fields whole under the list, and beside it from
-// 160 columns.
+// (detail.go), holds that row's fields whole under the list at every width.
 //
 // Every panel is a pane with its own cursor and scroll: tab and shift+tab move
 // the focus, the keys that move and act read the focused pane's row, the focused

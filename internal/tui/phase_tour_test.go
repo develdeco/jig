@@ -90,8 +90,8 @@ var detailTitle = regexp.MustCompile(`╭─ Detail · (.+?) ─`)
 // publish screens of a ticket in its fix round, at five sizes: every thing is a
 // row of a list, the Detail panel is the cursor row's and each down moves it to
 // the next row, none of its fields is cut with an ellipsis (what the screen has
-// no room for is marked inside the box), from 160 columns the detail is beside
-// the list, and at 100x30 the lists and details of the build and the review are
+// no room for is marked inside the box), the detail is under the list at every width,
+// and at 100x30 the lists and details of the build and the review are
 // whole in the first screenful.
 func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 	t.Parallel()
@@ -138,12 +138,6 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 					// What is in the detail is whole: a field is wrapped at its words and never
 					// ends in an ellipsis; what does not fit is marked in the box.
 					panel := between(view, "╭─ Detail · "+m[1], "╰")
-					if w >= 160 {
-						panel = sideColumn(view)
-						if !strings.Contains(view, "╮  ╭─ Detail · "+m[1]) {
-							t.Errorf("row %d at %d columns: the detail is not beside the list:\n%s", i, w, view)
-						}
-					}
 					if strings.Contains(panel, "…") {
 						t.Errorf("row %d: a field of the detail is cut with an ellipsis:\n%s", i, view)
 					}

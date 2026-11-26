@@ -78,38 +78,25 @@ func TestADetailPanelShowsEveryFieldWholeAndMarksWhatIsCut(t *testing.T) {
 	}
 }
 
-// TestTheDetailSitsBesideTheListFrom160Columns: from 160 columns the list takes
-// three fifths of the width and the detail the rest, both boxes drawn as tall as
-// the taller; under it the detail is the panel below the list.
-func TestTheDetailSitsBesideTheListFrom160Columns(t *testing.T) {
+// TestTheDetailSitsUnderTheListAtEveryWidth: from 80 to 230 columns the detail is
+// the panel under the list, as wide as the screen allows, and no line is wider than
+// the terminal.
+func TestTheDetailSitsUnderTheListAtEveryWidth(t *testing.T) {
 	t.Parallel()
-	for _, w := range []int{160, 230} {
-		view := fixRoundBuild(t, w, 40).view()
-		top := rowHolding(view, "Slices", "╭─ Detail · a")
-		if top == "" {
-			t.Fatalf("at %d columns the detail is not beside the list:\n%s", w, view)
+	for _, size := range [][2]int{{80, 24}, {159, 40}, {160, 40}, {230, 50}} {
+		w, h := size[0], size[1]
+		view := fixRoundBuild(t, w, h).view()
+		if rowHolding(view, "Slices", "╭─ Detail · a") != "" || rowHolding(view, "╭─ Detail · a") == "" {
+			t.Errorf("at %d columns the detail is not the panel under the list:\n%s", w, view)
 		}
-		// The two boxes are two cells apart: the list is three fifths of the width.
-		if list := width(strings.Split(top, "╭─ Detail · a")[0]) - 2; list != w*3/5 {
-			t.Errorf("at %d columns the list is %d cells wide, want %d", w, list, w*3/5)
+		if list, detail := strings.Index(view, "╭─ Slices"), strings.Index(view, "╭─ Detail · a"); list < 0 || detail < list {
+			t.Errorf("at %d columns the detail does not come after the list:\n%s", w, view)
 		}
-		lines := strings.Split(view, "\n")
-		for _, l := range lines {
+		for _, l := range strings.Split(view, "\n") {
 			if width(l) > w {
 				t.Errorf("a line is %d cells at %d columns: %q", width(l), w, l)
 			}
 		}
-		if bottom := rowHolding(view, "╰", "╯  ╰"); bottom == "" {
-			t.Errorf("at %d columns the two boxes do not end on one line:\n%s", w, view)
-		}
-		// The list's rows and the detail's fields share lines.
-		if row := rowHolding(view, "▸ ● a", "oracle"); row == "" {
-			t.Errorf("at %d columns the cursor's row has no field beside it:\n%s", w, view)
-		}
-	}
-	under := fixRoundBuild(t, 159, 40).view()
-	if rowHolding(under, "Slices", "╭─ Detail · a") != "" || rowHolding(under, "╭─ Detail · a") == "" {
-		t.Errorf("at 159 columns the detail is not the panel below the list:\n%s", under)
 	}
 }
 
