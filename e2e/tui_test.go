@@ -198,6 +198,43 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	<-verifySlots
 	screens.until("4 slices green, each verified by jig")
 
+	// The ticket screen is a set of panes. The cursor in Steps goes up to the
+	// build, tab reaches the pane of its sub-steps and the hint line names it,
+	// and enter on a slice opens the slice; back, the cursor is where it was
+	// left.
+	screens.press("\x1b[A")
+	screens.until("╭─ Build")
+	screens.press("\t")
+	screens.until("↑↓ move in Build")
+	screens.press("\x1b[H")
+	screens.press("\r")
+	screens.until("slice a (1 of 4)")
+	screens.press("\x7f")
+	screens.until("▸ ✓ slice a", "↑↓ move in Build")
+	// tab reaches Activity, whose newest line opens the slice it is about; z
+	// shows the lines the screen had cut, and z again the screen.
+	screens.press("\t")
+	activity := screens.until("↑↓ move in Activity")
+	if !strings.Contains(activity, "latest ") {
+		t.Errorf("the ticket's Activity pane cuts none of its lines at 100x30:\n%s", activity)
+	}
+	screens.press("\r")
+	screens.until("slice ")
+	screens.press("\x7f")
+	screens.until("↑↓ move in Activity")
+	screens.press("z")
+	zoomed := screens.until("Activity, zoomed", "esc unzoom")
+	if strings.Contains(zoomed, "╭─ Steps") || !strings.Contains(zoomed, "you answered the question") {
+		t.Errorf("the zoomed Activity pane draws another pane or lacks the lines the screen cut:\n%s", zoomed)
+	}
+	screens.press("z")
+	screens.until("╭─ Steps", "↑↓ move in Activity")
+	// Back to Steps, on the step it began on.
+	screens.press("\x1b[Z")
+	screens.press("\x1b[Z")
+	screens.until("↑↓ move in Steps")
+	screens.press("\x1b[B")
+
 	// The gate opens from the screens. A subagent of the builder's session
 	// reads the round and reports one ask: the harness's hook payloads carry the
 	// subagent's id, the ledger's tool lines name it, and the round is
@@ -282,8 +319,9 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The detail of a section has its text: down to the section of slice A.
 	screens.press("\x1b[B")
 	screens.until("╭─ Detail · Slice A - failing clamp", "`alpha.Clamp` is committed broken")
-	// The slices are below the sections: the end of the list is the last slice,
-	// and two up is slice b, which waits for a.
+	// The slices are a pane below the sections: tab reaches it and the end of it
+	// is the last slice, and two up is slice b, which waits for a.
+	screens.press("\t")
 	screens.press("\x1b[F")
 	screens.press("\x1b[A")
 	screens.press("\x1b[A")
@@ -423,7 +461,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.until("╭─ Detail · body")
 	screens.press("\x1b[F")
 	publish := screens.until("╭─ Detail · published", "Publish activity", "finished", "changelog    written")
-	activity := publish[strings.Index(publish, "Publish activity"):]
+	activity = publish[strings.Index(publish, "Publish activity"):]
 	if finished, written := strings.Index(activity, "finished"), strings.Index(activity, "changelog    written"); finished < 0 || finished > written {
 		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
 	}

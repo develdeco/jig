@@ -112,7 +112,13 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 				if g.m.Screen() != sc.name {
 					t.Fatalf("on %s, want %s", g.m.Screen(), sc.name)
 				}
-				refs := g.m.page().refs()
+				// The lists' rows: the activity panes under them have rows of their own.
+				var refs []rowRef
+				for _, r := range g.m.page().refs() {
+					if r.kind != rowLog {
+						refs = append(refs, r)
+					}
+				}
 				if len(refs) != sc.rows {
 					t.Fatalf("%d rows to stand on, want %d (a row for each thing): %+v", len(refs), sc.rows, refs)
 				}
@@ -146,7 +152,16 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 					if w == 100 && (sc.name == "build" || sc.name == "review") && strings.Contains(panel, "↓ ") {
 						t.Errorf("row %d: the detail is not whole in the first screenful at 100x30:\n%s", i, view)
 					}
+					// Down moves the focused list's cursor; at its last row tab goes on to
+					// the next list.
+					before := *g.m.selected()
 					g.press("down")
+					for k := 0; k < 8 && i+1 < len(refs); k++ {
+						if got := g.m.selected(); got != nil && got.kind != rowLog && *got != before {
+							break
+						}
+						g.press("tab")
+					}
 				}
 			})
 		}

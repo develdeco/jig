@@ -4,8 +4,7 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   │  destination  A customer takes a coupon code from the cart to a discounted │
   │               order.                                                       │
   │  decided      ✓ Codes are single use  +1 more                              │
-  │  fog          ~ Stacking two codes                                         │
-  │               ~ Codes in other currencies                                  │
+  │  fog          ~ Stacking two codes  +1 more                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
   │    ticket  title           steps  where it stands      age                 │
@@ -21,4 +20,5 @@ jig  demo › ideas  Ideas                                         ○ not gradu
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · t tail · r refresh
+  esc back · q quit · ? keys · tab next pane: Tickets · ↑↓ move in Map · t tail
+  r refresh

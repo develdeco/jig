@@ -9,9 +9,7 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   │  ✓ branch jig/JIG-2 pushed                                                 │
   │  ✓ pull request api · opened ·                                    09:14:20 │
   │    https://example.test/acme/api/pull/7                                    │
-  │  ✓ pull request web · opened ·                                    09:14:21 │
-  │    https://example.test/acme/web/pull/3                                    │
-  │  ↓ 2 more                                                                  │
+  │  ↓ 3 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail · body ──────────────────────────────────────────── done 09:14:01 ─╮
   │  written for api ccccccc, web ddddddd                                      │
@@ -19,6 +17,8 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   │              web tickets/JIG-2/pr/web.md                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 3 more
+
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Detail · body
+  ↑↓ move in Checklist · say "Land JIG-2" · 1-5 steps · [ ] sibling · h main
+  t tail

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,14 @@ const (
 	// its own.
 	rowCheck   = "check"
 	rowSection = "section"
+	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
+	// is its key, slice the slice a slice sub-step names, container the step.
+	rowSub = "substep"
+	// rowLog is a line of an activity pane: id tells it from the others, and
+	// question, slice, round and container (the step) say what it is about.
+	rowLog = "activity"
+	// rowCommit is a store commit among a chart's activity: it opens nothing.
+	rowCommit = "commit"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
@@ -46,6 +55,10 @@ type rowRef struct {
 	ticket    string
 	slice     string
 	container string
+	// question and round are what an activity line is about besides its slice and
+	// its step: the id of a question, the number of a round.
+	question string
+	round    string
 }
 
 // rowIdentity is what makes a row the same row on the next draw: its kind, its
@@ -89,6 +102,11 @@ type pline struct {
 	// the list and its detail together, so a cursor on a row of the list leaves the
 	// window where it begins instead of moving it down to what follows the row.
 	hold int
+	// under marks a line a list draws under its row (boxUnder): the row's detail.
+	under bool
+	// home marks the row a pane's cursor stands on before the person has put it
+	// anywhere: the sub-step that matters now.
+	home bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -97,6 +115,29 @@ type page struct {
 	// cutAsks are the asks whose detail was cut to fit the screen: none of them is
 	// drawn whole, whatever lines are left of it.
 	cutAsks map[string]bool
+	// windowed holds, for a pane that draws only the window of its rows around
+	// its cursor, the rows it has all told, so the keys move over the ones it
+	// does not draw (panes.go).
+	windowed map[string][]rowRef
+	// allPanes are the titles of every pane of the screen on a page that draws
+	// only the zoomed one (zoom.go).
+	allPanes []string
+	// marks are the rows, among the page's rows, that the cursors of the panes
+	// that have not the focus stand on: drawn marked and not lit.
+	marks []int
+}
+
+// marker is the cursor's mark for the idx-th row of the page: the key color on
+// the row the cursor stands on, dim on a row an unfocused pane's cursor stands
+// on, and blank on any other.
+func (m *Model) marker(pg page, idx, sel int) string {
+	switch {
+	case idx == sel:
+		return m.st.key("▸") + " "
+	case slices.Contains(pg.marks, idx):
+		return m.st.dim("▸") + " "
+	}
+	return "  "
 }
 
 func (p *page) add(text string) { p.lines = append(p.lines, pline{text: text}) }
@@ -124,7 +165,11 @@ func (m *Model) page() page {
 		// The project's list is wrapped when it is built, once for what it reads.
 		return m.rawPage()
 	}
-	return m.wrapLong(m.rawPage())
+	pg := m.narrowPage(m.wrapLong(m.rawPage()))
+	if m.top().zoom != "" {
+		pg = m.zoomPage(pg)
+	}
+	return pg
 }
 
 // wrapLong wraps the lines of pg that are wider than the screen at words onto
@@ -264,15 +309,27 @@ type screenLayout struct {
 // layout lays the screen on top out as View draws it.
 func (m *Model) layout() screenLayout {
 	w, h := m.width, m.height
+	if e := m.top(); len(m.panesNow) > 0 && e.screen != screenMain {
+		// The hint line is cut for what the keys have just moved: the focus, the
+		// zoom, a search. The page is sized by it once, not again for the move.
+		m.keysOn.focus, m.keysOn.zoom, m.keysOn.search = e.paneFocus, e.zoom, e.psearch.applied()
+	}
 	pg := m.page()
 	sub := m.subjectOf(pg)
-	changed := !sub.same(m.keysOn)
-	m.keysOn = sub
-	if changed {
-		// The page was sized by a hint line cut for another subject: it is
-		// built again, once, for this one.
-		pg = m.page()
+	if changed := !sub.same(m.keysOn); changed {
+		// The page was sized by a hint line cut for another subject: it is built
+		// again, once, when the line for this one has another height.
+		before := len(m.footer(w))
+		m.keysOn = sub
+		if len(m.footer(w)) != before {
+			pg = m.page()
+		}
 	}
+	m.keysOn = sub
+	m.syncPanes(pg)
+	m.paneMarks(&pg)
+	m.shown = &shownPage{pg: pg, gen: m.w.gen, w: m.width, h: m.height, depth: len(m.nav), at: keyOf(*m.top()),
+		zoom: m.top().zoom, search: string(m.top().psearch.query), tail: m.tail}
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -280,6 +337,10 @@ func (m *Model) layout() screenLayout {
 	}
 	if sel < 0 {
 		sel = 0
+	}
+	if m.top().textFocus {
+		// A pane of text has no row under a cursor: the page is read by lines.
+		sel = -1
 	}
 
 	head := m.header(w)
@@ -432,9 +493,9 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
 		}
-		if n > 0 && sel == n-1 && !(detailed && selLine < h) {
-			// On the last row, show as much of what follows it as fits
-			// with the row still in view: a panel of activity is below.
+		if n > 0 && !(detailed && selLine < h) && (sel == n-1 || (m.top().screen != screenMain && lastRowOfPanel(pg.lines, selLine))) {
+			// On the last row of its panel, show as much of what follows it as
+			// fits with the row still in view: the panels below come into view.
 			start = clampStart(pg.lines, h, selLine)
 		}
 		if block >= 0 {
@@ -442,12 +503,13 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// window starts at them, the lines above behind a mark.
 			start = block
 		}
-		if n == 0 {
-			// A page with no row to stand on is moved by its own offset.
+		if n == 0 || m.top().textFocus {
+			// A page with no row to stand on, or whose focused pane is text, is
+			// moved by its own offset.
 			start = clampStart(pg.lines, h, m.top().scroll)
 		}
 	}
-	if n > 0 {
+	if n > 0 && !m.top().textFocus {
 		lead := m.top().lead
 		if clamp {
 			lead = min(lead, start)
@@ -456,6 +518,26 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		start = max(0, start-lead)
 	}
 	return start
+}
+
+// underRow says the line is one a list draws under a row (boxUnder): a finding's
+// detail, the reviewer under a round. A window that moves with a cursor never
+// begins on one, so the row it belongs to is not hidden under the count of the
+// rows above.
+func underRow(l pline) bool { return l.under }
+
+// lastRowOfPanel says the row at line i is the last row of the panel it is in:
+// no other row stands between it and the panel's bottom edge.
+func lastRowOfPanel(lines []pline, i int) bool {
+	if i < 0 || i >= len(lines) || lines[i].box == boxNone {
+		return false
+	}
+	for j := i + 1; j < len(lines) && lines[j].box != boxBottom && lines[j].box != boxNone; j++ {
+		if lines[j].ref != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // windowSpan is the page lines the window of h rows from start draws, from the
@@ -482,7 +564,9 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		k++
 	}
 	s := max(0, min(start, n-1))
-	for s > 0 && lines[s].cont {
+	// Only a window that has a cursor row to keep is moved off a row's detail.
+	snap := keep && selLine >= 0
+	for s > 0 && (lines[s].cont || snap && underRow(lines[s])) {
 		s--
 	}
 	if top, _ := boxOf(lines, s); top >= 0 && s > top && s <= top+namesRows(lines, top)+1 {
@@ -495,7 +579,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// the bottom edge starts at the panel's last row.
 		top, _ := boxOf(lines, s)
 		j := s - 1
-		for j > top && lines[j].cont {
+		for j > top && (lines[j].cont || snap && underRow(lines[j])) {
 			j--
 		}
 		if j > top+namesRows(lines, top) {
@@ -526,7 +610,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// The window moves down a row, and stops at the cursor's row, which is the
 		// first line of a row of its own: there e is past it.
 		s++
-		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom) {
+		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom || snap && underRow(lines[s])) {
 			// Past a row's continuation rows, and past a panel's bottom edge, not
 			// onto it: the panel above has no row in the window then, and is not
 			// drawn.
@@ -610,9 +694,7 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 		idx += len(l.hiddenRefs)
 		marker := "  "
 		if l.ref != nil {
-			if idx == sel {
-				marker = m.st.key("▸") + " "
-			}
+			marker = m.marker(pg, idx, sel)
 			idx++
 		}
 		if i < from || i >= to {
@@ -664,11 +746,12 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		return m.plainRows(pg, sel, from, to, w), from, to
 	}
 	// mark is a line of words inside the panel at edge, or loose; a panel drawn
-	// beside another has the other's blank row beside it.
+	// beside another has the other's blank row beside it, and the mark of a
+	// focused panel has its border lit with it.
 	mark := func(text string, edge int) string {
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if edge >= 0 {
-			l.box, l.sideW = boxMid, lines[edge].sideW
+			l.box, l.sideW, l.focus = boxMid, lines[edge].sideW, lines[edge].focus
 			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
@@ -691,7 +774,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, sideW: lines[edge].sideW}, "  ", w, false))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, sideW: lines[edge].sideW, focus: lines[edge].focus}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}
@@ -705,9 +788,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		idx += len(l.hiddenRefs)
 		marker := "  "
 		if l.ref != nil {
-			if idx == sel {
-				marker = m.st.key("▸") + " "
-			}
+			marker = m.marker(pg, idx, sel)
 			idx++
 		}
 		if i < from || i >= to {
@@ -811,6 +892,9 @@ func (m *Model) header(w int) []string {
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
 	}
+	if e.zoom != "" {
+		crumbs += " › " + m.st.bold(e.zoom) + m.st.dim(", zoomed")
+	}
 	if place := m.st.dim(m.place()); place != "" && width(crumbs)+width(right)+1 > w {
 		// The place among the siblings gives way before the step and the state.
 		crumbs, idCrumb = strings.Replace(crumbs, place, "", 1), strings.Replace(idCrumb, place, "", 1)
@@ -848,11 +932,24 @@ func (m *Model) footer(w int) []string {
 		return append(out, m.hintLines(w, "y", "yes", "any other key", "no")...)
 	case m.top().screen == screenMain && m.nav[0].search.open:
 		return append([]string{rule}, m.searchFooter(w)...)
+	case m.top().screen != screenMain && m.top().psearch.open:
+		return append([]string{rule}, m.paneSearchFooter(w)...)
 	case m.help != nil:
 		return append([]string{rule}, m.hintLines(w, "esc", "close", "↑↓", "scroll", "q", "quit")...)
 	}
-	return append([]string{rule}, m.hintLines(w, m.keyHints()...)...)
+	// The hint is at most hintLinesMax lines, so a narrow screen keeps its body: the
+	// keys that do not fit are the last of the table, and ? lists them all.
+	pairs := m.keyHints()
+	lines := m.hintLines(w, pairs...)
+	for len(lines) > hintLinesMax && len(pairs) > 6 {
+		pairs = pairs[:len(pairs)-2]
+		lines = m.hintLines(w, pairs...)
+	}
+	return append([]string{rule}, lines...)
 }
+
+// hintLinesMax is the most lines the hint under a screen takes.
+const hintLinesMax = 3
 
 // hintLines lays key/meaning pairs out in as many lines as w cells need.
 func (m *Model) hintLines(w int, pairs ...string) []string {

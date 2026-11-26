@@ -220,13 +220,14 @@ func TestAScreenKeepsItsCursor(t *testing.T) {
 	// Kept inside the rows it has now: a cursor past the end is on the last row.
 	for k := range g.m.kept {
 		if k.screen == screenBuild {
+			// A screen kept with its cursor on a row that has since gone.
 			e := g.m.kept[k]
-			e.sel = 99
+			e.sel, e.seenSel, e.paneCurs = 99, 99, map[string]paneCursor{e.paneFocus: {id: rowIdentity{kind: rowSlice, id: "gone"}, idx: 99, set: true}}
 			g.m.kept[k] = e
 		}
 	}
 	g.press("2")
-	if n := len(g.m.page().refs()); g.m.top().sel != n-1 {
-		t.Errorf("a kept cursor past the end is on row %d of %d", g.m.top().sel, n)
+	if n := len(g.m.page().refs()); g.m.top().sel < 0 || g.m.top().sel >= n || g.m.selected() == nil {
+		t.Errorf("a kept cursor past the end is on row %d of %d, want a row it has", g.m.top().sel, n)
 	}
 }

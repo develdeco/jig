@@ -68,7 +68,7 @@ func (m *Model) publishPage(id string) page {
 		}
 		rows[i] = listRow{ref: &rowRef{kind: rowCheck, id: c.key, ticket: id}, cells: []string{m.st.icon(state), text, m.st.dim(c.when)}}
 	}
-	at := m.cursorAmong(len(list))
+	at := m.cursorAmong(len(list), "Checklist")
 	c := list[at]
 	summary := "not done"
 	if c.done {

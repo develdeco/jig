@@ -184,6 +184,13 @@ its pull requests; the mouse wheel moves the cursor and a click on a row selects
 it. `?` lists every key of the screen, and says why the ones that cannot run
 now cannot.
 
+Every panel of a screen is a pane with a cursor of its own: `tab` and `shift+tab`
+move the focus from one to the next (the lit border and the hint line name the
+pane that has it), the arrows move in that pane, and `enter` opens what the row
+under the cursor is about (a slice from the build's sub-steps, the slice, round
+or question an activity line names). `z` shows the focused pane over the whole
+screen and `z` or `esc` brings the screen back.
+
 `/` on the main screen opens a search line: type, and the list narrows as you type to the
 rows whose words start with every word you typed, in any order - an id (`shop-11`) or its number
 (`11`), a word of the title, a kind (`issue`), a chart, a state (`waiting`, `landed`, `closed`) or a

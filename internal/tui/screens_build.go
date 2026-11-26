@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func (m *Model) buildPage(id string) page {
 			cells: []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), m.st.dim(tries), spent, goal},
 		}
 	}
-	at := m.cursorAmong(len(slices))
+	at := m.cursorAmong(len(slices), "Slices")
 	var full statusSlice
 	if t.status != nil && at < len(t.status.Slices) {
 		full = t.status.Slices[at]
@@ -89,10 +90,16 @@ func findingTitleFirst(line string) string {
 	return path[strings.LastIndex(path, "/")+1:] + " " + title
 }
 
-// cursorAmong is the row of a list of n rows the cursor stands on: the way the
-// window reads it, the index among the page's rows, held to the list.
-func (m *Model) cursorAmong(n int) int {
-	return max(0, min(m.top().sel, n-1))
+// cursorAmong is the row of the lists of n rows in all, titled lists, that the
+// Detail is of: the cursor's, the way the window reads it (the index among the
+// page's rows), when the focus is on one of the lists and the cursor is in them;
+// else the row the Detail was last of, so a focus on another pane leaves it.
+func (m *Model) cursorAmong(n int, lists ...string) int {
+	e := m.top()
+	if f := e.paneFocus; (f == "" || slices.Contains(lists, f)) && e.sel < n || !e.listAtSet {
+		e.listAt, e.listAtSet = max(0, min(e.sel, n-1)), true
+	}
+	return max(0, min(e.listAt, n-1))
 }
 
 // sliceColumns are the columns of a slice's row: its icon, id, state, tries, the

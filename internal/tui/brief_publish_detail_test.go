@@ -70,7 +70,7 @@ func TestBriefScreenIsARowPerSectionAndSliceAndTheCursorPartWhole(t *testing.T) 
 			t.Errorf("the detail of the last section lacks %q:\n%s", want, g.view())
 		}
 	}
-	g.press("down") // the first slice
+	g.tabTo("Slices") // the first slice
 	d = readWords(between(g.view(), "╭─ Detail · a", "╰"))
 	for _, want := range []string{"goal Greet by name", "oracle unit", "workspace app", "cited in Greeting"} {
 		if !strings.Contains(d, want) {

@@ -182,10 +182,14 @@ func (m *Model) planPage(c *chart) page {
 		suite = issue.status.Suite
 	}
 	fixes := fixTasks(suite)
-	rows := m.planRows(m.chartRows(c), is.Ticket, is.Branch)
+	rows := m.planRowsOf(c)
 
 	if e := m.top(); c.info != nil && e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
-		m.mapPanel(&p, c, planMapRows)
+		room := planMapRows
+		if m.zoomed("Map") {
+			room = m.bodyRows()
+		}
+		m.mapPanel(&p, c, room)
 	}
 	m.needPanel(&p, is.Ticket, issue)
 	landed, total := planProgress(rows)
@@ -215,13 +219,13 @@ func (m *Model) planPage(c *chart) page {
 		return 2 + n
 	}
 	run := m.runRows(c.info)
-	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight(run)) - activityFloor; spare < 0 && len(run) > 1 {
+	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight(run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		run = trimRuns(run, len(run)-min(-spare, len(run)-1))
 	}
 	p.boxTop("Run", runWord(c.info))
 	m.runBoxRows(&p, run)
 	p.boxEnd()
-	m.chartActivityPanel(&p, rows, c.info.History)
+	m.chartActivityPanel(&p, "plan:"+c.listing.Name, rows, c.info.History)
 	return p
 }
 

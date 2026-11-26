@@ -23,7 +23,7 @@ func TestReviewScreenIsARowPerRoundAndTheCursorRoundWhole(t *testing.T) {
 	if ref := g.m.selected(); ref == nil || ref.kind != rowAsk || ref.id != "r2-f2" {
 		t.Fatalf("opening the review puts the cursor on %+v, want the ask", ref)
 	}
-	g.press("up", "up")
+	g.tabTo("Rounds")
 	if ref := g.m.selected(); ref == nil || ref.kind != rowRound || ref.id != "2" {
 		t.Fatalf("two ups from the ask put the cursor on %+v, want round 2", ref)
 	}
@@ -60,7 +60,7 @@ func TestReviewScreenIsARowPerRoundAndTheCursorRoundWhole(t *testing.T) {
 func TestARoundDetailPairsEachFindingWithTheFixSliceItBecame(t *testing.T) {
 	t.Parallel()
 	g := reviewFixRound(t, 100, 40)
-	g.press("up", "up")
+	g.tabTo("Rounds")
 	detail := readWords(between(g.view(), "╭─ Detail · round 2", "╰"))
 	// The finding, its reason, the fix slice it became and the next finding, in
 	// that order.
@@ -114,7 +114,7 @@ func TestAnAskRowsDetailIsItsFindingWhole(t *testing.T) {
 func TestARoundTheStatusHasNoFindingsOfSaysItsCounts(t *testing.T) {
 	t.Parallel()
 	g := reviewFixRound(t, 100, 40)
-	g.press("up")
+	g.tabTo("Rounds").press("down")
 	view := g.view()
 	detail := readWords(between(view, "╭─ Detail · round 1", "╰"))
 	_, detail, _ = strings.Cut(detail, "╮") // the rows, not the verdict on the top edge

@@ -19,6 +19,6 @@ jig  demo › checkout  Coupons at checkout                        ? run needs y
   │  next say "Continue checkout"                                              │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 2 more
-
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open ticket · t tail · r refresh
+  esc back · q quit · ? keys · tab next pane: Detail · ↑↓ move in Tickets
+  enter open ticket · t tail · r refresh

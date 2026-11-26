@@ -20,5 +20,5 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review           ! review find
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 2 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Detail · r1-f1 · ↑↓ move in Asks
+  k keep · d dismiss · 1-5 steps · [ ] sibling · h main · t tail

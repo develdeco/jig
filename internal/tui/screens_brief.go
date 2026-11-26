@@ -70,7 +70,7 @@ func (m *Model) briefPage(id string) page {
 		}
 	}
 	var detail *detailSpec
-	at := m.cursorAmong(len(sections) + len(rows))
+	at := m.cursorAmong(len(sections)+len(rows), "Sections", "Slices")
 	if len(sections)+len(rows) > 0 {
 		var d detailSpec
 		if at < len(sections) {

@@ -15,10 +15,10 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   │  written for ccccccc                                                       │
   │  file        tickets/JIG-2/pr/demo.md                                      │
   │  body        ## Intent                                                     │
-  │              Load the config from the file the person names.               │
-  │  ↓ 5 more                                                                  │
+  │  ↓ 6 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 3 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Detail · body
+  ↑↓ move in Checklist · say "Land JIG-2" · 1-5 steps · [ ] sibling · h main
+  t tail

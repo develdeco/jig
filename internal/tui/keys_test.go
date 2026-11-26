@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +31,11 @@ func hintPairs(frame string) []string {
 	for _, l := range strings.Split(footerKeys(frame), "\n") {
 		for _, p := range strings.Split(l, " · ") {
 			if p = strings.TrimSpace(p); p != "" {
+				if n := len(out); n > 0 && strings.HasSuffix(out[n-1], "Detail") {
+					// The Detail pane's title is "Detail · <row>", which holds the separator.
+					out[n-1] += " · " + p
+					continue
+				}
 				out = append(out, p)
 			}
 		}
@@ -93,6 +99,14 @@ func TestKeyTableDrivesHandlerAndHints(t *testing.T) {
 		for i := range g.m.table {
 			row := &g.m.table[i]
 			for _, name := range row.names {
+				// Two rows can share a key on screens that differ (`esc` and `/` on
+				// the project's list and on the others): the key runs the first the
+				// screen has, which is the row tested on that screen.
+				if first := slices.IndexFunc(g.m.table, func(r keyRow) bool {
+					return slices.Contains(r.names, name) && r.screens.has(g.m.top().screen)
+				}); first >= 0 && &g.m.table[first] != row {
+					continue
+				}
 				var ran []string
 				orig := row.run
 				row.run = func(_ *Model, key string) tea.Cmd { ran = append(ran, key); return nil }
@@ -145,14 +159,14 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 			[]string{"g gate now", "k keep now", "d dismiss now"},
 			[]string{"p publish", "u requeue"}},
 		{"publish", func(t *testing.T) *rig { return can1(t, reviewReady()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenPublish, ticket: "JIG-2"}) },
-			[]string{"↑↓ move now", "p publish not now: the publish is not ready: after a clean review"},
+			[]string{"↑↓ move in Checklist now", "p publish not now: the publish is not ready: after a clean review"},
 			[]string{"g gate"}},
 		{"land", func(t *testing.T) *rig { return can1(t, landStop()) }, func(g *rig) { onScreenOf(g, navEntry{screen: screenLand, ticket: "JIG-2"}) },
 			[]string{"↑↓ scroll now", "esc back now", "1-5 steps now", "h main now"},
 			[]string{"g gate", "p publish", "k keep"}},
 	} {
 		for _, wd := range []int{80, 100} {
-			g := sized(c.rig(t), wd, 24)
+			g := sized(c.rig(t), wd, 28)
 			c.nav(g)
 			screen, depth := g.m.Screen(), len(g.m.nav)
 			body := g.view()

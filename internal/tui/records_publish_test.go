@@ -125,7 +125,7 @@ func TestOpeningTheReviewPutsTheCursorOnTheAskThatWasChosen(t *testing.T) {
 	if ref := g.m.selected(); ref == nil || ref.kind != rowAsk || ref.id != "r1-f1" {
 		t.Fatalf("opening the review step puts the cursor on %+v, want ask r1-f1", ref)
 	}
-	g.press("esc", "end", "enter") // the ticket screen's last row: ask r1-f2
+	g.press("esc").tabTo("Needs you").press("end", "enter") // the Needs you pane's last row: ask r1-f2
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want the review screen", g.m.Screen())
 	}
@@ -167,12 +167,14 @@ func TestDetailScreensBeginAtTheirTop(t *testing.T) {
 	if view := g.view(); len(strings.Split(view, "\n")) != 24 || !strings.Contains(view, "╭─ Detail · Goal") || !strings.Contains(view, "▸") {
 		t.Errorf("the first screenful of the brief has no detail of its first row:\n%s", view)
 	}
-	g.press("end")
+	// Down through the sections to the slices: the window leaves the top, and
+	// the cursor stays on the screen.
+	g.tabTo("Slices").press("end")
 	view := g.view()
 	if !strings.Contains(view, "▸") || !strings.Contains(view, "Ship the copy") || !strings.Contains(view, "╭─ Detail · d") {
 		t.Errorf("the last row is not on the screen with its detail:\n%s", view)
 	}
-	g.press("home")
+	g.tabTo("Sections").press("home")
 	if view := g.view(); !strings.Contains(view, "▸ Goal") && !strings.Contains(view, "│▸ Goal") {
 		t.Errorf("home did not bring back the first row:\n%s", view)
 	}

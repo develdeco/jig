@@ -134,7 +134,7 @@ const (
 const (
 	detailPeek = 5
 	listMin    = 5
-	collapsed  = 3
+	collapsed  = 2
 	// detailLeast is the least a Detail panel is drawn in: its edges, a first row
 	// and a mark.
 	detailLeast = 4
@@ -154,27 +154,12 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 		}
 		return
 	}
+	if m.top().zoom != "" {
+		m.zoomedBlock(p, d, at, lists)
+		return
+	}
 	first := m.taken(p) // the lines above are wrapped as they will be drawn
 	side := m.width >= sideMinWidth
-	// The least a block of lists and detail is: the cursor's list, the others as a
-	// mark each, and the detail's edges, a first row and a mark. When the lines
-	// above leave it less than that, it has the window but for the marks of what
-	// lies above and below, and the window starts at it (blockTop).
-	least := listMin + collapsed*(len(lists)-1) + 4
-	if side {
-		least = max(listMin+collapsed*(len(lists)-1), 5)
-	}
-	room := m.bodyRows() - 1 // the mark of what lies below
-	avail := room - first
-	listsLeast := listMin + collapsed*(len(lists)-1)
-	shifted := avail < least
-	if shifted {
-		floor := listsLeast + 1 // and the line that says the detail has no room
-		if side {
-			floor = listsLeast
-		}
-		avail = max(room-1, floor)
-	}
 	listW, sideW := m.width, m.width
 	if side {
 		listW = m.width * 3 / 5
@@ -190,6 +175,36 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 			total += len(q.lines)
 		}
 	})
+	// The cursor's list and its place in it.
+	cl, cr := 0, at
+	for i, l := range lists {
+		if cr < len(l.rows) {
+			cl = i
+			break
+		}
+		cr -= len(l.rows)
+		cl = i + 1
+	}
+	// The least a block of lists and detail is: the cursor's list, with its row as
+	// tall as it is, the others as a mark each, and the detail's edges, a first row
+	// and a mark. When the lines above leave it less than that, it has the window
+	// but for the marks of what lies above and below, and the window starts at it
+	// (blockTop).
+	listsLeast := listMin + rowExtra(full, cl, cr) + collapsed*(len(lists)-1)
+	least := listsLeast + 4
+	if side {
+		least = max(listsLeast, 5)
+	}
+	room := m.bodyRows() - 1 // the mark of what lies below
+	avail := room - first
+	shifted := avail < least
+	if shifted {
+		floor := listsLeast + 1 // and the line that says the detail has no room
+		if side {
+			floor = listsLeast
+		}
+		avail = max(room-1, floor)
+	}
 	dl := m.detailLines(*d, sideW)
 
 	// The room each takes. Beside each other both have all of it; under it the
@@ -214,15 +229,6 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 
 	// The lists, each windowed around the cursor's row when it is in it, the
 	// others to what they need up to a few lines.
-	cl, cr := 0, at
-	for i, l := range lists {
-		if cr < len(l.rows) {
-			cl = i
-			break
-		}
-		cr -= len(l.rows)
-		cl = i + 1
-	}
 	var left []pline
 	if lb >= total {
 		for _, f := range full {
@@ -314,13 +320,15 @@ func (m *Model) windowList(f []pline, row, budget int) []pline {
 		return len(body)
 	}
 	if row < 0 {
-		// A list with no room: its edges and one mark for all its rows.
+		// A list with no room: its two edges, the count its title says, and its rows
+		// kept in their places on the bottom edge.
 		var all []rowRef
 		for _, s := range starts {
 			all = append(all, *body[s].ref)
 		}
-		mark := pline{text: m.st.dim(strconv.Itoa(len(all)) + " " + plural(len(all), "row", "rows")), box: boxMid, hiddenRefs: all}
-		return []pline{f[0], mark, f[len(f)-1]}
+		bottom := f[len(f)-1]
+		bottom.hiddenRefs = all
+		return []pline{f[0], bottom}
 	}
 	row = max(0, min(row, len(starts)-1))
 	lo, hi := row, row
@@ -423,4 +431,63 @@ func padPanel(lines []pline, n int) []pline {
 // window cut a panel is drawn beside.
 func (m *Model) blankSide(w int) string {
 	return m.frameLine(pline{box: boxMid}, "  ", w, false)
+}
+
+// rowExtra is how many lines the cursor's row of the list cl has beyond its
+// first: a row that wraps needs them as well as the list's minimum.
+func rowExtra(full [][]pline, cl, cr int) int {
+	if cl >= len(full) {
+		return 0
+	}
+	n, in := 0, false
+	for _, l := range full[cl] {
+		switch {
+		case l.ref != nil:
+			if in {
+				return n
+			}
+			in = cr == 0
+			cr--
+		case in && l.cont:
+			n++
+		case in:
+			return n
+		}
+	}
+	return n
+}
+
+// zoomedBlock is the lists and the Detail of a screen with one pane zoomed: the
+// pane has the whole body, a list windowed around its cursor's row and a Detail
+// whole, and the others are only what the keys count over.
+func (m *Model) zoomedBlock(p *page, d *detailSpec, at int, lists []listSpec) {
+	z := m.top().zoom
+	cl, cr := 0, at
+	for i, l := range lists {
+		if cr < len(l.rows) {
+			cl = i
+			break
+		}
+		cr -= len(l.rows)
+		cl = i + 1
+	}
+	for i, l := range lists {
+		var q page
+		m.listPanel(&q, l)
+		switch {
+		case l.title == z && i == cl:
+			p.lines = append(p.lines, m.windowList(q.lines, cr, m.bodyRows())...)
+		case l.title == z:
+			p.lines = append(p.lines, m.windowList(q.lines, 0, m.bodyRows())...)
+		default:
+			p.lines = append(p.lines, m.windowList(q.lines, -1, collapsed)...)
+		}
+	}
+	dl := m.detailLines(*d, m.width)
+	if z != dl[0].text {
+		dl, _ = cutDetail(m, dl, detailLeast)
+	}
+	detailAt := len(p.lines)
+	p.lines = append(p.lines, dl...)
+	p.lines[detailAt].hold |= holdFrom
 }

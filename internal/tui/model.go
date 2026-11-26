@@ -187,6 +187,24 @@ type navEntry struct {
 	// the current step moves on with it.
 	follow  bool
 	lastCur int
+	// paneFocus is the title of the pane that has the focus, and paneCurs what
+	// each pane keeps while it has not: its cursor's row and its scroll (panes.go).
+	// seenSel is the cursor the panes were last read against, so a cursor put on
+	// a row by anything else gives its pane the focus. textFocus says the focused
+	// pane is text only: it scrolls by lines and has no row under a cursor.
+	paneFocus string
+	// listAt is the row of the lists of a phase screen the Detail was last drawn for:
+	// a focus on a pane that is not one of the lists leaves the Detail where it was.
+	listAt    int
+	listAtSet bool
+	// zoom is the title of the pane drawn over the whole body, "" for none.
+	zoom string
+	// psearch is the query narrowing one pane (searchpane.go).
+	psearch   paneSearch
+	paneCurs  map[string]paneCursor
+	seenSel   int
+	seenSet   bool
+	textFocus bool
 }
 
 // textInput is a line a person is typing: an answer.
@@ -296,6 +314,9 @@ type Model struct {
 	kept map[navKey]navEntry
 	// table is the key table (keys.go): the one place a key lives.
 	table []keyRow
+	// panesNow are the titles of the panes of the screen on top as the last page
+	// read had them, in drawing order (panes.go).
+	panesNow []string
 	// help is the `?` overlay while it is up.
 	help *helpView
 	// laid holds the layouts the allocator gave lists, by what they were made of
@@ -308,6 +329,13 @@ type Model struct {
 	panelW int
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
+	// rowMemo holds the rows of the chart screens built for the world as it
+	// stands (chartcache.go).
+	rowMemo *rowsMemo
+	// shown is the page the last frame drew (chartcache.go).
+	shown *shownPage
+	// rowReads counts the tickets read into a row of a chart screen.
+	rowReads int
 	// queueBuilds counts the project's list built (maincache.go): a key that
 	// moves nothing the list reads builds none, a search key included.
 	queueBuilds int
@@ -1053,6 +1081,8 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 		if m.nav[0].search.open {
 			return m.searchKey(k)
 		}
+	} else if m.top().psearch.open {
+		return m.paneSearchKey(k)
 	}
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
@@ -1070,29 +1100,40 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
 	m.moveBy(delta)
+	m.rememberMove(m.geometry())
 	m.noteCursor()
 }
 
 func (m *Model) moveBy(delta int) {
 	m.followSel()
-	pg := m.page()
+	pg := m.geometry()
 	n := len(pg.refs())
 	e := m.top()
-	if n == 0 {
+	m.syncPanes(pg)
+	// The keys move the focused pane's cursor, within its rows.
+	lo, cnt := m.paneSpan(pg)
+	hi := lo + cnt - 1
+	if n == 0 || e.textFocus {
 		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
 		return
 	}
 	e.follow = false
+	if e.lead == 0 || delta <= -(1<<19) || delta >= 1<<19 {
+		// A page held above its cursor's window is read a line at a time first.
+		if m.moveWindowed(pg, delta) {
+			return
+		}
+	}
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
-		// Home: the first row; the window follows it.
-		e.sel, e.lead = 0, 0
+		// Home: the focused pane's first row; the window follows it.
+		e.sel, e.lead = lo, 0
 		return
 	case delta >= 1<<19:
-		e.sel, e.lead = n-1, 0
+		e.sel, e.lead = hi, 0
 		return
-	case delta < 0 && e.sel == 0:
+	case delta < 0 && e.sel == 0 && lo == 0:
 		// Up from the first row moves the page above it; any other move is the
 		// cursor's, and the window follows it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
@@ -1119,13 +1160,7 @@ func (m *Model) moveBy(delta int) {
 		return
 	}
 	was := e.sel
-	e.sel += delta
-	if e.sel >= n {
-		e.sel = n - 1
-	}
-	if e.sel < 0 {
-		e.sel = 0
-	}
+	e.sel = min(max(e.sel+delta, lo), hi)
 	if e.sel != was {
 		e.lead = 0
 	}
@@ -1138,8 +1173,10 @@ func (m *Model) rowUnderCursor() (rowRef, bool) {
 	if e.follow {
 		return rowRef{}, false
 	}
-	refs := m.page().refs()
-	if e.sel < 0 || e.sel >= len(refs) {
+	pg := m.page()
+	m.syncPanes(pg)
+	refs := pg.refs()
+	if e.sel < 0 || e.sel >= len(refs) || e.textFocus {
 		return rowRef{}, false
 	}
 	return refs[e.sel], true
@@ -1299,9 +1336,11 @@ func (m *Model) selected() *rowRef {
 
 // refIn is the row of pg under the cursor.
 func (m *Model) refIn(pg page) *rowRef {
+	m.syncPanes(pg)
 	refs := pg.refs()
 	sel := m.top().sel
-	if sel < 0 || sel >= len(refs) {
+	if sel < 0 || sel >= len(refs) || m.top().textFocus {
+		// A pane of text has no row under a cursor.
 		return nil
 	}
 	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {
@@ -1347,11 +1386,39 @@ func (m *Model) open() tea.Cmd {
 		e.open[ref.id] = !e.open[ref.id]
 		return nil
 	}
+	if m.promptFor(*ref) != "" {
+		// An open question's subject is the prompt that answers it.
+		m.beginAnswer()
+		return nil
+	}
 	next, ok := m.openTarget(*ref)
 	if !ok {
+		if why := opensNothing(*ref); why != "" {
+			m.notice = why
+		}
 		return nil
 	}
 	return m.goTo(len(m.nav), ref, next)
+}
+
+// logNamesNothing is why enter opens nothing on an activity line that names no
+// question, slice, round or step, and commitOpensNothing why it opens nothing on
+// a store commit.
+const (
+	logNamesNothing    = "this line names no question, slice, round or step to open"
+	commitOpensNothing = "a store commit opens nothing"
+)
+
+// opensNothing is why the row ref opens nothing, "" for a row that does open
+// something or whose reason is the usual one.
+func opensNothing(ref rowRef) string {
+	switch {
+	case ref.kind == rowCommit:
+		return commitOpensNothing
+	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
+		return logNamesNothing
+	}
+	return ""
 }
 
 // openTarget is the screen enter on the row ref opens: none when the row opens
@@ -1382,6 +1449,22 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowSub, rowLog:
+		// A sub-step or a line of the log opens the most specific thing it names:
+		// its slice, its round (the review screen, which has no screen of a round's
+		// own), its step. A question of the line is its prompt while it is open
+		// (promptFor) and its slice once answered.
+		i := slices.IndexFunc(stepNames[:], func(n string) bool { return strings.ToLower(n) == ref.container })
+		switch {
+		case ref.slice != "":
+			next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+		case ref.round != "":
+			next = navEntry{screen: screenReview, ticket: ref.ticket}
+		case i >= 0:
+			next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
+		default:
+			return next, false
+		}
 	case rowQuestion:
 		if ref.slice == "" {
 			return next, false
@@ -1474,15 +1557,19 @@ func (m *Model) beginAnswer() {
 		return
 	}
 	var q *questionRow
-	if ref := m.selected(); ref != nil && ref.kind == rowQuestion {
+	if ref := m.selected(); ref != nil && (ref.kind == rowQuestion || (ref.kind == rowLog && ref.question != "")) {
+		qid := ref.id
+		if ref.kind == rowLog {
+			qid = ref.question
+		}
 		for _, x := range t.questions(m.zone) {
-			if x.ID == ref.id {
+			if x.ID == qid {
 				x := x
 				q = &x
 			}
 		}
 		if q == nil || !q.Open {
-			m.notice = ref.id + " is already answered"
+			m.notice = qid + " is already answered"
 			return
 		}
 	} else {

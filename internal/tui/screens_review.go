@@ -32,7 +32,7 @@ func (m *Model) reviewPage(id string) page {
 	rounds = withStatusRounds(t, rounds)
 	asks := t.asks()
 	var detail *detailSpec
-	at := m.cursorAmong(len(rounds) + len(asks))
+	at := m.cursorAmong(len(rounds)+len(asks), "Rounds", "Asks")
 	if len(rounds)+len(asks) > 0 {
 		var d detailSpec
 		if at < len(rounds) {
@@ -376,10 +376,10 @@ func (m *Model) probeRows(p *page, t *ticket) {
 			if superseded[i] {
 				l = m.st.dim(l)
 			}
-			p.boxAdd("    " + l)
+			p.boxUnder("    " + l)
 		}
 		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines) {
-			p.boxAdd("    " + m.st.dim(l))
+			p.boxUnder("    " + m.st.dim(l))
 		}
 	}
 	p.boxEnd()

@@ -11,7 +11,7 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 5 land               ◇ waits t
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Land activity ────────────────────────────────────────────────────────────╮
   │  time     step     what                                                    │
-  │  09:15:30 · record landed web into main                                    │
+  │▸ 09:15:30 · record landed web into main                                    │
   ╰────────────────────────────────────────────────────────────────────────────╯
 
 
@@ -20,5 +20,5 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 5 land               ◇ waits t
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps
-  [ ] sibling · h main · o open PRs · t tail
+  esc back · q quit · ? keys · tab next pane: Pull requests · ↑↓ scroll
+  say "Land JIG-2" · 1-5 steps · [ ] sibling · h main · o open PRs · t tail

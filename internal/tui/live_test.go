@@ -42,6 +42,7 @@ func waitingOnAnswer(g *rig, id string, n int) {
 	d.Slices = &slices
 	g.pin(id, &d)
 	g.m.w.tickets[id].digest = &d
+	g.m.w.gen++
 }
 
 // TestNeedsYouIsHeldBackWhileASessionIsLive: a ledger line of a session bound to
@@ -205,7 +206,7 @@ func TestALiveSessionKeepsTheRoundsAsksOnScreen(t *testing.T) {
 		t.Fatalf("a live session's round does not keep its asks under the asks group:\n%s", p)
 	}
 	g.press("enter") // the review step: the cursor lands on the first ask
-	g.press("esc", "end", "d")
+	g.press("esc").tabTo("Asks").press("end", "d")
 	if got := g.r.lines(); len(got) != 1 || got[0] != "triage JIG-2 r1-f2 dismiss --store /s" {
 		t.Errorf("d on a live ticket's ask ran %q", got)
 	}

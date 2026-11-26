@@ -412,6 +412,9 @@ func (g *rig) syncDigests() {
 	for _, id := range order {
 		t := g.m.w.tickets[id]
 		if d, ok := g.pinned[id]; ok {
+			if t.digest != d {
+				g.m.w.gen++
+			}
 			t.digest = d
 			continue
 		}
@@ -537,6 +540,10 @@ func (g *rig) press(keys ...string) *rig {
 			g.send(tea.KeyMsg{Type: tea.KeyDown})
 		case "backspace":
 			g.send(tea.KeyMsg{Type: tea.KeyBackspace})
+		case "tab":
+			g.send(tea.KeyMsg{Type: tea.KeyTab})
+		case "shift+tab":
+			g.send(tea.KeyMsg{Type: tea.KeyShiftTab})
 		case "home":
 			g.send(tea.KeyMsg{Type: tea.KeyHome})
 		case "end":
@@ -555,6 +562,20 @@ func (g *rig) press(keys ...string) *rig {
 }
 
 func (g *rig) view() string { return g.m.View() }
+
+// tabTo presses tab until the pane titled title has the focus.
+func (g *rig) tabTo(title string) *rig {
+	g.t.Helper()
+	g.view()
+	for i := 0; i < 12 && !samePane(g.m.focusedPane(), title); i++ {
+		g.press("tab")
+		g.view()
+	}
+	if !samePane(g.m.focusedPane(), title) {
+		g.t.Fatalf("tab did not reach the pane %q: panes %v, focus %q", title, g.m.panesNow, g.m.focusedPane())
+	}
+	return g
+}
 
 // onRow puts the cursor of the screen on top on the row of id, whatever group
 // the project's list drew it in.
@@ -837,4 +858,10 @@ func (t *ticket) guessSliceState(slice string) string {
 		return StateBuilding
 	}
 	return StateQueued
+}
+
+// samePane says two pane titles are one pane: the Detail pane is named for the row
+// under the cursor of the list beside it, so its title changes as that cursor moves.
+func samePane(a, b string) bool {
+	return a == b || strings.HasPrefix(a, "Detail · ") && strings.HasPrefix(b, "Detail · ")
 }

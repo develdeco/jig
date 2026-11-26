@@ -52,6 +52,9 @@ type keyRow struct {
 	hintKey, hintText string
 	// quiet keeps the row off the hint line; `?` still lists it.
 	quiet bool
+	// noRow says the row's availability reads no row of the screen: it is asked of
+	// the subject the last frame was drawn for, and a key builds no page for it.
+	noRow bool
 	// screens are the screens the row works on; hinted, when not zero, are the
 	// ones whose hint line carries it.
 	screens, hinted screenSet
@@ -106,7 +109,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "z", "/", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -158,11 +161,26 @@ func canOpen(m *Model, sub subject) (bool, string) {
 		if sub.row.kind == rowFold {
 			return true, ""
 		}
+		if m.promptFor(sub.row) != "" {
+			return true, ""
+		}
 		if _, ok := m.openTarget(sub.row); ok {
 			return true, ""
 		}
+		if why := opensNothing(sub.row); why != "" {
+			return false, why
+		}
 	}
 	return false, "nothing under the cursor opens another screen"
+}
+
+// inPane words a key that acts in the focused pane: on a screen of several
+// panes it says which; on a screen of one the pane is the screen.
+func inPane(words string, sub subject) string {
+	if len(sub.panes) > 1 && sub.focus != "" {
+		return words + " in " + sub.focus
+	}
+	return words
 }
 
 // keyRows is the table. Its order is the hint line's and `?`'s.
@@ -174,7 +192,29 @@ func keyRows() []keyRow {
 	}
 	return []keyRow{
 		{names: []string{"esc", "left", "backspace"}, label: "esc", words: "back", screens: onAllScreens &^ onScreens(screenMain),
-			run: func(m *Model, _ string) tea.Cmd { m.back(); return nil }},
+			say: func(_ *Model, sub subject) string {
+				switch {
+				case sub.search:
+					return "clear search"
+				case sub.zoom != "":
+					return "unzoom"
+				}
+				return "back"
+			},
+			run: func(m *Model, _ string) tea.Cmd {
+				if m.top().psearch.applied() {
+					// A narrowed pane is widened before anything else.
+					m.clearPaneSearch()
+					return nil
+				}
+				if m.top().zoom != "" {
+					// A zoomed pane is left before the screen is.
+					m.setZoom("")
+					return nil
+				}
+				m.back()
+				return nil
+			}},
 		{names: []string{"q"}, label: "q", words: "quit", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { return m.quit() }},
 		{names: []string{"esc"}, label: "esc", words: "clear search", screens: onScreens(screenMain),
@@ -184,7 +224,30 @@ func keyRows() []keyRow {
 			run: func(m *Model, _ string) tea.Cmd { m.clearSearch(); return nil }},
 		{names: []string{"?"}, label: "?", words: "keys", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { m.help = &helpView{}; return nil }},
+		{names: []string{"tab"}, label: "tab", words: "next pane", noRow: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return sub.paneWords("next pane", 1) },
+			can: canSwitchPane,
+			run: func(m *Model, _ string) tea.Cmd { m.switchPane(1); return nil }},
+		{names: []string{"shift+tab"}, label: "shift+tab", words: "previous pane", quiet: true, noRow: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return sub.paneWords("previous pane", -1) },
+			can: canSwitchPane,
+			run: func(m *Model, _ string) tea.Cmd { m.switchPane(-1); return nil }},
+		{names: []string{"z"}, label: "z", words: "zoom", quiet: true, noRow: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string {
+				if sub.zoom != "" {
+					return "unzoom"
+				}
+				return "zoom " + sub.focus
+			},
+			can: func(_ *Model, sub subject) (bool, string) {
+				if sub.zoom == "" && sub.focus == "" {
+					return false, "this screen has no pane to zoom"
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.toggleZoom(); return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
+			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {
 				if key == "up" {
 					return step(-1)(m, key)
@@ -224,6 +287,18 @@ func keyRows() []keyRow {
 				return true, ""
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.beginSearch(); return nil }},
+		{names: []string{"/"}, label: "/", words: "search", quiet: true, noRow: true, screens: onAllScreens &^ onScreens(screenMain),
+			say: func(_ *Model, sub subject) string { return inPane("search", sub) },
+			can: func(m *Model, sub subject) (bool, string) {
+				switch {
+				case sub.focus == "":
+					return false, "this screen has no pane to search"
+				case m.top().textFocus:
+					return false, sub.focus + " is text: it has no rows to search"
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.beginPaneSearch(); return nil }},
 		{names: []string{"a"}, label: "a", words: "answer", act: actAnswer, screens: onScreens(screenMain, screenChart, screenTicket, screenSlice),
 			run: func(m *Model, _ string) tea.Cmd { m.beginAnswer(); return nil }},
 		{names: []string{"k"}, label: "k", words: "keep", act: actKeep, screens: onScreens(screenTicket, screenReview),
@@ -338,7 +413,10 @@ func (m *Model) runKey(key string) tea.Cmd {
 			return m.refuseAction(r)
 		}
 		if r.needsSubject() {
-			sub := m.subjectNow()
+			sub := m.keysOn
+			if !r.noRow {
+				sub = m.subjectNow()
+			}
 			m.keysOn = sub
 			if ok, why := r.avail(m, sub); !ok {
 				m.notice = why

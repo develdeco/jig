@@ -35,6 +35,6 @@ jig  demo › SHOP-1                                                            
   │  09:01:00 build·round ◐ builder took it · Round to the cent                                    │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Build · ↑↓ move in Steps · enter open · h main
+  t tail

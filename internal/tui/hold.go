@@ -52,10 +52,10 @@ func (m *Model) settle(l *screenLayout) {
 	}
 	e := m.top()
 	refs := l.pg.refs()
-	if !e.follow && e.sel == h.sel && h.sel < len(h.refs) && !(h.sel < len(refs) && refs[h.sel] == h.refs[h.sel]) {
+	if !e.follow && !e.textFocus && e.sel == h.sel && h.sel < len(h.refs) && !(h.sel < len(refs) && refs[h.sel] == h.refs[h.sel]) {
 		for i, r := range refs {
 			if r == h.refs[h.sel] {
-				e.sel = i
+				e.sel, e.seenSel = i, i
 				l.sel = min(i, len(refs)-1)
 				break
 			}
@@ -68,7 +68,7 @@ func (m *Model) settle(l *screenLayout) {
 	if shift <= 0 {
 		return
 	}
-	if len(refs) == 0 {
+	if len(refs) == 0 || e.textFocus {
 		e.scroll = h.start + shift
 	} else {
 		now := m.windowStart(l.pg, l.sel, l.pageH, false)

@@ -52,7 +52,7 @@ func TestADetailBesideItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
 
 	// The brief with the cursor on the last slice: the detail has its goal.
 	b := tourRig(t, 160, 20)
-	b.press("1", "end")
+	b.press("1").tabTo("Slices").press("end")
 	if side := sideColumn(b.view()); !strings.Contains(side, "goal") {
 		t.Errorf("the detail of the last slice lost its first field:\n%s", b.view())
 	}
@@ -88,7 +88,7 @@ func TestTheDetailIsDrawnWhateverTheListsLength(t *testing.T) {
 	if view := r.view(); !strings.Contains(view, "╭─ Detail · ") || !strings.Contains(view, "▸") {
 		t.Errorf("nine rounds at 100x30 draw no detail of the cursor's row:\n%s", view)
 	}
-	r.press("up", "up", "up", "up")
+	r.tabTo("Rounds").press("down", "down", "down", "down")
 	if view := r.view(); !strings.Contains(view, "╭─ Detail · round") || !strings.Contains(view, "▸") {
 		t.Errorf("a round in the middle of nine has no detail:\n%s", view)
 	}
@@ -272,7 +272,7 @@ func TestTheTailsLineNamesTheRowsItWasGiven(t *testing.T) {
 }
 
 // TestDownMovesTheCursorOnEveryScreenWithRows: down moves the cursor from the
-// first row to the last on each phase screen, a row at a time, and the window
+// first row to the last of the focused pane on each phase screen, a row at a time, and the window
 // follows it; the page is not scrolled instead.
 func TestDownMovesTheCursorOnEveryScreenWithRows(t *testing.T) {
 	t.Parallel()
@@ -283,7 +283,14 @@ func TestDownMovesTheCursorOnEveryScreenWithRows(t *testing.T) {
 			if g.m.Screen() != sc.name {
 				t.Fatalf("on %s, want %s", g.m.Screen(), sc.name)
 			}
-			rows := len(g.m.page().refs())
+			// The cursor moves in the pane that has the focus: the lists of a screen are
+			// panes, and tab goes from one to the next.
+			rows := 0
+			for _, p := range g.m.page().panes() {
+				if p.title == g.m.focusedPane() {
+					rows = p.rows
+				}
+			}
 			for i := 1; i < rows; i++ {
 				before := g.m.top().sel
 				g.press("down")

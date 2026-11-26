@@ -157,7 +157,7 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 		t.Errorf("with two asks open and the cursor elsewhere k ran %q, notice %q", got, g.m.notice)
 	}
 	// The cursor on an ask decides that one when it is drawn whole.
-	g.press("end", "up")
+	g.tabTo("Needs you").press("end", "up")
 	g.press("d")
 	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 dismiss") {
 		t.Errorf("d on the first ask ran %q", got)
