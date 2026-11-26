@@ -20,6 +20,9 @@ type pane struct {
 	title       string
 	top, bottom int
 	first, rows int
+	// home is the place among the pane's rows of the row its cursor begins on,
+	// -1 when the pane gives none.
+	home int
 }
 
 // panes are the panels of the page, in the order they are drawn. A row outside
@@ -30,11 +33,14 @@ func (p page) panes() []pane {
 	for i, l := range p.lines {
 		switch {
 		case l.box == boxTop:
-			out = append(out, pane{title: l.text, top: i, bottom: i, first: row})
+			out = append(out, pane{title: l.text, top: i, bottom: i, first: row, home: -1})
 		case l.box != boxNone && len(out) > 0:
 			cur := &out[len(out)-1]
 			cur.bottom = i
 			if l.ref != nil {
+				if l.home {
+					cur.home = cur.rows
+				}
 				cur.rows++
 			}
 		}
@@ -142,11 +148,10 @@ func (m *Model) syncPanes(pg page) {
 	}
 	e.textFocus = false
 	pc := e.paneCurs[p.title]
-	if adopted || !pc.set {
-		e.rememberPane(p, refs)
-	} else {
+	if !adopted && pc.set {
 		e.sel = p.first + pc.find(p, refs)
 	}
+	e.rememberPane(pg, p, refs)
 	e.seenSel, e.seenSet = e.sel, true
 }
 
@@ -161,8 +166,9 @@ func (c paneCursor) find(p pane, refs []rowRef) int {
 	return min(max(c.idx, 0), p.rows-1)
 }
 
-// rememberPane notes the row the cursor stands on as the pane's own.
-func (e *navEntry) rememberPane(p pane, refs []rowRef) {
+// rememberPane notes the row the cursor stands on as the pane's own. Its place
+// is among all the pane's rows when the pane draws only a window of them.
+func (e *navEntry) rememberPane(pg page, p pane, refs []rowRef) {
 	if p.rows == 0 || e.sel < p.first || e.sel >= p.first+p.rows {
 		return
 	}
@@ -171,7 +177,58 @@ func (e *navEntry) rememberPane(p pane, refs []rowRef) {
 	}
 	pc := e.paneCurs[p.title]
 	pc.id, pc.idx, pc.set = refs[e.sel].identity(), e.sel-p.first, true
+	if full := pg.windowed[p.title]; len(full) > 0 {
+		for i, r := range full {
+			if r.identity() == pc.id {
+				pc.idx = i
+				break
+			}
+		}
+	}
 	e.paneCurs[p.title] = pc
+}
+
+// paneCursorIn is the place, among ids, of the row the pane titled title keeps
+// its cursor on: by identity, else the place it was at, else def. The builder
+// of a pane that draws only a window of its rows reads it to draw the window
+// around the cursor.
+func (m *Model) paneCursorIn(title string, ids []rowIdentity, def int) int {
+	pc := m.top().paneCurs[title]
+	if !pc.set || len(ids) == 0 {
+		return min(max(def, 0), max(len(ids)-1, 0))
+	}
+	if i := slices.Index(ids, pc.id); i >= 0 {
+		return i
+	}
+	return min(max(pc.idx, 0), len(ids)-1)
+}
+
+// moveWindowed is a move in a pane that draws only a window of its rows: the
+// cursor goes to the row delta places on among all of them, which the next page
+// draws a window around. It says whether the focused pane is one.
+func (m *Model) moveWindowed(pg page, delta int) bool {
+	e := m.top()
+	full := pg.windowed[e.paneFocus]
+	if len(full) == 0 {
+		return false
+	}
+	ids := make([]rowIdentity, len(full))
+	for i, r := range full {
+		ids[i] = r.identity()
+	}
+	at := m.paneCursorIn(e.paneFocus, ids, 0)
+	to := min(max(at+delta, 0), len(full)-1)
+	switch {
+	case delta <= -(1 << 19):
+		to = 0
+	case delta >= 1<<19:
+		to = len(full) - 1
+	}
+	pc := e.paneCurs[e.paneFocus]
+	pc.id, pc.idx, pc.set = ids[to], to, true
+	e.paneCurs[e.paneFocus] = pc
+	e.follow, e.lead = false, 0
+	return true
 }
 
 // moveFocus gives the focus to pane i: the pane it leaves keeps its cursor and
@@ -209,13 +266,16 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 		e.textFocus = false
 		if !keep {
 			pc := e.paneCurs[p.title]
-			if pc.set {
+			switch {
+			case pc.set:
 				e.sel = p.first + pc.find(p, refs)
-			} else {
+			case p.home >= 0:
+				e.sel = p.first + p.home
+			default:
 				e.sel = p.first
 			}
 		}
-		e.rememberPane(p, refs)
+		e.rememberPane(pg, p, refs)
 	}
 	e.seenSel, e.seenSet = e.sel, true
 }

@@ -1092,6 +1092,9 @@ func (m *Model) moveBy(delta int) {
 		return
 	}
 	e.follow = false
+	if m.moveWindowed(pg, delta) {
+		return
+	}
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
@@ -1392,6 +1395,17 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowSub:
+		// A slice's sub-step opens its slice, any other the screen of its step.
+		if ref.slice != "" {
+			next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+			break
+		}
+		i := slices.IndexFunc(stepNames[:], func(n string) bool { return strings.ToLower(n) == ref.container })
+		if i < 0 {
+			return next, false
+		}
+		next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
 	case rowQuestion:
 		if ref.slice == "" {
 			return next, false

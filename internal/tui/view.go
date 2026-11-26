@@ -21,6 +21,9 @@ const (
 	rowQuestion = "question"
 	rowAsk      = "ask"
 	rowSlice    = "slice"
+	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
+	// is its key, slice the slice a slice sub-step names, container the step.
+	rowSub = "substep"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
@@ -69,11 +72,18 @@ type pline struct {
 	// focus draws the line with its panel border in the key color; a panel is
 	// drawn focused when every one of its lines says so.
 	focus bool
+	// home marks the row a pane's cursor stands on before the person has put it
+	// anywhere: the sub-step that matters now.
+	home bool
 }
 
 // page is a screen's body before it is windowed and framed.
 type page struct {
 	lines []pline
+	// windowed holds, for a pane that draws only the window of its rows around
+	// its cursor, the rows it has all told, so the keys move over the ones it
+	// does not draw (panes.go).
+	windowed map[string][]rowRef
 	// marks are the rows, among the page's rows, that the cursors of the panes
 	// that have not the focus stand on: drawn marked and not lit.
 	marks []int

@@ -86,8 +86,8 @@ func TestEachPaneKeepsItsCursorWhenTheFocusLeaves(t *testing.T) {
 	// The unfocused pane keeps its row marked, and not lit.
 	g.tabTo("Steps")
 	v := g.view()
-	if n := strings.Count(v, "▸"); n != 2 {
-		t.Errorf("the frame has %d cursor marks, want the focused pane's and the other's:\n%s", n, v)
+	if n := strings.Count(v, "▸"); n != 3 {
+		t.Errorf("the frame has %d cursor marks, want the focused pane's and the two panes the focus passed through:\n%s", n, v)
 	}
 
 	// A screen opened from a pane and left comes back with the focus and every
