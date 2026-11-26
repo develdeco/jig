@@ -27,6 +27,13 @@
 // edge when a window cuts the list (parts.go). The row under the cursor is lit
 // across its panel, and a panel can be drawn with its border lit.
 //
+// Every panel is a pane with its own cursor and scroll: tab and shift+tab move
+// the focus, the keys that move and act read the focused pane's row, the focused
+// pane's border is lit and the hint line names it, a pane of text scrolls by
+// lines, a pane that holds more rows than its room draws the window around its
+// cursor and counts the rest, a row opens what it is about, and z draws the
+// focused pane over the whole body (panes.go, zoom.go).
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on
