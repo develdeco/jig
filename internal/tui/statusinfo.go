@@ -80,6 +80,9 @@ type statusSlice struct {
 	Workspace, Oracle string
 	FromGate          int
 	Attempts          int
+	// Findings are the gate finding ids a fix slice resolves, empty for any other
+	// slice and for a status that predates the column.
+	Findings []string
 }
 
 // statusLastRun is a row of the status's last_runs table in its own words:
@@ -208,11 +211,15 @@ func parseStatus(out string) *statusInfo {
 		return s
 	}
 	for _, r := range doc.Tables["slices"].Maps() {
-		info.Slices = append(info.Slices, statusSlice{
+		sl := statusSlice{
 			ID: r["id"], State: r["state"], Attempts: atoi(r["attempts"]),
 			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]), Goal: dash(r["goal"]),
 			Workspace: dash(r["workspace"]), Oracle: dash(r["oracle"]), FromGate: atoi(r["from_gate"]),
-		})
+		}
+		if f := dash(r["findings"]); f != "" {
+			sl.Findings = strings.Split(f, "+")
+		}
+		info.Slices = append(info.Slices, sl)
 	}
 	for _, r := range doc.Tables["last_runs"].Maps() {
 		if info.LastRuns == nil {

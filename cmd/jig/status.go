@@ -174,7 +174,11 @@ func renderStatusWith(st *store.Store, ticket string, sections []statusSection, 
 		if sl.FromGate > 0 {
 			fromGate = strconv.Itoa(sl.FromGate)
 		}
-		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal, dashed(sl.Workspace), dashed(sl.Oracle), fromGate})
+		findings := "-"
+		if len(sl.Findings) > 0 {
+			findings = joinPlus(sl.Findings)
+		}
+		rows = append(rows, []string{sl.ID, ss.State, strconv.Itoa(ss.Attempts), blocked, question, goal, dashed(sl.Workspace), dashed(sl.Oracle), fromGate, findings})
 
 		if ss.State == "needs-input" {
 			parkedRows = append(parkedRows, []string{sl.ID, ss.Question, resumeCell(ticket, sl, ss)})
@@ -227,7 +231,7 @@ func renderStatusWith(st *store.Store, ticket string, sections []statusSection, 
 		}
 		blocks = append(blocks, budgetLine)
 	}
-	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate"}, rows))
+	blocks = append(blocks, axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal", "workspace", "oracle", "from_gate", "findings"}, rows))
 	if len(questions) == 0 {
 		blocks = append(blocks, "questions: none")
 	} else {
