@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 )
 
@@ -83,33 +84,83 @@ func (m *Model) cursorID() (rowIdentity, string, bool) {
 }
 
 // fitPane is pg, the page with what is expanded laid out, as the page the person
-// sees: folded, but for the pane that holds the cursor's row when it is
-// expanded, which takes the lines it had folded.
+// sees: folded, but for each pane that holds an expanded row, which takes the
+// lines it had folded, whatever pane has the focus. A page that holds an
+// expanded pane of text is the one laid out whole: such a pane is read by the
+// page.
 func (m *Model) fitPane(pg, folded page) page {
 	e := m.top()
-	id, pane, ok := m.cursorID()
-	if !ok {
-		return pg
+	curID, curPane, curOK := m.cursorID()
+	var keys []expKey
+	for k := range e.expanded {
+		if k.id == (rowIdentity{}) {
+			return pg
+		}
+		keys = append(keys, k)
 	}
-	// The pane of the cursor's row, on the folded page, by the row's identity.
-	var fp pane2
-	at := 0
-	for i, l := range folded.lines {
-		if l.ref != nil && l.ref.identity() == id {
-			fp, at = paneAround(folded.lines, i), i
-			break
+	live := func(k expKey) bool {
+		return curOK && k.id == curID && (e.screen == screenMain || k.pane == curPane)
+	}
+	sort.Slice(keys, func(a, b int) bool {
+		if la, lb := live(keys[a]), live(keys[b]); la != lb {
+			return la
+		}
+		if keys[a].pane != keys[b].pane {
+			return keys[a].pane < keys[b].pane
+		}
+		return keys[a].id.id < keys[b].id.id
+	})
+	// The pane the cursor is in draws the cursor's row: a row expanded earlier in
+	// that pane is folded while the cursor is elsewhere in it.
+	cursorPane := curPane
+	if curOK && e.screen == screenMain {
+		for i, l := range folded.lines {
+			if l.ref != nil && l.ref.identity() == curID {
+				if p := paneAround(folded.lines, i); p.top >= 0 {
+					cursorPane = folded.lines[p.top].text
+				}
+				break
+			}
 		}
 	}
-	if fp.top < 0 || fp.top >= len(folded.lines) {
-		return folded
+	out, fitted := folded, map[string]bool{}
+	windowed := false
+	for _, k := range keys {
+		if fitted[k.pane] || (curOK && k.pane == cursorPane && !live(k)) {
+			continue
+		}
+		if next, w, ok := m.fitOne(pg, out, folded, k, live(k)); ok {
+			out, fitted[k.pane] = next, true
+			windowed = windowed || w
+		}
 	}
-	title := folded.lines[fp.top].text
-	if e.screen == screenMain {
-		pane = title
+	if windowed {
+		out.fold = folded.lines
 	}
-	if !e.expanded[expKey{pane, id}] {
-		return folded
+	return out
+}
+
+// fitOne draws the pane of the expanded row key names into the lines it had on
+// the folded page, in cur, a page of as many lines. live says the row is the
+// cursor's, whose lines the keys scroll. It says whether the page is windowed.
+func (m *Model) fitOne(pg, cur, folded page, key expKey, live bool) (page, bool, bool) {
+	e := m.top()
+	id := key.id
+	// The pane of the row, on the folded page, by the row's identity.
+	var fp pane2
+	at := -1
+	for i, l := range cur.lines {
+		if l.ref != nil && l.ref.identity() == id {
+			if p := paneAround(cur.lines, i); p.top >= 0 && cur.lines[p.top].text == key.pane {
+				fp, at = p, i
+				break
+			}
+		}
 	}
+	if at < 0 {
+		return cur, false, false
+	}
+	title := key.pane
 	// The row as it is laid out expanded, on the page that has it.
 	var gx []pline
 	for i, l := range pg.lines {
@@ -127,13 +178,13 @@ func (m *Model) fitPane(pg, folded page) page {
 		}
 	}
 	if len(gx) == 0 {
-		return folded
+		return cur, false, false
 	}
-	head := folded.lines[fp.top : fp.top+1+fp.names]
+	head := cur.lines[fp.top : fp.top+1+fp.names]
 	b0, b1 := fp.top+1+fp.names, fp.bottom
-	for _, g := range groupsOf(folded.lines[b0:b1]) {
+	for _, g := range groupsOf(cur.lines[b0:b1]) {
 		if g.row && g.id == id && len(gx) <= len(g.lines) {
-			return folded
+			return cur, false, false
 		}
 	}
 	// A folded page taller than the screen is windowed: the lines of the pane that
@@ -167,7 +218,7 @@ func (m *Model) fitPane(pg, folded page) page {
 		}
 		return out
 	}
-	body := groupsOf(folded.lines[lo:hi])
+	body := groupsOf(cur.lines[lo:hi])
 	cg := -1
 	for i, g := range body {
 		if g.row && g.id == id {
@@ -175,18 +226,20 @@ func (m *Model) fitPane(pg, folded page) page {
 		}
 	}
 	if cg < 0 {
-		return folded
+		return cur, false, false
+	}
+	// A row the cursor is not on is read from its first line.
+	scrolls := e
+	if !live {
+		scrolls = &navEntry{}
 	}
 	var lines []pline
-	lines = append(lines, held(folded.lines[b0:lo])...)
-	lines = append(lines, m.fitRows(body, cg, gx, hi-lo+extra, e)...)
-	lines = append(lines, held(folded.lines[hi:b1])...)
-	out := folded
-	out.lines = append(append(append(append([]pline(nil), folded.lines[:fp.top]...), head...), lines...), folded.lines[fp.bottom:]...)
-	if windowed {
-		out.fold = folded.lines
-	}
-	return out
+	lines = append(lines, held(cur.lines[b0:lo])...)
+	lines = append(lines, m.fitRows(body, cg, gx, hi-lo+extra, scrolls)...)
+	lines = append(lines, held(cur.lines[hi:b1])...)
+	out := cur
+	out.lines = append(append(append(append([]pline(nil), cur.lines[:fp.top]...), head...), lines...), cur.lines[fp.bottom:]...)
+	return out, windowed, true
 }
 
 // pane2 is the place of a pane on a page: the lines of its top edge, its names
@@ -366,7 +419,9 @@ func (m *Model) cutRow(body []group, cg int, gx []pline, room int, e *navEntry) 
 	for len(out) < room {
 		out = append(out, pline{box: boxMid})
 	}
-	m.tall = &tallInfo{id: id, total: total, part: len(row), max: maxScroll}
+	if e == m.top() {
+		m.tall = &tallInfo{id: id, total: total, part: len(row), max: maxScroll}
+	}
 	return out
 }
 

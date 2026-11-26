@@ -65,7 +65,7 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 				// A panel of what needs a person is sentences, not a list.
 				isList = isList && title != s
 			}
-			if inside == 1 && isList && body > 1 && !strings.Contains(l, word) {
+			if inside == 1 && isList && body > 1 && !strings.Contains(l, word) && !strings.Contains(l, "…") {
 				t.Errorf("%s: the first line of %s is %q, want the names with %q", where, title, l, word)
 			}
 		case strings.Contains(l, "▸"):

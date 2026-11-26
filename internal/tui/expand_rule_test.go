@@ -131,3 +131,58 @@ func TestCollapsedListsTakeWhatTheCursorsListLeaves(t *testing.T) {
 		t.Errorf("lines are left blank above the keys:\n%s", frame)
 	}
 }
+
+// TestANamesRowThatCannotFitIsLeftOut: a list draws its names only when every
+// name fits the column it names; short of room the names are none, and no column
+// is held wide for them.
+func TestANamesRowThatCannotFitIsLeftOut(t *testing.T) {
+	t.Parallel()
+	cols := []column{{}, {gap: 1}, {free: true, gap: 2}}
+	rows := [][]string{
+		{"", "identifier-name-long", "title"},
+		{"●", "JIG-1234567", strings.Repeat("word ", 12)},
+	}
+	wide := layoutMarked(cols, rows, 100, wrapRows, nil, true)
+	if len(wide[0].lines) == 0 || !strings.Contains(wide[0].lines[0], "identifier-name-long") {
+		t.Errorf("the names are left out at 100 wide: %q", wide[0].lines)
+	}
+	narrow := layoutMarked(cols, rows, 36, wrapRows, nil, true)
+	if len(narrow[0].lines) != 0 {
+		t.Errorf("the names are drawn although one is cut: %q", narrow[0].lines)
+	}
+	if got := narrow[1].lines[0]; !strings.Contains(got, "JIG-1234567") {
+		t.Errorf("the id is cut to keep a name: %q", got)
+	}
+}
+
+// TestAnExpansionStaysInItsPaneWhateverHasTheFocus: a row expanded in one pane
+// is drawn into that pane's folded room when the focus goes to another pane,
+// one of text too: the frame above the keys outside the pane is the folded one.
+func TestAnExpansionStaysInItsPaneWhateverHasTheFocus(t *testing.T) {
+	t.Parallel()
+	body := func(frame, pane string) []string {
+		lines := strings.Split(frame, "\n")
+		for i := len(lines) - 1; i > 0; i-- {
+			if strings.HasPrefix(lines[i], "───") {
+				lines = lines[:i]
+				break
+			}
+		}
+		return outsideFrame(strings.Join(lines, "\n"), pane)
+	}
+	for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {
+		g := sized(longChartRig(t, 60), size[0], size[1]).openChart("checkout").onRow("JIG-8")
+		g.tabTo("Tickets")
+		g.press("space")
+		g.press("tab")
+		after := stripANSI(g.view())
+		// What the same keys draw with nothing expanded.
+		f := sized(longChartRig(t, 60), size[0], size[1]).openChart("checkout").onRow("JIG-8")
+		f.tabTo("Tickets")
+		f.press("tab")
+		folded := body(stripANSI(f.view()), "Tickets")
+		if got := body(after, "Tickets"); strings.Join(got, "\n") != strings.Join(folded, "\n") {
+			t.Errorf("%dx%d: the frame outside Tickets moved when the focus left it:\n--- folded\n%s\n--- now\n%s", size[0], size[1], strings.Join(folded, "\n"), after)
+		}
+	}
+}

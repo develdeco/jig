@@ -147,14 +147,6 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 		}
 	}
 
-	// A list with names never cuts them: a measured column is as wide as its
-	// names, whatever it gives up.
-	floor := func(c int) int {
-		if named && len(rows) > 0 && c < len(rows[0]) {
-			return width0(rows[0][c])
-		}
-		return 0
-	}
 	// Measured columns give way only when 20 cells for the free text do not
 	// fit beside them.
 	need := 0
@@ -165,7 +157,7 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 		pick := -1
 		for _, wantID := range []bool{false, true} {
 			for _, c := range visible {
-				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= max(1, floor(c)) {
+				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= 1 {
 					continue
 				}
 				if pick < 0 || w[c] >= w[pick] {
@@ -202,8 +194,20 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 		at += w[c]
 	}
 
+	// The names are drawn when every one fits its column, else none is.
+	namesFit := true
+	if named && len(rows) > 0 {
+		for _, c := range visible {
+			if !stacked[c] && c < len(rows[0]) && width0(rows[0][c]) > w[c] {
+				namesFit = false
+			}
+		}
+	}
 	out := make([]laidRow, len(rows))
 	for ri, r := range rows {
+		if named && ri == 0 && !namesFit {
+			continue
+		}
 		rowMax := maxRows
 		isWhole := ri < len(whole) && whole[ri]
 		if isWhole {

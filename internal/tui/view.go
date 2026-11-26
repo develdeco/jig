@@ -850,7 +850,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
-		inBox, top, k := hiddenAbove(lines, from)
+		inBox, top, k := hiddenAbove(pg.shaped().lines, from)
 		edge := -1
 		if inBox {
 			edge = top
@@ -895,7 +895,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		rows = append(rows, fit(marker+l.text, w))
 	}
 	if to < len(lines) {
-		inBox, bottom, k := hiddenBelow(lines, to)
+		inBox, bottom, k := hiddenBelow(pg.shaped().lines, to)
 		if k > 0 {
 			edge := -1
 			if inBox {

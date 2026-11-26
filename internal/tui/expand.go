@@ -176,6 +176,9 @@ func (m *Model) expandHolder(fold bool) bool {
 func (m *Model) expandMoved() {
 	m.top().expGen++
 	m.shown = nil
+	// A page that changed because the person folded or opened a holder has no new
+	// lines in it: the reader's place is not held against the last frame.
+	m.seen = nil
 }
 
 // underWrap adds text to the panel p as lines under the row of owner (nil for a
