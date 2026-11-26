@@ -280,8 +280,9 @@ func TestBuildScreenShowsAVerificationThatCouldNotRun(t *testing.T) {
 	}
 }
 
-// TestBuildScreenGivesTheFacts: the slice row ends in the workspace and oracle
-// when they fit, and a fix slice names its round.
+// TestBuildScreenGivesTheFacts: the detail of the slice under the cursor says its
+// workspace and oracle, what it waits for and, for a fix slice, the round it came
+// from; the row has the goal alone.
 func TestBuildScreenGivesTheFacts(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
@@ -290,11 +291,16 @@ func TestBuildScreenGivesTheFacts(t *testing.T) {
 		[]string{"fix-1", "queued", "0", "a", "-", "Check the error that the long goal of this fix slice goes on about and on", "app", "go test ./...", "1"},
 	), 0)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", ""))).press("enter")
-	text := pageText(g)
-	if !strings.Contains(text, "Greet  workspace app · oracle unit") {
-		t.Errorf("the short row does not end in its facts:\n%s", text)
+	text := readWords(pageText(g))
+	if !strings.Contains(text, "goal Greet oracle unit workspace app") || strings.Contains(text, "waits for") {
+		t.Errorf("the detail of the first slice does not give its facts:\n%s", text)
 	}
-	if !strings.Contains(readWords(text), "workspace app · oracle go test ./... · fix slice of round 1 · after a") || strings.Contains(readWords(text), "on and on workspace") {
-		t.Errorf("the facts a long row has no room for are not on the line below it:\n%s", text)
+	g.press("down")
+	text = readWords(pageText(g))
+	if !strings.Contains(text, "goal Check the error that the long goal of this fix slice goes on about and on oracle go test ./... workspace app waits for a round 1") {
+		t.Errorf("the detail of the fix slice does not give its facts:\n%s", text)
+	}
+	if strings.Contains(strings.Split(text, "Detail")[0], "workspace") {
+		t.Errorf("a row of the list says its facts:\n%s", text)
 	}
 }

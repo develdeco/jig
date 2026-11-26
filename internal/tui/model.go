@@ -298,6 +298,9 @@ type Model struct {
 	table []keyRow
 	// help is the `?` overlay while it is up.
 	help *helpView
+	// panelW, when it is more than 0, is the width the panels being built are
+	// drawn in: the side of a screen (detail.go), not the whole of it.
+	panelW int
 	// pageBuilds counts the pages built: a frame builds one.
 	pageBuilds int
 	// queueBuilds counts the project's list built (maincache.go): a key that

@@ -158,8 +158,7 @@ func TestAStoppedRunIsNotShownAsAFailure(t *testing.T) {
 	quiet.feed(envs...)
 	tk := quiet.m.w.tickets["JIG-1"]
 	tk.status = nil
-	var p page
-	quiet.m.sliceRecords(&p, tk, sliceRow{ID: "a"}, 1, "")
+	p := page{lines: quiet.m.detailLines(quiet.m.buildDetail(tk, sliceRow{ID: "a"}, statusSlice{}), 80)}
 	if got := pagesText(p); !strings.Contains(got, readingText) || strings.Contains(got, "failed:") {
 		t.Errorf("records before the status is read:\n%s", got)
 	}

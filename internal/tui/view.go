@@ -68,6 +68,16 @@ type pline struct {
 	// focus draws the line with its panel border in the key color; a panel is
 	// drawn focused when every one of its lines says so.
 	focus bool
+	// side is the line of a panel drawn beside this one, as it is to be drawn, and
+	// sideW the cells it takes; a line of the panel with no side line of its own
+	// (a mark the window adds) has a blank one.
+	side  string
+	sideW int
+	// hold marks the first and the last line of a Detail panel (detail.go): the
+	// page is read down to it with the list above it, so a cursor on a row of the
+	// list leaves the window where it begins while the detail has room, instead of
+	// moving it down to what follows the row.
+	hold int
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -343,7 +353,14 @@ func (m *Model) bodyRows() int {
 // page opened at its top lessens what is held as it is read down.
 func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	selLine, n := 0, 0
+	from, to := -1, -1
 	for i, l := range pg.lines {
+		if l.hold&holdFrom != 0 {
+			from = i
+		}
+		if l.hold&holdTo != 0 {
+			to = i + 1
+		}
 		if l.ref == nil {
 			continue
 		}
@@ -352,6 +369,8 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 		}
 		n++
 	}
+	// room is whether a page that begins at its top shows a row of its detail.
+	room := from >= 0 && from+2 < h
 	start := 0
 	if len(pg.lines) > h {
 		start = selLine - h/2
@@ -360,10 +379,15 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// A row in the first screenful leaves the page where it begins.
 			start = 0
 		}
-		if n > 0 && sel == n-1 {
+		if n > 0 && sel == n-1 && !(room && selLine < h) {
 			// On the last row, show as much of what follows it as fits
 			// with the row still in view: a panel of activity is below.
 			start = clampStart(pg.lines, h, selLine)
+		}
+		if n > 0 && from >= 0 && !room {
+			// The list leaves no room for its detail: the window starts as low as
+			// the cursor's row lets it, to show the detail.
+			start = clampStart(pg.lines, h, min(selLine, max(0, to-h)))
 		}
 		if n == 0 {
 			// A page with no row to stand on is moved by its own offset.
@@ -583,33 +607,40 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if plain {
 		return m.plainRows(pg, sel, from, to, w), from, to
 	}
-	mark := func(text string, boxed bool) string {
+	// mark is a line of words inside the panel at edge, or loose; a panel drawn
+	// beside another has the other's blank row beside it.
+	mark := func(text string, edge int) string {
 		l := pline{text: m.st.dim(text), box: boxNone}
-		if boxed {
-			l.box = boxMid
+		if edge >= 0 {
+			l.box, l.sideW = boxMid, lines[edge].sideW
 			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
 	}
 	if from > 0 {
 		inBox, top, k := hiddenAbove(lines, from)
+		edge := -1
 		if inBox {
+			edge = top
 			rows = append(rows, m.frameLine(lines[top], "  ", w, false))
-			// A list cut from below its first row keeps its column names.
+			// A list cut from below its first row keeps its column names, with
+			// nothing beside them: what is beside them is a row it has not drawn.
 			for i := 1; i <= namesAbove(lines, from, h); i++ {
-				rows = append(rows, m.frameLine(lines[top+i], "  ", w, false))
+				names := lines[top+i]
+				names.side = ""
+				rows = append(rows, m.frameLine(names, "  ", w, false))
 			}
 		}
 		switch {
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, m.frameLine(pline{text: above, box: boxMid}, "  ", w, false))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, sideW: lines[edge].sideW}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}
 		case k > 0:
-			rows = append(rows, mark(fmt.Sprintf("↑ %d more", k), inBox))
+			rows = append(rows, mark(fmt.Sprintf("↑ %d more", k), edge))
 		}
 	}
 	idx := 0
@@ -638,7 +669,11 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if to < len(lines) {
 		inBox, bottom, k := hiddenBelow(lines, to)
 		if k > 0 {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox))
+			edge := -1
+			if inBox {
+				edge = bottom
+			}
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), edge))
 		}
 		if inBox {
 			rows = append(rows, m.frameLine(lines[bottom], "  ", w, false))

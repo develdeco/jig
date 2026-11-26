@@ -83,13 +83,20 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 		}
 		cells, lit := litCells(l)
 		first, last := -1, -1
+		var borders []int
 		for i, cell := range cells {
 			if cell == "│" {
 				if first < 0 {
 					first = i
 				}
 				last = i
+				borders = append(borders, i)
 			}
+		}
+		if len(borders) == 4 {
+			// A list with its detail beside it: the row is lit across the list's
+			// own panel, not the detail's.
+			last = borders[1]
 		}
 		for i := first + 1; i < last; i++ {
 			if !lit[i] {

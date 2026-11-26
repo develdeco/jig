@@ -97,14 +97,17 @@ func TestAnAdoptedBranchSeenWithoutItsStatusIsBuilt(t *testing.T) {
 	}
 }
 
+// TestTheLastRowShowsThePanelBelowIt: on the last slice the panel below the list
+// is its own detail, drawn whole with its edge, and the list is not cut to make
+// room for what follows it.
 func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 22})
 	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
 	v := g.view()
-	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "slice c builder asks: Formal or casual?") {
-		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
+	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╭─ Detail · d") || !strings.Contains(v, "waits for b, c") || strings.Contains(v, "↑ ") {
+		t.Errorf("the last slice and its whole detail are not in view under the whole list:\n%s", v)
 	}
 }
 
