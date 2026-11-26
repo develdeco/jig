@@ -265,6 +265,23 @@ func TestEveryCutHasAMarkAndAHolder(t *testing.T) {
 		"build":    func(t *testing.T, w, h int) *rig { return buildRig(t, w, h, 40) },
 		"map":      func(t *testing.T, w, h int) *rig { return longDestinationChart(t, w, h, 70) },
 		"slice":    func(t *testing.T, w, h int) *rig { return buildRig(t, w, h, 40).press("enter") },
+		// A fog entry is a row of the Tickets pane the cursor cannot stand on: it is
+		// never cut, so there is no mark to leave without a holder.
+		"fog": func(t *testing.T, w, h int) *rig {
+			g := newRig(t, "")
+			lines, status := chartTickets()
+			fog := func(v map[string]any) {
+				for _, e := range v["tickets"].([]map[string]any) {
+					if e["id"] == "" {
+						e["title"] = cutTitle(42)
+					}
+				}
+			}
+			answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(fog), status)
+			g.feed(lines...)
+			g.send(tea.WindowSizeMsg{Width: w, Height: h})
+			return g.openChart("checkout")
+		},
 	}
 	for name, mk := range screens {
 		for _, size := range sizes {
