@@ -102,6 +102,9 @@ type pline struct {
 	// home marks the row a pane's cursor stands on before the person has put it
 	// anywhere: the sub-step that matters now.
 	home bool
+	// fits marks a line already wrapped for the width the page is drawn at: a
+	// cached body is wrapped once, and a frame does not measure it again.
+	fits bool
 }
 
 // page is a screen's body before it is windowed and framed.
@@ -174,8 +177,12 @@ func (m *Model) page() page {
 // and so is a line of an ask, which its screen wraps whole.
 func (m *Model) wrapLong(pg page) page {
 	var out []pline
-	m.measured += len(pg.lines)
 	for _, l := range pg.lines {
+		if l.fits {
+			out = append(out, l)
+			continue
+		}
+		m.measured++
 		w := max(1, m.width-2)
 		if l.box != boxNone {
 			w = m.innerWidth()

@@ -133,7 +133,7 @@ func TestADownOnTheSliceScreenBuildsNoRow(t *testing.T) {
 		jl(at(3, 1), "JIG-1", "b", journal.EventRecorded, with("", sha('f'), "", "", "", ""), func(l *journal.Line) { l.Recordings = recs }),
 	)
 	g := openSlice(t, fixRoundStatus(), lines, "b", 100, 30)
-	built, laid := g.m.sliceBuilds, g.m.laidBuilds
+	built, laid, measured := g.m.sliceBuilds, g.m.laidBuilds, g.m.measured
 	if built == 0 {
 		t.Fatal("the slice screen built no body")
 	}
@@ -143,8 +143,8 @@ func TestADownOnTheSliceScreenBuildsNoRow(t *testing.T) {
 	}
 	g.press("up")
 	g.view()
-	if g.m.sliceBuilds != built || g.m.laidBuilds != laid {
-		t.Errorf("keys built %d bodies and laid out %d lists, want none", g.m.sliceBuilds-built, g.m.laidBuilds-laid)
+	if g.m.sliceBuilds != built || g.m.laidBuilds != laid || g.m.measured != measured {
+		t.Errorf("keys built %d bodies, laid out %d lists and measured %d rows, want none", g.m.sliceBuilds-built, g.m.laidBuilds-laid, g.m.measured-measured)
 	}
 	// What arrives builds it again, and then the frames that follow build nothing.
 	g.feed(jl(at(4, 0), "JIG-1", "b", journal.EventNote, with("s-builder", "", "", "a note", "", "")))

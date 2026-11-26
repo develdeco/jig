@@ -21,13 +21,33 @@ func (m *Model) slicePage(id, slice string) page {
 		p.add(m.st.dim("no ticket " + id))
 		return p
 	}
-	var row *sliceRow
+	p.lines = append(p.lines, m.sliceHead(t, slice)...)
+	p.lines = append(p.lines, m.sliceBody(t, slice)...)
+	return p
+}
+
+// sliceRowOf is the row of the slice among the ticket's, nil when it has none.
+func (m *Model) sliceRowOf(t *ticket, slice string) *sliceRow {
 	for _, s := range t.slices(m.zone) {
 		if s.ID == slice {
-			s := s
-			row = &s
+			return &s
 		}
 	}
+	return nil
+}
+
+// sliceHead is the lines of the slice screen over its commits: the finding of a
+// fix slice and the slice's own panel. They show the slice's work time, which
+// counts to the second, so they are built once for each second as well as for
+// what they read; a key within the second draws them again and builds nothing.
+func (m *Model) sliceHead(t *ticket, slice string) []pline {
+	memo := t.memoFor()
+	key := "head|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String() + "|" + strconv.FormatInt(m.now().Unix(), 10)
+	if lines, ok := memo.sliceBody[key]; ok {
+		return lines
+	}
+	var p page
+	row := m.sliceRowOf(t, slice)
 	switch {
 	case row == nil && t.status == nil:
 		p.add(m.st.dim("reading the ticket's status"))
@@ -37,23 +57,44 @@ func (m *Model) slicePage(id, slice string) page {
 		m.findingPanel(&p, t, *row)
 		m.slicePanel(&p, t, *row)
 	}
+	return m.keepLines(memo, key, p)
+}
 
-	p.lines = append(p.lines, m.sliceBody(t, slice, row)...)
-	return p
+// keepLines wraps a built page for the width once, marks its lines as fitting,
+// and keeps them in the ticket's memo under key.
+func (m *Model) keepLines(memo *ticketMemo, key string, p page) []pline {
+	p = m.wrapLong(p)
+	for i := range p.lines {
+		p.lines[i].fits = true
+	}
+	if memo.sliceBody == nil {
+		memo.sliceBody = map[string][]pline{}
+	}
+	if strings.HasPrefix(key, "head|") {
+		// The heads of the seconds gone by.
+		for k := range memo.sliceBody {
+			if strings.HasPrefix(k, "head|") {
+				delete(memo.sliceBody, k)
+			}
+		}
+	}
+	memo.sliceBody[key] = p.lines
+	return p.lines
 }
 
 // sliceBody is the lines of the slice screen under the slice's own panel: its
 // commits, the questions, the calls and the timeline. They are built once for
 // what they read, the ticket's lines, status and the width, and a key that moves
 // the cursor draws them again and builds nothing.
-func (m *Model) sliceBody(t *ticket, slice string, row *sliceRow) []pline {
+func (m *Model) sliceBody(t *ticket, slice string) []pline {
 	memo := t.memoFor()
-	key := slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String()
+	key := "body|" + slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String()
 	if lines, ok := memo.sliceBody[key]; ok {
 		return lines
 	}
 	m.sliceBuilds++
 	var p page
+	row := m.sliceRowOf(t, slice)
 	oracle := ""
 	if row != nil {
 		oracle = row.Oracle
@@ -117,11 +158,7 @@ func (m *Model) sliceBody(t *ticket, slice string, row *sliceRow) []pline {
 		}
 		m.listPanel(&p, listSpec{title: "Timeline", summary: strconv.Itoa(len(lines)), cols: timelineColumns, names: timelineColumnNames, rows: rows})
 	}
-	if memo.sliceBody == nil {
-		memo.sliceBody = map[string][]pline{}
-	}
-	memo.sliceBody[key] = p.lines
-	return p.lines
+	return m.keepLines(memo, key, p)
 }
 
 // The columns of the slice screen's lists: a commit, a question, and a line of
@@ -376,7 +413,12 @@ func (m *Model) under(p *page, indent int, mark, text string, style func(string)
 	if mark != "" {
 		lead += width(mark) + 1
 	}
-	for i, l := range wrapWhole(text, max(1, m.innerWidth()-lead)) {
+	room := max(1, m.innerWidth()-lead)
+	lines := []string{text}
+	if strings.Contains(text, "\n") || (len(text) > room && width(text) > room) {
+		lines = wrapWhole(text, room)
+	}
+	for i, l := range lines {
 		if i == 0 && mark != "" {
 			p.boxUnder(spaces(indent) + mark + " " + style(l))
 			continue
