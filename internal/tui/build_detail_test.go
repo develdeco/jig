@@ -67,14 +67,14 @@ func TestADetailPanelShowsEveryFieldWholeAndMarksWhatIsCut(t *testing.T) {
 	}
 
 	// A screen with too few rows for the detail windows it inside its box.
-	b := fixRoundBuild(t, 80, 16)
+	b := fixRoundBuild(t, 80, 20)
 	b.press("down", "down", "down", "down") // the fix slice, whose goal is long
 	view := b.view()
-	if line := rowHolding(view, "more"); !strings.HasPrefix(strings.TrimSpace(line), "│") || !strings.HasSuffix(strings.TrimSpace(line), "│") {
-		t.Errorf("the mark of what is cut is not inside a box:\n%s", view)
+	if detail := between(view, "╭─ Detail · fix-2-app", "╰"); !strings.Contains(detail, "│  ↓ ") || strings.Contains(detail, "…") {
+		t.Errorf("the detail is not cut with a mark inside its box:\n%s", view)
 	}
-	if h := len(strings.Split(view, "\n")); h != 16 {
-		t.Errorf("the screen is %d rows, want 16:\n%s", h, view)
+	if h := len(strings.Split(view, "\n")); h != 20 {
+		t.Errorf("the screen is %d rows, want 20:\n%s", h, view)
 	}
 }
 

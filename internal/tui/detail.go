@@ -130,9 +130,23 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, lists ...listSpec) {
 	}
 	first := len(p.lines)
 	if m.width < sideMinWidth {
-		for _, l := range lists {
-			m.listPanel(p, l)
+		// The lists are laid out as they are asked to be. When what is above the
+		// detail leaves it no room, the rows of a list that can give up lines
+		// take one line each: the detail has each field whole.
+		var list page
+		for pass := 0; pass < 2; pass++ {
+			list = page{}
+			for _, l := range lists {
+				if pass == 1 && l.room == 0 {
+					l.room = len(l.rows)
+				}
+				m.listPanel(&list, l)
+			}
+			if first+len(list.lines)+detailPeek <= m.bodyRows() {
+				break
+			}
 		}
+		p.lines = append(p.lines, list.lines...)
 		first = len(p.lines)
 		p.lines = append(p.lines, m.detailLines(*d, m.width)...)
 	} else {
@@ -155,6 +169,11 @@ const (
 	holdFrom = 1 << iota
 	holdTo
 )
+
+// detailPeek is the lines of a Detail panel a window must reach when the page
+// begins at its top for the list above it to leave the detail room: its top
+// edge, two rows of it, the mark of what is cut and its bottom edge.
+const detailPeek = 5
 
 // zipSides puts the lines of a panel drawn in right beside the lines of left,
 // line by line: the shorter of the two is given blank rows inside its frame,

@@ -27,6 +27,11 @@
 // edge when a window cuts the list (parts.go). The row under the cursor is lit
 // across its panel, and a panel can be drawn with its border lit.
 //
+// A phase screen (build, review, brief, publish) is a list and
+// the detail of the row under the cursor: a Detail panel, drawn by one part
+// (detail.go), holds that row's fields whole under the list, and beside it from
+// 160 columns.
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on
