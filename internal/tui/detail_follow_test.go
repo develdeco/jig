@@ -4,8 +4,54 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/journal"
 )
+
+// keyNow delivers one key to the model and draws it once, with no other message
+// between: the frame a terminal shows after the key.
+func keyNow(g *rig, r rune) string {
+	g.t.Helper()
+	g.m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return g.m.View()
+}
+
+// firstFrames opens the review of reviewFixRound's ticket on its ask and returns to
+// it from the activity pane, at w x h, and checks the first frame each time is the
+// ask's Detail.
+func firstFrames(t *testing.T, w, h int) {
+	t.Helper()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", reviewFixRoundStatus(), 0)
+	g.feed(reviewFixRoundEvents()...)
+	g.sized(w, h)
+	g.view()
+	if first := keyNow(g, '3'); !strings.Contains(first, "╭─ Detail · r2-f2") || strings.Contains(first, "╭─ Detail · round") {
+		t.Errorf("%dx%d: the first frame of the review is not the ask's Detail:\n%s", w, h, first)
+	}
+	g.tabTo("Review activity")
+	g.press("esc")
+	if first := keyNow(g, '3'); !strings.Contains(first, "╭─ Detail · r2-f2") || strings.Contains(first, "╭─ Detail · round") {
+		t.Errorf("%dx%d: the first frame of a return to the review is not the ask's Detail:\n%s", w, h, first)
+	}
+}
+
+// TestTheDetailIsTheFocusedListsRowInEveryFrame: a screen's panes have their
+// cursors from its first frame, so the frame after the key that opens the review
+// on its ask, and the one after a return to it, draw the ask's Detail.
+func TestTheDetailIsTheFocusedListsRowInEveryFrame(t *testing.T) {
+	t.Parallel()
+	firstFrames(t, 100, 30)
+}
+
+// TestTheFirstFrameDrawsTheCursorRowsDetail: the same at 100x30 and 100x40.
+func TestTheFirstFrameDrawsTheCursorRowsDetail(t *testing.T) {
+	t.Parallel()
+	for _, size := range [][2]int{{100, 30}, {100, 40}} {
+		firstFrames(t, size[0], size[1])
+	}
+}
 
 // TestTheDetailFollowsItsRowNotItsIndex: the Detail is of the row the cursor of
 // the focused list stands on, found by the row's identity, so a zoom that keeps

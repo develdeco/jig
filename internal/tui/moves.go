@@ -44,6 +44,7 @@ func (m *Model) arrive(e *navEntry) bool {
 	if ok {
 		e.sel, e.scroll, e.follow = k.sel, k.scroll, k.follow
 		e.paneFocus, e.paneCurs, e.textFocus, e.zoom = k.paneFocus, k.paneCurs, k.textFocus, k.zoom
+		e.listFocus = k.listFocus
 		e.lead, e.psearch = k.lead, k.psearch
 		e.seenSel, e.seenSet = k.seenSel, k.seenSet
 	}
