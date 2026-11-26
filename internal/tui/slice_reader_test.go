@@ -107,8 +107,11 @@ func TestSliceScreenKeepsTheColorOfEveryWrappedLine(t *testing.T) {
 	}
 	wrapped := 0
 	for _, l := range commits {
-		if !strings.Contains(l, "\x1b[") {
-			t.Errorf("a line of the commits panel has no color: %q", l)
+		// Every row opens its own color: the text after the indent starts with the
+		// sequence that sets it. A row cut from a line colored before it was
+		// wrapped carries only the end of the color, and starts with plain text.
+		if !strings.HasPrefix(strings.TrimLeft(l, " "), "\x1b[") {
+			t.Errorf("a line of the commits panel does not open its color: %q", l)
 		}
 		if strings.Contains(l, "(sampled peak)") && !strings.Contains(l, "oracle passed") {
 			wrapped++

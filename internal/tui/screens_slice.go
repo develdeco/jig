@@ -112,14 +112,15 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 		for i, q := range qs {
 			state, word := StateNeedsInput, "open"
 			if !q.Open {
+				// The answer says by whom, in the words the timeline uses.
 				state, word = StateOK, "answered"
-				if q.Provenance == "person" {
-					word += " by you"
+				if by := m.byWhom(t, q.Provenance, q.AnswerSession); by != "" {
+					word += " by " + by
 				}
 			}
 			asked := ""
 			if q.Session != "" {
-				asked = m.st.dim("asked by " + m.who(t, q.Session) + " at " + q.At)
+				asked = m.st.dim("asked by " + m.whoAs(t, q.Session, roleOf(journal.EventQuestion)) + " at " + q.At)
 			}
 			cells[i] = []string{m.st.icon(state), q.ID, m.st.state(state, word), asked}
 		}
@@ -135,7 +136,8 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 				p.boxUnder("    " + l)
 			}
 			if !q.Open && q.Answer != "" {
-				p.boxUnder("    " + m.st.state(StateOK, "answer: ") + q.Answer)
+				// An answer is what a person acted on: drawn whole, wrapped.
+				m.under(&p, 4, "", "answer: "+q.Answer, func(s string) string { return s })
 			}
 		}
 		p.boxEnd()

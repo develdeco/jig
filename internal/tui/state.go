@@ -353,6 +353,8 @@ type questionRow struct {
 	ID, Slice, Text, Session, At string
 	Open                         bool
 	Answer, Provenance           string
+	// AnswerSession is the session that wrote the answer line, if it named one.
+	AnswerSession string
 }
 
 // questions are the ticket's questions in the order they were asked. The text
@@ -384,7 +386,7 @@ func (t *ticket) readQuestions(zone *time.Location) []questionRow {
 			byID[l.Ref] = &questionRow{ID: l.Ref, Slice: l.Slice, Text: l.Summary, Session: l.Session, At: clock(l, zone), Open: true}
 		case journal.EventAnswer:
 			if q := byID[l.Ref]; q != nil {
-				q.Open, q.Answer, q.Provenance = false, l.Summary, l.Provenance
+				q.Open, q.Answer, q.Provenance, q.AnswerSession = false, l.Summary, l.Provenance, l.Session
 			}
 		}
 	}
