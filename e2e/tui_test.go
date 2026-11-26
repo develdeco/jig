@@ -415,9 +415,12 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("\x1b[B")
 	screens.until("╭─ Detail · round 1", "5 files read")
 	screens.press("\x7f")
-	// The round that closed applied the dismissal: the ask is gone.
-	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
+	// The round that closed applied the dismissal: the ask is gone, and the finding
+	// stays in the findings table as the round that raised it recorded it.
+	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") {
 		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
+	} else if !strings.Contains(out, "r1-f1,1,ask,") {
+		t.Errorf("status lost the finding the first round raised:\n%s", out)
 	}
 
 	// With no What written the key stops: the frame says where the bullets go and
