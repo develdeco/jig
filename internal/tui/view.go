@@ -441,6 +441,14 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 	return start
 }
 
+// underRow says the line is one a list draws under a row, indented four cells: a
+// finding's detail, the reviewer under a round. A window that moves with the
+// cursor never begins on one, so the row it belongs to is not hidden under the
+// count of the rows above.
+func underRow(l pline) bool {
+	return l.box == boxMid && !l.names && l.ref == nil && !l.cont && strings.HasPrefix(l.text, "    ")
+}
+
 // lastRowOfPanel says the row at line i is the last row of the panel it is in:
 // no other row stands between it and the panel's bottom edge.
 func lastRowOfPanel(lines []pline, i int) bool {
@@ -478,7 +486,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		k++
 	}
 	s := max(0, min(start, n-1))
-	for s > 0 && lines[s].cont {
+	for s > 0 && (lines[s].cont || keep && underRow(lines[s])) {
 		s--
 	}
 	if top, _ := boxOf(lines, s); top >= 0 && s > top && s <= top+namesRows(lines, top)+1 {
@@ -491,7 +499,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// the bottom edge starts at the panel's last row.
 		top, _ := boxOf(lines, s)
 		j := s - 1
-		for j > top && lines[j].cont {
+		for j > top && (lines[j].cont || keep && underRow(lines[j])) {
 			j--
 		}
 		if j > top+namesRows(lines, top) {
@@ -522,7 +530,7 @@ func windowSpan(pg page, sel, start, h int, keep bool) (from, to int, plain bool
 		// The window moves down a row, and stops at the cursor's row, which is the
 		// first line of a row of its own: there e is past it.
 		s++
-		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom) {
+		for s < n-1 && (lines[s].cont || lines[s].box == boxBottom || underRow(lines[s])) {
 			// Past a row's continuation rows, and past a panel's bottom edge, not
 			// onto it: the panel above has no row in the window then, and is not
 			// drawn.

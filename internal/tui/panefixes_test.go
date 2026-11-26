@@ -125,6 +125,27 @@ func TestTheLastRowBringsThePanelsBelowIntoView(t *testing.T) {
 	}
 }
 
+// TestAWindowNeverBeginsOnARowsDetail: under a pane's "↑ n more" mark stands a row's
+// first line, never the detail a list draws under a row.
+func TestAWindowNeverBeginsOnARowsDetail(t *testing.T) {
+	t.Parallel()
+	for h := 14; h <= 30; h++ {
+		g := newRig(t, "JIG-2")
+		g.send(tea.WindowSizeMsg{Width: 80, Height: h})
+		g.feed(jig2Mid()...)
+		g.press("enter")
+		for _, keys := range [][]string{{"end"}, {"tab", "end"}, {"tab", "tab", "end"}} {
+			g.press(keys...)
+			lines := strings.Split(g.view(), "\n")
+			for i := 0; i+1 < len(lines); i++ {
+				if strings.Contains(lines[i], "│  ↑ ") && strings.Contains(lines[i], " more") && strings.HasPrefix(lines[i+1], "  │      ") {
+					t.Errorf("height %d after %v: a row's detail stands under the mark:\n%s", h, keys, strings.Join(lines, "\n"))
+				}
+			}
+		}
+	}
+}
+
 // TestAPanesCursorMovesInsideItsWindow: a down on a pane that draws a window of its
 // rows keeps the newest line in view; the window moves only when the cursor would
 // leave it.

@@ -2,7 +2,8 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Findings ─────────────────────────────────────────────────────── round 1 ─╮
   │    risk    where          outcome  title              id                   │
-  │  ↑ 3 more                                                                  │
+  │  ↑ 2 more                                                                  │
+  │  ○ low     beta/b.go:2    noted    Rename the helper  r1-f4                │
   │      a clearer name, whenever the file is next touched                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Asks ───────────────────────────────────────────────────────────────── 2 ─╮
@@ -15,8 +16,7 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
   ╭─ Review activity ────────────────────────────────────────── latest 2 of 4 ─╮
   │  time     step   what                                                      │
   │  09:11:41 - asks you dismissed “Name shadows import”                       │
-  │  09:11:40 + asks you kept “Unchecked error”                                │
-  │  ↓ 2 older                                                                 │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
