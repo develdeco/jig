@@ -12,20 +12,17 @@ import (
 // TestATrysRunsAndASlicesTriesReadNewestFirst: a slice's commits are listed
 // newest first by the line that began each, a commit run again keeps its place
 // and shows its runs newest first, and of two commits begun in one instant the
-// later written is above.
+// later written is above. A verify-pending line begins none.
 func TestATrysRunsAndASlicesTriesReadNewestFirst(t *testing.T) {
 	t.Parallel()
 	run := func(min, sec int, commit byte, outcome, command string) events.Envelope {
 		return jl(at(min, sec), "JIG-1", "a", journal.EventOracle, with("", sha(commit), outcome, "", "", ""), func(l *journal.Line) { l.Command, l.Seconds = command, 3 })
 	}
-	pending := func(min, sec int, commit byte) events.Envelope {
-		return jl(at(min, sec), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha(commit), "", "try "+string(commit), "", ""))
-	}
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "3", "-", "-", "Greet", "app", "unit", "-"}), 0)
 	g.feed(
-		pending(0, 0, 'a'), run(0, 30, 'a', "fail", "first run"),
-		pending(1, 0, 'b'), pending(1, 0, 'c'), run(1, 30, 'b', "fail", "only run"), // one instant: c was written after b
+		run(0, 30, 'a', "fail", "first run"),
+		run(1, 30, 'b', "fail", "only run"), run(1, 30, 'c', "fail", "third run"), // one instant: c was written after b
 		run(3, 0, 'a', "fail", "second run"), // the first commit is run again, after the others began
 	).press("enter").sized(100, 60)
 	text := pageText(g)

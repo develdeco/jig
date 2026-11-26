@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -34,8 +35,9 @@ func TestTheSliceTrackReadsClaimedRunVerified(t *testing.T) {
 
 // TestALoneOraclePassIsBuildingNotVerifying: the build screen's commit list
 // starts a commit that has only a recorded oracle pass, and no verified line,
-// as building, and one with only an old pending line as having no recorded
-// result. A verified line makes it green; a failure stalls it.
+// as building. A verified line makes it green; a failure stalls it. An old
+// pending line is no commit, and the screen speaks of the commit it names only
+// as the status's table does: with no recorded result.
 func TestALoneOraclePassIsBuildingNotVerifying(t *testing.T) {
 	t.Parallel()
 	a, b, c := sha('a'), sha('b'), sha('c')
@@ -49,14 +51,13 @@ func TestALoneOraclePassIsBuildingNotVerifying(t *testing.T) {
 	for _, r := range tk.commits("s") {
 		got[r.SHA] = r.State
 	}
-	want := map[string]string{a: StateQueued, b: StateBuilding, c: StateGreen}
-	for sha, state := range want {
-		if got[sha] != state {
-			t.Errorf("commit %s is %q, want %q (all: %v)", short(sha), got[sha], state, got)
-		}
+	want := map[string]string{b: StateBuilding, c: StateGreen}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the commits are %v, want %v: an old pending line is no commit", got, want)
 	}
 
-	// On the build screen a commit with only a pending line says so.
+	// On the build screen the commit a pending line names reads the state the
+	// status's table gives it.
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"})+axi.Table("verification_states", []string{"slice", "commit", "state", "clear"}, [][]string{{"a", a[:12], "no recorded result", "jig verify JIG-1 --slice a"}}), 0)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", a, "", "first", "", ""))).press("enter")

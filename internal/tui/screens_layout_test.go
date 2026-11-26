@@ -48,8 +48,8 @@ func TestBuildReviewSliceScreensCutNothingWhileWidthAllows(t *testing.T) {
 		lines := jig1Records()
 		for i := range lines {
 			switch lines[i].Event {
-			case journal.EventVerifyPending:
-				lines[i].Summary = layoutSubject
+			case journal.EventOracle:
+				lines[i].Subject = layoutSubject
 			case journal.EventQuestion:
 				lines[i].Summary = layoutQuestion
 			}
@@ -65,6 +65,9 @@ func TestBuildReviewSliceScreensCutNothingWhileWidthAllows(t *testing.T) {
 		},
 		"slice": func() (*rig, []string) {
 			g := build()
+			// The slice screen words a commit's subject through the line that asked
+			// for its verification, until it lists the commits itself.
+			g.feed(jl(at(0, 6), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", layoutSubject, "", "")))
 			g.press("enter", "up", "enter")
 			return g, []string{layoutSubject}
 		},

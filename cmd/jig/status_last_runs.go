@@ -44,13 +44,13 @@ func lastRunsTable(runs []verify.LastRun) []string {
 		if l.Seconds > 0 {
 			seconds = strconv.Itoa(l.Seconds)
 		}
-		peak := memoryWords(l.PeakBytes)
+		peak := verify.MemoryWords(l.PeakBytes)
 		basis := ""
 		if peak != "" {
-			basis = basisWords(l.PeakBasis)
+			basis = verify.BasisWords(l.PeakBasis)
 		}
 		rows = append(rows, []string{r.Slice, shortSHA(l.Commit), r.Result, r.Covers, orNotMeasured(seconds),
-			orNotMeasured(cpuWords(l.CPUMs)), orNotMeasured(peak), orNotMeasured(basis)})
+			orNotMeasured(verify.CPUWords(l.CPUMs)), orNotMeasured(peak), orNotMeasured(basis)})
 	}
 	if len(rows) == 0 {
 		return nil

@@ -8,6 +8,7 @@ import (
 
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // The records the detail screens show under their rows: what a slice's commits
@@ -19,13 +20,13 @@ import (
 type commitRecord struct {
 	SHA, Subject string
 	// State is how the commit stands: StateQueued while it has no recorded
-	// result (an old pending line is no result), StateBuilding once a run
+	// result, StateBuilding once a run
 	// passed and no verified line follows, StateGreen once verified,
 	// StateStalled when the latest run failed or the verification could not
 	// run.
 	State string
-	// At is when the verification was asked for, and Verified when it passed.
-	At, Verified events.Envelope
+	// Verified is the line that says the commit passed.
+	Verified events.Envelope
 	// Began is the instant of the first line about the commit, which is where
 	// a list of commits puts it: later words add to the commit and never move it.
 	Began time.Time
@@ -34,13 +35,16 @@ type commitRecord struct {
 	// Error is the verify-error line that ended the commit's verification, if
 	// one did.
 	Error *events.Envelope
+	// Recordings are the files the build's scenarios wrote at the commit, the
+	// ones its recorded lines name.
+	Recordings []journal.Recording
 }
 
-// commits are the commits slice's verifications were asked about, oldest first by
-// their first line,
-// from the journal's verify-pending, oracle, verified and verify-error lines. An
-// oracle line for a commit that was never asked about (the session ran the
-// oracle itself) is a commit of its own, with no subject.
+// commits are the commits slice's verifications have a word about, oldest first
+// by their first line, from the journal's oracle, verified, verify-error and
+// recorded lines. A verify-pending line (an old worker's history every reader
+// skips) gives a commit no time, no state and no subject, and a commit with
+// only such a line is none.
 func (t *ticket) commits(slice string) []commitRecord {
 	var out []commitRecord
 	at := map[string]int{}
@@ -58,9 +62,6 @@ func (t *ticket) commits(slice string) []commitRecord {
 			continue
 		}
 		switch l.Event {
-		case journal.EventVerifyPending:
-			c := get(l)
-			c.At, c.Subject = l, firstOf(c.Subject, l.Summary)
 		case journal.EventOracle:
 			c := get(l)
 			c.Subject = firstOf(c.Subject, l.Subject)
@@ -76,10 +77,40 @@ func (t *ticket) commits(slice string) []commitRecord {
 		case journal.EventVerified:
 			c := get(l)
 			c.State, c.Verified = StateGreen, l
+		case journal.EventRecorded:
+			c := get(l)
+			c.Recordings = append(c.Recordings, l.Recordings...)
 		case journal.EventVerifyError:
 			c := get(l)
 			l := l
 			c.State, c.Error = StateStalled, &l
+		}
+	}
+	return out
+}
+
+// sliceCommits are the slice's commits as the screens list them: the ones the
+// journal has a word about, and a commit only the status's verification table
+// names (a commit nothing was run against reads the state the table gives it,
+// "no recorded result"), none left out.
+func (t *ticket) sliceCommits(slice string) []commitRecord {
+	out := t.commits(slice)
+	if t.status == nil {
+		return out
+	}
+	for _, v := range t.status.Verifications {
+		if v.Slice != slice || v.Commit == "" {
+			continue
+		}
+		known := false
+		for _, c := range out {
+			if strings.HasPrefix(c.SHA, v.Commit) {
+				known = true
+				break
+			}
+		}
+		if !known {
+			out = append(out, commitRecord{SHA: v.Commit, State: StateQueued})
 		}
 	}
 	return out
@@ -109,10 +140,14 @@ func (t *ticket) lastRunFailed(slice string) (events.Envelope, bool) {
 	return t.lines[i], true
 }
 
-// oracleWords is an oracle run as a line says it: "passed in 15s", and who ran it
-// when the line says. The command stands in place of "oracle" only when it is not
-// the one the screen already says: "`go test ./pkg` passed in 15s".
-func oracleWords(l events.Envelope, oracle string) string {
+// runWords is an oracle run as the screens say it: its result, how long it took,
+// what its process tree used when the line measured it, and who ran it, "run by
+// builder, witnessed by jig". The session is named in the role the line gives
+// it (an oracle line is a builder's), never by the first role it played, so a
+// session that drafted the brief and then ran the oracle is the builder. The
+// command stands in place of "oracle" only when it is not the slice's own, and a
+// run that covers no commit says why.
+func (m *Model) runWords(t *ticket, l events.Envelope, oracle string) string {
 	cmd := "oracle "
 	if l.Command != "" && l.Command != oracle {
 		cmd = "`" + l.Command + "` "
@@ -132,14 +167,54 @@ func oracleWords(l events.Envelope, oracle string) string {
 	case "":
 		word = "ran"
 	}
-	text := cmd + word + took(l.Seconds)
-	switch l.Source {
-	case "jig":
-		text += " · jig ran it"
-	case "session":
-		text += " · the session ran it"
+	parts := []string{cmd + word + took(l.Seconds)}
+	if cpu := verify.CPUWords(l.CPUMs); cpu != "" {
+		parts = append(parts, "cpu "+cpu+"s")
 	}
-	return text
+	if peak := verify.MemoryWords(l.PeakBytes); peak != "" {
+		if basis := verify.BasisWords(l.PeakBasis); basis != "" {
+			peak += " (" + basis + ")"
+		}
+		parts = append(parts, "peak "+peak)
+	}
+	if l.Uncovered != "" {
+		parts = append(parts, "covers nothing: "+l.Uncovered)
+	}
+	ran := "witnessed by jig"
+	if who := m.whoAs(t, l.Session, roleOf(l.Event)); who != "" {
+		ran = "run by " + who + ", " + ran
+	}
+	return strings.Join(append(parts, ran), " · ")
+}
+
+// commitWhen is when a commit's latest word came: its latest run, its
+// verification or the error that ended it. A commit none of them is about has
+// no time.
+func (m *Model) commitWhen(c commitRecord) string {
+	var last events.Envelope
+	var lastAt time.Time
+	for _, l := range c.words() {
+		if at, ok := l.At(); ok && !at.Before(lastAt) {
+			last, lastAt = l, at
+		}
+	}
+	if last.TS == "" {
+		return ""
+	}
+	return clock(last, m.zone)
+}
+
+// words are the lines that speak of the commit's verification: its runs, its
+// verification and the error that ended it.
+func (c commitRecord) words() []events.Envelope {
+	out := append([]events.Envelope(nil), c.Runs...)
+	if c.Verified.TS != "" {
+		out = append(out, c.Verified)
+	}
+	if c.Error != nil {
+		out = append(out, *c.Error)
+	}
+	return out
 }
 
 // wrap breaks text into lines of at most w cells, on spaces, keeping at most
