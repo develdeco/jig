@@ -216,6 +216,52 @@ func TestTheTailGivesWayToAFixRowThatWraps(t *testing.T) {
 	}
 }
 
+// TestAPartThatCannotFitSaysSoInOneLine: where the body has 13 rows or fewer, the
+// Detail is drawn or, below its least room, is one line that names it, the rows
+// it needs and the rows it was left, and the lists keep their edges; an open tail
+// that has no room says the same of itself. No such line names the body's total.
+func TestAPartThatCannotFitSaysSoInOneLine(t *testing.T) {
+	t.Parallel()
+	if got := partNeeds("tail", 8, 6); got != "the tail needs 8 rows; 6 are left" {
+		t.Errorf("partNeeds = %q", got)
+	}
+	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
+		for _, size := range [][2]int{{80, 16}, {60, 17}, {80, 18}, {60, 20}} {
+			for _, tail := range []bool{false, true} {
+				if tail && size[1] < 18 {
+					continue // the tail's own line and the lists' marks leave a body this short no room
+				}
+				g := tourRig(t, size[0], size[1])
+				g.press(sc.key)
+				if tail {
+					g.press("t")
+				}
+				e := g.m.top()
+				e.sel, e.lead, e.follow = 0, 0, false
+				g.m.noteCursor()
+				for i, n := 0, len(g.m.page().refs()); i < n; i++ {
+					view := g.view()
+					where := sc.name + " " + strconv.Itoa(size[0]) + "x" + strconv.Itoa(size[1]) + " tail " + strconv.FormatBool(tail) + " row " + strconv.Itoa(i)
+					if len(strings.Split(view, "\n")) != size[1] {
+						t.Fatalf("%s: the frame is not %d rows:\n%s", where, size[1], view)
+					}
+					drawn, said := strings.Contains(view, "╭─ Detail · "), strings.Contains(view, "the Detail needs 4 rows; ")
+					if drawn == said {
+						t.Errorf("%s: the detail is neither drawn nor said to have no room, or both:\n%s", where, view)
+					}
+					if tail && !strings.Contains(view, "tail ─") && !strings.Contains(view, "the tail needs 8 rows; ") {
+						t.Errorf("%s: the open tail is neither drawn nor said to have no room:\n%s", where, view)
+					}
+					if strings.Contains(view, "this screen has") || strings.Contains(view, "body rows") {
+						t.Errorf("%s: a line names the body's total:\n%s", where, view)
+					}
+					g.press("down")
+				}
+			}
+		}
+	}
+}
+
 // TestDownMovesTheCursorOnEveryScreenWithRows: down moves the cursor from the
 // first row to the last on each phase screen, a row at a time, and the window
 // follows it; the page is not scrolled instead.

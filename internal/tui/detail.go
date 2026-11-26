@@ -135,6 +135,9 @@ const (
 	detailPeek = 5
 	listMin    = 5
 	collapsed  = 3
+	// detailLeast is the least a Detail panel is drawn in: its edges, a first row
+	// and a mark.
+	detailLeast = 4
 )
 
 // listAndDetail adds the list panels and, with them, the Detail panel of the row
@@ -163,9 +166,14 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 	}
 	room := m.bodyRows() - 1 // the mark of what lies below
 	avail := room - first
+	listsLeast := listMin + collapsed*(len(lists)-1)
 	shifted := avail < least
 	if shifted {
-		avail = max(room-1, least)
+		floor := listsLeast + 1 // and the line that says the detail has no room
+		if side {
+			floor = listsLeast
+		}
+		avail = max(room-1, floor)
 	}
 	listW, sideW := m.width, m.width
 	if side {
@@ -196,8 +204,11 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 				need = len(dl)
 			}
 			db = max(min(len(dl), avail-total), need)
-			db = max(min(db, avail-listMin), min(len(dl), detailPeek))
+			db = min(db, avail-listsLeast)
 			lb = avail - db
+			if db < min(len(dl), detailLeast) {
+				lb = avail - 1 // the line that says the detail has no room
+			}
 		}
 	}
 
@@ -245,12 +256,14 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, at int, lists ...listSpec)
 			}
 		}
 	}
-	if !side && len(left) > lb {
-		// The lists could not give up as much as they were asked to: the detail
-		// has what is left, its edges and a mark at least.
-		db = max(avail-len(left), 4)
-	}
 	right, cut := cutDetail(m, dl, db)
+	if spare := avail - len(left); !side && spare < min(len(dl), detailLeast) {
+		// What the lists leave is less than the detail's least: one line says so,
+		// in the detail's place.
+		right, cut = []pline{{text: m.st.dim(partNeeds("Detail", min(len(dl), detailLeast), spare)), ask: d.ask}}, true
+	} else if !side && len(left) > lb {
+		right, cut = cutDetail(m, dl, spare)
+	}
 	if cut && d.ask != "" {
 		if p.cutAsks == nil {
 			p.cutAsks = map[string]bool{}
@@ -311,8 +324,9 @@ func (m *Model) windowList(f []pline, row, budget int) []pline {
 	}
 	row = max(0, min(row, len(starts)-1))
 	lo, hi := row, row
+	kept := head // the lines above the rows that stay: the edge and the names
 	need := func(lo, hi int) int {
-		n := head + 1 + end(hi) - starts[lo]
+		n := kept + 1 + end(hi) - starts[lo]
 		if lo > 0 {
 			n++
 		}
@@ -320,6 +334,9 @@ func (m *Model) windowList(f []pline, row, budget int) []pline {
 			n++
 		}
 		return n
+	}
+	if need(row, row) > budget {
+		kept = 1 // no room for the names: the edge, the marks and the row
 	}
 	for grew := true; grew; {
 		grew = false
@@ -339,7 +356,7 @@ func (m *Model) windowList(f []pline, row, budget int) []pline {
 		}
 		return out
 	}
-	out := append([]pline(nil), f[:head]...)
+	out := append([]pline(nil), f[:kept]...)
 	if lo > 0 {
 		out = append(out, pline{text: m.st.dim("↑ " + strconv.Itoa(lo) + " more"), box: boxMid, hiddenRefs: refs(0, lo)})
 	}
