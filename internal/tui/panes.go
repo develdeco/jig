@@ -368,7 +368,7 @@ func (m *Model) moveWindowed(pg page, delta int) bool {
 	if delta <= -(1 << 19) {
 		// Home goes to the page's top when the pane's first row is the page's.
 		for _, p := range pg.panes() {
-			if p.title == e.paneFocus && p.first == 0 && !phaseScreen(e.screen) {
+			if p.title == e.paneFocus && p.first == 0 && !pg.follows() {
 				e.lead = 1 << 20
 			}
 		}
@@ -398,10 +398,10 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 		e.follow, e.lead = false, 0
 	}
 	e.paneFocus = p.title
-	if !moving && e.screen != screenTicket && e.screen != screenChart && !phaseScreen(e.screen) {
+	if !moving && e.screen != screenTicket && e.screen != screenChart && !pg.follows() {
 		// A step's screen opens at its top, so what is above its first row is read
 		// before the rows are: the first move reads the page a line at a time. A
-		// phase screen's window follows its cursor from the first move.
+		// page with a Detail (detail.go) follows its cursor from the first move.
 		e.lead = 1 << 20
 	}
 	if p.rows == 0 {
@@ -518,12 +518,14 @@ func (m *Model) paneMarks(pg *page) {
 	}
 }
 
-// phaseScreen says the screen is a list and the Detail of the row under its
-// cursor (detail.go): its window follows the cursor, never held at the top.
-func phaseScreen(s screenKind) bool {
-	switch s {
-	case screenBuild, screenReview, screenBrief, screenPublish:
-		return true
+// follows says the page is a list and the Detail of the row under its cursor
+// (detail.go): its window follows the cursor and is never held at the top, while
+// a page with no Detail is held until it is read a line at a time.
+func (p page) follows() bool {
+	for _, l := range p.lines {
+		if l.hold&holdFrom != 0 {
+			return true
+		}
 	}
 	return false
 }

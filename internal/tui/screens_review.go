@@ -32,7 +32,8 @@ func (m *Model) reviewPage(id string) page {
 	rounds = withStatusRounds(t, rounds)
 	asks := t.asks()
 	var detail *detailSpec
-	at := m.cursorAmong(len(rounds)+len(asks), "Rounds", "Asks")
+	roundList, askList := m.roundsSpec(t, rounds), m.asksSpec(t, asks)
+	at := m.cursorAmong(roundList, askList)
 	if len(rounds)+len(asks) > 0 {
 		var d detailSpec
 		if at < len(rounds) {
@@ -42,7 +43,7 @@ func (m *Model) reviewPage(id string) page {
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail, at, m.roundsSpec(t, rounds), m.asksSpec(t, asks))
+	m.listAndDetail(&p, detail, at, roundList, askList)
 	m.probeRows(&p, t)
 
 	m.stepActivityPanel(&p, t, stepReview)

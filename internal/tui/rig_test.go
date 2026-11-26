@@ -587,10 +587,17 @@ func (g *rig) onRow(id string) *rig {
 // focus is onRow with the folds as they are.
 func (g *rig) focus(id string) *rig {
 	g.t.Helper()
-	for i, r := range g.m.page().refs() {
+	pg := g.m.page()
+	for i, r := range pg.refs() {
 		if r.id == id {
 			e := g.m.top()
 			e.sel, e.lead, e.follow = i, 0, false
+			// The pane that holds the row has the focus and keeps the cursor.
+			if at := paneOfRow(pg.panes(), i); at >= 0 {
+				p := pg.panes()[at]
+				e.paneFocus, e.textFocus = p.title, false
+				e.rememberPane(pg, p, pg.refs())
+			}
 			g.m.noteCursor()
 			return g
 		}

@@ -62,14 +62,14 @@ func (m *Model) buildPage(id string) page {
 			cells: []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), m.st.dim(tries), spent, goal},
 		}
 	}
-	at := m.cursorAmong(len(slices), "Slices")
+	list := listSpec{title: "Slices", summary: strconv.Itoa(green) + " of " + strconv.Itoa(len(slices)) + " green", cols: sliceColumns, names: sliceColumnNames, rows: rows}
+	at := m.cursorAmong(list)
 	var full statusSlice
 	if t.status != nil && at < len(t.status.Slices) {
 		full = t.status.Slices[at]
 	}
 	detail := m.buildDetail(t, slices[at], full)
-	m.listAndDetail(&p, &detail, at,
-		listSpec{title: "Slices", summary: strconv.Itoa(green) + " of " + strconv.Itoa(len(slices)) + " green", cols: sliceColumns, names: sliceColumnNames, rows: rows})
+	m.listAndDetail(&p, &detail, at, list)
 
 	if rows := m.sessionRows(t, roleBuilder); len(rows) > 0 {
 		m.listPanel(&p, listSpec{title: "Sessions", summary: strconv.Itoa(len(rows)), cols: sessionColumns, names: sessionColumnNames, rows: rows})
@@ -90,16 +90,38 @@ func findingTitleFirst(line string) string {
 	return path[strings.LastIndex(path, "/")+1:] + " " + title
 }
 
-// cursorAmong is the row of the lists of n rows in all, titled lists, that the
-// Detail is of: the cursor's, the way the window reads it (the index among the
-// page's rows), when the focus is on one of the lists and the cursor is in them;
-// else the row the Detail was last of, so a focus on another pane leaves it.
-func (m *Model) cursorAmong(n int, lists ...string) int {
+// cursorAmong is the row, among the rows of lists in order, that the Detail is of:
+// the row the cursor of the focused list stands on, found by its identity as the
+// panes find theirs, so a zoom, a search that narrows the rows or a row that comes
+// in above leaves the Detail on its row. A focus on a pane that is not one of the
+// lists leaves the Detail on the list that had it last.
+func (m *Model) cursorAmong(lists ...listSpec) int {
 	e := m.top()
-	if f := e.paneFocus; (f == "" || slices.Contains(lists, f)) && e.sel < n || !e.listAtSet {
-		e.listAt, e.listAtSet = max(0, min(e.sel, n-1)), true
+	offs := make([]int, len(lists))
+	n, k := 0, -1
+	for i, l := range lists {
+		offs[i] = n
+		n += len(l.rows)
+		if len(l.rows) > 0 && l.title == e.paneFocus {
+			k = i
+		}
 	}
-	return max(0, min(e.listAt, n-1))
+	if n == 0 {
+		return 0
+	}
+	if k >= 0 {
+		e.listFocus = e.paneFocus
+	} else if i := slices.IndexFunc(lists, func(l listSpec) bool { return len(l.rows) > 0 && l.title == e.listFocus }); i >= 0 {
+		k = i
+	} else {
+		k = slices.IndexFunc(lists, func(l listSpec) bool { return len(l.rows) > 0 })
+	}
+	ids := make([]rowIdentity, len(lists[k].rows))
+	for i, r := range lists[k].rows {
+		ids[i] = r.ref.identity()
+	}
+	// With no cursor of the pane's own yet, the first draw's cursor is the page's.
+	return offs[k] + m.paneCursorIn(lists[k].title, ids, e.sel-offs[k])
 }
 
 // sliceColumns are the columns of a slice's row: its icon, id, state, tries, the

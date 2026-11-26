@@ -68,15 +68,15 @@ func (m *Model) publishPage(id string) page {
 		}
 		rows[i] = listRow{ref: &rowRef{kind: rowCheck, id: c.key, ticket: id}, cells: []string{m.st.icon(state), text, m.st.dim(c.when)}}
 	}
-	at := m.cursorAmong(len(list), "Checklist")
+	checklist := listSpec{title: "Checklist", summary: strconv.Itoa(done) + " of " + strconv.Itoa(len(list)) + " done", cols: checkColumns, names: checkColumnNames, rows: rows}
+	at := m.cursorAmong(checklist)
 	c := list[at]
 	summary := "not done"
 	if c.done {
 		summary = strings.TrimSpace("done " + c.when)
 	}
 	detail := detailSpec{title: c.name, summary: summary, rows: c.rows}
-	m.listAndDetail(&p, &detail, at,
-		listSpec{title: "Checklist", summary: strconv.Itoa(done) + " of " + strconv.Itoa(len(list)) + " done", cols: checkColumns, names: checkColumnNames, rows: rows})
+	m.listAndDetail(&p, &detail, at, checklist)
 	m.stepActivityPanel(&p, t, stepPublish)
 	return p
 }

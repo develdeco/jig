@@ -193,10 +193,9 @@ type navEntry struct {
 	// a row by anything else gives its pane the focus. textFocus says the focused
 	// pane is text only: it scrolls by lines and has no row under a cursor.
 	paneFocus string
-	// listAt is the row of the lists of a phase screen the Detail was last drawn for:
-	// a focus on a pane that is not one of the lists leaves the Detail where it was.
-	listAt    int
-	listAtSet bool
+	// listFocus is the title of the list of a phase screen that had the focus last:
+	// a focus on a pane that is not one of the lists leaves the Detail on its row.
+	listFocus string
 	// zoom is the title of the pane drawn over the whole body, "" for none.
 	zoom string
 	// psearch is the query narrowing one pane (searchpane.go).
@@ -1127,13 +1126,20 @@ func (m *Model) moveBy(delta int) {
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
-		// Home: the focused pane's first row; the window follows it.
+		// Home: the focused pane's first row; the window follows it, and a page that
+		// has no Detail is held at its top.
 		e.sel, e.lead = lo, 0
+		if lo == 0 && !pg.follows() {
+			e.lead = 1 << 20
+		}
 		return
 	case delta >= 1<<19:
 		e.sel, e.lead = hi, 0
 		return
-	case delta < 0 && e.sel == 0 && lo == 0:
+	case e.lead > 0 || (delta < 0 && e.sel == 0 && lo == 0):
+		// A page held above its cursor's window is read a line at a time, from
+		// whatever row the cursor is on, until it is back at the window: where the
+		// focused pane has no row to move to the page is read, not the cursor moved.
 		// Up from the first row moves the page above it; any other move is the
 		// cursor's, and the window follows it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at

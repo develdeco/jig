@@ -31,7 +31,7 @@
 // the detail of the row under the cursor: a Detail panel, drawn by one part
 // (detail.go), holds that row's fields whole under the list, and beside it from
 // 160 columns.
-
+//
 // Every panel is a pane with its own cursor and scroll: tab and shift+tab move
 // the focus, the keys that move and act read the focused pane's row, the focused
 // pane's border is lit and the hint line names it, a pane of text scrolls by

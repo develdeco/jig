@@ -70,7 +70,9 @@ func (m *Model) briefPage(id string) page {
 		}
 	}
 	var detail *detailSpec
-	at := m.cursorAmong(len(sections)+len(rows), "Sections", "Slices")
+	sectionList := listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"}
+	sliceList := listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"}
+	at := m.cursorAmong(sectionList, sliceList)
 	if len(sections)+len(rows) > 0 {
 		var d detailSpec
 		if at < len(sections) {
@@ -80,9 +82,7 @@ func (m *Model) briefPage(id string) page {
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail, at,
-		listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"},
-		listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"})
+	m.listAndDetail(&p, detail, at, sectionList, sliceList)
 
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p

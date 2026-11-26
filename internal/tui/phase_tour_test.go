@@ -123,9 +123,7 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 					t.Fatalf("%d rows to stand on, want %d (a row for each thing): %+v", len(refs), sc.rows, refs)
 				}
 				// The person has read down to the first row: the window follows the cursor.
-				e := g.m.top()
-				e.sel, e.lead, e.follow = 0, 0, false
-				g.m.noteCursor()
+				g.focus(refs[0].id)
 				seen := map[string]bool{}
 				for i := range refs {
 					view := g.view()
