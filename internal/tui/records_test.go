@@ -159,8 +159,9 @@ func TestBuildScreenListsTheLastCommitsAndCountsTheEarlier(t *testing.T) {
 	var lines []events.Envelope
 	for i, d := range []byte("12345") {
 		lines = append(lines,
-			jl(at(i, 0), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha(d), "", fmt.Sprintf("attempt %d", i+1), "", "")),
-			jl(at(i, 30), "JIG-1", "a", journal.EventOracle, with("", sha(d), "fail", "boom "+string(d), "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./...", 30 }))
+			jl(at(i, 30), "JIG-1", "a", journal.EventOracle, with("", sha(d), "fail", "boom "+string(d), "", ""), func(l *journal.Line) {
+				l.Command, l.Seconds, l.Subject = "go test ./...", 30, fmt.Sprintf("attempt %d", i+1)
+			}))
 	}
 	g.feed(lines...).press("enter").sized(100, 80)
 	text, _, _ := strings.Cut(pageText(g), "activity") // the records, not the activity under them
@@ -192,7 +193,6 @@ func TestBuildScreenSaysWhereToReadAFailureThatLeftNoOutput(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
 	g.feed(
-		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "fail", "", "", "")),
 	).press("enter")
 	if text := pageText(g); !strings.Contains(readWords(text), "no output was recorded: the verify log on the machine that ran it") {
@@ -200,7 +200,6 @@ func TestBuildScreenSaysWhereToReadAFailureThatLeftNoOutput(t *testing.T) {
 	}
 
 	g.feed(
-		jl(at(1, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('b'), "", "second", "", "")),
 		jl(at(1, 20), "JIG-1", "a", journal.EventOracle, with("", sha('b'), "pass", "", "", "")),
 		jl(at(1, 21), "JIG-1", "a", journal.EventVerified, with("", sha('b'), "", "", "", "")),
 	)
@@ -216,10 +215,9 @@ func TestBuildScreenShowsAVerificationThatCouldNotRun(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
 	g.feed(
-		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventVerifyError, with("", sha('a'), "", "no worktree", "", "")),
 	).press("enter")
-	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✗ aaaaaaa “first”") {
+	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✗ aaaaaaa") {
 		t.Errorf("the screen does not show the commit that could not be verified:\n%s", text)
 	}
 }

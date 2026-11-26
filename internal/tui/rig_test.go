@@ -153,26 +153,25 @@ func briefTextJIG1() string {
 	}, "\n") + "\n"
 }
 
-// jig1Records is jig1 as the build screen shows its records: the commits carry
-// their subjects, the oracle lines their command, time and who ran them, slice
+// jig1Records is jig1 as the build screen shows its records: the oracle lines
+// carry their commit's subject, their command, time and who ran them, slice
 // b is checked twice and fails both times, and slice a once had a question that
 // was answered.
 func jig1Records() []events.Envelope {
-	oracle := func(command string, seconds int, source string) func(*journal.Line) {
-		return func(l *journal.Line) { l.Command, l.Seconds, l.Source = command, seconds, source }
+	oracle := func(command string, seconds int, subject string) func(*journal.Line) {
+		return func(l *journal.Line) {
+			l.Command, l.Seconds, l.Subject, l.Session = command, seconds, subject, "s-builder"
+		}
 	}
 	return []events.Envelope{
 		jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 		jl(at(0, 2), "JIG-1", "a", journal.EventQuestion, with("s-builder", "", "", "Trim the name?", "q-000", "agent")),
 		jl(at(0, 3), "JIG-1", "a", journal.EventAnswer, with("s-person", "", "", "Yes, trim it.", "q-000", "person")),
-		jl(at(0, 5), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Greet the person by name", "", "")),
-		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), oracle("go test ./...", 15, "jig")),
+		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), oracle("go test ./...", 15, "Greet the person by name")),
 		jl(at(0, 21), "JIG-1", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
 		jl(at(1, 0), "JIG-1", "b", journal.EventClaim, with("s-builder", "", "", "", "", "")),
-		jl(at(1, 10), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('b'), "", "Say goodbye", "", "")),
-		jl(at(1, 40), "JIG-1", "b", journal.EventOracle, with("", sha('b'), "fail", "TestB: want 2, got 3", "", ""), oracle("go test ./...", 30, "jig")),
-		jl(at(1, 50), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('e'), "", "Say goodbye, politely", "", "")),
-		jl(at(2, 15), "JIG-1", "b", journal.EventOracle, with("", sha('e'), "fail", "--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1", "", ""), oracle("go test ./...", 25, "jig")),
+		jl(at(1, 40), "JIG-1", "b", journal.EventOracle, with("", sha('b'), "fail", "TestB: want 2, got 3", "", ""), oracle("go test ./...", 30, "Say goodbye")),
+		jl(at(2, 15), "JIG-1", "b", journal.EventOracle, with("", sha('e'), "fail", "--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1", "", ""), oracle("go test ./...", 25, "Say goodbye, politely")),
 		jl(at(2, 30), "JIG-1", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-001", "agent")),
 		ll(at(2, 31), "JIG-1", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-builder", "Bash" }),
 	}

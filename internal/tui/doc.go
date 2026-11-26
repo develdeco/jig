@@ -42,6 +42,12 @@
 // cursor and counts the rest, a row opens what it is about, and z draws the
 // focused pane over the whole body (panes.go, zoom.go).
 //
+// The slice screen tells the whole story of one slice, top to bottom: its
+// finding when it is a fix slice, its goal, oracle and facts, every commit with
+// its runs, the questions asked about it, the calls its holder made and its
+// timeline. A run and a commit are worded once (records.go) for it and for the
+// build screen's detail.
+//
 // The model is a bubbletea model and nothing in it needs a terminal: View is
 // plain text (colored when its renderer has a color profile), so each screen
 // is tested by feeding it a stream and comparing what it draws. Run puts it on

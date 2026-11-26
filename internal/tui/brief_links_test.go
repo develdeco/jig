@@ -63,12 +63,12 @@ func TestASliceScreensSectionsAreRowsThatOpenTheBriefAtThem(t *testing.T) {
 		if got := onSlice(g); got != "slice a" {
 			t.Fatalf("%v: opened %q, want slice a", size, got)
 		}
+		g.tabTo("Brief sections").press("end")
 		view := g.view()
 		panel := readWords(between(view, "╭─ Brief sections", "╰"))
 		if !strings.Contains(panel, "Greeting changed since the approval") || strings.Contains(panel, "Tone") {
 			t.Errorf("%v: slice a's Brief sections panel is not the section that cites it:\n%s", size, view)
 		}
-		g.tabTo("Brief sections")
 		if ref := g.m.selected(); ref == nil || ref.kind != rowSection || ref.id != "section-2" {
 			t.Fatalf("%v: the cursor is on %+v, want the section Greeting", size, ref)
 		}

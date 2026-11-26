@@ -1,24 +1,24 @@
 jig  demo › JIG-1  Greeting copy › 2 build › slice c (3 of 4)      ? needs-input
 ────────────────────────────────────────────────────────────────────────────────
-  Pick the tone
-  ? needs-input · 1 try
-  workspace copy · oracle go test ./...
+  ╭─ Slice c ──────────────────────────────────── ? needs-input · 1 try · 15s ─╮
+  │  state     ? needs-input                                                   │
+  │  tries     1                                                               │
+  │▸ needed by ○ d                                                             │
+  │  workspace copy                                                            │
+  │  oracle    go test ./...                                                   │
+  │  goal      Pick the tone                                                   │
+  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Questions ──────────────────────────────────────────────────────────── 1 ─╮
   │    question  state  asked                                                  │
-  │▸ ? q-001     open   asked by builder at 09:02:30                           │
+  │  ? q-001     open   asked by builder at 09:02:30                           │
   │      Formal or casual?                                                     │
-  ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Brief sections ─────────────────────────────────────────────────────── 1 ─╮
-  │  section                                                                   │
-  │  Tone                                                                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Timeline ───────────────────────────────────────────────────────────── 1 ─╮
   │  time     what                                                             │
   │  09:02:30 ? builder asks: Formal or casual?                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
-
+  ↓ 1 more
 
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Brief sections
-  ↑↓ move in Questions · a answer · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Questions · ↑↓ move in Slice c
+  a answer · 1-5 steps · [ ] sibling · h main · t tail

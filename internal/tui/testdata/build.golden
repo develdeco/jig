@@ -16,7 +16,7 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs
   │  questions ✓ q-000 Trim the name?                                          │
   │              → Yes, trim it.                                               │
   │  tries     ● aaaaaaa “Greet the person by name” 09:00:21                   │
-  │              ● `go test ./...` passed in 15s · jig ran it                  │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
