@@ -29,6 +29,20 @@ type Approval struct {
 	// said so themselves), "agent" (an agent recorded the person's word) or
 	// "jig".
 	Provenance string `yaml:"provenance,omitempty"`
+	// Sections are the "## " sections the approval covered, in the brief's
+	// order, so a later reader can say which of them changed. An approval
+	// made before sections were recorded has none, and says so by it.
+	Sections []ApprovedSection `yaml:"sections,omitempty"`
+	// IllustrationSHA256 is the hash of the illustration as it was approved,
+	// empty when the brief had none.
+	IllustrationSHA256 string `yaml:"illustration_sha256,omitempty"`
+}
+
+// ApprovedSection is one section an approval covered: its heading and the
+// hash BriefSection carries, the one a slice's from_brief cites.
+type ApprovedSection struct {
+	Heading string `yaml:"heading"`
+	Hash    string `yaml:"hash"`
 }
 
 // approvalFile returns <ticket>/approval.yaml: the one place that names it.
@@ -97,6 +111,29 @@ func (s *Store) BriefSHA256(ticket string) (string, error) {
 		return "", err
 	}
 	return sha256Hex([]byte("brief.md " + briefSum + "\n" + IllustrationFile + " " + sha256Hex(illustration) + "\n")), nil
+}
+
+// BriefRecord returns what an approval of ticket's brief as it is on disk
+// records beyond the whole-brief hash: each section's heading and hash, and
+// the illustration's hash ("" when the brief has none). A ticket with no brief
+// is an error, as for BriefSHA256.
+func (s *Store) BriefRecord(ticket string) (sections []ApprovedSection, illustration string, err error) {
+	dir := s.TicketDir(ticket)
+	brief, err := ReadFile(filepath.Join(dir, "brief.md"))
+	if err != nil {
+		return nil, "", err
+	}
+	for _, sec := range BriefSections(brief) {
+		sections = append(sections, ApprovedSection{Heading: sec.Heading, Hash: sec.Hash})
+	}
+	ill, err := ReadFile(filepath.Join(dir, IllustrationFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return sections, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return sections, sha256Hex(ill), nil
 }
 
 // sha256Hex returns the hex sha256 digest of data.

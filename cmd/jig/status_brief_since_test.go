@@ -163,6 +163,6 @@ func TestStatusBriefSaysWhichSectionsChangedSinceTheApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	out = r.status()
-	r.want(out, "  Alpha,-,-\n  Beta,-,-\n  Delta,-,-\n", "  illustration_since_approval: \"-\"\n")
+	r.want(out, "  Alpha,-,-\n  Beta,-,-\n  Delta,-,-\n", "  illustration_since_approval: -\n")
 	r.wantNot(out, "brief_removed")
 }
