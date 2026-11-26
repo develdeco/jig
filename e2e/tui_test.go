@@ -288,7 +288,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// it and what they read.
 	screens.press("3")
 	screens.until("fix budget 0 of 3 rounds used", "Which greeting does the product want?", "undecided", "a user-visible string")
-	screens.press("\x1b[A")
+	screens.press("\x1b[Z") // shift+tab: the Rounds pane
 	screens.until("round 1  findings", "1 ask", "independent", "5 files")
 	// ? lists the keys of the screen, with the ones that cannot run and why: the
 	// gate waits for the ask to be decided, and no pull request is open yet.
@@ -411,6 +411,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
 	}
 	// What each round read is the detail of its row: down from round 2 is round 1.
+	screens.press("\x1b[H")
 	screens.press("\x1b[B")
 	screens.until("╭─ Detail · round 1", "5 files read")
 	screens.press("\x7f")
