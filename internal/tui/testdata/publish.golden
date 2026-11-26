@@ -19,6 +19,6 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 3 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Detail · body · space expand
+  esc back · q quit · ? keys · tab next pane: Detail · body
   ↑↓ move in Checklist · say "Land JIG-2" · 1-5 steps · [ ] sibling · h main
   t tail

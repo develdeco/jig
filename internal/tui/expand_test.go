@@ -205,10 +205,9 @@ func TestSpaceWithNothingCutSaysSo(t *testing.T) {
 	t.Parallel()
 	g := cutRig(t, 80, 40, 130)
 	g.onRow("JIG-3")
-	// The keys never read what the body cuts: space is listed on every screen.
 	view := stripANSI(g.view())
-	if !strings.Contains(strings.Join(strings.Fields(view), " "), "space expand") {
-		t.Errorf("the hint line does not list space on a row with nothing cut:\n%s", view)
+	if strings.Contains(strings.Join(strings.Fields(view), " "), "space ") {
+		t.Errorf("the hint line lists space on a row with nothing cut:\n%s", view)
 	}
 	g.press("space")
 	if g.m.notice != "nothing is cut here" {

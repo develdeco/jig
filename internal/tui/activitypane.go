@@ -18,9 +18,10 @@ import (
 func (m *Model) activityPanel(p *page, t *ticket) {
 	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
 	// The edges and the names take three of the rows the panel has.
-	room := max(3, m.bodyRows()-m.taken(p)-3)
+	spare := m.bodyRows() - m.taken(p) - 3
+	room, tight := max(3, spare), spare < 3
 	if r, ok := m.zoomRoom("Activity"); ok {
-		room = r
+		room, tight = r, false
 	}
 	refs := m.logRefs(t, all)
 	total := len(all)
@@ -53,7 +54,7 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 		rows = append(rows, listRow{ref: &refs[i], cells: []string{m.st.dim(clock(e.l, m.zone)), tag, m.moveText(t, e.l)}})
 	}
 	spec := listSpec{title: "Activity", summary: right, cols: activityColumns, names: activityColumnNames, rows: rows, empty: emptyActivity(searched),
-		room: room - markLines(from, to, len(all), merged)}
+		room: room - markLines(from, to, len(all), merged), tight: tight}
 	switch {
 	case merged:
 		spec.after = []string{m.st.dim(fmt.Sprintf("↑ %d newer · ↓ %d older", from, len(all)-to))}
@@ -140,9 +141,10 @@ func logRef(ticket string, l events.Envelope, key string, step int, prefix strin
 func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 	all := newestFirst(t.stepLines(step), func(l events.Envelope) time.Time { at, _ := l.At(); return at })
 	title := stepNames[step] + " activity"
-	room := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-m.taken(p)-3))
+	spare := m.bodyRows() - m.taken(p) - 3
+	room, tight := min(activityCap(m.bodyRows()), max(3, spare)), spare < 3
 	if r, ok := m.zoomRoom(title); ok {
-		room = r
+		room, tight = r, false
 	}
 	seen := make(map[string]int, len(all))
 	refs := make([]rowRef, len(all))
@@ -170,7 +172,7 @@ func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
 		rows = append(rows, listRow{ref: &refs[i], cells: m.activityCells(t, labels, all[i])})
 	}
 	spec := listSpec{title: title, summary: activityRight(searched, total, from, to, len(all)), cols: activityColumns, names: activityColumnNames, rows: rows, empty: emptyActivity(searched),
-		room: room - markLines(from, to, len(all), merged)}
+		room: room - markLines(from, to, len(all), merged), tight: tight}
 	m.paneMarksOf(&spec, from, to, len(all), merged)
 	m.listPanel(p, spec)
 }
@@ -226,9 +228,10 @@ func (m *Model) chartActivityPanel(p *page, name string, rows []chartRow, histor
 	})
 	all, refs, ids := log.all, log.refs, log.ids
 	// The edges and the names take three of the rows the panel has.
-	room := max(activityFloor-3, m.bodyRows()-m.taken(p)-3)
+	spare := m.bodyRows() - m.taken(p) - 3
+	room, tight := max(activityFloor-3, spare), spare < 3
 	if r, ok := m.zoomRoom("Activity"); ok {
-		room = r
+		room, tight = r, false
 	}
 	total := len(all)
 	keep, searched := m.narrowIdx("Activity", total, func(i int) string {
@@ -267,7 +270,7 @@ func (m *Model) chartActivityPanel(p *page, name string, rows []chartRow, histor
 		items = append(items, listRow{ref: &refs[i], cells: []string{m.st.dim(clock(e.l, m.zone)), e.id, tag, m.moveText(e.t, e.l)}})
 	}
 	spec := listSpec{title: "Activity", summary: activityRight(searched, total, from, to, len(all)), cols: chartActivityColumns, names: chartActivityColumnNames, rows: items, empty: emptyActivity(searched),
-		room: room - markLines(from, to, len(all), merged)}
+		room: room - markLines(from, to, len(all), merged), tight: tight}
 	m.paneMarksOf(&spec, from, to, len(all), merged)
 	m.listPanel(p, spec)
 }

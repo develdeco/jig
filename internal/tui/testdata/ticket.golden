@@ -19,6 +19,6 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   │  ↓ 6 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Needs you · space expand
-  ↑↓ move in Steps · enter open · a answer · 1-5 steps · [ ] sibling · h main
-  t tail
+  esc back · q quit · ? keys · tab next pane: Needs you · ↑↓ move in Steps
+  enter open · a answer · 1-5 steps · [ ] sibling · h main · t tail
+

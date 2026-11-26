@@ -631,9 +631,17 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	// The clock always shows: the label gives way to it.
 	label := pad(s.Label, labelW)
 	labelCut := false
-	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room && !whole {
-		label = pad(s.Label, max(1, room))
-		labelCut = width(s.Label) > max(1, room)
+	// The rest of a label an expanded sub-step wrapped, under its first row.
+	var labelRest []string
+	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room {
+		if whole {
+			parts := wrapCell(s.Label, max(1, room), wholeRows)
+			label = pad(parts[0], max(1, room))
+			labelRest = parts[1:]
+		} else {
+			label = pad(s.Label, max(1, room))
+			labelCut = width(s.Label) > max(1, room)
+		}
 	}
 	head := m.st.icon(state) + " " + m.st.bold(label) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
@@ -648,6 +656,12 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 		return "    " + m.st.dim(pad(label, fieldW)) + text
 	}
 	cuts := [][]cutMark{nil}
+	for _, part := range labelRest {
+		// The label wraps within its column, under its first row, so the clock
+		// stays on the first.
+		out = append(out, spaces(width(m.st.icon(state))+1)+m.st.bold(part))
+		cuts = append(cuts, nil)
+	}
 	if labelCut {
 		// The label the clock took room from is a cut like any other.
 		cuts[0] = []cutMark{{x: width(m.st.icon(state)) + 1 + width(label) - 1, value: s.Label}}

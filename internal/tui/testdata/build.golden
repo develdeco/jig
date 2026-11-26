@@ -20,5 +20,5 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy › 2 build            ? build needs
   ╰────────────────────────────────────────────────────────────────────────────╯
   ↓ 4 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Detail · a · space expand
-  ↑↓ move in Slices · enter open · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Detail · a · ↑↓ move in Slices
+  enter open · 1-5 steps · [ ] sibling · h main · t tail

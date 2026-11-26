@@ -36,5 +36,5 @@ jig  demo › SHOP-1                                                            
   ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Build · space expand · ↑↓ move in Steps · enter open
-  h main · t tail
+  esc back · q quit · ? keys · tab next pane: Build · ↑↓ move in Steps · enter open · h main
+  t tail

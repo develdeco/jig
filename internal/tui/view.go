@@ -208,7 +208,9 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 		switch {
 		case l.ref != nil:
 			owner = l.ref
-		case !l.cont && !l.under:
+		case l.box != boxMid:
+			// A line that is in no pane, or an edge, belongs to no row; a line of a
+			// pane that is none's own sits under the cursor row above it.
 			owner = nil
 		}
 		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
@@ -996,13 +998,25 @@ func (m *Model) footer(w int) []string {
 	}
 	// The hint is at most hintLinesMax lines, so a narrow screen keeps its body: the
 	// keys that do not fit are the last of the table, and ? lists them all.
-	pairs := m.keyHints()
+	// The footer is as tall as the screen's full key set, decided before the body
+	// is laid out and whatever it cuts: the keys that can run fill it, and what
+	// is left of its height stays empty, never padded with a key that cannot run.
+	lines := m.hintFit(w, m.keyHints(false))
+	for len(lines) < len(m.hintFit(w, m.keyHints(true))) {
+		lines = append(lines, "")
+	}
+	return append([]string{rule}, lines...)
+}
+
+// hintFit is the hint lines of pairs, the last pairs left out while they take
+// more than hintLinesMax lines.
+func (m *Model) hintFit(w int, pairs []string) []string {
 	lines := m.hintLines(w, pairs...)
 	for len(lines) > hintLinesMax && len(pairs) > 6 {
 		pairs = pairs[:len(pairs)-2]
 		lines = m.hintLines(w, pairs...)
 	}
-	return append([]string{rule}, lines...)
+	return lines
 }
 
 // hintLinesMax is the most lines the hint under a screen takes.

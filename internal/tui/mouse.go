@@ -39,8 +39,9 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 		if line.ref == nil {
 			// The rows a mark stands for are rows the cursor passes over.
 			h.sel = append(h.sel, -1)
-			if !(line.cont || line.under) || line.names {
-				// Anything but a row's continuation or detail lines ends the row above it.
+			if line.box != boxMid || line.names {
+				// An edge, the names, or a line outside every pane ends the row above;
+				// any other line of the pane sits under the cursor row above it.
 				cur = -1
 			}
 			h.owner = append(h.owner, cur)

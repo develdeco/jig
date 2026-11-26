@@ -131,7 +131,7 @@ func wantBoxesClosed(t *testing.T, view string) {
 func TestWindowNeverCutsABoxWithoutItsEdges(t *testing.T) {
 	t.Parallel()
 	ids := [3]string{"round-totals", "fix-4-cart-test", "cart-total"}
-	for _, size := range [][2]int{{60, 23}, {80, 24}} {
+	for _, size := range [][2]int{{60, 21}, {80, 24}} {
 		w, h := size[0], size[1]
 		t.Run(fmt.Sprintf("ticket %dx%d", w, h), func(t *testing.T) {
 			t.Parallel()

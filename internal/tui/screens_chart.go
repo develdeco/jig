@@ -159,7 +159,12 @@ func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, 
 		}
 	}
 	for _, row := range laid[len(rows):] {
+		// A fog entry sits under the cursor row above it, which a window keeps it with.
+		at := len(p.lines)
 		p.boxRow(nil, row)
+		for k := at; k < len(p.lines); k++ {
+			p.lines[k].under = true
+		}
 	}
 	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
 		n := c.listing.Ungraduated

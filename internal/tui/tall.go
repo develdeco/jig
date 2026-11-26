@@ -51,7 +51,7 @@ func (m *Model) tallRow(l *screenLayout) {
 		last++
 	}
 	total := last - first
-	if total < 3 {
+	if total < 2 {
 		return
 	}
 	h := l.pageH
@@ -75,7 +75,7 @@ func (m *Model) tallRow(l *screenLayout) {
 	}
 	id := lines[first].ref.identity()
 	part := 0
-	for p := min(total-1, capLines); p >= 3; p-- {
+	for p := min(total-1, capLines); p >= 2; p-- {
 		if shown(m.tallPage(l.pg, first, last, 0, p), first+p) {
 			part = p
 			break
@@ -103,7 +103,7 @@ func (m *Model) tallPage(pg page, first, last, scroll, part int) page {
 	lines := pg.lines
 	total := last - first
 	head := lines[first]
-	top := scroll > 0
+	top := scroll > 0 && part >= 3 // a part of two lines has room for one count
 	// The lines the part holds when nothing is below it, else one fewer for the
 	// count of what is.
 	content := part

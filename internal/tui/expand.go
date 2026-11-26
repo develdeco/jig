@@ -76,9 +76,14 @@ func (p page) holdsCut(sel int) bool {
 			if in && len(l.cuts) > 0 {
 				return true
 			}
-		default:
-			// Any other line ends the row.
+		case l.box != boxMid:
+			// An edge, or a line outside every pane, ends the row; any other line
+			// of the pane sits under the cursor row above it.
 			in = false
+		default:
+			if in && len(l.cuts) > 0 {
+				return true
+			}
 		}
 	}
 	return false

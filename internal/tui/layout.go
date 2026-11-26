@@ -15,9 +15,6 @@ const (
 	// freeMin is the least a free column is given before the measured columns
 	// give way to it.
 	freeMin = 20
-	// freeLow is the least a free column is given before an id is cut, in a list
-	// whose names are kept whole.
-	freeLow = 12
 	// wrapRows is the most rows a free cell takes; text that goes on past them
 	// ends in an ellipsis on the last.
 	wrapRows = 3
@@ -164,22 +161,9 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 	for _, c := range active() {
 		need += min(natural[c], freeMin)
 	}
-	// With the names kept whole the other measured columns give less, so before
-	// an id is cut the free text gives up some of its cells, down to freeLow.
-	squeeze := 0
-	if named {
-		for _, c := range active() {
-			squeeze += max(0, min(natural[c], freeMin)-min(natural[c], freeLow))
-		}
-	}
 	for deficit := gaps() + measured() + need - width; deficit > 0; deficit-- {
 		pick := -1
 		for _, wantID := range []bool{false, true} {
-			if wantID && pick < 0 && squeeze > 0 {
-				squeeze--
-				pick = -2
-				break
-			}
 			for _, c := range visible {
 				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= max(1, floor(c)) {
 					continue
@@ -188,12 +172,9 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 					pick = c
 				}
 			}
-			if pick != -1 {
+			if pick >= 0 {
 				break
 			}
-		}
-		if pick == -2 {
-			continue
 		}
 		if pick < 0 {
 			break
