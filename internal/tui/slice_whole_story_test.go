@@ -148,21 +148,25 @@ func TestSliceScreenTimelineIsNotCappedAndNeverSpeaksOfARequestedVerification(t 
 // returns, and the fix slice opens with its finding.
 func TestTheSliceScreenTellsTheWholeStoryAtEverySize(t *testing.T) {
 	t.Parallel()
+	subject := "The slice screen lists every commit with its runs, the agent's calls and the whole timeline"
+	lines := append(storyLines(), jl(at(3, 5), "JIG-1", "b", journal.EventOracle, with("s-builder", sha('9'), "pass", "", "", ""), func(l *journal.Line) { l.Subject = subject }))
 	for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}, {160, 40}, {230, 50}} {
 		w, h := size[0], size[1]
-		g := openSlice(t, fixRoundStatus(), storyLines(), "b", w, h)
-		page := readWords(pageText(g))
-		squeezed := strings.ReplaceAll(page, " ", "")
+		g := openSlice(t, fixRoundStatus(), lines, "b", w, h)
 		for _, want := range []string{
-			"Say goodbye, politely", "go test ./...", "held by builder", "builder took it",
+			"Say goodbye, politely", "go test ./...", "held by builder", "builder took it", subject,
 			"--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1",
 			"recorded: goodbye · the farewell · flow happy step 2 · bye-1.webm · 2.0 KiB",
 			"run by builder, witnessed by jig",
 		} {
-			if !strings.Contains(squeezed, strings.ReplaceAll(want, " ", "")) {
-				t.Errorf("at %dx%d the story of b lacks %q:\n%s", w, h, want, pageText(g))
+			// What is read is the window the screen draws, and what the keys bring
+			// into it.
+			fresh := openSlice(t, fixRoundStatus(), lines, "b", w, h)
+			if found, _ := reaches(fresh, want, 60); !found {
+				t.Errorf("at %dx%d the story of b lacks %q in what the screen draws:\n%s", w, h, want, fresh.view())
 			}
 		}
+		page := readWords(pageText(g))
 		if strings.Contains(page, "planner") {
 			t.Errorf("at %dx%d the builder is named the planner:\n%s", w, h, pageText(g))
 		}

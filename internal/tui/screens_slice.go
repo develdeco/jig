@@ -38,6 +38,22 @@ func (m *Model) slicePage(id, slice string) page {
 		m.slicePanel(&p, t, *row)
 	}
 
+	p.lines = append(p.lines, m.sliceBody(t, slice, row)...)
+	return p
+}
+
+// sliceBody is the lines of the slice screen under the slice's own panel: its
+// commits, the questions, the calls and the timeline. They are built once for
+// what they read, the ticket's lines, status and the width, and a key that moves
+// the cursor draws them again and builds nothing.
+func (m *Model) sliceBody(t *ticket, slice string, row *sliceRow) []pline {
+	memo := t.memoFor()
+	key := slice + "|" + strconv.Itoa(m.width) + "|" + m.zone.String()
+	if lines, ok := memo.sliceBody[key]; ok {
+		return lines
+	}
+	m.sliceBuilds++
+	var p page
 	oracle := ""
 	if row != nil {
 		oracle = row.Oracle
@@ -71,7 +87,7 @@ func (m *Model) slicePage(id, slice string) page {
 		for i, q := range qs {
 			var ref *rowRef
 			if q.Open {
-				ref = &rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}
+				ref = &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}
 			}
 			p.boxLaid(ref, laid[i])
 			for _, l := range m.panelLines(q.Text) {
@@ -101,7 +117,11 @@ func (m *Model) slicePage(id, slice string) page {
 		}
 		m.listPanel(&p, listSpec{title: "Timeline", summary: strconv.Itoa(len(lines)), cols: timelineColumns, names: timelineColumnNames, rows: rows})
 	}
-	return p
+	if memo.sliceBody == nil {
+		memo.sliceBody = map[string][]pline{}
+	}
+	memo.sliceBody[key] = p.lines
+	return p.lines
 }
 
 // The columns of the slice screen's lists: a commit, a question, and a line of
@@ -115,14 +135,14 @@ var (
 	timelineColumnNames = []string{"time", "what"}
 )
 
-// claimHolder is the session holding the slice by its latest claim line that
-// no release has followed.
-func claimHolder(t *ticket, slice string) (string, bool) {
+// lastClaimant is the session of the slice's latest claim line, whoever has let
+// go of the slice since, and whether it still holds it.
+func lastClaimant(t *ticket, slice string) (session string, held, ok bool) {
 	claim := t.latest(slice, journal.EventClaim)
-	if claim < 0 || t.latest(slice, journal.EventRelease) > claim {
-		return "", false
+	if claim < 0 {
+		return "", false, false
 	}
-	return t.lines[claim].Session, true
+	return t.lines[claim].Session, t.latest(slice, journal.EventRelease) < claim, true
 }
 
 // factRow is a row of the slice's panel: a label, its value, and the slice the
@@ -143,20 +163,17 @@ func (m *Model) slicePanel(p *page, t *ticket, s sliceRow) {
 		}
 	}
 	full := t.statusSlice(s.ID)
-	if t.fixRound(s.ID) == 0 {
-		// A fix slice's goal is its finding, drawn above in a panel of its own.
-		add("goal", strings.Join(strings.Fields(full.Goal), " "))
-	}
-	add("oracle", s.Oracle)
+	// The facts come first, so each is on the screen whatever the length of the
+	// goal and the oracle under them.
 	add("state", m.st.icon(s.State)+" "+m.st.state(s.State, s.State))
 	add("tries", strconv.Itoa(s.Attempts))
-	if holder, ok := claimHolder(t, s.ID); ok {
-		verb := "held by"
-		if s.State == StateGreen {
-			verb = "built by"
+	if holder, held, ok := lastClaimant(t, s.ID); ok {
+		verb := "built by"
+		if held && s.State != StateGreen {
+			verb = "held by"
 		}
 		// A session that claimed the slice is its builder, whatever else it did
-		// on the ticket.
+		// on the ticket and whether it holds the slice still.
 		add(verb, firstOf(m.whoWithAs(t, holder, roleBuilder), "a session"))
 	}
 	all := t.slices(m.zone)
@@ -189,6 +206,11 @@ func (m *Model) slicePanel(p *page, t *ticket, s sliceRow) {
 	}
 	named("needed by", waiting)
 	add("workspace", s.Workspace)
+	add("oracle", s.Oracle)
+	if t.fixRound(s.ID) == 0 {
+		// A fix slice's goal is its finding, drawn above in a panel of its own.
+		add("goal", strings.Join(strings.Fields(full.Goal), " "))
+	}
 
 	summary := m.st.icon(s.State) + " " + m.st.state(s.State, s.State) + " · " + strconv.Itoa(s.Attempts) + " " + plural(s.Attempts, "try", "tries")
 	if d := m.clocksOf(t).work.of(stepBuild, "slice:"+s.ID); d > 0 {
@@ -277,27 +299,34 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 		case hasRow:
 			icons[i] = row.icon()
 		}
-		cells[i] = []string{m.st.icon(icons[i]), short(c.SHA), c.Subject, m.st.dim(m.commitWhen(c))}
+		when := m.commitWhen(c)
+		if when != "" {
+			when = m.st.dim(when)
+		}
+		cells[i] = []string{m.st.icon(icons[i]), short(c.SHA), c.Subject, when}
 	}
 	p.boxTop("Commits", strconv.Itoa(len(commits)))
-	laid := m.laidList(p, commitColumns, dimmed(m.st, commitColumnNames), cells, 0)
+	// A commit's subject is never cut, and a column nothing is written in has no
+	// name.
+	laid := m.laidList(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1)
 	for i, c := range commits {
 		p.boxLaid(nil, laid[i])
 		row, hasRow := t.status.verificationOf(slice, c.SHA)
 		switch {
 		case t.status == nil:
-			m.under(p, 2, m.st.dim(readingText))
+			m.under(p, 2, "", readingText, m.st.dim)
 		case hasRow:
 			// The state in phase's words, then the command that clears it.
-			m.under(p, 2, m.st.state(icons[i], row.State))
+			icon := icons[i]
+			m.under(p, 2, "", row.State, func(s string) string { return m.st.state(icon, s) })
 			if row.Clear != "" {
-				m.under(p, 4, m.st.dim(row.Clear))
+				m.under(p, 4, "", row.Clear, m.st.dim)
 			}
 		case c.State == StateGreen:
-			m.under(p, 2, m.st.state(StateGreen, "verified"))
+			m.under(p, 2, "", "verified", func(s string) string { return m.st.state(StateGreen, s) })
 		}
 		if c.Error != nil {
-			m.under(p, 2, m.st.state(StateStalled, "could not be verified: "+firstOf(c.Error.Summary, "no reason recorded")))
+			m.under(p, 2, "", "could not be verified: "+firstOf(c.Error.Summary, "no reason recorded"), func(s string) string { return m.st.state(StateStalled, s) })
 		}
 		for _, run := range newestFirst(c.Runs, func(l events.Envelope) time.Time { at, _ := l.At(); return at }) {
 			state := StateGreen
@@ -308,17 +337,20 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 			case run.Outcome != "pass":
 				state = StateStalled
 			}
-			m.under(p, 2, m.st.icon(state)+" "+m.st.dim(m.runWords(t, run, oracle)))
+			m.under(p, 2, m.st.icon(state), m.runWords(t, run, oracle), m.st.dim)
 			if run.Outcome == "fail" && run.Cause == "" {
 				output, note := failureOutput(run)
 				if output != "" {
-					m.under(p, 4, m.st.state(StateStalled, output))
+					m.under(p, 4, "", output, func(s string) string { return m.st.state(StateStalled, s) })
 				}
-				m.under(p, 4, m.st.dim(note))
+				m.under(p, 4, "", note, m.st.dim)
 			}
 		}
 		for _, r := range c.Recordings {
-			m.under(p, 2, m.st.dim("recorded: "+recordingWords(r)))
+			m.under(p, 2, "", "recorded: "+recordingWords(r), m.st.dim)
+		}
+		if c.RecordNote != "" {
+			m.under(p, 2, "", "recordings: "+c.RecordNote, m.st.dim)
 		}
 	}
 	if t.status != nil {
@@ -336,11 +368,40 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 }
 
 // under adds text under the row above it in the panel, standing indent cells in
-// and wrapped whole at the room that leaves: none of it is cut.
-func (m *Model) under(p *page, indent int, text string) {
-	for _, l := range wrapWhole(text, max(1, m.innerWidth()-indent)) {
-		p.boxUnder(spaces(indent) + l)
+// and wrapped whole at the room that leaves, none of it cut. A mark, when there
+// is one, leads the first line; style colors each line after the wrap, so the
+// color is whole on every line the text came to.
+func (m *Model) under(p *page, indent int, mark, text string, style func(string) string) {
+	lead := indent
+	if mark != "" {
+		lead += width(mark) + 1
 	}
+	for i, l := range wrapWhole(text, max(1, m.innerWidth()-lead)) {
+		if i == 0 && mark != "" {
+			p.boxUnder(spaces(indent) + mark + " " + style(l))
+			continue
+		}
+		p.boxUnder(spaces(lead) + style(l))
+	}
+}
+
+// namedColumns are the names of a list's columns, a blank for each column whose
+// cells are all blank.
+func namedColumns(names []string, cells [][]string) []string {
+	out := append([]string(nil), names...)
+	for c := range out {
+		blank := true
+		for _, row := range cells {
+			if c < len(row) && row[c] != "" {
+				blank = false
+				break
+			}
+		}
+		if blank {
+			out[c] = ""
+		}
+	}
+	return out
 }
 
 // recordingWords is a recorded file in words: the scenario with its caption, the

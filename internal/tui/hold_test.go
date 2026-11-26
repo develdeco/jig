@@ -100,8 +100,7 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	// mark that said there was more above.
 	for i := newAt + 1; i < len(before)-4; i++ {
 		if strings.Contains(before[i], "↓") {
-			// The mark of the rows below counts them: two lines came in, and the
-			// timeline keeps its latest forty.
+			// The mark of the rows below counts them, and two lines came in.
 			break
 		}
 		if before[i] != after[i] {

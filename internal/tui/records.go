@@ -38,6 +38,9 @@ type commitRecord struct {
 	// Recordings are the files the build's scenarios wrote at the commit, the
 	// ones its recorded lines name.
 	Recordings []journal.Recording
+	// RecordNote is what the recorded lines say of the files they left out or
+	// refused, in the line's own words.
+	RecordNote string
 }
 
 // commits are the commits slice's verifications have a word about, oldest first
@@ -80,6 +83,12 @@ func (t *ticket) commits(slice string) []commitRecord {
 		case journal.EventRecorded:
 			c := get(l)
 			c.Recordings = append(c.Recordings, l.Recordings...)
+			if l.Outcome != "" {
+				if c.RecordNote != "" {
+					c.RecordNote += "; "
+				}
+				c.RecordNote += l.Outcome
+			}
 		case journal.EventVerifyError:
 			c := get(l)
 			l := l
