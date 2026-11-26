@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,11 @@ const (
 	// rowFold is the fold row of a group of the project's list: enter opens the
 	// rows it holds in place, and folds them again.
 	rowFold = "fold"
+	// rowFinding is a finding a round raised: enter opens its screen. rowCarry is
+	// the line of a round that carries an earlier round's verdict, its id the
+	// number of that round: enter moves the Rounds cursor to it.
+	rowFinding = "finding"
+	rowCarry   = "carried"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and
@@ -237,6 +243,8 @@ func (m *Model) rawPage() page {
 		return m.publishPage(e.ticket)
 	case screenLand:
 		return m.landPage(e.ticket)
+	case screenFinding:
+		return m.findingPage(e.ticket, e.finding)
 	case screenChart:
 		return m.chartPage(e.chart)
 	}
@@ -845,7 +853,7 @@ func (m *Model) header(w int) []string {
 	default:
 		t := m.w.tickets[e.ticket]
 		crumbs += " › " + m.st.bold(e.ticket)
-		if e.screen != screenSlice {
+		if k := m.sibKindOf(); e.screen != screenSlice && k != sibFindings && k != sibRounds {
 			crumbs += m.st.dim(m.place())
 		}
 		idCrumb = crumbs
@@ -864,6 +872,24 @@ func (m *Model) header(w int) []string {
 			crumbs += " › 2 build"
 		case screenReview:
 			crumbs += " › 3 review"
+			if m.sibKindOf() == sibRounds {
+				// The place among the rounds, the screen's own siblings.
+				crumbs += m.st.dim(m.place())
+			}
+		case screenFinding:
+			round := "?"
+			if f := t.findingNamed(e.finding); f != nil {
+				round = strconv.Itoa(f.Round)
+			}
+			// The review step gives way first when the line is too long for the size.
+			full := crumbs + " › 3 review › round " + round + " › " + m.st.bold(e.finding) + m.st.dim(m.place())
+			short := crumbs + " › round " + round + " › " + m.st.bold(e.finding) + m.st.dim(m.place())
+			crumbs = full
+			if f := t.findingNamed(e.finding); f != nil {
+				if width(full)+width(m.st.icon(findingState(*f))+" "+findingWord(*f))+1 > w {
+					crumbs = short
+				}
+			}
 		case screenPublish:
 			crumbs += " › 4 publish"
 		case screenLand:
@@ -886,6 +912,10 @@ func (m *Model) header(w int) []string {
 						state, label = s.State, s.State
 					}
 				}
+			}
+			if f := t.findingNamed(e.finding); e.screen == screenFinding && f != nil {
+				// A finding's screen says how the finding stands.
+				state, label = findingState(*f), findingWord(*f)
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}

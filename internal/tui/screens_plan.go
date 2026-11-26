@@ -101,7 +101,7 @@ func (m *Model) issuesOf(id string) []string {
 func (m *Model) upFrom() string {
 	e := m.top()
 	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand:
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand, screenFinding:
 		if t := m.w.tickets[e.ticket]; t != nil && !t.awaiting {
 			return e.ticket
 		}

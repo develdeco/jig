@@ -32,7 +32,7 @@ func (s screenSet) has(k screenKind) bool { return s&(1<<k) != 0 }
 
 var (
 	// onTicketScreens are the screens of one ticket.
-	onTicketScreens = onScreens(screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice, screenLand)
+	onTicketScreens = onScreens(screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice, screenLand, screenFinding)
 	// siblingScreens are the screens that stand among others of their kind.
 	siblingScreens = onTicketScreens | onScreens(screenChart)
 	// onAllScreens is every screen.
@@ -158,7 +158,7 @@ func (m *Model) keyHints() []string {
 // other than the one on top.
 func canOpen(m *Model, sub subject) (bool, string) {
 	if sub.hasRow {
-		if sub.row.kind == rowFold {
+		if sub.row.kind == rowFold || sub.row.kind == rowCarry {
 			return true, ""
 		}
 		if m.promptFor(sub.row) != "" {
@@ -185,7 +185,7 @@ func inPane(words string, sub subject) string {
 
 // keyRows is the table. Its order is the hint line's and `?`'s.
 func keyRows() []keyRow {
-	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice)
+	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenPublish, screenSlice, screenFinding)
 	scrolls := onScreens(screenLand)
 	step := func(delta int) func(*Model, string) tea.Cmd {
 		return func(m *Model, _ string) tea.Cmd { m.move(delta); return nil }

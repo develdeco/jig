@@ -14,12 +14,12 @@ import (
 
 // navKey names a screen a person can leave and come back to.
 type navKey struct {
-	screen               screenKind
-	ticket, slice, chart string
+	screen                        screenKind
+	ticket, slice, chart, finding string
 }
 
 func keyOf(e navEntry) navKey {
-	return navKey{screen: e.screen, ticket: e.ticket, slice: e.slice, chart: e.chart}
+	return navKey{screen: e.screen, ticket: e.ticket, slice: e.slice, chart: e.chart, finding: e.finding}
 }
 
 // cut leaves every screen above the first n, keeping where the cursor stood on

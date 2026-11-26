@@ -239,6 +239,11 @@ func (m *Model) roundDetail(t *ticket, r roundRow) detailSpec {
 			}
 		}
 	}
+	if r.State == StateReady && r.Carried > 0 {
+		// A round that carries an earlier round's verdict names it, and enter goes there.
+		n := strconv.Itoa(r.Carried)
+		add(detailRow{label: "carried", text: "carried over from round " + n, ref: &rowRef{kind: rowCarry, id: n, ticket: t.id}})
+	}
 	shown := map[string]bool{}
 	label := "findings"
 	if t.status != nil {
@@ -246,14 +251,15 @@ func (m *Model) roundDetail(t *ticket, r roundRow) detailSpec {
 			if f.Round != r.N {
 				continue
 			}
-			add(detailRow{label: label, icon: findingState(f), text: strings.TrimSpace(f.Risk + " " + f.Where + " " + f.Title + " → " + findingWord(f))})
+			ref := &rowRef{kind: rowFinding, id: f.ID, ticket: t.id, round: strconv.Itoa(f.Round)}
+			add(detailRow{label: label, icon: findingState(f), ref: ref, text: strings.TrimSpace(f.Risk + " " + f.Where + " " + f.Title + " → " + findingWord(f))})
 			label = ""
 			if f.Rationale != "" {
 				add(detailRow{indent: 2, dim: true, text: f.Rationale})
 			}
 			for _, id := range became[f.ID] {
 				shown[id] = true
-				add(detailRow{indent: 2, icon: states[id], text: "fix slice " + id + " · " + states[id]})
+				add(detailRow{indent: 2, icon: states[id], text: "fix slice " + id + " · " + states[id], ref: &rowRef{kind: rowSlice, id: id, ticket: t.id, slice: id, container: f.ID}})
 			}
 		}
 	}
@@ -269,7 +275,7 @@ func (m *Model) roundDetail(t *ticket, r roundRow) detailSpec {
 			if shown[s.ID] || t.fixRound(s.ID) != r.N {
 				continue
 			}
-			add(detailRow{label: label, icon: states[s.ID], text: s.ID + " · " + states[s.ID]})
+			add(detailRow{label: label, icon: states[s.ID], text: s.ID + " · " + states[s.ID], ref: &rowRef{kind: rowSlice, id: s.ID, ticket: t.id, slice: s.ID, container: "sent back"}})
 			label = ""
 		}
 	}
@@ -458,7 +464,7 @@ func findingWord(f statusFinding) string {
 		return "dismissed"
 	}
 	if f.Decision != "" {
-		return f.Decision
+		return f.Decision + decidedBy(askRow{DecidedBy: f.DecidedBy})
 	}
 	return "ask"
 }
