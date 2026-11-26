@@ -4,7 +4,7 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
 
   ╭─ Checklist ────────────────────────────────────────────────── 7 of 7 done ─╮
   │    step                                                           at       │
-  │  ✓ body written for api ccccccc, web ddddddd                      09:14:01 │
+  │▸ ✓ body written for api ccccccc, web ddddddd                      09:14:01 │
   │  ✓ approved by you for api ccccccc, web ddddddd                   09:14:11 │
   │  ✓ branch jig/JIG-2 pushed                                                 │
   │  ✓ pull request api · opened ·                                    09:14:20 │
@@ -14,10 +14,10 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   │  ✓ changelog written                                                       │
   │  ✓ published                                                      09:14:22 │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Publish activity ───────────────────────────────────────── latest 2 of 7 ─╮
-  │  time     step               what                                          │
-  │  09:14:22 ● published        finished                                      │
-  │  ↓ 2 more                                                                  │
+  ╭─ Detail · body ──────────────────────────────────────────── done 09:14:01 ─╮
+  │  written for api ccccccc, web ddddddd                                      │
+  │  files       api tickets/JIG-2/pr/api.md                                   │
+  │  ↓ 1 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   esc back · q quit · ? keys · ↑↓ scroll · say "Land JIG-2" · 1-5 steps

@@ -23,6 +23,11 @@ const (
 	// rowRound is a gate round on the review screen: it opens nothing, and the
 	// detail under the list is its own.
 	rowRound = "round"
+	// rowCheck is a check of the publish screen's checklist and rowSection a
+	// section of the brief: each opens nothing, and the detail under the list is
+	// its own.
+	rowCheck   = "check"
+	rowSection = "section"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.

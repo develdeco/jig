@@ -126,6 +126,9 @@ type statusPublish struct {
 	PR, PRState, Head, Branch string
 	BodyFile, Body            string
 	ChangelogFile, Changelog  string
+	// Repos are the files that hold a pull request body for each repo of a
+	// publish in several, by the repo's name: the status's publish_prs table.
+	Repos map[string]string
 }
 
 // statusBrief is the brief block of a status: whether the brief as it is now
@@ -279,6 +282,15 @@ func parseStatus(out string) *statusInfo {
 		info.Publish = &statusPublish{
 			PR: kv["pr"], PRState: kv["pr_state"], Head: kv["head"], Branch: kv["branch"],
 			BodyFile: kv["body_file"], Body: kv["body"], ChangelogFile: kv["changelog_file"], Changelog: kv["changelog"],
+		}
+		for _, r := range doc.Tables["publish_prs"].Maps() {
+			if r["body_file"] == "" || r["body_file"] == "-" {
+				continue
+			}
+			if info.Publish.Repos == nil {
+				info.Publish.Repos = map[string]string{}
+			}
+			info.Publish.Repos[r["repo"]] = r["body_file"]
 		}
 	}
 	for _, r := range doc.Tables["questions"].Maps() {

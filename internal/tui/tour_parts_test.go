@@ -53,7 +53,7 @@ func wantEveryRowInAPanel(t *testing.T, where string, g *rig, w int, sentences .
 			if title == "" || strings.ToUpper(title[:1]) != title[:1] {
 				t.Errorf("%s: the panel %q has no capital", where, title)
 			}
-			if !strings.HasSuffix(l, "─╮") {
+			if !strings.HasSuffix(l, "─╮") && !strings.Contains(l, "─╮  ") { // or closed before a panel drawn beside it
 				t.Errorf("%s: the top edge of %s is not closed: %q", where, title, l)
 			}
 		case strings.HasPrefix(l, "  ╰"):

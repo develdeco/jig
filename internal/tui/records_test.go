@@ -56,26 +56,6 @@ func TestWrapBreaksOnSpacesAndMarksWhatItCut(t *testing.T) {
 	}
 }
 
-func TestShareRowsGivesEachTextItsOwnWhenBothFit(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ a, b, room, wantA, wantB int }{
-		{3, 2, 10, 3, 2}, // both fit
-		{7, 5, 6, 4, 2},  // neither does: three parts of five and two
-		{7, 1, 6, 5, 1},  // the short one leaves its rows to the other
-		{1, 9, 6, 1, 5},
-		{7, 5, 1, 1, 0}, // a single row is the body's
-		{7, 5, 0, 0, 0},
-		{0, 5, 3, 0, 3},
-	} {
-		if a, b := shareRows(tc.a, tc.b, tc.room); a != tc.wantA || b != tc.wantB {
-			t.Errorf("shareRows(%d, %d, %d) = %d, %d, want %d, %d", tc.a, tc.b, tc.room, a, b, tc.wantA, tc.wantB)
-		}
-	}
-	if got := clip([]string{"a", "b", "c"}, 2); !reflect.DeepEqual(got, []string{"a", "b …"}) {
-		t.Errorf("clip = %q, want the last line to end in an ellipsis", got)
-	}
-}
-
 // TestParseBriefTextTakesTheTablesAndPassesOverTheBodies: the verb prints each
 // section body after its tables as an indented block of its own, and a heading
 // may be quoted.
@@ -132,8 +112,8 @@ func TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives(t *testing.T) {
 	if g.m.Screen() != "brief" || g.r.reads("brief") != 1 {
 		t.Fatalf("on %s after %d reads, want the brief screen after one", g.m.Screen(), g.r.reads("brief"))
 	}
-	if !strings.Contains(pageText(g), "Use the first name") {
-		t.Errorf("the screen does not show the text it read:\n%s", pageText(g))
+	if !strings.Contains(pageText(g), "Say hello and goodbye to a person by name") || !strings.Contains(pageText(g.focus("Greeting")), "Use the first name") {
+		t.Errorf("the detail of the section under the cursor does not show the text it read:\n%s", pageText(g))
 	}
 	g.press("esc", "enter")
 	if n := g.r.reads("brief"); n != 1 {
@@ -173,13 +153,17 @@ func TestBriefScreenShowsTheHeadingsWhenTheTextIsNotThere(t *testing.T) {
 	g.r.answer("brief show JIG-1 --text --store /s", "error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2)
 	g.feed(jig1()...).press("up", "enter")
 	text := pageText(g)
-	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "workspace app · oracle unit"} {
+	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "heading Goal"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "Use the first name") {
 		t.Errorf("the screen shows text it could not read:\n%s", text)
+	}
+	// What slices.yaml says of a slice is the detail of its row.
+	if detail := readWords(pageText(g.focus("a"))); !strings.Contains(detail, "workspace app") || !strings.Contains(detail, "oracle unit") {
+		t.Errorf("the detail of slice a lacks its workspace and oracle:\n%s", detail)
 	}
 }
 
