@@ -56,20 +56,20 @@ func TestRenderStatus(t *testing.T) {
 
 	want := "ticket: JIG-1\n" +
 		"state: building\n" +
-		"slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:\n" +
-		"  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-\n" +
-		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\",alpha,test,-\n" +
-		"  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-\n" +
-		"  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-\n" +
+		"slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate,findings}:\n" +
+		"  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-,-\n" +
+		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\",alpha,test,-,-\n" +
+		"  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-,-\n" +
+		"  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-,-\n" +
 		"questions: none\n" +
 		"brief:\n" +
 		"  approval: none\n" +
-		"brief_sections[5]{heading,slices}:\n" +
-		"  Goal,-\n" +
-		"  Slice A - failing clamp,a\n" +
-		"  Slice B - clamp callers,b\n" +
-		"  Slice C - greeting decision,c\n" +
-		"  Slice D - rig smoke,d\n" +
+		"brief_sections[5]{heading,slices,since_approval}:\n" +
+		"  Goal,-,-\n" +
+		"  Slice A - failing clamp,a,-\n" +
+		"  Slice B - clamp callers,b,-\n" +
+		"  Slice C - greeting decision,c,-\n" +
+		"  Slice D - rig smoke,d,-\n" +
 		"help[1]:\n" +
 		"  Run `jig next JIG-1` to see what is ready, then `jig claim JIG-1 --slice <slice>` to take one; ask: Build JIG-1\n"
 

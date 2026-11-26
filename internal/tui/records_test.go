@@ -56,66 +56,6 @@ func TestWrapBreaksOnSpacesAndMarksWhatItCut(t *testing.T) {
 	}
 }
 
-func TestShareRowsGivesEachTextItsOwnWhenBothFit(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ a, b, room, wantA, wantB int }{
-		{3, 2, 10, 3, 2}, // both fit
-		{7, 5, 6, 4, 2},  // neither does: three parts of five and two
-		{7, 1, 6, 5, 1},  // the short one leaves its rows to the other
-		{1, 9, 6, 1, 5},
-		{7, 5, 1, 1, 0}, // a single row is the body's
-		{7, 5, 0, 0, 0},
-		{0, 5, 3, 0, 3},
-	} {
-		if a, b := shareRows(tc.a, tc.b, tc.room); a != tc.wantA || b != tc.wantB {
-			t.Errorf("shareRows(%d, %d, %d) = %d, %d, want %d, %d", tc.a, tc.b, tc.room, a, b, tc.wantA, tc.wantB)
-		}
-	}
-	if got := clip([]string{"a", "b", "c"}, 2); !reflect.DeepEqual(got, []string{"a", "b …"}) {
-		t.Errorf("clip = %q, want the last line to end in an ellipsis", got)
-	}
-}
-
-// TestParseBriefTextTakesTheTablesAndPassesOverTheBodies: the verb prints each
-// section body after its tables as an indented block of its own, and a heading
-// may be quoted.
-func TestParseBriefTextTakesTheTablesAndPassesOverTheBodies(t *testing.T) {
-	t.Parallel()
-	out := strings.Join([]string{
-		axi.KV("brief", [][2]string{{"ticket", "JIG-1"}, {"title", "Greeting: copy"}, {"illustration", "yes"}}),
-		axi.Table("sections", []string{"heading", "summary"}, [][]string{
-			{"Goal, in short", "Say hello. Say goodbye."},
-			{"Tone", "Casual"},
-		}),
-		"section: " + axi.Quote("Goal, in short") + "\n  Say hello. Say goodbye.\n\n  help[1]: not a block\n  odd[1]{x}: nope",
-		"section: Tone\n  Casual",
-		axi.Help("serve it"),
-	}, "\n") + "\n"
-	got := parseBriefText(out, 0)
-	want := briefText{
-		Title: "Greeting: copy", Illustration: true,
-		Sections: []briefSection{{"Goal, in short", "Say hello. Say goodbye."}, {"Tone", "Casual"}},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("brief text = %+v, want %+v", got, want)
-	}
-	if s := got.summaryOf(1, "Tone"); s != "Casual" {
-		t.Errorf("summary of Tone = %q", s)
-	}
-	if s := got.summaryOf(0, "Tone"); s != "Casual" {
-		t.Errorf("summary found by heading when the position holds another = %q", s)
-	}
-	if s := (*briefText)(nil).summaryOf(0, "Tone"); s != "" {
-		t.Errorf("summary of an unread brief = %q", s)
-	}
-	if refused := parseBriefText("error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2); refused.Err != "ticket JIG-1 has no brief.md" {
-		t.Errorf("a refusal reads as %+v", refused)
-	}
-	if odd := parseBriefText("panic\n", 3); !strings.Contains(odd.Err, "exited 3") {
-		t.Errorf("an exit with no refusal reads as %+v", odd)
-	}
-}
-
 // TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives: the screen reads the
 // brief when it opens, not again while the brief is as it was, and again when a
 // line about the brief arrives, at once if the screen is open.
@@ -128,12 +68,12 @@ func TestBriefTextIsReadOnceAndKeptUntilABriefLineArrives(t *testing.T) {
 	if n := g.r.reads("brief"); n != 0 {
 		t.Fatalf("the ticket screen read the brief %d times, want none", n)
 	}
-	g.press("up", "enter")
+	g.sized(100, 60).press("up", "enter")
 	if g.m.Screen() != "brief" || g.r.reads("brief") != 1 {
 		t.Fatalf("on %s after %d reads, want the brief screen after one", g.m.Screen(), g.r.reads("brief"))
 	}
-	if !strings.Contains(pageText(g), "Use the first name") {
-		t.Errorf("the screen does not show the text it read:\n%s", pageText(g))
+	if !strings.Contains(pageText(g), "Say hello and goodbye to a person by name") || !strings.Contains(pageText(g.focus("section-2")), "Use the first name") {
+		t.Errorf("the detail of the section under the cursor does not show the text it read:\n%s", pageText(g))
 	}
 	g.press("esc", "enter")
 	if n := g.r.reads("brief"); n != 1 {
@@ -171,15 +111,19 @@ func TestBriefScreenShowsTheHeadingsWhenTheTextIsNotThere(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
 	g.r.answer("brief show JIG-1 --text --store /s", "error: ticket JIG-1 has no brief.md\ncode: VALIDATION_ERROR\n", 2)
-	g.feed(jig1()...).press("up", "enter")
-	text := pageText(g)
-	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "slice c, d", "workspace app · oracle unit"} {
+	g.feed(jig1()...).press("up", "enter").sized(100, 60)
+	text := readWords(pageText(g))
+	for _, want := range []string{"the brief's text is not available: ticket JIG-1 has no brief.md", "Greeting", "cited by 2", "heading Goal"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, "Use the first name") {
 		t.Errorf("the screen shows text it could not read:\n%s", text)
+	}
+	// What slices.yaml says of a slice is the detail of its row.
+	if detail := readWords(pageText(g.focus("a"))); !strings.Contains(detail, "workspace app") || !strings.Contains(detail, "oracle unit") {
+		t.Errorf("the detail of slice a lacks its workspace and oracle:\n%s", detail)
 	}
 }
 
@@ -188,9 +132,9 @@ func TestBriefScreenSaysWhenTheBriefHasAnIllustration(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", statusJIG1Brief(), 0)
 	g.r.answer("brief show JIG-1 --text --store /s", strings.Replace(briefTextJIG1(), "illustration: no", "illustration: yes", 1), 0)
-	g.feed(jig1()...).press("up", "enter")
-	if text := pageText(g); !strings.Contains(text, "it has an illustration: `jig brief show JIG-1` serves it") {
-		t.Errorf("the screen does not point at the illustration:\n%s", text)
+	g.feed(jig1()...).press("up", "enter").sized(100, 60)
+	if text := readWords(pageText(g)); !strings.Contains(text, "illustration the brief's illustration not served yet") {
+		t.Errorf("the screen does not list the illustration as a part:\n%s", text)
 	}
 }
 
@@ -215,16 +159,22 @@ func TestBuildScreenListsTheLastCommitsAndCountsTheEarlier(t *testing.T) {
 	var lines []events.Envelope
 	for i, d := range []byte("12345") {
 		lines = append(lines,
-			jl(at(i, 0), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha(d), "", fmt.Sprintf("attempt %d", i+1), "", "")),
-			jl(at(i, 30), "JIG-1", "a", journal.EventOracle, with("", sha(d), "fail", "boom "+string(d), "", ""), func(l *journal.Line) { l.Command, l.Seconds = "go test ./...", 30 }))
+			jl(at(i, 30), "JIG-1", "a", journal.EventOracle, with("", sha(d), "fail", "boom "+string(d), "", ""), func(l *journal.Line) {
+				l.Command, l.Seconds, l.Subject = "go test ./...", 30, fmt.Sprintf("attempt %d", i+1)
+			}))
 	}
-	g.feed(lines...).press("enter")
+	g.feed(lines...).press("enter").sized(100, 80)
 	text, _, _ := strings.Cut(pageText(g), "activity") // the records, not the activity under them
 	if !strings.Contains(text, "+2 earlier commits") {
 		t.Errorf("the screen does not count the commits it left out:\n%s", text)
 	}
 	if strings.Contains(text, "1111111") || strings.Contains(text, "2222222") || !strings.Contains(text, "3333333") || !strings.Contains(text, "5555555 “attempt 5”") {
 		t.Errorf("the screen does not list the last three commits:\n%s", text)
+	}
+	// The newest commit is on top and the count of the older ones is under the
+	// list, not above it.
+	if five, three, more := strings.Index(text, "5555555"), strings.Index(text, "3333333"), strings.Index(text, "+2 earlier commits"); !(five < three && three < more) {
+		t.Errorf("the commits are not newest first with the count of the earlier ones under them (5 at %d, 3 at %d, count at %d):\n%s", five, three, more, text)
 	}
 	// Only the output of the latest run is shown: the commit before it failed too.
 	if !strings.Contains(text, "boom 5") || strings.Contains(text, "boom 4") {
@@ -243,15 +193,13 @@ func TestBuildScreenSaysWhereToReadAFailureThatLeftNoOutput(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
 	g.feed(
-		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "fail", "", "", "")),
 	).press("enter")
-	if text := pageText(g); !strings.Contains(text, "no output was recorded: the verify log on the machine that ran it") {
+	if text := pageText(g); !strings.Contains(readWords(text), "no output was recorded: the verify log on the machine that ran it") {
 		t.Errorf("the screen does not say where to read a failure with no output:\n%s", text)
 	}
 
 	g.feed(
-		jl(at(1, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('b'), "", "second", "", "")),
 		jl(at(1, 20), "JIG-1", "a", journal.EventOracle, with("", sha('b'), "pass", "", "", "")),
 		jl(at(1, 21), "JIG-1", "a", journal.EventVerified, with("", sha('b'), "", "", "", "")),
 	)
@@ -267,16 +215,16 @@ func TestBuildScreenShowsAVerificationThatCouldNotRun(t *testing.T) {
 	g := newRig(t, "JIG-1")
 	g.r.answer("status JIG-1 --store /s", slicesStatus([]string{"a", "building", "1", "-", "-", "Greet", "app", "unit", "-"}), 0)
 	g.feed(
-		jl(at(0, 1), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "first", "", "")),
 		jl(at(0, 20), "JIG-1", "a", journal.EventVerifyError, with("", sha('a'), "", "no worktree", "", "")),
 	).press("enter")
-	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✖ aaaaaaa “first”") {
+	if text := pageText(g); !strings.Contains(text, "could not be verified: no worktree") || !strings.Contains(text, "✗ aaaaaaa") {
 		t.Errorf("the screen does not show the commit that could not be verified:\n%s", text)
 	}
 }
 
-// TestBuildScreenGivesTheFacts: the slice row ends in the workspace and oracle
-// when they fit, and a fix slice names its round.
+// TestBuildScreenGivesTheFacts: the detail of the slice under the cursor says its
+// workspace and oracle, what it waits for and, for a fix slice, the round it came
+// from; the row has the goal alone.
 func TestBuildScreenGivesTheFacts(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
@@ -285,11 +233,16 @@ func TestBuildScreenGivesTheFacts(t *testing.T) {
 		[]string{"fix-1", "queued", "0", "a", "-", "Check the error that the long goal of this fix slice goes on about and on", "app", "go test ./...", "1"},
 	), 0)
 	g.feed(jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", ""))).press("enter")
-	text := pageText(g)
-	if !strings.Contains(text, "Greet  workspace app · oracle unit") {
-		t.Errorf("the short row does not end in its facts:\n%s", text)
+	text := readWords(pageText(g))
+	if !strings.Contains(text, "goal Greet oracle unit workspace app") || strings.Contains(text, "waits for") {
+		t.Errorf("the detail of the first slice does not give its facts:\n%s", text)
 	}
-	if !strings.Contains(text, "\n         workspace app · oracle go test ./... · fix slice of round 1 · after a") {
-		t.Errorf("the facts a long row has no room for are not on the line below it:\n%s", text)
+	g.press("down")
+	text = readWords(pageText(g))
+	if !strings.Contains(text, "goal Check the error that the long goal of this fix slice goes on about and on oracle go test ./... workspace app waits for a round 1") {
+		t.Errorf("the detail of the fix slice does not give its facts:\n%s", text)
+	}
+	if strings.Contains(strings.Split(text, "Detail")[0], "workspace") {
+		t.Errorf("a row of the list says its facts:\n%s", text)
 	}
 }

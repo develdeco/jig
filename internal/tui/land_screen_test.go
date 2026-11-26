@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
@@ -15,11 +17,11 @@ import (
 func TestFiveOpensTheLandScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("down", "down", "down", "down") // the question under "needs you"
+	g.feed(jig1()...).press("tab") // the question under "needs you"
 	if ref := g.m.selected(); ref == nil || ref.kind != rowQuestion {
 		t.Fatalf("the cursor is on %+v, want a question", ref)
 	}
-	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "5 land") {
+	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "1-5 steps") {
 		t.Errorf("the ticket's hint line does not list 5:\n%s", hint)
 	}
 	g.press("5")
@@ -39,7 +41,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 	}
 
 	// From the build screen, with the cursor moved off its first row.
-	g.press("up", "up", "up", "up", "enter")
+	g.tabTo("Steps").press("enter")
 	if g.m.Screen() != "build" {
 		t.Fatalf("on %s, want build", g.m.Screen())
 	}
@@ -47,12 +49,12 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 	if g.m.Screen() != "land" {
 		t.Fatalf("5 on the build screen went to %s", g.m.Screen())
 	}
-	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "esc back") || strings.Contains(hint, "5 land") {
+	if hint := lastLines(g.view(), 2); !strings.Contains(hint, "esc back") || !strings.Contains(hint, "1-5 steps") {
 		t.Errorf("the land screen's hint line:\n%s", hint)
 	}
 	g.press("esc")
-	if g.m.Screen() != "build" {
-		t.Errorf("esc went to %s, want the build screen", g.m.Screen())
+	if g.m.Screen() != "ticket" {
+		t.Errorf("esc went to %s, want the ticket: a step key replaces the screens above it", g.m.Screen())
 	}
 
 	// From each other step's screen and from a slice's.
@@ -69,7 +71,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 		}
 	}
 	s := newRig(t, "JIG-1")
-	s.feed(jig1()...).press("down", "down", "down", "down", "enter")
+	s.feed(jig1()...).press("enter", "enter") // the build screen, its first slice
 	if s.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", s.m.Screen())
 	}
@@ -135,12 +137,12 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 		`◇ waits to land · say "Land JIG-2"`,
 		"the session merges each pull request and records it",
 		"1 of 3 landed",
-		"◇ api  merge PR #7 into main · open on the host",
-		"✓ web  PR #3 into main · landed at 09:15:30 · by you",
-		"◇ docs  merge PR #2 into main · merged on the host, not recorded",
-		"record · landed web into main", // the landed line, in the land step's own activity
+		"◇ api PR #7 open into main merge to make",
+		"✓ web PR #3 merged into main landed at 09:15:30 · by you",
+		"◇ docs PR #2 merged into main merged on the host, not recorded",
+		"record landed web into main", // the landed line, in the land step's own activity
 	} {
-		if !strings.Contains(view, want) {
+		if !hasWords(view, want) {
 			t.Errorf("two repos: the land screen lacks %q:\n%s", want, view)
 		}
 	}
@@ -154,13 +156,14 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 	g = landTicket(t, shared, jl(at(15, 30), "JIG-2", "", journal.EventLanded, func(l *journal.Line) {
 		l.Repo, l.Into, l.Base, l.Provenance = "shop", "ISSUE-1", "501-first-issue", journal.ProvenanceHost
 	}))
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 24}) // a long branch needs the room to be read whole
 	g.press("5")
 	view = g.view()
 	for _, want := range []string{
-		"✓ shop  PR #5 into 501-first-issue · landed at 09:15:30 · by the host",
-		"◇ shop  merge PR #6 into 502-second-issue · state not read",
+		"✓ shop PR #5 merged into 501-first-issue landed at 09:15:30 · by the host",
+		"◇ shop PR #6 into 502-second-issue (state not read) merge to make",
 	} {
-		if !strings.Contains(view, want) {
+		if !strings.Contains(readWords(view), want) {
 			t.Errorf("a shared task: the land screen lacks %q:\n%s", want, view)
 		}
 	}
@@ -172,14 +175,14 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 	behind.PRs = []digestPR{{Repo: "api", Number: 8, URL: "https://x/8", State: "open", Target: "main"}}
 	g = landTicket(t, behind)
 	g.press("5")
-	if view := g.view(); !strings.Contains(view, "▲ merge PR #8 into main · open on the host") || !strings.Contains(view, "lands after JIG-1") {
+	if view := g.view(); !strings.Contains(readWords(view), "▲ PR #8 open into main merge to make") || !strings.Contains(view, "lands after JIG-1") {
 		t.Errorf("a ticket published behind another:\n%s", view)
 	}
 	g = landTicket(t, task("land", false, "done|a", "done|b", "done|c", publish, "done|landed"), jl(at(15, 30), "JIG-2", "", journal.EventLanded, func(l *journal.Line) {
 		l.Repo, l.Base, l.Provenance = "api", "release", journal.ProvenanceAgent
 	}))
 	g.press("5")
-	if view := g.view(); !strings.Contains(view, "✓ api  landed into release at 09:15:30 · by an agent") {
+	if view := g.view(); !strings.Contains(readWords(view), "✓ api landed into release at 09:15:30 · by an agent") {
 		t.Errorf("a landing no pull request names:\n%s", view)
 	}
 	merged := task("land", false, "done|a", "done|b", "done|c", publish, "current|merged on the host, not recorded")
@@ -195,7 +198,7 @@ func TestLandScreenNamesEachMergeAndLanding(t *testing.T) {
 	closedPR.PRs = []digestPR{{Repo: "api", Number: 9, URL: "https://x/9", State: "closed", Target: "main"}}
 	g = landTicket(t, closedPR)
 	g.press("5")
-	if view := g.view(); !strings.Contains(view, "✖ merge PR #9 into main · closed on the host, not merged") {
+	if view := g.view(); !strings.Contains(readWords(view), "✗ PR #9 closed into main closed on the host, not merged") {
 		t.Errorf("a closed pull request:\n%s", view)
 	}
 
@@ -225,14 +228,23 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	t.Parallel()
 	digests := endDigests()
 	g := landTicket(t, digests[StateWaitsToLand])
-	if page := pagesText(g.m.ticketPage("JIG-2")); !strings.Contains(page, "needs you") || !strings.Contains(page, `◇ waits to land · say "Land JIG-2"`) {
+	g.m.height = 30
+	if page := pagesText(g.m.ticketPage("JIG-2")); !strings.Contains(page, "Needs you") || !strings.Contains(page, `◇ waits to land · say "Land JIG-2"`) {
 		t.Errorf("the ticket screen has no needs-you row for the landing:\n%s", page)
 	}
 	// The row opens the land screen.
-	refs := g.m.ticketPage("JIG-2").refs()
-	if last := refs[len(refs)-1]; last.kind != rowLand || last.ticket != "JIG-2" {
-		t.Errorf("the last row is %+v, want the landing", last)
+	var landing *rowRef
+	for _, r := range g.m.ticketPage("JIG-2").refs() {
+		if r.kind == rowLand {
+			r := r
+			landing = &r
+		}
 	}
+	if landing == nil || landing.ticket != "JIG-2" {
+		t.Errorf("the ticket screen has no row for the landing: %+v", landing)
+	}
+	// Two asks drawn whole take the rows the land step's block would have.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 40})
 	g.press("end")
 	if v := g.view(); !strings.Contains(v, "╭─ Land ─") {
 		t.Errorf("the cursor on the landing row does not open the land step's sub-steps:\n%s", v)
@@ -245,6 +257,7 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 	for state, d := range digests {
 		c := chartRig(t)
 		c.m.w.tickets["JIG-4"].digest = d
+		c.m.w.gen++
 		ch := c.m.w.charts["checkout"]
 		row := c.m.chartRows(ch)[0]
 		want := state == StateWaitsToLand
@@ -254,7 +267,7 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 		if _, label := c.m.chartStatus(ch, c.m.chartRows(ch)); want && label != "run needs you" {
 			t.Errorf("%s: the chart says %q, want it to say the run needs you", state, label)
 		}
-		if page := pagesText(c.m.ticketPage("JIG-4")); strings.Contains(page, "needs you") != want {
+		if page := pagesText(c.m.ticketPage("JIG-4")); strings.Contains(page, "Needs you") != want {
 			t.Errorf("%s: the ticket screen's needs-you block = %v, want %v:\n%s", state, !want, want, page)
 		}
 	}

@@ -26,7 +26,7 @@ func keptFixLines() []events.Envelope {
 
 // TestFixRoundFromJournalEqualsFromGate: with the journal alone a fix slice a
 // kept ask queued reads the round the status gives it as from_gate, on the
-// review screen and in the sub-steps.
+// build screen and in the sub-steps.
 func TestFixRoundFromJournalEqualsFromGate(t *testing.T) {
 	t.Parallel()
 	statusOf := func(fromGate bool) string {
@@ -42,11 +42,11 @@ func TestFixRoundFromJournalEqualsFromGate(t *testing.T) {
 		if got := tk.fixRound("fix-2"); got != 2 {
 			t.Errorf("fromGate=%v: fix-2 reads round %d, want 2", fromGate, got)
 		}
-		g.press("down", "enter")
-		views[i] = g.view()
-		for _, want := range []string{"fix-1  round 1  Fix round one", "fix-2  round 2  Fix round two"} {
+		g.press("enter") // the build screen: a fix slice's row reads its finding by round
+		views[i] = readWords(g.view())
+		for _, want := range []string{"round 1 · Fix round one", "round 2 · Fix round two"} {
 			if !strings.Contains(views[i], want) {
-				t.Errorf("fromGate=%v: the review screen lacks %q:\n%s", fromGate, want, views[i])
+				t.Errorf("fromGate=%v: the build screen lacks %q:\n%s", fromGate, want, views[i])
 			}
 		}
 	}
@@ -77,7 +77,7 @@ func TestFixSliceUnplacedNamesNoRound(t *testing.T) {
 	}
 }
 
-// TestReviewerOwnChangeSaysItOnce: the review row of a round that is not
+// TestReviewerOwnChangeSaysItOnce: the detail of a round that is not
 // independent names its reviewer "builder reviewing its own change" and does
 // not say it a second time.
 func TestReviewerOwnChangeSaysItOnce(t *testing.T) {
@@ -90,12 +90,11 @@ func TestReviewerOwnChangeSaysItOnce(t *testing.T) {
 		jl(at(12, 30), "JIG-2", "", journal.EventGateOpen),
 		jl(at(12, 50), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 1, "s-reviewer" }),
 	)...).press("enter")
-	text := pageText(g)
-	text, _, _ = strings.Cut(text, "asks")
+	text, _, _ := strings.Cut(pageText(g.focus("1")), "Review activity") // the detail, not the activity under it
 	if n := strings.Count(text, "builder reviewing its own change"); n != 1 {
-		t.Errorf("the row says it %d times, want once:\n%s", n, text)
+		t.Errorf("the detail says it %d times, want once:\n%s", n, text)
 	}
 	if strings.Contains(text, "NOT independent") {
-		t.Errorf("the row repeats itself with NOT independent:\n%s", text)
+		t.Errorf("the detail repeats itself with NOT independent:\n%s", text)
 	}
 }

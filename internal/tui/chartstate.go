@@ -135,20 +135,43 @@ type chartRow struct {
 // "reading" and nothing else. The verb's entry adds only the chart's own facts
 // (its problem, the entries with no ticket).
 func (m *Model) chartRows(c *chart) []chartRow {
-	var rows []chartRow
-	for _, id := range c.ids() {
-		if verb := c.verbOf(id); verb != nil {
-			rows = append(rows, m.rowOf(id, verb.Title, verb))
-		} else {
-			rows = append(rows, m.rowOf(id, "", nil))
+	return m.rowsOf("chart:"+c.listing.Name, func() []chartRow {
+		var rows []chartRow
+		for _, id := range c.ids() {
+			if verb := c.verbOf(id); verb != nil {
+				rows = append(rows, m.rowOf(id, verb.Title, verb))
+			} else {
+				rows = append(rows, m.rowOf(id, "", nil))
+			}
 		}
+		return rows
+	})
+}
+
+// statusRows are the rows a chart's status is counted from: for the chart that
+// plans an issue, the plan's rows, each task as it stands in that issue, so what
+// needs the person here is what its rows say and a landing into another issue is
+// not counted; else the chart's own.
+func (m *Model) statusRows(c *chart) []chartRow {
+	rows := m.chartRows(c)
+	if c.issueID() == "" {
+		return rows
 	}
-	return rows
+	return m.planRowsOf(c)
+}
+
+// planRowsOf are the rows of the plan of the issue chart c plans.
+func (m *Model) planRowsOf(c *chart) []chartRow {
+	return m.rowsOf("plan:"+c.listing.Name, func() []chartRow {
+		is := c.planIssue()
+		return m.planRows(m.chartRows(c), is.Ticket, is.Branch)
+	})
 }
 
 // rowOf is the row of ticket id as the screens show it, under title when the
 // chart names one.
 func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
+	m.rowReads++
 	r := chartRow{id: id, title: title, verb: verb}
 	if t := m.w.tickets[id]; t != nil {
 		r.t, r.title = t, firstOf(title, t.title)
@@ -159,7 +182,7 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 			r.steps, _ = m.rowSteps(t, r.d)
 			// A question and a landing are the person's whoever else is at work; what a
 			// live session records itself (an approval, a round's asks) waits.
-			r.needs = t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(t, r.d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
+			r.needs = m.needsYouOf(t, r.d)
 			r.waits = t.blockers
 			r.behind = t.digest.Behind
 			r.end, r.atEnd = m.endOf(t)
@@ -167,6 +190,15 @@ func (m *Model) rowOf(id, title string, verb *chartTicket) chartRow {
 		r.done = t.digest != nil && r.steps[stepPublish].Done
 	}
 	return r
+}
+
+// needsYouOf is whether the ticket t, standing as d says, waits for the person: a
+// question or a landing is theirs whoever else is at work, and what a live
+// session records itself (an approval, a round's asks) waits. A task two issues
+// list is asked about as it stands in one issue (cutFor), so its landing stop
+// is that issue's and no other's.
+func (m *Model) needsYouOf(t *ticket, d phase.Ticket) bool {
+	return t.digest.waitsForAnswer() || len(t.openQuestions(m.zone, "")) > 0 || (needsYou(t, d) && !m.ticketLive(t)) || m.landingNeedsYou(t)
 }
 
 // needsYou is whether a phase that is under way waits for the person: an open
@@ -318,13 +350,20 @@ func endNote(e chartEnd) string {
 // prNumber matches the number a pull request's address ends in.
 var prNumber = regexp.MustCompile(`/(?:pull|pulls|merge_requests)/(\d+)`)
 
+// prRef is how a line names the pull request at address: "PR #7", from the
+// number its path ends in. An address that is not a pull request's is returned
+// as it is: free text, which the layout wraps whole.
+func prRef(address string) string {
+	if m := prNumber.FindStringSubmatch(address); m != nil {
+		return "PR #" + m[1]
+	}
+	return address
+}
+
 // chartPRWords names a pull request and its state: "PR #7 open", or its address when
 // no number can be read from it.
 func chartPRWords(pr chartPR) string {
-	name := pr.URL
-	if m := prNumber.FindStringSubmatch(pr.URL); m != nil {
-		name = "PR #" + m[1]
-	}
+	name := prRef(pr.URL)
 	if pr.State != "" {
 		name += " " + strings.ToLower(pr.State)
 	}

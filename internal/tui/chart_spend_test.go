@@ -11,7 +11,7 @@ import (
 // spendHeight is the height of the terminal the spend tests draw on: three rows
 // more than the 80 by 24 screen, which the Detail panel takes, so the Run panel
 // keeps every row, the spend one among them.
-const spendHeight = 27
+const spendHeight = 30
 
 // chartScreenOfHeight is chartScreenRig on a terminal of 80 columns and height
 // rows.
@@ -19,7 +19,7 @@ func chartScreenOfHeight(t *testing.T, height int) *rig {
 	t.Helper()
 	g := chartRig(t)
 	g.send(tea.WindowSizeMsg{Width: 80, Height: height})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}
@@ -47,7 +47,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 	}), status)
 	g.feed(lines...)
 	g.send(tea.WindowSizeMsg{Width: 80, Height: spendHeight})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}
@@ -60,7 +60,7 @@ func chartWithSpendRig(t *testing.T, spend map[string]any) *rig {
 func TestChartScreenShowsItsSpend(t *testing.T) {
 	t.Parallel()
 	v := chartWithSpendRig(t, spendObject()).view()
-	if want := "spend    31.2M tokens · $12.34 · 3 tickets · 2 subagents"; !strings.Contains(v, want) {
+	if want := "spend   31.2M tokens · $12.34 · 3 tickets · 2 subagents"; !strings.Contains(v, want) {
 		t.Errorf("the chart screen has no row %q:\n%s", want, v)
 	}
 	golden(t, "chart-spend", v)

@@ -61,7 +61,7 @@ func TestMainsRowsSayTheKindAndWhatTheDigestSays(t *testing.T) {
 		{ID: "JIG-84", Title: "A broken ticket", Digest: &digestInfo{Kind: "task", PhaseProblem: "its slices.yaml cannot be read"}},
 	})
 	rows := map[string]string{}
-	for _, line := range strings.Split(pagesText(g.m.mainPage()), "\n") {
+	for _, line := range strings.Split(g.mainText(), "\n") {
 		for _, id := range []string{"JIG-80", "JIG-81", "JIG-82", "JIG-83", "JIG-84"} {
 			if strings.Contains(line, id+"  ") {
 				rows[id] = line

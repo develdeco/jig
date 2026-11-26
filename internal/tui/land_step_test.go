@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -54,7 +56,7 @@ func TestLandIsTheFifthStep(t *testing.T) {
 			t.Errorf("%s: the Land row is not %q saying %q:\n%s", tc.name, want, tc.words, page)
 		}
 		dots := g.m.stepDots(g.m.steps(g.m.w.tickets["JIG-9"]))
-		if row := pagesText(g.m.mainPage()); len(strings.Fields(dots)) != 5 || !strings.Contains(row, dots) {
+		if row := g.mainText(); len(strings.Fields(dots)) != 5 || !strings.Contains(row, dots) {
 			t.Errorf("%s: the main row does not draw the five dots %q:\n%s", tc.name, dots, row)
 		}
 
@@ -77,6 +79,7 @@ func TestLandIsTheFifthStep(t *testing.T) {
 func TestLandedLineIsFiledUnderLand(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 40})
 	g.feed(jig2()...)
 	buildTook := g.m.steps(g.m.w.tickets["JIG-2"])[stepBuild].Took
 	g.feed(

@@ -30,8 +30,8 @@ func askedRig(t *testing.T, ticket string) *rig {
 	return g
 }
 
-// hasGroup is whether a ticket screen draws its "needs you" group.
-func hasGroup(page string) bool { return hasLine(page, "needs you") }
+// hasGroup is whether a ticket screen draws its "Needs you" panel.
+func hasGroup(page string) bool { return hasLine(page, "Needs you") }
 
 // waitingOnAnswer is the roster's word that n slices of the ticket wait on an
 // answer, as `jig next` gives it once the store has moved.
@@ -42,6 +42,7 @@ func waitingOnAnswer(g *rig, id string, n int) {
 	d.Slices = &slices
 	g.pin(id, &d)
 	g.m.w.tickets[id].digest = &d
+	g.m.w.gen++
 }
 
 // TestNeedsYouIsHeldBackWhileASessionIsLive: a ledger line of a session bound to
@@ -170,7 +171,7 @@ func TestAnOpenQuestionIsNeverHeldBackByALiveBuilder(t *testing.T) {
 	if p := pagesText(g.m.ticketPage("JIG-1")); !hasGroup(p) || !strings.Contains(p, "Formal or casual?") {
 		t.Errorf("a live builder hides its own question on the ticket screen:\n%s", p)
 	}
-	if p := pagesText(g.m.mainPage()); !strings.Contains(p, "1 open question") {
+	if p := g.mainText(); !strings.Contains(p, "1 open question") {
 		t.Errorf("main does not count the question of a live builder:\n%s", p)
 	}
 
@@ -201,11 +202,11 @@ func TestALiveSessionKeepsTheRoundsAsksOnScreen(t *testing.T) {
 	g.feed(jig2Mid()...)
 	g.feed(ll(at(59, 0), "JIG-2", journal.EventTool, with("s-reviewer", "", "", "", "", "")))
 	p := pagesText(g.m.ticketPage("JIG-2"))
-	if hasGroup(p) || !hasLine(p, "asks") || !strings.Contains(p, "Unchecked error") {
+	if hasGroup(p) || !hasLine(p, "Asks") || !strings.Contains(p, "Unchecked error") {
 		t.Fatalf("a live session's round does not keep its asks under the asks group:\n%s", p)
 	}
 	g.press("enter") // the review step: the cursor lands on the first ask
-	g.press("esc", "end", "d")
+	g.press("esc").tabTo("Asks").press("end", "d")
 	if got := g.r.lines(); len(got) != 1 || got[0] != "triage JIG-2 r1-f2 dismiss --store /s" {
 		t.Errorf("d on a live ticket's ask ran %q", got)
 	}
@@ -265,7 +266,7 @@ func TestAnIssuesEndsReadAsPhaseWritesThemWhateverTheLandings(t *testing.T) {
 
 	g := tallChart(t, checkoutJSON(model, end("merged")))
 	v := g.view()
-	if !strings.Contains(v, "ends at  "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
+	if !strings.Contains(v, "ends at "+fact) || strings.Contains(v, "to merge") || strings.Count(v, fact) != 1 {
 		t.Errorf("an issue's run with no landing open does not say its end once, as phase writes it:\n%s", v)
 	}
 	g = tallChart(t, checkoutJSON(model, end("stacked")))
@@ -302,7 +303,7 @@ func TestALiveTicketsOwnAsksAndApprovalsStayHeldBackOnTheChart(t *testing.T) {
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(), status)
 	g.feed(lines...)
 	g.pin("JIG-4", task("land", false, "done|approved by Ada", "done|1 slice green", "done|round 1 clean", "done|pull request opened", "done|landed"))
-	g.press("end", "enter")
+	g.openChart("checkout")
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 60})
 	if !hasNeedsPhase(g, "JIG-5") {
 		t.Fatalf("the fixture's ticket has no phase waiting on the person")
@@ -363,7 +364,7 @@ func TestNeedsYouEndsWithItsCause(t *testing.T) {
 		if p := pagesText(g.m.ticketPage("JIG-1")); hasGroup(p) {
 			t.Errorf("the ticket screen still asks after the answer:\n%s", p)
 		}
-		if p := pagesText(g.m.mainPage()); strings.Contains(p, "open question") {
+		if p := g.mainText(); strings.Contains(p, "open question") {
 			t.Errorf("main still counts the question after the answer:\n%s", p)
 		}
 	})

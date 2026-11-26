@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/develdeco/jig/internal/axi"
-	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -69,16 +68,6 @@ func TestATicketGivenOpensItsScreenWithTheProjectBehindIt(t *testing.T) {
 	g.press("esc")
 	if g.m.Screen() != "main" || !strings.Contains(g.view(), "JIG-1") {
 		t.Errorf("back from the ticket: on %s\n%s", g.m.Screen(), g.view())
-	}
-}
-
-func TestOpeningAQuestionGoesToItsSlice(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("down", "down", "down", "down") // the question under "needs a person"
-	g.press("enter")
-	if g.m.Screen() != "slice" || g.m.top().slice != "c" {
-		t.Fatalf("on %s %q, want slice c", g.m.Screen(), g.m.top().slice)
 	}
 }
 
@@ -177,7 +166,7 @@ func TestAnswerAsksWhichQuestionWhenSeveralAreOpen(t *testing.T) {
 	if g.m.input != nil || !strings.Contains(g.m.notice, "several questions") {
 		t.Fatalf("a with two questions open and the cursor on no question: input %+v, notice %q", g.m.input, g.m.notice)
 	}
-	g.press("down", "down", "down", "down", "down") // the second question
+	g.press("tab", "down") // the second question
 	if ref := g.m.selected(); ref == nil || ref.id != "q-002" {
 		t.Fatalf("cursor is on %+v, want q-002", ref)
 	}
@@ -202,9 +191,10 @@ func TestAnswerRefusesAQuestionThatIsAnswered(t *testing.T) {
 func TestTriageDecidesTheAskUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("enter") // the cursor follows the current step: the review
-	g.press("down", "d")                // r1-f2
-	g.press("up", "k")                  // r1-f1
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30}) // the panels' edges and names take rows an ask needs
+	g.feed(jig2Mid()...).press("enter")              // the cursor follows the current step: the review
+	g.press("down", "d")                             // r1-f2
+	g.press("up", "k")                               // r1-f1
 	want := []string{
 		"triage JIG-2 r1-f2 dismiss --store /s",
 		"triage JIG-2 r1-f1 keep --store /s",
@@ -237,7 +227,10 @@ func TestTriageOfTheOnlyUndecidedAskNeedsNoCursor(t *testing.T) {
 func TestGateRunsOnTheOpenTicket(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
-	g.feed(jig2Mid()...).press("g")
+	g.feed(jig2Mid()...)
+	g.pin("JIG-2", reviewReady())
+	g.syncDigests()
+	g.press("g")
 	want := []string{"gate JIG-2 --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands run = %q, want %q", got, want)
@@ -247,6 +240,8 @@ func TestGateRunsOnTheOpenTicket(t *testing.T) {
 func TestGateOnTheMainScreenIsForTheTicketUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
+	g.pin("JIG-2", reviewReady())
+	g.syncDigests()
 	g.press("down", "g")
 	want := []string{"gate JIG-2 --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
@@ -258,39 +253,43 @@ func TestPublishApprovesThenPushesAndOnlyOnYes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.feed(jig2Mid()...)
+	g.pin("JIG-2", publishReady())
+	g.syncDigests()
 	g.press("p")
 	if g.m.ask == nil || !strings.Contains(g.view(), "publish JIG-2") {
 		t.Fatalf("p did not ask first:\n%s", g.view())
 	}
-	if len(g.r.lines()) != 0 {
-		t.Fatalf("p ran %q before it was confirmed", g.r.lines())
+	const render = "publish JIG-2 --body --store /s"
+	if got := g.r.lines(); !reflect.DeepEqual(got, []string{render}) {
+		t.Fatalf("p ran %q before it was confirmed, want only the render that pushes nothing", got)
 	}
 	g.press("n")
-	if g.m.ask != nil || len(g.r.lines()) != 0 {
-		t.Fatalf("n: ask %+v, commands %q, want the question gone and nothing run", g.m.ask, g.r.lines())
+	if g.m.ask != nil || len(g.r.lines()) != 1 {
+		t.Fatalf("n: ask %+v, commands %q, want the question gone and nothing more run", g.m.ask, g.r.lines())
 	}
 	g.press("p", "y")
-	want := []string{"publish JIG-2 --approve --store /s", "publish JIG-2 --yes --store /s"}
+	want := []string{render, render, "publish JIG-2 --approve --store /s", "publish JIG-2 --yes --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands run = %q, want the approval and then the publish %q", got, want)
 	}
 	g.press("p", "enter")
-	if got := len(g.r.lines()); got != 4 {
-		t.Errorf("enter did not confirm: %d commands, want 4", got)
+	if got := len(g.r.lines()); got != 7 {
+		t.Errorf("enter did not confirm: %d commands, want 7", got)
 	}
 }
 
 func TestPublishStopsWhenTheApprovalIsRefused(t *testing.T) {
 	t.Parallel()
-	g := newQuietRig(t, "JIG-2")
+	g := quietRigAt(t, "JIG-2", publishReady())
 	g.r.answer("publish JIG-2 --approve --store /s", "error: the latest round is not clean\ncode: PUBLISH_NOT_CLEAN\n", 1)
-	g.feed(jig2Mid()...).press("p", "y")
-	want := []string{"publish JIG-2 --approve --store /s"}
+	g.feed(jig2Mid()...)
+	g.press("p", "y")
+	want := []string{"publish JIG-2 --body --store /s", "publish JIG-2 --approve --store /s"}
 	if got := g.r.lines(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("commands run = %q, want only the refused approval: nothing is pushed on a refusal", got)
+		t.Fatalf("commands run = %q, want the render and the refused approval: nothing is pushed on a refusal", got)
 	}
 	v := g.view()
-	for _, w := range []string{"✖ jig publish JIG-2 --approve", "the latest round is not clean"} {
+	for _, w := range []string{"✗ jig publish JIG-2 --approve", "the latest round is not clean"} {
 		if !strings.Contains(v, w) {
 			t.Errorf("the screen lacks %q:\n%s", w, v)
 		}
@@ -385,23 +384,19 @@ func TestResizeRedrawsWithinTheNewSize(t *testing.T) {
 func TestACursorBelowTheWindowScrollsIntoView(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "")
-	var envs []events.Envelope
 	var ids []string
 	for i := 0; i < 30; i++ {
 		ids = append(ids, fmt.Sprintf("JIG-%d", 100+i))
 	}
 	g.r.answer("next --json --roster --store /s", rosterListing(ids...), 0)
-	for i := 0; i < 30; i++ {
-		envs = append(envs, jl(at(5, i), fmt.Sprintf("JIG-%d", 100+i), "a", journal.EventClaim, with("s", "", "", "", "", "")))
-	}
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 12})
-	g.feed(envs...)
+	g.feed()
 	if v := g.view(); !strings.Contains(v, "JIG-100") || strings.Contains(v, "JIG-129") {
 		t.Fatalf("the top of 30 tickets in 12 lines:\n%s", v)
 	}
 	g.press("end")
 	v := g.view()
-	if !strings.Contains(v, "▸ ◐ JIG-129") || strings.Contains(v, "JIG-100") {
+	if !strings.Contains(v, "▸ ○ JIG-129") || strings.Contains(v, "JIG-100") {
 		t.Errorf("the cursor is not in view after end:\n%s", v)
 	}
 	if lines := strings.Count(v, "\n") + 1; lines != 12 {

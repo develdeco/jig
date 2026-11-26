@@ -1,19 +1,51 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// publishPage is the publish: the pull request body jig writes with its first
-// lines, the person's approval of the reviewed head, the branch, the pull
-// request, the changelog with its first lines, when each of them happened, and
-// the publish's activity.
+// prReading is a pull request named by its address as the digest numbers it, in
+// prWords' reading ("PR #7 open into main"); an address the digest does not
+// number is shown whole.
+func (m *Model) prReading(t *ticket, url string) string {
+	for _, pr := range t.digest.prs() {
+		if pr.URL == url && pr.Number > 0 {
+			return prWords([]digestPR{pr}, true)
+		}
+	}
+	return url
+}
+
+// checkColumns are the columns of the publish screen's checklist and
+// checkColumnNames name them.
+var (
+	checkColumns     = []column{{}, {free: true, gap: 1}, {gap: 2, keep: true}}
+	checkColumnNames = []string{"", "step", "at"}
+)
+
+// publishCheck is a row of the checklist: whether it is done, what it says, when
+// it happened, and the fields of its detail: what it holds when it is done, what
+// it waits for when it is not.
+type publishCheck struct {
+	key, name string
+	done      bool
+	text      string
+	when      string
+	rows      []detailRow
+}
+
+// publishPage is the publish: a checklist of what the publish does, a row for
+// each (the body jig writes, the person's approval of the reviewed head, the
+// branch, a pull request for each repo, the changelog, the end), when each of
+// them happened, the detail of the check the cursor is on, and the publish's
+// activity.
 //
-// The body and the changelog are the lines the status printed of their files.
-// They take the rows the steps and the activity leave, so the screen fits the
-// window it has; past that they end in an ellipsis, and the files hold the rest.
+// The detail holds what the status and the journal carry of the check, whole: the
+// body's and the changelog's lines with the file that holds each, who approved
+// which head, the branch, a pull request's number, state, target and address.
 func (m *Model) publishPage(id string) page {
 	var p page
 	t := m.w.tickets[id]
@@ -25,34 +57,38 @@ func (m *Model) publishPage(id string) page {
 	p.add(m.st.icon(step.State) + " " + m.st.state(step.State, step.Text))
 	p.add("")
 
-	pub := t.publish()
-	var body, changelog []string
-	if t.status != nil && t.status.Publish != nil {
-		body, changelog = textLines(t.status.Publish.Body), textLines(t.status.Publish.Changelog)
+	list := m.publishChecks(t)
+	done := 0
+	rows := make([]listRow, len(list))
+	for i, c := range list {
+		state, text := StateQueued, m.st.dim(c.text)
+		if c.done {
+			state, text = StateOK, c.text
+			done++
+		}
+		rows[i] = listRow{ref: &rowRef{kind: rowCheck, id: c.key, ticket: id}, cells: []string{m.st.icon(state), text, m.st.dim(c.when)}}
 	}
-	// The rows the page has for the two texts: what the window holds less the
-	// checks, the rule before the activity and its floor of three lines.
-	checks := 6 + max(0, len(pub.Repos)-1)
-	activity := 2 + min(3, max(1, len(t.stepLines(stepPublish))))
-	bodyN, changelogN := shareRows(len(body), len(changelog), m.bodyRows()-len(p.lines)-checks-1-activity)
+	checklist := listSpec{title: "Checklist", summary: strconv.Itoa(done) + " of " + strconv.Itoa(len(list)) + " done", cols: checkColumns, names: checkColumnNames, rows: rows}
+	at := m.cursorAmong(checklist)
+	c := list[at]
+	summary := "not done"
+	if c.done {
+		summary = strings.TrimSpace("done " + c.when)
+	}
+	detail := detailSpec{title: c.name, summary: summary, rows: c.rows}
+	m.listAndDetail(&p, &detail, at, checklist)
+	m.stepActivityPanel(&p, t, stepPublish)
+	return p
+}
 
-	check := func(done bool, text, when string) {
-		state := StateQueued
-		if done {
-			state = StateOK
-		} else {
-			text = m.st.dim(text)
-		}
-		if when != "" {
-			text += m.st.dim("  " + when)
-		}
-		p.add(m.st.icon(state) + " " + text)
+// publishChecks are the checks of the publish, each with its detail.
+func (m *Model) publishChecks(t *ticket) []publishCheck {
+	pub := t.publish()
+	var st statusPublish
+	if t.status != nil && t.status.Publish != nil {
+		st = *t.status.Publish
 	}
-	record := func(lines []string, n int) {
-		for _, l := range clip(lines, n) {
-			p.add("    " + m.st.dim(fit(l, m.width-8)))
-		}
-	}
+	var list []publishCheck
 	at := func(event string) string {
 		if i := t.latest("", event); i >= 0 {
 			return clock(t.lines[i], m.zone)
@@ -65,97 +101,106 @@ func (m *Model) publishPage(id string) page {
 		}
 		return clock(t.lines[i], m.zone)
 	}
+	// check adds a check with the rows of what is known of it; one that is not done
+	// ends in what it waits for, in the sentence its row says.
+	check := func(key, name string, done bool, text, when string, rows ...detailRow) {
+		if !done {
+			rows = append(rows, detailRow{label: "waits for", text: text})
+		}
+		list = append(list, publishCheck{key: key, name: name, done: done, text: text, when: when, rows: rows})
+	}
+
 	if pub.BodyFor != "" {
-		check(true, "body written for "+repoHeads(pub, func(r publishRepo) string { return r.BodyFor }, commitWords(t, pub.BodyFor)), at(journal.EventPrBody))
-		record(body, bodyN)
+		rows := []detailRow{{label: "written for", text: repoHeads(pub, func(r publishRepo) string { return r.BodyFor }, commitWords(t, pub.BodyFor))}}
+		switch {
+		case len(st.Repos) > 0:
+			label := "files"
+			for _, r := range pub.Repos {
+				if file := st.Repos[r.Name]; file != "" {
+					rows = append(rows, detailRow{label: label, text: r.Name + " " + file})
+					label = ""
+				}
+			}
+		case st.BodyFile != "":
+			rows = append(rows, detailRow{label: "file", text: st.BodyFile})
+		}
+		if st.Body != "" {
+			rows = append(rows, detailRow{label: "body", text: st.Body})
+		}
+		check("body", "body", true, "body written for "+repoHeads(pub, func(r publishRepo) string { return r.BodyFor }, commitWords(t, pub.BodyFor)), at(journal.EventPrBody), rows...)
 	} else {
-		check(false, "body: jig writes it from the brief, the slices and the review", "")
+		check("body", "body", false, "body: jig writes it from the brief, the slices and the review", "")
 	}
+
 	if pub.ApprovedFor != "" && allApproved(pub) {
-		check(true, "approved by "+firstOf(m.byWhom(t, pub.ApprovedBy, ""), "someone")+" for "+repoHeads(pub, func(r publishRepo) string { return r.ApprovedFor }, short(pub.ApprovedFor)), at(journal.EventPublishApproved))
+		who := firstOf(m.byWhom(t, pub.ApprovedBy, ""), "someone")
+		heads := repoHeads(pub, func(r publishRepo) string { return r.ApprovedFor }, short(pub.ApprovedFor))
+		when := at(journal.EventPublishApproved)
+		rows := []detailRow{{label: "approved by", text: who}, {label: "for", text: heads}}
+		if when != "" {
+			rows = append(rows, detailRow{label: "at", text: when})
+		}
+		check("approval", "approval", true, "approved by "+who+" for "+heads, when, rows...)
 	} else {
-		check(false, "approval: yours, of the reviewed head (p)", "")
+		check("approval", "approval", false, "approval: yours, of the reviewed head (p)", "")
 	}
+
 	if pub.Branch != "" {
-		check(pub.PR != "", "branch "+pub.Branch+" pushed", "")
+		rows := []detailRow{{label: "branch", text: pub.Branch}}
+		if pub.PR != "" {
+			rows = append(rows, detailRow{label: "pushed", text: "yes"})
+		}
+		check("branch", "branch", pub.PR != "", "branch "+pub.Branch+" pushed", "", rows...)
 	} else {
-		check(false, "branch pushed", "")
+		check("branch", "branch", false, "branch pushed", "")
+	}
+
+	pr := func(key, name, repo, url, outcome, when string) {
+		rows := []detailRow{{label: "pull request", text: m.prReading(t, url)}, {label: "address", text: url}}
+		if repo != "" {
+			rows = append([]detailRow{{label: "repo", text: repo}}, rows...)
+		}
+		if outcome != "" {
+			rows = append(rows, detailRow{label: "outcome", text: outcome})
+		}
+		said := strings.Join(strings.Fields("pull request "+repo), " ")
+		check(key, name, true, said+" · "+firstOf(outcome, "recorded")+" · "+m.prReading(t, url), when, rows...)
 	}
 	switch {
 	case len(pub.Repos) > 0:
 		// A pull request for each repo of the publish.
 		for _, r := range pub.Repos {
 			if r.PR != "" {
-				check(true, strings.TrimSpace("pull request "+r.Name+"  "+firstOf(r.PROutcome, "recorded")+"  "+r.PR), atLine(r.PRAt))
+				pr("pr:"+r.Name, "pull request "+r.Name, r.Name, r.PR, r.PROutcome, atLine(r.PRAt))
 			} else {
-				check(false, "pull request "+r.Name+" opened", "")
+				check("pr:"+r.Name, "pull request "+r.Name, false, "pull request "+r.Name+" opened", "")
 			}
 		}
 	case pub.PR != "":
-		check(true, strings.TrimSpace("pull request "+firstOf(pub.PROutcome, "recorded")+"  "+pub.PR), at(journal.EventPr))
+		pr("pr", "pull request", "", pub.PR, pub.PROutcome, at(journal.EventPr))
 	default:
-		check(false, "pull request opened", "")
+		check("pr", "pull request", false, "pull request opened", "")
 	}
-	if when := at(journal.EventChangelog); when != "" || len(changelog) > 0 {
-		check(true, "changelog written", when)
-		record(changelog, changelogN)
+
+	if when := at(journal.EventChangelog); when != "" || st.Changelog != "" {
+		var rows []detailRow
+		if st.ChangelogFile != "" {
+			rows = append(rows, detailRow{label: "file", text: st.ChangelogFile})
+		}
+		if st.Changelog != "" {
+			rows = append(rows, detailRow{label: "changelog", text: st.Changelog})
+		}
+		check("changelog", "changelog", true, "changelog written", when, rows...)
 	} else {
-		check(false, "changelog: written when the publish finishes", "")
+		check("changelog", "changelog", false, "changelog: written when the publish finishes", "")
 	}
+
 	if pub.Done {
-		check(true, "published", at(journal.EventPublishDone))
+		check("published", "published", true, "published", at(journal.EventPublishDone), detailRow{label: "published", text: "yes"})
 	} else {
-		check(false, "published", "")
+		check("published", "published", false, "published", "")
 	}
-
-	p.add("")
-	m.stepActivityPanel(&p, t, stepPublish)
-	return p
-}
-
-// textLines are the lines of a text the status printed, none for no text.
-func textLines(text string) []string {
-	if text == "" {
-		return nil
-	}
-	return strings.Split(text, "\n")
-}
-
-// shareRows divides room rows between two texts of a and b lines: each gets
-// its whole text when both fit, else the first gets three parts of five and the
-// second two, whichever is shorter than its share leaving the rest to the other.
-// A text that exists gets a row when there is any room at all.
-func shareRows(a, b, room int) (int, int) {
-	room = max(0, room)
-	if a+b <= room {
-		return a, b
-	}
-	second := room * 2 / 5
-	first := room - second
-	if b < second {
-		second, first = b, room-b
-	}
-	if a < first {
-		first, second = a, min(b, room-a)
-	}
-	if a > 0 && first == 0 && room > 0 {
-		first, second = 1, max(0, min(second, room-1))
-	}
-	return first, second
-}
-
-// clip is the first n of lines, the last of them ending in an ellipsis when
-// some were left out.
-func clip(lines []string, n int) []string {
-	if n <= 0 {
-		return nil
-	}
-	if len(lines) <= n {
-		return lines
-	}
-	out := append([]string(nil), lines[:n]...)
-	out[n-1] += " …"
-	return out
+	return list
 }
 
 // allApproved is whether a person's approval stands for every repo of the

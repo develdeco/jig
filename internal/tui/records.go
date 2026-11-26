@@ -2,11 +2,13 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
+	"github.com/develdeco/jig/internal/verify"
 )
 
 // The records the detail screens show under their rows: what a slice's commits
@@ -18,33 +20,44 @@ import (
 type commitRecord struct {
 	SHA, Subject string
 	// State is how the commit stands: StateQueued while it has no recorded
-	// result (an old pending line is no result), StateBuilding once a run
+	// result, StateBuilding once a run
 	// passed and no verified line follows, StateGreen once verified,
 	// StateStalled when the latest run failed or the verification could not
 	// run.
 	State string
-	// At is when the verification was asked for, and Verified when it passed.
-	At, Verified events.Envelope
+	// Verified is the line that says the commit passed.
+	Verified events.Envelope
+	// Began is the instant of the first line about the commit, which is where
+	// a list of commits puts it: later words add to the commit and never move it.
+	Began time.Time
 	// Runs are the oracle runs against the commit, oldest first.
 	Runs []events.Envelope
 	// Error is the verify-error line that ended the commit's verification, if
 	// one did.
 	Error *events.Envelope
+	// Recordings are the files the build's scenarios wrote at the commit, the
+	// ones its recorded lines name.
+	Recordings []journal.Recording
+	// RecordNote is what the recorded lines say of the files they left out or
+	// refused, in the line's own words.
+	RecordNote string
 }
 
-// commits are the commits slice's verifications were asked about, oldest first,
-// from the journal's verify-pending, oracle, verified and verify-error lines. An
-// oracle line for a commit that was never asked about (the session ran the
-// oracle itself) is a commit of its own, with no subject.
+// commits are the commits slice's verifications have a word about, oldest first
+// by their first line, from the journal's oracle, verified, verify-error and
+// recorded lines. A verify-pending line (an old worker's history every reader
+// skips) gives a commit no time, no state and no subject, and a commit with
+// only such a line is none.
 func (t *ticket) commits(slice string) []commitRecord {
 	var out []commitRecord
 	at := map[string]int{}
-	get := func(sha string) *commitRecord {
-		if i, ok := at[sha]; ok {
+	get := func(l events.Envelope) *commitRecord {
+		if i, ok := at[l.Commit]; ok {
 			return &out[i]
 		}
-		at[sha] = len(out)
-		out = append(out, commitRecord{SHA: sha, State: StateQueued})
+		at[l.Commit] = len(out)
+		began, _ := l.At()
+		out = append(out, commitRecord{SHA: l.Commit, State: StateQueued, Began: began})
 		return &out[len(out)-1]
 	}
 	for _, l := range t.lines {
@@ -52,11 +65,8 @@ func (t *ticket) commits(slice string) []commitRecord {
 			continue
 		}
 		switch l.Event {
-		case journal.EventVerifyPending:
-			c := get(l.Commit)
-			c.At, c.Subject = l, firstOf(c.Subject, l.Summary)
 		case journal.EventOracle:
-			c := get(l.Commit)
+			c := get(l)
 			c.Subject = firstOf(c.Subject, l.Subject)
 			c.Runs = append(c.Runs, l)
 			// A run that covers nothing is listed, and leaves the state alone.
@@ -68,12 +78,48 @@ func (t *ticket) commits(slice string) []commitRecord {
 				c.State = StateStalled
 			}
 		case journal.EventVerified:
-			c := get(l.Commit)
+			c := get(l)
 			c.State, c.Verified = StateGreen, l
+		case journal.EventRecorded:
+			c := get(l)
+			c.Recordings = append(c.Recordings, l.Recordings...)
+			if l.Outcome != "" {
+				if c.RecordNote != "" {
+					c.RecordNote += "; "
+				}
+				c.RecordNote += l.Outcome
+			}
 		case journal.EventVerifyError:
-			c := get(l.Commit)
+			c := get(l)
 			l := l
 			c.State, c.Error = StateStalled, &l
+		}
+	}
+	return out
+}
+
+// sliceCommits are the slice's commits as the screens list them: the ones the
+// journal has a word about, and a commit only the status's verification table
+// names (a commit nothing was run against reads the state the table gives it,
+// "no recorded result"), none left out.
+func (t *ticket) sliceCommits(slice string) []commitRecord {
+	out := t.commits(slice)
+	if t.status == nil {
+		return out
+	}
+	for _, v := range t.status.Verifications {
+		if v.Slice != slice || v.Commit == "" {
+			continue
+		}
+		known := false
+		for _, c := range out {
+			if strings.HasPrefix(c.SHA, v.Commit) {
+				known = true
+				break
+			}
+		}
+		if !known {
+			out = append(out, commitRecord{SHA: v.Commit, State: StateQueued})
 		}
 	}
 	return out
@@ -103,12 +149,17 @@ func (t *ticket) lastRunFailed(slice string) (events.Envelope, bool) {
 	return t.lines[i], true
 }
 
-// oracleWords is an oracle run as a line says it: "`go test ./...` passed in
-// 15s", and who ran it when the line says.
-func oracleWords(l events.Envelope) string {
-	cmd := "its oracle"
-	if l.Command != "" {
-		cmd = "`" + l.Command + "`"
+// runWords is an oracle run as the screens say it: its result, how long it took,
+// what its process tree used when the line measured it, and who ran it, "run by
+// builder, witnessed by jig". The session is named in the role the line gives
+// it (an oracle line is a builder's), never by the first role it played, so a
+// session that drafted the brief and then ran the oracle is the builder. The
+// command stands in place of "oracle" only when it is not the slice's own, and a
+// run that covers no commit says why.
+func (m *Model) runWords(t *ticket, l events.Envelope, oracle string) string {
+	cmd := "oracle "
+	if l.Command != "" && l.Command != oracle {
+		cmd = "`" + l.Command + "` "
 	}
 	word := l.Outcome
 	switch l.Outcome {
@@ -125,30 +176,116 @@ func oracleWords(l events.Envelope) string {
 	case "":
 		word = "ran"
 	}
-	text := cmd + " " + word + took(l.Seconds)
-	switch l.Source {
-	case "jig":
-		text += " · jig ran it"
-	case "session":
-		text += " · the session ran it"
+	parts := []string{cmd + word + took(l.Seconds)}
+	if cpu := verify.CPUWords(l.CPUMs); cpu != "" {
+		parts = append(parts, "cpu "+cpu+"s")
 	}
-	return text
+	if peak := verify.MemoryWords(l.PeakBytes); peak != "" {
+		if basis := verify.BasisWords(l.PeakBasis); basis != "" {
+			peak += " (" + basis + ")"
+		}
+		parts = append(parts, "peak "+peak)
+	}
+	if l.Uncovered != "" {
+		parts = append(parts, "covers nothing: "+l.Uncovered)
+	}
+	ran := "witnessed by jig"
+	if who := m.whoAs(t, l.Session, roleOf(l.Event)); who != "" {
+		ran = "run by " + who + ", " + ran
+	}
+	return strings.Join(append(parts, ran), " · ")
+}
+
+// commitWhen is when a commit's latest word came: its latest run, its
+// verification or the error that ended it. A commit none of them is about has
+// no time.
+func (m *Model) commitWhen(c commitRecord) string {
+	var last events.Envelope
+	var lastAt time.Time
+	for _, l := range c.words() {
+		if at, ok := l.At(); ok && !at.Before(lastAt) {
+			last, lastAt = l, at
+		}
+	}
+	if last.TS == "" {
+		return ""
+	}
+	return clock(last, m.zone)
+}
+
+// words are the lines that speak of the commit's verification: its runs, its
+// verification and the error that ended it.
+func (c commitRecord) words() []events.Envelope {
+	out := append([]events.Envelope(nil), c.Runs...)
+	if c.Verified.TS != "" {
+		out = append(out, c.Verified)
+	}
+	if c.Error != nil {
+		out = append(out, *c.Error)
+	}
+	return out
 }
 
 // wrap breaks text into lines of at most w cells, on spaces, keeping at most
 // maxLines of them; when it cut, the last line ends in an ellipsis. A word wider
 // than a line is cut. Text with no room gives no lines.
 func wrap(text string, w, maxLines int) []string {
+	lines, _ := wrapCut(text, w, maxLines)
+	return lines
+}
+
+// wrapCut is wrap that also says whether it cut: the last line then ends in the
+// cut's ellipsis.
+func wrapCut(text string, w, maxLines int) ([]string, bool) {
 	if w < 1 || maxLines < 1 {
+		return nil, false
+	}
+	lines := wordLines(text, w)
+	cut := len(lines) > maxLines
+	if cut {
+		lines = lines[:maxLines]
+		last := lines[len(lines)-1]
+		if width(last)+1 > w {
+			last = fit(last, w-1)
+			last = strings.TrimSuffix(last, "…")
+		}
+		lines[len(lines)-1] = last + "…"
+	}
+	return lines, cut
+}
+
+// wrapWhole breaks text into lines of at most w cells and cuts none of it: it
+// breaks on spaces, keeps the line breaks the text has (a blank line stays a
+// blank line), cuts a word wider than a line into lines, and never ends in an
+// ellipsis. It is for text a person acts on, which a cut would leave unread.
+func wrapWhole(text string, w int) []string {
+	if w < 1 {
 		return nil
 	}
 	var lines []string
+	for _, para := range strings.Split(strings.TrimRight(text, "\n\r "), "\n") {
+		if got := wordLines(para, w); len(got) > 0 {
+			lines = append(lines, got...)
+		} else {
+			lines = append(lines, "")
+		}
+	}
+	return lines
+}
+
+// wordLines is text broken into lines of at most w cells on spaces, its line
+// breaks read as spaces.
+func wordLines(text string, w int) []string {
+	var lines []string
 	cur := ""
-	cut := false
 	for _, word := range strings.Fields(text) {
 		for width(word) > w {
-			head := ansi.Truncate(word, w, "")
-			if head == "" {
+			// A word wider than a line is cut by its cells, not its bytes: the
+			// text is cut as text and the styles it carries go with each piece,
+			// each closed, so no character is lost and none bleeds.
+			full := width(word)
+			head, rest := ansi.Cut(word, 0, w), ansi.Cut(word, w, full)
+			if head == "" || rest == "" && full > w {
 				word = ""
 				break
 			}
@@ -156,8 +293,8 @@ func wrap(text string, w, maxLines int) []string {
 				lines = append(lines, cur)
 				cur = ""
 			}
-			lines = append(lines, head)
-			word = word[len(head):]
+			lines = append(lines, closed(head))
+			word = rest
 		}
 		if word == "" {
 			continue
@@ -175,18 +312,16 @@ func wrap(text string, w, maxLines int) []string {
 	if cur != "" {
 		lines = append(lines, cur)
 	}
-	if len(lines) > maxLines {
-		lines, cut = lines[:maxLines], true
-	}
-	if cut {
-		last := lines[len(lines)-1]
-		if width(last)+1 > w {
-			last = fit(last, w-1)
-			last = strings.TrimSuffix(last, "…")
-		}
-		lines[len(lines)-1] = last + "…"
-	}
 	return lines
+}
+
+// closed is s with its styles ended when it holds any, so a piece cut from a
+// styled word does not carry its color onto what follows it.
+func closed(s string) string {
+	if strings.Contains(s, "\x1b[") && !strings.HasSuffix(s, "\x1b[0m") && !strings.HasSuffix(s, "\x1b[m") {
+		return s + "\x1b[0m"
+	}
+	return s
 }
 
 // shortRange is a reviewed range as the review screen says it: "full 1a2b3c4..5d6e7f8".

@@ -97,14 +97,17 @@ func TestAnAdoptedBranchSeenWithoutItsStatusIsBuilt(t *testing.T) {
 	}
 }
 
+// TestTheLastRowShowsThePanelBelowIt: on the last slice the panel below the list
+// is its own detail, drawn whole with its edge, and the list is not cut to make
+// room for what follows it.
 func TestTheLastRowShowsThePanelBelowIt(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.send(tea.WindowSizeMsg{Width: 80, Height: 18})
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 22})
 	g.feed(jig1()...).press("enter", "end") // the build's screen, its last slice
 	v := g.view()
-	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╰") || !strings.Contains(v, "slice c · builder asks: Formal or casual?") {
-		t.Errorf("the last slice, the newest activity line and the panel's edge are not all in view:\n%s", v)
+	if !strings.Contains(v, "▸ ○ d") || !strings.Contains(v, "╭─ Detail · d") || !strings.Contains(v, "waits for b, c") || strings.Contains(v, "↑ ") {
+		t.Errorf("the last slice and its whole detail are not in view under the whole list:\n%s", v)
 	}
 }
 
@@ -116,6 +119,7 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 			{"fix-1", "queued", "0", "-", "-", "Fix these gate findings:\n\nalpha/a.go:3 Unchecked error\nThe error is dropped."},
 		}), "questions: none"}, "\n") + "\n"
 	g := newRig(t, "JIG-6")
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 28})
 	g.r.answer("status JIG-6 --store /s", status, 0)
 	g.feed(
 		jl(at(30, 0), "JIG-6", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
@@ -126,18 +130,24 @@ func TestTheReviewScreenNamesWhatARoundSentBack(t *testing.T) {
 	)
 	g.press("down", "enter") // from the build, the current step, to the review
 	v := g.view()
-	for _, want := range []string{"sent back to the build", "fix-1  round 1  alpha/a.go:3 Unchecked error", "fixes · sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
-		if !strings.Contains(v, want) {
+	for _, want := range []string{"fixes sent back fix-1 from round 1: alpha/a.go:3 Unchecked"} {
+		if !strings.Contains(readWords(v), want) {
 			t.Errorf("the review screen lacks %q:\n%s", want, v)
 		}
 	}
-	// The goal's other lines never reach a row: every screen keeps its height.
-	for _, keys := range [][]string{{"esc"}, {"up", "enter"}} {
-		g.press(keys...)
-		v := g.view()
-		if strings.Contains(v, "The error is dropped.") || strings.Count(v, "\n")+1 != 24 {
-			t.Errorf("after %v a fix slice's goal spills over its row:\n%s", keys, v)
-		}
+	if strings.Contains(v, "Sent back") {
+		t.Errorf("the review screen has a panel of the fix slices sent back:\n%s", v)
+	}
+	// The goal's other lines never reach a row: the list says its first line, and
+	// the detail of the slice under the cursor says all of it.
+	g.press("esc", "up", "enter") // the build screen
+	v = g.view()
+	if list := between(v, "Slices", "╰"); strings.Contains(list, "The error is dropped.") || !strings.Contains(readWords(list), "fix-1 queued 0 tries round 1 · a.go:3 Unchecked error") {
+		t.Errorf("a fix slice's row is not its finding's line:\n%s", v)
+	}
+	g.press("down")
+	if detail := between(g.view(), "╭─ Detail · fix-1", "╰"); !strings.Contains(readWords(detail), "The error is dropped.") || strings.Count(g.view(), "\n")+1 != g.m.height {
+		t.Errorf("the detail of a fix slice does not say its goal whole:\n%s", g.view())
 	}
 }
 

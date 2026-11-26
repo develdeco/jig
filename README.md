@@ -173,7 +173,37 @@ each review round with its reviewer, what it sent back and the asks it left, and
 the pull request's body and changelog. `jig tui` opened on no ticket opens the
 first ticket a session creates after it started (a brief verdict mints it; a
 chart verdict creates none), until you press a key; `jig tui SHOP-1` can be open
-before SHOP-1 exists, and fills in when it does.
+before SHOP-1 exists, and fills in when it does. `jig tui 48` opens what the
+tracker item 48 is bound to (an issue opens its plan); an item with no record is
+refused, and `jig next 48` reads it.
+
+Every move is one key. `1` to `5` open a ticket's steps from any of its screens,
+`[` and `]` go to the previous and next sibling (the header says the place, `2
+of 5`), `h` goes to the project's list, `c` to the ticket's chart and `o` opens
+its pull requests; the mouse wheel moves the cursor and a click on a row selects
+it. `?` lists every key of the screen, and says why the ones that cannot run
+now cannot.
+
+Every panel of a screen is a pane with a cursor of its own: `tab` and `shift+tab`
+move the focus from one to the next (the lit border and the hint line name the
+pane that has it), the arrows move in that pane, and `enter` opens what the row
+under the cursor is about (a slice from the build's sub-steps, the slice, round
+or question an activity line names). `z` shows the focused pane over the whole
+screen and `z` or `esc` brings the screen back.
+
+What the screen cuts ends in `…`, and nothing cut is lost: `space` lays the row
+under the cursor out whole where it stands (a pane with no rows lays out every
+line it cut, and with nothing cut in the focus the last command's line), and
+`space` again folds it back. A click on the `…` does what `space` does. A row
+taller than its pane is read by lines with `up` and `down`, and `z` gives it the
+whole body. What is expanded lasts as long as its screen.
+
+`/` on the main screen opens a search line: type, and the list narrows as you type to the
+rows whose words start with every word you typed, in any order - an id (`shop-11`) or its number
+(`11`), a word of the title, a kind (`issue`), a chart, a state (`waiting`, `landed`, `closed`) or a
+pull request's number (`287`, `#287`). The letters that matched are lit, a task's issue stays above
+it, and folded groups open for the search. The header counts the matches, `enter` opens the row under
+the cursor and `esc` clears the search and puts the cursor back where it was.
 
 A chart is a row on the main screen after the tickets, with how many of its
 tickets published. Enter opens its screen: the chart's map (destination, what

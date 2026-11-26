@@ -19,6 +19,7 @@ import (
 
 // The kinds of ticket the plan tells apart, as the digest names them.
 const (
+	kindIssue     = "issue"
 	kindTask      = "task"
 	kindMultiTask = "multi-task"
 )
@@ -105,6 +106,7 @@ func (m *Model) rowInPlan(r chartRow, container, branch string) chartRow {
 		r.steps, _ = m.rowSteps(cut, r.d)
 		r.end, r.atEnd = m.endOf(cut)
 		r.done = r.steps[stepPublish].Done
+		r.needs = m.needsYouOf(cut, r.d)
 		r.mark = ""
 		if r.atEnd {
 			r.mark = r.end.State
@@ -301,12 +303,15 @@ func (m *Model) multiPage(t *ticket) page {
 		branch = t.status.Branch
 	}
 	m.needPanel(&p, t.id, t)
-	var rows []chartRow
-	for _, c := range t.digest.Children {
-		if c.ID != "" {
-			rows = append(rows, m.rowInPlan(m.rowOf(c.ID, c.Title, nil), t.id, branch))
+	rows := m.rowsOf("multi:"+t.id, func() []chartRow {
+		var rows []chartRow
+		for _, c := range t.digest.Children {
+			if c.ID != "" {
+				rows = append(rows, m.rowInPlan(m.rowOf(c.ID, c.Title, nil), t.id, branch))
+			}
 		}
-	}
+		return rows
+	})
 	landed, total := planProgress(rows)
 	right := fmt.Sprintf("%d of %d landed", landed, total)
 	if total == 0 {
@@ -320,8 +325,8 @@ func (m *Model) multiPage(t *ticket) page {
 	if branch != "" {
 		words = branch
 	}
-	m.stageLines(&p, t.id, t, words, rows, nil, phase.Prompt(phase.Publish, t.id), true, 0)
+	m.stageLines(&p, t.id, t, words, rows, nil, nil, phase.Prompt(phase.Publish, t.id), true, 0)
 	p.boxEnd()
-	m.chartActivityPanel(&p, rows, nil)
+	m.chartActivityPanel(&p, "multi:"+t.id, rows, nil)
 	return p
 }

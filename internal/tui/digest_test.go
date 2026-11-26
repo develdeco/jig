@@ -11,9 +11,14 @@ import (
 
 // pagesText is a page's lines, with no marker, one to a row.
 func pagesText(p page) string {
-	lines := make([]string, len(p.lines))
-	for i, l := range p.lines {
-		lines[i] = l.text
+	var lines []string
+	for _, l := range p.lines {
+		if l.cont && len(lines) > 0 {
+			// A row's words are one text, wherever the screen wrapped them.
+			lines[len(lines)-1] += " " + strings.TrimSpace(l.text)
+			continue
+		}
+		lines = append(lines, l.text)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -96,7 +101,7 @@ func TestStepsTakeTheDigestsWords(t *testing.T) {
 		if tc.d.Kind == "task" && (!strings.Contains(page, "5 Land") || !strings.Contains(page, tc.land)) {
 			t.Errorf("%s: the ticket screen has no fifth step saying %q:\n%s", tc.name, tc.land, page)
 		}
-		if row := pagesText(g.m.mainPage()); tc.kind != "" && !strings.Contains(row, tc.kind) {
+		if row := g.mainText(); tc.kind != "" && !strings.Contains(row, tc.kind) {
 			t.Errorf("%s: the main screen's row does not name %q:\n%s", tc.name, tc.kind, row)
 		}
 	}

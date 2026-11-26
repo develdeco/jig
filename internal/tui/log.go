@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -329,8 +328,12 @@ type placedLine struct {
 // placed are the log's lines of a ticket that stands as d says, oldest first,
 // each with its place.
 func (m *Model) placed(t *ticket, d phase.Ticket) []placedLine {
-	out, _ := m.placedIn(t, d)
-	return out
+	memo := t.memoFor()
+	if memo.placed == nil {
+		out, _ := m.placedIn(t, d)
+		memo.placed = &out
+	}
+	return *memo.placed
 }
 
 // placedIn is placed with the windows the places came from.
@@ -446,37 +449,16 @@ func tagOf(step int, key string) string {
 // stepTagState is the state whose color tags a step's lines.
 var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing, StatePublishing}
 
-// tagMaxW is the most cells a tag takes.
-const tagMaxW = 18
+// activityColumns are the columns of an activity line: its time, its tag and
+// what happened.
+var activityColumns = []column{{}, {gap: 1}, {free: true, gap: 1}}
 
-// activityPanel adds the ticket's activity log to p, newest first: as many
-// lines as the rows left below what p holds allow, three at least, so the
-// panel's edge stays on the screen and a tall one is filled to its foot.
-func (m *Model) activityPanel(p *page, t *ticket) {
-	all := m.placed(t, m.phaseOf(t))
-	keep := max(3, m.bodyRows()-len(p.lines)-2)
-	right := ""
-	if n := len(all); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
-	}
-	p.boxTop("Activity", right)
-	if len(all) == 0 {
-		p.boxAdd(m.st.dim("nothing yet"))
-	}
-	var shown []placedLine
-	tagW := 0
-	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(tagOf(all[i].step, all[i].key))))
-		shown = append(shown, all[i])
-	}
-	for _, e := range shown {
-		tag := pad(tagOf(e.step, e.key), tagW)
-		if e.step >= 0 {
-			tag = m.st.state(stepTagState[e.step], tag)
-		} else {
-			tag = m.st.dim(tag)
-		}
-		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + tag + " " + m.moveText(t, e.l))
-	}
-	p.boxEnd()
-}
+// activityColumnNames name the columns of an activity list.
+var activityColumnNames = []string{"time", "step", "what"}
+
+// chartActivityColumns are a chart's activity line's: its time, the ticket,
+// its tag and what happened.
+var chartActivityColumns = []column{{}, {id: true, gap: 1}, {gap: 1}, {free: true, gap: 1}}
+
+// chartActivityColumnNames name them.
+var chartActivityColumnNames = []string{"time", "ticket", "step", "what"}

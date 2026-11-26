@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -20,14 +21,18 @@ type briefText struct {
 	// Illustration is whether the brief has an illustration beside it.
 	Illustration bool
 	// Sections are the brief's "## " sections in order, each with the first line
-	// or two of its body.
+	// or two of its body and the body whole.
 	Sections []briefSection
 	// Err is why the text could not be read, "" when it was.
 	Err string
+	// md are the sections drawn, by what they were drawn for (rendered).
+	md map[mdKey][]string
 }
 
+// briefSection is a section as the verb printed it: its heading, the first line
+// or two of its body, and the body whole, as the markdown it was written in.
 type briefSection struct {
-	Heading, Summary string
+	Heading, Summary, Body string
 }
 
 // parseBriefText reads what `jig brief show --text` printed and the code it
@@ -45,29 +50,87 @@ func parseBriefText(out string, code int) briefText {
 	if kv, ok := doc.KV["brief"]; ok {
 		b.Title, b.Illustration = kv["title"], kv["illustration"] == "yes"
 	}
-	for _, r := range doc.Tables["sections"].Maps() {
-		b.Sections = append(b.Sections, briefSection{Heading: r["heading"], Summary: r["summary"]})
+	bodies := sectionBodies(out)
+	for i, r := range doc.Tables["sections"].Maps() {
+		s := briefSection{Heading: r["heading"], Summary: r["summary"]}
+		if i < len(bodies) {
+			s.Body = bodies[i]
+		}
+		b.Sections = append(b.Sections, s)
 	}
 	return b
 }
 
-// summaryOf is the first lines of the brief's section at position i of the
-// status's list: the section of the text at the same position when it has the
-// same heading, else the first section of that heading. "" when the text has
-// none (it was not read, or the brief changed since the status was).
-func (b *briefText) summaryOf(i int, heading string) string {
-	if b == nil {
-		return ""
+// sectionBodies are the bodies the verb prints after its tables, one for each
+// "section: <heading>" block in order: the lines of the block with their two
+// spaces of indent taken off, a blank line kept, so the markdown reads as it
+// was written. A block ends at the next line that is neither indented nor
+// blank, so a body can hold any text, a line that looks like a block of the
+// verb's own among it.
+func sectionBodies(out string) []string {
+	var bodies []string
+	var cur []string
+	open := false
+	flush := func() {
+		if open {
+			bodies = append(bodies, strings.TrimRight(strings.Join(cur, "\n"), "\n"))
+		}
+		cur, open = nil, false
 	}
-	if i < len(b.Sections) && b.Sections[i].Heading == heading {
-		return b.Sections[i].Summary
-	}
-	for _, s := range b.Sections {
-		if s.Heading == heading {
-			return s.Summary
+	for _, raw := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
+		switch {
+		case open && (raw == "" || strings.HasPrefix(raw, "  ")):
+			cur = append(cur, strings.TrimPrefix(raw, "  "))
+		case strings.HasPrefix(raw, "section: "):
+			flush()
+			open = true
+		default:
+			flush()
 		}
 	}
-	return ""
+	flush()
+	return bodies
+}
+
+// sectionAt is the place in the text of the brief's section at position i of
+// the status's list: the section at the same position when it has the same
+// heading, else the first section of that heading. ok is false when the text has
+// none (it was not read, or the brief changed since the status was).
+func (b *briefText) sectionAt(i int, heading string) (at int, ok bool) {
+	if b == nil {
+		return 0, false
+	}
+	if i < len(b.Sections) && b.Sections[i].Heading == heading {
+		return i, true
+	}
+	for j, s := range b.Sections {
+		if s.Heading == heading {
+			return j, true
+		}
+	}
+	return 0, false
+}
+
+// mdKey tells a section's rendering: the section, the cells it was laid out in
+// and whether the frame draws no color.
+type mdKey struct {
+	section, width int
+	plain          bool
+}
+
+// rendered is section at's body drawn in lines of at most w cells, laid out
+// once for the text read: a frame draws from what is built and renders nothing.
+func (b *briefText) rendered(at, w int, st styles) []string {
+	k := mdKey{at, w, st.plainFrame()}
+	if lines, ok := b.md[k]; ok {
+		return lines
+	}
+	lines := st.briefMarkdown(b.Sections[at].Body, w)
+	if b.md == nil {
+		b.md = map[mdKey][]string{}
+	}
+	b.md[k] = lines
+	return lines
 }
 
 // briefMsg is a ticket's brief text, read.

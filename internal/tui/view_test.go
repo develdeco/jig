@@ -17,6 +17,9 @@ import (
 func mainRig(t *testing.T) *rig {
 	g := newRig(t, "")
 	g.feed(append(jig1(), jig2()...)...)
+	// The list is drawn from the roster before the stream says JIG-1 has a
+	// question, so the cursor is put on JIG-1 here, the first row of its group.
+	g.focus("JIG-1")
 	return g
 }
 
@@ -77,6 +80,28 @@ func TestSliceScreen(t *testing.T) {
 	golden(t, "slice", g.view())
 }
 
+// TestKeepActsOnTheReviewScreenAt80x24: the review screen of a ticket with asks
+// opens at the default size with the cursor's ask drawn whole under its row, so
+// k keeps it without a taller terminal.
+func TestKeepActsOnTheReviewScreenAt80x24(t *testing.T) {
+	t.Parallel()
+	g := newRig(t, "JIG-2")
+	g.feed(jig2Mid()...).press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want review", g.m.Screen())
+	}
+	if g.m.width != 80 || g.m.height != 24 {
+		t.Fatalf("the rig is %dx%d, want 80x24", g.m.width, g.m.height)
+	}
+	if v := g.view(); !strings.Contains(readWords(v), "a failed write would pass silently") {
+		t.Fatalf("the ask under the cursor is not drawn whole:\n%s", v)
+	}
+	g.press("k")
+	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 keep") {
+		t.Errorf("k on the first ask at 80x24 ran %q, notice %q", got, g.m.notice)
+	}
+}
+
 func TestReviewScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
@@ -84,7 +109,7 @@ func TestReviewScreen(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	golden(t, "review", g.view())
+	goldenCuts(t, "review", g)
 }
 
 func TestReviewScreenPublished(t *testing.T) {
@@ -95,7 +120,7 @@ func TestReviewScreenPublished(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	golden(t, "review-published", g.view())
+	goldenCuts(t, "review-published", g)
 }
 
 func TestPublishScreen(t *testing.T) {
@@ -106,7 +131,7 @@ func TestPublishScreen(t *testing.T) {
 	if g.m.Screen() != "publish" {
 		t.Fatalf("on %s, want publish", g.m.Screen())
 	}
-	golden(t, "publish", g.view())
+	goldenCuts(t, "publish", g)
 }
 
 func TestBriefScreen(t *testing.T) {
@@ -134,7 +159,10 @@ func TestPublishConfirmScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Done(), 0)
-	g.feed(jig2()...).press("p")
+	g.feed(jig2()...)
+	g.pin("JIG-2", publishReady())
+	g.syncDigests()
+	g.press("p")
 	golden(t, "publish-confirm", g.view())
 }
 
@@ -153,9 +181,10 @@ func TestCommandPanelShowsWhatTheVerbPrinted(t *testing.T) {
 		"help[1]:", "  The next round applies it: run `jig gate JIG-2`",
 	}, "\n")+"\n", 0)
 	g.feed(jig2Mid()...).press("enter", "down", "d") // the review, then r1-f2
-	golden(t, "panel-ok", g.view())
+	goldenCuts(t, "panel-ok", panelOKRig(t))         // a rig of its own: the check expands and folds its marks
 
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
+	g.feed(decided()...) // both asks decided: the gate that applies them can run
 	g.press("g")
 	golden(t, "panel-fail", g.view())
 }
@@ -193,7 +222,7 @@ func TestEveryStateHasItsOwnLookAndColor(t *testing.T) {
 	shared := map[string][]string{
 		"!": {StateFindings, StateAsk},
 		"✓": {StatePublished, StateOK},
-		"✖": {StateStalled, StateFail},
+		"✗": {StateStalled, StateFail},
 	}
 	for icon, who := range icons {
 		if len(who) > 1 && !reflect.DeepEqual(who, shared[icon]) {
@@ -225,7 +254,7 @@ func TestColorIsOnlyDecoration(t *testing.T) {
 	if !strings.Contains(got, "\x1b[") {
 		t.Fatalf("the colored screen has no escape sequence:\n%s", got)
 	}
-	if stripped := stripANSI(got); stripped != plain.view() {
+	if stripped := undecorated(got); stripped != plain.view() {
 		t.Errorf("color changed the text\n--- plain\n%s\n--- colored, stripped\n%s", plain.view(), stripped)
 	}
 }

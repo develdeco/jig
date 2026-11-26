@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +84,16 @@ type Config struct {
 	// scratchpad under it says nothing to a reader and names the person on a
 	// shared screen. Empty is the user's home folder.
 	Home string
+	// Open sends a pull request's address to the system's opener, for the key
+	// `o`: the command gives it only on a terminal. Nil opens nothing, and the
+	// key says the address instead.
+	Open func(url string) error
+	// Viewer serves a ticket's illustration and says where it is: its address on
+	// the loopback interface, or its path in a session whose browser cannot
+	// reach it. It is the one action the screens take outside a verb (a verb that
+	// serves it blocks), writes nothing, and the command gives it. Nil serves
+	// nothing, and the key says so.
+	Viewer func(ticket string) (string, error)
 	// Width and Height are the screen's size until the terminal reports one;
 	// zero is 100 by 30.
 	Width, Height int
@@ -101,7 +112,7 @@ const (
 	batchMax = 512
 )
 
-// screenKind is which of the nine screens is showing.
+// screenKind is which of the ten screens is showing.
 type screenKind int
 
 const (
@@ -114,6 +125,7 @@ const (
 	screenPublish                   // a ticket's publish: body, approval, pull request
 	screenChart                     // a chart: its map, tickets, run and activity
 	screenLand                      // a ticket's land: its pull requests, the merges to make and the landings
+	screenFinding                   // one finding of a gate round, whole, with the fix slices it became
 )
 
 func (s screenKind) String() string {
@@ -136,6 +148,8 @@ func (s screenKind) String() string {
 		return "chart"
 	case screenLand:
 		return "land"
+	case screenFinding:
+		return "finding"
 	}
 	return "?"
 }
@@ -147,7 +161,26 @@ type navEntry struct {
 	ticket string
 	slice  string
 	chart  string
-	sel    int
+	// finding is the id of the finding a finding screen is of.
+	finding string
+	sel     int
+	// part is the row of the brief screen's Parts list the screen is opened on,
+	// by identity (a section by its place, a slice by its id); partSet is false
+	// when it is opened for no part and begins on its first row.
+	part    rowIdentity
+	partSet bool
+	// cur is the row the main screen's cursor stands on, by identity, found
+	// again on each draw wherever the page now has it; curSet is false until
+	// the page has had a row to stand on.
+	cur    rowIdentity
+	curSet bool
+	// open are the fold rows of the main screen that are opened, by group name;
+	// byChart is the view of the main screen laid out by chart, which a run does
+	// not keep.
+	open    map[string]bool
+	byChart bool
+	// search narrows the main screen to the rows its query matches (search.go).
+	search searchState
 	// entered is set once a chart screen has started to read its chart.
 	entered bool
 	// showMap shows the Map panel on the plan of an issue, which hides it.
@@ -156,25 +189,60 @@ type navEntry struct {
 	// screen longer than its window can be read to its end.
 	scroll int
 	// lead is how many lines a page with rows is held above the window its
-	// cursor gives, so the lines above the first row can be read: set high when
-	// a screen opens at its top, raised by a move up from the first row, and
-	// cleared by any move of the cursor.
+	// cursor gives, so the lines above the first row can be read: raised by a move
+	// up from the first row, by lines coming in above (hold.go) and cleared by any
+	// move of the cursor.
 	lead int
+	// fresh is how many rows came in above the window of a page read below its
+	// top, which its first row counts; it is cleared once the window is back at
+	// the top.
+	fresh int
 	// follow keeps a ticket screen's cursor on the current step, and a chart
 	// screen's on the first ticket not published, until the person moves it;
 	// lastCur is the current step the screen last showed, so a cursor left on
 	// the current step moves on with it.
 	follow  bool
 	lastCur int
+	// paneFocus is the title of the pane that has the focus, and paneCurs what
+	// each pane keeps while it has not: its cursor's row and its scroll (panes.go).
+	// seenSel is the cursor the panes were last read against, so a cursor put on
+	// a row by anything else gives its pane the focus. textFocus says the focused
+	// pane is text only: it scrolls by lines and has no row under a cursor.
+	paneFocus string
+	// listFocus is the title of the list of a phase screen that had the focus last:
+	// a focus on a pane that is not one of the lists leaves the Detail on its row.
+	listFocus string
+	// zoom is the title of the pane drawn over the whole body, "" for none.
+	zoom string
+	// psearch is the query narrowing one pane (searchpane.go).
+	psearch  paneSearch
+	paneCurs map[string]paneCursor
+	// expanded are the holders laid out whole (expand.go), by pane and the row's
+	// identity; expGen counts their changes. A screen opened again is folded: the
+	// screen memory (arrive) keeps cursors, never these.
+	expanded map[expKey]bool
+	expGen   int
+	// rowScroll is how many lines of the expanded row rowScrollOf are held above
+	// the part of it the window draws (tall.go).
+	rowScroll int
+	// suppress lays the screen out as if nothing were expanded: the folded page
+	// each pane is held to (fit.go).
+	suppress    bool
+	rowScrollOf rowIdentity
+	seenSel     int
+	seenSet     bool
+	textFocus   bool
 }
 
 // textInput is a line a person is typing: an answer.
 type textInput struct {
 	prompt string
-	about  []string
-	value  []rune
-	ticket string
-	qid    string
+	// head and about are what the person answers: who asked, and the question
+	// as written. The footer wraps about when it draws, so a resize re-wraps it.
+	head, about string
+	value       []rune
+	ticket      string
+	qid         string
 }
 
 // confirmation is an action that waits for a yes.
@@ -183,13 +251,15 @@ type confirmation struct {
 	run    func() tea.Cmd
 }
 
-// Model is the TUI: nine screens over the event stream and the verbs. It is a
+// Model is the TUI: ten screens over the event stream and the verbs. It is a
 // bubbletea model, and nothing else in the package needs the terminal: its
 // View is plain text a test compares.
 type Model struct {
 	cfg Config
 	st  styles
-	run classedRunner
+	// edges remembers the pieces of a panel's border the renderer drew.
+	edges edgeCache
+	run   classedRunner
 	// queue is what run goes through: one command at a time, the next by class.
 	queue *queue
 	zone  *time.Location
@@ -202,7 +272,14 @@ type Model struct {
 	ask    *confirmation
 	last   *outcome
 	notice string
+	// served is the address each ticket's illustration was given when the person
+	// opened it, so opening it again reuses the address.
+	served map[string]string
 	tail   bool
+	// drawn is what the last View drew of each ask (askCut, askWhole), nil when
+	// a key has been taken in since that View: a key that acts on an ask acts
+	// on what the person read, never on a screen nobody has seen.
+	drawn map[string]int
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -246,12 +323,79 @@ type Model struct {
 	// first ticket that appears after started, when the stream first names
 	// it: a key pressed before that clears it.
 	followNew bool
-	started   time.Time
+	// folded says, for each row of the main screen's list that a closed fold
+	// hides, the fold row it is in: the page of the last draw.
+	folded map[rowIdentity]rowIdentity
+	// main is the project's list as last built (mainqueue.go), kept while nothing it
+	// reads has moved.
+	main *mainCache
+	// mainF is the project's list as laid out folded, for the same.
+	mainF *mainCache
+	// keysOn is what the keys of the screen on top act on, as the last frame
+	// found it: the hint line is cut by it, and a key reads it again before it
+	// runs.
+	keysOn subject
+	// hit is what the last frame drew of the body, for a click (mouse.go).
+	hit *hitMap
+	// lastOpen is the last command when the person has expanded its line (lastcmd.go);
+	// it is the screen's, so it goes with the line, which a new command replaces.
+	lastOpen *outcome
+	// lastMark is where the last frame drew the last command's cut mark, for a click.
+	lastMark *lastMarkAt
+	// tall is the row the last frame drew by lines, nil when it drew none
+	// (tall.go).
+	tall *tallInfo
+	// sibMemo is the siblings of the screen on top as one frame or one message
+	// read them, once read (sibs).
+	sibMemo *sibSet
+	sibRead bool
+	// kept is where the cursor stood on each screen the person left, for the
+	// session (moves.go).
+	kept map[navKey]navEntry
+	// table is the key table (keys.go): the one place a key lives.
+	table []keyRow
+	// panesNow are the titles of the panes of the screen on top as the last page
+	// read had them, in drawing order (panes.go).
+	panesNow []string
+	// help is the `?` overlay while it is up.
+	help *helpView
+	// laid holds the layouts the allocator gave lists, by what they were made of
+	// (laidOnce), so a frame that reads the same lists measures none.
+	laid map[string][]laidRow
+	// laidBuilds counts the lists the allocator laid out and the memo did not hold.
+	laidBuilds int
+	// sliceBuilds counts the slice screens' bodies built and the memo did not hold.
+	sliceBuilds int
+	// pageBuilds counts the pages built: a frame builds one.
+	pageBuilds int
+	// rowMemo holds the rows of the chart screens built for the world as it
+	// stands (chartcache.go).
+	rowMemo *rowsMemo
+	// shown is the page the last frame drew (chartcache.go).
+	shown *shownPage
+	// rowReads counts the tickets read into a row of a chart screen.
+	rowReads int
+	// queueBuilds counts the project's list built (maincache.go): a key that
+	// moves nothing the list reads builds none, a search key included.
+	queueBuilds int
+	// rowBuilds counts the rows of the project's list built from a ticket (their
+	// cells), which a step of the clock does not do.
+	rowBuilds int
+	// detailBuilds counts the details of a ticket's row built, the words after
+	// its steps: a key of a search builds none.
+	detailBuilds int
+	// measured counts the rows the layout measured: a frame that changed none of
+	// what a page reads measures none.
+	measured int
+	// seen is what the last frame drew of the screen on top, which the next one
+	// settles the cursor and the window against (hold.go).
+	seen    *held
+	started time.Time
 }
 
 // New builds the model for cfg.
 func New(cfg Config) *Model {
-	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height}
+	m := &Model{cfg: cfg, w: newWorld(), width: cfg.Width, height: cfg.Height, table: keyRows()}
 	if m.width <= 0 {
 		m.width = defaultWidth
 	}
@@ -561,9 +705,16 @@ func (m *Model) waitEvents() tea.Cmd {
 
 // Update takes a message in.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.forgetSibs()
+	if _, key := msg.(tea.KeyMsg); !key {
+		// A key moves the cursor, or starts a command whose result is a message
+		// of its own: what the screens built from the world holds.
+		m.w.gen++
+	}
 	next, cmd := m.update(msg)
 	m.settleLast(msg)
 	m.syncScreen()
+	m.forgetSibs()
 	return next, cmd
 }
 
@@ -573,6 +724,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		return m, m.keys(msg)
+	case tea.MouseMsg:
+		return m, m.mouse(msg)
 	case eventsMsg:
 		return m, tea.Batch(m.onEvents(msg), m.waitEvents())
 	case streamEndMsg:
@@ -900,6 +1053,9 @@ func (m *Model) settleLast(msg tea.Msg) {
 func (m *Model) onRan(msg ranMsg) tea.Cmd {
 	m.last = &msg.result
 	m.last.After = m.rosterStarted
+	if msg.result.Label == labelPublishWhat {
+		m.publishRead(m.last)
+	}
 	var cmds []tea.Cmd
 	if msg.result.Ticket != "" {
 		// The roster read that follows is the one that says what the command did.
@@ -937,6 +1093,8 @@ func (m *Model) keys(k tea.KeyMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, r := range k.Runes {
 		cmds = append(cmds, m.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}))
+		// No screen is drawn between the keys of one read.
+		m.drawn = nil
 	}
 	return tea.Batch(cmds...)
 }
@@ -954,101 +1112,105 @@ func (m *Model) key(k tea.KeyMsg) tea.Cmd {
 	if m.ask != nil {
 		return m.confirmKey(k)
 	}
+	if m.help != nil {
+		return m.helpKey(k)
+	}
 	m.notice = ""
+	if m.top().screen == screenMain {
+		if m.nav[0].search.open {
+			return m.searchKey(k)
+		}
+	} else if m.top().psearch.open {
+		return m.paneSearchKey(k)
+	}
 	if m.top().screen == screenLand {
 		// The land screen shows the landing and acts on nothing: the session
 		// merges and records it at the person's word, said to it, not here.
 		switch k.String() {
-		case "a", "k", "d", "g", "p":
+		case "a", "k", "d", "g", "p", "u", "v":
 			m.notice = `landing is said to the session: "Land ` + m.top().ticket + `"`
 			return nil
 		}
 	}
-	switch k.String() {
-	case "q":
-		return m.quit()
-	case "up":
-		m.move(-1)
-	case "down":
-		m.move(1)
-	case "pgup":
-		m.move(-5)
-	case "pgdown":
-		m.move(5)
-	case "home":
-		m.move(-1 << 20)
-	case "end":
-		m.move(1 << 20)
-	case "enter", "right":
-		return m.open()
-	case "esc", "left", "backspace":
-		m.back()
-	case "a":
-		m.beginAnswer()
-	case "k":
-		return m.triage("keep")
-	case "d":
-		return m.triage("dismiss")
-	case "t":
-		m.tail = !m.tail
-	case "g":
-		return m.gate()
-	case "p":
-		m.beginPublish()
-	case "5":
-		return m.openLand()
-	case "c":
-		return m.openIssue()
-	case "m":
-		m.toggleMap()
-	case "r":
-		return m.refreshAll()
-	}
-	return nil
+	return m.runKey(k.String())
 }
 
 // move puts the cursor delta rows on, within the screen's rows. A cursor
 // that was following the current step stays where it moved.
 func (m *Model) move(delta int) {
+	m.moveBy(delta)
+	m.rememberMove(m.geometry())
+	m.noteCursor()
+}
+
+func (m *Model) moveBy(delta int) {
 	m.followSel()
-	pg := m.page()
+	pg := m.geometry()
 	n := len(pg.refs())
 	e := m.top()
-	if n == 0 {
-		e.scroll = max(0, min(e.scroll+delta, len(pg.lines)-m.bodyRows()))
+	m.syncPanes(pg)
+	// The keys move the focused pane's cursor, within its rows.
+	lo, cnt := m.paneSpan(pg)
+	hi := lo + cnt - 1
+	if n == 0 || e.textFocus {
+		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
+		return
+	}
+	if m.scrollTall(pg, delta) {
+		// The row under the cursor is read by lines before the cursor leaves it.
 		return
 	}
 	e.follow = false
+	if e.lead == 0 || delta <= -(1<<19) || delta >= 1<<19 {
+		// A page held above its cursor's window is read a line at a time first.
+		if m.moveWindowed(pg, delta) {
+			return
+		}
+	}
 	m.windowStart(pg, e.sel, m.bodyRows(), true) // holds only the lines there are
 	switch {
 	case delta <= -(1 << 19):
-		// Home: the first row, with the page held at its top.
-		e.sel, e.lead = 0, 1<<20
+		// Home: the focused pane's first row; the window follows it, and a page that
+		// has no Detail is held at its top.
+		e.sel, e.lead = lo, 0
+		if lo == 0 && !pg.follows() {
+			e.lead = 1 << 20
+		}
 		return
 	case delta >= 1<<19:
-		e.sel, e.lead = n-1, 0
+		e.sel, e.lead = hi, 0
 		return
-	case e.lead > 0 || (delta < 0 && e.sel == 0):
+	case e.lead > 0 || (delta < 0 && e.sel == 0 && lo == 0):
 		// A page held above its cursor's window is read a line at a time, from
-		// whatever row the cursor is on, until it is back at the window; and
-		// up from the first row moves the page above it. The window clamps lead
+		// whatever row the cursor is on, until it is back at the window: where the
+		// focused pane has no row to move to the page is read, not the cursor moved.
+		// Up from the first row moves the page above it; any other move is the
+		// cursor's, and the window follows it. The window clamps lead
 		// to the lines there are, so the first move after a screen opened at
 		// its top starts at once.
-		if delta < 0 {
-			e.lead = min(e.lead-delta, 1<<20)
-		} else {
-			e.lead = max(0, e.lead-delta)
+		// A window that would start where it cannot, on the top or the names of the
+		// list it is in, is the one it was: the page goes on to the next line it
+		// can show.
+		h := m.bodyRows()
+		from := func() int {
+			f, _, _ := windowSpan(pg, e.sel, m.windowStart(pg, e.sel, h, false), h, e.lead == 0)
+			return f
+		}
+		was := from()
+		for i := 0; i < 8; i++ {
+			if delta < 0 {
+				e.lead = min(e.lead-delta, 1<<20)
+			} else {
+				e.lead = max(0, e.lead-delta)
+			}
+			if e.lead == 0 || e.lead == 1<<20 || from() != was {
+				break
+			}
 		}
 		return
 	}
 	was := e.sel
-	e.sel += delta
-	if e.sel >= n {
-		e.sel = n - 1
-	}
-	if e.sel < 0 {
-		e.sel = 0
-	}
+	e.sel = min(max(e.sel+delta, lo), hi)
 	if e.sel != was {
 		e.lead = 0
 	}
@@ -1061,8 +1223,10 @@ func (m *Model) rowUnderCursor() (rowRef, bool) {
 	if e.follow {
 		return rowRef{}, false
 	}
-	refs := m.page().refs()
-	if e.sel < 0 || e.sel >= len(refs) {
+	pg := m.page()
+	m.syncPanes(pg)
+	refs := pg.refs()
+	if e.sel < 0 || e.sel >= len(refs) || e.textFocus {
 		return rowRef{}, false
 	}
 	return refs[e.sel], true
@@ -1093,6 +1257,10 @@ func (m *Model) putCursorOn(ref rowRef, ok bool) {
 // step is done.
 func (m *Model) followSel() {
 	e := m.top()
+	if e.screen == screenMain {
+		m.followRow(e)
+		return
+	}
 	if e.screen == screenChart && e.follow {
 		if c := m.w.charts[e.chart]; c != nil {
 			e.sel = m.chartFirstOpen(c)
@@ -1113,15 +1281,119 @@ func (m *Model) followSel() {
 	e.lastCur = cur
 }
 
+// switchView is `s` on the main screen: the list by state, or by chart. The
+// cursor stays on its ticket (its chart, or its fold row) across the switch.
+func (m *Model) switchView() {
+	e := m.top()
+	if e.screen != screenMain || m.readingStore() {
+		return
+	}
+	was, ok := rowRef{}, false
+	if refs := m.mainRefs(); e.sel >= 0 && e.sel < len(refs) {
+		was, ok = refs[e.sel], true
+	}
+	m.nav[0].byChart = !m.nav[0].byChart
+	e.lead = 0
+	refs := m.mainRefs()
+	e.sel = min(e.sel, max(len(refs)-1, 0))
+	if ok {
+		// The same row where the view has it, else the same ticket (or chart, or
+		// fold) wherever it is drawn, else the fold row that hides it.
+		if i, found := m.findRow(refs, was.identity()); found {
+			e.sel = i
+		}
+	}
+	e.curSet = false
+	m.noteCursor()
+}
+
+// noteCursor remembers the row under the main screen's cursor as an identity.
+func (m *Model) noteCursor() {
+	e := m.top()
+	if e.screen != screenMain {
+		return
+	}
+	refs := m.mainRefs()
+	if e.sel >= 0 && e.sel < len(refs) {
+		e.cur, e.curSet = refs[e.sel].identity(), true
+	}
+}
+
+// followRow puts the main screen's cursor on the row it stood on, wherever the
+// page now has it. A row that left the page leaves the cursor on the row at
+// the same place, or the nearest one, and that row is the one it follows from
+// then on.
+func (m *Model) followRow(e *navEntry) {
+	refs := m.mainRefs()
+	if len(refs) == 0 {
+		return
+	}
+	if e.curSet {
+		for i, r := range refs {
+			if r.identity() == e.cur {
+				e.sel = i
+				return
+			}
+		}
+	}
+	if fold, ok := m.folded[e.cur]; ok && e.curSet {
+		// The row is folded away: the cursor is on the fold row that holds it.
+		for i, r := range refs {
+			if r.identity() == fold {
+				e.sel, e.cur = i, fold
+				return
+			}
+		}
+	}
+	e.sel = min(max(e.sel, 0), len(refs)-1)
+	e.cur, e.curSet = refs[e.sel].identity(), true
+}
+
+// findRow is where the row stands among refs, as main now draws it: its
+// identity (kind, id and the container it is drawn under) first, else the same
+// kind and id wherever it is drawn, else the fold row that hides a row of that
+// kind and id (m.folded, as the last mainRefs read it). Every place that puts
+// the cursor back on a row finds it by this.
+func (m *Model) findRow(refs []rowRef, id rowIdentity) (int, bool) {
+	for i, r := range refs {
+		if r.identity() == id {
+			return i, true
+		}
+	}
+	for i, r := range refs {
+		if r.kind == id.kind && r.id == id.id {
+			return i, true
+		}
+	}
+	for hidden, fold := range m.folded {
+		if hidden.kind != id.kind || hidden.id != id.id {
+			continue
+		}
+		for i, r := range refs {
+			if r.identity() == fold {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // selected is the row under the cursor, nil when the screen has none.
 func (m *Model) selected() *rowRef {
 	m.followSel()
-	refs := m.page().refs()
+	return m.refIn(m.page())
+}
+
+// refIn is the row of pg under the cursor.
+func (m *Model) refIn(pg page) *rowRef {
+	m.syncPanes(pg)
+	refs := pg.refs()
 	sel := m.top().sel
-	if sel < 0 || sel >= len(refs) {
+	if sel < 0 || sel >= len(refs) || m.top().textFocus {
+		// A pane of text has no row under a cursor.
 		return nil
 	}
-	if e := m.top(); e.lead > 0 && !m.rowShown(sel) {
+	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {
 		// A row the window does not show is not under the cursor: a key that
 		// acts on it would decide what its person cannot see.
 		return nil
@@ -1129,19 +1401,20 @@ func (m *Model) selected() *rowRef {
 	return &refs[sel]
 }
 
-// rowShown says whether the sel-th selectable row of the page on top is in the
-// window the screen draws.
-func (m *Model) rowShown(sel int) bool {
-	pg := m.page()
+// rowShown says whether the sel-th selectable row of pg is in the window the
+// screen draws.
+func (m *Model) rowShown(pg page, sel int) bool {
 	h := m.bodyRows()
 	start := m.windowStart(pg, sel, h, false)
+	from, to, _ := windowSpan(pg, sel, start, h, m.top().lead == 0 || (m.top().fresh != 0 && start != 0))
 	n := 0
 	for i, l := range pg.lines {
+		n += len(l.hiddenRefs)
 		if l.ref == nil {
 			continue
 		}
 		if n == sel {
-			return i >= start && i < start+h
+			return i >= from && i < to
 		}
 		n++
 	}
@@ -1154,8 +1427,73 @@ func (m *Model) open() tea.Cmd {
 	if ref == nil {
 		return nil
 	}
+	if ref.kind == rowFold {
+		// A fold opens or closes in place: no screen is pushed.
+		e := &m.nav[0]
+		if e.open == nil {
+			e.open = map[string]bool{}
+		}
+		e.open[ref.id] = !e.open[ref.id]
+		return nil
+	}
+	if m.promptFor(*ref) != "" {
+		// An open question's subject is the prompt that answers it.
+		m.beginAnswer()
+		return nil
+	}
+	if ref.kind == rowCarry {
+		m.goToRound(ref.id)
+		return nil
+	}
+	if ref.kind == rowIllustration {
+		// The illustration opens in the browser, not in a screen.
+		m.openIllustration(ref.ticket)
+		return nil
+	}
+	next, ok := m.openTarget(*ref)
+	if !ok {
+		if why := opensNothing(*ref); why != "" {
+			m.notice = why
+		}
+		return nil
+	}
+	return m.goTo(len(m.nav), ref, next)
+}
+
+// logNamesNothing is why enter opens nothing on an activity line that names no
+// question, slice, round or step, and commitOpensNothing why it opens nothing on
+// a store commit.
+const (
+	logNamesNothing    = "this line names no question, slice, round or step to open"
+	commitOpensNothing = "a store commit opens nothing"
+	noFixTaskYet       = "no fix task was added for this failed suite yet"
+	tryIsWhole         = "this try is whole here: its runs, their output and recordings are under it"
+)
+
+// opensNothing is why the row ref opens nothing, "" for a row that does open
+// something or whose reason is the usual one.
+func opensNothing(ref rowRef) string {
+	switch {
+	case ref.kind == rowCommit:
+		return commitOpensNothing
+	case ref.kind == rowSuite && ref.id == "":
+		return noFixTaskYet
+	case ref.kind == rowTry:
+		return tryIsWhole
+	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
+		return logNamesNothing
+	}
+	return ""
+}
+
+// openTarget is the screen enter on the row ref opens: none when the row opens
+// nothing, or opens the screen the person is on (an ask on the review screen,
+// a slice's question on its own screen), which would stack a second copy.
+func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 	var next navEntry
 	switch ref.kind {
+	case rowFold:
+		return next, false
 	case rowChart:
 		next = navEntry{screen: screenChart, chart: ref.id, follow: true}
 	case rowTicket:
@@ -1176,67 +1514,71 @@ func (m *Model) open() tea.Cmd {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
+	case rowFinding:
+		next = navEntry{screen: screenFinding, ticket: ref.ticket, finding: ref.id}
+	case rowTry:
+		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+	case rowRound:
+		// A round the slice screen's Finding panel names: the review screen, with
+		// the Rounds cursor on it.
+		next = navEntry{screen: screenReview, ticket: ref.ticket}
+	case rowSuite:
+		if ref.id == "" {
+			return next, false
+		}
+		return m.openTarget(rowRef{kind: rowTicket, id: ref.id, ticket: ref.id})
+	case rowIssue:
+		// An issue's screen is its plan, the screen of the chart that plans it.
+		chart := m.planOf(ref.id)
+		if chart == "" {
+			return next, false
+		}
+		next = navEntry{screen: screenChart, chart: chart, follow: true}
+	case rowSection:
+		// A line that names a section opens the brief at it.
+		next = navEntry{screen: screenBrief, ticket: ref.ticket, part: ref.identity(), partSet: true}
+	case rowSub, rowLog:
+		// A sub-step or a line of the log opens the most specific thing it names:
+		// its slice, its round (the review screen, which has no screen of a round's
+		// own), its step. A question of the line is its prompt while it is open
+		// (promptFor) and its slice once answered.
+		i := slices.IndexFunc(stepNames[:], func(n string) bool { return strings.ToLower(n) == ref.container })
+		switch {
+		case ref.slice != "":
+			next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+		case ref.round != "":
+			next = navEntry{screen: screenReview, ticket: ref.ticket}
+		case i >= 0:
+			next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
+			if next.screen == screenBrief && ref.kind == rowSub {
+				// A brief sub-step opens the part it is about, else the first row.
+				next.part, next.partSet = m.briefPartOf(ref.ticket, ref.id)
+			}
+		default:
+			return next, false
+		}
 	case rowQuestion:
 		if ref.slice == "" {
-			return nil
+			return next, false
 		}
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
 	default:
-		return nil
+		return next, false
 	}
-	m.nav = append(m.nav, next)
-	m.last = nil
-	if next.screen == screenReview {
-		// What the review screen is for, when something waits, is deciding it.
-		m.top().sel = m.askRow(ref)
-		// The page opens at its top, so the rounds are read before the rows.
-		m.top().lead = 1 << 20
-	}
-	var cmds []tea.Cmd
-	if next.screen == screenChart {
-		cmds = append(cmds, m.enterChart(m.top())...)
-	}
-	if t := m.w.tickets[next.ticket]; t != nil && (t.status == nil || t.dirty) {
-		cmds = append(cmds, m.refreshStatus(next.ticket))
-	}
-	if next.screen == screenBrief {
-		cmds = append(cmds, m.loadBrief(next.ticket))
-	}
-	return tea.Batch(cmds...)
-}
-
-// openLand opens the Land screen of the ticket on the screen, whatever the
-// cursor is on: from the ticket's screen, a step's or a slice's. The land screen
-// itself, the project's list and a chart's have no ticket of their own to open
-// it for.
-func (m *Model) openLand() tea.Cmd {
-	e := m.top()
-	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish:
-	default:
-		return nil
-	}
-	t := m.w.tickets[e.ticket]
-	if t == nil || t.awaiting {
-		return nil
-	}
-	m.nav = append(m.nav, navEntry{screen: screenLand, ticket: e.ticket})
-	m.last = nil
-	if t.status == nil || t.dirty {
-		return m.refreshStatus(e.ticket)
-	}
-	return nil
+	top := m.top()
+	same := next.screen == top.screen && next.ticket == top.ticket && next.slice == top.slice && next.chart == top.chart && next.finding == top.finding
+	return next, !same
 }
 
 // askRow is the position, among the rows of the review screen on top, of the
 // ask ref names, else of the first ask; 0 when it holds none.
-func (m *Model) askRow(ref *rowRef) int {
+func (m *Model) askRow(pg page, ref *rowRef) int {
 	first := -1
-	for i, r := range m.page().refs() {
+	for i, r := range pg.refs() {
 		if r.kind != rowAsk {
 			continue
 		}
-		if ref.kind == rowAsk && r.id == ref.id {
+		if ref != nil && ref.kind == rowAsk && r.id == ref.id {
 			return i
 		}
 		if first < 0 {
@@ -1249,7 +1591,7 @@ func (m *Model) askRow(ref *rowRef) int {
 // back goes up one screen.
 func (m *Model) back() {
 	if len(m.nav) > 1 {
-		m.nav = m.nav[:len(m.nav)-1]
+		m.cut(len(m.nav) - 1)
 		m.last = nil
 	}
 }
@@ -1307,15 +1649,19 @@ func (m *Model) beginAnswer() {
 		return
 	}
 	var q *questionRow
-	if ref := m.selected(); ref != nil && ref.kind == rowQuestion {
+	if ref := m.selected(); ref != nil && (ref.kind == rowQuestion || (ref.kind == rowLog && ref.question != "")) {
+		qid := ref.id
+		if ref.kind == rowLog {
+			qid = ref.question
+		}
 		for _, x := range t.questions(m.zone) {
-			if x.ID == ref.id {
+			if x.ID == qid {
 				x := x
 				q = &x
 			}
 		}
 		if q == nil || !q.Open {
-			m.notice = ref.id + " is already answered"
+			m.notice = qid + " is already answered"
 			return
 		}
 	} else {
@@ -1335,9 +1681,13 @@ func (m *Model) beginAnswer() {
 			return
 		}
 	}
-	about := []string{"slice " + q.Slice + " asked:"}
-	about = append(about, strings.Split(q.Text, "\n")...)
-	m.input = &textInput{prompt: "answer " + q.ID, about: about, ticket: id, qid: q.ID}
+	m.input = &textInput{prompt: "answer " + q.ID, head: "slice " + q.Slice + " asked:", about: q.Text, ticket: id, qid: q.ID}
+	// A question is never answered from a cut: when the prompt with the whole
+	// question would leave the body under its floor, there is no prompt.
+	if need := minBodyRows + headerRows + len(m.footer(m.width)); m.height < need {
+		m.input = nil
+		m.notice = "the screen is too short to show the whole question " + q.ID + ": it needs " + strconv.Itoa(need) + " rows, this has " + strconv.Itoa(m.height)
+	}
 }
 
 // inputKey edits the line being typed.
@@ -1414,7 +1764,58 @@ func (m *Model) triage(decision string) tea.Cmd {
 		m.notice = "no ask is waiting for a decision"
 		return nil
 	}
+	// A person decides an ask from what the screen shows: one drawn cut, or not
+	// drawn at all, is not decided.
+	switch drawn, seen := m.drawn[pick.ID]; {
+	case m.drawn == nil:
+		m.notice = "the screen changed under the key before it was drawn: press it again"
+		return nil
+	case drawn == askWhole:
+	case seen && m.top().ticket == id:
+		// The person is on the ticket's own screen: opening it is not a way out.
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller"
+		return nil
+	case seen:
+		m.notice = "ask " + pick.ID + " is not drawn whole on this screen: make the screen taller, or open " + id + " to read it"
+		return nil
+	case m.top().ticket == id:
+		m.notice = "ask " + pick.ID + " is read and decided on the review screen, which this screen does not draw it on"
+		return nil
+	default:
+		m.notice = "ask " + pick.ID + " is not shown on this screen: open " + id + " to read it"
+		return nil
+	}
 	return m.exec("triage", id, m.verbArgs("triage", id, pick.ID, decision))
+}
+
+// requeue puts a stalled or env-blocked slice back in the queue: the one the
+// keys act on (the cursor's, or the slice screen's), else the only one. It runs
+// at once: a requeue is a retry the builder's next claim takes.
+func (m *Model) requeue() tea.Cmd {
+	id := m.keysOn.ticket
+	slice := m.keysOn.slice
+	if slice == "" {
+		// can said at least one is stuck.
+		stuck := m.w.tickets[id].stuckSlices()
+		if len(stuck) != 1 {
+			m.notice = "several slices are stalled: put the cursor on the one to requeue"
+			return nil
+		}
+		slice = stuck[0]
+	}
+	return m.exec("requeue", id, m.verbArgs("requeue", id, "--slice", slice))
+}
+
+// askApprove asks to approve the brief as it stands: the verb records the
+// approval as the person's, since the runner has them at the keys.
+func (m *Model) askApprove() {
+	id := m.targetTicket()
+	m.ask = &confirmation{
+		prompt: "approve the brief of " + id + " as it is now?",
+		run: func() tea.Cmd {
+			return m.exec("validate", id, m.verbArgs("validate", id))
+		},
+	}
 }
 
 // gate opens a gate round on the ticket.
@@ -1431,18 +1832,48 @@ func (m *Model) gate() tea.Cmd {
 	return m.exec("gate", id, m.verbArgs("gate", id))
 }
 
-// beginPublish asks to publish the ticket: a person's approval of the
-// reviewed head, then the push and the pull request.
-func (m *Model) beginPublish() {
+// beginPublish renders the ticket's pull request body, which pushes nothing, to
+// read what its What says: the verb's own word on it comes back as publishRead.
+func (m *Model) beginPublish() tea.Cmd {
 	id := m.targetTicket()
 	if id == "" || m.w.tickets[id] == nil {
 		m.notice = "select a ticket first"
-		return
+		return nil
 	}
 	if m.w.tickets[id].awaiting {
 		m.notice = id + " does not exist yet"
+		return nil
+	}
+	return m.exec(labelPublishWhat, id, m.verbArgs("publish", id, "--body"))
+}
+
+// whatPending says a rendered body has a What nobody wrote: a `what` row (or one
+// for each repo of a ticket of several) the verb says is pending.
+func whatPending(out string) bool {
+	for k, v := range parseAxi(out).KV["publish_body"] {
+		if (k == "what" || strings.HasPrefix(k, "what_")) && v == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// publishRead takes in the render beginPublish ran. With a What to write it
+// stops: nothing is asked or pushed, and the panel keeps the verb's own help
+// line for it, whole. A render the verb refused is shown as any refusal. A body
+// with its What asks to publish, and the render leaves no line of its own.
+func (m *Model) publishRead(res *outcome) {
+	s := res.shown()
+	if s.Code != 0 || whatPending(s.Out) {
 		return
 	}
+	m.last = nil
+	m.askPublish(res.Ticket)
+}
+
+// askPublish asks to publish the ticket: a person's approval of the
+// reviewed head, then the push and the pull request.
+func (m *Model) askPublish(id string) {
 	m.ask = &confirmation{
 		prompt: "publish " + id + ": approve the reviewed head, push it and open the pull request?",
 		run: func() tea.Cmd {

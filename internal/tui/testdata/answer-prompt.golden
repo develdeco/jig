@@ -1,21 +1,21 @@
-jig  demo › JIG-1  Greeting copy                               ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ Steps ────────────────────────────────────── step 2 of 5 · worked 1m 59s ─╮
-  │  ✓ 1 Brief            no brief on record                                   │
-  │▸ ? 2 Build    1m 59s  1 of 4 green · slice c needs your answer 57m 30s     │
-  │  ○ 3 Review           after the build                                      │
-  │  ○ 4 Publish          after a clean review                                 │
-  │  ○ 5 Land             after the publish                                    │
+  │      step    took    where it stands                                       │
+  │  ✓ 1 Brief           no brief on record                                    │
+  │▸ ? 2 Build   1m 59s  1 of 4 green · slice c needs your answer 57m 30s      │
+  │  ○ 3 Review          after the build                                       │
+  │  ○ 4 Publish         after a clean review                                  │
+  │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Build ────────────────────────────────────────────────────── 1 of 4 done ─╮
-  │  ✖ slice b  failed its last run                                            │
+  ╭─ Needs you ──────────────────────────────────────────────────── 1 waiting ─╮
+  │  ? builder asks about slice c  q-001                                       │
+  │      Formal or casual?                                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  needs you
-  ? builder asks about slice c: Formal or casual?  q-001
-  ╭─ Activity ───────────────────────────────────────────────── latest 3 of 8 ─╮
+  ╭─ Activity ───────────────────────────────────────────────── latest 2 of 8 ─╮
+  │  time     step    what                                                     │
   │  09:02:00 build·c ? builder asks: Formal or casual?                        │
-  │  09:01:40 build·b ✖ its oracle failed: TestB: want 2, got 3                │
-  │  09:01:10 build·b · verification requested for bbbbbbb                     │
+  │  ↓ 2 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
   slice c asked:

@@ -165,11 +165,11 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 	src := newLiveSource(append(jig1(), jig2()...)...)
 	s := startRun(t, plainConfig(src, r))
 
-	s.out.until(t, "waits to land")
-	s.keys("\r") // open JIG-1
+	s.out.until(t, "Needs you")
+	s.keys("\x1b[H\r") // open JIG-1, the first row of the group
 	s.out.until(t, "needs you")
-	s.keys("g")
-	r.untilRan(t, "gate JIG-1 --store /s")
+	s.keys("aOK")
+	r.untilRan(t, "answer --as person --store /s JIG-1 q-001 -- OK")
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatalf("Run = %v, want nil after q", err)
@@ -183,7 +183,8 @@ func TestRunPrintsEachScreenWholeAndTakesKeysFromTheInput(t *testing.T) {
 		t.Errorf("the first screen is not the store being read before the roster:\n%s", first)
 	}
 	for i, f := range frames {
-		if !strings.Contains(f, "jig  demo") || !strings.Contains(f, "quit") {
+		// The keys: quit, or the answer being typed (enter sends, esc cancels).
+		if !strings.Contains(f, "jig  demo") || !(strings.Contains(f, "quit") || strings.Contains(f, "cancel")) {
 			t.Errorf("screen %d is not a whole screen (no header or no keys):\n%s", i, f)
 		}
 		if strings.Contains(f, "\x1b") {
@@ -207,7 +208,7 @@ func TestRunShowsWhatIsWrittenAfterItStarted(t *testing.T) {
 	r.answer("next --json --roster --store /s", rosterJSONWith(map[string]any{
 		"id": "JIG-7", "title": "New work", "state": "ready", "digest": draftedDigest()}), 0)
 	src.live <- jl(at(9, 0), "JIG-7", "a", "claim")
-	s.out.until(t, "JIG-7")
+	s.out.until(t, "Not started")
 	s.keys("q")
 	if err := s.ended(); err != nil {
 		t.Fatal(err)
@@ -220,7 +221,9 @@ func TestRunTakesKeysThatArriveTogether(t *testing.T) {
 	cfg := plainConfig(newLiveSource(jig1()...), r)
 	cfg.Ticket = "JIG-1"
 	s := startRun(t, cfg)
-	s.out.until(t, "needs you")
+	// `a` needs the ticket's question read and drawn, not only a heading.
+	s.out.until(t, "Formal or casual?")
+	s.out.until(t, "a answer")
 
 	// The answer prompt, its text and its end, in one write.
 	s.keys("aOK\r")
@@ -315,8 +318,8 @@ func TestRunOnAScreenDrawsWithTheRendererAndEndsOnQ(t *testing.T) {
 	go func() { done <- Run(context.Background(), cfg, pr, out, true) }()
 
 	out.until(t, "needs you")
-	pw.Write([]byte("g"))
-	r.untilRan(t, "gate JIG-1 --store /s")
+	pw.Write([]byte("aOK"))
+	r.untilRan(t, "answer --as person --store /s JIG-1 q-001 -- OK")
 	pw.Write([]byte("q"))
 	select {
 	case err := <-done:

@@ -32,7 +32,7 @@ func roleOf(event string) string {
 	case journal.EventApproval, journal.EventRevalidate:
 		return rolePlanner
 	case journal.EventClaim, journal.EventRelease, journal.EventVerifyPending, journal.EventQuestion,
-		journal.EventDispatch, journal.EventResult, journal.EventCall:
+		journal.EventDispatch, journal.EventResult, journal.EventCall, journal.EventOracle:
 		return roleBuilder
 	case journal.EventGateOpen, journal.EventGateReviewer, journal.EventGateRound, journal.EventGateClean:
 		return roleReviewer
@@ -105,12 +105,9 @@ func (m *Model) whoAs(t *ticket, session, role string) string {
 // who names a session by the role it played first on the ticket.
 func (m *Model) who(t *ticket, session string) string { return m.whoAs(t, session, "") }
 
-// whoWith is who, with the harness and model the session runs when the
-// ledger said: "reviewer (Claude Code · Opus 5.5)".
-func (m *Model) whoWith(t *ticket, session string) string { return m.whoWithAs(t, session, "") }
-
-// whoWithAs is whoWith for a session playing role in what is worded: a
-// session that planned and then claims a slice is named as its builder.
+// whoWithAs is whoAs with the harness and model the session runs when the
+// ledger said: "reviewer (Claude Code · Opus 5.5)". A session that planned and
+// then claims a slice is named as its builder when role says so.
 func (m *Model) whoWithAs(t *ticket, session, role string) string {
 	name := m.whoAs(t, session, role)
 	if name == "" {

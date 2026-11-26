@@ -1,24 +1,24 @@
-jig  demo › JIG-1  Greeting copy › 1 brief                     ? build needs you
+jig  demo › JIG-1 (1 of 3)  Greeting copy › 1 brief            ? build needs you
 ────────────────────────────────────────────────────────────────────────────────
   ✓ approved by an agent, as Ada Lovelace · 4 sections, 4 slices
-    approved 2026-10-23 09:00 by an agent, as Ada Lovelace
-    recorded by the session that drafted it · brief 0123456789ab
 
-  sections  cited by
-▸ Goal      no slice
-      Say hello and goodbye to a person by name, in the tone the product has.
-  Greeting  slice a
-      Use the first name. Fall back to "friend" when there is none.
-  Farewell  slice b
-      Say goodbye politely, and never twice.
-  Tone      slice c, d
-      Casual or formal: the owner decides. Until then neither is shipped, so
-      the copy waits for the answer.
-
-  slices
-  ● a  Greet by name  workspace app · oracle unit
-  ✖ b  Say goodbye, politely  workspace app · oracle unit
-  ? c  Pick the tone  workspace copy · oracle go test ./...
-  ○ d  Ship the copy  workspace copy · oracle go test ./... · after b, c
+  ╭─ Parts ────────────────────────────────────────────────────────── 9 parts ─╮
+  │  kind      part                       stands at                            │
+  │▸ section   Goal                       no slice                             │
+  │  section   Greeting                   cited by 1                           │
+  │  section   Farewell                   cited by 1                           │
+  │  section   Tone                       cited by 2                           │
+  │  slice     a  Greet by name           ● green                              │
+  │  slice     b  Say goodbye, politely   ✗ fail                               │
+  │  slice     c  Pick the tone           ? needs-input                        │
+  │  ↓ 2 more                                                                  │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Detail · Goal ──────────────────────────────────────── no slice cites it ─╮
+  │  heading Goal                                                              │
+  │  text    Say hello and goodbye to a person by name, in the tone the        │
+  │          product has.                                                      │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 1 more
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · esc back · 5 land · t tail · q quit
+  esc back · q quit · ? keys · tab next pane: Detail · Goal · ↑↓ move in Parts
+  1-5 steps · [ ] sibling · h main · t tail

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -56,11 +55,11 @@ func (m *Model) ticketPage(id string) page {
 	if total := totalTook(steps); total > 0 {
 		right += " · worked " + ago(total)
 	}
-	p.boxTop("Steps", right)
+	rows := make([]listRow, len(steps))
 	for i, s := range steps {
-		p.boxRow(rowRef{kind: s.Kind, ticket: id}, m.stepLine(s, i == cur))
+		rows[i] = listRow{ref: &rowRef{kind: s.Kind, ticket: id}, cells: m.stepCells(s, i == cur)}
 	}
-	p.boxEnd()
+	m.listPanel(&p, listSpec{title: "Steps", summary: right, cols: stepColumns, names: stepColumnNames, rows: rows})
 
 	// What follows the sub-steps: the rows that wait for a person, whose
 	// cursor places come after the steps'. There is no line of what to run
@@ -89,20 +88,28 @@ func (m *Model) ticketPage(id string) page {
 	if len(qs)+len(asks) > 0 || landing {
 		// A live session holds back the call to act, not the asks: the group
 		// reads asks while one is at work and only asks wait.
-		heading := "needs you"
+		title := "Needs you"
 		if len(qs) == 0 && !landing && m.ticketLive(t) {
-			heading = "asks"
+			title = "Asks"
 		}
-		needs.add(m.st.bold(heading))
 		for _, q := range qs {
 			needs.addRow(rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: q.Slice}, m.questionLine(t, q))
+			for _, l := range m.panelLines(q.Text) {
+				needs.lines = append(needs.lines, pline{text: "    " + l, cont: true})
+			}
 		}
 		for i, line := range m.askLines(asks) {
 			needs.addRow(rowRef{kind: rowAsk, id: asks[i].ID, ticket: id}, line)
+			m.addAskText(&needs, t, asks[i])
 		}
 		if landing {
 			needs.addRow(rowRef{kind: rowLand, ticket: id}, m.landNeedsLine(t))
 		}
+		n := len(qs) + len(asks)
+		if landing {
+			n++
+		}
+		needs.intoPanel(0, title, strconv.Itoa(n)+" waiting")
 	}
 
 	// The heights. The screen has a body of so many rows: the steps, the
@@ -118,11 +125,11 @@ func (m *Model) ticketPage(id string) page {
 			groups = append(groups, g)
 		}
 	}
-	taken := len(p.lines)
+	taken := m.taken(&p)
 	for _, g := range groups {
 		taken += len(g.lines)
 	}
-	floor := 2 + min(3, max(1, len(t.logLines())))
+	floor := 3 + min(3, max(1, len(t.logLines())))
 	spare := body - taken - floor
 
 	var block page
@@ -133,7 +140,12 @@ func (m *Model) ticketPage(id string) page {
 		if f := focusIndex(subs); f >= 0 {
 			extra = max(0, m.openWant(t, focus, subs[f])-1)
 		}
-		block = m.substepsPanel(t, focus, subs, min(substepCap(body)+2+extra, spare, len(subs)+2+extra))
+		height := min(substepCap(body)+3+extra, spare, len(subs)+3+extra)
+		if _, ok := m.zoomRoom(stepNames[focus]); ok {
+			// Zoomed, the pane has the whole body.
+			height = body
+		}
+		block = m.substepsPanel(t, focus, subs, height)
 		spare -= len(block.lines)
 	}
 	blank := func() bool {
@@ -148,6 +160,7 @@ func (m *Model) ticketPage(id string) page {
 	gapActivity := blank()
 
 	p.lines = append(p.lines, block.lines...)
+	p.windowed = block.windowed
 	for i, g := range groups {
 		if (i == 0 && gapBefore) || (i > 0 && gapBetween) {
 			p.add("")
@@ -170,41 +183,37 @@ func (m *Model) waitingPage(id string) page {
 	return p
 }
 
-// stepLine is a step's row: its icon, number and name, how long it has taken,
-// and where it stands. A step not reached yet is drawn back, and the time of
+// stepColumns are the columns of the steps: the icon, the number, the name, how
+// long it has taken, the words and the clock. The time taken and the clock are
+// never cut: the names give way first, and the words wrap.
+var stepColumns = []column{{}, {gap: 1}, {gap: 1}, {gap: 1, keep: true}, {free: true, gap: 2}, {gap: 1, keep: true}}
+
+// stepColumnNames name the columns of the steps.
+var stepColumnNames = []string{"", "", "step", "took", "where it stands", ""}
+
+// stepCells are a step's row as cells: its icon, number and name, how long it
+// has taken, where it stands, and the clock of a wait or of the time since
+// nobody worked on it. A step not reached yet is drawn back, and the time of
 // the step under way, which counts on, is not.
-func (m *Model) stepLine(s stepRow, current bool) string {
-	name := pad(stepNames[s.Step], 8)
-	num := strconv.Itoa(s.Step+1) + " "
-	text := s.Text
-	if s.Wait != "" {
-		// The clock goes last and always shows: the words give way to it. 21
-		// cells are the icon, number, name and time before the text, 7 the
-		// panel's frame and marker.
-		text = fit(text, m.width-7-21-width(s.Wait)-1) + " " + s.Wait
-	}
-	took := m.st.dim(pad(s.Took, 7))
-	if s.Idle != "" {
-		text = fit(text, m.width-7-21-width(s.Idle)-3) + " · " + s.Idle
-	}
+func (m *Model) stepCells(s stepRow, current bool) []string {
+	num, name, text, took, clock := strconv.Itoa(s.Step+1), stepNames[s.Step], s.Text, m.st.dim(s.Took), ""
 	switch {
 	case s.Idle != "":
 		// A step nobody is working on is drawn back, its time stopped.
-		name, text = m.st.bold(name), m.st.dim(text)
-		took = m.st.dim(pad(s.Took, 7))
+		name, text, clock = m.st.bold(name), m.st.dim(text), m.st.dim("· "+s.Idle)
 	case s.Wait != "":
 		// A step that waits for a person or the host reads it in the colour of
 		// a turn that is not the builder's, current or not.
-		name, text = m.st.bold(name), m.st.state(StateNeedsInput, text)
-		took = pad(s.Took, 7)
+		name, text, clock = m.st.bold(name), m.st.state(StateNeedsInput, text), m.st.state(StateNeedsInput, s.Wait)
+		took = s.Took
 	case current && !s.Done:
-		name, text, took = m.st.bold(name), m.st.state(s.State, text), pad(s.Took, 7)
+		name, text, took = m.st.bold(name), m.st.state(s.State, text), s.Took
 	case current:
 		name, text = m.st.bold(name), m.st.state(s.State, text)
 	case !s.Done:
 		num, name, text = m.st.dim(num), m.st.dim(name), m.st.dim(text)
 	}
-	return m.st.icon(s.State) + " " + num + name + " " + took + " " + text
+	return []string{m.st.icon(s.State), num, name, took, text, clock}
 }
 
 // ticketFocus is the step whose sub-steps and activity the ticket screen
@@ -214,6 +223,20 @@ func (m *Model) stepLine(s stepRow, current bool) string {
 // which.
 func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 	e := m.top()
+	if !e.follow {
+		// The panes show the step the Steps cursor is on, whichever has the focus,
+		// read by its row.
+		if pc := e.paneCurs["Steps"]; pc.set {
+			for i, s := range steps {
+				if s.Kind == pc.id.kind {
+					return i
+				}
+			}
+		}
+	}
+	if e.paneFocus != "" && e.paneFocus != "Steps" {
+		return currentStep(steps)
+	}
 	switch {
 	case e.follow:
 		return currentStep(steps)
@@ -227,88 +250,18 @@ func (m *Model) ticketFocus(steps []stepRow, questions, asks int) int {
 	return stepLand
 }
 
-// substepsPanel is a panel of the sub-steps of step, height lines tall with its
-// frame, titled by the step's name alone (the steps above number it): a list
-// with a state, a label and a few words each, the labels in a column, and the
-// one that matters now (focusIndex) opened (focus.go) when the panel has room
-// for it beside the rest. When they do not all fit it shows the ones that
-// matter most (a person's turn, a failure, the work under way), in their
-// order, and says how many more there are.
-func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int) page {
-	var p page
-	done := 0
-	labelW := 0
-	for _, s := range subs {
-		if s.State == phase.SubDone {
-			done++
-		}
-		labelW = max(labelW, min(labelMaxW, width(s.Label)))
-	}
-	p.boxTop(stepNames[step], fmt.Sprintf("%d of %d done", done, len(subs)))
-	room := height - 2
-	c := m.clocksOf(t)
-	focus, openRows := focusIndex(subs), 0
-	if focus >= 0 {
-		// The open sub-step takes what the other lines leave; with too many
-		// of them, two stay, the rest are counted, and it takes the remainder.
-		others := len(subs) - 1
-		want := m.openWant(t, step, subs[focus])
-		switch {
-		case room-others >= openMin:
-			openRows = min(want, room-others)
-		case room-min(others, 2) >= openMin:
-			openRows = min(want, room-min(others, 2))
-		}
-	}
-	if openRows == 0 {
-		shown := pickSubs(subs, room)
-		for _, i := range shown {
-			p.boxAdd(m.foldedLine(t, step, subs[i], labelW, c))
-		}
-		if more := len(subs) - len(shown); more > 0 && room >= 2 {
-			p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
-		}
-		p.boxEnd()
-		return p
-	}
+// subColumns are the columns of a sub-step's line: its state's icon, its label
+// and its detail.
+var subColumns = []column{{}, {gap: 1}, {free: true, gap: 2}}
 
-	others := make([]phase.Sub, 0, len(subs)-1)
-	at := make([]int, 0, len(subs)-1)
-	for i, s := range subs {
-		if i != focus {
-			others, at = append(others, s), append(at, i)
-		}
-	}
-	shownAt := map[int]bool{}
-	picked := pickSubs(others, room-openRows)
-	for _, j := range picked {
-		shownAt[at[j]] = true
-	}
-	for i, s := range subs {
-		switch {
-		case i == focus:
-			for _, line := range m.openLines(t, step, s, subs, labelW, openRows, c) {
-				p.boxAdd(line)
-			}
-		case shownAt[i]:
-			p.boxAdd(m.foldedLine(t, step, s, labelW, c))
-		}
-	}
-	if more := len(others) - len(picked); more > 0 {
-		p.boxAdd(m.st.dim("+" + strconv.Itoa(more) + " more"))
-	}
-	p.boxEnd()
-	return p
-}
+// subColumnNames name the columns of a sub-step's line.
+var subColumnNames = []string{" ", "sub-step", "detail"}
 
-// labelMaxW is the widest a sub-step's label column gets.
-const labelMaxW = 16
-
-// foldedLine is a sub-step on one line: subLine with what the status adds to
+// foldedCells are a sub-step on one line: subCells with what the status adds to
 // its detail (subDetail), and how long it took once it is done.
-func (m *Model) foldedLine(t *ticket, step int, s phase.Sub, labelW int, c clocks) string {
+func (m *Model) foldedCells(t *ticket, step int, s phase.Sub, labelW int, c clocks) []string {
 	s.Detail = strings.Join(nonEmpty(m.subDetail(t, s), m.subSummary(c, step, s)), " · ")
-	return m.subLine(step, s, labelW)
+	return m.subCells(step, s, labelW)
 }
 
 // subDetail is a sub-step's detail with what the status adds to it once it is
@@ -335,39 +288,6 @@ func (m *Model) subDetail(t *ticket, s phase.Sub) string {
 	return s.Detail + ": " + strings.Join(names, ", ")
 }
 
-// pickSubs are the positions of the sub-steps to show in room lines, in their
-// order. All of them when they fit; else room-1 of them, to leave a line for
-// the count of the rest (the only one when room is 1).
-func pickSubs(subs []phase.Sub, room int) []int {
-	if len(subs) <= room {
-		all := make([]int, len(subs))
-		for i := range all {
-			all[i] = i
-		}
-		return all
-	}
-	keep := room - 1
-	if room < 2 {
-		keep = room
-	}
-	order := make([]int, len(subs))
-	for i := range order {
-		order[i] = i
-	}
-	// A person's turn and a failure first, then what is under way, what waits,
-	// what is next, and last what is done, the latest first.
-	sort.SliceStable(order, func(a, b int) bool {
-		pa, pb := subWeight(subs[order[a]]), subWeight(subs[order[b]])
-		if pa != pb {
-			return pa < pb
-		}
-		return pa == subWeightDone && order[a] > order[b]
-	})
-	picked := order[:max(0, keep)]
-	sort.Ints(picked)
-	return picked
-}
-
 // subWeightDone is the weight of a sub-step that is done: the last to show.
 const subWeightDone = 4
 
@@ -387,22 +307,18 @@ func subWeight(s phase.Sub) int {
 	return subWeightDone
 }
 
-// subLine is a sub-step as a line of the block: its state's icon, its label in
-// a column labelW wide, and a few words of detail. The ones that are waiting or
-// still to come are drawn back.
-func (m *Model) subLine(step int, s phase.Sub, labelW int) string {
+// subCells are a sub-step as the cells of a line of the block: its state's
+// icon, its label in a column labelW wide, and a few words of detail. The ones
+// that are waiting or still to come are drawn back.
+func (m *Model) subCells(step int, s phase.Sub, labelW int) []string {
 	label := pad(s.Label, labelW)
-	detail := ""
-	if s.Detail != "" {
-		detail = m.st.dim("  " + s.Detail)
-	}
 	switch s.State {
 	case phase.SubActive, phase.SubNeedsYou, phase.SubFailed:
 		label = m.st.bold(label)
 	case phase.SubWaiting, phase.SubPending:
 		label = m.st.dim(label)
 	}
-	return m.st.icon(subState(step, s)) + " " + label + detail
+	return []string{m.st.icon(subState(step, s)), label, m.st.dim(s.Detail)}
 }
 
 // subState is the state a sub-step is drawn in.
@@ -429,35 +345,29 @@ func subState(step int, s phase.Sub) string {
 	return StateQueued
 }
 
-// stepActivityPanel adds a panel of the latest lines of step to p, for the
-// step's own screen: as many as
-// the rows left below what p holds allow, activityLines at most and three at
-// least, so the newest line and the panel's edge stay on the screen. Each
-// line names the sub-step it advances.
-func (m *Model) stepActivityPanel(p *page, t *ticket, step int) {
-	lines := t.stepLines(step)
-	keep := min(activityCap(m.bodyRows()), max(3, m.bodyRows()-len(p.lines)-2))
-	right := ""
-	if n := len(lines); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
-		lines = lines[n-keep:]
-	}
-	p.boxTop(stepNames[step]+" activity", right)
-	if len(lines) == 0 {
-		p.boxAdd(m.st.dim("nothing yet"))
-	}
-	labels := m.subLabelsOf(t)
-	for _, l := range lines {
-		p.boxAdd(m.activityLine(t, labels, l))
-	}
-	p.boxEnd()
-}
-
 // questionLine is an open question as a row: who asked about which slice, and
-// the question.
+// the question's id. The question itself follows the row, whole (panelLines).
 func (m *Model) questionLine(t *ticket, q questionRow) string {
 	who := firstOf(m.who(t, q.Session), "a session")
-	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + ": " + firstLine(q.Text) + m.st.dim("  "+q.ID)
+	return m.st.icon(StateNeedsInput) + " " + who + " asks about slice " + q.Slice + m.st.dim("  "+q.ID)
+}
+
+// panelLines is the text of a question or an ask as a person reads it to act:
+// wrapped to the room a panel's line has under its marker and a four-cell
+// indent, none cut. A question's ask and its default are often its last line,
+// so a cut would hide them.
+func (m *Model) panelLines(text string) []string {
+	return wrapWhole(text, m.innerWidth()-4)
+}
+
+// addAskText adds an ask's text under its row, whole, each line tagged with the
+// ask's id.
+func (m *Model) addAskText(p *page, t *ticket, a askRow) {
+	for _, l := range m.panelLines(t.askText(a)) {
+		// The text belongs to its row, as the lines a row wrapped onto do: a window
+		// that shows the row shows it.
+		p.lines = append(p.lines, pline{text: "    " + m.st.dim(l), ask: a.ID, cont: true})
+	}
 }
 
 // firstLine is the first line of text.
@@ -474,28 +384,31 @@ func (m *Model) askLines(asks []askRow) []string {
 	words := make([]string, len(asks))
 	for i, a := range asks {
 		riskW, whereW = max(riskW, width(a.Risk)), max(whereW, width(a.Where))
-		switch a.Decision {
-		case "keep":
-			words[i] = "kept" + decidedBy(a)
-		case "dismiss":
-			words[i] = "dismissed" + decidedBy(a)
-		default:
-			words[i] = "undecided"
-		}
+		_, words[i] = askDecision(a)
 		decW = max(decW, width(words[i]))
 	}
 	out := make([]string, len(asks))
 	for i, a := range asks {
-		state, decision := StateAsk, m.st.dim(pad(words[i], decW))
-		switch a.Decision {
-		case "keep":
-			state, decision = StateKept, m.st.state(StateKept, pad(words[i], decW))
-		case "dismiss":
-			state, decision = StateDismissed, m.st.state(StateDismissed, pad(words[i], decW))
+		state, _ := askDecision(a)
+		decision := m.st.dim(pad(words[i], decW))
+		if state != StateAsk {
+			decision = m.st.state(state, pad(words[i], decW))
 		}
 		out[i] = fmt.Sprintf("%s %s  %s  %s  %s%s", m.st.icon(state), pad(a.Risk, riskW), pad(a.Where, whereW), decision, a.Title, m.st.dim("  "+a.ID))
 	}
 	return out
+}
+
+// askDecision is the state an ask is drawn in and the word for what has been
+// decided of it.
+func askDecision(a askRow) (state, word string) {
+	switch a.Decision {
+	case "keep":
+		return StateKept, "kept" + decidedBy(a)
+	case "dismiss":
+		return StateDismissed, "dismissed" + decidedBy(a)
+	}
+	return StateAsk, "undecided"
 }
 
 func decidedBy(a askRow) string {

@@ -10,7 +10,10 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -135,6 +138,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	dropEnvFromSlices(t, fx)
+	longOracleForSliceD(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
 	branch := fx.Branch
 	h.Branch(branch)
@@ -169,7 +173,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if res := h.Jig("ask", fx.Ticket, "--slice", "c", "Formal or casual?"); res.Code != 0 {
 		t.Fatalf("jig ask exit = %d\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
-	screens.until("Formal or casual?")
+	screens.until("Formal or casual?", "a answer") // the key is listed once the roster has read the ticket
 	screens.press("a")
 	screens.until("answer q-001")
 	screens.press("Casual, please.")
@@ -196,6 +200,62 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	}
 	<-verifySlots
 	screens.until("4 slices green, each verified by jig")
+
+	// The ticket screen is a set of panes. The cursor in Steps goes up to the
+	// build, tab reaches the pane of its sub-steps and the hint line names it,
+	// and enter on a slice opens the slice; back, the cursor is where it was
+	// left.
+	screens.press("\x1b[A")
+	screens.until("╭─ Build")
+	screens.press("\t")
+	screens.until("↑↓ move in Build")
+	screens.press("\x1b[H")
+	screens.press("\r")
+	screens.until("slice a (1 of 4)")
+	screens.press("\x7f")
+	screens.until("▸ ✓ slice a", "↑↓ move in Build")
+	// tab reaches Activity, whose newest line opens the slice it is about; z
+	// shows the lines the screen had cut, and z again the screen.
+	screens.press("\t")
+	activity := screens.until("↑↓ move in Activity")
+	if !strings.Contains(activity, "latest ") {
+		t.Errorf("the ticket's Activity pane cuts none of its lines at 100x30:\n%s", activity)
+	}
+	// A line the pane cut ends in the TUI's own mark: space on it lays the line
+	// out whole where it stands, and space again folds it back.
+	cut := cutActivityLines(activity)
+	if len(cut) == 0 {
+		t.Fatalf("the Activity pane has no cut line at 100x30:\n%s", activity)
+	}
+	screens.press("\x1b[B")
+	screens.until("↑↓ move in Activity", "space expand")
+	screens.press(" ")
+	whole := screens.until("space fold")
+	if got := cutActivityLines(whole); len(got) >= len(cut) {
+		t.Errorf("space on the cut line did not show it whole (cut lines %q before, %q after):\n%s", cut, got, whole)
+	}
+	screens.press(" ")
+	if folded := screens.until("space expand"); len(cutActivityLines(folded)) != len(cut) {
+		t.Errorf("space again did not fold the line back:\n%s", folded)
+	}
+	screens.press("\x1b[A")
+	screens.until("↑↓ move in Activity")
+	screens.press("\r")
+	screens.until("slice ")
+	screens.press("\x7f")
+	screens.until("↑↓ move in Activity")
+	screens.press("z")
+	zoomed := screens.until("Activity, zoomed", "esc unzoom")
+	if strings.Contains(zoomed, "╭─ Steps") || !strings.Contains(zoomed, "you answered the question") {
+		t.Errorf("the zoomed Activity pane draws another pane or lacks the lines the screen cut:\n%s", zoomed)
+	}
+	screens.press("z")
+	screens.until("╭─ Steps", "↑↓ move in Activity")
+	// Back to Steps, on the step it began on.
+	screens.press("\x1b[Z")
+	screens.press("\x1b[Z")
+	screens.until("↑↓ move in Steps")
+	screens.press("\x1b[B")
 
 	// The gate opens from the screens. A subagent of the builder's session
 	// reads the round and reports one ask: the harness's hook payloads carry the
@@ -244,22 +304,55 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// what `jig status` and `jig brief show --text` printed for it.
 	// The round: who reviewed it, whether they stood apart from the builders,
 	// what they read, what they raised, and the ask with the reviewer's reason.
-	screens.press("\r")
-	screens.until("round 1  findings", "raised 1 ask", "independent", "files read", "fix budget 0 of 3 rounds used",
-		"Which greeting does the product want?", "undecided", "a user-visible string")
+	// The steps are one key each: 3 is the review, 2 the build, 1 the brief.
+	// The cursor opens on the ask, whose detail is its finding whole with the
+	// reviewer's reason; up from it is the round, whose detail says who reviewed
+	// it and what they read.
+	screens.press("3")
+	screens.until("fix budget 0 of 3 rounds used", "Which greeting does the product want?", "undecided", "a user-visible string")
+	screens.press("\x1b[Z") // shift+tab: the Rounds pane
+	screens.until("round 1  findings", "1 ask", "independent", "5 files")
+	// ? lists the keys of the screen, with the ones that cannot run and why: the
+	// gate waits for the ask to be decided, and no pull request is open yet.
+	screens.press("?")
+	screens.until("Keys on this screen", "not now: the review is not ready", "not now: "+fx.Ticket+" has no pull request")
+	screens.press("?")
 	// The build: each slice's workspace and oracle from slices.yaml, and the
 	// commit that was verified, with its subject.
-	screens.press("\x7f")
+	// The detail of the slice under the cursor says them, so the cursor goes
+	// from the first slice down to the third, whose workspace is the other.
+	screens.press("2")
+	screens.until("workspace alpha", "oracle    test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	screens.press("\x1b[B")
+	screens.press("\x1b[B")
+	screens.until("workspace beta", "oracle    test")
 	screens.press("\x1b[A")
+	screens.press("\x1b[A")
+	screens.until("╭─ Detail · a")
+	// A slice, and the one after it by ]: the header names the place.
 	screens.press("\r")
-	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	screens.until("slice a (1 of 4)")
+	screens.press("]")
+	screens.until("slice b (2 of 4)")
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
-	screens.press("\x7f")
+	screens.press("1")
+	screens.until("Slice A - failing clamp")
+	// The detail of a section has its text: down to the section of slice A.
+	screens.press("\x1b[B")
+	screens.until("╭─ Detail · Slice A - failing clamp", "`alpha.Clamp` is committed broken")
+	// The slices are the parts after the sections and before the approval: the end
+	// of the list is the approval, and three up is slice b, which waits for a.
+	screens.press("\x1b[F")
 	screens.press("\x1b[A")
+	screens.press("\x1b[A")
+	screens.press("\x1b[A")
+	screens.until("╭─ Detail · b", "workspace alpha", "oracle    test", "waits for a")
+	// h goes to the project's list, and its row opens the ticket again.
+	screens.press("h")
+	screens.until("╭─ Running ", fx.Ticket)
 	screens.press("\r")
-	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken", "workspace alpha · oracle test · after a")
-	screens.press("\x7f")
+	screens.until("› "+fx.Ticket, "Steps")
 
 	// The person dismisses the ask from the screens, and opens the next round.
 	screens.press("d")
@@ -330,16 +423,74 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		t.Fatalf("jig review done (round 2) exit = %d, want 0 and a clean verdict\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
 	}
 	screens.until("round 2 clean")
-	// The round that closed applied the dismissal: the ask is gone.
-	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
+	// The review screen lists the rounds newest first: round 2 above round 1.
+	screens.press("\x1b[H")
+	screens.press("\x1b[B")
+	screens.press("\x1b[B")
+	screens.press("\r")
+	rounds := screens.until("round 2  clean", "round 1  findings")
+	if strings.Index(rounds, "round 2  clean") > strings.Index(rounds, "round 1  findings") {
+		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
+	}
+	// What each round read is the detail of its row: down from round 2 is round 1.
+	screens.press("\x1b[H")
+	screens.press("\x1b[B")
+	screens.until("╭─ Detail · round 1", "5 files read")
+	screens.press("\x7f")
+	// The round that closed applied the dismissal: the ask is gone, and the finding
+	// stays in the findings table as the round that raised it recorded it.
+	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") {
 		t.Errorf("status still lists the ask after the round applied the decision:\n%s", out)
+	} else if !strings.Contains(out, "r1-f1,1,ask,") {
+		t.Errorf("status lost the finding the first round raised:\n%s", out)
 	}
 
-	// One key, and a yes to the question, approves and publishes.
+	// With no What written the key stops: the frame says where the bullets go and
+	// how to give them, and nothing is asked or pushed.
+	screens.press("p")
+	screens.until("✓ jig publish "+fx.Ticket+" --body", "Write the pull request's What", "--what")
+	if got := originRefOrEmpty(t, fx.RepoRemote, "refs/heads/"+branch); got != "" {
+		t.Errorf("origin's %s = %s after a p that stopped on the What, want nothing pushed", branch, got)
+	}
+	for _, l := range readJournal(t, fx, fx.Ticket) {
+		if l.Event == journal.EventPublishApproved || l.Event == journal.EventPublishDone {
+			t.Errorf("the journal has a %s line after a p that stopped on the What", l.Event)
+		}
+	}
+
+	// The What is given with the verb the frame named, and one key, and a yes to
+	// the question, approves and publishes.
+	what := filepath.Join(t.TempDir(), "what.md")
+	if err := os.WriteFile(what, []byte("- Greet the person by the name they gave, so the page no longer says hello to nobody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.Jig("publish", fx.Ticket, "--body", "--what", what); res.Code != 0 || !strings.Contains(res.Stdout, "what: given") {
+		t.Fatalf("jig publish --body --what exit = %d, want 0 and the What given\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+	}
 	screens.press("p")
 	screens.until("approve the reviewed head")
 	screens.press("y")
 	screens.until("✓ jig publish "+fx.Ticket+" --yes", "◇ waits to land", "published")
+	// o names the pull request by number and target; a pipe has no opener, so
+	// the notice carries its address.
+	screens.press("o")
+	screens.until("PR #", " into ", "/pull/")
+	// The publish screen's activity reads newest first: what was finished above
+	// the changelog it wrote just before.
+	screens.press("\x1b[H")
+	for i := 0; i < 3; i++ {
+		screens.press("\x1b[B")
+	}
+	screens.press("\r")
+	// The body's detail is long and the activity is under it: the cursor goes to
+	// the last check, whose detail is short, so both are on the screen.
+	screens.until("╭─ Detail · body")
+	screens.press("\x1b[F")
+	publish := screens.until("╭─ Detail · published", "Publish activity", "finished", "changelog    written")
+	activity = publish[strings.Index(publish, "Publish activity"):]
+	if finished, written := strings.Index(activity, "finished"), strings.Index(activity, "changelog    written"); finished < 0 || finished > written {
+		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
+	}
 	screens.press("q")
 	if res := tui.Stop(); res.Code != 0 {
 		t.Fatalf("jig tui exit = %d, want 0 after q\nstderr:\n%s", res.Code, res.Stderr)
@@ -389,4 +540,55 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if !created {
 		t.Errorf("the fake gh was never asked to open a pull request: %v", ghCalls(t, ghLog))
 	}
+}
+
+// cutActivityLines are the lines of a frame's Activity pane that end in the
+// mark of a line the pane cut.
+func cutActivityLines(frame string) []string {
+	var out []string
+	in := false
+	for _, l := range strings.Split(frame, "\n") {
+		if strings.Contains(l, "╭─ Activity") {
+			in = true
+			continue
+		}
+		if in && strings.Contains(l, "╰─") {
+			break
+		}
+		if in && strings.HasSuffix(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), "│")), "…") {
+			out = append(out, strings.TrimSpace(l))
+		}
+	}
+	return out
+}
+
+// longOracleForSliceD gives slice d an oracle command that no Activity column
+// of 100x30 holds, whatever the path of the Go toolchain: the same go binary
+// as the fixture's oracle, with flags that change nothing.
+func longOracleForSliceD(t *testing.T, fx *fixture.Fixture) {
+	t.Helper()
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	path := filepath.Join(st.TicketDir(fx.Ticket), "slices.yaml")
+	body := string(readFileOrFatal(t, path))
+	goBin := filepath.ToSlash(filepath.Join(runtime.GOROOT(), "bin", "go"))
+	if runtime.GOOS == "windows" {
+		goBin += ".exe"
+	}
+	if strings.Contains(goBin, " ") {
+		goBin = `"` + goBin + `"`
+	}
+	long := goBin + " test -count=1 -timeout 10m -vet=off -p 1 -parallel 4 -failfast -run TestGreet ./beta/..."
+	at := strings.Index(body, "id: d\n")
+	if at < 0 {
+		t.Fatalf("test setup: %s has no slice d:\n%s", path, body)
+	}
+	head, tail := body[:at], body[at:]
+	swapped := strings.Replace(tail, "oracle: test\n", "oracle: "+strconv.Quote(long)+"\n", 1)
+	if swapped == tail {
+		t.Fatalf("test setup: slice d of %s names no test oracle:\n%s", path, body)
+	}
+	writeFileOrFatal(t, path, []byte(head+swapped))
 }

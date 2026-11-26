@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 	"github.com/develdeco/jig/internal/phase"
@@ -327,6 +329,10 @@ func (m *Model) heldBy(t *ticket, s phase.Sub, tr subTrack) string {
 type field struct {
 	label string
 	rows  []string
+	// cut says the last of the rows ends in a cut's ellipsis, and value is the
+	// whole text of the field it stands for.
+	cut   bool
+	value string
 }
 
 // fieldText is how many cells a field leaves its text: the block's inside, less
@@ -337,19 +343,27 @@ func (m *Model) fieldText() int { return max(10, m.width-7-4-fieldW) }
 // is known: a slice's goal, holder, oracle and commit; a round's reviewer; the
 // brief's planner, sections, slices and the approval it waits for; a publish's
 // session, branch and pull request.
-func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack) []field {
+func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack, whole bool) []field {
 	var fs []field
-	add := func(label string, rows ...string) {
+	tw := m.fieldText()
+	// addWrap is a field of text wrapped to at most most rows, or whole when the
+	// sub-step is expanded; a cut registers the whole text.
+	addWrap := func(label, text string, most int) {
+		if whole {
+			most = wholeRows
+		}
+		rows, cut := wrapCut(text, tw, most)
 		if len(rows) > 0 && rows[0] != "" {
-			fs = append(fs, field{label, rows})
+			fs = append(fs, field{label: label, rows: rows, cut: cut, value: text})
 		}
 	}
-	tw := m.fieldText()
+	// add is a field of one row, which a field wider than the block cuts.
+	add := func(label, text string) { addWrap(label, text, 1) }
 	who := m.heldBy(t, s, tr)
 	kind, id, _ := strings.Cut(s.Key, ":")
 	switch kind {
 	case "slice":
-		add("goal", wrap(goalText(t.goal(id)), tw, goalRows)...)
+		addWrap("goal", goalText(t.goal(id)), goalRows)
 		add("held by", dotted(who))
 		add("checked", t.checkedBy(id))
 		add("commit", t.lastCommit(id))
@@ -357,7 +371,7 @@ func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack) []field {
 		add("reviewer", dotted(who))
 	case "drafted", "slices", "approved":
 		add("planner", strings.TrimPrefix(strings.TrimPrefix(dotted(who), rolePlanner), " · "))
-		add("sections", wrap(strings.Join(t.headings(), " · "), tw, briefRows)...)
+		addWrap("sections", strings.Join(t.headings(), " · "), briefRows)
 		var ids []string
 		for _, sl := range t.planned() {
 			ids = append(ids, sl.ID)
@@ -370,7 +384,7 @@ func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack) []field {
 		add("by", dotted(who))
 		if pub := t.publishInfo(); pub != nil {
 			add("branch", strings.Join(nonEmpty(pub.Branch, headWords(pub.Head)), " · "))
-			add("pull req", pub.PR)
+			add("pull req", m.prReading(t, pub.PR))
 		}
 	default:
 		add("held by", dotted(who))
@@ -547,7 +561,14 @@ func (m *Model) openParts(t *ticket, step int, s phase.Sub) (subTrack, []field, 
 	if len(moves) > 0 {
 		last = &moves[len(moves)-1]
 	}
-	return tr, m.subFields(t, s, tr), last
+	return tr, m.subFields(t, s, tr, m.subWhole(t, step, s)), last
+}
+
+// subWhole says whether the person has expanded the sub-step s of step: its
+// fields are then given every row they need.
+func (m *Model) subWhole(t *ticket, step int, s phase.Sub) bool {
+	ref := subRef(t.id, step, s)
+	return m.top().isExpanded(stepNames[step], &ref)
 }
 
 // openWant is how many rows the open sub-step s would take: its line, its
@@ -575,8 +596,13 @@ func trimFields(fs []field, n int) []field {
 			fs = fs[:len(fs)-1]
 			continue
 		}
+		if !last.cut {
+			// The field was whole until now: what it stood for is its rows.
+			last.value = strings.Join(last.rows, " ")
+		}
 		last.rows = last.rows[:len(last.rows)-1]
 		last.rows[len(last.rows)-1] = strings.TrimRight(last.rows[len(last.rows)-1], " …") + " …"
+		last.cut = true
 	}
 	return fs
 }
@@ -585,8 +611,13 @@ func trimFields(fs []field, n int) []field {
 // line (label, track, how long it has run), its fields, and its live line, the
 // latest move with how long ago it was made. Fields give way when rows are few;
 // the line and the live line stay.
-func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int, c clocks) []string {
+func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, labelW, rows int, c clocks) laidRow {
 	_, fs, last := m.openParts(t, step, s)
+	whole := m.subWhole(t, step, s)
+	if whole {
+		// An expanded sub-step keeps every row its fields have.
+		rows = wholeRows
+	}
 	now := m.now()
 	state := subState(step, s)
 	w := max(20, m.width-7)
@@ -597,7 +628,22 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	} else if took := c.work.of(step, s.Key); took > 0 {
 		right = m.st.state(state, ago(took))
 	}
-	head := m.st.icon(state) + " " + m.st.bold(pad(s.Label, labelW)) + "  "
+	// The clock always shows: the label gives way to it.
+	label := pad(s.Label, labelW)
+	labelCut := false
+	// The rest of a label an expanded sub-step wrapped, under its first row.
+	var labelRest []string
+	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room {
+		if whole {
+			parts := wrapCell(s.Label, max(1, room), wholeRows)
+			label = pad(parts[0], max(1, room))
+			labelRest = parts[1:]
+		} else {
+			label = pad(s.Label, max(1, room))
+			labelCut = width(s.Label) > max(1, room)
+		}
+	}
+	head := m.st.icon(state) + " " + m.st.bold(label) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
 	track := m.trackLine(state, stages, reached)
 	if width(head)+width(track)+width(right)+2 > w {
@@ -609,13 +655,30 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	row := func(label, text string) string {
 		return "    " + m.st.dim(pad(label, fieldW)) + text
 	}
+	cuts := [][]cutMark{nil}
+	for _, part := range labelRest {
+		// The label wraps within its column, under its first row, so the clock
+		// stays on the first.
+		out = append(out, spaces(width(m.st.icon(state))+1)+m.st.bold(part))
+		cuts = append(cuts, nil)
+	}
+	if labelCut {
+		// The label the clock took room from is a cut like any other.
+		cuts[0] = []cutMark{{x: width(m.st.icon(state)) + 1 + width(label) - 1, value: s.Label}}
+	}
 	for _, f := range trimFields(fs, max(0, rows-2)) {
 		for i, r := range f.rows {
 			label := ""
 			if i == 0 {
 				label = f.label
 			}
-			out = append(out, row(label, r))
+			line := row(label, r)
+			out = append(out, line)
+			var marks []cutMark
+			if f.cut && i == len(f.rows)-1 {
+				marks = []cutMark{{x: width(line) - 1, value: f.value}}
+			}
+			cuts = append(cuts, marks)
 		}
 	}
 	live := m.st.dim("nothing yet")
@@ -624,7 +687,25 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 			live = m.st.state(state, pad(ago(now.Sub(at)), 7)) + " " + m.moveText(t, *last)
 		}
 	}
-	return append(out, row("now", live))
+	line := row("now", live)
+	if width(line) <= m.innerWidth() {
+		return laidRow{lines: append(out, line), cuts: append(cuts, nil)}
+	}
+	if whole {
+		// An expanded sub-step wraps its live line under its own column.
+		for i, l := range wrapCell(live, m.fieldText(), wholeRows) {
+			label := ""
+			if i == 0 {
+				label = "now"
+			}
+			out = append(out, row(label, l))
+			cuts = append(cuts, nil)
+		}
+		return laidRow{lines: out, cuts: cuts}
+	}
+	// The block draws the line in one row: what it cuts is the mark.
+	mark := cutMark{x: m.innerWidth() - 1, value: ansi.Strip(live)}
+	return laidRow{lines: append(out, line), cuts: append(cuts, []cutMark{mark})}
 }
 
 // ago is a time in a few cells (how long ago the live line's move was made, how

@@ -19,8 +19,9 @@ import (
 // pull request from the issue's digest, each task's end state from its own
 // digest and landed lines. The screens run no verb for it and ask no host.
 
-// planLabelW is the width of the label column of the Issue panel.
-const planLabelW = 7
+// planColumns are the columns of a plan panel's lines: the icon of the state,
+// its label and its words.
+var planColumns = []column{{}, {gap: 1}, {free: true, gap: 1}}
 
 // planMapRows are the rows the Map panel of the plan has when m shows it: the
 // plan is a page that scrolls, so the map takes what it needs.
@@ -100,7 +101,7 @@ func (m *Model) issuesOf(id string) []string {
 func (m *Model) upFrom() string {
 	e := m.top()
 	switch e.screen {
-	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand:
+	case screenTicket, screenBrief, screenBuild, screenReview, screenSlice, screenPublish, screenLand, screenFinding:
 		if t := m.w.tickets[e.ticket]; t != nil && !t.awaiting {
 			return e.ticket
 		}
@@ -126,26 +127,25 @@ func (m *Model) upIssue(id string) string {
 	return issues[0]
 }
 
-// openIssue is `c`: the plan of the issue the ticket on the screen belongs to.
+// openIssue is `c`: the ticket's chart. A task of a multi-task goes up to it,
+// and it goes up to the issue's plan; a task of an issue goes to the plan; any
+// other ticket goes to the first chart that lists it.
 func (m *Model) openIssue() tea.Cmd {
 	id := m.upFrom()
 	if id == "" {
 		return nil
 	}
 	if parent := m.multiParent(id); parent != "" {
-		// A task of a multi-task goes up to it, and it goes up to the issue.
-		m.nav = append(m.nav, navEntry{screen: screenTicket, ticket: parent})
-		m.last = nil
-		return m.refreshStatus(parent)
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenTicket, ticket: parent})
 	}
-	issue := m.upIssue(id)
-	if issue == "" {
-		m.notice = id + " is in no issue's plan"
-		return nil
+	if issue := m.upIssue(id); issue != "" {
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenChart, chart: m.planOf(issue), follow: true})
 	}
-	m.nav = append(m.nav, navEntry{screen: screenChart, chart: m.planOf(issue), follow: true})
-	m.last = nil
-	return tea.Batch(m.enterChart(m.top())...)
+	if charts := m.chartsOf(id); len(charts) > 0 {
+		return m.goTo(len(m.nav), nil, navEntry{screen: screenChart, chart: charts[0], follow: true})
+	}
+	m.notice = id + " is in no chart"
+	return nil
 }
 
 // toggleMap is `m`: the plan's map shows and hides in place.
@@ -182,10 +182,14 @@ func (m *Model) planPage(c *chart) page {
 		suite = issue.status.Suite
 	}
 	fixes := fixTasks(suite)
-	rows := m.planRows(m.chartRows(c), is.Ticket, is.Branch)
+	rows := m.planRowsOf(c)
 
 	if e := m.top(); c.info != nil && e.showMap && e.screen == screenChart && e.chart == c.listing.Name {
-		m.mapPanel(&p, c, planMapRows)
+		room := planMapRows
+		if m.zoomed("Map") {
+			room = m.bodyRows()
+		}
+		m.mapPanel(&p, c, room)
 	}
 	m.needPanel(&p, is.Ticket, issue)
 	landed, total := planProgress(rows)
@@ -215,15 +219,13 @@ func (m *Model) planPage(c *chart) page {
 		return 2 + n
 	}
 	run := m.runRows(c.info)
-	if spare := m.bodyRows() - len(p.lines) - frame(len(run)) - activityFloor; spare < 0 && len(run) > 1 {
+	if spare := m.bodyRows() - m.taken(&p) - frame(m.runHeight("Run", run)) - activityFloor; spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		run = trimRuns(run, len(run)-min(-spare, len(run)-1))
 	}
 	p.boxTop("Run", runWord(c.info))
-	for _, r := range run {
-		p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
-	}
+	m.runBoxRows(&p, run)
 	p.boxEnd()
-	m.chartActivityPanel(&p, rows, c.info.History)
+	m.chartActivityPanel(&p, "plan:"+c.listing.Name, rows, c.info.History)
 	return p
 }
 
@@ -237,12 +239,12 @@ const issueBranchWords = "the issue's branch"
 // chart screen says of it, less the parent every row here shares. A
 // multi-task's are its own, and a task two issues list says what its pull
 // request into this issue and its landing there say, and nothing of the other's.
-func (m *Model) planNote(container, branch, label string) func(chartRow) (string, bool) {
-	return func(r chartRow) (string, bool) {
+func (m *Model) planNote(container, branch, label string) func(chartRow) string {
+	return func(r chartRow) string {
 		switch t := r.t; {
 		case t == nil || t.digest == nil:
 		case isMulti(t):
-			return m.multiNote(r, branch), false
+			return m.multiNote(r, branch)
 		case m.shared(t):
 			if r.atEnd {
 				note := m.st.state(r.end.State, inBranch(r.end.Words, branch, label))
@@ -257,12 +259,11 @@ func (m *Model) planNote(container, branch, label string) func(chartRow) (string
 					}
 					note += m.st.dim(" · " + prShort(mine))
 				}
-				return note, false
+				return note
 			}
-			return m.st.dim("not published into " + container + " yet"), false
+			return m.st.dim("not published into " + container + " yet")
 		}
-		note, own := m.chartNoteIn(r, false)
-		return inBranch(note, branch, label), own
+		return inBranch(m.chartNoteIn(r, false), branch, label)
 	}
 }
 
@@ -323,10 +324,10 @@ func (m *Model) needPanel(p *page, id string, issue *ticket) {
 	p.boxEnd()
 }
 
-// planLine is a line of the Issue panel: the icon of its state, its label and
-// its words.
-func (m *Model) planLine(state, label, words string) string {
-	return m.st.icon(state) + " " + m.st.dim(pad(label, planLabelW)) + " " + words
+// planLine is a line of the Issue panel as cells: the icon of its state, its
+// label and its words.
+func (m *Model) planLine(state, label, words string) []string {
+	return []string{m.st.icon(state), m.st.dim(label), words}
 }
 
 // issuePanel is the issue's own stages, one line each: its branch, how many of
@@ -345,7 +346,7 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 			branch += m.st.dim(" · from " + is.Stack[0].StartFrom)
 		}
 	}
-	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), is.Prompt, suiteMet(is, issue, suite), is.ungraduated())
+	m.stageLines(p, is.Ticket, issue, branch, rows, m.suiteLines(is, issue, suite), suiteRefs(is.Ticket, suite), is.Prompt, suiteMet(is, issue, suite), is.ungraduated())
 	p.boxEnd()
 }
 
@@ -353,47 +354,51 @@ func (m *Model) issuePanel(p *page, c *chart, issue *ticket, suite []statusSuite
 // tasks landed, the suite lines it has (none for a multi-task), its own pull
 // request and its landing. prompt is what opens the pull request, and suiteOK
 // says no suite holds it back.
-func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite []string, prompt string, suiteOK bool, ungraduated int) {
-	p.boxAdd(m.planLine(StateOK, "branch", branch))
+func (m *Model) stageLines(p *page, id string, t *ticket, branch string, rows []chartRow, suite [][]string, suiteRefs []*rowRef, prompt string, suiteOK bool, ungraduated int) {
+	cells := [][]string{m.planLine(StateOK, "branch", branch)}
 
 	landed, total := planProgress(rows)
 	switch {
 	case total == 0:
-		p.boxAdd(m.planLine(StateQueued, "tasks", m.st.dim("none graduated yet")))
+		cells = append(cells, m.planLine(StateQueued, "tasks", m.st.dim("none graduated yet")))
 	case landed == total:
-		p.boxAdd(m.planLine(StateLanded, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
+		cells = append(cells, m.planLine(StateLanded, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
 	default:
 		state := StateQueued
 		if landed > 0 {
 			state = StateBuilding
 		}
-		p.boxAdd(m.planLine(state, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
+		cells = append(cells, m.planLine(state, "tasks", fmt.Sprintf("%d of %d landed", landed, total)))
 	}
-	for _, l := range suite {
-		p.boxAdd(l)
-	}
+	cells = append(cells, suite...)
 	prState, prWords := m.planPR(prompt, t, suiteOK, ungraduated, rows)
-	p.boxAdd(m.planLine(prState, "PR", prWords))
+	cells = append(cells, m.planLine(prState, "PR", prWords))
 	landState, landWords := m.planLanding(id, t)
-	p.boxAdd(m.planLine(landState, "landing", landWords))
+	cells = append(cells, m.planLine(landState, "landing", landWords))
+	// The rows a person can open (a failed suite) take the cursor; the others are lines.
+	refs := make([]*rowRef, len(cells))
+	copy(refs[2:], suiteRefs)
+	for i, row := range layoutMarked(planColumns, cells, m.innerWidth(), wrapRows, m.wholePane(p.paneTitle(), len(cells)), false) {
+		p.boxRow(refs[i], row)
+	}
 }
 
 // suiteLines are the suite of the issue in words, one line for each row of its
 // status: the standing at the tip of its branch, and a failed run at an earlier
 // tip as history. A project of several repos names each line's repo.
-func (m *Model) suiteLines(is *chartIssue, issue *ticket, suite []statusSuite) []string {
+func (m *Model) suiteLines(is *chartIssue, issue *ticket, suite []statusSuite) [][]string {
 	if issue == nil || issue.status == nil {
-		return []string{m.planLine(StateQueued, "suite", m.st.dim(readingText))}
+		return [][]string{m.planLine(StateQueued, "suite", m.st.dim(readingText))}
 	}
 	if len(suite) == 0 {
-		return []string{m.planLine(StateQueued, "suite", m.st.dim("none recorded (the repo leaves it to CI)"))}
+		return [][]string{m.planLine(StateQueued, "suite", m.st.dim("none recorded (the repo leaves it to CI)"))}
 	}
 	repos := map[string]bool{}
 	for _, s := range suite {
 		repos[s.Repo] = true
 	}
 	current := lastSuiteRows(suite)
-	var out []string
+	var out [][]string
 	for i, s := range suite {
 		state, words := m.suiteWords(is, s, current[s.Repo] == i)
 		if len(repos) > 1 {
@@ -410,6 +415,25 @@ func lastSuiteRows(suite []statusSuite) map[string]int {
 	out := map[string]int{}
 	for i, s := range suite {
 		out[s.Repo] = i
+	}
+	return out
+}
+
+// suiteRefs are the rows the cursor can stand on among the suite lines of the
+// issue, one for each row of its status: a failed run is one, and enter opens the
+// fix task it names, the newest when it names several, and none when none was
+// added yet (the row's id is then empty).
+func suiteRefs(issue string, suite []statusSuite) []*rowRef {
+	out := make([]*rowRef, len(suite))
+	for i, s := range suite {
+		if s.Standing != land.SuiteFail {
+			continue
+		}
+		fix := ""
+		if n := len(s.Fixes); n > 0 {
+			fix = s.Fixes[n-1]
+		}
+		out[i] = &rowRef{kind: rowSuite, id: fix, ticket: issue, container: s.Repo + "@" + s.Tip}
 	}
 	return out
 }

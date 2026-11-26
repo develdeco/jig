@@ -31,7 +31,7 @@ func TestStatusBriefBlockFollowsTheApproval(t *testing.T) {
 		}
 		return out
 	}
-	if out := status(); !strings.Contains(out, "brief:\n  approval: none\n") || !strings.Contains(out, "  Slice A - failing clamp,a\n") {
+	if out := status(); !strings.Contains(out, "brief:\n  approval: none\n") || !strings.Contains(out, "  Slice A - failing clamp,a,-\n") {
 		t.Fatalf("before an approval:\n%s", out)
 	}
 

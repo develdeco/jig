@@ -92,7 +92,7 @@ func TestReviewScreenShowsARecordedRoundsProbes(t *testing.T) {
 	keys.Write([]byte("\x1b[A")) // the review step, above the publish one the cursor starts on
 	keys.Write([]byte("\r"))
 	frames.until(t, "2 probes · 1 caught · 1 survived")
-	frames.until(t, "round 1  "+survivor+":1  survived")
+	frames.untilWords(t, "round 1 "+survivor+":1 survived")
 	for _, unwanted := range []string{"unprobed", "set aside", "skipped"} {
 		if strings.Contains(frames.String(), unwanted) {
 			t.Errorf("the review screen shows %q:\n%s", unwanted, frames.String())

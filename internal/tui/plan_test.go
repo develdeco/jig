@@ -27,6 +27,8 @@ type planSpec struct {
 	// which of them landed into the branch (all when nil).
 	tasks  []string
 	landed map[string]bool
+	// titles are the tasks' titles where they are not "Task" and the id.
+	titles map[string]string
 	// suite are the rows of the status's suite table, comma separated.
 	suite []string
 	// noSuiteTable leaves the table out, as an older jig's status does.
@@ -59,6 +61,14 @@ func (s planSpec) taskIDs() []string {
 	return s.tasks
 }
 
+// titleOf is a task's title: the spec's own, else "Task" and its id.
+func (s planSpec) titleOf(id string) string {
+	if t, ok := s.titles[id]; ok {
+		return t
+	}
+	return "Task " + id
+}
+
 func (s planSpec) isLanded(id string) bool { return s.landed == nil || s.landed[id] }
 
 // landedIssue is the digest of an issue whose pull request merged into main and
@@ -81,8 +91,8 @@ func planMain(t *testing.T, spec planSpec) *rig {
 	tickets := []map[string]any{{"id": "SHOP-49", "title": "Review rounds stop repeating work", "state": "issue"}}
 	entries := []map[string]any{}
 	for _, id := range ids {
-		tickets = append(tickets, map[string]any{"id": id, "title": "Task " + id, "state": "done"})
-		entries = append(entries, entry(id, "Task "+id, "publish", []string{"done", "done", "done", "done"}, false))
+		tickets = append(tickets, map[string]any{"id": id, "title": spec.titleOf(id), "state": "done"})
+		entries = append(entries, entry(id, spec.titleOf(id), "publish", []string{"done", "done", "done", "done"}, false))
 	}
 	charts := []map[string]any{{"name": "repeat", "title": "Repeat rounds", "tickets": ids, "ungraduated": 0, "issue": "SHOP-49"}}
 	if spec.loose {
@@ -201,7 +211,7 @@ func planMain(t *testing.T, spec planSpec) *rig {
 func planRig(t *testing.T, spec planSpec) *rig {
 	t.Helper()
 	g := planMain(t, spec)
-	g.press("end", "enter")
+	g.openChart("repeat")
 	if g.m.Screen() != "chart" || g.m.top().chart != "repeat" {
 		t.Fatalf("on %s, want the chart screen:\n%s", g.m.Screen(), g.view())
 	}
@@ -308,7 +318,7 @@ func TestIssuePlanStagesNameBranchSuitePullRequestAndLanding(t *testing.T) {
 	}
 	closedPR := planRig(t, planSpec{issue: &digestInfo{Kind: "issue", State: "published", PRs: []digestPR{{Number: 512, State: "closed", Target: "main"}}}})
 	closedPR.m.height = 40
-	if row := issueLine(stripANSI(closedPR.view()), "PR"); !strings.Contains(row, "✖ PR") || !strings.Contains(row, "PR #512 into main · closed") {
+	if row := issueLine(stripANSI(closedPR.view()), "PR"); !strings.Contains(row, "✗ PR") || !strings.Contains(row, "PR #512 into main · closed") {
 		t.Errorf("a pull request closed on the host: %q", row)
 	}
 	for label, want := range map[string]string{
@@ -469,9 +479,12 @@ func TestALegacyChartScreenIsUnchanged(t *testing.T) {
 		t.Fatal("the legacy chart has an issue")
 	}
 	v := g.view()
+	// The names of the columns take rows, so the Activity panel is read on a
+	// taller screen than the golden's.
+	tall := chartScreenOfHeight(t, 40).view()
 	for _, want := range []string{"Tickets", "Run", "Activity"} {
-		if !strings.Contains(v, want) {
-			t.Errorf("the legacy chart lacks %q:\n%s", want, v)
+		if !strings.Contains(tall, want) {
+			t.Errorf("the legacy chart lacks %q:\n%s", want, tall)
 		}
 	}
 	for _, bad := range []string{"Need", "Issue", "Tasks"} {

@@ -3,7 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -45,12 +47,16 @@ func TestEndStatesReadApart(t *testing.T) {
 
 	for state, d := range endDigests() {
 		g := chartRig(t)
+		// Wide enough that the branch the pull request goes into is one word on
+		// one row.
+		g.send(tea.WindowSizeMsg{Width: 200, Height: 30})
 		g.feed(jl(at(15, 30), "JIG-4", "", journal.EventLanded, func(l *journal.Line) { l.Base = "main" }))
 		tk := g.m.w.tickets["JIG-4"]
 		if state != StateLanded {
 			tk.lines = tk.lines[:len(tk.lines)-1]
 		}
 		tk.digest = d
+		g.m.w.gen++
 		icon := lookOf(state).Icon
 		if prev, dup := icons[icon]; dup {
 			t.Errorf("%s and %s share the icon %s", prev, state, icon)
@@ -58,14 +64,14 @@ func TestEndStatesReadApart(t *testing.T) {
 		icons[icon] = state
 
 		// The project's list.
-		row := lineWith(pagesText(g.m.mainPage()), "JIG-4")
+		row := lineWith(g.mainText(), "JIG-4")
 		if !strings.Contains(row, icon+" JIG-4") || !strings.Contains(row, words[state]) {
 			t.Errorf("%s: main's row is not %s with %q:\n%s", state, icon, words[state], row)
 		}
 		// The chart's row and its Detail.
 		c := g.m.w.charts["checkout"]
 		cr := g.m.chartRows(c)[0]
-		if note, _ := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
+		if note := g.m.chartNote(cr); cr.state() != state || !strings.Contains(note, words[state]) {
 			t.Errorf("%s: the chart's row is %s saying %q, want %q", state, cr.state(), note, words[state])
 		}
 		if got := chartStateWord(cr); got != header[state] {
@@ -94,6 +100,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 		d.Closed = "not planned"
 		g := chartRig(t)
 		g.m.w.tickets["JIG-4"].digest = d
+		g.m.w.gen++
 		tk := g.m.w.tickets["JIG-4"]
 
 		steps := g.m.steps(tk)
@@ -110,7 +117,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 		}
 		for screen, text := range map[string]string{
 			"the ticket": pagesText(g.m.ticketPage("JIG-4")),
-			"main":       lineWith(pagesText(g.m.mainPage()), "JIG-4"),
+			"main":       lineWith(g.mainText(), "JIG-4"),
 			"the chart":  lineWith(pagesText(g.m.chartPage("checkout")), "JIG-4"),
 		} {
 			for _, bad := range []string{"reading", "ready for a fresh session", "of 1 green", "being drafted", "round 1 open", "waiting for your approval"} {
@@ -122,7 +129,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 				t.Errorf("%s: %s does not read closed with its icon:\n%s", name, screen, text)
 			}
 		}
-		if !strings.Contains(lineWith(pagesText(g.m.mainPage()), "JIG-4"), "closed · not planned") {
+		if !strings.Contains(lineWith(g.mainText(), "JIG-4"), "closed · not planned") {
 			t.Errorf("%s: main does not give the reason", name)
 		}
 	}
@@ -134,7 +141,7 @@ func TestClosedTicketReadsClosedEverywhere(t *testing.T) {
 	d.Closed = "not planned"
 	g.pin("JIG-1", d)
 	g.syncDigests()
-	if row := lineWith(pagesText(g.m.mainPage()), "JIG-1"); strings.Contains(row, "open question") || !strings.Contains(row, "closed · not planned") {
+	if row := lineWith(g.mainText(), "JIG-1"); strings.Contains(row, "open question") || !strings.Contains(row, "closed · not planned") {
 		t.Errorf("a closed ticket with a question open reads:\n%s", row)
 	}
 }
@@ -151,7 +158,8 @@ func TestLandedLinesAreTheLatestOfEachRepoAndContainer(t *testing.T) {
 	land(at(15, 10), "web", "main")
 	land(at(15, 20), "api", "release")
 	got := g.m.landedLines(g.m.w.tickets["JIG-4"])
-	want := []landedAt{{Repo: "api", Into: "release", At: "09:15:20"}, {Repo: "web", Into: "main", At: "09:15:10"}}
+	when := func(sec int) time.Time { return time.Date(2026, 10, 23, 9, 15, sec, 0, time.UTC) }
+	want := []landedAt{{Repo: "api", Into: "release", At: "09:15:20", When: when(20)}, {Repo: "web", Into: "main", At: "09:15:10", When: when(10)}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("landed lines = %+v, want %+v", got, want)
 	}

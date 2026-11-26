@@ -58,7 +58,7 @@ func TestEveryKindOfLineNamesTheSubstepItAdvances(t *testing.T) {
 		{jl(at(4, 0), "JIG-6", "", journal.EventPrBody, func(l *journal.Line) { l.Commit = sha('c') }), "body", "written for ccccccc"},
 		{jl(at(4, 1), "JIG-6", "", journal.EventPublishPicks, with("", sha('c'), "refused", "no files", "", "")), "body", "demo refused: no files"},
 		{jl(at(4, 2), "JIG-6", "", journal.EventPublishApproved, with("", sha('c'), "", "", "", "person")), "approval", "you approved ccccccc"},
-		{jl(at(4, 3), "JIG-6", "", journal.EventPr, func(l *journal.Line) { l.Outcome, l.URL = "opened", "https://example.test/pull/1" }), "pull request", "opened https://example.test/pull/1"},
+		{jl(at(4, 3), "JIG-6", "", journal.EventPr, func(l *journal.Line) { l.Outcome, l.URL = "opened", "https://example.test/pull/1" }), "pull request", "opened PR #1"},
 		{jl(at(4, 4), "JIG-6", "", journal.EventSquash, with("", sha('d'), "", "", "", "")), "pull request", "the branch was squashed ddddddd"},
 		{jl(at(4, 5), "JIG-6", "", journal.EventChangelog), "changelog", "written"},
 		{jl(at(4, 6), "JIG-6", "", journal.EventMemorize, with("", "", "", "use the cart api", "", "")), "changelog", "what the ticket taught was memorized: use the cart api"},

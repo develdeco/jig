@@ -36,7 +36,7 @@ func init() {
 			{"for", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already", false},
 			{"tickets", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does", false},
 			{"json", "print one JSON object instead of blocks", false},
-			{"roster", "with --json: print only every ticket's row and the charts, the host never asked", false},
+			{"roster", "with --json: print only every ticket's row, the charts and the order to start the ready ones, the host never asked", false},
 			{"refresh-merges", "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else", false},
 		}, false},
 		Order: 301,
@@ -73,7 +73,7 @@ func cmdNext(e env, args []string, stdout io.Writer) int {
 	forFlag := fs.String("for", "", "the phase you are about to run (brief, build, review, publish or land): says whether it can run now, what it waits for, or that it is done already")
 	ticketsFlag := fs.String("tickets", "", "with a chart: run over these tickets of it only (a comma list of ids or aliases), as a prompt that names them does")
 	jsonOut := fs.Bool("json", false, "print one JSON object instead of blocks")
-	rosterFlag := fs.Bool("roster", false, "with --json: print only every ticket's row and the charts, the host never asked")
+	rosterFlag := fs.Bool("roster", false, "with --json: print only every ticket's row, the charts and the order to start the ready ones, the host never asked")
 	refreshFlag := fs.Bool("refresh-merges", false, "ask the host for the pull request states this machine kept longer ago than a listing takes, and print nothing else")
 	positionals, handled, err := parseWithPositionals(stdout, fs, args)
 	if handled {

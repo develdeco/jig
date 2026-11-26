@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"slices"
 
@@ -25,7 +26,7 @@ const (
 // init registers this file's verb with the registry (registry.go).
 func init() {
 	registerVerb(verb{
-		Spec: cmdSpec{"tui", "browse a store's tickets and charts in the terminal and drive them: answer, decide asks, gate, publish", []flagSpec{
+		Spec: cmdSpec{"tui", "browse a store's tickets and charts in the terminal, opened on a ticket, a chart or a tracker item's number, and drive them: answer, decide asks, gate, publish", []flagSpec{
 			{"store", tuiStoreUsage, false},
 			{"project", tuiProjectUsage, false},
 			{"merge-every", tuiMergeEveryUsage, false},
@@ -37,7 +38,7 @@ func init() {
 	})
 }
 
-// cmdTUI implements `jig tui [T|C] [--store P] [--project N] [--merge-every D]`: nine screens
+// cmdTUI implements `jig tui [T|C|N] [--store P] [--project N] [--merge-every D]`: nine screens
 // (the project, a ticket, its brief, build, review, publish and land, a slice, a
 // chart) over the event stream `jig events` prints, acting only by running
 // verbs (internal/tui). With a ticket the screens open on it, with a chart (a
@@ -70,7 +71,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 	} else if err != nil {
 		return renderErr(stdout, err)
 	}
-	ticket, err := atMostOne(positionals, "jig tui", "ticket or chart")
+	ticket, err := atMostOne(positionals, "jig tui", "ticket, chart or tracker item")
 	if err != nil {
 		return renderErr(stdout, err)
 	}
@@ -91,8 +92,29 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		return renderErr(stdout, err)
 	}
 	chart := ""
-	if name, ok := chartNamed(st, ticket); ok {
-		chart, ticket = name, ""
+	// A tracker item's number goes before a chart or a ticket, read as `jig next`
+	// reads it: the bound issue opens its plan, a task its ticket, a chart's own
+	// record that chart. The screens read nothing from the host, so an item with
+	// no record is pointed at `jig next`.
+	item, err := locate.ResolveItem(st, cfg, ticket)
+	if err != nil {
+		return renderErr(stdout, err)
+	}
+	switch {
+	case item != nil && !item.Bound:
+		return renderErr(stdout, locate.AddHelp(&axi.Error{
+			Msg:  fmt.Sprintf("%s is an unbound tracker item", item.Ref),
+			Code: "VALIDATION_ERROR",
+			Help: []string{"Run `jig next " + itemAsk(item) + "` to read it: jig tui reads nothing from the host"},
+		}, item.Shadow))
+	case item != nil && item.Chart != "":
+		chart, ticket = item.Chart, ""
+	case item != nil:
+		ticket = item.Ticket
+	default:
+		if name, ok := chartNamed(st, ticket); ok {
+			chart, ticket = name, ""
+		}
 	}
 	awaiting := false
 	if ticket != "" {
@@ -124,7 +146,12 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Ledger:   jigHome,
 		Journals: func() ([]events.Journal, error) { return storeJournals(st, cfg.Name) },
 	}
+	terminal := e.stdoutIsTerminal(stdout)
+	viewer := newTUIViewer(e, st)
+	defer viewer.Close()
 	err = tui.Run(e.ctx, tui.Config{
+		Open:       tuiOpener(terminal),
+		Viewer:     viewer.Address,
 		Source:     eventsSource{scope},
 		Run:        tuiRunner(e),
 		Ticket:     ticket,
@@ -139,7 +166,7 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		// uncommitted does not, so the ticket's own screen reads its status on
 		// idle for that, and the list shows it at the next head move.
 		StoreHead: func() (string, error) { return gitx.RevParse(st.Root, "HEAD") },
-	}, stdin, stdout, e.stdoutIsTerminal(stdout))
+	}, stdin, stdout, terminal)
 	if err != nil {
 		return renderErr(stdout, err)
 	}

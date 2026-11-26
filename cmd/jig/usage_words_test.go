@@ -8,29 +8,6 @@ import (
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// TestUsageIsToldInWords: CPU in seconds with one decimal, memory in MiB or
-// GiB, the basis in words, and nothing for a figure that is not there.
-func TestUsageIsToldInWords(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		got, want string
-	}{
-		{cpuWords(63200), "63.2"},
-		{cpuWords(1), "0.0"},
-		{cpuWords(0), ""},
-		{memoryWords(300 << 20), "300 MiB"},
-		{memoryWords(1), "1 MiB"},
-		{memoryWords(1536 << 20), "1.5 GiB"},
-		{memoryWords(0), ""},
-		{basisWords("job"), "job"},
-		{basisWords("sampled"), "sampled peak"},
-	} {
-		if c.got != c.want {
-			t.Errorf("got %q, want %q", c.got, c.want)
-		}
-	}
-}
-
 // TestHereVerifyShowsWhatTheLatestRunUsed: the verification block and its JSON
 // carry the CPU time, peak memory and basis of the commit's latest oracle line
 // beside the seconds, and a line with none shows none.

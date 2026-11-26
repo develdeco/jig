@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
 
@@ -14,7 +15,7 @@ import (
 func lastPanel(view string) []string {
 	var out []string
 	for _, l := range strings.Split(view, "\n") {
-		if strings.HasPrefix(l, "  ✓ jig") || strings.HasPrefix(l, "  ✖ jig") {
+		if strings.HasPrefix(l, "  ✓ jig") || strings.HasPrefix(l, "  ✗ jig") {
 			out = append(out, l)
 		}
 	}
@@ -41,21 +42,21 @@ func TestLastCommandPanelIsOneLine(t *testing.T) {
 	})
 
 	t.Run("a failure says its error and its code", func(t *testing.T) {
-		g := newQuietRig(t, "JIG-2")
+		g := quietRigAt(t, "JIG-2", reviewReady())
 		g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\nhelp[1]:\n  Run `jig next JIG-2`\n", 1)
 		g.feed(jig2Mid()...).press("enter", "g")
 		got := lastPanel(g.view())
-		if len(got) != 1 || got[0] != "  ✖ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)" {
+		if len(got) != 1 || got[0] != "  ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)" {
 			t.Errorf("panel = %q", got)
 		}
 	})
 
 	t.Run("a chain whose second step failed shows the failure", func(t *testing.T) {
-		g := newQuietRig(t, "JIG-2")
+		g := quietRigAt(t, "JIG-2", publishReady())
 		g.r.answer("publish JIG-2 --yes --store /s", "error: the head moved\ncode: PUBLISH_STALE\n", 1)
 		g.feed(jig2Mid()...).press("p", "y")
 		got := lastPanel(g.view())
-		if len(got) != 1 || got[0] != "  ✖ jig publish JIG-2 --yes  the head moved (PUBLISH_STALE)" {
+		if len(got) != 1 || got[0] != "  ✗ jig publish JIG-2 --yes  the head moved (PUBLISH_STALE)" {
 			t.Errorf("panel = %q, want only the failed step", got)
 		}
 	})
@@ -78,7 +79,7 @@ func TestLastCommandPanelExpiresWhenTheTicketMoves(t *testing.T) {
 	t.Parallel()
 	g := newQuietRig(t, "JIG-2")
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
-	g.feed(jig2Mid()...).press("enter", "g")
+	g.feed(jig2Mid()...).feed(decided()...).press("enter", "g")
 	if len(lastPanel(g.view())) != 1 {
 		t.Fatalf("no line after the refused gate:\n%s", g.view())
 	}
@@ -111,7 +112,7 @@ func TestACommandsOwnEffectDoesNotRemoveItsLine(t *testing.T) {
 	t.Parallel()
 	g := newQuietRig(t, "JIG-2")
 	g.r.answer("gate JIG-2 --store /s", "error: round 1 is not recorded\ncode: GATE_NOT_GREEN\n", 1)
-	g.feed(jig2Mid()...)
+	g.feed(jig2Mid()...).feed(decided()...)
 	refusal := func(sec int) {
 		g.feed(jl(at(12, sec), "JIG-2", "", journal.EventGateRefused, func(l *journal.Line) {
 			l.Code, l.Summary = "GATE_NOT_GREEN", "slice a is queued, not green"
@@ -269,5 +270,14 @@ func TestAChartCommandLineExpiresWithTheChartsStanding(t *testing.T) {
 	g.m.settleLast(nil)
 	if g.m.last != nil {
 		t.Errorf("the line outlived the chart's verdict: %+v", g.m.last)
+	}
+}
+
+// decided are the person's decisions on both asks of the second ticket's round:
+// the review is ready for the gate that applies them.
+func decided() []events.Envelope {
+	return []events.Envelope{
+		jl(at(11, 40), "JIG-2", "", journal.EventTriage, with("s-person", "", "keep", "", "r1-f1", "person")),
+		jl(at(11, 41), "JIG-2", "", journal.EventTriage, with("s-person", "", "dismiss", "", "r1-f2", "person")),
 	}
 }

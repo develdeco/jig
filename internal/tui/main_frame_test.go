@@ -99,10 +99,10 @@ func TestMainDrawsNothingBeforeTheRoster(t *testing.T) {
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("JIG-2"), listed("JIG-9"), listed("JIG-1")}, seq: 1})
 	frame = m.View()
 	at1, at2, at9 := strings.Index(frame, "JIG-1 "), strings.Index(frame, "JIG-2 "), strings.Index(frame, "JIG-9 ")
-	if at1 < 0 || at2 < 0 || at9 < 0 || !(at2 < at9 && at9 < at1) {
-		t.Errorf("main after the roster is not its list in its order (JIG-2, JIG-9, JIG-1):\n%s", frame)
+	if at1 < 0 || at2 < 0 || at9 < 0 || !(at1 < at2 && at2 < at9) {
+		t.Errorf("main after the roster is not its list in the queue's order (JIG-1, JIG-2, JIG-9):\n%s", frame)
 	}
-	if !strings.Contains(frame, "3 tickets") {
+	if !strings.Contains(frame, "1 need you · 2 running") {
 		t.Errorf("the header does not count the roster's tickets:\n%s", frame)
 	}
 
@@ -111,7 +111,8 @@ func TestMainDrawsNothingBeforeTheRoster(t *testing.T) {
 	cfg.Run = nil
 	bare := New(cfg)
 	bare.w.apply(jig1())
-	if got := bare.View(); !strings.Contains(got, "JIG-1") || strings.Contains(got, "reading the store") {
+	// Its one ticket is nothing the roster said anything of: not started, in its fold.
+	if got := bare.View(); !strings.Contains(got, "Not started") || strings.Contains(got, "reading the store") {
 		t.Errorf("a model with no runner does not draw the stream:\n%s", got)
 	}
 }
@@ -138,8 +139,8 @@ func TestMainKeepsRosterOrderUnderTheCursor(t *testing.T) {
 			order = append(order, ref.ticket)
 		}
 	}
-	if got := strings.Join(order, " "); got != "T-9 T-8 T-3 T-2 T-1" {
-		t.Errorf("the rows are %s, want the roster's order", got)
+	if got := strings.Join(order, " "); got != "T-1 T-2 T-3 T-8 T-9" {
+		t.Errorf("the rows are %s, want the queue's order", got)
 	}
 	// A list that no longer has the ticket leaves the cursor on a row.
 	_, _ = m.Update(rosterMsg{rows: []rosterRow{listed("T-9")}, seq: 3})

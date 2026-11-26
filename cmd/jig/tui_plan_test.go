@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestTheListingNamesTheIssueOfAChart: the charts of the store listing carry the
@@ -29,6 +30,42 @@ func TestTheListingNamesTheIssueOfAChart(t *testing.T) {
 	}
 	if want := map[string]string{"plan": "TK-1", "old": ""}; !reflect.DeepEqual(got, want) {
 		t.Errorf("the listing's charts name the issues %v, want %v", got, want)
+	}
+}
+
+// TestTUIPipeFramesNameTheFocusedPane: the frames `jig tui` prints on a pipe
+// name the pane that has the focus in the hint line, and the pane that is zoomed
+// in the breadcrumb, over the real store.
+func TestTUIPipeFramesNameTheFocusedPane(t *testing.T) {
+	t.Parallel()
+	r := containerRig(t)
+	r.put(t, "tickets/TK-1/ticket.yaml", "schema_version: 1\ntitle: Ticket TK-1\nkind: issue\nbody: |\n  The issue is that tickets of a chart read apart.\n")
+	keys, out, wait := startTUI(t, r.env(), "TK-1", "--store", r.root)
+	out.until(t, "TK-2")
+	out.until(t, "↑↓ move in Tasks")
+	if frame := out.String(); !strings.Contains(frame, "tab next pane: ") {
+		t.Errorf("the plan's hint line does not say where tab goes:\n%s", frame)
+	}
+	// tab moves the focus along the panes in the order they are drawn, and the
+	// hint line names the one it reached.
+	keys.Write([]byte("\t"))
+	deadline := time.Now().Add(20 * time.Second)
+	for screen := lastScreen(out.String()); !strings.Contains(screen, "↑↓ move in ") || strings.Contains(screen, "↑↓ move in Tasks"); screen = lastScreen(out.String()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("tab never moved the focus off Tasks; the last frame:\n%s", screen)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	keys.Write([]byte("z"))
+	out.until(t, ", zoomed")
+	frame := lastScreen(out.String())
+	if head := strings.Split(frame, "\n")[0]; !strings.Contains(head, ", zoomed") || !strings.Contains(frame, "esc unzoom") {
+		t.Errorf("the zoomed frame does not name its pane in the breadcrumb and the way out:\n%s", frame)
+	}
+	keys.Write([]byte("z"))
+	keys.Write([]byte("q"))
+	if code := wait(); code != 0 {
+		t.Fatalf("jig tui: exit %d\n%s", code, out.String())
 	}
 }
 

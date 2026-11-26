@@ -30,6 +30,33 @@ func (o *tuiOut) String() string {
 	return o.buf.String()
 }
 
+// untilFold waits for the last screen's fold panel titled title to be state.
+func (o *tuiOut) untilFold(t *testing.T, title, state string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if foldState(lastScreen(o.String()), title) == state {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the fold %s never was %s; the last screen was:\n%s", title, state, lastScreen(o.String()))
+}
+
+// untilWords waits for the output to hold want as words: a panel's frame and the
+// padding of its columns are no part of what a screen says.
+func (o *tuiOut) untilWords(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(o.String(), "│", " ")), " "), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the screens never showed %q; they showed:\n%s", want, o.String())
+}
+
 // until waits for the output to hold want.
 func (o *tuiOut) until(t *testing.T, want string) {
 	t.Helper()
@@ -41,6 +68,40 @@ func (o *tuiOut) until(t *testing.T, want string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("the screens never showed %q; they showed:\n%s", want, o.String())
+}
+
+// showFolds waits for the project's list to be read and opens its folds, the
+// ones of the groups at the end of a queue (not started, then done), so every
+// ticket has a row on the screens, and leaves the cursor on the last row.
+func showFolds(t *testing.T, keys io.Writer, out *tuiOut) {
+	t.Helper()
+	// The end of the list is below the first screen: the cursor goes there until
+	// the done panel shows.
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(lastScreen(out.String()), "╭─ Done ") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the screens never showed the done panel; they showed:\n%s", out.String())
+		}
+		keys.Write([]byte("\x1b[F"))
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, group := range []string{"not started", "done"} {
+		title := strings.ToUpper(group[:1]) + group[1:]
+		if foldState(lastScreen(out.String()), title) != "closed" {
+			continue
+		}
+		// The done group's fold row is the last row, and the other's the one
+		// before it, so opening it first leaves the done group's where it is.
+		keys.Write([]byte("\x1b[F"))
+		if group == "not started" {
+			keys.Write([]byte("\x1b[A"))
+		}
+		keys.Write([]byte("\r"))
+		out.untilFold(t, title, "open")
+	}
+	// The list is longer than the screen: the last rows are read with the
+	// cursor on the last one, the first ones from the screens before.
+	keys.Write([]byte("\x1b[F"))
 }
 
 // startTUI runs `jig tui args...` in e in the background on a pipe, as a
@@ -100,7 +161,7 @@ func TestTUIWithATicketOpensItsScreen(t *testing.T) {
 	out.until(t, "› "+fx.Ticket)
 	out.until(t, "waiting for your approval") // the status was read
 	keys.Write([]byte("\x1b"))                // esc: back to the project
-	out.until(t, "1 ticket")
+	out.until(t, "1 need you")                // the project's list, grouped by what the person does next
 	keys.Write([]byte("q"))
 	if code := wait(); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out.String())
@@ -209,6 +270,7 @@ func TestTUIReadsAndActsOnTheStoreItWasOpenedOn(t *testing.T) {
 	out := t.TempDir()
 	keys, screen, wait := startTUI(t, testEnv(fx.Home).inDir(out), "--store", fx.StoreDir, fx.Ticket)
 	screen.until(t, "q-001")
+	screen.until(t, "a answer") // the key is listed once the roster has read the ticket
 	keys.Write([]byte("a"))
 	screen.until(t, "answer q-001")
 	keys.Write([]byte("Casual\r"))
@@ -324,6 +386,7 @@ func TestTUIFramesNameNoLaunchingSession(t *testing.T) {
 
 	keys, screen, wait := startTUI(t, e, fx.Ticket)
 	screen.until(t, "q-001")
+	screen.until(t, "a answer") // the key is listed once the roster has read the ticket
 	keys.Write([]byte("a"))
 	screen.until(t, "answer q-001")
 	keys.Write([]byte("Casual\r"))

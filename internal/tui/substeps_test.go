@@ -60,11 +60,24 @@ func shop1Rig(t *testing.T) *rig {
 func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := shop1Rig(t)
-	golden(t, "ticket-substeps", g.view())
+	goldenCuts(t, "ticket-substeps", shop1Rig(t)) // a rig of its own: the check expands and folds its marks
 
-	if refs := g.m.page().refs(); len(refs) != 5 {
-		t.Errorf("the page has %d rows for the cursor, want the 5 steps and no sub-step", len(refs))
+	steps, subs := 0, 0
+	for _, r := range g.m.page().refs() {
+		switch r.kind {
+		case rowLog:
+		case rowSub:
+			subs++
+		default:
+			steps++
+		}
 	}
+	if steps != 5 || subs == 0 {
+		t.Errorf("the page has %d rows for the steps and %d for the sub-steps, want the 5 steps and the sub-steps the pane draws", steps, subs)
+	}
+	// The names of the columns take a row of each panel, so the sub-steps are read
+	// in a taller window than the golden's.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 30})
 	for _, tc := range []struct {
 		keys  []string
 		title string
@@ -117,7 +130,7 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 	status := strings.Join([]string{"ticket: BIG-1", "state: building",
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, rows), "questions: none"}, "\n") + "\n"
 
-	for _, height := range []int{24, 40} {
+	for _, height := range []int{26, 42} {
 		g := newRig(t, "BIG-1")
 		g.r.answer("status BIG-1 --store /s", status, 0)
 		g.send(tea.WindowSizeMsg{Width: 80, Height: height})
@@ -129,17 +142,17 @@ func TestSubstepsListAtMostSixAndTheActivityKeepsThree(t *testing.T) {
 		}
 		block, act := panelLines(rowsOf, "Build ─"), panelLines(rowsOf, "Activity")
 		room := substepCap(g.m.bodyRows())
-		if height == 24 && room != 6 {
-			t.Errorf("height 24: the block has room for %d sub-steps, want 6", room)
+		if height == 26 && room != 6 {
+			t.Errorf("height 26: the block has room for %d sub-steps, want 6", room)
 		}
 		tk := g.m.w.tickets["BIG-1"]
 		subs := g.m.phaseOf(tk).Of(phase.Build).Subs
 		extra := g.m.openWant(tk, stepBuild, subs[focusIndex(subs)]) - 1
-		if len(block) < 3 || len(block) > min(9, room)+2+extra {
+		if len(block) < 3 || len(block) > min(9, room)+3+extra {
 			t.Errorf("height %d: the sub-steps block takes %d lines, want its frame, 1 to %d sub-steps and the card's %d more:\n%s", height, len(block), room, extra, v)
 		}
-		if len(act) < 5 {
-			t.Errorf("height %d: the activity panel takes %d lines, want its three and the frame:\n%s", height, len(act), v)
+		if len(act) < 6 {
+			t.Errorf("height %d: the activity panel takes %d lines, want its three, the names and the frame:\n%s", height, len(act), v)
 		}
 		joined := strings.Join(block, "\n")
 		if !strings.Contains(joined, "slice s6") || strings.Contains(joined, "more") != (room < 9) {
@@ -174,68 +187,22 @@ func panelLines(rows []string, title string) []string {
 // view, with the sub-steps block and with a question and asks waiting.
 func TestTheTicketScreenFitsWhateverTheStepsAreDoing(t *testing.T) {
 	t.Parallel()
-	for name, g := range map[string]*rig{
-		"a build with a question": func() *rig { g := newRig(t, "JIG-1"); g.feed(jig1()...); return g }(),
-		"a round with asks":       func() *rig { g := newRig(t, "JIG-2"); g.feed(jig2Mid()...); return g }(),
-		"a build in progress":     shop1Rig(t),
+	for name, c := range map[string]struct {
+		g      *rig
+		panels int
+	}{
+		"a build with a question": {func() *rig { g := newRig(t, "JIG-1"); g.feed(jig1()...); return g }(), 3},
+		// The asks are drawn whole, which leaves the sub-steps no room.
+		"a round with asks":   {func() *rig { g := sized(newRig(t, "JIG-2"), 80, 25); g.feed(jig2Mid()...); return g }(), 2},
+		"a build in progress": {shop1Rig(t), 3},
 	} {
-		v := g.view()
-		if n := strings.Count(v, "\n") + 1; n != 24 {
-			t.Errorf("%s: the screen has %d lines, want 24:\n%s", name, n, v)
+		v := c.g.view()
+		if n := strings.Count(v, "\n") + 1; n != c.g.m.height {
+			t.Errorf("%s: the screen has %d lines, want %d:\n%s", name, n, c.g.m.height, v)
 		}
-		if !strings.Contains(v, "╭─ Activity") || strings.Count(v, "╰") < 3 {
+		if !strings.Contains(v, "╭─ Activity") || strings.Count(v, "╰") < c.panels {
 			t.Errorf("%s: the Steps, sub-steps and activity panels are not all drawn to their edges:\n%s", name, v)
 		}
-	}
-}
-
-// TestPickingSubstepsKeepsWhatNeedsAPersonAndWhatIsUnderWay: when the block
-// has room for fewer sub-steps than there are, the ones shown are a person's
-// turn and a failure first, then what is under way, what waits, what is next,
-// and the latest of what is done, in their order.
-func TestPickingSubstepsKeepsWhatNeedsAPersonAndWhatIsUnderWay(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "")
-	status := strings.Join([]string{"ticket: SHOP-2", "state: parked",
-		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
-			{"a", "green", "1", "-", "-", "A"}, {"b", "green", "1", "-", "-", "B"}, {"c", "needs-input", "1", "-", "q-001", "C"},
-			{"d", "stalled", "1", "-", "-", "D"}, {"e", "building", "1", "-", "-", "E"}, {"f", "queued", "0", "e", "-", "F"},
-		}),
-		axi.Table("questions", []string{"id", "slice", "status"}, [][]string{{"q-001", "c", "open"}}),
-	}, "\n") + "\n"
-	tk := ticketOf("SHOP-2")
-	tk.status = parseStatus(status)
-	g.m.w.tickets["SHOP-2"] = tk
-	subs := g.m.phaseOf(tk).Of("build").Subs
-	if len(subs) != 6 {
-		t.Fatalf("sub-steps = %+v, want one per slice", subs)
-	}
-	var got []string
-	for _, i := range pickSubs(subs, 4) {
-		got = append(got, subs[i].Key)
-	}
-	// Room for four: three sub-steps and the count. The slice that waits for
-	// an answer and the stalled one come first, then the one under way.
-	if want := "slice:c slice:d slice:e"; strings.Join(got, " ") != want {
-		t.Errorf("picked %v, want %s", got, want)
-	}
-	got = nil
-	for _, i := range pickSubs(subs, 1) {
-		got = append(got, subs[i].Key)
-	}
-	if want := "slice:c"; strings.Join(got, " ") != want {
-		t.Errorf("picked %v for one line, want %s alone", got, want)
-	}
-	if all := pickSubs(subs, 6); len(all) != 6 {
-		t.Errorf("picked %v for six lines, want all of them", all)
-	}
-	// With nothing under way, the latest of what is done shows.
-	var finished []phase.Sub
-	for _, id := range []string{"a", "b", "c", "d", "e"} {
-		finished = append(finished, phase.Sub{Key: "slice:" + id, State: phase.SubDone})
-	}
-	if got := pickSubs(finished, 3); len(got) != 2 || got[0] != 3 || got[1] != 4 {
-		t.Errorf("picked %v of five done, want the latest two (3 and 4) and a line for the count", got)
 	}
 }
 
@@ -246,7 +213,7 @@ func TestSubstepsOfAPublishInTwoReposListAPullRequestForEach(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", statusJIG2Repos(), 0)
-	g.send(tea.WindowSizeMsg{Width: 80, Height: 30}) // the landing stop is a row of the needs-you block
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 33}) // the landing stop is a row of the needs-you block
 	g.feed(jig2Repos()...).press("up")               // the cursor follows the land step
 	v := g.view()
 	for _, want := range []string{

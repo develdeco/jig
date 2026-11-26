@@ -132,9 +132,9 @@ func TestStatusSlicesNameTheirWorkspaceOracleAndRound(t *testing.T) {
 	}
 	got := block(statusOf(t, fx, st), "slices[")
 	want := []string{
-		"slices[5]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:",
-		"  a,queued,0,-,-,Fix Clamp so TestClamp passes.,alpha,test,-",
-		"  fix-1,queued,0,a,-,Fix the finding,alpha,go test ./...,2",
+		"slices[5]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate,findings}:",
+		"  a,queued,0,-,-,Fix Clamp so TestClamp passes.,alpha,test,-,-",
+		"  fix-1,queued,0,a,-,Fix the finding,alpha,go test ./...,2,-",
 	}
 	if len(got) != 6 || got[0] != want[0] || got[1] != want[1] || got[5] != want[2] {
 		t.Errorf("slices block:\n%s\nwant it to start %q and end %q", strings.Join(got, "\n"), want[:2], want[2])
@@ -199,10 +199,11 @@ func TestStatusRoundsNamesARoundNoReviewerRan(t *testing.T) {
 	}
 }
 
-// TestStatusFindingsListsTheLatestRoundsFindings: the findings the latest round
-// raised, high risk first, with the decision a person or an agent has pending
-// for each and nothing of an earlier round's.
-func TestStatusFindingsListsTheLatestRoundsFindings(t *testing.T) {
+// TestStatusFindingsListsEveryRoundsFindings: the findings every recorded round
+// raised, oldest round first and a round's high risk first, with the decision a
+// person has pending on an ask of an earlier round, and none of the earlier asks
+// a later round's file only carries.
+func TestStatusFindingsListsEveryRoundsFindings(t *testing.T) {
 	t.Parallel()
 	fx := newFixture(t, fixture.Opts{})
 	st := greenTicket(t, fx)
@@ -215,17 +216,47 @@ func TestStatusFindingsListsTheLatestRoundsFindings(t *testing.T) {
 			finding("r2-f2", "note", "low", "c.go", 2, "Tidy, later", "noted") +
 			finding("r2-f1", "ask", "high", "a.go", 5, "Still unchecked", "asked") + "summary: round 2\n",
 	})
-	if code := triageAs(t, fx, true, "r2-f1", "dismiss", "--reason", "fine"); code != 0 {
+	if code := triageAs(t, fx, true, "r1-f2", "dismiss", "--reason", "fine"); code != 0 {
 		t.Fatalf("jig triage exit = %d", code)
 	}
 	got := block(statusOf(t, fx, st), "findings[")
 	want := []string{
-		"findings[2]{id,round,action,risk,file:line,title,status,rationale,decision,decided_by}:",
-		`  r2-f1,2,ask,high,"a.go:5",Still unchecked,asked,why r2-f1 matters,dismiss,person`,
-		`  r2-f2,2,note,low,"c.go:2","Tidy, later",noted,why r2-f2 matters,,`,
+		"findings[5]{id,round,action,risk,file:line,title,status,rationale,decision,decided_by,detail,triage}:",
+		`  r1-f1,1,fix,high,"a.go:3",Unchecked error,open,why r1-f1 matters,,,d,-`,
+		`  r1-f2,1,ask,medium,"b.go:9",Which greeting?,asked,why r1-f2 matters,dismiss,person,d,-`,
+		`  r1-f3,1,note,low,"c.go:1",Rename later,noted,why r1-f3 matters,,,d,-`,
+		`  r2-f1,2,ask,high,"a.go:5",Still unchecked,asked,why r2-f1 matters,,,d,-`,
+		`  r2-f2,2,note,low,"c.go:2","Tidy, later",noted,why r2-f2 matters,,,d,-`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("findings block:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestStatusFindingsCarryTheDetailAndWhoSortedThem: the detail of a finding is
+// printed whole, its lines quoted into the one row, and triage says whether a
+// person or the gate sorted it.
+func TestStatusFindingsCarryTheDetailAndWhoSortedThem(t *testing.T) {
+	t.Parallel()
+	fx := newFixture(t, fixture.Opts{})
+	st := greenTicket(t, fx)
+	writeRound(t, fx.StoreDir, fx.Ticket, 1, roundFiles{
+		report: "round: 1\nverdict: fix-slices\nindependent: true\nreviewer:\n  session: s-rev\n",
+		findings: "scope: full\nreviewed_paths:\n  - a.go\nfindings:\n" +
+			"  - id: r1-f1\n    file: a.go\n    line: 5\n    title: Unchecked\n    detail: |-\n      The error is dropped.\n      Check it, then \"return\" it.\n" +
+			"    action: fix\n    risk: high\n    risk_rationale: why\n    status: open\n    recurrences: 0\n    triage: auto\n" +
+			"  - id: r1-f2\n    file: b.go\n    line: 9\n    title: Which greeting\n    detail: Pick one.\n    action: ask\n    risk: low\n    risk_rationale: why\n" +
+			"    status: asked\n    recurrences: 0\n    triage: human\n" +
+			finding("r1-f3", "note", "low", "c.go", 1, "Rename later", "noted") + "summary: round 1\n",
+	})
+	got := block(statusOf(t, fx, st), "findings[")
+	want := []string{
+		`  r1-f1,1,fix,high,"a.go:5",Unchecked,open,why,,,"The error is dropped.\nCheck it, then \"return\" it.",auto`,
+		`  r1-f2,1,ask,low,"b.go:9",Which greeting,asked,why,,,Pick one.,human`,
+		`  r1-f3,1,note,low,"c.go:1",Rename later,noted,why r1-f3 matters,,,d,-`,
+	}
+	if len(got) != 4 || strings.Join(got[1:], "\n") != strings.Join(want, "\n") {
+		t.Errorf("findings block:\n%s\nwant rows\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -243,13 +274,13 @@ func TestStatusFindingsDropsADecisionARoundHasTaken(t *testing.T) {
 	if code := triageAs(t, fx, true, "r1-f1", "keep", "--workspace", "alpha", "--oracle", "test"); code != 0 {
 		t.Fatalf("jig triage exit = %d", code)
 	}
-	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",keep,person") {
+	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",keep,person,d,-") {
 		t.Errorf("row of the pending decision = %q, want it to end in the keep", got)
 	}
 	if err := journal.Append(st, fx.Ticket, journal.Line{Event: journal.EventGateRound, Attempt: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",,") {
+	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",,,d,-") {
 		t.Errorf("row of the spent decision = %q, want no decision", got)
 	}
 }
@@ -429,7 +460,7 @@ func TestStatusFindingsNamesAnAgentsPendingDecisionAsTheAgents(t *testing.T) {
 	if code := triageAs(t, fx, false, "r1-f1", "dismiss", "--reason", "fine"); code != 0 {
 		t.Fatalf("jig triage exit = %d", code)
 	}
-	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",dismiss,agent") {
-		t.Errorf("row of the agent's decision = %q, want it to end in ,dismiss,agent", got)
+	if got := block(statusOf(t, fx, st), "findings[")[1]; !strings.HasSuffix(got, ",dismiss,agent,d,-") {
+		t.Errorf("row of the agent's decision = %q, want it to end in ,dismiss,agent,d,-", got)
 	}
 }

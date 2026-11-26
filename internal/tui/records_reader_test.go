@@ -6,7 +6,22 @@ import (
 	"testing"
 
 	"github.com/develdeco/jig/internal/axi"
+	"github.com/develdeco/jig/internal/events"
+	"github.com/develdeco/jig/internal/journal"
 )
+
+// manyRoundsEvents is JIG-2 after twelve gate rounds, the first with two asks
+// waiting: the rounds list is long, so the first ask is below the first screenful.
+func manyRoundsEvents() []events.Envelope {
+	out := jig2Mid()
+	for n := 2; n <= 12; n++ {
+		n := n
+		out = append(out,
+			jl(at(20+n, 0), "JIG-2", "", journal.EventGateOpen),
+			jl(at(20+n, 30), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = n, "s-reviewer" }))
+	}
+	return out
+}
 
 // manyProbesTwoAsks is a review status with a round that took 12 caught probes
 // and two asks waiting after them.
@@ -30,9 +45,24 @@ func body(view string) []string {
 	lines := strings.Split(view, "\n")
 	var out []string
 	for _, l := range lines[2 : len(lines)-2] {
-		out = append(out, strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(l, " "), "▸")))
+		l = strings.TrimSpace(l)
+		l = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(l, "│"), "│"))
+		out = append(out, strings.TrimSpace(strings.TrimPrefix(l, "▸")))
 	}
-	return out
+	// The marks of what lies above and below are not lines of the page, and
+	// neither are the edges of a box and the names of its columns, which a
+	// window of the box keeps above the lines it draws.
+	var rows []string
+	for i := 0; i < len(out); i++ {
+		switch row := out[i]; {
+		case strings.HasPrefix(row, "╭─"):
+			i++ // and the names under it
+		case strings.HasPrefix(row, "╰"), strings.HasPrefix(row, "↑ "), strings.HasPrefix(row, "↓ "):
+		default:
+			rows = append(rows, row)
+		}
+	}
+	return rows
 }
 
 // TestReviewPageOpensAtItsRoundsWithManyProbes: a page with many probes and two
@@ -43,9 +73,9 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
-	g.feed(jig2Mid()...).press("enter")
+	g.feed(manyRoundsEvents()...).press("enter")
 	view := g.view()
-	if !hasLine(view, "rounds") || !strings.Contains(view, "12 probes") {
+	if !strings.Contains(view, "╭─ Rounds ") || !strings.Contains(view, "12 rounds") {
 		t.Fatalf("the page does not open at its rounds:\n%s", view)
 	}
 	// Each down shows the next line: no probe is skipped.
@@ -54,7 +84,7 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 		g.press("down")
 		view = g.view()
 		cur := body(view)
-		if !strings.Contains(view, "▸") && cur[0] != prev[1] {
+		if !strings.Contains(view, "▸") && cur[0] != prev[1] && cur[0] != prev[0] {
 			t.Fatalf("down moved the page by more than a line (%q, then %q):\n%s", prev[1], cur[0], view)
 		}
 		prev = cur
@@ -72,50 +102,43 @@ func TestReviewPageOpensAtItsRoundsWithManyProbes(t *testing.T) {
 		t.Fatalf("down from the cursor's window did not move it to the second ask:\n%s", view)
 	}
 	g.press("home")
-	if view := g.view(); !hasLine(view, "rounds") {
+	if view := g.view(); !strings.Contains(view, "╭─ Rounds ") {
 		t.Errorf("home from the second row does not reach the rounds heading:\n%s", view)
 	}
 	g.press("end")
 	if view := g.view(); !strings.Contains(view, "▸ ! low") {
 		t.Errorf("end does not reach the last row:\n%s", view)
 	}
-	for i := 0; i < 100 && !hasLine(g.view(), "rounds"); i++ {
+	for i := 0; i < 100 && !strings.Contains(g.view(), "╭─ Rounds "); i++ {
 		g.press("up")
 	}
-	if view := g.view(); !hasLine(view, "rounds") {
+	if view := g.view(); !strings.Contains(view, "╭─ Rounds ") {
 		t.Errorf("up does not reach the rounds heading:\n%s", view)
 	}
 }
 
-// TestReviewPageKeysActOnlyOnAShownRow: the keys that decide the row under the
-// cursor act on a row the window shows with its marker, never on one it hides.
+// TestReviewPageKeysActOnlyOnAShownRow: with twelve rounds before the asks the
+// cursor's row and its ask are still on the opened screen, the keys that decide
+// act on the ask drawn whole, and on a screen too short to draw it whole they run
+// nothing.
 func TestReviewPageKeysActOnlyOnAShownRow(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-2")
 	g.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
-	g.feed(jig2Mid()...).press("enter")
-	if view := g.view(); strings.Contains(view, "▸") {
-		t.Fatalf("the cursor's row is shown on the opened page, the test needs it hidden:\n%s", view)
-	}
-	triages := func() int {
-		n := 0
-		for _, l := range g.r.lines() {
-			if strings.HasPrefix(l, "triage ") {
-				n++
-			}
-		}
-		return n
-	}
-	g.press("d", "k")
-	if n := triages(); n != 0 {
-		t.Errorf("d and k decided a row the screen did not show: %q", g.r.lines())
-	}
-	for i := 0; i < 100 && !strings.Contains(g.view(), "▸"); i++ {
-		g.press("down")
+	g.feed(manyRoundsEvents()...).press("enter")
+	if view := g.view(); !strings.Contains(view, "▸ ! high") || !strings.Contains(readWords(view), "decision ! undecided") {
+		t.Fatalf("the opened screen does not show the cursor's ask whole:\n%s", view)
 	}
 	g.press("d")
-	if got := g.r.lines(); triages() != 1 || !strings.Contains(got[len(got)-1], "triage JIG-2 r1-f1 dismiss") {
-		t.Errorf("d on the shown row did not triage it: %q", got)
+	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 dismiss") {
+		t.Errorf("d on an ask drawn whole ran %q", got)
+	}
+	short := newRig(t, "JIG-2")
+	short.r.answer("status JIG-2 --store /s", manyProbesTwoAsks(), 0)
+	short.feed(manyRoundsEvents()...).press("enter").sized(80, 12)
+	short.press("d", "k")
+	if got := triaged(short); len(got) != 0 {
+		t.Errorf("d and k decided an ask the screen did not draw whole: %q", got)
 	}
 }
 

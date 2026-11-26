@@ -1,16 +1,15 @@
-jig  demo                                                              3 tickets
+jig  demo                                                 2 need you · 1 waiting
 ────────────────────────────────────────────────────────────────────────────────
-▸ ? JIG-1  Greeting copy  ✓ ? ○ ○ ○  1 open question
-  ◇ JIG-2  Config loader  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-2"
-  ◐ JIG-3  Release notes  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your approval
-
-
-
-
-
-
-
-
+  ╭─ Needs you ──────────────────────────────────────────────────────────── 2 ─╮
+  │    ticket  title          steps      where it stands                   age │
+  │▸ ? JIG-1   Greeting copy  ✓ ? ○ ○ ○  1 open question                   57m │
+  │  ◇ JIG-2   Config loader  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-2"  45m │
+  ╰────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Waiting ────────────────────────────────────────────────────────────── 1 ─╮
+  │    ticket  title          steps      where it stands                   age │
+  │  ◐ JIG-3   Release notes  ◐ ○ ○ ○ ○  Brief: drafted · waiting for your     │
+  │                                      approval                              │
+  ╰────────────────────────────────────────────────────────────────────────────╯
 
 
 
@@ -21,4 +20,5 @@ jig  demo                                                              3 tickets
 
 
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open · g gate · a answer · t tail · r refresh · q quit
+  q quit · ? keys · ↑↓ move · enter open · / search · a answer · s by chart
+  t tail · r refresh

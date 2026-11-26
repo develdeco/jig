@@ -77,7 +77,7 @@ func TestParseStatusReadsTheTablesJigStatusPrints(t *testing.T) {
 	if info.Err != nil || info.State != "green" {
 		t.Fatalf("info = %+v", info)
 	}
-	if want := (statusSlice{ID: "a", State: "green", Attempts: 1, Goal: "Load the config", Workspace: "alpha", Oracle: "unit"}); len(info.Slices) != 1 || info.Slices[0] != want {
+	if want := (statusSlice{ID: "a", State: "green", Attempts: 1, Goal: "Load the config", Workspace: "alpha", Oracle: "unit"}); len(info.Slices) != 1 || !reflect.DeepEqual(info.Slices[0], want) {
 		t.Errorf("slices = %+v, want %+v: green after 1 try, with no blocker or question", info.Slices, want)
 	}
 	if len(info.Asks) != 2 || info.Asks[0] != (statusAsk{ID: "r1-f1", Risk: "high", Where: "alpha/a.go:3", Title: "Unchecked error", Why: "needs a human"}) {
@@ -174,6 +174,35 @@ func TestParseStatusReadsTheRecordsOfTheSections(t *testing.T) {
 	old := parseStatus(statusJIG1())
 	if old.Err != nil || old.Rounds != nil || old.Findings != nil || old.Publish != nil || old.FixBudget != "" || old.Slices[0].Workspace != "" {
 		t.Errorf("a status without the sections reads as %+v", old)
+	}
+}
+
+// TestStatusFindingsCarryEveryRound: the findings table lists the rows of every
+// round, each with its round, its detail whole (the newlines restored) and who
+// sorted it; a table without the last two columns, or with one round's rows
+// only, reads as it did, with no detail and no triage.
+func TestStatusFindingsCarryEveryRound(t *testing.T) {
+	t.Parallel()
+	cols := findingColumns
+	out := "ticket: JIG-9\nstate: fix-slices\n" + axi.Table("findings", cols, [][]string{
+		{"r1-f1", "1", "fix", "high", "a.go:3", "Unchecked", "open", "why", "", "", "The error is dropped.\nCheck it.", "auto"},
+		{"r1-f2", "1", "ask", "low", "b.go:9", "Greeting", "asked", "why", "dismiss", "person", "Pick one.", "-"},
+		{"r2-f1", "2", "fix", "low", "b.go:9", "Shadow", "open", "why", "", "", "Rename it.", "human"},
+	})
+	got := parseStatus(out).Findings
+	if len(got) != 3 || got[0].Round != 1 || got[2].Round != 2 || got[2].ID != "r2-f1" {
+		t.Fatalf("findings = %+v, want the rows of both rounds", got)
+	}
+	if got[0].Detail != "The error is dropped.\nCheck it." || got[0].Triage != "auto" || got[1].Triage != "" || got[2].Triage != "human" {
+		t.Errorf("detail and triage = %+v", got)
+	}
+	if got[1].Decision != "dismiss" || got[1].DecidedBy != "person" {
+		t.Errorf("a row's pending decision = %+v", got[1])
+	}
+
+	old := axi.Table("findings", findingColumns[:10], [][]string{{"r2-f1", "2", "fix", "low", "b.go:9", "Shadow", "open", "why", "", ""}})
+	if f := parseStatus("ticket: JIG-9\nstate: fix-slices\n" + old).Findings; len(f) != 1 || f[0].Detail != "" || f[0].Triage != "" || f[0].Title != "Shadow" {
+		t.Errorf("a status without the two columns reads as %+v", f)
 	}
 }
 

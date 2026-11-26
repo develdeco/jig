@@ -51,6 +51,10 @@ type world struct {
 	// rosterRead is set once the ticket list has been read: until then the
 	// screens do not know what the store holds, and say they are reading.
 	rosterRead bool
+	// gen counts what moved the world: a stream batch, a roster, a chart
+	// listing, and any message but a key (Update). What is built from the world
+	// once (main's rows) is built again when it differs.
+	gen uint64
 }
 
 func newWorld() *world {
@@ -80,6 +84,7 @@ type chart struct {
 // setCharts takes the charts the store listing named: the order they are
 // listed in, with what was read of each kept; a chart no longer listed is gone.
 func (w *world) setCharts(listed []chartListing) {
+	w.gen++
 	charts := make(map[string]*chart, len(listed))
 	order := make([]string, 0, len(listed))
 	for _, l := range listed {
@@ -135,6 +140,12 @@ type ticket struct {
 	// blockers are the blockers `jig next` listed for the ticket that are not
 	// met.
 	blockers []chartWait
+	// state is the roster's word on the ticket (new, ready, active, green,
+	// blocked, done or closed), and readyAt its place in the roster's order to
+	// start the ready tickets, 1 for the first and 0 for a ticket the order
+	// does not name.
+	state   string
+	readyAt int
 	// updated is when the ticket's journal last had a line, as the roster says
 	// it (zero for none): the age of the ticket, which no screen reads the
 	// stream for.
@@ -169,6 +180,7 @@ func (w *world) ticketFor(id string) (*ticket, bool) {
 // apply takes a batch of the stream in. It reports the tickets the batch
 // touched, and whether any of them was new to the screens.
 func (w *world) apply(envs []events.Envelope) (touched map[string]bool, fresh bool) {
+	w.gen++
 	touched = map[string]bool{}
 	for _, in := range envs {
 		for _, e := range w.place(in) {
@@ -240,10 +252,12 @@ func (w *world) take(e events.Envelope, touched map[string]bool, fresh *bool) {
 // setRoster takes the tickets `jig next` listed: their titles and states, and
 // the order they are listed in.
 func (w *world) setRoster(rows []rosterRow) {
+	w.gen++
 	order := make([]string, 0, len(rows))
 	for _, r := range rows {
 		t, _ := w.ticketFor(r.ID)
 		t.title, t.blockers, t.digest, t.updated = r.Title, r.Blockers, r.Digest, r.Updated
+		t.state, t.readyAt = r.State, r.StartOrder
 		t.awaiting = false
 		order = append(order, r.ID)
 	}
@@ -301,6 +315,10 @@ type rosterRow struct {
 	// Updated is the instant of the newest line of the ticket's journal, zero
 	// for a ticket with none.
 	Updated time.Time
+	// StartOrder is the ticket's place in the roster's next list, the ready
+	// tickets in the order to start them: 1 for the first, 0 when it is not in
+	// it.
+	StartOrder int
 }
 
 // latest is the position of the last line of the ticket whose event is one
@@ -335,6 +353,8 @@ type questionRow struct {
 	ID, Slice, Text, Session, At string
 	Open                         bool
 	Answer, Provenance           string
+	// AnswerSession is the session that wrote the answer line, if it named one.
+	AnswerSession string
 }
 
 // questions are the ticket's questions in the order they were asked. The text
@@ -366,7 +386,7 @@ func (t *ticket) readQuestions(zone *time.Location) []questionRow {
 			byID[l.Ref] = &questionRow{ID: l.Ref, Slice: l.Slice, Text: l.Summary, Session: l.Session, At: clock(l, zone), Open: true}
 		case journal.EventAnswer:
 			if q := byID[l.Ref]; q != nil {
-				q.Open, q.Answer, q.Provenance = false, l.Summary, l.Provenance
+				q.Open, q.Answer, q.Provenance, q.AnswerSession = false, l.Summary, l.Provenance, l.Session
 			}
 		}
 	}
@@ -406,6 +426,9 @@ type roundRow struct {
 	State    string // StateReviewing, StateFindings or StateReady
 	At       string
 	Reviewer string
+	// Began is the instant the round was opened, or when it closed for a round
+	// whose opening no line records: where a list of rounds puts it.
+	Began time.Time
 	// Carried is the round whose verdict a clean round carries over, 0 for a
 	// round a reviewer read.
 	Carried int
@@ -428,7 +451,11 @@ func (t *ticket) readRounds(zone *time.Location) []roundRow {
 	closed := map[int]roundRow{}
 	var order []int
 	lastClosed := -1
+	var opened time.Time // the opening no round has used yet
 	for i, l := range t.lines {
+		if l.Event == journal.EventGateOpen {
+			opened, _ = l.At()
+		}
 		if l.Event != journal.EventGateRound && l.Event != journal.EventGateClean {
 			continue
 		}
@@ -440,10 +467,16 @@ func (t *ticket) readRounds(zone *time.Location) []roundRow {
 		if n == 0 {
 			n = len(order) + 1
 		}
-		if _, dup := closed[n]; !dup {
+		began, dup := closed[n]
+		if !dup {
 			order = append(order, n)
+			began.Began = opened
+			if began.Began.IsZero() {
+				began.Began, _ = l.At()
+			}
+			opened = time.Time{}
 		}
-		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Carried: l.Carried}
+		closed[n] = roundRow{N: n, State: state, At: clock(l, zone), Reviewer: l.Session, Began: began.Began, Carried: l.Carried}
 		lastClosed = i
 	}
 	sort.Ints(order)
@@ -456,7 +489,8 @@ func (t *ticket) readRounds(zone *time.Location) []roundRow {
 		if len(order) > 0 {
 			n = order[len(order)-1] + 1
 		}
-		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone)})
+		began, _ := t.lines[open].At()
+		out = append(out, roundRow{N: n, State: StateReviewing, At: clock(t.lines[open], zone), Began: began})
 	}
 	return out
 }
@@ -466,6 +500,23 @@ func (t *ticket) readRounds(zone *time.Location) []roundRow {
 type askRow struct {
 	ID, Risk, Where, Title, Why string
 	Decision, DecidedBy         string // "", keep or dismiss; person or agent
+}
+
+// askText is what a person decides an ask from: its title, the reason the
+// reviewer gave for the finding behind it, and the ask's own why.
+func (t *ticket) askText(a askRow) string {
+	parts := []string{a.Title}
+	if t.status != nil {
+		for _, f := range t.status.Findings {
+			if f.ID == a.ID && f.Rationale != "" {
+				parts = append(parts, f.Rationale)
+			}
+		}
+	}
+	if a.Why != "" && a.Why != "-" {
+		parts = append(parts, a.Why)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // asks are the asks status lists, each with the latest triage line for it
@@ -715,7 +766,7 @@ func describe(l events.Envelope) string {
 	case journal.EventPublishApproved:
 		return "publish approved " + repoWords(l) + short(l.Commit) + who
 	case journal.EventPr:
-		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + l.URL)
+		return strings.TrimSpace("pr " + repoWords(l) + l.Outcome + " " + prRef(l.URL))
 	case journal.EventPublishDone:
 		return "published"
 	}

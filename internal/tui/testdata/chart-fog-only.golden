@@ -3,22 +3,22 @@ jig  demo › ideas  Ideas                                         ○ not gradu
   ╭─ Map ──────────────────────────────────────────────── charts/ideas/map.md ─╮
   │  destination  A customer takes a coupon code from the cart to a discounted │
   │               order.                                                       │
-  │  decided      ✓ Codes are single use                                       │
-  │               ✓ Discounts apply before tax                                 │
-  │  fog          ~ Stacking two codes                                         │
-  │               ~ Codes in other currencies                                  │
+  │  decided      ✓ Codes are single use  +1 more                              │
+  │  fog          ~ Stacking two codes  +1 more                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ───────────────────────────────────────────────── none graduated ─╮
-  │  ·   Gift cards      fog · not graduated                                   │
-  │  ·   Loyalty points  fog · not graduated                                   │
+  │    ticket  title           steps  where it stands      age                 │
+  │  ·         Gift cards             fog · not graduated                      │
+  │  ·         Loyalty points         fog · not graduated                      │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ──────────────────────────────────────────────────────── not started ─╮
-  │  next     run `jig graduate ideas`                                         │
+  │  next run `jig graduate ideas`                                             │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Activity ─────────────────────────────────────────────────────────────────╮
   │  nothing yet                                                               │
   ╰────────────────────────────────────────────────────────────────────────────╯
 
+
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
-  r refresh · q quit
+  esc back · q quit · ? keys · tab next pane: Tickets · ↑↓ move in Map · t tail
+  r refresh

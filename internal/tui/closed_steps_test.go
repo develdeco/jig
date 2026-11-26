@@ -55,7 +55,7 @@ func TestClosedTicketTellsUnfinishedStepsFromThePhasesDoneMarks(t *testing.T) {
 			t.Errorf("%s: the land step is %+v", name, steps[stepLand])
 		}
 		// The same dots on the project's list, with no status read.
-		if row := lineWith(pagesText(g.m.mainPage()), "JIG-9"); !strings.Contains(row, tc.dots) {
+		if row := lineWith(g.mainText(), "JIG-9"); !strings.Contains(row, tc.dots) {
 			t.Errorf("%s: main's row does not draw %s:\n%s", name, tc.dots, row)
 		}
 	}
@@ -73,8 +73,8 @@ func TestLandedTicketOfOneRepoIsNotOwedAMerge(t *testing.T) {
 	}))
 	g.press("5")
 	view := g.view()
-	for _, want := range []string{"1 of 1 landed", "✓ PR #22 into main · landed at 09:15:30"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{"1 of 1 landed", "✓ PR #22 merged into main landed at 09:15:30"} {
+		if !hasWords(view, want) {
 			t.Errorf("the land screen lacks %q:\n%s", want, view)
 		}
 	}

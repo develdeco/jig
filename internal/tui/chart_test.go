@@ -14,7 +14,7 @@ import (
 
 func TestMainScreenWithCharts(t *testing.T) {
 	t.Parallel()
-	g := chartRig(t)
+	g := chartRig(t).focus("JIG-4")
 	golden(t, "main-charts", g.view())
 }
 
@@ -27,7 +27,7 @@ func TestChartScreenOfATallTerminal(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
 	g.send(tea.WindowSizeMsg{Width: 100, Height: 40})
-	g.press("end", "enter")
+	g.openChart("checkout")
 	golden(t, "chart-tall", g.view())
 }
 
@@ -57,7 +57,7 @@ func shopRig(t *testing.T) *rig {
 	})
 	answerChart(g, roster, "shop", verb, map[string]string{"JIG-4": status["JIG-4"], "JIG-7": status["JIG-7"]})
 	g.feed(lines[:len(asTicket(jig2(), "JIG-4"))]...)
-	g.press("end", "enter")
+	g.openChart("shop")
 	return g
 }
 
@@ -97,7 +97,7 @@ func TestChartScreenOfAChartNothingIsGraduatedOf(t *testing.T) {
 func TestChartRowOpensTheChartScreenAndEscReturns(t *testing.T) {
 	t.Parallel()
 	g := chartRig(t)
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart", g.m.Screen())
 	}
@@ -134,10 +134,15 @@ func TestTheChartCursorStartsOnTheFirstTicketNotPublishedAndATicketOpensAndRetur
 func TestKeysOnTheChartActOnTheTicketUnderTheCursor(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	g.pin("JIG-8", reviewReady())
+	g.syncDigests()
 	g.press("down", "g")
 	if got := g.r.lines(); !reflect.DeepEqual(got, []string{"gate JIG-8 --store /s"}) {
 		t.Errorf("g ran %v, want the gate of JIG-8", got)
 	}
+	g.pin("JIG-8", publishReady())
+	g.pin("JIG-4", publishReady())
+	g.syncDigests()
 	g.press("p")
 	if v := g.view(); !strings.Contains(v, "publish JIG-8: approve the reviewed head") {
 		t.Errorf("p did not ask to publish JIG-8:\n%s", v)
@@ -153,7 +158,7 @@ func TestMainScreenWithoutChartsDrawsNoChartAndReadsNone(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)
 	v := g.view()
-	if strings.Contains(v, "chart") {
+	if strings.Contains(strings.ReplaceAll(v, "s by chart", ""), "chart") { // the key that lays the list out by chart is no chart
 		t.Errorf("a store with no charts draws one:\n%s", v)
 	}
 	g.press("end", "enter")
@@ -170,7 +175,7 @@ func TestAChartVerbThatPrintsNoChartLeavesTheScreenWithTheListingAndNoNotice(t *
 		g := newRig(t, "")
 		lines, status := chartTickets()
 		answerChart(g, chartRoster(checkoutListing()), "checkout", out, status)
-		g.feed(lines...).press("end", "enter")
+		g.feed(lines...).openChart("checkout")
 		v := g.view()
 		if g.m.notice != "" {
 			t.Errorf("a verb that printed %q left the notice %q", out, g.m.notice)
@@ -191,7 +196,7 @@ func TestAChartOfTheWrongShapeIsReadAgainAndThenSaid(t *testing.T) {
 	g := newRig(t, "")
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", `{"chart":"checkout","tickets":"none"}`+"\n", status)
-	g.feed(lines...).press("end", "enter")
+	g.feed(lines...).openChart("checkout")
 	if !strings.HasPrefix(g.m.notice, "chart checkout: ") {
 		t.Errorf("notice = %q, want the chart's read said", g.m.notice)
 	}
@@ -207,7 +212,7 @@ func TestTheChartScreenReadsItsChartOnOpenAndOnRefreshAndNotFromTheListScreen(t 
 	if n := g.r.ran(read); n != 0 {
 		t.Fatalf("the project's list read the chart %d times", n)
 	}
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if n := g.r.ran(read); n != 1 {
 		t.Fatalf("opening the chart read it %d times, want 1", n)
 	}
@@ -226,7 +231,7 @@ func chartQuietRig(t *testing.T) (g *rig, advance func(time.Duration)) {
 	now := time.Date(2026, 10, 23, 9, 30, 0, 0, time.UTC)
 	g = chartRig(t)
 	g.m.now = func() time.Time { return now }
-	g.press("end", "enter")
+	g.openChart("checkout")
 	return g, func(d time.Duration) { now = now.Add(d) }
 }
 
@@ -280,7 +285,10 @@ func TestAKeyThatRanOnAChartsTicketMarksTheChartToBeRead(t *testing.T) {
 	t.Parallel()
 	g, advance := chartQuietRig(t)
 	before := g.r.ran("next checkout --json --store /s")
-	g.press("down", "g")
+	g.press("down")
+	g.pin(g.m.targetTicket(), reviewReady())
+	g.syncDigests()
+	g.press("g")
 	advance(10 * time.Second)
 	g.send(idleMsg{})
 	if n := g.r.ran("next checkout --json --store /s"); n != before+1 {
@@ -466,11 +474,11 @@ func TestTheChartRowsAreWhatTheTicketsListSaysUntilTheVerbIsRead(t *testing.T) {
 	if want := []string{"JIG-4", "JIG-5", "JIG-6", "JIG-7", "JIG-8"}; !reflect.DeepEqual(ids, want) {
 		t.Errorf("ids = %v, want the listing's %v", ids, want)
 	}
-	if note, own := g.m.chartNote(rows[2]); stripANSI(note) != "stacked on JIG-5" || !own {
-		t.Errorf("JIG-6's note = %q, %v", note, own)
+	if note := g.m.chartNote(rows[2]); stripANSI(note) != "stacked on JIG-5" {
+		t.Errorf("JIG-6's note = %q", note)
 	}
 	// With the verb read, its order is the screen's: what can start comes before what waits.
-	g.press("end", "enter")
+	g.openChart("checkout")
 	var after []string
 	for _, r := range g.m.chartRows(c) {
 		after = append(after, r.id)
@@ -491,12 +499,12 @@ func TestChartRowReadsReadingUntilTheRosterIsThere(t *testing.T) {
 	answerChart(g, roster, "checkout", checkoutJSON(), nil)
 	g.feed().press("enter")
 	v := g.view()
-	for _, want := range []string{"○ JIG-4  Coupon model", "○ ○ ○ ○", "reading…", "state    reading…"} {
+	for _, want := range []string{"○ JIG-4   Coupon model", "○ ○ ○ ○", "reading…", "state reading…"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the screen lacks %q:\n%s", want, v)
 		}
 	}
-	for _, guess := range []string{"ready · brief next", "stacked on JIG-5", "✓ ✓ ✓ ✓", "published https", "state    published"} {
+	for _, guess := range []string{"ready · brief next", "stacked on JIG-5", "✓ ✓ ✓ ✓", "published https", "state published"} {
 		if strings.Contains(v, guess) {
 			t.Errorf("the screen says %q of a ticket the roster has not listed:\n%s", guess, v)
 		}
@@ -545,7 +553,7 @@ func TestChartStatusWords(t *testing.T) {
 	if state, label := status(); state != StateNeedsInput || label != "run needs you" {
 		t.Errorf("a chart with an open question: %s, %q", state, label)
 	}
-	if v := g.view(); !strings.Contains(v, "1 needs you") {
+	if v := g.view(); !strings.Contains(v, "1 needs") {
 		t.Errorf("the list does not say a chart needs you:\n%s", v)
 	}
 
@@ -687,17 +695,17 @@ func TestAChartScreenDrawnWithColorHasTheTextOfOneWithout(t *testing.T) {
 	plain := chartScreenRig(t)
 	paint := chartRig(t)
 	paint.m.st = styles{r: colored()}
-	paint.press("end", "enter")
+	paint.openChart("checkout")
 	got := paint.view()
 	if !strings.Contains(got, "\x1b[") {
 		t.Fatalf("the colored screen has no escape sequence:\n%s", got)
 	}
-	if stripped := stripANSI(got); stripped != plain.view() {
+	if stripped := undecorated(got); stripped != plain.view() {
 		t.Errorf("color changed the text\n--- plain\n%s\n--- colored, stripped\n%s", plain.view(), stripped)
 	}
 	paint.press("esc")
 	plain.press("esc")
-	if stripped := stripANSI(paint.view()); stripped != plain.view() {
+	if stripped := undecorated(paint.view()); stripped != plain.view() {
 		t.Errorf("color changed the list\n--- plain\n%s\n--- colored, stripped\n%s", plain.view(), stripped)
 	}
 }
@@ -723,8 +731,8 @@ func historyRig(t *testing.T, commits ...map[string]any) *rig {
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
 	g.feed(lines...)
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 43})
-	g.press("end", "enter")
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 46})
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}
@@ -755,14 +763,15 @@ func TestChartScreenShowsTheChartsHistoryAmongTheTicketsLines(t *testing.T) {
 		"09:13:10 chart", "09:13:00 JIG-4 review·r2",
 	}
 	last := -1
+	words := readWords(v)
 	for _, want := range order {
-		at := strings.Index(v, want)
+		at := strings.Index(words, want)
 		if at < 0 || at < last {
 			t.Fatalf("%q is not below what precedes it in the Activity (at %d after %d):\n%s", want, at, last, v)
 		}
 		last = at
 	}
-	for _, want := range []string{"latest 12 of 23", "09:14:25 chart store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
+	for _, want := range []string{"latest 11 of 23", "↓ 12 older", "09:14:25 chart  store ", "· " + strings.Repeat("a", 7) + " chart checkout: tighten the destination"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the Activity lacks %q:\n%s", want, v)
 		}

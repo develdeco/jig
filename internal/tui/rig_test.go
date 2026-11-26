@@ -25,8 +25,18 @@ import (
 // update rewrites the golden files: go test ./internal/tui -update.
 var update = flag.Bool("update", false, "rewrite the golden files")
 
-// golden compares got with testdata/<name>.golden.
+// golden compares got with testdata/<name>.golden. A frame that holds a cut is
+// written through goldenCuts, which reads its marks: golden refuses its name.
 func golden(t *testing.T, name, got string) {
+	t.Helper()
+	if cutGoldens[name] {
+		t.Fatalf("the golden %s holds a cut: write it through goldenCuts", name)
+	}
+	goldenFile(t, name, got)
+}
+
+// goldenFile compares got with testdata/<name>.golden.
+func goldenFile(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name+".golden")
 	if *update {
@@ -153,26 +163,25 @@ func briefTextJIG1() string {
 	}, "\n") + "\n"
 }
 
-// jig1Records is jig1 as the build screen shows its records: the commits carry
-// their subjects, the oracle lines their command, time and who ran them, slice
+// jig1Records is jig1 as the build screen shows its records: the oracle lines
+// carry their commit's subject, their command, time and who ran them, slice
 // b is checked twice and fails both times, and slice a once had a question that
 // was answered.
 func jig1Records() []events.Envelope {
-	oracle := func(command string, seconds int, source string) func(*journal.Line) {
-		return func(l *journal.Line) { l.Command, l.Seconds, l.Source = command, seconds, source }
+	oracle := func(command string, seconds int, subject string) func(*journal.Line) {
+		return func(l *journal.Line) {
+			l.Command, l.Seconds, l.Subject, l.Session = command, seconds, subject, "s-builder"
+		}
 	}
 	return []events.Envelope{
 		jl(at(0, 1), "JIG-1", "a", journal.EventClaim, with("s-builder", "", "", "", "", "")),
 		jl(at(0, 2), "JIG-1", "a", journal.EventQuestion, with("s-builder", "", "", "Trim the name?", "q-000", "agent")),
 		jl(at(0, 3), "JIG-1", "a", journal.EventAnswer, with("s-person", "", "", "Yes, trim it.", "q-000", "person")),
-		jl(at(0, 5), "JIG-1", "a", journal.EventVerifyPending, with("s-builder", sha('a'), "", "Greet the person by name", "", "")),
-		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), oracle("go test ./...", 15, "jig")),
+		jl(at(0, 20), "JIG-1", "a", journal.EventOracle, with("", sha('a'), "pass", "", "", ""), oracle("go test ./...", 15, "Greet the person by name")),
 		jl(at(0, 21), "JIG-1", "a", journal.EventVerified, with("", sha('a'), "", "", "", "")),
 		jl(at(1, 0), "JIG-1", "b", journal.EventClaim, with("s-builder", "", "", "", "", "")),
-		jl(at(1, 10), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('b'), "", "Say goodbye", "", "")),
-		jl(at(1, 40), "JIG-1", "b", journal.EventOracle, with("", sha('b'), "fail", "TestB: want 2, got 3", "", ""), oracle("go test ./...", 30, "jig")),
-		jl(at(1, 50), "JIG-1", "b", journal.EventVerifyPending, with("s-builder", sha('e'), "", "Say goodbye, politely", "", "")),
-		jl(at(2, 15), "JIG-1", "b", journal.EventOracle, with("", sha('e'), "fail", "--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1", "", ""), oracle("go test ./...", 25, "jig")),
+		jl(at(1, 40), "JIG-1", "b", journal.EventOracle, with("", sha('b'), "fail", "TestB: want 2, got 3", "", ""), oracle("go test ./...", 30, "Say goodbye")),
+		jl(at(2, 15), "JIG-1", "b", journal.EventOracle, with("", sha('e'), "fail", "--- FAIL: TestB (0.00s) b_test.go:12: want 2, got 3 FAIL exit status 1", "", ""), oracle("go test ./...", 25, "Say goodbye, politely")),
 		jl(at(2, 30), "JIG-1", "c", journal.EventQuestion, with("s-builder", "", "", "Formal or casual?", "q-001", "agent")),
 		ll(at(2, 31), "JIG-1", journal.EventTool, func(l *journal.Line) { l.Session, l.Tool = "s-builder", "Bash" }),
 	}
@@ -234,7 +243,7 @@ func statusJIG2() string {
 // findings tables.
 var (
 	roundColumns   = []string{"round", "verdict", "reviewer", "harness", "model", "independent", "fix", "ask", "note", "scope", "base", "head", "files", "kept_fixed", "probes", "survived"}
-	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by"}
+	findingColumns = []string{"id", "round", "action", "risk", "file:line", "title", "status", "rationale", "decision", "decided_by", "detail", "triage"}
 )
 
 // statusJIG2Done is `jig status JIG-2` once the clean round has folded the
@@ -412,6 +421,9 @@ func (g *rig) syncDigests() {
 	for _, id := range order {
 		t := g.m.w.tickets[id]
 		if d, ok := g.pinned[id]; ok {
+			if t.digest != d {
+				g.m.w.gen++
+			}
 			t.digest = d
 			continue
 		}
@@ -439,7 +451,7 @@ func (g *rig) syncDigests() {
 		if m, ok := moved[id]; ok {
 			d = m
 		}
-		changed = append(changed, rosterRow{ID: id, Title: t.title, Blockers: t.blockers, Digest: d})
+		changed = append(changed, rosterRow{ID: id, Title: t.title, State: t.state, Blockers: t.blockers, Digest: d, StartOrder: t.readyAt})
 	}
 	var charts []chartListing
 	for _, name := range g.m.w.chartOrder {
@@ -496,6 +508,9 @@ func (g *rig) send(msg tea.Msg) {
 	_, cmd := g.m.Update(msg)
 	g.settle(cmd)
 	g.syncDigests()
+	// Bubble Tea draws the model after each message it delivers: the screen a
+	// key acts on is the one drawn after the message before it.
+	g.m.View()
 }
 
 // settle runs cmd and every command its messages start, to the end.
@@ -534,6 +549,10 @@ func (g *rig) press(keys ...string) *rig {
 			g.send(tea.KeyMsg{Type: tea.KeyDown})
 		case "backspace":
 			g.send(tea.KeyMsg{Type: tea.KeyBackspace})
+		case "tab":
+			g.send(tea.KeyMsg{Type: tea.KeyTab})
+		case "shift+tab":
+			g.send(tea.KeyMsg{Type: tea.KeyShiftTab})
 		case "home":
 			g.send(tea.KeyMsg{Type: tea.KeyHome})
 		case "end":
@@ -552,6 +571,72 @@ func (g *rig) press(keys ...string) *rig {
 }
 
 func (g *rig) view() string { return g.m.View() }
+
+// tabTo presses tab until the pane titled title has the focus.
+func (g *rig) tabTo(title string) *rig {
+	g.t.Helper()
+	g.view()
+	for i := 0; i < 12 && !samePane(g.m.focusedPane(), title); i++ {
+		g.press("tab")
+		g.view()
+	}
+	if !samePane(g.m.focusedPane(), title) {
+		g.t.Fatalf("tab did not reach the pane %q: panes %v, focus %q", title, g.m.panesNow, g.m.focusedPane())
+	}
+	return g
+}
+
+// onRow puts the cursor of the screen on top on the row of id, whatever group
+// the project's list drew it in.
+func (g *rig) onRow(id string) *rig {
+	g.t.Helper()
+	return g.unfold().focus(id)
+}
+
+// focus is onRow with the folds as they are.
+func (g *rig) focus(id string) *rig {
+	g.t.Helper()
+	pg := g.m.page()
+	for i, r := range pg.refs() {
+		if r.id == id {
+			e := g.m.top()
+			e.sel, e.lead, e.follow = i, 0, false
+			// The pane that holds the row has the focus and keeps the cursor.
+			if at := paneOfRow(pg.panes(), i); at >= 0 {
+				p := pg.panes()[at]
+				e.paneFocus, e.textFocus = p.title, false
+				e.rememberPane(pg, p, pg.refs())
+			}
+			g.m.noteCursor()
+			return g
+		}
+	}
+	g.t.Fatalf("no row %s on the screen:\n%s", id, g.view())
+	return g
+}
+
+// mainText is the project's list, every fold open, as text.
+func (g *rig) mainText() string {
+	g.t.Helper()
+	return pagesText(g.unfold().m.mainPage())
+}
+
+// unfold opens the folds of the project's list, so every row is drawn.
+func (g *rig) unfold() *rig {
+	g.m.nav[0].open = map[string]bool{groupNotStarted.name(): true, groupDone.name(): true}
+	return g
+}
+
+// openChart opens the screen of the chart name from the project's list: its
+// chart row, or the issue it plans when it plans one, since that row stands for
+// it.
+func (g *rig) openChart(name string) *rig {
+	g.t.Helper()
+	if c := g.m.w.charts[name]; c != nil && c.listing.Issue != "" {
+		return g.onRow(c.listing.Issue).press("enter")
+	}
+	return g.onRow(name).press("enter")
+}
 
 // colored is a renderer that draws with the colors of a terminal, whatever the
 // output is.
@@ -789,4 +874,10 @@ func (t *ticket) guessSliceState(slice string) string {
 		return StateBuilding
 	}
 	return StateQueued
+}
+
+// samePane says two pane titles are one pane: the Detail pane is named for the row
+// under the cursor of the list beside it, so its title changes as that cursor moves.
+func samePane(a, b string) bool {
+	return a == b || strings.HasPrefix(a, "Detail · ") && strings.HasPrefix(b, "Detail · ")
 }

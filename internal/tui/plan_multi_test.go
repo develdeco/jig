@@ -104,7 +104,7 @@ func TestMultiTaskNestsUnderTheIssuesTasks(t *testing.T) {
 	kids := &digestInfo{Kind: "multi-task", Parent: "SHOP-49", State: "landed", Children: []digestChild{{ID: "SHOP-5"}, {ID: "SHOP-6"}},
 		PRs: []digestPR{{Repo: "demo", Number: 7, State: "merged", Target: planBranch}}}
 	done := planRig(t, planSpec{multi: true, kidsLanded: true, multiDigest: kids})
-	done.m.height, done.m.width = 40, 100
+	done.m.height, done.m.width = 40, 170
 	dv := stripANSI(done.view())
 	if row := lineWith(dv, "SHOP-7  "); !strings.Contains(row, "✓ SHOP-7") || !strings.Contains(row, "multi-task · landed · into the issue's branch at 09:25:00") {
 		t.Errorf("a landed multi-task reads %q", row)
@@ -184,7 +184,7 @@ func TestASharedTaskRowDrawsEveryPartFromItsOwnIssue(t *testing.T) {
 			)
 		}
 		g.syncDigests()
-		g.press("end", "enter")
+		g.openChart("second")
 		row := lineWith(stripANSI(g.view()), "SHOP-1  ")
 		for _, want := range []string{c.icon, c.dots, c.words} {
 			if want != "" && !strings.Contains(row, want) {
@@ -226,7 +226,7 @@ func TestALandingIsAFactOfItsIssue(t *testing.T) {
 		t.Errorf("the first issue's count: %q", row)
 	}
 	g.press("esc")
-	g.press("end", "enter")
+	g.openChart("second")
 	if row := lineWith(stripANSI(g.view()), "SHOP-1  "); !strings.Contains(row, "◆ SHOP-1") || !strings.Contains(row, "✓ ✓ ◆ ○ ○") {
 		t.Errorf("the second issue's plan reads the task as %q", row)
 	}
@@ -240,7 +240,7 @@ func TestASharedTaskShowsUnderEachIssueLandingPerIssue(t *testing.T) {
 	t.Parallel()
 	g := planMain(t, planSpec{second: true})
 	g.m.height, g.m.width = 40, 110
-	g.press("end", "enter") // the plan of SHOP-50, the second chart
+	g.openChart("second") // the plan of SHOP-50, the second chart
 	if g.m.top().chart != "second" {
 		t.Fatalf("opened %q, want second", g.m.top().chart)
 	}

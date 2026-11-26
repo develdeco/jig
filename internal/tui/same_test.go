@@ -299,7 +299,7 @@ func TestOneCounterReadsTheSameInBothPlaces(t *testing.T) {
 		lines = append(lines, l.text)
 	}
 	text := strings.Join(lines, "\n")
-	for _, want := range []string{"slice a  verified aaaaaaa · took 40s", "slice b  verified bbbbbbb · took 30s"} {
+	for _, want := range []string{"slice a   verified aaaaaaa · took 40s", "slice b   verified bbbbbbb · took 30s"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the block lacks %q:\n%s", want, text)
 		}

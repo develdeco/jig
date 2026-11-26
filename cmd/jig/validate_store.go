@@ -387,10 +387,15 @@ func recordApproval(e env, st *store.Store, ticket, sum, provenance string) (sto
 	if err != nil {
 		return store.Approval{}, "", err
 	}
+	sections, illustration, err := st.BriefRecord(ticket)
+	if err != nil {
+		return store.Approval{}, "", err
+	}
 	a := store.Approval{
 		By: who.Name, Email: who.Email,
 		At:          e.now().UTC().Format(time.RFC3339),
 		BriefSHA256: sum, Provenance: provenance,
+		Sections: sections, IllustrationSHA256: illustration,
 	}
 	if err := st.WriteApproval(ticket, a); err != nil {
 		return store.Approval{}, "", err

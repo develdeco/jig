@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +11,7 @@ import (
 
 // activityFloor is the fewest rows the chart screen's Activity panel gets with
 // its frame: the newest two lines.
-const activityFloor = 4
+const activityFloor = 5
 
 // mapLabelW is the width of the label column of the Map panel.
 const mapLabelW = 12
@@ -40,8 +39,11 @@ func (m *Model) chartPage(name string) page {
 	var detail []runRow
 	detailID := ""
 	if len(rows) > 0 {
-		r := rows[min(max(m.top().sel, 0), len(rows)-1)]
-		detail, detailID = trimRuns(m.chartDetailRows(r), detailMax), r.id
+		r := rows[m.ticketsCursor(rows, "Tickets")]
+		detail, detailID = m.chartDetailRows(r), r.id
+		if !m.zoomed("Detail") {
+			detail = trimRuns(detail, detailMax)
+		}
 	}
 	// The heights: the tickets, the Detail and Run panels and the activity at
 	// its floor come first, and the Run panel's detail goes before the Detail
@@ -59,19 +61,22 @@ func (m *Model) chartPage(name string) page {
 			run = m.runningRows(run, c.info, age)
 		}
 	}
-	spare := m.bodyRows() - len(tickets.lines) - frame(len(detail)) - frame(len(run)) - activityFloor
-	if spare < 0 && len(run) > 1 {
+	spare := m.bodyRows() - len(tickets.lines) - frame(m.runHeight("Detail", detail)) - frame(m.runHeight("Run", run)) - activityFloor
+	if spare < 0 && len(run) > 1 && !m.zoomed("Run") {
 		cut := min(-spare, len(run)-1)
 		run = trimRuns(run, len(run)-cut)
 		spare += cut
 	}
-	if spare < 0 && len(detail) > 1 {
-		cut := min(-spare, len(detail)-1)
-		detail = trimRuns(detail, len(detail)-cut)
+	if spare < 0 && !m.zoomed("Detail") {
+		var cut int
+		detail, cut = shortenRuns(detail, -spare)
 		spare += cut
 	}
 	var mapPanel page
 	if c.info != nil {
+		if m.zoomed("Map") {
+			spare = m.bodyRows()
+		}
 		m.mapPanel(&mapPanel, c, spare)
 	}
 	p.lines = append(p.lines, mapPanel.lines...)
@@ -81,16 +86,14 @@ func (m *Model) chartPage(name string) page {
 	}
 	if c.info != nil {
 		p.boxTop("Run", runWord(c.info))
-		for _, r := range run {
-			p.boxAdd(m.st.dim(pad(r.label, 8)) + " " + r.text)
-		}
+		m.runBoxRows(&p, run)
 		p.boxEnd()
 	}
 	var history []chartCommit
 	if c.info != nil {
 		history = c.info.History
 	}
-	m.chartActivityPanel(&p, rows, history)
+	m.chartActivityPanel(&p, "chart:"+c.listing.Name, rows, history)
 	return p
 }
 
@@ -110,106 +113,126 @@ func (m *Model) chartTicketsPanel(c *chart, rows []chartRow) page {
 // ticketRowsPanel is the panel of a chart's tickets as chartTicketsPanel draws
 // it, under title and with right at its edge: noteOf says the words after each
 // row's steps, and sub, when set, the lines a row has under it that the cursor
-// does not stand on.
-func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) (string, bool), sub func(chartRow) []string) page {
+// does not stand on. A task under another has its id indented. The rows are
+// laid out together, so the ids, titles and steps line up, and a note or a
+// title that does not fit wraps under its column.
+func (m *Model) ticketRowsPanel(c *chart, rows []chartRow, title, right string, noteOf func(chartRow) string, sub func(chartRow) []string) page {
 	var p page
 	p.boxTop(title, right)
 
+	cells := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		age := ""
+		if r.t != nil {
+			age = m.st.dim(m.ageOf(r.t.lastActivity()))
+		}
+		cells = append(cells, []string{m.st.icon(r.state()), spaces(2*r.depth) + r.id, r.title, m.chartDots(r), noteOf(r), age})
+	}
 	// The entries that have no ticket yet: fog, listed after the tickets.
-	var fog []string
+	nFog := 0
 	if c != nil && c.info != nil {
 		for _, t := range c.info.Tickets {
 			if t.ID == "" {
-				fog = append(fog, t.Title)
+				cells = append(cells, []string{m.st.dim("·"), "", m.st.dim(t.Title), "", m.st.dim("fog · not graduated"), ""})
+				nFog++
 			}
 		}
 	}
-
-	idW, titleW, noteW, ownW, nestW := 0, 0, 0, 0, 0
-	for _, title := range fog {
-		titleW = max(titleW, width(title))
-	}
-	notes := make([]string, len(rows))
-	for i, r := range rows {
-		var own bool
-		notes[i], own = noteOf(r)
-		idW, titleW, noteW = max(idW, width(r.id)), max(titleW, width(r.title)), max(noteW, width(notes[i]))
-		nestW = max(nestW, 2*r.depth)
-		if own {
-			ownW = max(ownW, width(notes[i]))
+	var laid []laidRow
+	if len(cells) > 0 {
+		names := make([]string, len(ticketColumnNames))
+		for i, n := range ticketColumnNames {
+			names[i] = m.st.dim(n)
 		}
-	}
-	// "icon id  title  ◐ ○ ○ ○  note" in the room a panel's text has. The words
-	// the chart says itself keep their whole column, the title gives way to them,
-	// and a status's own words are cut at the end of the line.
-	room := m.width - 7 - (nestW + 2 + idW + 2 + 2 + 2*stepCount - 1 + 2)
-	noteW = max(ownW, min(noteW, room-min(titleW, 16)))
-	titleW = min(titleW, max(0, room-noteW))
-	for i, r := range rows {
-		line := spaces(2*r.depth) + m.st.icon(r.state()) + " " + pad(r.id, idW)
-		if titleW > 0 {
-			line += "  " + pad(r.title, titleW)
+		refs := make([]*rowRef, len(cells))
+		for i, r := range rows {
+			refs[i] = &rowRef{kind: rowTicket, id: r.id, ticket: r.id}
 		}
-		line += "  " + m.chartDots(r) + "  " + notes[i]
-		p.boxRow(rowRef{kind: rowTicket, id: r.id, ticket: r.id}, line)
+		laid = m.laidListFor(&p, ticketColumns, names, cells, 0, refs)
+	}
+	for i, r := range rows {
+		p.boxRow(&rowRef{kind: rowTicket, id: r.id, ticket: r.id}, laid[i])
 		if sub != nil {
 			for _, l := range sub(r) {
-				p.boxAdd(l)
+				p.boxUnder(l)
 			}
 		}
 	}
-
-	for _, title := range fog {
-		p.boxAdd(m.st.dim("·" + spaces(1+idW) + "  " + pad(title, titleW) + "  fog · not graduated"))
+	for _, row := range laid[len(rows):] {
+		// A fog entry sits under the cursor row above it, which a window keeps it with.
+		at := len(p.lines)
+		p.boxRow(nil, row)
+		for k := at; k < len(p.lines); k++ {
+			p.lines[k].under = true
+		}
 	}
 	if c != nil && c.info == nil && c.listing.Ungraduated > 0 {
 		n := c.listing.Ungraduated
-		fog = append(fog, "")
+		nFog++
 		p.boxAdd(m.st.dim("· " + strconv.Itoa(n) + " " + plural(n, "entry", "entries") + " not graduated"))
 	}
-	if len(rows)+len(fog) == 0 {
+	if len(rows)+nFog == 0 {
 		p.boxAdd(m.st.dim("no tickets yet"))
 	}
 	p.boxEnd()
 	return p
 }
 
+// ticketColumns are the columns of a panel's ticket rows: the state icon
+// (indented under its parent), the id, the title, the five steps, the note and
+// the age, which is never cut.
+var ticketColumns = []column{{}, {id: true, gap: 1}, {free: true, gap: 2}, {gap: 2}, {free: true, gap: 2}, {gap: 2, keep: true}}
+
 // chartNote is the words after a ticket's steps in the chart: what it waits
 // for when its build has not begun, that it can start, or where it stands as
-// on the project's list. own says they are the chart's own words, which a
-// narrow row must not cut, and not the ticket's status.
-func (m *Model) chartNote(r chartRow) (note string, own bool) { return m.chartNoteIn(r, true) }
+// on the project's list.
+func (m *Model) chartNote(r chartRow) string { return m.chartNoteIn(r, true) }
 
 // chartNoteIn is chartNote with or without the kind a ticket says of itself
 // ("task of <issue> · "), which a screen that is about that parent need not say.
-func (m *Model) chartNoteIn(r chartRow, kind bool) (note string, own bool) {
+func (m *Model) chartNoteIn(r chartRow, kind bool) string {
 	switch {
 	case r.verb != nil && r.verb.Problem != "":
-		return m.st.state(StateStalled, r.verb.Problem), true
+		return m.st.state(StateStalled, r.verb.Problem)
 	case r.t == nil || r.t.digest == nil:
 		// The roster has not listed the ticket: nothing of it is known.
-		return m.st.dim(readingText), true
+		return m.st.dim(readingText)
 	case r.behind:
-		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes), true
+		return m.st.state(StateReady, behindWord) + m.st.dim(" · "+behindOwes)
 	case r.t != nil && (r.done || r.needs || len(r.t.stepLines(stepBuild)) > 0):
-		return m.ticketDetailIn(r.t, r.steps, kind), false
+		return m.ticketDetailIn(r.t, r.steps, kind)
 	case r.done:
-		return m.st.state(StatePublished, "published"), true
+		return m.st.state(StatePublished, "published")
 	case len(r.waits) > 0:
-		return m.st.dim(waitNote(r.waits[0])), true
+		return m.st.dim(waitNote(r.waits[0]))
 	case r.t != nil && r.t.digest != nil && r.t.digest.Ready:
-		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next"), true
+		return m.st.state(StateReady, "ready") + m.st.dim(" · "+r.t.digest.Current+" next")
 	case r.t != nil:
-		return m.ticketDetailIn(r.t, r.steps, kind), false
+		return m.ticketDetailIn(r.t, r.steps, kind)
 	}
-	return "", false
+	return ""
 }
 
 // runRow is a line of the Run panel: a label, the words, and how much the line
-// matters when the panel is short (0 is kept longest).
+// matters when the panel is short (0 is kept longest). A line of an ask's text
+// carries the ask's id and is never cut for room: a person decides the ask from
+// it.
 type runRow struct {
 	label, text string
 	weight      int
+	ask         string
+}
+
+// cuttable is how many of rows a short panel may give up: all but the lines of
+// an ask.
+func cuttable(rows []runRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.ask == "" {
+			n++
+		}
+	}
+	return n
 }
 
 // runRows are what a run of the chart would do: the prompt that starts it,
@@ -223,29 +246,29 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 	case info.Reason != "":
 		next = m.st.dim(info.Reason)
 	}
-	rows := []runRow{{"next", next, 0}}
+	rows := []runRow{{"next", next, 0, ""}}
 	first, then := landingsOf(info)
 	switch {
 	case first != nil:
 		// The run stops at a landing: the person's word is the landing's, not
 		// the run's, and the reason is the landing's state as phase words it.
 		rows[0].text = "say " + m.st.key(strconv.Quote(first.Prompt))
-		rows = append(rows, runRow{"why", m.st.dim(first.State), 1})
+		rows = append(rows, runRow{"why", m.st.dim(first.State), 1, ""})
 		for _, l := range then {
 			words := "also " + l.Prompt
 			if len(l.After) > 0 {
 				words = "then " + l.Prompt + ", after " + andList(l.After)
 			}
-			rows = append(rows, runRow{"", m.st.dim(words), 1})
+			rows = append(rows, runRow{"", m.st.dim(words), 1, ""})
 		}
 	case len(info.Ends) == 0 && info.Reason != "" && info.Prompt != "":
-		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1})
+		rows = append(rows, runRow{"why", m.st.dim(info.Reason), 1, ""})
 	}
 	if len(info.Briefs) > 0 {
-		rows = append(rows, runRow{"briefs", strings.Join(info.Briefs, ", "), 2})
+		rows = append(rows, runRow{"briefs", strings.Join(info.Briefs, ", "), 2, ""})
 	}
 	for i, w := range info.Run {
-		rows = append(rows, runRow{"wave " + strconv.Itoa(i+1), strings.Join(w, ", "), 3})
+		rows = append(rows, runRow{"wave " + strconv.Itoa(i+1), strings.Join(w, ", "), 3, ""})
 	}
 	for i, e := range info.Ends {
 		label := ""
@@ -258,10 +281,10 @@ func (m *Model) runRows(info *chartInfo) []runRow {
 			// the words internal/phase wrote for it.
 			note = e.Fact
 		}
-		rows = append(rows, runRow{label, note, 1})
+		rows = append(rows, runRow{label, note, 1, ""})
 	}
 	if info.Spend != nil {
-		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2})
+		rows = append(rows, runRow{"spend", spendWords(info.Spend), 2, ""})
 	}
 	return rows
 }
@@ -327,14 +350,26 @@ func andList(words []string) string {
 	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
+// shortenRuns is rows with up to short lines given back, and how many were: one
+// line of the cuttable ones is always kept, and the lines of an ask are never
+// given back.
+func shortenRuns(rows []runRow, short int) ([]runRow, int) {
+	cut := min(short, cuttable(rows)-1)
+	if cut < 1 {
+		return rows, 0
+	}
+	return trimRuns(rows, cuttable(rows)-cut), cut
+}
+
 // trimRuns is rows cut to n lines, the least important first (the last of
-// them among equals), the rest in their order.
+// them among equals), the rest in their order. The lines of an ask are not
+// counted in n and never cut.
 func trimRuns(rows []runRow, n int) []runRow {
 	rows = append([]runRow(nil), rows...)
-	for len(rows) > max(1, n) {
-		drop := 0
+	for cuttable(rows) > max(1, n) {
+		drop := -1
 		for i, r := range rows {
-			if r.weight >= rows[drop].weight {
+			if r.ask == "" && (drop < 0 || r.weight >= rows[drop].weight) {
 				drop = i
 			}
 		}
@@ -358,8 +393,18 @@ func (m *Model) mapPanel(p *page, c *chart, room int) {
 	if mp == nil {
 		p.boxAdd(m.st.dim("no map.md yet"))
 	} else {
-		for _, l := range m.mapLines(mp, m.width-7, room-2) {
+		// An expanded Map is every line it has, whatever room it was given.
+		whole := m.paneExpanded("Map")
+		n := room - 2
+		if whole {
+			n = wholeRows
+		}
+		lines, cuts := m.mapLinesMarked(mp, m.width-7, n, whole)
+		for i, l := range lines {
 			p.boxAdd(l)
+			if c, ok := cuts[i]; ok {
+				p.lines[len(p.lines)-1].cuts = []cutMark{c}
+			}
 		}
 	}
 	p.boxEnd()
@@ -370,12 +415,17 @@ func (m *Model) mapPanel(p *page, c *chart, room int) {
 // scope. When they do not all fit the out-of-scope lines go first, then the
 // decisions and the fog shrink to their first item and a count, then the
 // destination to one line, then the decisions and the fog go.
-func (m *Model) mapLines(mp *chartMap, w, n int) []string {
+//
+// whole gives the destination every row it needs; the lines that end in a cut
+// come back with the mark that stands for them, by their place in the lines.
+func (m *Model) mapLinesMarked(mp *chartMap, w, n int, whole bool) ([]string, map[int]cutMark) {
 	textW := max(1, w-mapLabelW-1)
 	type section struct {
 		label string
 		full  []string // every line, at its fullest
 		one   []string // one line, the rest counted
+		// fullCut and oneCut say the last of the lines ends in a cut.
+		fullCut, oneCut bool
 	}
 	items := func(label, glyph string, list []string, most int, tint func(string) string) section {
 		s := section{label: label}
@@ -398,9 +448,15 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 	}
 	plain := func(s string) string { return s }
 	dest := section{label: "destination"}
+	destText := ""
 	if text := strings.Join(mp.Destination, " "); text != "" {
-		dest.full = wrap(text, textW, 2)
-		dest.one = wrap(text, textW, 1)
+		most := 2
+		if whole {
+			most = wholeRows
+		}
+		dest.full, dest.fullCut = wrapCut(text, textW, most)
+		dest.one, dest.oneCut = wrapCut(text, textW, 1)
+		destText = text
 	}
 	secs := []section{
 		dest,
@@ -450,11 +506,12 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 		}
 		return total
 	}
-	by := lines(0)
+	by, used := lines(0), 0
 	for level := 1; level <= reductions && count(by) > n; level++ {
-		by = lines(level)
+		by, used = lines(level), level
 	}
 	var out []string
+	cuts := map[int]cutMark{}
 	for i, l := range by {
 		for j, text := range l {
 			label := spaces(mapLabelW)
@@ -462,9 +519,13 @@ func (m *Model) mapLines(mp *chartMap, w, n int) []string {
 				label = m.st.dim(pad(secs[i].label, mapLabelW))
 			}
 			out = append(out, label+" "+text)
+			if i == 0 && j == len(l)-1 && (used > oneDest && dest.oneCut || used <= oneDest && dest.fullCut) {
+				// The destination's ellipsis is the cut the whole text stands for.
+				cuts[len(out)-1] = cutMark{x: width(out[len(out)-1]) - 1, value: destText}
+			}
 		}
 	}
-	return out[:min(len(out), n)]
+	return out[:min(len(out), n)], cuts
 }
 
 // chartLine is a line of the chart's activity: a ticket's log line, or (commit
@@ -493,107 +554,23 @@ func (c chartLine) tag() string {
 	return tagOf(c.step, c.key)
 }
 
-// chartActivityPanel adds the latest lines of the chart to p, newest first:
-// every ticket's, each with the ticket and the step it belongs to, and the
-// commits of the chart's folder in the store (history, newest first), as many
-// as the rows left below p allow, two at least.
-func (m *Model) chartActivityPanel(p *page, rows []chartRow, history []chartCommit) {
-	var all []chartLine
-	idW := 0
-	for _, r := range rows {
-		if r.t == nil {
-			continue
+// ticketsCursor is the place among rows of the ticket the cursor of the pane
+// titled title stands on, whatever pane has the focus: the cursor itself when
+// the pane has the focus, else the row it was left on. It reads no page.
+func (m *Model) ticketsCursor(rows []chartRow, title string) int {
+	e := m.top()
+	last := max(len(rows)-1, 0)
+	pc := e.paneCurs[title]
+	if !pc.set {
+		// The first frame: the cursor has not been read as a row yet.
+		return min(max(e.sel, 0), last)
+	}
+	for i, r := range rows {
+		if r.id == pc.id.id {
+			return i
 		}
-		idW = max(idW, width(r.id))
-		for _, pl := range m.placed(r.t, r.d) {
-			at, _ := pl.l.At()
-			all = append(all, chartLine{id: r.id, t: r.t, placedLine: pl, at: at})
-		}
 	}
-	if len(history) > 0 {
-		idW = max(idW, width(chartCommitID))
-	}
-	// The commits come after the tickets' lines, oldest first, so that at one
-	// instant the stable sort keeps git's order (the newer above the older) and
-	// a commit stands above a ticket's line.
-	for i := len(history) - 1; i >= 0; i-- {
-		all = append(all, chartLine{id: chartCommitID, commit: &history[i], at: history[i].Time})
-	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
-	keep := max(activityFloor-2, m.bodyRows()-len(p.lines)-2)
-	right := ""
-	if n := len(all); n > keep {
-		right = fmt.Sprintf("latest %d of %d", keep, n)
-	}
-	p.boxTop("Activity", right)
-	if len(all) == 0 {
-		p.boxAdd(m.st.dim("nothing yet"))
-	}
-	var shown []chartLine
-	tagW := 0
-	for i := len(all) - 1; i >= 0 && len(shown) < keep; i-- {
-		tagW = max(tagW, min(tagMaxW, width(all[i].tag())))
-		shown = append(shown, all[i])
-	}
-	for _, e := range shown {
-		tag := pad(e.tag(), tagW)
-		if e.commit != nil {
-			p.boxAdd(m.st.dim(clockAt(e.at, m.zone)) + " " + pad(e.id, idW) + " " + m.st.dim(tag) + " " + m.st.dim("· "+short(e.commit.SHA)) + " " + e.commit.Subject)
-			continue
-		}
-		if e.step >= 0 {
-			tag = m.st.state(stepTagState[e.step], tag)
-		} else {
-			tag = m.st.dim(tag)
-		}
-		p.boxAdd(m.st.dim(clock(e.l, m.zone)) + " " + pad(e.id, idW) + " " + tag + " " + m.moveText(e.t, e.l))
-	}
-	p.boxEnd()
-}
-
-// mainCharts adds the project's charts to p after its tickets: a row each, with
-// how many of its tickets are published and whether one needs the person. The
-// columns follow the tickets' (idW, titleW) and widen for a longer name or
-// title, as far as the row has room.
-func (m *Model) mainCharts(p *page, idW, titleW int) {
-	if len(m.w.chartOrder) == 0 {
-		return
-	}
-	nameW, ownW := idW, 0
-	for _, name := range m.w.chartOrder {
-		nameW = max(nameW, width(name))
-		ownW = max(ownW, width(m.w.charts[name].title()))
-	}
-	// The room left once the icon, the name, "chart" and the counts are drawn.
-	titleW = max(titleW, min(ownW, max(0, m.width-nameW-42)))
-	if len(p.lines) > 0 {
-		p.add("")
-	}
-	p.add(m.st.dim("charts"))
-	for _, name := range m.w.chartOrder {
-		c := m.w.charts[name]
-		rows := m.chartRows(c)
-		total, done, needs := chartProgress(rows)
-		state, _ := m.chartStatus(c, rows)
-		title := c.title()
-		if title == name {
-			title = ""
-		}
-		line := m.st.icon(state) + " " + pad(name, nameW)
-		if titleW > 0 {
-			line += "  " + pad(title, titleW)
-		}
-		line += "  " + m.st.dim("chart") + "  "
-		if total == 0 {
-			line += m.st.dim("not graduated")
-		} else {
-			line += m.st.dim(fmt.Sprintf("%d of %d published", done, total))
-		}
-		if needs > 0 {
-			line += m.st.state(StateNeedsInput, fmt.Sprintf(" · %d needs you", needs))
-		}
-		p.addRow(rowRef{kind: rowChart, id: name}, line)
-	}
+	return min(max(pc.idx, 0), last)
 }
 
 // chartFirstOpen is the position, among a chart screen's rows, of the first

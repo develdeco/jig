@@ -42,6 +42,14 @@ type outcome struct {
 	After int
 }
 
+// leavesTheMove says the verb's result leaves the next move to someone else (the
+// gate opens a round for a reviewer), so its help line is shown whole.
+func (o outcome) leavesTheMove() bool { return o.Label == "gate" || o.Label == labelPublishWhat }
+
+// labelPublishWhat is the label of the render `p` runs first: what it leaves on
+// the panel is a What that waits for its bullets.
+const labelPublishWhat = "publish-what"
+
 // shown is the step the screen reports: the one that failed, else the last.
 func (o outcome) shown() ranStep {
 	if len(o.Steps) == 0 {

@@ -44,7 +44,7 @@ func heldChartRig(t *testing.T) *rig {
 // onChart opens the chart screen of a rig that shows the project's list.
 func onChart(g *rig) *rig {
 	g.t.Helper()
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		g.t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}
@@ -66,12 +66,12 @@ func detailPanelOf(t *testing.T, view string) []string {
 // who holds its claim and which agent made the call.
 func TestChartDetailNamesTheHolderTheAgentAndTheStage(t *testing.T) {
 	t.Parallel()
-	g := onChart(heldChartRig(t))
+	g := onChart(wideChart(heldChartRig(t)))
 	panel := detailPanelOf(t, g.view())
 	if !strings.HasSuffix(panel[0], "JIG-5 ─╮") {
 		t.Errorf("the top edge does not end with the ticket's id:\n%s", strings.Join(panel, "\n"))
 	}
-	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice    s2 · claimed · builder · agent 4f2a91c0") {
+	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice s2 · claimed · builder · agent 4f2a91c0") {
 		t.Errorf("the panel does not name the slice, its stage, its holder and its agent:\n%s", got)
 	}
 }
@@ -124,7 +124,7 @@ func TestChartDetailOfATicketWithNothingBuilding(t *testing.T) {
 	g := chartScreenRig(t)
 	g.press("up")
 	panel := detailPanelOf(t, g.view())
-	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state    waits to land") {
+	if !strings.HasSuffix(panel[0], "JIG-4 ─╮") || len(panel) != 3 || !strings.Contains(panel[1], "state waits to land") {
 		t.Errorf("the panel of a published ticket does not say so in its one row:\n%s", strings.Join(panel, "\n"))
 	}
 	g.press("down", "down")
@@ -144,15 +144,19 @@ func TestChartDetailOfATicketTheScreensDoNotKnowSaysSo(t *testing.T) {
 	}
 }
 
-// TestChartDetailTakesItsRowsFromTheMapAndTheRunPanelFirst: a short screen gives
-// up the Map, then the Run panel's rows, and keeps the Detail panel; a tall one
-// has room for all of them.
+// TestChartDetailTakesItsRowsFromTheMapAndTheRunPanelFirst: a screen of 80 by 25,
+// its tickets' notes wrapped, gives up the Map, then the Run
+// panel's rows, and keeps the Detail panel; a tall one has room for all of them.
 func TestChartDetailTakesItsRowsFromTheMapAndTheRunPanelFirst(t *testing.T) {
 	t.Parallel()
 	g := chartScreenRig(t)
+	// One row short of 80 by 24: the hint line of a chart is one line when no
+	// key of a ticket can run, which leaves a row more than the screen the
+	// panels' budget was set on.
+	g.send(tea.WindowSizeMsg{Width: 80, Height: 29})
 	v := g.view()
 	if strings.Contains(v, "map:") || strings.Contains(v, "╭─ Map") {
-		t.Errorf("the 80 by 24 screen still has the map:\n%s", v)
+		t.Errorf("the short screen still has the map:\n%s", v)
 	}
 	run := strings.Join(panelLines(strings.Split(v, "\n"), "Run"), "\n")
 	if !strings.Contains(run, "next ") || !strings.Contains(run, "ends at") || strings.Contains(run, "wave") {
@@ -243,15 +247,15 @@ func TestChartDetailGivesUpRowsDownToOneOnAShortScreen(t *testing.T) {
 	if len(panel) != 2+3 {
 		t.Fatalf("three slices are being built and the Detail panel has %d rows:\n%s", len(panel)-2, strings.Join(panel, "\n"))
 	}
-	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice    s1 · claimed · builder · agent a1") ||
-		!strings.Contains(got, "         s2 · claimed · builder") || !strings.Contains(got, "         s3 · claimed · builder") {
+	if got := strings.Join(panel, "\n"); !strings.Contains(got, "slice s1 · claimed · builder · agent a1") ||
+		!strings.Contains(got, "      s2 · claimed · builder") || !strings.Contains(got, "      s3 · claimed · builder") {
 		t.Errorf("the rows do not name each slice, its stage and its holder, the label on the first only:\n%s", got)
 	}
 
-	for _, c := range []struct{ height, rows int }{{24, 2}, {23, 1}} {
+	for _, c := range []struct{ height, rows int }{{29, 2}, {28, 1}} {
 		v := buildingRig(t, 80, c.height, 3).view()
 		panel = detailPanelOf(t, v)
-		if len(panel)-2 != c.rows || !strings.Contains(strings.Join(panel, "\n"), "slice    s1 · claimed") || strings.Contains(strings.Join(panel, "\n"), "s3") {
+		if len(panel)-2 != c.rows || !strings.Contains(strings.Join(panel, "\n"), "slice s1 · claimed") || strings.Contains(strings.Join(panel, "\n"), "s3") {
 			t.Errorf("the 80 by %d screen has %d Detail rows for three slices, want %d, s3 gone first:\n%s", c.height, len(panel)-2, c.rows, v)
 		}
 		if !strings.Contains(v, "╭─ Activity") || len(strings.Split(v, "\n")) != c.height {
@@ -367,7 +371,7 @@ func wideChart(g *rig) *rig {
 func TestChartDetailShowsAHoldUntilTheTicketMoves(t *testing.T) {
 	t.Parallel()
 	g := onChart(wideChart(heldChartRig(t)))
-	const hold = "hold     ⏸ agent 4f2a91c0 held at its stop · commit 222222222222 for slice s2 has no recorded result"
+	const hold = "hold  ⏸ agent 4f2a91c0 held at its stop · commit 222222222222 for slice s2 has no recorded result"
 	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, hold) {
 		t.Fatalf("the panel has no hold row:\n%s", got)
 	}
@@ -389,21 +393,20 @@ func TestChartDetailShowsTheSessionsOwnHold(t *testing.T) {
 	g := wideChart(chartRig(t))
 	g.feed(holdLine(at(2, 31), "JIG-5", "", "s2", "the oracle failed"), holdLine(at(3, 0), "JIG-8", "", "", "changes are not committed"))
 	onChart(g)
-	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, "hold     ⏸ the session held at its stop · the oracle failed") {
+	if got := strings.Join(detailPanelOf(t, g.view()), "\n"); !strings.Contains(got, "hold  ⏸ the session held at its stop · the oracle failed") {
 		t.Errorf("a stop of the session is not worded so:\n%s", got)
 	}
 	g.press("down")
 	panel := detailPanelOf(t, g.view())
 	if got := strings.Join(panel, "\n"); !strings.HasSuffix(panel[0], "JIG-8 ─╮") || len(panel) != 3 ||
-		!strings.Contains(got, "hold     ⏸ the session held at its stop · changes are not committed") || strings.Contains(got, "state") {
+		!strings.Contains(got, "hold ⏸ the session held at its stop · changes are not committed") || strings.Contains(got, "state") {
 		t.Errorf("a ticket with a hold and nothing building is not its hold row alone:\n%s", got)
 	}
 }
 
-// TestChartDetailShowsTheNewestTwoHoldsOldestFirst: of three holds the oldest is
-// left out, the other two stand in the order they were made, the label on the
-// first.
-func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
+// TestChartDetailShowsTheNewestTwoHoldsNewestFirst: of three holds the oldest is
+// left out, the other two stand newest first, the label on the first.
+func TestChartDetailShowsTheNewestTwoHoldsNewestFirst(t *testing.T) {
 	t.Parallel()
 	g := wideChart(chartRig(t))
 	g.feed(
@@ -417,9 +420,9 @@ func TestChartDetailShowsTheNewestTwoHoldsOldestFirst(t *testing.T) {
 	if strings.Contains(got, "first fact") {
 		t.Errorf("the oldest of three holds is drawn:\n%s", got)
 	}
-	second, third := strings.Index(got, "hold     ⏸ agent bbbbbbbb held at its stop · second fact"), strings.Index(got, "         ⏸ the session held at its stop · third fact")
-	if second < 0 || third < second {
-		t.Errorf("the newest two holds are not drawn in time order, the label on the first:\n%s", got)
+	third, second := strings.Index(got, "hold  ⏸ the session held at its stop · third fact"), strings.Index(got, "      ⏸ agent bbbbbbbb held at its stop · second fact")
+	if third < 0 || second < third {
+		t.Errorf("the newest two holds are not drawn newest first, the label on the first:\n%s", got)
 	}
 }
 
@@ -435,7 +438,7 @@ func TestChartDetailGivesUpTheSliceRowsBeforeTheHold(t *testing.T) {
 	if len(panel)-2 != detailMax {
 		t.Fatalf("the panel has %d rows, want the most it has, %d:\n%s", len(panel)-2, detailMax, got)
 	}
-	for _, want := range []string{"slice    s1 · claimed", "         s2 · claimed", "hold     ⏸ agent a1 held at its stop · first fact", "         ⏸ the session held at its stop · second fact"} {
+	for _, want := range []string{"slice s1 · claimed", "      s2 · claimed", "hold  ⏸ the session held at its stop · second fact", "      ⏸ agent a1 held at its stop · first fact"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the panel lacks %q:\n%s", want, got)
 		}
@@ -458,10 +461,10 @@ func TestChartDetailNamesNoAgentForAClaimWhoseOwnCallIsGone(t *testing.T) {
 	g.feed(claimLine(at(4, 2), "JIG-5", "s-builder", "agent-newer", "jig claim JIG-5 --slice s2"))
 	panel := detailPanelOf(t, g.view())
 	got := strings.Join(panel, "\n")
-	if !strings.Contains(panel[1], "slice    s1 · claimed · builder") || strings.Contains(panel[1], "agent") {
+	if !strings.Contains(panel[1], "slice s1 · claimed · builder") || strings.Contains(panel[1], "agent") {
 		t.Errorf("the older slice's row does not name the builder alone:\n%s", got)
 	}
-	if !strings.Contains(panel[2], "         s2 · claimed · builder · agent newer") {
+	if !strings.Contains(panel[2], "      s2 · claimed · builder · agent newer") {
 		t.Errorf("the newer slice's row does not name the agent of its own call:\n%s", got)
 	}
 }

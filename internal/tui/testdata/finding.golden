@@ -1,0 +1,30 @@
+jig  demo › JIG-2  Config loader › 3 review › round 1 › r1-f1 (1 of 4)                      ◐ to fix
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ╭─ Finding r1-f1 ─────────────────────────────────────────────────────────────── round 1 · high ─╮
+  │  where     alpha/a.go:12                                                                       │
+  │  title     Close the file                                                                      │
+  │  risk      high                                                                                │
+  │  why       a leaked handle fails the next open                                                 │
+  │  action    fix                                                                                 │
+  │  became    ◐ to fix                                                                            │
+  │  sorted by the gate                                                                            │
+  │  round     1                                                                                   │
+  │                                                                                                │
+  │  The file is opened and never closed.                                                          │
+  │  Close it on every path.                                                                       │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭─ Fix slices ─────────────────────────────────────────────────────────────────────────────── 1 ─╮
+  │    slice        state  goal                                                                    │
+  │▸ ● fix-1-alpha  green  alpha/a.go:12 Close the file                                            │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  esc back · q quit · ? keys · tab next pane: Finding r1-f1 · ↑↓ move in Fix slices · 1-5 steps
+  [ ] sibling · h main · t tail

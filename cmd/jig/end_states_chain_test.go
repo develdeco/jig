@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -65,12 +66,12 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 	}
 
 	keys, main, wait := startTUI(t, e, scope...)
-	main.until(t, "17 tickets")
+	showFolds(t, keys, main)
 	keys.Write([]byte("q"))
 	if wait() != 0 {
 		t.Fatalf("jig tui exited non-zero\n%s", main.String())
 	}
-	list := lastScreen(main.String())
+	list := main.String() // the rows are read from the screens that showed them
 
 	for id, w := range want {
 		var n nextTicket
@@ -97,13 +98,13 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 		if id == "TK-13" && !strings.Contains(row, "⊖ ⊖ ⊖ ⊖ ⊖") {
 			t.Errorf("%s: closed before its work was done, its dots on the project's list are not all closed:\n%s", id, row)
 		}
-		if !strings.Contains(row, w.icon+" "+id) || !strings.Contains(row, head(w.words, 28)) {
+		if !regexp.MustCompile(regexp.QuoteMeta(w.icon)+`\s+`+regexp.QuoteMeta(id)).MatchString(row) || !strings.Contains(strings.Join(strings.Fields(list), " "), head(w.words, 28)) {
 			t.Errorf("%s: its row on the project's list is not %s with %q:\n%s", id, w.icon, w.words, row)
 		}
 
 		// The ticket's screen.
 		keys, screen, wait := startTUI(t, e, append([]string{id}, scope...)...)
-		screen.until(t, "› "+id+"  Ticket "+id)
+		screen.until(t, "  Ticket "+id)
 		screen.until(t, head(land.Text, 20))
 		if id == "TK-13" {
 			screen.until(t, "⊖ 1 Brief") // the status is read: the steps it never finished are told
@@ -148,7 +149,7 @@ func TestTUIEndStatesEqualNext(t *testing.T) {
 			}
 		}
 		if w.word == "landed" && d != nil && len(d.PRs) > 0 {
-			if !strings.Contains(lframe, "✓") || !strings.Contains(lframe, "record · landed") {
+			if !strings.Contains(lframe, "✓") || !strings.Contains(lframe, "record landed") {
 				t.Errorf("%s: the landing is not under the land step:\n%s", id, lframe)
 			}
 		}

@@ -191,7 +191,7 @@ func (f *fakeRunner) ran(line string) int {
 func chartScreenRig(t *testing.T) *rig {
 	t.Helper()
 	g := chartRig(t)
-	g.press("end", "enter")
+	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())
 	}

@@ -115,7 +115,7 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 	t.Parallel()
 	g := cardRig(t, 100, 40)
 	v := g.view()
-	golden(t, "ticket-card", v)
+	goldenCuts(t, "ticket-card", cardRig(t, 100, 40)) // a rig of its own: the check expands and folds its marks
 	rows := strings.Split(v, "\n")
 	block := strings.Join(panelLines(rows, "Build ─"), "\n")
 	for _, want := range []string{
@@ -160,12 +160,12 @@ func TestTheSliceUnderWayOpensWithItsFields(t *testing.T) {
 // even that lists the sub-steps one line each.
 func TestTheOpenSubstepGivesWayOnASmallScreen(t *testing.T) {
 	t.Parallel()
-	v := cardRig(t, 80, 24).view()
+	v := cardRig(t, 80, 28).view()
 	block := strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if !strings.Contains(block, "now ") || strings.Contains(block, "   a quantity above") {
 		t.Errorf("the 80x24 block does not keep the live line over the fields:\n%s", v)
 	}
-	v = cardRig(t, 80, 20).view()
+	v = cardRig(t, 80, 24).view()
 	block = strings.Join(panelLines(strings.Split(v, "\n"), "Build ─"), "\n")
 	if strings.Contains(block, "now ") || !strings.Contains(block, "◐ slice clamp  claimed by builder") {
 		t.Errorf("the 80x20 block is not one line per sub-step:\n%s", v)
@@ -199,7 +199,7 @@ func TestAReviewRoundOpensWithItsReviewer(t *testing.T) {
 	rows := strings.Split(g.view(), "\n")
 	block := strings.Join(panelLines(rows, "Review ─"), "\n")
 	for _, want := range []string{
-		"◎ round 1  opened ━━ taken ━━ reviewing ── closed",
+		"◎ round 1   opened ━━ taken ━━ reviewing ── closed",
 		"reviewer reviewer subagent · Claude Code · Opus 5",
 		"now      55m 30s ✗ $ `go test ./cart/...` · exit 1",
 	} {

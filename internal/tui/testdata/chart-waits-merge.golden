@@ -1,24 +1,24 @@
 jig  demo › shop  Shop                                           ? run needs you
 ────────────────────────────────────────────────────────────────────────────────
-  ╭─ Map ───────────────────────────────────────────────── charts/shop/map.md ─╮
-  │  destination  Receipts show the coupon.                                    │
-  │  decided      ✓ One line per coupon                                        │
-  ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 2 published ─╮
-  │  ◇ JIG-4  Coupon model  ✓ ✓ ✓ ✓ ◇  waits to land · say "Land JIG-4"        │
-  │▸ ◐ JIG-7  Coupons in …  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR is open │
+  │    ticket  title                steps      where it stands             age │
+  │  ◇ JIG-4   Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land   45m │
+  │                                            JIG-4"                          │
+  │▸ ◐ JIG-7   Coupons in receipts  ◐ ○ ○ ○ ○  waits for JIG-4 merged · its PR │
+  │                                            is open                         │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Detail ─────────────────────────────────────────────────────────── JIG-7 ─╮
-  │  state    brief being drafted                                              │
+  │  state brief being drafted                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Run ────────────────────────────────────────────────── waits for a merge ─╮
-  │  next     say "Continue shop"                                              │
-  │  ends at  JIG-7 waits for JIG-4 to merge · PR #7 open                      │
+  │  next    say "Continue shop"                                               │
+  │  ends at JIG-7 waits for JIG-4 to merge · PR #7 open                       │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Activity ──────────────────────────────────────────────── latest 2 of 12 ─╮
-  │  09:14:21 JIG-4 publish·done ● finished                                    │
-  │  09:14:20 JIG-4 publish·pr   ▲ opened https://example.test/acme/demo/pull… │
+  ╭─ Activity ──────────────────────────────────────────────── latest 1 of 12 ─╮
+  │  time     ticket step         what                                         │
+  │  09:14:21 JIG-4  publish·done ● finished                                   │
+  │  ↓ 11 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move · enter open ticket · esc back · g gate · a answer · t tail
-  r refresh · q quit
+  esc back · q quit · ? keys · tab next pane: Detail · ↑↓ move in Tickets
+  enter open ticket · t tail · r refresh
