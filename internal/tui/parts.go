@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -95,19 +97,53 @@ func (m *Model) laidList(p *page, cols []column, names []string, cells [][]strin
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
-	var laid [][]string
-	switch {
-	case room < 0:
-		// What a person decides on is never cut: its free text wraps as far as it
-		// goes.
-		laid = layoutRows(cols, all, m.innerWidth(), 1<<20)
-	case room > 0:
-		laid = laidWithin(cols, all, m.innerWidth(), room+1)
-	default:
-		laid = layout(cols, all, m.innerWidth())
-	}
+	laid := m.laidOnce(cols, all, room, func() [][]string {
+		switch {
+		case room == oneRow:
+			// A list that gives up what it can for room: each row is one line, and
+			// the detail beside or under it has the text whole.
+			return layoutRows(cols, all, m.innerWidth(), 1)
+		case room < 0:
+			// What a person decides on is never cut: its free text wraps as far as it
+			// goes.
+			return layoutRows(cols, all, m.innerWidth(), 1<<20)
+		case room > 0:
+			return laidWithin(cols, all, m.innerWidth(), room+1)
+		}
+		return layout(cols, all, m.innerWidth())
+	})
 	p.boxNames(laid[0])
 	return laid[1:]
+}
+
+// oneRow is the room of a list whose rows are one line each.
+const oneRow = -2
+
+// laidOnce is the layout of the cells under cols in room, as the allocator last
+// gave it for the same cells at the same width: a frame that moves the cursor
+// reads the same lists and measures none of them again. The lines it gives back
+// are the memo's, and nothing changes them.
+func (m *Model) laidOnce(cols []column, all [][]string, room int, lay func() [][]string) [][]string {
+	var k strings.Builder
+	fmt.Fprintf(&k, "%d|%d|%v", room, m.innerWidth(), cols)
+	for _, row := range all {
+		for _, c := range row {
+			k.WriteString(c)
+			k.WriteByte(0)
+		}
+		k.WriteByte(1)
+	}
+	key := k.String()
+	if laid, ok := m.laid[key]; ok {
+		return laid
+	}
+	if m.laid == nil || len(m.laid) > 128 {
+		m.laid = map[string][][]string{}
+	}
+	m.laidBuilds++
+	laid := lay()
+	m.laid[key] = laid
+	return laid
 }
 
 // boxNames adds the row of a list's column names to the panel.

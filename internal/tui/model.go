@@ -298,6 +298,11 @@ type Model struct {
 	table []keyRow
 	// help is the `?` overlay while it is up.
 	help *helpView
+	// laid holds the layouts the allocator gave lists, by what they were made of
+	// (laidOnce), so a frame that reads the same lists measures none.
+	laid map[string][][]string
+	// laidBuilds counts the lists the allocator laid out and the memo did not hold.
+	laidBuilds int
 	// panelW, when it is more than 0, is the width the panels being built are
 	// drawn in: the side of a screen (detail.go), not the whole of it.
 	panelW int

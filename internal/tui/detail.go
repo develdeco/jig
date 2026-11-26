@@ -138,7 +138,7 @@ func (m *Model) listAndDetail(p *page, d *detailSpec, lists ...listSpec) {
 			list = page{}
 			for _, l := range lists {
 				if pass == 1 && l.room == 0 {
-					l.room = len(l.rows)
+					l.room = oneRow
 				}
 				m.listPanel(&list, l)
 			}
