@@ -248,8 +248,8 @@ func (m *Model) layMain(p *mainDraft) page {
 	if len(charts) > 0 {
 		charts = append([][]string{dim(chartColumnNames)}, charts...)
 	}
-	laidT := layoutMarked(mainColumns, tickets, w, wrapRows, wholeT)
-	laidC := layoutMarked(mainColumns, charts, w, wrapRows, wholeC)
+	laidT := layoutMarked(mainColumns, tickets, w, wrapRows, wholeT, true)
+	laidC := layoutMarked(mainColumns, charts, w, wrapRows, wholeC, true)
 	var namesT, namesC []string
 	if len(laidT) > 0 {
 		namesT, laidT = laidT[0].lines, laidT[1:]

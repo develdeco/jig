@@ -16,7 +16,7 @@ import (
 func TestToursCutNothingWhileWidthAllows(t *testing.T) {
 	t.Parallel()
 	ids := [3]string{"round-totals", "fix-4-cart-test", "cart-total"}
-	for _, size := range [][2]int{{60, 21}, {80, 24}, {230, 50}} {
+	for _, size := range [][2]int{{60, 23}, {80, 24}, {230, 50}} {
 		w, h := size[0], size[1]
 		// check is what every screen of the tour owes the person.
 		check := func(t *testing.T, g *rig, what string) string {

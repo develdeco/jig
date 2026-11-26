@@ -20,5 +20,5 @@ jig  demo › SHOP-1                                           ◐ build in prog
   │  ↓ 5 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Build · ↑↓ move in Steps
-  enter open · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Build · space expand
+  ↑↓ move in Steps · enter open · h main · t tail

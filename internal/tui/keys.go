@@ -247,19 +247,21 @@ func keyRows() []keyRow {
 			},
 			run: func(m *Model, _ string) tea.Cmd { m.toggleZoom(); return nil }},
 		{names: []string{" ", "space"}, label: "space", words: "expand", screens: onAllScreens,
+			// The key is listed whatever the page cuts, so what the body cuts never
+			// changes the keys' height, and the body is laid out once: with nothing
+			// cut it says so. Its words follow what is expanded, not what is cut.
 			say: func(_ *Model, sub subject) string {
-				if sub.holds() && sub.expanded || !sub.holds() && sub.lastExpanded {
+				if sub.expanded || sub.lastExpanded {
 					return "fold"
 				}
 				return "expand"
 			},
-			can: func(_ *Model, sub subject) (bool, string) {
-				if sub.holds() || sub.lastCut || sub.lastExpanded {
-					return true, ""
+			run: func(m *Model, _ string) tea.Cmd {
+				if !m.expandHolder(true) && m.notice == "" {
+					m.notice = "nothing is cut here"
 				}
-				return false, "nothing is cut here"
-			},
-			run: func(m *Model, _ string) tea.Cmd { m.expandHolder(true); return nil }},
+				return nil
+			}},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
 			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {

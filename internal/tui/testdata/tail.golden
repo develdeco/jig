@@ -6,9 +6,8 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   │▸ ? 2 Build   1m 59s  1 of 4 green · slice c needs your answer 57m 30s      │
   │  ○ 3 Review          after the build                                       │
   │  ○ 4 Publish         after a clean review                                  │
-  │  ○ 5 Land            after the publish                                     │
+  │  ↓ 1 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ↓ 4 more
   tail ─────────────────────────────────────────────────────────────────────────
   09:02:01 l tool             Bash s-builder
   09:02:00 j question       c q-001 Formal or casual? (agent) s-builder
@@ -20,5 +19,6 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   09:00:05 j verify-pending a aaaaaaa s-builder
   09:00:01 j claim          a s-builder
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Needs you · ↑↓ move in Steps
-  enter open · a answer · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Needs you · space expand
+  ↑↓ move in Steps · enter open · a answer · 1-5 steps · [ ] sibling · h main
+  t tail

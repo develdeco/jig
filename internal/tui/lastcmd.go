@@ -137,11 +137,10 @@ func (m *Model) lastState() (cut, expanded bool) {
 	if m.last == nil || m.width < 1 {
 		return false, false
 	}
-	v, whole := m.lastShown(m.width)
-	if whole {
-		return false, true
-	}
-	return v.cut >= 0, false
+	// What is cut follows the width alone, and what is open is the person's: the
+	// keys never read the rows the screen has to spare.
+	v := m.lastViewOf(m.last, m.width, false)
+	return v.cut >= 0, m.lastOpen == m.last
 }
 
 // toggleLast expands the last command, or folds it when it is expanded and fold

@@ -15,6 +15,9 @@ const (
 	// freeMin is the least a free column is given before the measured columns
 	// give way to it.
 	freeMin = 20
+	// freeLow is the least a free column is given before an id is cut, in a list
+	// whose names are kept whole.
+	freeLow = 12
 	// wrapRows is the most rows a free cell takes; text that goes on past them
 	// ends in an ellipsis on the last.
 	wrapRows = 3
@@ -78,7 +81,7 @@ type laidRow struct {
 // at words in its own column with no limit on rows, a word wider than the column
 // broken at it. The columns are the widths the folded rows give them, so
 // expanding a row moves no other cell of any row.
-func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bool) []laidRow {
+func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bool, named bool) []laidRow {
 	natural := make([]int, len(cols))
 	for _, r := range rows {
 		for c := range cols {
@@ -147,26 +150,50 @@ func layoutMarked(cols []column, rows [][]string, width, maxRows int, whole []bo
 		}
 	}
 
+	// A list with names never cuts them: a measured column is as wide as its
+	// names, whatever it gives up.
+	floor := func(c int) int {
+		if named && len(rows) > 0 && c < len(rows[0]) {
+			return width0(rows[0][c])
+		}
+		return 0
+	}
 	// Measured columns give way only when 20 cells for the free text do not
 	// fit beside them.
 	need := 0
 	for _, c := range active() {
 		need += min(natural[c], freeMin)
 	}
+	// With the names kept whole the other measured columns give less, so before
+	// an id is cut the free text gives up some of its cells, down to freeLow.
+	squeeze := 0
+	if named {
+		for _, c := range active() {
+			squeeze += max(0, min(natural[c], freeMin)-min(natural[c], freeLow))
+		}
+	}
 	for deficit := gaps() + measured() + need - width; deficit > 0; deficit-- {
 		pick := -1
 		for _, wantID := range []bool{false, true} {
+			if wantID && pick < 0 && squeeze > 0 {
+				squeeze--
+				pick = -2
+				break
+			}
 			for _, c := range visible {
-				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= 1 {
+				if cols[c].free || cols[c].keep || cols[c].id != wantID || w[c] <= max(1, floor(c)) {
 					continue
 				}
 				if pick < 0 || w[c] >= w[pick] {
 					pick = c
 				}
 			}
-			if pick >= 0 {
+			if pick != -1 {
 				break
 			}
+		}
+		if pick == -2 {
+			continue
 		}
 		if pick < 0 {
 			break
@@ -389,7 +416,7 @@ func openStyle(s string) string {
 // lines: free text wraps to as many rows as it needs, and a list short of room
 // asks for fewer rows of each before it gives up a row.
 func laidWithin(cols []column, cells [][]string, width, room int) [][]string {
-	laid := laidWithinMarked(cols, cells, width, room, nil)
+	laid := laidWithinMarked(cols, cells, width, room, nil, false)
 	out := make([][]string, len(laid))
 	for i, r := range laid {
 		out[i] = r.lines
@@ -398,18 +425,18 @@ func laidWithin(cols []column, cells [][]string, width, room int) [][]string {
 }
 
 // laidWithinMarked is laidWithin with the rows whole says laid out whole.
-func laidWithinMarked(cols []column, cells [][]string, width, room int, whole []bool) []laidRow {
+func laidWithinMarked(cols []column, cells [][]string, width, room int, whole []bool, named bool) []laidRow {
 	for rows := wrapRows; ; rows-- {
 		// The room is spent on the rows as they are folded: an expanded row takes
 		// more than its room and gives no other row up.
-		laid := layoutMarked(cols, cells, width, rows, nil)
+		laid := layoutMarked(cols, cells, width, rows, nil, named)
 		used := 0
 		for _, r := range laid {
 			used += len(r.lines)
 		}
 		if used <= room || rows <= 1 {
 			if whole != nil {
-				laid = layoutMarked(cols, cells, width, rows, whole)
+				laid = layoutMarked(cols, cells, width, rows, whole, named)
 			}
 			return laid
 		}

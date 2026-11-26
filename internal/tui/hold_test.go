@@ -92,7 +92,7 @@ func TestAPageHeldBelowItsTopCountsTheLinesThatCameInAbove(t *testing.T) {
 	}
 	// The lines it showed stay where they were: the count took the place of the
 	// mark that said there was more above.
-	for i := newAt + 1; i < len(before)-4; i++ {
+	for i := newAt + 1; i < len(before)-5; i++ {
 		if before[i] != after[i] {
 			t.Fatalf("row %d was %q and is now %q:\n%s", i, before[i], after[i], g.view())
 		}

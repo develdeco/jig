@@ -114,13 +114,16 @@ func (m *Model) roundsPanel(p *page, t *ticket, rounds []roundRow) {
 		return
 	}
 	cells := make([][]string, len(rounds))
-	notes := make([][]string, len(rounds))
+	notes, whos := make([][]string, len(rounds)), make([]string, len(rounds))
 	for i, r := range rounds {
-		cells[i], notes[i] = m.roundRecord(t, r)
+		cells[i], whos[i], notes[i] = m.roundRecord(t, r)
 	}
 	laid := m.laidListFor(p, roundListColumns, dimmed(m.st, roundListColumnNames), cells, 0, nil)
 	for i := range rounds {
 		p.boxRow(nil, laid[i])
+		if whos[i] != "" {
+			m.underWrap(p, nil, "    ", "    ", whos[i], m.innerWidth()-6, 2, m.st.dim)
+		}
 		for _, l := range notes[i] {
 			p.boxUnder(l)
 		}
@@ -131,7 +134,7 @@ func (m *Model) roundsPanel(p *page, t *ticket, rounds []roundRow) {
 // roundRecord is a round as the cells of its row, and the lines under it: who
 // reviewed it and whether they stood apart from the builders, and what its
 // reviewer probed.
-func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
+func (m *Model) roundRecord(t *ticket, r roundRow) (cells []string, whoText string, notes []string) {
 	word := map[string]string{StateReviewing: "open", StateFindings: "findings", StateReady: "clean"}[r.State]
 	if r.State == StateReady && r.Carried > 0 {
 		word += " (carried over from round " + strconv.Itoa(r.Carried) + ")"
@@ -191,11 +194,6 @@ func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
 	if reviewer != "" {
 		who = append(who, shortID(reviewer))
 	}
-	if len(who) > 0 {
-		for _, l := range wrap(strings.Join(who, " · "), m.innerWidth()-6, 2) {
-			notes = append(notes, "    "+m.st.dim(l))
-		}
-	}
 	rng, read := "", ""
 	if rec != nil {
 		rng = shortRange(rec.Scope, rec.Base, rec.Head)
@@ -207,7 +205,7 @@ func (m *Model) roundRecord(t *ticket, r roundRow) (cells, notes []string) {
 		}
 	}
 	cells = []string{m.st.icon(state), "round " + fmt.Sprint(r.N), m.st.state(state, word), m.st.dim(asked), m.st.dim(rng), m.st.dim(read), m.st.dim(r.At)}
-	return cells, notes
+	return cells, strings.Join(who, " · "), notes
 }
 
 // probeCounts is what a reviewer round recorded of its probes: "27 probes ·

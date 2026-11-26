@@ -94,8 +94,17 @@ func TestASubstepExpandsItsCutFieldsWhole(t *testing.T) {
 		}
 		g.press("space")
 		open := stripANSI(g.view())
-		if build := paneBlock(t, open, "Build"); strings.Contains(build, "…") || !hasWordsInOrder(build, cutTitle(80)) || !strings.Contains(between(build, "now", "slice cart"), "w030") {
-			t.Errorf("%dx%d: space did not give the goal every row:\n%s", size[0], size[1], open)
+		// Read by lines inside the room the pane has: the goal is drawn whole when
+		// the pane holds it, else by lines down to the live line's last word.
+		for i := 0; i < 40 && !strings.Contains(paneBlock(t, open, "Build"), "w030"); i++ {
+			g.press("down")
+			open = stripANSI(g.view())
+		}
+		if build := paneBlock(t, open, "Build"); !strings.Contains(build, "w030") || strings.Contains(between(build, "goal", "held by"), "…") {
+			t.Errorf("%dx%d: the expanded sub-step is not read to its live line:\n%s", size[0], size[1], open)
+		}
+		for len(g.m.top().expanded) > 0 && g.m.top().rowScroll > 0 {
+			g.press("up")
 		}
 		g.press("space")
 		if folded := stripANSI(g.view()); folded != before {

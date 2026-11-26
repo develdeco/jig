@@ -71,8 +71,14 @@ func (m *Model) substepsPanel(t *ticket, step int, subs []phase.Sub, height int)
 	cur := m.paneCursorIn(title, ids, homeSub(subs, focus))
 	from, to, openRows, merged := m.subWindow(title, t, step, subs, cur, focus, room)
 	if focus >= from && focus < to && m.subWhole(t, step, subs[focus]) {
-		// The open sub-step the person expanded takes every row it needs.
+		// The open sub-step the person expanded takes every row it needs, read by
+		// lines inside the room the pane has: when it needs more than the room
+		// leaves beside the others it is drawn alone with a count of them.
 		openRows = max(openRows, m.openWant(t, step, subs[focus]))
+		if cur == focus && openRows > room-markLines(from, to, len(subs), merged) {
+			from, to, merged = focus, focus+1, false
+		}
+		p.rooms = map[string]int{title: max(1, room-markLines(from, to, len(subs), merged))}
 	}
 
 	var picked []int
@@ -177,6 +183,6 @@ func (m *Model) foldedFit(t *ticket, step int, subs []phase.Sub, picked []int, l
 			whole[i+1] = true
 		}
 	}
-	all := laidWithinMarked(subColumns, cells, m.innerWidth(), room+1, whole)
+	all := laidWithinMarked(subColumns, cells, m.innerWidth(), room+1, whole, true)
 	return all[0].lines, all[1:]
 }

@@ -8,7 +8,6 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   │  ○ 4 Publish         after a clean review                                  │
   │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
-
   ╭─ Needs you ──────────────────────────────────────────────────── 1 waiting ─╮
   │  ? builder asks about slice c  q-001                                       │
   │      Formal or casual?                                                     │
@@ -20,5 +19,6 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   │  ↓ 6 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Needs you · ↑↓ move in Steps
-  enter open · a answer · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Needs you · space expand
+  ↑↓ move in Steps · enter open · a answer · 1-5 steps · [ ] sibling · h main
+  t tail

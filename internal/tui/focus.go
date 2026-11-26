@@ -346,11 +346,6 @@ func (m *Model) fieldText() int { return max(10, m.width-7-4-fieldW) }
 func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack, whole bool) []field {
 	var fs []field
 	tw := m.fieldText()
-	add := func(label string, rows ...string) {
-		if len(rows) > 0 && rows[0] != "" {
-			fs = append(fs, field{label: label, rows: rows})
-		}
-	}
 	// addWrap is a field of text wrapped to at most most rows, or whole when the
 	// sub-step is expanded; a cut registers the whole text.
 	addWrap := func(label, text string, most int) {
@@ -362,6 +357,8 @@ func (m *Model) subFields(t *ticket, s phase.Sub, tr subTrack, whole bool) []fie
 			fs = append(fs, field{label: label, rows: rows, cut: cut, value: text})
 		}
 	}
+	// add is a field of one row, which a field wider than the block cuts.
+	add := func(label, text string) { addWrap(label, text, 1) }
 	who := m.heldBy(t, s, tr)
 	kind, id, _ := strings.Cut(s.Key, ":")
 	switch kind {
@@ -633,8 +630,10 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 	}
 	// The clock always shows: the label gives way to it.
 	label := pad(s.Label, labelW)
-	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room {
+	labelCut := false
+	if room := w - 2 - 2 - width(right) - 1; right != "" && width(label) > room && !whole {
 		label = pad(s.Label, max(1, room))
+		labelCut = width(s.Label) > max(1, room)
 	}
 	head := m.st.icon(state) + " " + m.st.bold(label) + "  "
 	stages, reached := t.stagesOf(step, s, subs)
@@ -649,6 +648,10 @@ func (m *Model) openLines(t *ticket, step int, s phase.Sub, subs []phase.Sub, la
 		return "    " + m.st.dim(pad(label, fieldW)) + text
 	}
 	cuts := [][]cutMark{nil}
+	if labelCut {
+		// The label the clock took room from is a cut like any other.
+		cuts[0] = []cutMark{{x: width(m.st.icon(state)) + 1 + width(label) - 1, value: s.Label}}
+	}
 	for _, f := range trimFields(fs, max(0, rows-2)) {
 		for i, r := range f.rows {
 			label := ""

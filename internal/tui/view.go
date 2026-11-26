@@ -101,6 +101,9 @@ type page struct {
 	// its cursor, the rows it has all told, so the keys move over the ones it
 	// does not draw (panes.go).
 	windowed map[string][]rowRef
+	// rooms holds, for a pane that was given a room, the most lines one of its
+	// rows may take: an expanded row is read by lines inside it.
+	rooms map[string]int
 	// allPanes are the titles of every pane of the screen on a page that draws
 	// only the zoomed one (zoom.go).
 	allPanes []string
@@ -167,6 +170,11 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	var out []pline
 	m.measured += len(pg.lines)
 	pane := ""
+	// withRows are the panes that have rows the cursor stands on.
+	withRows := map[string]bool{}
+	for _, p := range pg.panes() {
+		withRows[p.title] = p.rows > 0
+	}
 	// owner is the row whose lines the ones under it are: they are expanded with it.
 	var owner *rowRef
 	for _, l := range pg.lines {
@@ -197,12 +205,23 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 			// What a person decides on is never cut.
 			rows = 1 << 20
 		}
-		if owner != nil && e.isExpanded(pane, owner) || owner == nil && e.paneOpen(pane) {
+		switch {
+		case owner != nil && e.isExpanded(pane, owner), owner == nil && e.paneOpen(pane):
+			rows = wholeRows
+		case owner == nil && withRows[pane]:
+			// A line no cursor row holds, in a pane of rows, has no holder to
+			// expand it: it is never cut.
 			rows = wholeRows
 		}
 		// Every row, the first too, is wrapped to the room the continuation rows
 		// have under their indent, so none is wider than the line may be.
 		lines, cut := wrapCellCut(l.text[indent:], max(1, w-lead), rows)
+		// A line that came with a mark of its own (a clipped text) keeps it on the
+		// last row it wraps to, which is where its ellipsis lands.
+		carried := ""
+		if len(l.cuts) > 0 {
+			carried = l.cuts[0].value
+		}
 		for i, text := range lines {
 			next := l
 			next.text = spaces(indent) + text
@@ -211,8 +230,9 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 				next.text = spaces(lead) + text
 			}
 			next.cuts = nil
-			if cut && i == len(lines)-1 {
-				next.cuts = []cutMark{{x: width(next.text) - 1, value: ansi.Strip(l.text)}}
+			if (cut || carried != "") && i == len(lines)-1 {
+				value := firstOf(carried, ansi.Strip(l.text))
+				next.cuts = []cutMark{{x: width(next.text) - 1, value: value}}
 			}
 			out = append(out, next)
 		}

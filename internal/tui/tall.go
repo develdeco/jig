@@ -59,12 +59,23 @@ func (m *Model) tallRow(l *screenLayout) {
 		from, to, _ := windowSpan(pg, l.sel, m.windowStart(pg, l.sel, h, false), h, true)
 		return from <= first && to >= rowEnd
 	}
-	if shown(l.pg, last) {
+	// A row never takes more than the room its pane was given, nor more than the
+	// body holds.
+	capLines := h
+	for i := first; i >= 0; i-- {
+		if lines[i].box == boxTop {
+			if r, ok := l.pg.rooms[lines[i].text]; ok && r > 0 {
+				capLines = min(h, r)
+			}
+			break
+		}
+	}
+	if total <= capLines && shown(l.pg, last) {
 		return
 	}
 	id := lines[first].ref.identity()
 	part := 0
-	for p := min(total-1, h); p >= 3; p-- {
+	for p := min(total-1, capLines); p >= 3; p-- {
 		if shown(m.tallPage(l.pg, first, last, 0, p), first+p) {
 			part = p
 			break

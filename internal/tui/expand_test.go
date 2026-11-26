@@ -66,8 +66,8 @@ func TestAllocatorWholeRowWrapsCutCellsUnderTheirColumns(t *testing.T) {
 	t.Parallel()
 	title := cutTitle(60)
 	rows := [][]string{{"o", "JIG-1", title, "...", "ready", "3m"}, {"o", "JIG-2", "short", "...", "ready", "4m"}}
-	folded := layoutMarked(allocatorColumns, rows, 60, wrapRows, nil)
-	whole := layoutMarked(allocatorColumns, rows, 60, wrapRows, []bool{true, false})
+	folded := layoutMarked(allocatorColumns, rows, 60, wrapRows, nil, false)
+	whole := layoutMarked(allocatorColumns, rows, 60, wrapRows, []bool{true, false}, false)
 	if len(folded[0].lines) != wrapRows || !strings.HasSuffix(folded[0].lines[wrapRows-1], "…") {
 		t.Fatalf("the folded row is not cut after %d rows:\n%s", wrapRows, strings.Join(folded[0].lines, "\n"))
 	}
@@ -93,8 +93,8 @@ func TestAllocatorWholeRowWrapsCutCellsUnderTheirColumns(t *testing.T) {
 func TestAllocatorWholeRowMovesNoOtherColumn(t *testing.T) {
 	t.Parallel()
 	rows := [][]string{{"o", "JIG-1", cutTitle(60), "...", "ready", "3m"}, {"o", "JIG-22", "short", "...", "waiting on the review", "4m"}}
-	folded := layoutMarked(allocatorColumns, rows, 70, wrapRows, nil)
-	whole := layoutMarked(allocatorColumns, rows, 70, wrapRows, []bool{true, false})
+	folded := layoutMarked(allocatorColumns, rows, 70, wrapRows, nil, false)
+	whole := layoutMarked(allocatorColumns, rows, 70, wrapRows, []bool{true, false}, false)
 	if folded[0].lines[0] != whole[0].lines[0] {
 		t.Errorf("the first line of the row moved:\n%q\n%q", folded[0].lines[0], whole[0].lines[0])
 	}
@@ -112,7 +112,7 @@ func TestACutRegistersAMarkWithItsWholeValue(t *testing.T) {
 	t.Parallel()
 	title := cutTitle(60)
 	rows := [][]string{{"o", "JIG-1", title, "...", "ready", "3m"}}
-	folded := layoutMarked(allocatorColumns, rows, 60, wrapRows, nil)[0]
+	folded := layoutMarked(allocatorColumns, rows, 60, wrapRows, nil, false)[0]
 	if !folded.cut() {
 		t.Fatal("a cut row registers no mark")
 	}
@@ -135,11 +135,11 @@ func TestACutRegistersAMarkWithItsWholeValue(t *testing.T) {
 		t.Errorf("a row with one cut cell registers %d marks", n)
 	}
 	// A cut id is a measured cell: it registers a mark too.
-	id := layoutMarked(allocatorColumns, [][]string{{"o", "JIG-0000000000000000000000001", "t", "...", "ready", "3m"}}, 40, wrapRows, nil)[0]
+	id := layoutMarked(allocatorColumns, [][]string{{"o", "JIG-0000000000000000000000001", "t", "...", "ready", "3m"}}, 40, wrapRows, nil, false)[0]
 	if !id.cut() {
 		t.Errorf("a cut id registers no mark:\n%s", strings.Join(id.lines, "\n"))
 	}
-	if whole := layoutMarked(allocatorColumns, rows, 60, wrapRows, []bool{true})[0]; whole.cut() {
+	if whole := layoutMarked(allocatorColumns, rows, 60, wrapRows, []bool{true}, false)[0]; whole.cut() {
 		t.Errorf("a row laid out whole registers a mark")
 	}
 }
@@ -149,7 +149,7 @@ func TestACutRegistersAMarkWithItsWholeValue(t *testing.T) {
 func TestAWordWithItsOwnEllipsisRegistersNoMark(t *testing.T) {
 	t.Parallel()
 	rows := [][]string{{"o", "JIG-1", "reading… the store…", "...", "reading…", "3m"}}
-	laid := layoutMarked(allocatorColumns, rows, 80, wrapRows, nil)[0]
+	laid := layoutMarked(allocatorColumns, rows, 80, wrapRows, nil, false)[0]
 	if laid.cut() || !strings.Contains(laid.lines[0], "reading…") {
 		t.Errorf("a word with its own ellipsis registered a mark or was lost: %v %v", laid.cuts, laid.lines)
 	}
@@ -205,9 +205,10 @@ func TestSpaceWithNothingCutSaysSo(t *testing.T) {
 	t.Parallel()
 	g := cutRig(t, 80, 40, 130)
 	g.onRow("JIG-3")
+	// The keys never read what the body cuts: space is listed on every screen.
 	view := stripANSI(g.view())
-	if strings.Contains(strings.Join(strings.Fields(view), " "), "space ") {
-		t.Errorf("the hint line lists space on a row with nothing cut:\n%s", view)
+	if !strings.Contains(strings.Join(strings.Fields(view), " "), "space expand") {
+		t.Errorf("the hint line does not list space on a row with nothing cut:\n%s", view)
 	}
 	g.press("space")
 	if g.m.notice != "nothing is cut here" {

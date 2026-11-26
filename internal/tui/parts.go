@@ -57,17 +57,78 @@ func (m *Model) listPanel(p *page, s listSpec) {
 			cells[i], refs[i] = r.cells, r.ref
 		}
 		laid := m.laidListFor(p, s.cols, names, cells, s.room, refs)
-		for _, l := range s.before {
+		from, to, cap := m.rowsInRoom(p, s, laid)
+		alone := to-from < len(laid)
+		before, after := s.before, s.after
+		if alone {
+			// The row drawn alone is read by lines in the room the pane has, the
+			// counts of the rows around it taking a line each when there is the
+			// room for them.
+			before, after = nil, nil
+			if cap >= 5 {
+				if from > 0 {
+					before = []string{m.st.dim("↑ " + strconv.Itoa(from) + " more")}
+					cap--
+				}
+				if to < len(laid) {
+					after = []string{m.st.dim("↓ " + strconv.Itoa(len(laid)-to) + " more")}
+					cap--
+				}
+			}
+		}
+		for _, l := range before {
 			p.boxAdd(l)
 		}
-		for i, row := range laid {
-			p.boxRow(s.rows[i].ref, row)
+		for i := from; i < to; i++ {
+			p.boxRow(s.rows[i].ref, laid[i])
+		}
+		for _, l := range after {
+			p.boxAdd(l)
+		}
+		s.after = nil
+		if s.room > 0 {
+			if p.rooms == nil {
+				p.rooms = map[string]int{}
+			}
+			p.rooms[s.title] = cap
 		}
 	}
 	for _, l := range s.after {
 		p.boxAdd(l)
 	}
 	p.boxEnd()
+}
+
+// rowsInRoom is the rows of a list the pane draws, from from to to-1, and the
+// most lines one of them may take (cap). An expanded row never grows its pane:
+// when the rows laid out take more lines than the room the pane was given, the
+// row the cursor stands on, when it is expanded, is drawn alone with
+// a count of the rows left out, and read by lines in the room that is left.
+func (m *Model) rowsInRoom(p *page, s listSpec, laid []laidRow) (from, to, cap int) {
+	from, to, cap = 0, len(laid), s.room
+	if s.room <= 0 {
+		return from, to, cap
+	}
+	e := m.top()
+	lines := 0
+	for _, r := range laid {
+		lines += len(r.lines)
+	}
+	if lines <= s.room {
+		return from, to, cap
+	}
+	// Only the row the cursor stands on can be drawn alone: the cursor must stay
+	// on a row the page has.
+	pick := -1
+	for i, r := range s.rows {
+		if r.ref != nil && e.isExpanded(p.paneTitle(), r.ref) && e.paneCurs[s.title].set && e.paneCurs[s.title].id == r.ref.identity() {
+			pick = i
+		}
+	}
+	if pick < 0 {
+		return from, to, cap
+	}
+	return pick, pick + 1, s.room + len(s.before) + len(s.after)
 }
 
 // ageOf is how long ago at was, in its largest whole unit: "42s", "4m", "3h",
@@ -107,17 +168,28 @@ func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]st
 			// The names are the first row of the list and are never cut.
 			whole[0] = false
 		}
+	} else {
+		// A row the cursor cannot stand on, in a list of rows it can, has no
+		// holder to expand it: it is never cut.
+		for i, r := range refs {
+			if r == nil {
+				if whole == nil {
+					whole = make([]bool, len(all))
+				}
+				whole[1+i] = true
+			}
+		}
 	}
 	var laid []laidRow
 	switch {
 	case room < 0:
 		// What a person decides on is never cut: its free text wraps as far as it
 		// goes.
-		laid = layoutMarked(cols, all, m.innerWidth(), wholeRows, whole)
+		laid = layoutMarked(cols, all, m.innerWidth(), wholeRows, whole, true)
 	case room > 0:
-		laid = laidWithinMarked(cols, all, m.innerWidth(), room+1, whole)
+		laid = laidWithinMarked(cols, all, m.innerWidth(), room+1, whole, true)
 	default:
-		laid = layoutMarked(cols, all, m.innerWidth(), wrapRows, whole)
+		laid = layoutMarked(cols, all, m.innerWidth(), wrapRows, whole, true)
 	}
 	p.boxNames(laid[0].lines)
 	return laid[1:]
