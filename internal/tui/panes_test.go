@@ -86,8 +86,8 @@ func TestEachPaneKeepsItsCursorWhenTheFocusLeaves(t *testing.T) {
 	// The unfocused pane keeps its row marked, and not lit.
 	g.tabTo("Steps")
 	v := g.view()
-	if n := strings.Count(v, "▸"); n != 3 {
-		t.Errorf("the frame has %d cursor marks, want the focused pane's and the two panes the focus passed through:\n%s", n, v)
+	if n := strings.Count(v, "▸"); n != 4 {
+		t.Errorf("the frame has %d cursor marks, want the focused pane's and the three panes the focus passed through:\n%s", n, v)
 	}
 
 	// A screen opened from a pane and left comes back with the focus and every
@@ -203,8 +203,8 @@ func TestAClickFocusesThePaneUnderIt(t *testing.T) {
 	}
 	v = g.view()
 	click(g, termRow(v, "its oracle failed"))
-	if got := g.m.focusedPane(); got != "Activity" || g.m.selected() != nil {
-		t.Errorf("a click on a line of Activity: focus %q, row %+v; want Activity and no row", got, g.m.selected())
+	if got := g.m.focusedPane(); got != "Activity" || g.m.selected() == nil || g.m.selected().kind != rowLog {
+		t.Errorf("a click on a line of Activity: focus %q, row %+v; want Activity and the line", got, g.m.selected())
 	}
 	v = g.view()
 	click(g, termRow(v, "1 of 4 green"))

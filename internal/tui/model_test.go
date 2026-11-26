@@ -71,16 +71,6 @@ func TestATicketGivenOpensItsScreenWithTheProjectBehindIt(t *testing.T) {
 	}
 }
 
-func TestOpeningAQuestionGoesToItsSlice(t *testing.T) {
-	t.Parallel()
-	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("tab") // the question under "needs a person"
-	g.press("enter")
-	if g.m.Screen() != "slice" || g.m.top().slice != "c" {
-		t.Fatalf("on %s %q, want slice c", g.m.Screen(), g.m.top().slice)
-	}
-}
-
 func TestTheCursorStaysOnItsScreen(t *testing.T) {
 	t.Parallel()
 	g := mainRig(t)

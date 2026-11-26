@@ -158,8 +158,14 @@ func canOpen(m *Model, sub subject) (bool, string) {
 		if sub.row.kind == rowFold {
 			return true, ""
 		}
+		if m.promptFor(sub.row) != "" {
+			return true, ""
+		}
 		if _, ok := m.openTarget(sub.row); ok {
 			return true, ""
+		}
+		if r := sub.row; r.kind == rowLog && r.slice == "" && r.round == "" && r.container == "" {
+			return false, logNamesNothing
 		}
 	}
 	return false, "nothing under the cursor opens another screen"

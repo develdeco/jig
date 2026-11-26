@@ -71,7 +71,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 		}
 	}
 	s := newRig(t, "JIG-1")
-	s.feed(jig1()...).tabTo("Needs you").press("enter")
+	s.feed(jig1()...).press("enter", "enter") // the build screen, its first slice
 	if s.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", s.m.Screen())
 	}
@@ -233,9 +233,15 @@ func TestLandingStopIsANeedsYouMoment(t *testing.T) {
 		t.Errorf("the ticket screen has no needs-you row for the landing:\n%s", page)
 	}
 	// The row opens the land screen.
-	refs := g.m.ticketPage("JIG-2").refs()
-	if last := refs[len(refs)-1]; last.kind != rowLand || last.ticket != "JIG-2" {
-		t.Errorf("the last row is %+v, want the landing", last)
+	var landing *rowRef
+	for _, r := range g.m.ticketPage("JIG-2").refs() {
+		if r.kind == rowLand {
+			r := r
+			landing = &r
+		}
+	}
+	if landing == nil || landing.ticket != "JIG-2" {
+		t.Errorf("the ticket screen has no row for the landing: %+v", landing)
 	}
 	// Two asks drawn whole take the rows the land step's block would have.
 	g.send(tea.WindowSizeMsg{Width: 80, Height: 40})

@@ -1360,12 +1360,24 @@ func (m *Model) open() tea.Cmd {
 		e.open[ref.id] = !e.open[ref.id]
 		return nil
 	}
+	if m.promptFor(*ref) != "" {
+		// An open question's subject is the prompt that answers it.
+		m.beginAnswer()
+		return nil
+	}
 	next, ok := m.openTarget(*ref)
 	if !ok {
+		if ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "" {
+			m.notice = logNamesNothing
+		}
 		return nil
 	}
 	return m.goTo(len(m.nav), ref, next)
 }
+
+// logNamesNothing is why enter opens nothing on an activity line that names no
+// question, slice, round or step.
+const logNamesNothing = "this line names no question, slice, round or step to open"
 
 // openTarget is the screen enter on the row ref opens: none when the row opens
 // nothing, or opens the screen the person is on (an ask on the review screen,
@@ -1395,17 +1407,22 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenLand, ticket: ref.ticket}
 	case rowSlice:
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
-	case rowSub:
-		// A slice's sub-step opens its slice, any other the screen of its step.
-		if ref.slice != "" {
-			next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
-			break
-		}
+	case rowSub, rowLog:
+		// A sub-step or a line of the log opens the most specific thing it names:
+		// its slice, its round (the review screen, which has no screen of a round's
+		// own), its step. A question of the line is its prompt while it is open
+		// (promptFor) and its slice once answered.
 		i := slices.IndexFunc(stepNames[:], func(n string) bool { return strings.ToLower(n) == ref.container })
-		if i < 0 {
+		switch {
+		case ref.slice != "":
+			next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
+		case ref.round != "":
+			next = navEntry{screen: screenReview, ticket: ref.ticket}
+		case i >= 0:
+			next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
+		default:
 			return next, false
 		}
-		next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
 	case rowQuestion:
 		if ref.slice == "" {
 			return next, false
@@ -1498,15 +1515,19 @@ func (m *Model) beginAnswer() {
 		return
 	}
 	var q *questionRow
-	if ref := m.selected(); ref != nil && ref.kind == rowQuestion {
+	if ref := m.selected(); ref != nil && (ref.kind == rowQuestion || (ref.kind == rowLog && ref.question != "")) {
+		qid := ref.id
+		if ref.kind == rowLog {
+			qid = ref.question
+		}
 		for _, x := range t.questions(m.zone) {
-			if x.ID == ref.id {
+			if x.ID == qid {
 				x := x
 				q = &x
 			}
 		}
 		if q == nil || !q.Open {
-			m.notice = ref.id + " is already answered"
+			m.notice = qid + " is already answered"
 			return
 		}
 	} else {

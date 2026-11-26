@@ -251,7 +251,6 @@ var subColumns = []column{{}, {gap: 1}, {free: true, gap: 2}}
 // subColumnNames name the columns of a sub-step's line.
 var subColumnNames = []string{" ", "sub-step", "detail"}
 
-
 // foldedCells are a sub-step on one line: subCells with what the status adds to
 // its detail (subDetail), and how long it took once it is done.
 func (m *Model) foldedCells(t *ticket, step int, s phase.Sub, labelW int, c clocks) []string {

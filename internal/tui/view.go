@@ -24,6 +24,9 @@ const (
 	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
 	// is its key, slice the slice a slice sub-step names, container the step.
 	rowSub = "substep"
+	// rowLog is a line of an activity pane: id tells it from the others, and
+	// question, slice, round and container (the step) say what it is about.
+	rowLog = "activity"
 	// rowStop is a line the cursor can rest on and that opens nothing: the head
 	// of a record on a screen whose page is longer than its window, so the
 	// window can be moved to it.
@@ -42,6 +45,10 @@ type rowRef struct {
 	ticket    string
 	slice     string
 	container string
+	// question and round are what an activity line is about besides its slice and
+	// its step: the id of a question, the number of a round.
+	question string
+	round    string
 }
 
 // rowIdentity is what makes a row the same row on the next draw: its kind, its

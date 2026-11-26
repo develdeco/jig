@@ -115,21 +115,6 @@ func homeSub(subs []phase.Sub, focus int) int {
 	return max(0, len(subs)-1)
 }
 
-// markLines is how many lines the counts of the rows above and below a window of
-// rows from to to-1 of n take: one each, or one for both when merged.
-func markLines(from, to, n int, merged bool) int {
-	k := 0
-	if from > 0 {
-		k++
-	}
-	if to < n {
-		k++
-	}
-	if merged {
-		k = 1
-	}
-	return k
-}
 
 // subWindow chooses the sub-steps of subs the pane draws in room lines: the rows
 // from to to-1, which hold the cursor's row cur and, when the room allows, the
@@ -139,39 +124,21 @@ func markLines(from, to, n int, merged bool) int {
 // room for before it takes more than its three lines.
 func (m *Model) subWindow(t *ticket, step int, subs []phase.Sub, cur, focus, room int) (from, to, openRows int, merged bool) {
 	n := len(subs)
-	// The counts above and below take a line each, or one together when the room
-	// has no line for two.
-	cost := func(f, e, extra int) int {
-		k := e - f + extra
-		return k + markLines(f, e, n, f > 0 && e < n && k+2 > room)
-	}
-	both := func(f, e, extra int) bool { return f > 0 && e < n && e-f+extra+2 > room }
-	grow := func(f, e, extra int) (int, int) {
-		for {
-			switch {
-			case e < n && cost(f, e+1, extra) <= room:
-				e++
-			case f > 0 && cost(f-1, e, extra) <= room:
-				f--
-			default:
-				return f, e
-			}
-		}
-	}
 	if focus >= 0 {
 		lo, hi := min(cur, focus), max(cur, focus)+1
-		if cost(lo, hi, openMin-1) <= room {
-			from, to = grow(lo, hi, openMin-1)
+		if windowCost(n, lo, hi, openMin-1, room) <= room {
+			from, to, merged = windowAround(n, lo, hi, openMin-1, room)
 			// The open sub-step is not worth the rows of the others: it opens when
 			// it can stay beside two of them, as it always has.
 			if to-from >= min(n, 3) {
 				want := m.openWant(t, step, subs[focus])
-				return from, to, min(want, 1+room-cost(from, to, 0)), both(from, to, 0)
+				free := room - (to - from) - markLines(from, to, n, merged)
+				return from, to, min(want, 1+free), merged
 			}
 		}
 	}
-	from, to = grow(cur, cur+1, 0)
-	return from, to, 0, both(from, to, 0)
+	from, to, merged = windowAround(n, cur, cur+1, 0, room)
+	return from, to, 0, merged
 }
 
 // foldedFit lays out the sub-steps of subs at the positions picked, in their

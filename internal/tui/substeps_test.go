@@ -65,6 +65,7 @@ func TestTicketScreenShowsTheSubstepsOfTheStepUnderTheCursor(t *testing.T) {
 	steps, subs := 0, 0
 	for _, r := range g.m.page().refs() {
 		switch r.kind {
+		case rowLog:
 		case rowSub:
 			subs++
 		default:

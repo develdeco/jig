@@ -149,7 +149,7 @@ func (m *Model) syncPanes(pg page) {
 	e.textFocus = false
 	pc := e.paneCurs[p.title]
 	if !adopted && pc.set {
-		e.sel = p.first + pc.find(p, refs)
+		e.sel = p.first + pc.find(p, refs, pg.windowed[p.title])
 	}
 	e.rememberPane(pg, p, refs)
 	e.seenSel, e.seenSet = e.sel, true
@@ -157,9 +157,21 @@ func (m *Model) syncPanes(pg page) {
 
 // find is the place in pane p, among its rows, that the cursor c names: the row
 // of its identity, else the place it was at, kept inside the pane.
-func (c paneCursor) find(p pane, refs []rowRef) int {
+//
+// A pane that draws only a window of its rows (full holds all of them) keeps its
+// place among all of them, and the row it falls on is the one the window was
+// drawn around.
+func (c paneCursor) find(p pane, refs []rowRef, full []rowRef) int {
+	id := c.id
+	if len(full) > 0 {
+		at := slices.IndexFunc(full, func(r rowRef) bool { return r.identity() == id })
+		if at < 0 {
+			at = min(max(c.idx, 0), len(full)-1)
+		}
+		id = full[at].identity()
+	}
 	for i := 0; i < p.rows; i++ {
-		if refs[p.first+i].identity() == c.id {
+		if refs[p.first+i].identity() == id {
 			return i
 		}
 	}
@@ -201,6 +213,53 @@ func (m *Model) paneCursorIn(title string, ids []rowIdentity, def int) int {
 		return i
 	}
 	return min(max(pc.idx, 0), len(ids)-1)
+}
+
+// markLines is how many lines the counts of the rows above and below a window of
+// rows from to to-1 of n take: one each, or one for both when merged.
+func markLines(from, to, n int, merged bool) int {
+	k := 0
+	if from > 0 {
+		k++
+	}
+	if to < n {
+		k++
+	}
+	if merged {
+		k = 1
+	}
+	return k
+}
+
+// windowAround grows the window of rows f to e-1 of n, which holds the cursor,
+// row by row while the lines it takes stay within room: the rows, extra lines
+// more than one each, and the counts of what is left out above and below, one
+// line each, or one for both when there is no room for two. It says whether
+// the window needs the one line.
+func windowAround(n, f, e, extra, room int) (from, to int, merged bool) {
+	cost := func(f, e int) int {
+		k := e - f + extra
+		return k + markLines(f, e, n, f > 0 && e < n && k+2 > room)
+	}
+	e = min(e, n)
+	f = min(f, e)
+	for {
+		switch {
+		case e < n && cost(f, e+1) <= room:
+			e++
+		case f > 0 && cost(f-1, e) <= room:
+			f--
+		default:
+			return f, e, f > 0 && e < n && e-f+extra+2 > room
+		}
+	}
+}
+
+// windowCost is how many lines the window of rows from to to-1 takes with extra
+// lines more than one each, the counts included.
+func windowCost(n, from, to, extra, room int) int {
+	k := to - from + extra
+	return k + markLines(from, to, n, from > 0 && to < n && k+2 > room)
 }
 
 // moveWindowed is a move in a pane that draws only a window of its rows: the
@@ -268,7 +327,7 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 			pc := e.paneCurs[p.title]
 			switch {
 			case pc.set:
-				e.sel = p.first + pc.find(p, refs)
+				e.sel = p.first + pc.find(p, refs, pg.windowed[p.title])
 			case p.home >= 0:
 				e.sel = p.first + p.home
 			default:
@@ -345,7 +404,7 @@ func (m *Model) paneMarks(pg *page) {
 			continue
 		}
 		if pc := e.paneCurs[p.title]; pc.set && p.rows > 0 {
-			pg.marks = append(pg.marks, p.first+pc.find(p, refs))
+			pg.marks = append(pg.marks, p.first+pc.find(p, refs, pg.windowed[p.title]))
 		}
 	}
 }
