@@ -92,7 +92,7 @@ func TestTUIPipeFramesOpenTheBriefPartByPart(t *testing.T) {
 		return strings.Contains(s, "╭─ Parts") && strings.Contains(screenWords(s), "The issue is that tickets of a chart read apart.")
 	})
 	words := screenWords(screen)
-	for _, want := range []string{"issue TK-1", "The issue is that tickets of a chart read apart.", "section Steps slice a · changed", "approval the approval of the brief the brief changed since"} {
+	for _, want := range []string{"issue TK-1", "The issue is that tickets of a chart read apart.", "section Steps cited by 1 · changed", "approval the approval of the brief the brief changed since"} {
 		if !strings.Contains(words, want) {
 			t.Errorf("the brief screen lacks %q:\n%s", want, screen)
 		}
