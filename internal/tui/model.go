@@ -1494,6 +1494,10 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 			next = navEntry{screen: screenReview, ticket: ref.ticket}
 		case i >= 0:
 			next = navEntry{screen: stepScreens[i], ticket: ref.ticket}
+			if next.screen == screenBrief && ref.kind == rowSub {
+				// A brief sub-step opens the part it is about, else the first row.
+				next.part, next.partSet = m.briefPartOf(ref.ticket, ref.id)
+			}
 		default:
 			return next, false
 		}

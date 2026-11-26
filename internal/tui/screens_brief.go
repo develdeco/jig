@@ -95,6 +95,30 @@ func (m *Model) briefPage(id string) page {
 	return p
 }
 
+// briefPartOf is the part of the ticket's brief the sub-step key is about: brief
+// drafted is the first section, slices written the first slice, brief approved
+// the approval. ok is false when the part does not exist (no section yet, no
+// slice), and the brief then opens on its first row.
+func (m *Model) briefPartOf(ticket, key string) (rowIdentity, bool) {
+	t := m.w.tickets[ticket]
+	if t == nil || t.status == nil || t.status.Brief == nil {
+		return rowIdentity{}, false
+	}
+	switch key {
+	case "drafted":
+		if len(t.status.Brief.Sections) > 0 {
+			return rowIdentity{kind: rowSection, id: sectionID(0)}, true
+		}
+	case "slices":
+		if s := t.slices(m.zone); len(s) > 0 {
+			return rowIdentity{kind: rowSlice, id: s[0].ID}, true
+		}
+	case "approved":
+		return rowIdentity{kind: rowApproval, id: "approval"}, true
+	}
+	return rowIdentity{}, false
+}
+
 // partsTitle is the title of the brief screen's list of its parts.
 const partsTitle = "Parts"
 
