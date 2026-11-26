@@ -47,7 +47,7 @@ func (m *Model) tallRow(l *screenLayout) {
 		return
 	}
 	last := first + 1
-	for last < len(lines) && lines[last].cont && lines[last].ref == nil && !lines[last].names {
+	for last < len(lines) && (lines[last].cont || lines[last].under) && lines[last].ref == nil && !lines[last].names {
 		last++
 	}
 	total := last - first

@@ -167,6 +167,8 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 	var out []pline
 	m.measured += len(pg.lines)
 	pane := ""
+	// owner is the row whose lines the ones under it are: they are expanded with it.
+	var owner *rowRef
 	for _, l := range pg.lines {
 		w := max(1, m.width-2)
 		if l.box != boxNone {
@@ -174,6 +176,12 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 		}
 		if l.box == boxTop {
 			pane = l.text
+		}
+		switch {
+		case l.ref != nil:
+			owner = l.ref
+		case !l.cont && !l.under:
+			owner = nil
 		}
 		if l.box == boxTop || l.box == boxBottom || l.ask != "" || width(l.text) <= w {
 			out = append(out, l)
@@ -189,7 +197,7 @@ func (m *Model) wrapLongIn(e *navEntry, pg page) page {
 			// What a person decides on is never cut.
 			rows = 1 << 20
 		}
-		if l.ref != nil && e.isExpanded(pane, l.ref) || l.ref == nil && !l.cont && e.paneOpen(pane) {
+		if owner != nil && e.isExpanded(pane, owner) || owner == nil && e.paneOpen(pane) {
 			rows = wholeRows
 		}
 		// Every row, the first too, is wrapped to the room the continuation rows

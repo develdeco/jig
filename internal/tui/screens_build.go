@@ -62,9 +62,13 @@ func (m *Model) buildPage(id string) page {
 		}
 	}
 	p.boxTop("Slices", strconv.Itoa(len(slices)))
-	laid := m.laidList(&p, sliceColumns, dimmed(m.st, sliceColumnNames), cells, 0)
+	refs := make([]*rowRef, len(slices))
 	for i, s := range slices {
-		p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
+		refs[i] = &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}
+	}
+	laid := m.laidListFor(&p, sliceColumns, dimmed(m.st, sliceColumnNames), cells, 0, refs)
+	for i, s := range slices {
+		p.boxRow(refs[i], laid[i])
 		at := len(p.lines)
 		m.sliceRecords(&p, t, s, idW, below[i])
 		for k := at; k < len(p.lines); k++ {
@@ -124,6 +128,7 @@ func (m *Model) fixBudgetLine(t *ticket) string {
 // asked about it with their answers. idW is the width of the ids' column, and
 // facts what the row had no room for, drawn back.
 func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts string) {
+	owner := &rowRef{kind: rowSlice, id: s.ID, ticket: t.id, slice: s.ID}
 	pre := "    " + spaces(idW)
 	room := m.innerWidth() - width(pre) - 2
 	if facts != "" {
@@ -166,7 +171,7 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 			}
 			p.add(pre + "  " + m.st.icon(state) + " " + m.st.dim(oracleWords(run)))
 			if failedOK && run.TS == failed.TS && run.Commit == failed.Commit {
-				m.failureTail(p, pre+"    ", run, room-4)
+				m.failureTail(p, owner, pre+"    ", run, room-4)
 			}
 		}
 		switch {
@@ -174,16 +179,8 @@ func (m *Model) sliceRecords(p *page, t *ticket, s sliceRow, idW int, facts stri
 			p.add(pre + "  " + m.st.dim(readingText))
 		case hasRow:
 			// The state in phase's words, then the command that clears it.
-			for i, l := range wrap(row.State, room-4, 2) {
-				lead := "  " + m.st.icon(icon) + " "
-				if i > 0 {
-					lead = "    "
-				}
-				p.add(pre + lead + m.st.dim(l))
-			}
-			for _, l := range wrap(row.Clear, room-4, 2) {
-				p.add(pre + "    " + m.st.dim(l))
-			}
+			m.underWrap(p, owner, pre+"  "+m.st.icon(icon)+" ", pre+"    ", row.State, room-4, 2, m.st.dim)
+			m.underWrap(p, owner, pre+"    ", pre+"    ", row.Clear, room-4, 2, m.st.dim)
 		}
 	}
 
@@ -242,20 +239,14 @@ func (m *Model) commitWhen(c commitRecord) string {
 // recorded it, or where to read it when the line recorded none. The line
 // carries the last 600 bytes of the output at most; the machine that ran the
 // check has the rest in its verify log.
-func (m *Model) failureTail(p *page, pre string, run events.Envelope, room int) {
+func (m *Model) failureTail(p *page, owner *rowRef, pre string, run events.Envelope, room int) {
 	tail := firstOf(run.Summary, run.Signature)
 	if tail == "" {
-		for _, l := range wrap("no output was recorded: the verify log on the machine that ran it has it", room, 2) {
-			p.add(pre + m.st.dim(l))
-		}
+		m.underWrap(p, owner, pre, pre, "no output was recorded: the verify log on the machine that ran it has it", room, 2, m.st.dim)
 		return
 	}
-	for _, l := range wrap(tail, room, 3) {
-		p.add(pre + m.st.state(StateStalled, l))
-	}
-	for _, l := range wrap("the end of its output; all of it is in the verify log on the machine that ran it", room, 2) {
-		p.add(pre + m.st.dim(l))
-	}
+	m.underWrap(p, owner, pre, pre, tail, room, 3, func(l string) string { return m.st.state(StateStalled, l) })
+	m.underWrap(p, owner, pre, pre, "the end of its output; all of it is in the verify log on the machine that ran it", room, 2, m.st.dim)
 }
 
 // sessionRows are the sessions of the ticket that played role, a row each:

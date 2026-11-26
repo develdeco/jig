@@ -51,18 +51,24 @@ func (p page) paneTitle() string {
 }
 
 // holdsCut says whether the sel-th row of the page, with the continuation rows
-// that belong to it, carries a cut mark.
+// and the lines under it that belong to it, carries a cut mark.
 func (p page) holdsCut(sel int) bool {
-	n := -1
+	n, in := -1, false
 	for _, l := range p.lines {
 		switch {
 		case l.ref != nil:
 			n++
-			if n == sel && len(l.cuts) > 0 {
+			in = n == sel
+			if in && len(l.cuts) > 0 {
 				return true
 			}
-		case l.cont && n == sel && len(l.cuts) > 0:
-			return true
+		case l.cont || l.under:
+			if in && len(l.cuts) > 0 {
+				return true
+			}
+		default:
+			// Any other line ends the row.
+			in = false
 		}
 	}
 	return false
@@ -131,4 +137,27 @@ func (m *Model) expandHolder(fold bool) bool {
 func (m *Model) expandMoved() {
 	m.top().expGen++
 	m.shown = nil
+}
+
+// underWrap adds text to the panel p as lines under the row of owner (nil for a
+// pane with no cursor rows, whose own they are), the first led by first and the
+// rest by pre, wrapped to most rows of w cells and drawn by style. A holder the
+// person has expanded is given every row it needs; a cut registers its mark with
+// the whole text.
+func (m *Model) underWrap(p *page, owner *rowRef, first, pre, text string, w, most int, style func(string) string) {
+	e, pane := m.top(), p.paneTitle()
+	if owner != nil && e.isExpanded(pane, owner) || owner == nil && e.paneOpen(pane) {
+		most = wholeRows
+	}
+	lines, cut := wrapCut(text, w, most)
+	for i, l := range lines {
+		line := pre + style(l)
+		if i == 0 {
+			line = first + style(l)
+		}
+		p.lines = append(p.lines, pline{text: line, box: boxMid, under: true})
+		if cut && i == len(lines)-1 {
+			p.lines[len(p.lines)-1].cuts = []cutMark{{x: width(line) - 1, value: text}}
+		}
+	}
 }

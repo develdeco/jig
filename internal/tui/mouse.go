@@ -38,8 +38,8 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 		h.cuts = append(h.cuts, line.cuts)
 		if line.ref == nil {
 			h.sel = append(h.sel, -1)
-			if !line.cont || line.names {
-				// Anything but a row's continuation row ends the row above it.
+			if !(line.cont || line.under) || line.names {
+				// Anything but a row's continuation or detail lines ends the row above it.
 				cur = -1
 			}
 			h.owner = append(h.owner, cur)

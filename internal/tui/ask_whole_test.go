@@ -251,7 +251,7 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 func TestAskDrawnReadsTheWindowAsItIsDrawn(t *testing.T) {
 	t.Parallel()
 	whole, cut := 0, 0
-	for height := 10; height <= 23; height++ {
+	for height := 10; height <= 26; height++ {
 		w, c := scrollAskDrawn(t, height)
 		whole, cut = whole+w, cut+c
 	}

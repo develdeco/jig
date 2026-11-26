@@ -165,9 +165,9 @@ func (m *Model) publishPageLess(id string, less int) page {
 		cells[i] = []string{m.st.icon(state), text, m.st.dim(c.when)}
 	}
 	p.boxTop("Checklist", strconv.Itoa(done)+" of "+strconv.Itoa(len(list))+" done")
-	laid := m.laidList(&p, checkColumns, dimmed(m.st, checkColumnNames), cells, 0)
+	laid := m.laidListFor(&p, checkColumns, dimmed(m.st, checkColumnNames), cells, 0, nil)
 	for i, c := range list {
-		p.boxLaid(nil, laid[i])
+		p.boxRow(nil, laid[i])
 		for i, l := range c.excerpt {
 			p.boxUnder(l)
 			if c.cutValue != "" && i == len(c.excerpt)-1 {

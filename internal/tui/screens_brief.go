@@ -60,12 +60,14 @@ func (m *Model) briefPage(id string) page {
 	if len(cells) == 0 {
 		p.boxAdd(m.st.dim("no sections"))
 	} else {
-		laid := m.laidList(&p, sectionColumns, dimmed(m.st, sectionColumnNames), cells, 0)
+		refs := make([]*rowRef, len(b.Sections))
 		for i, s := range b.Sections {
-			p.boxLaid(&rowRef{kind: rowStop, id: s.Heading, ticket: id}, laid[i])
-			for _, line := range wrap(t.brief.summaryOf(i, s.Heading), m.innerWidth()-6, 2) {
-				p.boxUnder("    " + m.st.dim(line))
-			}
+			refs[i] = &rowRef{kind: rowStop, id: s.Heading, ticket: id}
+		}
+		laid := m.laidListFor(&p, sectionColumns, dimmed(m.st, sectionColumnNames), cells, 0, refs)
+		for i, s := range b.Sections {
+			p.boxRow(refs[i], laid[i])
+			m.underWrap(&p, refs[i], "    ", "    ", t.brief.summaryOf(i, s.Heading), m.innerWidth()-6, 2, m.st.dim)
 		}
 	}
 	p.boxEnd()
@@ -81,9 +83,13 @@ func (m *Model) briefPage(id string) page {
 	if len(cells) == 0 {
 		p.boxAdd(m.st.dim("no slices yet"))
 	} else {
-		laid := m.laidList(&p, briefSliceColumns, dimmed(m.st, briefSliceColumnNames), cells, 0)
+		refs := make([]*rowRef, len(slices))
 		for i, s := range slices {
-			p.boxLaid(&rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}, laid[i])
+			refs[i] = &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID}
+		}
+		laid := m.laidListFor(&p, briefSliceColumns, dimmed(m.st, briefSliceColumnNames), cells, 0, refs)
+		for i, s := range slices {
+			p.boxRow(refs[i], laid[i])
 			if facts := sliceFacts(s, true); facts != "" {
 				p.boxUnder("    " + spaces(idW) + m.st.dim(facts))
 			}

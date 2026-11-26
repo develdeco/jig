@@ -80,9 +80,9 @@ func (m *Model) slicePage(id, slice string) page {
 				cells[i] = []string{m.st.icon(v.icon()), short(v.Commit), m.st.dim(v.State)}
 			}
 			p.boxTop("Verification", strconv.Itoa(len(states)))
-			laid := m.laidList(&p, verificationColumns, dimmed(m.st, verificationColumnNames), cells, 0)
+			laid := m.laidListFor(&p, verificationColumns, dimmed(m.st, verificationColumnNames), cells, 0, nil)
 			for i, v := range states {
-				p.boxLaid(nil, laid[i])
+				p.boxRow(nil, laid[i])
 				if v.Clear != "" {
 					p.boxUnder("    " + m.st.dim(v.Clear))
 				}
@@ -114,13 +114,15 @@ func (m *Model) slicePage(id, slice string) page {
 			cells[i] = []string{m.st.icon(state), q.ID, m.st.state(state, word), asked}
 		}
 		p.boxTop("Questions", strconv.Itoa(len(qs)))
-		laid := m.laidList(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0)
+		refs := make([]*rowRef, len(qs))
 		for i, q := range qs {
-			var ref *rowRef
 			if q.Open {
-				ref = &rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}
+				refs[i] = &rowRef{kind: rowQuestion, id: q.ID, ticket: id, slice: slice}
 			}
-			p.boxLaid(ref, laid[i])
+		}
+		laid := m.laidListFor(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0, refs)
+		for i, q := range qs {
+			p.boxRow(refs[i], laid[i])
 			for _, l := range m.panelLines(q.Text) {
 				p.boxUnder("    " + l)
 			}

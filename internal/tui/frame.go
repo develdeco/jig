@@ -36,14 +36,9 @@ func (p *page) boxUnder(text string) {
 	p.lines = append(p.lines, pline{text: text, box: boxMid, under: true})
 }
 
-// boxLaid adds the lines the allocator laid a row out in, inside the panel:
-// the first is the row, standing for ref when the cursor can stand on it, and
-// the rest are its continuation rows.
-func (p *page) boxLaid(ref *rowRef, lines []string) {
-	p.boxRow(ref, laidRow{lines: lines})
-}
-
-// boxRow is boxLaid for a row laid out with the cuts it carries.
+// boxRow adds the lines the allocator laid a row out in, inside the panel: the
+// first is the row, standing for ref when the cursor can stand on it, and the
+// rest are its continuation rows, with the cuts the row carries.
 func (p *page) boxRow(ref *rowRef, r laidRow) {
 	for i, l := range r.lines {
 		pl := pline{text: l, box: boxMid, cont: i > 0}

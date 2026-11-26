@@ -118,9 +118,9 @@ func (m *Model) roundsPanel(p *page, t *ticket, rounds []roundRow) {
 	for i, r := range rounds {
 		cells[i], notes[i] = m.roundRecord(t, r)
 	}
-	laid := m.laidList(p, roundListColumns, dimmed(m.st, roundListColumnNames), cells, 0)
+	laid := m.laidListFor(p, roundListColumns, dimmed(m.st, roundListColumnNames), cells, 0, nil)
 	for i := range rounds {
-		p.boxLaid(nil, laid[i])
+		p.boxRow(nil, laid[i])
 		for _, l := range notes[i] {
 			p.boxUnder(l)
 		}
@@ -282,18 +282,15 @@ func (m *Model) probeRows(p *page, t *ticket) {
 		}
 	}
 	p.boxTop("Probes", strconv.Itoa(len(probes)))
-	laid := m.laidList(p, probeListColumns, dimmed(m.st, probeListColumnNames), cells, 0)
+	laid := m.laidListFor(p, probeListColumns, dimmed(m.st, probeListColumnNames), cells, 0, nil)
 	for i, pr := range probes {
-		p.boxLaid(nil, laid[i])
-		for _, l := range wrap(pr.Mutation, m.innerWidth()-6, probeLines) {
-			if superseded[i] {
-				l = m.st.dim(l)
-			}
-			p.boxUnder("    " + l)
+		p.boxRow(nil, laid[i])
+		plain := func(l string) string { return l }
+		if superseded[i] {
+			plain = m.st.dim
 		}
-		for _, l := range wrap(pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines) {
-			p.boxUnder("    " + m.st.dim(l))
-		}
+		m.underWrap(p, nil, "    ", "    ", pr.Mutation, m.innerWidth()-6, probeLines, plain)
+		m.underWrap(p, nil, "    ", "    ", pr.Seam+" · "+pr.Command, m.innerWidth()-6, probeLines, m.st.dim)
 	}
 	p.boxEnd()
 }
@@ -382,12 +379,14 @@ func (m *Model) findingRows(p *page, t *ticket, asking map[string]bool) {
 		cells[i] = []string{m.st.icon(state), f.Risk, f.Where, m.st.state(state, findingWord(f)), f.Title, m.st.dim(f.ID)}
 	}
 	p.boxTop("Findings", "round "+strconv.Itoa(rows[0].Round))
-	laid := m.laidList(p, findingListColumns, dimmed(m.st, findingListColumnNames), cells, 0)
+	refs := make([]*rowRef, len(rows))
 	for i, f := range rows {
-		p.boxLaid(&rowRef{kind: rowStop, id: f.ID, ticket: t.id}, laid[i])
-		for _, l := range wrap(f.Rationale, m.innerWidth()-6, 2) {
-			p.boxUnder("    " + m.st.dim(l))
-		}
+		refs[i] = &rowRef{kind: rowStop, id: f.ID, ticket: t.id}
+	}
+	laid := m.laidListFor(p, findingListColumns, dimmed(m.st, findingListColumnNames), cells, 0, refs)
+	for i, f := range rows {
+		p.boxRow(refs[i], laid[i])
+		m.underWrap(p, refs[i], "    ", "    ", f.Rationale, m.innerWidth()-6, 2, m.st.dim)
 	}
 	p.boxEnd()
 }
@@ -408,9 +407,13 @@ func (m *Model) asksPanel(p *page, t *ticket, asks []askRow) {
 			state, word := askDecision(a)
 			cells[i] = []string{m.st.icon(state), a.Risk, a.Where, m.st.state(state, word), a.Title, m.st.dim(a.ID)}
 		}
-		laid := m.laidList(p, askColumns, dimmed(m.st, askColumnNames), cells, -1)
+		refs := make([]*rowRef, len(asks))
 		for i, a := range asks {
-			p.boxLaid(&rowRef{kind: rowAsk, id: a.ID, ticket: t.id}, laid[i])
+			refs[i] = &rowRef{kind: rowAsk, id: a.ID, ticket: t.id}
+		}
+		laid := m.laidListFor(p, askColumns, dimmed(m.st, askColumnNames), cells, -1, refs)
+		for i, a := range asks {
+			p.boxRow(refs[i], laid[i])
 			at := len(p.lines)
 			m.addAskText(p, t, a)
 			for k := at; k < len(p.lines); k++ {

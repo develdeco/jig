@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"time"
 )
@@ -87,27 +88,26 @@ func (m *Model) ageOf(at time.Time) string {
 	return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 }
 
-// laidList lays the cells of a list out under cols with its names, in one call of
-// the allocator, adds the names row to the panel p and gives back the lines of
-// each row. room, when it is more than 0, is the most lines the rows may take,
-// and when it is less than 0 the rows are not cut at all.
-func (m *Model) laidList(p *page, cols []column, names []string, cells [][]string, room int) [][]string {
-	laid := m.laidListFor(p, cols, names, cells, room, nil)
-	out := make([][]string, len(laid))
-	for i, r := range laid {
-		out[i] = r.lines
-	}
-	return out
-}
-
-// laidListFor is laidList that gives each row with the cut marks it carries.
+// laidListFor lays the cells of a list out under cols with its names, in one call
+// of the allocator, adds the names row to the panel p and gives back each row
+// with the cut marks it carries. room, when it is more than 0, is the most lines
+// the rows may take, and when it is less than 0 the rows are not cut at all.
 // refs, when given, are the rows' places for the cursor, in the order of cells:
-// a row the screen has expanded (expand.go) is laid out whole.
+// a row the screen has expanded (expand.go) is laid out whole. A list with no
+// refs is the pane's own, which is laid out whole when the pane is expanded.
 func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]string, room int, refs []*rowRef) []laidRow {
 	all := make([][]string, 0, len(cells)+1)
 	all = append(all, names)
 	all = append(all, cells...)
-	whole := m.top().wholeOf(p.paneTitle(), 1, refs)
+	pane := p.paneTitle()
+	whole := m.top().wholeOf(pane, 1, refs)
+	if !slices.ContainsFunc(refs, func(r *rowRef) bool { return r != nil }) {
+		whole = m.wholePane(pane, len(all))
+		if whole != nil {
+			// The names are the first row of the list and are never cut.
+			whole[0] = false
+		}
+	}
 	var laid []laidRow
 	switch {
 	case room < 0:
