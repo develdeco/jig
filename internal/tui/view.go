@@ -299,7 +299,7 @@ func (m *Model) layout() screenLayout {
 	pageH, tailH, note := m.tailSplit(bodyH)
 	l.pageH, l.tailH = pageH, tailH
 	if note {
-		l.tailNote = tailNeeds(bodyH)
+		l.tailNote = partNeeds("tail", tailMinRows, m.tailLeft(bodyH))
 	}
 	return l
 }
@@ -307,10 +307,16 @@ func (m *Model) layout() screenLayout {
 // tailMinRows is the body rows a screen needs to have its tail.
 const tailMinRows = 8
 
-// tailNeeds is the line that stands in the tail's place on a screen too short
-// for it: what it needs and what the screen has.
-func tailNeeds(rows int) string {
-	return fmt.Sprintf("the tail needs %d body rows, this screen has %d", tailMinRows, rows)
+// partNeeds is the one line a part that cannot fit says in its place: the part, the
+// rows it needs and the rows it was left, never the body's total.
+func partNeeds(part string, need, left int) string {
+	return fmt.Sprintf("the %s needs %d rows; %d are left", part, need, max(left, 0))
+}
+
+// tailLeft is the rows a tail is left in a body of bodyH rows: what the page does
+// not need, less the tail's heading.
+func (m *Model) tailLeft(bodyH int) int {
+	return bodyH - m.phaseNeed() - 1
 }
 
 // What View drew of an ask: some of its lines, or all of them. An ask the page

@@ -240,7 +240,7 @@ func TestATailThatCannotFitSaysSo(t *testing.T) {
 	g.feed(jig2Mid()...)
 	g.press("t")
 	view := g.view()
-	if !strings.Contains(view, "the tail needs 8 body rows, this screen has ") {
+	if !strings.Contains(view, "the tail needs 8 rows; ") {
 		t.Errorf("a tail that cannot fit does not say so:\n%s", view)
 	}
 	if n := len(strings.Split(view, "\n")); n != 12 {
