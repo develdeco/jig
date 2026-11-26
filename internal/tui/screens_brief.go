@@ -190,23 +190,3 @@ func (m *Model) approvalRecord(t *ticket, b *statusBrief) []string {
 	}
 	return out
 }
-
-// sliceFacts is what slices.yaml says of a slice, in a line: its workspace and
-// oracle, the round a fix slice came from, and, when after is set, the slices it
-// waits for.
-func sliceFacts(s sliceRow, after bool) string {
-	var parts []string
-	if s.Workspace != "" {
-		parts = append(parts, "workspace "+s.Workspace)
-	}
-	if s.Oracle != "" {
-		parts = append(parts, "oracle "+s.Oracle)
-	}
-	if s.FromGate > 0 {
-		parts = append(parts, "fix slice of round "+strconv.Itoa(s.FromGate))
-	}
-	if after && s.BlockedBy != "" {
-		parts = append(parts, "after "+strings.ReplaceAll(s.BlockedBy, "+", ", "))
-	}
-	return strings.Join(parts, " · ")
-}

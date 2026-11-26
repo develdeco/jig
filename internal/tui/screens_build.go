@@ -281,19 +281,25 @@ func (m *Model) commitRows(t *ticket, s sliceRow, d *detailSpec, label string) {
 	}
 }
 
-// failureRows adds the end of the output of a run that failed, as the oracle
-// line recorded it, or where to read it when the line recorded none. The line
-// carries the last 600 bytes of the output at most; the machine that ran the
-// check has the rest in its verify log.
-func (m *Model) failureRows(d *detailSpec, run events.Envelope) {
-	tail := firstOf(run.Summary, run.Signature)
-	if tail == "" {
-		d.rows = append(d.rows, detailRow{indent: 4, dim: true, text: "no output was recorded: the verify log on the machine that ran it has it"})
-		return
+// failureOutput is the end of the output of a run that failed, as the oracle line
+// recorded it ("" when it recorded none), and the note that says where the rest
+// is, or where to read it when there is none. The line carries the last 600
+// bytes of the output at most; the machine that ran the check has the rest in its
+// verify log.
+func failureOutput(run events.Envelope) (output, note string) {
+	if output = firstOf(run.Summary, run.Signature); output == "" {
+		return "", "no output was recorded: the verify log on the machine that ran it has it"
 	}
-	d.rows = append(d.rows,
-		detailRow{indent: 4, state: StateStalled, text: tail},
-		detailRow{indent: 4, dim: true, text: "the end of its output; all of it is in the verify log on the machine that ran it"})
+	return output, "the end of its output; all of it is in the verify log on the machine that ran it"
+}
+
+// failureRows adds the end of the output of a run that failed to d.
+func (m *Model) failureRows(d *detailSpec, run events.Envelope) {
+	output, note := failureOutput(run)
+	if output != "" {
+		d.rows = append(d.rows, detailRow{indent: 4, state: StateStalled, text: output})
+	}
+	d.rows = append(d.rows, detailRow{indent: 4, dim: true, text: note})
 }
 
 // sessionRows are the sessions of the ticket that played role, a row each:

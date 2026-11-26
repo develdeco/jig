@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/develdeco/jig/internal/events"
 	"github.com/develdeco/jig/internal/journal"
 )
 
-// timelineLines is how many of a slice's latest lines its screen shows.
-const timelineLines = 40
-
-// slicePage is one slice: its state and who holds it, where it builds and what
-// checks it, the questions asked about it, and its lines newest first.
+// slicePage is the whole story of one slice, top to bottom: for a fix slice its
+// finding, then the slice's own panel (its goal, oracle and facts), every commit
+// with its runs, the questions asked about it, the calls its holder made, and
+// its lines newest first.
 func (m *Model) slicePage(id, slice string) page {
 	var p page
 	t := m.w.tickets[id]
@@ -38,44 +38,11 @@ func (m *Model) slicePage(id, slice string) page {
 		m.slicePanel(&p, t, *row)
 	}
 
-	if t.status != nil {
-		var states []statusVerification
-		for _, v := range t.status.Verifications {
-			if v.Slice == slice {
-				states = append(states, v)
-			}
-		}
-		if len(states) > 0 {
-			// Each commit that is not verified, in the status's words and with
-			// the command that clears it.
-			p.add("")
-			// A row names its commit by a prefix; it stands where the commit's
-			// first line puts it, and one the journal has no line of sinks.
-			commits := t.commits(slice)
-			began := func(v statusVerification) time.Time {
-				for _, c := range commits {
-					if v.Commit != "" && strings.HasPrefix(c.SHA, v.Commit) {
-						return c.Began
-					}
-				}
-				return time.Time{}
-			}
-			states = newestFirst(states, began)
-			cells := make([][]string, len(states))
-			for i, v := range states {
-				cells[i] = []string{m.st.icon(v.icon()), short(v.Commit), m.st.dim(v.State)}
-			}
-			p.boxTop("Verification", strconv.Itoa(len(states)))
-			laid := m.laidList(&p, verificationColumns, dimmed(m.st, verificationColumnNames), cells, 0)
-			for i, v := range states {
-				p.boxLaid(nil, laid[i])
-				if v.Clear != "" {
-					p.boxUnder("    " + m.st.dim(v.Clear))
-				}
-			}
-			p.boxEnd()
-		}
+	oracle := ""
+	if row != nil {
+		oracle = row.Oracle
 	}
+	m.commitsPanel(&p, t, slice, oracle)
 
 	var qs []questionRow
 	for _, q := range t.questions(m.zone) {
@@ -117,40 +84,35 @@ func (m *Model) slicePage(id, slice string) page {
 		p.boxEnd()
 	}
 
+	m.callsPanel(&p, t, slice, row)
+
 	var lines []int
 	for i, l := range t.lines {
-		if l.Slice == slice {
+		// An old worker's request for a verification is nothing here.
+		if l.Slice == slice && l.Event != journal.EventVerifyPending {
 			lines = append(lines, i)
 		}
 	}
 	if len(lines) > 0 {
 		lines = newestFirst(lines, func(i int) time.Time { at, _ := t.lines[i].At(); return at })
-		older := 0
-		if len(lines) > timelineLines {
-			older, lines = len(lines)-timelineLines, lines[:timelineLines]
-		}
 		rows := make([]listRow, len(lines))
 		for k, i := range lines {
 			rows[k] = listRow{cells: m.timelineCells(t, t.lines[i])}
 		}
-		spec := listSpec{title: "Timeline", summary: strconv.Itoa(len(lines) + older), cols: timelineColumns, names: timelineColumnNames, rows: rows}
-		if older > 0 {
-			spec.after = []string{m.olderRow(older)}
-		}
-		m.listPanel(&p, spec)
+		m.listPanel(&p, listSpec{title: "Timeline", summary: strconv.Itoa(len(lines)), cols: timelineColumns, names: timelineColumnNames, rows: rows})
 	}
 	return p
 }
 
-// The columns of the slice screen's lists: a commit's verification, a question,
-// and a line of the timeline.
+// The columns of the slice screen's lists: a commit, a question, and a line of
+// the timeline or of the calls.
 var (
-	verificationColumns     = []column{{}, {gap: 1}, {free: true, gap: 2}}
-	verificationColumnNames = []string{"", "commit", "state"}
-	questionColumns         = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
-	questionColumnNames     = []string{"", "question", "state", "asked"}
-	timelineColumns         = []column{{}, {free: true, gap: 1}}
-	timelineColumnNames     = []string{"time", "what"}
+	commitColumns       = []column{{}, {gap: 1}, {free: true, gap: 2}, {gap: 2}}
+	commitColumnNames   = []string{"", "commit", "subject", "time"}
+	questionColumns     = []column{{}, {gap: 1}, {gap: 2}, {free: true, gap: 2}}
+	questionColumnNames = []string{"", "question", "state", "asked"}
+	timelineColumns     = []column{{}, {free: true, gap: 1}}
+	timelineColumnNames = []string{"time", "what"}
 )
 
 // claimHolder is the session holding the slice by its latest claim line that
@@ -292,4 +254,144 @@ func (t *ticket) statusSlice(id string) statusSlice {
 		}
 	}
 	return statusSlice{}
+}
+
+// commitsPanel adds the panel of every commit of the slice, newest first, none
+// left out: its short id, its subject and its time, and under it how its
+// verification stands in phase's words with the command that clears it, each run
+// of the oracle against it, the output of a run that failed, and the recordings
+// its scenarios wrote. A slice with no commit has none.
+func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
+	commits := newestFirst(t.sliceCommits(slice), func(c commitRecord) time.Time { return c.Began })
+	if len(commits) == 0 {
+		return
+	}
+	cells := make([][]string, len(commits))
+	icons := make([]string, len(commits))
+	for i, c := range commits {
+		row, hasRow := t.status.verificationOf(slice, c.SHA)
+		icons[i] = c.State
+		switch {
+		case t.status == nil:
+			icons[i] = StateQueued
+		case hasRow:
+			icons[i] = row.icon()
+		}
+		cells[i] = []string{m.st.icon(icons[i]), short(c.SHA), c.Subject, m.st.dim(m.commitWhen(c))}
+	}
+	p.boxTop("Commits", strconv.Itoa(len(commits)))
+	laid := m.laidList(p, commitColumns, dimmed(m.st, commitColumnNames), cells, 0)
+	for i, c := range commits {
+		p.boxLaid(nil, laid[i])
+		row, hasRow := t.status.verificationOf(slice, c.SHA)
+		switch {
+		case t.status == nil:
+			m.under(p, 2, m.st.dim(readingText))
+		case hasRow:
+			// The state in phase's words, then the command that clears it.
+			m.under(p, 2, m.st.state(icons[i], row.State))
+			if row.Clear != "" {
+				m.under(p, 4, m.st.dim(row.Clear))
+			}
+		case c.State == StateGreen:
+			m.under(p, 2, m.st.state(StateGreen, "verified"))
+		}
+		if c.Error != nil {
+			m.under(p, 2, m.st.state(StateStalled, "could not be verified: "+firstOf(c.Error.Summary, "no reason recorded")))
+		}
+		for _, run := range newestFirst(c.Runs, func(l events.Envelope) time.Time { at, _ := l.At(); return at }) {
+			state := StateGreen
+			switch {
+			case run.Cause != "":
+				// A run that judged nothing is not the code failing.
+				state = StateQueued
+			case run.Outcome != "pass":
+				state = StateStalled
+			}
+			m.under(p, 2, m.st.icon(state)+" "+m.st.dim(m.runWords(t, run, oracle)))
+			if run.Outcome == "fail" && run.Cause == "" {
+				output, note := failureOutput(run)
+				if output != "" {
+					m.under(p, 4, m.st.state(StateStalled, output))
+				}
+				m.under(p, 4, m.st.dim(note))
+			}
+		}
+		for _, r := range c.Recordings {
+			m.under(p, 2, m.st.dim("recorded: "+recordingWords(r)))
+		}
+	}
+	if t.status != nil {
+		if run, ok := t.status.LastRuns[slice]; ok && run.Result != "" {
+			// What the status says of the slice's last witnessed run: whether it
+			// covers the slice's last commit.
+			state := StateGreen
+			if run.Result != "pass" {
+				state = StateStalled
+			}
+			p.boxAdd(m.st.icon(state) + " " + m.st.dim("last run: "+run.Result+" \u00b7 covers: "+run.Covers))
+		}
+	}
+	p.boxEnd()
+}
+
+// under adds text under the row above it in the panel, standing indent cells in
+// and wrapped whole at the room that leaves: none of it is cut.
+func (m *Model) under(p *page, indent int, text string) {
+	for _, l := range wrapWhole(text, max(1, m.innerWidth()-indent)) {
+		p.boxUnder(spaces(indent) + l)
+	}
+}
+
+// recordingWords is a recorded file in words: the scenario with its caption, the
+// flow and step when it has them, the file's name and its size.
+func recordingWords(r journal.Recording) string {
+	parts := []string{r.Scenario}
+	if r.Caption != "" {
+		parts = append(parts, r.Caption)
+	}
+	if r.Flow != "" {
+		flow := "flow " + r.Flow
+		if r.Step > 0 {
+			flow += " step " + strconv.Itoa(r.Step)
+		}
+		parts = append(parts, flow)
+	}
+	parts = append(parts, r.File, sizeWords(r.Size))
+	return strings.Join(parts, " \u00b7 ")
+}
+
+// sizeWords is a file's size in the unit that reads shortest.
+func sizeWords(n int64) string {
+	const kib, mib = 1 << 10, 1 << 20
+	switch {
+	case n >= mib:
+		return strconv.FormatFloat(float64(n)/mib, 'f', 1, 64) + " MiB"
+	case n >= kib:
+		return strconv.FormatFloat(float64(n)/kib, 'f', 1, 64) + " KiB"
+	}
+	return strconv.FormatInt(n, 10) + " B"
+}
+
+// callsPanel adds the panel of the calls the slice's holder made while it held
+// the slice, newest first, each as the sub-step's live line words it. A slice
+// whose holder made none has no panel.
+func (m *Model) callsPanel(p *page, t *ticket, slice string, row *sliceRow) {
+	tr := t.trackOf(stepBuild, "slice:"+slice)
+	open := row != nil && row.State != StateGreen
+	var calls []events.Envelope
+	for _, l := range t.moves(tr, open, m.now()) {
+		if isMove(l) {
+			calls = append(calls, l)
+		}
+	}
+	if len(calls) == 0 {
+		return
+	}
+	calls = newestFirst(calls, func(l events.Envelope) time.Time { at, _ := l.At(); return at })
+	rows := make([]listRow, len(calls))
+	for i, l := range calls {
+		rows[i] = listRow{cells: []string{m.st.dim(clock(l, m.zone)), m.moveText(t, l)}}
+	}
+	m.listPanel(p, listSpec{title: "Calls", summary: strconv.Itoa(len(calls)), cols: timelineColumns, names: timelineColumnNames, rows: rows})
 }
