@@ -221,7 +221,9 @@ func TestRunTakesKeysThatArriveTogether(t *testing.T) {
 	cfg := plainConfig(newLiveSource(jig1()...), r)
 	cfg.Ticket = "JIG-1"
 	s := startRun(t, cfg)
-	s.out.until(t, "needs you")
+	// `a` needs the ticket's question read and drawn, not only a heading.
+	s.out.until(t, "Formal or casual?")
+	s.out.until(t, "a answer")
 
 	// The answer prompt, its text and its end, in one write.
 	s.keys("aOK\r")

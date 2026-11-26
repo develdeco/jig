@@ -330,71 +330,56 @@ func searchBig(t testing.TB, n int) *Model {
 	return m
 }
 
-// TestSearchKeyRedrawsWithin50msOn1000Tickets: each key of a search, the line's
-// first included, and esc, redraws within 50 ms from the key to the frame, the
-// median of repeated runs.
-func TestSearchKeyRedrawsWithin50msOn1000Tickets(t *testing.T) {
-	// Not parallel: a key's time is measured, and other tests would load it.
-	const budget = 50 * time.Millisecond
-	median := func(d []time.Duration) time.Duration {
-		sort.Slice(d, func(i, j int) bool { return d[i] < d[j] })
-		return d[len(d)/2]
-	}
-	keys := []struct {
-		name string
-		do   func(m *Model)
-	}{
-		{"the first key, /", func(m *Model) { typed(m, "/") }},
-		{"a first letter", func(m *Model) { typed(m, "/t") }},
-		{"a middle key", func(m *Model) { typed(m, "/t-00"); typed(m, "1") }},
-		{"a number", func(m *Model) { typed(m, "/10") }},
-		{"backspace", func(m *Model) { typed(m, "/t-001"); press(m, tea.KeyBackspace) }},
-		{"esc", func(m *Model) { typed(m, "/t-001"); press(m, tea.KeyEsc) }},
-	}
+// TestASearchKeyOn1000TicketsBuildsNoRow: on 1,000 tickets the first keys of a
+// search build each row's words at most once and no row's detail, and every
+// later key, esc and backspace included, builds nothing: not the queue, not a
+// row, not a detail, not a word. What a key costs is the work it does; the time
+// is logged, not held to a bar, which a shared runner's speed would decide.
+func TestASearchKeyOn1000TicketsBuildsNoRow(t *testing.T) {
+	t.Parallel()
 	m := searchBig(t, 1000)
 	m.View()
-	for _, k := range keys {
-		var took []time.Duration
-		for range 9 {
-			// Each run starts from a main with no search, the queue built.
-			press(m, tea.KeyEsc)
-			m.View()
-			m.main.srch = nil
-			// Everything before the last key is set up; the last one is timed.
-			var last func()
-			switch k.name {
-			case "the first key, /":
-				last = func() { typed(m, "/") }
-			case "a first letter":
-				typed(m, "/")
-				m.View()
-				last = func() { typed(m, "t") }
-			case "a middle key":
-				typed(m, "/t-00")
-				m.View()
-				last = func() { typed(m, "1") }
-			case "a number":
-				typed(m, "/1")
-				m.View()
-				last = func() { typed(m, "0") }
-			case "backspace":
-				typed(m, "/t-001")
-				m.View()
-				last = func() { press(m, tea.KeyBackspace) }
-			default:
-				typed(m, "/t-001")
-				m.View()
-				last = func() { press(m, tea.KeyEsc) }
-			}
-			start := time.Now()
-			last()
-			m.View()
-			took = append(took, time.Since(start))
+	words := func() int {
+		if m.main.srch == nil {
+			return 0
 		}
-		got := median(took)
-		t.Logf("%s: %v", k.name, got)
-		if got > budget {
-			t.Errorf("%s: key to frame takes %v on 1,000 tickets, want under %v", k.name, got, budget)
+		return len(m.main.srch.words)
+	}
+	type work struct{ queue, rows, details, words int }
+	now := func() work { return work{m.queueBuilds, m.rowBuilds, m.detailBuilds, words()} }
+	key := func(name string, do func()) work {
+		before := now()
+		start := time.Now()
+		do()
+		m.View()
+		t.Logf("%s: %v", name, time.Since(start))
+		after := now()
+		return work{after.queue - before.queue, after.rows - before.rows, after.details - before.details, after.words - before.words}
+	}
+
+	first := key("the first key, /", func() { typed(m, "/") })
+	letter := key("a first letter", func() { typed(m, "t") })
+	if first.queue != 0 || letter.queue != 0 || first.details != 0 || letter.details != 0 {
+		t.Errorf("the first keys built the queue or a row's detail: / %+v, t %+v", first, letter)
+	}
+	if built, rows := first.words+letter.words, m.main.srch.total; built > rows {
+		t.Errorf("the first keys built %d rows' words, each row at most once is %d", built, rows)
+	}
+	later := []struct {
+		name string
+		do   func()
+	}{
+		{"a middle key", func() { typed(m, "-00") }},
+		{"a number", func() { typed(m, "1") }},
+		{"another number", func() { typed(m, "0") }},
+		{"backspace", func() { press(m, tea.KeyBackspace) }},
+		{"esc", func() { press(m, tea.KeyEsc) }},
+		{"the search again", func() { typed(m, "/t-001") }},
+		{"esc again", func() { press(m, tea.KeyEsc) }},
+	}
+	for _, k := range later {
+		if got := key(k.name, k.do); got != (work{}) {
+			t.Errorf("%s built %+v on 1,000 tickets, want nothing", k.name, got)
 		}
 	}
 }

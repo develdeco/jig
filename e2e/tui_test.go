@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -136,6 +138,7 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	t.Parallel()
 	fx, env := newFixture(t, fixture.Opts{})
 	dropEnvFromSlices(t, fx)
+	longOracleForSliceD(t, fx)
 	h := newHarness(t, fx, env, "s-builder")
 	branch := fx.Branch
 	h.Branch(branch)
@@ -218,20 +221,21 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if !strings.Contains(activity, "latest ") {
 		t.Errorf("the ticket's Activity pane cuts none of its lines at 100x30:\n%s", activity)
 	}
-	// A line the pane cut to its first word ends in a mark: space on it lays
-	// the line out whole where it stands, and space again folds it back.
-	if !strings.Contains(activity, "●…") {
+	// A line the pane cut ends in the TUI's own mark: space on it lays the line
+	// out whole where it stands, and space again folds it back.
+	cut := cutActivityLines(activity)
+	if len(cut) == 0 {
 		t.Fatalf("the Activity pane has no cut line at 100x30:\n%s", activity)
 	}
 	screens.press("\x1b[B")
 	screens.until("↑↓ move in Activity", "space expand")
 	screens.press(" ")
 	whole := screens.until("space fold")
-	if strings.Contains(whole, "●…") {
-		t.Errorf("space on the cut line did not show it whole:\n%s", whole)
+	if got := cutActivityLines(whole); len(got) >= len(cut) {
+		t.Errorf("space on the cut line did not show it whole (cut lines %q before, %q after):\n%s", cut, got, whole)
 	}
 	screens.press(" ")
-	if folded := screens.until("space expand"); !strings.Contains(folded, "●…") {
+	if folded := screens.until("space expand"); len(cutActivityLines(folded)) != len(cut) {
 		t.Errorf("space again did not fold the line back:\n%s", folded)
 	}
 	screens.press("\x1b[A")
@@ -536,4 +540,55 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	if !created {
 		t.Errorf("the fake gh was never asked to open a pull request: %v", ghCalls(t, ghLog))
 	}
+}
+
+// cutActivityLines are the lines of a frame's Activity pane that end in the
+// mark of a line the pane cut.
+func cutActivityLines(frame string) []string {
+	var out []string
+	in := false
+	for _, l := range strings.Split(frame, "\n") {
+		if strings.Contains(l, "╭─ Activity") {
+			in = true
+			continue
+		}
+		if in && strings.Contains(l, "╰─") {
+			break
+		}
+		if in && strings.HasSuffix(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), "│")), "…") {
+			out = append(out, strings.TrimSpace(l))
+		}
+	}
+	return out
+}
+
+// longOracleForSliceD gives slice d an oracle command that no Activity column
+// of 100x30 holds, whatever the path of the Go toolchain: the same go binary
+// as the fixture's oracle, with flags that change nothing.
+func longOracleForSliceD(t *testing.T, fx *fixture.Fixture) {
+	t.Helper()
+	st, err := store.Open(fx.StoreDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	path := filepath.Join(st.TicketDir(fx.Ticket), "slices.yaml")
+	body := string(readFileOrFatal(t, path))
+	goBin := filepath.ToSlash(filepath.Join(runtime.GOROOT(), "bin", "go"))
+	if runtime.GOOS == "windows" {
+		goBin += ".exe"
+	}
+	if strings.Contains(goBin, " ") {
+		goBin = `"` + goBin + `"`
+	}
+	long := goBin + " test -count=1 -timeout 10m -vet=off -p 1 -parallel 4 -failfast -run TestGreet ./beta/..."
+	at := strings.Index(body, "id: d\n")
+	if at < 0 {
+		t.Fatalf("test setup: %s has no slice d:\n%s", path, body)
+	}
+	head, tail := body[:at], body[at:]
+	swapped := strings.Replace(tail, "oracle: test\n", "oracle: "+strconv.Quote(long)+"\n", 1)
+	if swapped == tail {
+		t.Fatalf("test setup: slice d of %s names no test oracle:\n%s", path, body)
+	}
+	writeFileOrFatal(t, path, []byte(head+swapped))
 }
