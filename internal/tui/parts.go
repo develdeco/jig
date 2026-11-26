@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -60,6 +62,7 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		from, to, cap := m.rowsInRoom(p, s, laid)
 		alone := to-from < len(laid)
 		before, after := s.before, s.after
+		var marks []countMark
 		if alone {
 			// The row drawn alone is read by lines in the room the pane has, the
 			// counts of the rows around it taking a line each when there is the
@@ -67,11 +70,11 @@ func (m *Model) listPanel(p *page, s listSpec) {
 			before, after = nil, nil
 			if cap >= 5 {
 				if from > 0 {
-					before = []string{m.st.dim("↑ " + strconv.Itoa(from) + " more")}
+					marks = append(marks, countMark{"↑ " + strconv.Itoa(from) + " more", 0, from, true})
 					cap--
 				}
 				if to < len(laid) {
-					after = []string{m.st.dim("↓ " + strconv.Itoa(len(laid)-to) + " more")}
+					marks = append(marks, countMark{"↓ " + strconv.Itoa(len(laid)-to) + " more", to, len(laid), false})
 					cap--
 				}
 			}
@@ -79,8 +82,18 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		for _, l := range before {
 			p.boxAdd(l)
 		}
+		for _, mk := range marks {
+			if mk.above {
+				p.lines = append(p.lines, mk.line(m, s.rows))
+			}
+		}
 		for i := from; i < to; i++ {
 			p.boxRow(s.rows[i].ref, laid[i])
+		}
+		for _, mk := range marks {
+			if !mk.above {
+				p.lines = append(p.lines, mk.line(m, s.rows))
+			}
 		}
 		for _, l := range after {
 			p.boxAdd(l)
@@ -97,6 +110,24 @@ func (m *Model) listPanel(p *page, s listSpec) {
 		p.boxAdd(l)
 	}
 	p.boxEnd()
+}
+
+// countMark is the line that counts the rows of a list from lo to hi-1 a pane
+// drew none of: it stands for them, so the cursor passes over them.
+type countMark struct {
+	text   string
+	lo, hi int
+	above  bool
+}
+
+func (c countMark) line(m *Model, rows []listRow) pline {
+	var hidden []rowRef
+	for _, r := range rows[c.lo:c.hi] {
+		if r.ref != nil {
+			hidden = append(hidden, *r.ref)
+		}
+	}
+	return pline{text: m.st.dim(c.text), box: boxMid, hiddenRefs: hidden}
 }
 
 // rowsInRoom is the rows of a list the pane draws, from from to to-1, and the
@@ -180,19 +211,46 @@ func (m *Model) laidListFor(p *page, cols []column, names []string, cells [][]st
 			}
 		}
 	}
-	var laid []laidRow
-	switch {
-	case room < 0:
-		// What a person decides on is never cut: its free text wraps as far as it
-		// goes.
-		laid = layoutMarked(cols, all, m.innerWidth(), wholeRows, whole, true)
-	case room > 0:
-		laid = laidWithinMarked(cols, all, m.innerWidth(), room+1, whole, true)
-	default:
-		laid = layoutMarked(cols, all, m.innerWidth(), wrapRows, whole, true)
-	}
+	laid := m.laidOnce(cols, all, room, whole, func() []laidRow {
+		switch {
+		case room < 0:
+			// What a person decides on is never cut: its free text wraps as far as it
+			// goes.
+			return layoutMarked(cols, all, m.innerWidth(), wholeRows, whole, true)
+		case room > 0:
+			return laidWithinMarked(cols, all, m.innerWidth(), room+1, whole, true)
+		}
+		return layoutMarked(cols, all, m.innerWidth(), wrapRows, whole, true)
+	})
 	p.boxNames(laid[0].lines)
 	return laid[1:]
+}
+
+// laidOnce is the layout of the cells under cols in room, with the rows whole
+// says are expanded, as the allocator last gave it for the same cells at the same
+// width: a frame that moves the cursor reads the same lists and measures none of
+// them again. The rows it gives back are the memo's, and nothing changes them.
+func (m *Model) laidOnce(cols []column, all [][]string, room int, whole []bool, lay func() []laidRow) []laidRow {
+	var k strings.Builder
+	fmt.Fprintf(&k, "%d|%d|%v|%v", room, m.innerWidth(), cols, whole)
+	for _, row := range all {
+		for _, c := range row {
+			k.WriteString(c)
+			k.WriteByte(0)
+		}
+		k.WriteByte(1)
+	}
+	key := k.String()
+	if laid, ok := m.laid[key]; ok {
+		return laid
+	}
+	if m.laid == nil || len(m.laid) > 128 {
+		m.laid = map[string][]laidRow{}
+	}
+	m.laidBuilds++
+	laid := lay()
+	m.laid[key] = laid
+	return laid
 }
 
 // boxNames adds the row of a list's column names to the panel.

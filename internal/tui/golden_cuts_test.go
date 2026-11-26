@@ -197,6 +197,16 @@ func everyCutHasAHolder(t *testing.T, name string, g *rig) {
 			g.press("down")
 			seen += "\n" + stripANSI(g.view())
 		}
+		// A pane of text is read by lines too, and put back where it was.
+		scrolled := 0
+		for g.m.top().textFocus && scrolled < 80 && !charsInOrder(seen, m.value) {
+			g.press("down")
+			scrolled++
+			seen += "\n" + stripANSI(g.view())
+		}
+		for ; scrolled > 0; scrolled-- {
+			g.press("up")
+		}
 		if !charsInOrder(seen, m.value) {
 			t.Errorf("%s: the expanded frame does not hold the whole value %q:\n%s", name, m.value, open)
 		}

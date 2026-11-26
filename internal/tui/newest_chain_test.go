@@ -39,7 +39,7 @@ func newestChainLines() []events.Envelope {
 // TestEveryListReadsNewestFirst is the rule on every screen at once: one
 // ticket's lines are delivered newest first, and then each screen that lists
 // what happened draws it newest first - the ticket's activity, the build's
-// commits, the review's rounds and fix slices, the publish activity, a slice's
+// commits, the review's rounds, the publish activity, a slice's
 // timeline, the chart's activity and the tail.
 func TestEveryListReadsNewestFirst(t *testing.T) {
 	t.Parallel()
@@ -75,14 +75,14 @@ func TestEveryListReadsNewestFirst(t *testing.T) {
 	newestOnTop(t, "slice timeline", clocksOf(strings.Split(timeline, "\n")), 4)
 	g.press("esc", "esc")
 
-	// The review: the rounds, the fix slices they sent back, and the activity.
+	// The review: the rounds, the detail of the newest, and the activity.
 	g.press("home", "down", "down", "enter")
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
 	text := pageText(g)
 	inOrder(t, "rounds", readWords(text), "round 2 ", "round 1 ")
-	inOrder(t, "fix slices", readWords(text), "Sent back", "fix-2 round 2", "fix-1 round 1")
+	inOrder(t, "the detail of the newest round", readWords(text), "Detail · round 2", "sent back")
 	newestOnTop(t, "review activity", clocksOf(panelRows(g.view(), "Review activity")), 4)
 	g.press("esc")
 

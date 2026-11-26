@@ -221,9 +221,13 @@ func (m *Model) layMain(p *mainDraft) page {
 	// wholeT and wholeC say which rows of each list the person has expanded
 	// (expand.go), after the names row each list starts with.
 	wholeT, wholeC := []bool{false}, []bool{false}
+	pane := ""
 	for i := range p.lines {
+		if p.lines[i].box == boxTop {
+			pane = p.lines[i].text
+		}
 		if cells, ok := p.cells[i]; ok {
-			open := m.nav[0].isExpanded("", p.lines[i].ref)
+			open := m.nav[0].isExpanded(pane, p.lines[i].ref)
 			if p.chart[i] {
 				charts = append(charts, cells)
 				wholeC = append(wholeC, open)

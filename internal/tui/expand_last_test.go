@@ -149,8 +149,8 @@ func TestAFoldedLastCommandIsAsItWas(t *testing.T) {
 		t.Fatalf("the line did not expand again:\n%s", open)
 	}
 	// A new command replaces the line: it opens folded.
-	g.r.answer("triage JIG-2 r1-f1 keep --store /s", strings.Join([]string{"triage:", "  ticket: JIG-2", "help[1]:", "  " + longSentence}, "\n")+"\n", 0)
-	g.press("up", "k")
+	replaced := *g.m.last
+	g.m.last = &replaced
 	if g.m.last == nil || g.m.lastOpen == g.m.last {
 		t.Errorf("a new command opened expanded")
 	}

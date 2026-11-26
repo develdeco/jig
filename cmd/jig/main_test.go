@@ -56,11 +56,11 @@ func TestRenderStatus(t *testing.T) {
 
 	want := "ticket: JIG-1\n" +
 		"state: building\n" +
-		"slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate}:\n" +
-		"  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-\n" +
-		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\",alpha,test,-\n" +
-		"  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-\n" +
-		"  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-\n" +
+		"slices[4]{id,state,attempts,blocked_by,question,goal,workspace,oracle,from_gate,findings}:\n" +
+		"  a,green,1,-,-,Fix Clamp so TestClamp passes.,alpha,test,-,-\n" +
+		"  b,queued,0,a,-,\"Give Clamp a percentage-range caller, once it works.\",alpha,test,-,-\n" +
+		"  c,queued,0,-,-,Decide and implement the greeting's tone.,beta,test,-,-\n" +
+		"  d,queued,0,-,-,Smoke-test the rig environment class.,beta,test,-,-\n" +
 		"questions: none\n" +
 		"brief:\n" +
 		"  approval: none\n" +

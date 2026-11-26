@@ -58,7 +58,9 @@ const frameLead = 5
 
 // innerWidth is the cells a panel's text has: the width less the frame, the
 // cursor's mark and the space before the right edge.
-func (m *Model) innerWidth() int { return max(1, m.width-7) }
+func (m *Model) innerWidth() int {
+	return max(1, m.width-7)
+}
 
 // boxRows lays rows out under cols in the panel's width and adds them to it.
 // None is a row the cursor can stand on.

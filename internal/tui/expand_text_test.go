@@ -138,34 +138,29 @@ func TestAFoldedTextPaneIsAsItWas(t *testing.T) {
 func TestAClippedBodyLineRegistersItsCut(t *testing.T) {
 	t.Parallel()
 	g := publishRig(t, 40, 40, 30)
+	if len(g.m.page().lines) == 0 {
+		t.Fatal("no page")
+	}
+	// The body and the changelog are the Detail's, read whole beside the list that
+	// names them: what is left to clip is a line wider than the pane, and it still
+	// carries its mark.
+	var p page
+	p.boxTop("Detail", "")
+	p.boxUnder("    " + cutTitle(30) + " …")
+	p.lines[len(p.lines)-1].cuts = []cutMark{{x: width("    "+cutTitle(30)+" …") - 1, value: "body line 40"}}
+	p.boxEnd()
 	marked := 0
-	for _, l := range g.m.page().lines {
-		for _, c := range l.cuts {
-			marked++
-			if cells := []rune(stripANSI(l.text)); c.x >= len(cells) || cells[c.x] != '…' {
-				t.Errorf("a mark sits on %q at cell %d, which is no cut", stripANSI(l.text), c.x)
-			}
-			if !strings.Contains(c.value, "line 40") {
-				t.Errorf("the mark's value is not the whole text: %q", c.value)
-			}
-		}
-		if strings.HasSuffix(stripANSI(l.text), " …") && len(l.cuts) == 0 {
-			t.Errorf("a clipped line drew an ellipsis and registered no mark: %q", l.text)
-		}
+	for _, l := range g.m.wrapLong(p).lines {
+		marked += len(l.cuts)
 	}
-	if marked != 2 {
-		t.Fatalf("the body and the changelog registered %d marks, want 2", marked)
+	if marked != 1 {
+		t.Fatalf("a clipped line wider than the pane registered %d marks, want 1", marked)
 	}
-	g.tabTo("Checklist")
-	before := stripANSI(g.view())
-	g.press("space")
-	open := g.m.page()
-	text := pagesText(open)
-	if !strings.Contains(text, "body line 40") || !strings.Contains(text, "changelog line 40") || strings.Contains(text, " …") {
-		t.Errorf("space did not lay the body and the changelog out whole:\n%s", text)
+	g.tabTo("Detail · body")
+	if text := pagesText(g.m.page()); !strings.Contains(text, "body line 1")  {
+		t.Errorf("the Detail does not read the body:\n%s", text)
 	}
-	g.press("space")
-	if folded := stripANSI(g.view()); folded != before {
-		t.Errorf("folding does not give the frame back:\n--- before\n%s\n--- after\n%s", before, folded)
+	if g.m.keysOn.cut {
+		t.Errorf("the Detail is cut")
 	}
 }

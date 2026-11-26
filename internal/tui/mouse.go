@@ -37,12 +37,14 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 	for _, line := range l.pg.lines {
 		h.cuts = append(h.cuts, line.cuts)
 		if line.ref == nil {
+			// The rows a mark stands for are rows the cursor passes over.
 			h.sel = append(h.sel, -1)
 			if !(line.cont || line.under) || line.names {
 				// Anything but a row's continuation or detail lines ends the row above it.
 				cur = -1
 			}
 			h.owner = append(h.owner, cur)
+			n += len(line.hiddenRefs)
 			continue
 		}
 		h.sel = append(h.sel, n)

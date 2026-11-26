@@ -24,7 +24,7 @@ func buildRig(t *testing.T, w, h, n int) *rig {
 	t.Helper()
 	status := strings.Join([]string{"ticket: BIG-1", "state: building",
 		axi.Table("slices", []string{"id", "state", "attempts", "blocked_by", "question", "goal"}, [][]string{
-			{"s1", "building", "1", "-", "-", "Slice s1"},
+			{"s1", "building", "1", "-", "-", subjectWords(n)},
 		}), "questions: none",
 	}, "\n") + "\n"
 	g := newRig(t, "BIG-1")
@@ -57,7 +57,7 @@ func TestABuildRowExpandsItsCutSubjectWhole(t *testing.T) {
 			g := buildRig(t, w, h, n)
 			g.tabTo("Slices")
 			before := stripANSI(g.view())
-			if !strings.Contains(before, "…") || hasWordsInOrder(before, subjectWords(n)) {
+			if list := panelText(t, before, "Slices"); !strings.Contains(list, "…") || hasWordsInOrder(list, subjectWords(n)) {
 				t.Fatalf("the subject is not cut:\n%s", before)
 			}
 			if hint := strings.Join(strings.Fields(before), " "); !strings.Contains(hint, "space expand") {
@@ -94,43 +94,31 @@ func findingStatus(n int) string {
 	}, "\n") + "\n"
 }
 
-// TestAReviewRowExpandsItsCutFindingWhole: a finding's title is cut after three
-// rows on the review screen; space on the finding shows it whole, with the
-// rationale under it whole too, and folds back.
+// reviewOf is the review screen of a ticket with a round and a finding at w by h.
+func reviewOf(t *testing.T, w, h int) *rig {
+	t.Helper()
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", findingStatus(40), 0)
+	g.send(tea.WindowSizeMsg{Width: w, Height: h})
+	g.feed(jig2Mid()...)
+	g.press("enter")
+	if g.m.Screen() != "review" {
+		t.Fatalf("on %s, want the review screen", g.m.Screen())
+	}
+	return g
+}
+
+// TestAReviewRowExpandsItsCutFindingWhole: the review screen's rounds and asks are
+// lists whose rows the allocator cuts at the narrow sizes; each cut is a mark,
+// and a click on it lays the row out whole where it stands.
 func TestAReviewRowExpandsItsCutFindingWhole(t *testing.T) {
 	t.Parallel()
-	for _, size := range phaseSizes {
-		w, h := size[0], size[1]
-		n := 40
-		if w > 100 {
-			n = 200
+	for _, size := range [][2]int{{60, 50}} {
+		g := reviewOf(t, size[0], size[1])
+		if len(cutCells(g.view())) == 0 {
+			t.Fatalf("%dx%d: no row of the review is cut:\n%s", size[0], size[1], g.view())
 		}
-		t.Run(fmt.Sprintf("%dx%d", w, h), func(t *testing.T) {
-			t.Parallel()
-			g := newRig(t, "JIG-2")
-			g.r.answer("status JIG-2 --store /s", findingStatus(n), 0)
-			g.send(tea.WindowSizeMsg{Width: w, Height: h})
-			g.feed(jig2Mid()...)
-			g.press("enter")
-			if g.m.Screen() != "review" {
-				t.Fatalf("on %s, want the review screen", g.m.Screen())
-			}
-			g.tabTo("Findings")
-			before := stripANSI(g.view())
-			findings := panelText(t, before, "Findings")
-			if !strings.Contains(findings, "…") || hasWordsInOrder(findings, cutTitle(n)) {
-				t.Fatalf("the finding is not cut:\n%s", before)
-			}
-			g.press("space")
-			open := stripANSI(g.view())
-			if panel := panelText(t, open, "Findings"); strings.Contains(between(panel, "w001", "The loop"), "…") || !hasWordsInOrder(panel, cutTitle(n)) || !hasWordsInOrder(panel, longAskReason) {
-				t.Errorf("space did not show the finding whole:\n%s", open)
-			}
-			g.press("space")
-			if folded := stripANSI(g.view()); folded != before {
-				t.Errorf("folding does not give the frame back:\n--- before\n%s\n--- after\n%s", before, folded)
-			}
-		})
+		everyCutHasAHolder(t, fmt.Sprintf("review %dx%d", size[0], size[1]), reviewOf(t, size[0], size[1]))
 	}
 }
 

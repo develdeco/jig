@@ -42,7 +42,7 @@ func TestReviewSectionsArePanels(t *testing.T) {
 			g.press("enter")
 			var names map[string]string
 			if rows != h {
-				names = map[string]string{"Rounds": "round", "Findings": "risk", "Probes": "round", "Sent back": "slice", "Asks": "risk", "Review activity": "time"}
+				names = map[string]string{"Rounds": "round", "Probes": "round", "Asks": "risk", "Review activity": "time"}
 			}
 			wantPanels(t, fmt.Sprintf("the review %dx%d", w, rows), g.view(), names)
 		}

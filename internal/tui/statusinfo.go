@@ -80,6 +80,9 @@ type statusSlice struct {
 	Workspace, Oracle string
 	FromGate          int
 	Attempts          int
+	// Findings are the gate finding ids a fix slice resolves, empty for any other
+	// slice and for a status that predates the column.
+	Findings []string
 }
 
 // statusLastRun is a row of the status's last_runs table in its own words:
@@ -123,6 +126,9 @@ type statusPublish struct {
 	PR, PRState, Head, Branch string
 	BodyFile, Body            string
 	ChangelogFile, Changelog  string
+	// Repos are the files that hold a pull request body for each repo of a
+	// publish in several, by the repo's name: the status's publish_prs table.
+	Repos map[string]string
 }
 
 // statusBrief is the brief block of a status: whether the brief as it is now
@@ -208,11 +214,15 @@ func parseStatus(out string) *statusInfo {
 		return s
 	}
 	for _, r := range doc.Tables["slices"].Maps() {
-		info.Slices = append(info.Slices, statusSlice{
+		sl := statusSlice{
 			ID: r["id"], State: r["state"], Attempts: atoi(r["attempts"]),
 			BlockedBy: dash(r["blocked_by"]), Question: dash(r["question"]), Goal: dash(r["goal"]),
 			Workspace: dash(r["workspace"]), Oracle: dash(r["oracle"]), FromGate: atoi(r["from_gate"]),
-		})
+		}
+		if f := dash(r["findings"]); f != "" {
+			sl.Findings = strings.Split(f, "+")
+		}
+		info.Slices = append(info.Slices, sl)
 	}
 	for _, r := range doc.Tables["last_runs"].Maps() {
 		if info.LastRuns == nil {
@@ -272,6 +282,15 @@ func parseStatus(out string) *statusInfo {
 		info.Publish = &statusPublish{
 			PR: kv["pr"], PRState: kv["pr_state"], Head: kv["head"], Branch: kv["branch"],
 			BodyFile: kv["body_file"], Body: kv["body"], ChangelogFile: kv["changelog_file"], Changelog: kv["changelog"],
+		}
+		for _, r := range doc.Tables["publish_prs"].Maps() {
+			if r["body_file"] == "" || r["body_file"] == "-" {
+				continue
+			}
+			if info.Publish.Repos == nil {
+				info.Publish.Repos = map[string]string{}
+			}
+			info.Publish.Repos[r["repo"]] = r["body_file"]
 		}
 	}
 	for _, r := range doc.Tables["questions"].Maps() {

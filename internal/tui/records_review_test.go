@@ -46,20 +46,30 @@ func TestReviewScreenSaysWhoReviewedEachRoundAndHowFarTheyStood(t *testing.T) {
 		jl(at(12, 30), "JIG-2", "", journal.EventGateOpen),
 		jl(at(12, 50), "JIG-2", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 2, "s-reviewer" }),
 	)...).press("enter")
-	text := pageText(g)
+	// The rows say how each round stands; who reviewed it and how far they read
+	// are the detail of the round under the cursor.
+	if text := readWords(pageText(g)); !strings.Contains(text, "✗ round 1 not clean 1 ask") || !strings.Contains(text, "fix budget 3 of 3 rounds used, reached") || !strings.Contains(text, "?..ddddddd") {
+		t.Errorf("the rows do not say how the rounds stand:\n%s", text)
+	}
+	text := readWords(pageText(g.focus("1")))
 	for _, want := range []string{
-		"✗ round 1 not clean 1 ask",
 		"builder reviewing its own change (Codex · Gpt 5)",
-		"full 0000000..ccccccc 4 files",
-		"reviewer · independence unknown · s-review", // round 2: nothing known of its model
-		"delta ?..ddddddd",                           // its base is not known, and it has no findings file
-		"fix budget 3 of 3 rounds used, reached",
+		"full 0000000..ccccccc · 4 files read",
 	} {
-		if !strings.Contains(readWords(text), want) {
-			t.Errorf("the screen lacks %q:\n%s", want, text)
+		if !strings.Contains(text, want) {
+			t.Errorf("the detail of round 1 lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Count(readWords(text), "files") != 1 {
+	text = readWords(pageText(g.focus("2")))
+	for _, want := range []string{
+		"reviewer · independence unknown · s-review", // round 2: nothing known of its model
+		"delta ?..ddddddd", // its base is not known, and it has no findings file
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the detail of round 2 lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "files read") {
 		t.Errorf("a round with no findings file claims files read:\n%s", text)
 	}
 }
@@ -77,7 +87,7 @@ func TestReviewScreenNamesTheModelTheRoundRanOn(t *testing.T) {
 	g.feed(append([]events.Envelope{
 		ll(at(10, 59), "JIG-2", journal.EventSessionStart, func(l *journal.Line) { l.Session, l.Harness, l.Model = "s-reviewer", "claude", "claude-sonnet-5" }),
 	}, jig2Mid()...)...).press("enter")
-	text := pageText(g)
+	text := pageText(g.focus("1"))
 	if !strings.Contains(text, "reviewer (Claude Code · Opus 5) · independent") || strings.Contains(text, "Codex") || strings.Contains(text, "Sonnet 5) · independent") {
 		t.Errorf("the screen does not use the harness the ledger gave and the model the round ran on:\n%s", text)
 	}
@@ -92,11 +102,11 @@ func TestReviewScreenNamesTheReviewerOfTheOpenRound(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want the review screen", g.m.Screen())
 	}
-	if text := pageText(g); !strings.Contains(readWords(text), "round 1 open 09:11:00") || !strings.Contains(text, "waiting for a reviewer to take it") {
+	if text := pageText(g.focus("1")); !strings.Contains(readWords(text), "round 1 open 09:11:00") || !strings.Contains(text, "waiting for a reviewer to take it") {
 		t.Errorf("an open round nobody took:\n%s", text)
 	}
 	g.feed(jl(at(11, 10), "JIG-2", "", journal.EventGateReviewer, func(l *journal.Line) { l.Session, l.Attempt = "s-reviewer", 1 }))
-	if text := pageText(g); !strings.Contains(text, "reviewer took it · s-review") || strings.Contains(text, "waiting for a reviewer") {
+	if text := pageText(g.focus("1")); !strings.Contains(text, "reviewer took it · s-review") || strings.Contains(text, "waiting for a reviewer") {
 		t.Errorf("an open round a reviewer took:\n%s", text)
 	}
 }
@@ -114,22 +124,22 @@ func TestReviewScreenListsWhatTheRoundFoundBesideTheAsks(t *testing.T) {
 		{"r1-f2", "1", "fix", "medium", "alpha/a.go:12", "Close the file", "open", "a leaked handle fails the next open", "", ""},
 		{"r1-f3", "1", "note", "low", "beta/b.go:2", "Rename the helper", "dismissed", "a clearer name", "", ""},
 	}), 0)
-	g.feed(jig2Mid()...).press("enter")
-	text := pageText(g)
-	findings, asks, _ := strings.Cut(text, "\nAsks\n")
-	if summaryOf(g.m.page(), "Findings") != "round 1" {
-		t.Errorf("the findings are not those of round 1:\n%s", text)
+	g.feed(jig2Mid()...).press("enter").sized(100, 60)
+	// The cursor opens on the ask, whose detail is its finding whole and why it
+	// waits.
+	if ask := readWords(pageText(g)); !strings.Contains(ask, "finding high · alpha/a.go:3 · Unchecked error reason a failed write would pass silently waits because the fix budget is reached") {
+		t.Errorf("the detail of the ask lacks the reason and the why:\n%s", ask)
 	}
-	for _, want := range []string{"to fix", "Close the file", "a leaked handle fails the next open", "dismissed", "Rename the helper"} {
-		if !strings.Contains(findings, want) {
-			t.Errorf("the findings lack %q:\n%s", want, text)
+	// The round's detail lists each finding it raised with its reason.
+	round := readWords(pageText(g.focus("1")))
+	for _, want := range []string{
+		"high alpha/a.go:3 Unchecked error → ask a failed write would pass silently",
+		"medium alpha/a.go:12 Close the file → to fix a leaked handle fails the next open",
+		"low beta/b.go:2 Rename the helper → dismissed a clearer name",
+	} {
+		if !strings.Contains(round, want) {
+			t.Errorf("the detail of the round lacks %q:\n%s", want, round)
 		}
-	}
-	if strings.Contains(findings, "Unchecked error") {
-		t.Errorf("an ask that waits for a person is listed with the other findings:\n%s", text)
-	}
-	if !strings.Contains(readWords(asks), "Unchecked error · a failed write would pass silently · the fix budget is reached") {
-		t.Errorf("the ask lacks the reason and the why under it:\n%s", text)
 	}
 }
 

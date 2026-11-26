@@ -71,7 +71,7 @@ func TestBuildReviewSliceScreensCutNothingWhileWidthAllows(t *testing.T) {
 		"review": func() (*rig, []string) {
 			g := newRig(t, "JIG-2")
 			g.r.answer("status JIG-2 --store /s", strings.ReplaceAll(manyProbesTwoAsks(), "Unchecked error", layoutFinding), 0)
-			g.feed(jig2Mid()...).press("enter", "end")
+			g.feed(jig2Mid()...).press("enter") // the cursor opens on the first ask, whose detail is its finding whole
 			return g, []string{layoutFinding}
 		},
 	}

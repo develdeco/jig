@@ -110,6 +110,16 @@ func splitPlus(cell string) []string {
 // earlier round is queued by the gate that is about to open the next round, and
 // the status gives such a slice that round as its from_gate.
 func (t *ticket) fixRounds() map[string]int {
+	memo := t.memoFor()
+	if memo.fixes == nil {
+		memo.fixes = t.readFixRounds()
+	}
+	return memo.fixes
+}
+
+// readFixRounds is the reading fixRounds keeps while the lines are the same:
+// the map is the memo's, and no caller changes it.
+func (t *ticket) readFixRounds() map[string]int {
 	out := map[string]int{}
 	closed := 0
 	for i, l := range t.lines {

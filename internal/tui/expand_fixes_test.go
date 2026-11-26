@@ -127,38 +127,18 @@ func TestAClippedBodyLineWiderThanThePaneKeepsItsMark(t *testing.T) {
 	}
 }
 
-// TestARoundsCutWhoLineRegistersItsMark: the line under a round that says who
-// reviewed it is cut to two rows on a narrow screen; its ellipsis is a mark held
-// by the Rounds pane.
+// TestARoundsCutWhoLineRegistersItsMark: a round's row is cut by its width; every
+// cut of the Rounds list is a mark held by its row, and the who line the row
+// once carried is the Detail's, which the cursor row reads whole.
 func TestARoundsCutWhoLineRegistersItsMark(t *testing.T) {
 	t.Parallel()
-	mk := func() *rig {
-		g := newRig(t, "JIG-2")
-		g.send(tea.WindowSizeMsg{Width: 36, Height: 40})
-		g.feed(jig2Mid()...).press("enter")
-		if g.m.Screen() != "review" {
-			t.Fatalf("on %s, want review", g.m.Screen())
-		}
-		return g.tabTo("Rounds")
-	}
-	g := mk()
+	g := reviewOf(t, 60, 50)
+	g.tabTo("Rounds")
 	frame := stripANSI(g.view())
-	// The line is a line of the pane, cut by its width: it carries the mark. (The
-	// columns of a screen this narrow do not all fit, which is not this test's.)
-	marked := false
-	for _, l := range g.m.page().lines {
-		if strings.Contains(stripANSI(l.text), "independent…") && len(l.cuts) == 1 && l.cuts[0].value != "" {
-			marked = true
-		}
+	if !strings.Contains(frame, "independent") {
+		t.Errorf("the round's detail does not say who reviewed it:\n%s", frame)
 	}
-	if !marked {
-		t.Fatalf("the round's who line is cut at 36 wide and registers no mark:\n%s", frame)
-	}
-	g.press("space")
-	open := stripANSI(g.view())
-	if rounds := paneBlock(t, open, "Rounds"); !strings.Contains(rounds, "s-review") || strings.Contains(between(rounds, "reviewer", "╰"), "…") {
-		t.Errorf("space did not lay the who line out whole:\n%s", open)
-	}
+	everyCutHasAHolder(t, "the review's rounds", reviewOf(t, 60, 50).tabTo("Rounds"))
 }
 
 // TestALayoutIsAFixedPoint: a screen laid out once is laid out the same again:

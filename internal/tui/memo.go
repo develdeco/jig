@@ -38,9 +38,11 @@ type ticketMemo struct {
 	questions *[]questionRow
 	landed    *[]landedAt
 	publish   *publishInfo
-	phase     *phase.Ticket
-	clocks    *clocks
-	clocksAt  int64
+	// fixes is the round the journal places each fix slice in (fixRounds).
+	fixes    map[string]int
+	phase    *phase.Ticket
+	clocks   *clocks
+	clocksAt int64
 	// placed are the log's lines each with its place (log.go): a reading of every
 	// line the ticket has.
 	placed *[]placedLine

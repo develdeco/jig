@@ -27,6 +27,10 @@
 // edge when a window cuts the list (parts.go). The row under the cursor is lit
 // across its panel, and a panel can be drawn with its border lit.
 //
+// A phase screen (build, review, brief, publish) is a list and
+// the detail of the row under the cursor: a Detail panel, drawn by one part
+// (detail.go), holds that row's fields whole under the list at every width.
+//
 // Every panel is a pane with its own cursor and scroll: tab and shift+tab move
 // the focus, the keys that move and act read the focused pane's row, the focused
 // pane's border is lit and the hint line names it, a pane of text scrolls by

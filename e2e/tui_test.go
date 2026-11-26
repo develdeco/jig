@@ -301,9 +301,13 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The round: who reviewed it, whether they stood apart from the builders,
 	// what they read, what they raised, and the ask with the reviewer's reason.
 	// The steps are one key each: 3 is the review, 2 the build, 1 the brief.
+	// The cursor opens on the ask, whose detail is its finding whole with the
+	// reviewer's reason; up from it is the round, whose detail says who reviewed
+	// it and what they read.
 	screens.press("3")
-	screens.until("round 1  findings", "1 ask", "independent", "5 files", "fix budget 0 of 3 rounds used",
-		"Which greeting does the product want?", "undecided", "a user-visible string")
+	screens.until("fix budget 0 of 3 rounds used", "Which greeting does the product want?", "undecided", "a user-visible string")
+	screens.press("\x1b[Z") // shift+tab: the Rounds pane
+	screens.until("round 1  findings", "1 ask", "independent", "5 files")
 	// ? lists the keys of the screen, with the ones that cannot run and why: the
 	// gate waits for the ask to be decided, and no pull request is open yet.
 	screens.press("?")
@@ -311,8 +315,16 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("?")
 	// The build: each slice's workspace and oracle from slices.yaml, and the
 	// commit that was verified, with its subject.
+	// The detail of the slice under the cursor says them, so the cursor goes
+	// from the first slice down to the third, whose workspace is the other.
 	screens.press("2")
-	screens.until("workspace alpha · oracle test", "workspace beta · oracle test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	screens.until("workspace alpha", "oracle    test", "“JIG-1 a: ", "fix budget 0 of 3 rounds used")
+	screens.press("\x1b[B")
+	screens.press("\x1b[B")
+	screens.until("workspace beta", "oracle    test")
+	screens.press("\x1b[A")
+	screens.press("\x1b[A")
+	screens.until("╭─ Detail · a")
 	// A slice, and the one after it by ]: the header names the place.
 	screens.press("\r")
 	screens.until("slice a (1 of 4)")
@@ -321,12 +333,17 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	// The brief: its sections with their first lines, read by the screen from
 	// the verb, and the slices that cite them.
 	screens.press("1")
-	screens.until("Slice A - failing clamp", "`alpha.Clamp` is committed broken")
+	screens.until("Slice A - failing clamp")
+	// The detail of a section has its text: down to the section of slice A.
+	screens.press("\x1b[B")
+	screens.until("╭─ Detail · Slice A - failing clamp", "`alpha.Clamp` is committed broken")
 	// The slices are a pane below the sections: tab reaches it and the end of it
-	// shows the last of them.
+	// is the last slice, and two up is slice b, which waits for a.
 	screens.press("\t")
 	screens.press("\x1b[F")
-	screens.until("workspace alpha · oracle test · after a")
+	screens.press("\x1b[A")
+	screens.press("\x1b[A")
+	screens.until("╭─ Detail · b", "workspace alpha", "oracle    test", "waits for a")
 	// h goes to the project's list, and its row opens the ticket again.
 	screens.press("h")
 	screens.until("╭─ Running ", fx.Ticket)
@@ -407,10 +424,14 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 	screens.press("\x1b[B")
 	screens.press("\x1b[B")
 	screens.press("\r")
-	rounds := screens.until("round 2  clean", "round 1  findings", "5 files")
+	rounds := screens.until("round 2  clean", "round 1  findings")
 	if strings.Index(rounds, "round 2  clean") > strings.Index(rounds, "round 1  findings") {
 		t.Errorf("the review screen lists round 1 above round 2:\n%s", rounds)
 	}
+	// What each round read is the detail of its row: down from round 2 is round 1.
+	screens.press("\x1b[H")
+	screens.press("\x1b[B")
+	screens.until("╭─ Detail · round 1", "5 files read")
 	screens.press("\x7f")
 	// The round that closed applied the dismissal: the ask is gone.
 	if out = runJig(t, env, h.Clone, "status", fx.Ticket).Stdout; strings.Contains(out, "outstanding_asks") || strings.Contains(out, "r1-f1") {
@@ -454,8 +475,13 @@ func TestTUIHandBuiltToPublish(t *testing.T) {
 		screens.press("\x1b[B")
 	}
 	screens.press("\r")
-	publish := screens.until("Publish activity", "published finished", "changelog written")
-	if finished, written := strings.Index(publish, "published finished"), strings.LastIndex(publish, "changelog written"); finished < 0 || finished > written {
+	// The body's detail is long and the activity is under it: the cursor goes to
+	// the last check, whose detail is short, so both are on the screen.
+	screens.until("╭─ Detail · body")
+	screens.press("\x1b[F")
+	publish := screens.until("╭─ Detail · published", "Publish activity", "finished", "changelog    written")
+	activity = publish[strings.Index(publish, "Publish activity"):]
+	if finished, written := strings.Index(activity, "finished"), strings.Index(activity, "changelog    written"); finished < 0 || finished > written {
 		t.Errorf("the publish screen's activity does not read newest first:\n%s", publish)
 	}
 	screens.press("q")

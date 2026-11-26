@@ -22,8 +22,8 @@ func markedRow(frame string) string {
 }
 
 // TestACursorStaysOnItsRowWhenLinesComeInAbove: with the cursor on the older of
-// two fix slices, a newer one that comes in is a row above it, and the cursor is
-// still on the older one.
+// two rounds, a newer one that comes in is a row above it, and the cursor is
+// still on the older one, and so is the detail under the list.
 func TestACursorStaysOnItsRowWhenLinesComeInAbove(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-6")
@@ -32,16 +32,22 @@ func TestACursorStaysOnItsRowWhenLinesComeInAbove(t *testing.T) {
 	if g.m.Screen() != "review" {
 		t.Fatalf("on %s, want review", g.m.Screen())
 	}
-	g.press("down") // fix-2 is on top, fix-1 under it
-	if row := markedRow(g.view()); !strings.Contains(row, "fix-1") {
-		t.Fatalf("the cursor is on %q, want fix-1:\n%s", row, g.view())
+	g.press("down") // round 2 is on top, round 1 under it
+	if row := markedRow(g.view()); !strings.Contains(row, "round 1") {
+		t.Fatalf("the cursor is on %q, want round 1:\n%s", row, g.view())
 	}
-	g.feed(jl(at(33, 31), "JIG-6", "fix-3", journal.EventFixSlice))
+	g.feed(
+		jl(at(33, 0), "JIG-6", "", journal.EventGateOpen),
+		jl(at(33, 30), "JIG-6", "", journal.EventGateRound, func(l *journal.Line) { l.Attempt, l.Session = 3, "s-reviewer" }),
+	)
 	v := g.view()
-	if row := markedRow(v); !strings.Contains(row, "fix-1") {
+	if row := markedRow(v); !strings.Contains(row, "round 1") {
 		t.Errorf("the cursor left its row: it is on %q:\n%s", row, v)
 	}
-	inOrder(t, "fix slices", v, "fix-3", "fix-2", "fix-1")
+	if !strings.Contains(v, "╭─ Detail · round 1") {
+		t.Errorf("the detail left the row the cursor is on:\n%s", v)
+	}
+	inOrder(t, "rounds", between(v, "Rounds", "╰"), "round 3", "round 2", "round 1")
 
 	// A row that went away leaves the cursor where it was, as before.
 	g2 := newRig(t, "JIG-6")

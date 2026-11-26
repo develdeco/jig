@@ -3,22 +3,22 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 4 publish            ◇ waits t
   ✓ pull request opened · https://example.test/acme/demo/pull/7
 
   ╭─ Checklist ────────────────────────────────────────────────── 6 of 6 done ─╮
-  │    step                                                         at         │
-  │  ✓ body written for ccccccc                                     09:14:00   │
-  │      ## Intent                                                             │
-  │      Load the config from the file the person names. …                     │
-  │  ✓ approved by you for ccccccc                                  09:14:10   │
+  │    step                                                           at       │
+  │▸ ✓ body written for ccccccc                                       09:14:00 │
+  │  ✓ approved by you for ccccccc                                    09:14:10 │
   │  ✓ branch jig/JIG-2 pushed                                                 │
-  │  ✓ pull request opened · https://example.test/acme/demo/pull/7  09:14:20   │
+  │  ✓ pull request · opened · https://example.test/acme/demo/pull/7  09:14:20 │
   │  ✓ changelog written                                                       │
-  │  ✓ published                                                    09:14:21   │
+  │  ✓ published                                                      09:14:21 │
   ╰────────────────────────────────────────────────────────────────────────────╯
-  ╭─ Publish activity ───────────────────────────────────────── latest 2 of 4 ─╮
-  │  time     step           what                                              │
-  │▸ 09:14:21 ● published    finished                                          │
-  │  09:14:20 ▲ pull request opened PR #7                                      │
-  │  ↓ 2 older                                                                 │
+  ╭─ Detail · body ──────────────────────────────────────────── done 09:14:00 ─╮
+  │  written for ccccccc                                                       │
+  │  file        tickets/JIG-2/pr/demo.md                                      │
+  │  body        ## Intent                                                     │
+  │  ↓ 6 more                                                                  │
   ╰────────────────────────────────────────────────────────────────────────────╯
+  ↓ 3 more
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · tab next pane: Checklist · space expand
-  ↑↓ scroll · say "Land JIG-2" · 1-5 steps · [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Detail · body · space expand
+  ↑↓ move in Checklist · say "Land JIG-2" · 1-5 steps · [ ] sibling · h main
+  t tail
