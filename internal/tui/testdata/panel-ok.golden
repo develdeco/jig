@@ -20,5 +20,5 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✓ jig triage JIG-2 r1-f2 dismiss  The next round applies it: run `jig gate JI…
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Review activity · ↑↓ move in Asks
+  k keep · d dismiss · 1-5 steps · [ ] sibling · h main · t tail

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +74,22 @@ type pline struct {
 // page is a screen's body before it is windowed and framed.
 type page struct {
 	lines []pline
+	// marks are the rows, among the page's rows, that the cursors of the panes
+	// that have not the focus stand on: drawn marked and not lit.
+	marks []int
+}
+
+// marker is the cursor's mark for the idx-th row of the page: the key color on
+// the row the cursor stands on, dim on a row an unfocused pane's cursor stands
+// on, and blank on any other.
+func (m *Model) marker(pg page, idx, sel int) string {
+	switch {
+	case idx == sel:
+		return m.st.key("▸") + " "
+	case slices.Contains(pg.marks, idx):
+		return m.st.dim("▸") + " "
+	}
+	return "  "
 }
 
 func (p *page) add(text string) { p.lines = append(p.lines, pline{text: text}) }
@@ -248,6 +265,8 @@ func (m *Model) layout() screenLayout {
 		// built again, once, for this one.
 		pg = m.page()
 	}
+	m.syncPanes(pg)
+	m.paneMarks(&pg)
 	refs := pg.refs()
 	sel := m.top().sel
 	if sel >= len(refs) {
@@ -255,6 +274,10 @@ func (m *Model) layout() screenLayout {
 	}
 	if sel < 0 {
 		sel = 0
+	}
+	if m.top().textFocus {
+		// A pane of text has no row under a cursor: the page is read by lines.
+		sel = -1
 	}
 
 	head := m.header(w)
@@ -365,12 +388,13 @@ func (m *Model) windowStart(pg page, sel, h int, clamp bool) int {
 			// with the row still in view: a panel of activity is below.
 			start = clampStart(pg.lines, h, selLine)
 		}
-		if n == 0 {
-			// A page with no row to stand on is moved by its own offset.
+		if n == 0 || m.top().textFocus {
+			// A page with no row to stand on, or whose focused pane is text, is
+			// moved by its own offset.
 			start = clampStart(pg.lines, h, m.top().scroll)
 		}
 	}
-	if n > 0 {
+	if n > 0 && !m.top().textFocus {
 		lead := m.top().lead
 		if clamp {
 			lead = min(lead, start)
@@ -531,9 +555,7 @@ func (m *Model) plainRows(pg page, sel, from, to, w int) []string {
 	for i, l := range pg.lines {
 		marker := "  "
 		if l.ref != nil {
-			if idx == sel {
-				marker = m.st.key("▸") + " "
-			}
+			marker = m.marker(pg, idx, sel)
 			idx++
 		}
 		if i < from || i >= to {
@@ -583,10 +605,11 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if plain {
 		return m.plainRows(pg, sel, from, to, w), from, to
 	}
-	mark := func(text string, boxed bool) string {
+	mark := func(text string, boxed, focus bool) string {
 		l := pline{text: m.st.dim(text), box: boxNone}
 		if boxed {
-			l.box = boxMid
+			// The mark is a row of its panel: its border is lit with the panel's.
+			l.box, l.focus = boxMid, focus
 			return m.frameLine(l, "  ", w, false)
 		}
 		return fit("  "+l.text, w)
@@ -604,12 +627,12 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 		case above != "":
 			// The count of what came in above takes the place of the mark.
 			if inBox {
-				rows = append(rows, m.frameLine(pline{text: above, box: boxMid}, "  ", w, false))
+				rows = append(rows, m.frameLine(pline{text: above, box: boxMid, focus: lines[top].focus}, "  ", w, false))
 			} else {
 				rows = append(rows, fit("  "+above, w))
 			}
 		case k > 0:
-			rows = append(rows, mark(fmt.Sprintf("↑ %d more", k), inBox))
+			rows = append(rows, mark(fmt.Sprintf("↑ %d more", k), inBox, inBox && lines[top].focus))
 		}
 	}
 	idx := 0
@@ -617,9 +640,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	for i, l := range lines {
 		marker := "  "
 		if l.ref != nil {
-			if idx == sel {
-				marker = m.st.key("▸") + " "
-			}
+			marker = m.marker(pg, idx, sel)
 			idx++
 		}
 		if i < from || i >= to {
@@ -638,7 +659,7 @@ func (m *Model) windowRows(pg page, sel, start, h, w int, above string) (rows []
 	if to < len(lines) {
 		inBox, bottom, k := hiddenBelow(lines, to)
 		if k > 0 {
-			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox))
+			rows = append(rows, mark(fmt.Sprintf("↓ %d more", k), inBox, inBox && lines[bottom].focus))
 		}
 		if inBox {
 			rows = append(rows, m.frameLine(lines[bottom], "  ", w, false))

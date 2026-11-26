@@ -20,5 +20,5 @@ jig  demo › JIG-2 (1 of 2)  Config loader › 3 review           ! review find
   ╰────────────────────────────────────────────────────────────────────────────╯
   ✗ jig gate JIG-2  round 1 is not recorded (GATE_NOT_GREEN)
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · k keep · d dismiss · g gate · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Review activity · ↑↓ move in Asks
+  k keep · d dismiss · g gate · 1-5 steps · [ ] sibling · h main · t tail

@@ -17,7 +17,7 @@ import (
 func TestFiveOpensTheLandScreen(t *testing.T) {
 	t.Parallel()
 	g := newRig(t, "JIG-1")
-	g.feed(jig1()...).press("down", "down", "down", "down") // the question under "needs you"
+	g.feed(jig1()...).press("tab") // the question under "needs you"
 	if ref := g.m.selected(); ref == nil || ref.kind != rowQuestion {
 		t.Fatalf("the cursor is on %+v, want a question", ref)
 	}
@@ -41,7 +41,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 	}
 
 	// From the build screen, with the cursor moved off its first row.
-	g.press("up", "up", "up", "up", "enter")
+	g.tabTo("Steps").press("enter")
 	if g.m.Screen() != "build" {
 		t.Fatalf("on %s, want build", g.m.Screen())
 	}
@@ -71,7 +71,7 @@ func TestFiveOpensTheLandScreen(t *testing.T) {
 		}
 	}
 	s := newRig(t, "JIG-1")
-	s.feed(jig1()...).press("down", "down", "down", "down", "enter")
+	s.feed(jig1()...).tabTo("Needs you").press("enter")
 	if s.m.Screen() != "slice" {
 		t.Fatalf("on %s, want slice", s.m.Screen())
 	}

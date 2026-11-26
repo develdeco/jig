@@ -105,7 +105,7 @@ func TestTicketScreenSectionsArePanels(t *testing.T) {
 		"a build with a question": func() *rig { g := newRig(t, "JIG-1"); g.feed(jig1()...); return g },
 		"a build with the card":   func() *rig { return shop1Rig(t) },
 	} {
-		for _, size := range [][2]int{{60, 20}, {80, 24}, {230, 50}} {
+		for _, size := range [][2]int{{60, 21}, {80, 25}, {230, 50}} {
 			g := mk()
 			g.send(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 			lines := strings.Split(g.view(), "\n")

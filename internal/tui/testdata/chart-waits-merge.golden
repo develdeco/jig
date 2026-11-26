@@ -1,6 +1,5 @@
 jig  demo › shop  Shop                                           ? run needs you
 ────────────────────────────────────────────────────────────────────────────────
-  map: 1 decided · 0 fog
   ╭─ Tickets ─────────────────────────────────────────────── 1 of 2 published ─╮
   │    ticket  title                steps      where it stands             age │
   │  ◇ JIG-4   Coupon model         ✓ ✓ ✓ ✓ ◇  waits to land · say "Land   45m │
@@ -21,4 +20,5 @@ jig  demo › shop  Shop                                           ? run needs y
   │  ↓ 11 older                                                                │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open ticket · t tail · r refresh
+  esc back · q quit · ? keys · tab next pane: Detail · ↑↓ move in Tickets
+  enter open ticket · t tail · r refresh

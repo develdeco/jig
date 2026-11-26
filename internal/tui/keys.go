@@ -106,7 +106,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -165,6 +165,15 @@ func canOpen(m *Model, sub subject) (bool, string) {
 	return false, "nothing under the cursor opens another screen"
 }
 
+// inPane words a key that acts in the focused pane: on a screen of several
+// panes it says which; on a screen of one the pane is the screen.
+func inPane(words string, sub subject) string {
+	if len(sub.panes) > 1 && sub.focus != "" {
+		return words + " in " + sub.focus
+	}
+	return words
+}
+
 // keyRows is the table. Its order is the hint line's and `?`'s.
 func keyRows() []keyRow {
 	moves := onScreens(screenMain, screenChart, screenTicket, screenBrief, screenBuild, screenReview, screenSlice)
@@ -184,7 +193,16 @@ func keyRows() []keyRow {
 			run: func(m *Model, _ string) tea.Cmd { m.clearSearch(); return nil }},
 		{names: []string{"?"}, label: "?", words: "keys", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { m.help = &helpView{}; return nil }},
+		{names: []string{"tab"}, label: "tab", words: "next pane", screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return "next pane: " + sub.paneSide(1) },
+			can: canSwitchPane,
+			run: func(m *Model, _ string) tea.Cmd { m.switchPane(1); return nil }},
+		{names: []string{"shift+tab"}, label: "shift+tab", words: "previous pane", quiet: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string { return "previous pane: " + sub.paneSide(-1) },
+			can: canSwitchPane,
+			run: func(m *Model, _ string) tea.Cmd { m.switchPane(-1); return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
+			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {
 				if key == "up" {
 					return step(-1)(m, key)

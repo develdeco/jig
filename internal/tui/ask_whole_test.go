@@ -140,7 +140,7 @@ func TestTriageNeedsTheAskDrawnWhole(t *testing.T) {
 		t.Errorf("with two asks open and the cursor elsewhere k ran %q, notice %q", got, g.m.notice)
 	}
 	// The cursor on an ask decides that one when it is drawn whole.
-	g.press("end", "up")
+	g.tabTo("Needs you").press("end", "up")
 	g.press("d")
 	if got := triaged(g); len(got) != 1 || !strings.Contains(got[0], "triage JIG-2 r1-f1 dismiss") {
 		t.Errorf("d on the first ask ran %q", got)
@@ -251,7 +251,7 @@ func TestTriageIgnoresKeysOfOneReadAfterTheFirst(t *testing.T) {
 func TestAskDrawnReadsTheWindowAsItIsDrawn(t *testing.T) {
 	t.Parallel()
 	whole, cut := 0, 0
-	for height := 9; height <= 22; height++ {
+	for height := 10; height <= 23; height++ {
 		w, c := scrollAskDrawn(t, height)
 		whole, cut = whole+w, cut+c
 	}

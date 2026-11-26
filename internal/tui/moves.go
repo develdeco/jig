@@ -43,6 +43,8 @@ func (m *Model) arrive(e *navEntry) bool {
 	k, ok := m.kept[keyOf(*e)]
 	if ok {
 		e.sel, e.scroll, e.follow = k.sel, k.scroll, k.follow
+		e.paneFocus, e.paneCurs, e.textFocus = k.paneFocus, k.paneCurs, k.textFocus
+		e.seenSel, e.seenSet = k.seenSel, k.seenSet
 	}
 	return ok
 }

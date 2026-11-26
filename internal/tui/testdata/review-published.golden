@@ -20,5 +20,5 @@ jig  demo › JIG-2 (1 of 3)  Config loader › 3 review             ◇ waits t
   │  ↓ 4 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · say "Land JIG-2" · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Asks · ↑↓ move in Rounds
+  say "Land JIG-2" · 1-5 steps · [ ] sibling · h main · t tail

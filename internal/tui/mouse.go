@@ -17,6 +17,8 @@ type hitMap struct {
 	top, rows, start int
 	// sel is, for each line of the page, its place among the rows, else -1.
 	sel []int
+	// panes are the panes of the page, for a click on one to focus it.
+	panes []pane
 }
 
 // recordHit notes what the frame drew of the body, for a click to be read against.
@@ -25,7 +27,7 @@ func (m *Model) recordHit(l screenLayout, from, to, prefix int) {
 		m.hit = nil
 		return
 	}
-	h := &hitMap{top: len(l.head) + prefix, rows: to - from, start: from}
+	h := &hitMap{top: len(l.head) + prefix, rows: to - from, start: from, panes: l.pg.panes()}
 	n := 0
 	for _, line := range l.pg.lines {
 		if line.ref == nil {
@@ -71,7 +73,19 @@ func (m *Model) click(y int) {
 		return
 	}
 	line := h.start + y - h.top
-	if line < 0 || line >= len(h.sel) || h.sel[line] < 0 {
+	if line < 0 || line >= len(h.sel) {
+		return
+	}
+	if h.sel[line] < 0 {
+		// A click on a pane's text or edge gives the pane the focus.
+		if m.top().screen != screenMain {
+			for _, p := range h.panes {
+				if line >= p.top && line <= p.bottom {
+					m.focusPane(p.title)
+					break
+				}
+			}
+		}
 		return
 	}
 	e := m.top()

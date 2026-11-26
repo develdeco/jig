@@ -152,7 +152,7 @@ func TestQuestionMarkListsEveryKey(t *testing.T) {
 			[]string{"g gate", "p publish", "k keep"}},
 	} {
 		for _, wd := range []int{80, 100} {
-			g := sized(c.rig(t), wd, 24)
+			g := sized(c.rig(t), wd, 26)
 			c.nav(g)
 			screen, depth := g.m.Screen(), len(g.m.nav)
 			body := g.view()

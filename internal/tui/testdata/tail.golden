@@ -20,5 +20,5 @@ jig  demo › JIG-1 (1 of 3)  Greeting copy                      ? build needs y
   09:00:05 j verify-pending a aaaaaaa s-builder
   09:00:01 j claim          a s-builder
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open · a answer · 1-5 steps
-  [ ] sibling · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Needs you · ↑↓ move in Steps
+  enter open · a answer · 1-5 steps · [ ] sibling · h main · t tail

@@ -731,7 +731,7 @@ func historyRig(t *testing.T, commits ...map[string]any) *rig {
 	lines, status := chartTickets()
 	answerChart(g, chartRoster(checkoutListing()), "checkout", checkoutJSON(withHistory(commits...)), status)
 	g.feed(lines...)
-	g.send(tea.WindowSizeMsg{Width: 100, Height: 45})
+	g.send(tea.WindowSizeMsg{Width: 100, Height: 46})
 	g.openChart("checkout")
 	if g.m.Screen() != "chart" {
 		t.Fatalf("on %s, want chart:\n%s", g.m.Screen(), g.view())

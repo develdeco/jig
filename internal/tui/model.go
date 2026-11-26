@@ -187,6 +187,16 @@ type navEntry struct {
 	// the current step moves on with it.
 	follow  bool
 	lastCur int
+	// paneFocus is the title of the pane that has the focus, and paneCurs what
+	// each pane keeps while it has not: its cursor's row and its scroll (panes.go).
+	// seenSel is the cursor the panes were last read against, so a cursor put on
+	// a row by anything else gives its pane the focus. textFocus says the focused
+	// pane is text only: it scrolls by lines and has no row under a cursor.
+	paneFocus string
+	paneCurs  map[string]paneCursor
+	seenSel   int
+	seenSet   bool
+	textFocus bool
 }
 
 // textInput is a line a person is typing: an answer.
@@ -296,6 +306,9 @@ type Model struct {
 	kept map[navKey]navEntry
 	// table is the key table (keys.go): the one place a key lives.
 	table []keyRow
+	// panesNow are the titles of the panes of the screen on top as the last page
+	// read had them, in drawing order (panes.go).
+	panesNow []string
 	// help is the `?` overlay while it is up.
 	help *helpView
 	// pageBuilds counts the pages built: a frame builds one.
@@ -1070,7 +1083,11 @@ func (m *Model) moveBy(delta int) {
 	pg := m.page()
 	n := len(pg.refs())
 	e := m.top()
-	if n == 0 {
+	m.syncPanes(pg)
+	// The keys move the focused pane's cursor, within its rows.
+	lo, cnt := m.paneSpan(pg)
+	hi := lo + cnt - 1
+	if n == 0 || e.textFocus {
 		e.scroll = skipNames(pg.lines, clampStart(pg.lines, m.bodyRows(), e.scroll+delta), delta, m.bodyRows())
 		return
 	}
@@ -1079,12 +1096,15 @@ func (m *Model) moveBy(delta int) {
 	switch {
 	case delta <= -(1 << 19):
 		// Home: the first row, with the page held at its top.
-		e.sel, e.lead = 0, 1<<20
+		e.sel, e.lead = lo, 0
+		if lo == 0 {
+			e.lead = 1 << 20
+		}
 		return
 	case delta >= 1<<19:
-		e.sel, e.lead = n-1, 0
+		e.sel, e.lead = hi, 0
 		return
-	case e.lead > 0 || (delta < 0 && e.sel == 0):
+	case e.lead > 0 || (delta < 0 && e.sel == 0 && lo == 0):
 		// A page held above its cursor's window is read a line at a time, from
 		// whatever row the cursor is on, until it is back at the window; and
 		// up from the first row moves the page above it. The window clamps lead
@@ -1112,13 +1132,7 @@ func (m *Model) moveBy(delta int) {
 		return
 	}
 	was := e.sel
-	e.sel += delta
-	if e.sel >= n {
-		e.sel = n - 1
-	}
-	if e.sel < 0 {
-		e.sel = 0
-	}
+	e.sel = min(max(e.sel+delta, lo), hi)
 	if e.sel != was {
 		e.lead = 0
 	}
@@ -1131,8 +1145,10 @@ func (m *Model) rowUnderCursor() (rowRef, bool) {
 	if e.follow {
 		return rowRef{}, false
 	}
-	refs := m.page().refs()
-	if e.sel < 0 || e.sel >= len(refs) {
+	pg := m.page()
+	m.syncPanes(pg)
+	refs := pg.refs()
+	if e.sel < 0 || e.sel >= len(refs) || e.textFocus {
 		return rowRef{}, false
 	}
 	return refs[e.sel], true
@@ -1292,9 +1308,11 @@ func (m *Model) selected() *rowRef {
 
 // refIn is the row of pg under the cursor.
 func (m *Model) refIn(pg page) *rowRef {
+	m.syncPanes(pg)
 	refs := pg.refs()
 	sel := m.top().sel
-	if sel < 0 || sel >= len(refs) {
+	if sel < 0 || sel >= len(refs) || m.top().textFocus {
+		// A pane of text has no row under a cursor.
 		return nil
 	}
 	if e := m.top(); e.lead > 0 && !m.rowShown(pg, sel) {

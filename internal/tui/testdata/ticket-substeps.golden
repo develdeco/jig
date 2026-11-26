@@ -10,7 +10,6 @@ jig  demo › SHOP-1                                           ◐ build in prog
   │  ○ 5 Land            after the publish                                     │
   ╰────────────────────────────────────────────────────────────────────────────╯
   ╭─ Build ────────────────────────────────────────────────────── 1 of 3 done ─╮
-  │    sub-step     detail                                                     │
   │  ◐ slice clamp  claimed by builder                                         │
   │  +2 more                                                                   │
   ╰────────────────────────────────────────────────────────────────────────────╯
@@ -21,4 +20,5 @@ jig  demo › SHOP-1                                           ◐ build in prog
   │  ↓ 5 older                                                                 │
   ╰────────────────────────────────────────────────────────────────────────────╯
 ────────────────────────────────────────────────────────────────────────────────
-  esc back · q quit · ? keys · ↑↓ move · enter open · h main · t tail
+  esc back · q quit · ? keys · tab next pane: Build · ↑↓ move in Steps
+  enter open · h main · t tail
