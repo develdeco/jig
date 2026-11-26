@@ -53,6 +53,10 @@ const (
 	// rowSuite is a failed run of an issue's suite on its plan screen: id is the
 	// fix task it names, the newest, and empty when none was added yet.
 	rowSuite = "suite"
+	// rowTry is a commit of a slice with its runs, id its sha: enter on the build
+	// screen's Detail opens it on the slice screen, where it is whole. The build
+	// Detail's count of the earlier ones is a try too, the newest of them.
+	rowTry = "try"
 )
 
 // rowRef says what a selectable line is: its kind, its id, and the ticket and

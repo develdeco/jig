@@ -1422,6 +1422,7 @@ const (
 	logNamesNothing    = "this line names no question, slice, round or step to open"
 	commitOpensNothing = "a store commit opens nothing"
 	noFixTaskYet       = "no fix task was added for this failed suite yet"
+	tryIsWhole         = "this try is whole here: its runs, their output and recordings are under it"
 )
 
 // opensNothing is why the row ref opens nothing, "" for a row that does open
@@ -1432,6 +1433,8 @@ func opensNothing(ref rowRef) string {
 		return commitOpensNothing
 	case ref.kind == rowSuite && ref.id == "":
 		return noFixTaskYet
+	case ref.kind == rowTry:
+		return tryIsWhole
 	case ref.kind == rowLog && ref.slice == "" && ref.round == "" && ref.container == "":
 		return logNamesNothing
 	}
@@ -1468,6 +1471,8 @@ func (m *Model) openTarget(ref rowRef) (navEntry, bool) {
 		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.id}
 	case rowFinding:
 		next = navEntry{screen: screenFinding, ticket: ref.ticket, finding: ref.id}
+	case rowTry:
+		next = navEntry{screen: screenSlice, ticket: ref.ticket, slice: ref.slice}
 	case rowRound:
 		// A round the slice screen's Finding panel names: the review screen, with
 		// the Rounds cursor on it.

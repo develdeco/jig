@@ -87,6 +87,10 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		// A round named from another screen: its row has the Rounds cursor.
 		m.goToRound(ref.id)
 	}
+	if e.screen == screenSlice && ref != nil && ref.kind == rowTry {
+		// A try named from the build screen: the slice's Commits pane is on it.
+		m.cursorToRow(func(r rowRef) bool { return r.kind == rowTry && r.id == ref.id })
+	}
 	var cmds []tea.Cmd
 	if e.screen == screenChart {
 		cmds = append(cmds, m.enterChart(e)...)

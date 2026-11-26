@@ -127,11 +127,9 @@ func (m *Model) sliceBody(t *ticket, slice string) []pline {
 		p.boxTop("Questions", strconv.Itoa(len(qs)))
 		laid := m.laidList(&p, questionColumns, dimmed(m.st, questionColumnNames), cells, 0)
 		for i, q := range qs {
-			var ref *rowRef
-			if q.Open {
-				ref = &rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}
-			}
-			p.boxLaid(ref, laid[i])
+			// Every question is a row, open or answered: the cursor stands on it and
+			// its text and answer are drawn whole under it.
+			p.boxLaid(&rowRef{kind: rowQuestion, id: q.ID, ticket: t.id, slice: slice}, laid[i])
 			for _, l := range m.panelLines(q.Text) {
 				p.boxUnder("    " + l)
 			}
@@ -360,7 +358,7 @@ func (m *Model) commitsPanel(p *page, t *ticket, slice, oracle string) {
 	// name.
 	laid := m.laidList(p, commitColumns, dimmed(m.st, namedColumns(commitColumnNames, cells)), cells, -1)
 	for i, c := range commits {
-		p.boxLaid(nil, laid[i])
+		p.boxLaid(&rowRef{kind: rowTry, id: c.SHA, ticket: t.id, slice: slice}, laid[i])
 		row, hasRow := t.status.verificationOf(slice, c.SHA)
 		switch {
 		case t.status == nil:

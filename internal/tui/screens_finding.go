@@ -119,13 +119,19 @@ func (m *Model) findingPage(id, finding string) page {
 // goToRound puts the Rounds list's cursor on round n of the review screen on top
 // and gives it the focus, so the Detail below is that round's.
 func (m *Model) goToRound(n string) {
-	e := m.top()
-	if e.screen != screenReview {
-		return
+	if m.top().screen == screenReview {
+		m.cursorToRow(func(r rowRef) bool { return r.kind == rowRound && r.id == n })
 	}
+}
+
+// cursorToRow puts the cursor of the screen on top on the first row match names,
+// and gives the pane that holds it the focus, so what follows the cursor (a
+// Detail) is the row's.
+func (m *Model) cursorToRow(match func(rowRef) bool) {
+	e := m.top()
 	pg := m.page()
 	for i, r := range pg.refs() {
-		if r.kind == rowRound && r.id == n {
+		if match(r) {
 			e.sel, e.seenSet, e.follow, e.lead = i, false, false, 0
 			m.syncPanes(pg)
 			return

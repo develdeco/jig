@@ -113,10 +113,19 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 					t.Fatalf("on %s, want %s", g.m.Screen(), sc.name)
 				}
 				// The lists' rows: the activity panes under them have rows of their own.
+				// The Detail's own rows (a finding, a try, a question) are not things of
+				// the list: they are what the row under the cursor holds.
 				var refs []rowRef
-				for _, r := range g.m.page().refs() {
-					if r.kind != rowLog {
-						refs = append(refs, r)
+				pg := g.m.page()
+				all := pg.refs()
+				for _, p := range pg.panes() {
+					if strings.HasPrefix(p.title, "Detail") {
+						continue
+					}
+					for _, r := range all[p.first : p.first+p.rows] {
+						if r.kind != rowLog {
+							refs = append(refs, r)
+						}
 					}
 				}
 				if len(refs) != sc.rows {
