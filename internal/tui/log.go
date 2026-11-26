@@ -445,7 +445,6 @@ func tagOf(step int, key string) string {
 // stepTagState is the state whose color tags a step's lines.
 var stepTagState = [stepCount]string{StateNeedsInput, StateBuilding, StateReviewing, StatePublishing, StatePublishing}
 
-
 // activityColumns are the columns of an activity line: its time, its tag and
 // what happened.
 var activityColumns = []column{{}, {gap: 1}, {free: true, gap: 1}}

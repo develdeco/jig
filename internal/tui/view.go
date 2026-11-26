@@ -91,6 +91,9 @@ type page struct {
 	// its cursor, the rows it has all told, so the keys move over the ones it
 	// does not draw (panes.go).
 	windowed map[string][]rowRef
+	// allPanes are the titles of every pane of the screen on a page that draws
+	// only the zoomed one (zoom.go).
+	allPanes []string
 	// marks are the rows, among the page's rows, that the cursors of the panes
 	// that have not the focus stand on: drawn marked and not lit.
 	marks []int
@@ -133,7 +136,11 @@ func (m *Model) page() page {
 		// The project's list is wrapped when it is built, once for what it reads.
 		return m.rawPage()
 	}
-	return m.wrapLong(m.rawPage())
+	pg := m.wrapLong(m.rawPage())
+	if m.top().zoom != "" {
+		pg = m.zoomPage(pg)
+	}
+	return pg
 }
 
 // wrapLong wraps the lines of pg that are wider than the screen at words onto
@@ -756,6 +763,9 @@ func (m *Model) header(w int) []string {
 			}
 			right = m.st.icon(state) + " " + m.st.state(state, label)
 		}
+	}
+	if e.zoom != "" {
+		crumbs += " › " + m.st.bold(e.zoom) + m.st.dim(", zoomed")
 	}
 	if place := m.st.dim(m.place()); place != "" && width(crumbs)+width(right)+1 > w {
 		// The place among the siblings gives way before the step and the state.

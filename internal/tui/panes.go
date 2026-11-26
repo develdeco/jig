@@ -99,6 +99,10 @@ func (m *Model) syncPanes(pg page) {
 	for _, p := range ps {
 		m.panesNow = append(m.panesNow, p.title)
 	}
+	if len(pg.allPanes) > 0 {
+		// A zoomed page has the one pane; the focus still moves over them all.
+		m.panesNow = pg.allPanes
+	}
 	if len(ps) == 0 {
 		e.textFocus = false
 		return
@@ -340,11 +344,21 @@ func (m *Model) moveFocus(pg page, ps []pane, refs []rowRef, i int, keep bool) {
 }
 
 // switchPane is `tab` and `shift+tab`: the focus goes delta panes on, wrapping.
+// A zoomed screen moves the zoom with the focus.
 func (m *Model) switchPane(delta int) {
+	e := m.top()
+	zoomed := e.zoom != ""
+	if zoomed {
+		m.syncPanes(m.page())
+		m.setZoom("")
+	}
 	pg := m.page()
 	m.syncPanes(pg)
 	ps := pg.panes()
 	if len(ps) < 2 {
+		if zoomed {
+			m.setZoom(e.paneFocus)
+		}
 		return
 	}
 	i := slices.IndexFunc(ps, func(p pane) bool { return p.title == m.top().paneFocus })
@@ -352,6 +366,9 @@ func (m *Model) switchPane(delta int) {
 		i = 0
 	}
 	m.moveFocus(pg, ps, pg.refs(), ((i+delta)%len(ps)+len(ps))%len(ps), false)
+	if zoomed {
+		m.setZoom(e.paneFocus)
+	}
 }
 
 // focusPane gives the focus to the pane titled title, when the screen has it.

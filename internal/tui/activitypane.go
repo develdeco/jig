@@ -18,6 +18,9 @@ func (m *Model) activityPanel(p *page, t *ticket) {
 	all := newestFirst(m.placed(t, m.phaseOf(t)), func(e placedLine) time.Time { at, _ := e.l.At(); return at })
 	// The edges and the names take three of the rows the panel has.
 	room := max(3, m.bodyRows()-m.taken(p)-3)
+	if r, ok := m.zoomRoom("Activity"); ok {
+		room = r
+	}
 	refs := m.logRefs(t, all)
 	ids := make([]rowIdentity, len(refs))
 	for i, r := range refs {

@@ -142,7 +142,12 @@ func (m *Model) ticketPage(id string) page {
 		if f := focusIndex(subs); f >= 0 {
 			extra = max(0, m.openWant(t, focus, subs[f])-1)
 		}
-		block = m.substepsPanel(t, focus, subs, min(substepCap(body)+3+extra, spare, len(subs)+3+extra))
+		height := min(substepCap(body)+3+extra, spare, len(subs)+3+extra)
+		if _, ok := m.zoomRoom(stepNames[focus]); ok {
+			// Zoomed, the pane has the whole body.
+			height = body
+		}
+		block = m.substepsPanel(t, focus, subs, height)
 		spare -= len(block.lines)
 	}
 	blank := func() bool {

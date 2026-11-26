@@ -193,6 +193,8 @@ type navEntry struct {
 	// a row by anything else gives its pane the focus. textFocus says the focused
 	// pane is text only: it scrolls by lines and has no row under a cursor.
 	paneFocus string
+	// zoom is the title of the pane drawn over the whole body, "" for none.
+	zoom      string
 	paneCurs  map[string]paneCursor
 	seenSel   int
 	seenSet   bool

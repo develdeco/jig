@@ -106,7 +106,7 @@ func (m *Model) listed(r *keyRow) bool {
 		return slices.Contains([]string{"esc", "q", "?", "1-5", "h", "t", "r"}, r.label)
 	case isMulti(t):
 		// A multi-task's tasks open; nothing else is done from its screen.
-		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
+		return slices.Contains([]string{"esc", "q", "?", "tab", "shift+tab", "z", "↑↓", "pgup pgdn", "home end", "enter", "1-5", "[", "]", "h", "c", "o", "t", "r"}, r.label)
 	}
 	return true
 }
@@ -189,7 +189,21 @@ func keyRows() []keyRow {
 	}
 	return []keyRow{
 		{names: []string{"esc", "left", "backspace"}, label: "esc", words: "back", screens: onAllScreens &^ onScreens(screenMain),
-			run: func(m *Model, _ string) tea.Cmd { m.back(); return nil }},
+			say: func(_ *Model, sub subject) string {
+				if sub.zoom != "" {
+					return "unzoom"
+				}
+				return "back"
+			},
+			run: func(m *Model, _ string) tea.Cmd {
+				if m.top().zoom != "" {
+					// A zoomed pane is left before the screen is.
+					m.setZoom("")
+					return nil
+				}
+				m.back()
+				return nil
+			}},
 		{names: []string{"q"}, label: "q", words: "quit", screens: onAllScreens,
 			run: func(m *Model, _ string) tea.Cmd { return m.quit() }},
 		{names: []string{"esc"}, label: "esc", words: "clear search", screens: onScreens(screenMain),
@@ -207,6 +221,20 @@ func keyRows() []keyRow {
 			say: func(_ *Model, sub subject) string { return "previous pane: " + sub.paneSide(-1) },
 			can: canSwitchPane,
 			run: func(m *Model, _ string) tea.Cmd { m.switchPane(-1); return nil }},
+		{names: []string{"z"}, label: "z", words: "zoom", quiet: true, screens: onAllScreens,
+			say: func(_ *Model, sub subject) string {
+				if sub.zoom != "" {
+					return "unzoom"
+				}
+				return "zoom " + sub.focus
+			},
+			can: func(_ *Model, sub subject) (bool, string) {
+				if sub.zoom == "" && sub.focus == "" {
+					return false, "this screen has no pane to zoom"
+				}
+				return true, ""
+			},
+			run: func(m *Model, _ string) tea.Cmd { m.toggleZoom(); return nil }},
 		{names: []string{"up", "down"}, label: "↑↓", words: "move", screens: moves,
 			say: func(_ *Model, sub subject) string { return inPane("move", sub) },
 			run: func(m *Model, key string) tea.Cmd {

@@ -115,7 +115,6 @@ func homeSub(subs []phase.Sub, focus int) int {
 	return max(0, len(subs)-1)
 }
 
-
 // subWindow chooses the sub-steps of subs the pane draws in room lines: the rows
 // from to to-1, which hold the cursor's row cur and, when the room allows, the
 // one that matters now (focus), which then takes openRows lines. A window that
