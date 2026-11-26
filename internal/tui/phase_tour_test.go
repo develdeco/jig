@@ -100,7 +100,7 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 		name, key string
 		rows      int
 	}{
-		{"build", "2", 4}, {"review", "3", 3}, {"brief", "1", 8}, {"publish", "4", 7},
+		{"build", "2", 4}, {"review", "3", 3}, {"brief", "1", 9}, {"publish", "4", 7},
 	}
 	for _, size := range sizes {
 		w, h := size[0], size[1]

@@ -47,7 +47,7 @@ func TestADetailUnderItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
 
 	// The brief with the cursor on the last slice: the detail has its goal.
 	b := tourRig(t, 160, 20)
-	b.press("1").press("end")
+	b.press("1").press("end", "up")
 	if !strings.Contains(between(b.view(), "╭─ Detail", "╰"), "goal") {
 		t.Errorf("the detail of the last slice lost its first field:\n%s", b.view())
 	}

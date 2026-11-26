@@ -29,6 +29,8 @@ const (
 	// its own.
 	rowCheck   = "check"
 	rowSection = "section"
+	// rowApproval is the approval of the brief among its parts: it opens nothing.
+	rowApproval = "approval"
 	// rowSub is a sub-step of the step under the ticket screen's Steps cursor: id
 	// is its key, slice the slice a slice sub-step names, container the step.
 	rowSub = "substep"

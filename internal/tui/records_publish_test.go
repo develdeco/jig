@@ -169,7 +169,7 @@ func TestDetailScreensBeginAtTheirTop(t *testing.T) {
 	}
 	// Down through the sections to the slices: the window leaves the top, and
 	// the cursor stays on the screen.
-	g.press("end")
+	g.press("end", "up")
 	view := g.view()
 	if !strings.Contains(view, "▸") || !strings.Contains(view, "Ship the copy") || !strings.Contains(view, "╭─ Detail · d") {
 		t.Errorf("the last row is not on the screen with its detail:\n%s", view)

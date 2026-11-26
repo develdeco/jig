@@ -50,7 +50,7 @@ func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 			t.Errorf("%dx%d: the screen still has a list of its own for sections or slices:\n%s", size[0], size[1], view)
 		}
 		head := readWords(between(view, "╭─ Parts", "╰"))
-		for _, want := range []string{"8 parts", "kind part stands at", "section Goal", "Detail"} {
+		for _, want := range []string{"9 parts", "kind part stands at", "section Goal", "Detail"} {
 			if want != "Detail" && !strings.Contains(head, want) {
 				t.Errorf("%dx%d: the Parts list lacks %q:\n%s", size[0], size[1], want, view)
 			}
@@ -69,7 +69,7 @@ func TestTheBriefScreenIsOneListOfParts(t *testing.T) {
 			names = append(names, f[0]+" "+f[1])
 		}
 	}
-	want := []string{"kind part", "section Goal", "section Greeting", "section Farewell", "section Tone", "slice a", "slice b", "slice c", "slice d"}
+	want := []string{"kind part", "section Goal", "section Greeting", "section Farewell", "section Tone", "slice a", "slice b", "slice c", "slice d", "approval the"}
 	if strings.Join(names, "|") != strings.Join(want, "|") {
 		t.Errorf("the parts are %q, want %q", names, want)
 	}
