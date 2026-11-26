@@ -147,8 +147,11 @@ func cmdTUI(e env, args []string, stdout io.Writer, stdin io.Reader) int {
 		Journals: func() ([]events.Journal, error) { return storeJournals(st, cfg.Name) },
 	}
 	terminal := e.stdoutIsTerminal(stdout)
+	viewer := newTUIViewer(e, st)
+	defer viewer.Close()
 	err = tui.Run(e.ctx, tui.Config{
 		Open:       tuiOpener(terminal),
+		Viewer:     viewer.Address,
 		Source:     eventsSource{scope},
 		Run:        tuiRunner(e),
 		Ticket:     ticket,

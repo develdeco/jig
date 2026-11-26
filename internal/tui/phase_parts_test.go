@@ -67,7 +67,7 @@ func TestBuildBriefAndSliceSectionsArePanels(t *testing.T) {
 			names map[string]string
 		}{
 			"the build": {[]string{"enter"}, map[string]string{"Slices": "slice", "Sessions": "harness", "Build activity": "time"}},
-			"the brief": {[]string{"enter", "esc", "1"}, map[string]string{"Sections": "section", "Slices": "slice", "Brief activity": "time"}},
+			"the brief": {[]string{"enter", "esc", "1"}, map[string]string{"Parts": "kind", "Brief activity": "time"}},
 			"a slice":   {[]string{"enter", "down", "down", "enter"}, map[string]string{"Timeline": "time"}},
 		} {
 			for _, rows := range []int{h, max(h, 70)} {

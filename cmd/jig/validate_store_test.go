@@ -254,7 +254,7 @@ func TestRecordApprovalWritesOnceAndLetsAPersonUpgradeAnAgent(t *testing.T) {
 			t.Errorf("%s: %d approval lines, want %d", what, n, wantLines)
 		}
 		got, ok, err := st.ReadApproval(fx.Ticket)
-		if err != nil || !ok || got != a {
+		if err != nil || !ok || !reflect.DeepEqual(got, a) {
 			t.Errorf("%s: the approval on disk = %+v, %v, %v, want %+v", what, got, ok, err, a)
 		}
 	}

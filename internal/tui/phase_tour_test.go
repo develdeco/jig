@@ -100,7 +100,7 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 		name, key string
 		rows      int
 	}{
-		{"build", "2", 4}, {"review", "3", 3}, {"brief", "1", 8}, {"publish", "4", 7},
+		{"build", "2", 4}, {"review", "3", 3}, {"brief", "1", 9}, {"publish", "4", 7},
 	}
 	for _, size := range sizes {
 		w, h := size[0], size[1]
@@ -112,10 +112,11 @@ func TestPhaseScreensAreAListAndTheDetailOfTheCursorRow(t *testing.T) {
 				if g.m.Screen() != sc.name {
 					t.Fatalf("on %s, want %s", g.m.Screen(), sc.name)
 				}
-				// The lists' rows: the activity panes under them have rows of their own.
+				// The lists' rows: the activity panes under them have rows of their own,
+				// and a section's detail has a row for each line of it.
 				var refs []rowRef
 				for _, r := range g.m.page().refs() {
-					if r.kind != rowLog {
+					if r.kind != rowLog && r.kind != rowStop {
 						refs = append(refs, r)
 					}
 				}

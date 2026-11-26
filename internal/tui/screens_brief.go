@@ -3,19 +3,16 @@ package tui
 import (
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/develdeco/jig/internal/journal"
-	"github.com/develdeco/jig/internal/phase"
 )
 
-// briefPage is the brief: the record of its approval, a list of its sections (each
-// with the slices that cite it) and of the slices it was cut into, one cursor
-// down the sections and then the slices, the detail of the row it is on, and the
-// brief's activity. A section's detail has its heading, the slices that cite it
-// and the text the brief read gives; a slice's its goal and oracle whole, where
-// it builds, what it waits for and the sections that cite it. A section opens
-// nothing, and a slice opens its slice screen.
+// briefPage is the brief: one list of its parts, the sections, then the slices,
+// then the approval, one cursor down them, the detail of the part it is on, and
+// the brief's activity. A section's detail has its heading, the slices that cite
+// it (rows that open), whether it changed since the approval and the text the
+// brief read gives, drawn as markdown; a slice's its goal and oracle whole, where
+// it builds, what it waits for and the sections that cite it; the approval's who,
+// when, how and which brief. A section and the approval open nothing, and a slice
+// opens its slice screen.
 //
 // The sections' words come from `jig brief show --text` (brieftext.go) and the
 // rest from the status, so a status that lists no text still shows the headings.
@@ -33,76 +30,143 @@ func (m *Model) briefPage(id string) page {
 	b := t.status.Brief
 	step := m.steps(t)[stepBrief]
 	p.add(m.st.icon(step.State) + " " + m.st.state(step.State, step.Text))
-	for _, line := range m.approvalRecord(t, b) {
-		p.add(m.st.dim("  " + line))
-	}
+	issues := m.issuesOfTask(id)
 	if b == nil {
-		p.add("")
-		p.add(m.st.dim("this ticket has no brief"))
-		return p
+		// A ticket with no brief has no section, slice or approval to list, but
+		// its issue is still the issue that plans it.
+		if len(issues) == 0 {
+			p.add("")
+			p.add(m.st.dim("this ticket has no brief"))
+			return p
+		}
+		b = &statusBrief{Approval: briefNone}
 	}
-	if t.brief != nil && t.brief.Illustration {
-		p.add(m.st.dim("  it has an illustration: `jig brief show " + id + "` serves it"))
-	}
+	hasBrief := t.status.Brief != nil
 
-	p.add("")
-	switch {
-	case t.brief == nil:
-		p.add(m.st.dim("reading the brief's text"))
-	case t.brief.Err != "":
-		p.add(m.st.dim("the brief's text is not available: " + t.brief.Err))
-	}
 	slices := t.slices(m.zone)
 	goals := t.goals()
-	sections := make([]listRow, len(b.Sections))
+	hasIllustration := hasBrief && t.brief != nil && t.brief.Illustration
+	rows := make([]listRow, 0, len(issues)+len(b.Sections)+len(slices)+1)
+	for _, issue := range issues {
+		rows = append(rows, m.issueRow(t, issue))
+	}
+	if !hasBrief {
+		slices = nil
+	}
 	for i, s := range b.Sections {
-		cited := m.st.dim("no slice")
-		if len(s.Slices) > 0 {
-			cited = "slice " + strings.Join(s.Slices, ", ")
+		// The slices that cite a section can grow: the row says how many, and the
+		// detail names them whole.
+		stands := m.st.dim("no slice")
+		if n := len(s.Slices); n > 0 {
+			stands = "cited by " + strconv.Itoa(n)
 		}
-		sections[i] = listRow{ref: &rowRef{kind: rowSection, id: s.Heading, ticket: id}, cells: []string{s.Heading, cited}}
+		if s.Since == sinceChangedWord {
+			stands += " · " + m.st.state(StateFindings, "changed")
+		}
+		// A section is told by its place: headings may repeat.
+		rows = append(rows, listRow{ref: &rowRef{kind: rowSection, id: sectionID(i), ticket: id}, cells: []string{"section", s.Heading, stands}})
 	}
-	rows := make([]listRow, len(slices))
-	for i, s := range slices {
-		rows[i] = listRow{
+	for _, s := range slices {
+		// A slice's name is its id and its goal, free text: the id is a word and
+		// wraps whole; where it stands is its state.
+		part := s.ID
+		if g := goals[s.ID]; g != "" {
+			part += "  " + m.st.dim(g)
+		}
+		rows = append(rows, listRow{
 			ref:   &rowRef{kind: rowSlice, id: s.ID, ticket: id, slice: s.ID},
-			cells: []string{m.st.icon(s.State), s.ID, m.st.state(s.State, s.State), firstOf(goals[s.ID], m.st.dim("no goal"))},
-		}
+			cells: []string{"slice", part, m.st.icon(s.State) + " " + m.st.state(s.State, s.State)},
+		})
 	}
+	if hasIllustration {
+		rows = append(rows, m.illustrationRow(t))
+	}
+	if hasBrief {
+		rows = append(rows, listRow{ref: &rowRef{kind: rowApproval, id: "approval", ticket: id}, cells: []string{"approval", "the approval of the brief", m.approvalStands(b)}})
+	}
+	list := listSpec{title: partsTitle, summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "part", "parts"), cols: partColumns, names: partColumnNames, rows: rows, empty: "no parts yet"}
 	var detail *detailSpec
-	sectionList := listSpec{title: "Sections", summary: strconv.Itoa(len(sections)) + " " + plural(len(sections), "section", "sections"), cols: sectionColumns, names: sectionColumnNames, rows: sections, empty: "no sections"}
-	sliceList := listSpec{title: "Slices", summary: strconv.Itoa(len(rows)) + " " + plural(len(rows), "slice", "slices"), cols: briefSliceColumns, names: briefSliceColumnNames, rows: rows, empty: "no slices yet"}
-	at := m.cursorAmong(sectionList, sliceList)
-	if len(sections)+len(rows) > 0 {
+	at := m.cursorAmong(list)
+	if len(rows) > 0 {
 		var d detailSpec
-		if at < len(sections) {
-			d = m.sectionDetail(t, at)
-		} else {
-			d = m.briefSliceDetail(t, at-len(sections))
+		switch {
+		case at < len(issues):
+			d = m.issueDetail(t, issues[at])
+		case at-len(issues) < len(b.Sections):
+			d = m.sectionDetail(t, at-len(issues))
+		case at-len(issues) < len(b.Sections)+len(slices):
+			d = m.briefSliceDetail(t, at-len(issues)-len(b.Sections))
+		case hasIllustration && at-len(issues) == len(b.Sections)+len(slices):
+			d = m.illustrationDetail(t)
+		default:
+			d = m.approvalDetail(t, step)
 		}
 		detail = &d
 	}
-	m.listAndDetail(&p, detail, at, sectionList, sliceList)
+	p.add("")
+	if !hasBrief {
+		p.add(m.st.dim("this ticket has no brief"))
+	}
+	m.listAndDetail(&p, detail, at, list)
 
 	m.stepActivityPanel(&p, t, stepBrief)
 	return p
 }
 
-// The columns of the brief's lists: a section and the slices that cite it, a
-// slice with its state and goal.
+// briefPartOf is the part of the ticket's brief the sub-step key is about: brief
+// drafted is the first section, slices written the first slice, brief approved
+// the approval. A part that does not exist (no section yet, no
+// slice) is the zero identity, which the brief opens on its first row, whatever a
+// visit before left.
+func (m *Model) briefPartOf(ticket, key string) (rowIdentity, bool) {
+	t := m.w.tickets[ticket]
+	if t == nil || t.status == nil || t.status.Brief == nil {
+		return rowIdentity{}, true
+	}
+	switch key {
+	case "drafted":
+		if len(t.status.Brief.Sections) > 0 {
+			return rowIdentity{kind: rowSection, id: sectionID(0)}, true
+		}
+	case "slices":
+		if s := t.slices(m.zone); len(s) > 0 {
+			return rowIdentity{kind: rowSlice, id: s[0].ID}, true
+		}
+	case "approved":
+		return rowIdentity{kind: rowApproval, id: "approval"}, true
+	}
+	return rowIdentity{}, true
+}
+
+// partsTitle is the title of the brief screen's list of its parts.
+const partsTitle = "Parts"
+
+// sectionID is the identity of the brief's section at i, told by its place in
+// the brief.
+func sectionID(i int) string { return "section-" + strconv.Itoa(i+1) }
+
+// What the status's brief block says: no approval yet, and of a section whose
+// text was edited since the approval or is new, that it changed.
+const (
+	briefNone        = "none"
+	sinceChangedWord = "changed"
+)
+
+// The columns of the brief's list: what the part is, its name and where it
+// stands. The name is the list's free column and wraps; where a part stands is a
+// few words (a state, a count of the slices that cite a section), and the detail
+// of the row under the cursor names the rest whole.
 var (
-	sectionColumns        = []column{{free: true}, {gap: 2}}
-	sectionColumnNames    = []string{"section", "cited by"}
-	briefSliceColumns     = []column{{}, {id: true, gap: 1}, {gap: 2}, {free: true, gap: 2}}
-	briefSliceColumnNames = []string{"", "slice", "state", "goal"}
+	partColumns     = []column{{}, {free: true, gap: 2}, {gap: 2}}
+	partColumnNames = []string{"kind", "part", "stands at"}
 )
 
 // sectionDetail is the detail of the brief's section at i: its heading, the
-// slices that cite it with the state each is in, and the text the brief read
-// gives of it, whole.
+// slices that cite it with the state each is in, whether it changed since the
+// approval and the text the brief read gives of it, drawn whole.
 func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 	s := t.status.Brief.Sections[i]
-	d := detailSpec{title: s.Heading, summary: "no slice cites it"}
+	d := detailSpec{title: s.Heading, summary: "no slice cites it", walk: true}
 	if n := len(s.Slices); n > 0 {
 		d.summary = "cited by " + strconv.Itoa(n) + " " + plural(n, "slice", "slices")
 	}
@@ -113,12 +177,40 @@ func (m *Model) sectionDetail(t *ticket, i int) detailSpec {
 	}
 	label := "cited by"
 	for _, id := range s.Slices {
-		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read")})
+		d.rows = append(d.rows, detailRow{label: label, icon: states[id], text: id + " · " + firstOf(states[id], "not read"), ref: &rowRef{kind: rowSlice, id: id, ticket: t.id, slice: id}})
 		label = ""
 	}
-	if text := t.brief.summaryOf(i, s.Heading); text != "" {
-		d.rows = append(d.rows, detailRow{label: "text", text: text})
+	// Only an approval has something to be changed since.
+	if t.status.Brief.Approval == "changed" {
+		switch s.Since {
+		case "same":
+			d.rows = append(d.rows, detailRow{label: "approval", text: "this section is as it was approved"})
+		case sinceChangedWord:
+			d.rows = append(d.rows, detailRow{label: "approval", text: "this section changed since the approval", state: StateFindings})
+		default:
+			d.rows = append(d.rows, detailRow{label: "approval", text: "which sections changed was not recorded for this approval", dim: true})
+		}
 	}
+	labelW := 0
+	for _, r := range d.rows {
+		labelW = max(labelW, width(r.label))
+	}
+	labelW = max(labelW, width("text"))
+	text := detailRow{label: "text"}
+	at, read := t.brief.sectionAt(i, s.Heading)
+	switch {
+	case t.brief == nil:
+		text.text, text.dim = "reading the brief's text", true
+	case t.brief.Err != "":
+		text.text, text.dim = "the brief's text is not available: "+t.brief.Err, true
+	case !read:
+		text.text, text.dim = "the brief's text has no section of this heading", true
+	case strings.TrimSpace(t.brief.Sections[at].Body) != "":
+		text.lines = t.brief.rendered(at, m.detailRoom(labelW), m.st)
+	default:
+		text.text, text.dim = "this section has no text", true
+	}
+	d.rows = append(d.rows, text)
 	return d
 }
 
@@ -151,42 +243,4 @@ func (m *Model) briefSliceDetail(t *ticket, i int) detailSpec {
 		}
 	}
 	return d
-}
-
-// approvalRecord is the lines that say how the brief came to be approved: when
-// and by whom, how it was recorded, and which brief it was. They are empty
-// for a brief nobody approved.
-func (m *Model) approvalRecord(t *ticket, b *statusBrief) []string {
-	if b == nil || b.ApprovedAt == "" {
-		return nil
-	}
-	when := b.ApprovedAt
-	if at, err := time.Parse(time.RFC3339, b.ApprovedAt); err == nil {
-		when = at.In(m.zone).Format("2006-01-02 15:04")
-	}
-	first := "approved " + when
-	if b.ApprovedBy != "" {
-		first += " by " + phase.Approver(b.ApprovedBy, b.Provenance)
-	}
-	how := ""
-	switch b.Provenance {
-	case "person":
-		how = "at a terminal"
-	case "agent":
-		how = "recorded by the session that drafted it"
-	case "jig":
-		how = "recorded by jig"
-	}
-	var rest []string
-	if how != "" {
-		rest = append(rest, how)
-	}
-	if i := t.latest("", journal.EventApproval); i >= 0 && t.lines[i].Ref != "" {
-		rest = append(rest, "brief "+t.lines[i].Ref)
-	}
-	out := []string{first}
-	if len(rest) > 0 {
-		out = append(out, strings.Join(rest, " · "))
-	}
-	return out
 }

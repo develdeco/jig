@@ -47,7 +47,7 @@ func TestADetailUnderItsListIsMarkedWhereTheWindowCutsIt(t *testing.T) {
 
 	// The brief with the cursor on the last slice: the detail has its goal.
 	b := tourRig(t, 160, 20)
-	b.press("1").tabTo("Slices").press("end")
+	b.press("1").press("end", "up")
 	if !strings.Contains(between(b.view(), "╭─ Detail", "╰"), "goal") {
 		t.Errorf("the detail of the last slice lost its first field:\n%s", b.view())
 	}
@@ -148,7 +148,7 @@ func TestTheDetailIsDrawnWithTheTailOpenAndAtTheNarrowestSizes(t *testing.T) {
 func TestTheTailGivesWayToTheListsAndTheDetail(t *testing.T) {
 	t.Parallel()
 	titles := map[string][]string{
-		"build": {"Slices"}, "review": {"Rounds", "Asks"}, "brief": {"Sections", "Slices"}, "publish": {"Checklist"},
+		"build": {"Slices"}, "review": {"Rounds", "Asks"}, "brief": {"Parts"}, "publish": {"Checklist"},
 	}
 	for _, sc := range []struct{ name, key string }{{"build", "2"}, {"review", "3"}, {"brief", "1"}, {"publish", "4"}} {
 		for _, size := range [][2]int{{60, 20}, {80, 24}, {100, 30}} {

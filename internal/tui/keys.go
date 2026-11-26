@@ -161,7 +161,7 @@ func (m *Model) keyHints(full bool) []string {
 // other than the one on top.
 func canOpen(m *Model, sub subject) (bool, string) {
 	if sub.hasRow {
-		if sub.row.kind == rowFold {
+		if sub.row.kind == rowFold || sub.row.kind == rowIllustration {
 			return true, ""
 		}
 		if m.promptFor(sub.row) != "" {
