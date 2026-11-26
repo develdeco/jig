@@ -130,6 +130,9 @@ type page struct {
 	// its cursor, the rows it has all told, so the keys move over the ones it
 	// does not draw (panes.go).
 	windowed map[string][]rowRef
+	// narrowed holds the panes whose rows were narrowed by the pane's query when
+	// their list was built, over every row it has and not the ones a window draws.
+	narrowed map[string]bool
 	// allPanes are the titles of every pane of the screen on a page that draws
 	// only the zoomed one (zoom.go).
 	allPanes []string

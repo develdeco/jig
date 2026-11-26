@@ -116,12 +116,18 @@ func TestTheDetailIsTheRowAClickOrAReopenPutTheCursorOn(t *testing.T) {
 		n.press("2", "esc")
 		n.tabTo("Needs you")
 		n.press("home")
+		chosen := n.m.selected()
 		n.m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		first := n.m.View()
 		sel := n.m.selected()
 		second := n.m.View()
 		if sel == nil || detailNamed(first) != sel.id || detailNamed(first) != detailNamed(second) {
 			t.Errorf("100x%d: the first frame of a reopen has the Detail %s, the cursor is %+v, the second frame has %s:\n%s", h, detailNamed(first), sel, detailNamed(second), first)
+		}
+		// The review is opened to decide the ask it was opened from: the search it
+		// was left with would hide it, so the cursor is on the chosen ask.
+		if chosen == nil || chosen.kind != rowAsk || sel == nil || sel.kind != rowAsk || sel.id != chosen.id {
+			t.Errorf("100x%d: the reopen from %+v puts the cursor on %+v, want the chosen ask", h, chosen, sel)
 		}
 	}
 }

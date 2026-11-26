@@ -77,6 +77,11 @@ func (m *Model) goTo(keep int, ref *rowRef, entries ...navEntry) tea.Cmd {
 		// What the review screen is for, when something waits, is deciding it:
 		// the cursor is on the ask it was opened from, else the first one, unless
 		// the person left it somewhere.
+		if ref != nil && ref.kind == rowAsk {
+			// Opened from an ask: a search or a zoom the screen was left with would
+			// hide it, and the review is for deciding it.
+			e.zoom, e.psearch = "", paneSearch{}
+		}
 		if !restored || (ref != nil && ref.kind == rowAsk) {
 			pg := m.page()
 			e.sel, e.seenSet = m.askRow(pg, ref), false

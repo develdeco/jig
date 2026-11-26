@@ -57,6 +57,36 @@ func (m *Model) narrowIdx(title string, n int, text func(i int) string) ([]int, 
 	return keep, len(terms) > 0
 }
 
+// narrowList is a list built over items, narrowed by its pane's query over every
+// row it has, the ones a window would hide behind its marks too: the items and
+// the list keep the rows that match, and the title counts them. The rows the
+// cursor stands on and the Detail is of are then rows of the narrowed list, so a
+// Detail never stays on a row the search hides. A pane that is not narrowed is as
+// it was.
+func narrowList[T any](m *Model, p *page, items []T, spec listSpec) ([]T, listSpec) {
+	terms := m.paneTerms(spec.title)
+	if len(terms) == 0 || len(items) != len(spec.rows) {
+		return items, spec
+	}
+	keep := make([]int, 0, len(items))
+	for i, r := range spec.rows {
+		if matches(terms, plainWords(strings.Join(r.cells, " "))) {
+			keep = append(keep, i)
+		}
+	}
+	if p.narrowed == nil {
+		p.narrowed = map[string]bool{}
+	}
+	p.narrowed[spec.title] = true
+	total := len(items)
+	spec.rows = pick(spec.rows, keep)
+	spec.summary = fmt.Sprintf("%d of %d", len(keep), total)
+	if len(keep) == 0 {
+		spec.empty = "no row matches"
+	}
+	return pick(items, keep), spec
+}
+
 // pick are the elements of s at the places keep names.
 func pick[T any](s []T, keep []int) []T {
 	out := make([]T, 0, len(keep))
@@ -84,7 +114,7 @@ func (m *Model) narrowPage(pg page) page {
 	if i < 0 || ps[i].rows == 0 {
 		return pg
 	}
-	if _, ok := pg.windowed[s.pane]; ok {
+	if _, ok := pg.windowed[s.pane]; ok || pg.narrowed[s.pane] {
 		return pg
 	}
 	p := ps[i]

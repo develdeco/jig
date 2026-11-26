@@ -335,6 +335,59 @@ func TestACarriedRoundNamesTheRoundItCarriesAndEnterMovesThere(t *testing.T) {
 	}
 }
 
+// TestAPaneSearchCoversTheRowsAWindowHidesBehindItsMarks: a query narrows a list
+// over every row it has, the ones its window hides included, and the Detail is of
+// a row the search keeps, never of one it hides.
+func TestAPaneSearchCoversTheRowsAWindowHidesBehindItsMarks(t *testing.T) {
+	t.Parallel()
+	g := threeRounds(t, 60, 22, 0)
+	g.tabTo("Rounds")
+	if got := g.view(); !strings.Contains(between(got, "╭─ Rounds", "╰"), "↓ 2 more") {
+		t.Fatalf("round 3's window does not hide rounds 2 and 1 behind a mark at 60x22:\n%s", got)
+	}
+	g.press("/")
+	typeText(g, "findings")
+	view := g.view()
+	if title := between(view, "╭─ Rounds", "─╮"); !strings.Contains(title, "2 of 3") {
+		t.Errorf("the Rounds title does not count what the search kept:\n%s", view)
+	}
+	if got := strings.Join(g.refsOfKind(rowRound), " "); got != "2 1" {
+		t.Errorf("the rows the search keeps are %q, want rounds 2 and 1 (1 was behind a mark)", got)
+	}
+	if !strings.Contains(view, "╭─ Detail · round 2") {
+		t.Errorf("the Detail stays on a round the search hides:\n%s", view)
+	}
+	g.press("down")
+	if ref := g.m.selected(); ref == nil || ref.kind != rowRound || ref.id != "1" {
+		t.Errorf("down in the narrowed list is on %+v, want round 1", ref)
+	}
+	if !strings.Contains(g.view(), "╭─ Detail · round 1") {
+		t.Errorf("the Detail does not follow the cursor to round 1:\n%s", g.view())
+	}
+}
+
+// TestAnAskWhoseRowWrapsToManyLinesStillLeavesTheDetailItsFirstLines: at the
+// floor an ask with a long title does not take the screen from its own Detail.
+func TestAnAskWhoseRowWrapsToManyLinesStillLeavesTheDetailItsFirstLines(t *testing.T) {
+	t.Parallel()
+	long := "Retry loop never ends when the remote keeps answering with a transient failure and no deadline is ever set anywhere in the call chain"
+	g := newRig(t, "JIG-2")
+	g.r.answer("status JIG-2 --store /s", strings.ReplaceAll(reviewFixRoundStatus(), "Retry loop never ends", long), 0)
+	g.feed(reviewFixRoundEvents()...).press("3")
+	g.sized(60, 20)
+	view := g.view()
+	if !strings.Contains(view, "╭─ Detail · r2-f2") {
+		t.Fatalf("the Detail of the ask has no room:\n%s", view)
+	}
+	detail := readWords(between(view, "╭─ Detail · r2-f2", "╰"))
+	if !strings.Contains(detail, "finding") || !strings.Contains(detail, "Retry loop never") {
+		t.Errorf("the Detail has not its first lines:\n%s", view)
+	}
+	if strings.Contains(view, "needs") && strings.Contains(view, "are left") {
+		t.Errorf("the Detail says it has no room:\n%s", view)
+	}
+}
+
 // TestTheFindingScreenIsDrawnAsTheGoldenFrame: the finding screen of a fix
 // finding that became a green slice, at the common size.
 func TestTheFindingScreenIsDrawnAsTheGoldenFrame(t *testing.T) {

@@ -33,6 +33,9 @@ func (m *Model) reviewPage(id string) page {
 	asks := t.asks()
 	var detail *detailSpec
 	roundList, askList := m.roundsSpec(t, rounds), m.asksSpec(t, asks)
+	// A search narrows each list over all its rows, before the Detail is chosen.
+	rounds, roundList = narrowList(m, &p, rounds, roundList)
+	asks, askList = narrowList(m, &p, asks, askList)
 	at := m.cursorAmong(roundList, askList)
 	if len(rounds)+len(asks) > 0 {
 		var d detailSpec
@@ -120,7 +123,7 @@ func (m *Model) asksSpec(t *ticket, asks []askRow) listSpec {
 			cells: []string{m.st.icon(state), a.Risk, a.Where, m.st.state(state, word), a.Title, m.st.dim(a.ID)},
 		}
 	}
-	spec := listSpec{title: "Asks", summary: strconv.Itoa(len(asks)), cols: askColumns, names: askColumnNames, rows: rows, room: -1}
+	spec := listSpec{title: "Asks", summary: strconv.Itoa(len(asks)), cols: askColumns, names: askColumnNames, rows: rows, room: len(asks) + 2}
 	switch {
 	case t.status == nil:
 		spec.empty = "reading the ticket's status"
