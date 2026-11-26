@@ -56,7 +56,11 @@ type detailSpec struct {
 // its top edge, every field wrapped whole, and its bottom edge.
 func (m *Model) detailLines(d detailSpec, w int) []pline {
 	inner := max(1, w-7)
-	lines := []pline{{text: "Detail · " + d.title, right: d.summary, box: boxTop}}
+	title := "Detail · " + d.title
+	lines := []pline{{text: title, right: d.summary, box: boxTop}}
+	// Every line carries the holder it stands for: its row, else the row above it,
+	// else the panel.
+	stamp := expKey{pane: title}
 	labelW := 0
 	for _, r := range d.rows {
 		labelW = max(labelW, width(r.label))
@@ -76,12 +80,16 @@ func (m *Model) detailLines(d detailSpec, w int) []pline {
 			case d.walk:
 				l.ref = &rowRef{kind: rowStop, id: "line-" + strconv.Itoa(n)}
 			}
+			if l.ref != nil {
+				stamp = expKey{pane: title, id: l.ref.identity()}
+			}
+			l.holder, l.held = stamp, true
 			n++
 			lines = append(lines, l)
 		}
 	}
 	if len(d.rows) == 0 && d.empty != "" {
-		lines = append(lines, pline{text: m.st.dim(d.empty), box: boxMid})
+		lines = append(lines, pline{text: m.st.dim(d.empty), box: boxMid, holder: stamp, held: true})
 	}
 	return append(lines, pline{box: boxBottom})
 }

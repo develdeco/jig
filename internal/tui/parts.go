@@ -191,6 +191,12 @@ func (p *page) intoPanel(at int, title, summary string) {
 	p.boxTop(title, summary)
 	for _, l := range body {
 		l.box = boxMid
+		// A loose line becomes the panel's: it takes the holder of the row above it.
+		if l.ref != nil {
+			l.holder, l.held = p.holderNow(l.ref)
+		} else {
+			l.holder, l.held = p.holderNow(nil)
+		}
 		p.lines = append(p.lines, l)
 	}
 	p.boxEnd()

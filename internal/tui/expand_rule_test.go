@@ -302,3 +302,108 @@ func wholePaneLines(frame, title string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// stampedUnderRows walks the page the last frame drew and says, for every line
+// of a pane that stands under a row, whether it carries that row's stamp; it
+// gives back the lines that do not, and how many were checked.
+func stampedUnderRows(pg page) (bad []string, checked int) {
+	pane, cur := "", ""
+	for _, l := range pg.lines {
+		switch {
+		case l.box == boxTop:
+			pane, cur = l.text, ""
+			continue
+		case l.box == boxBottom || l.box == boxNone || l.names:
+			cur = ""
+			continue
+		case l.ref != nil:
+			cur = l.ref.identity().id
+		}
+		if cur == "" || len(l.hiddenRefs) > 0 {
+			continue
+		}
+		checked++
+		if !l.held || l.holder.pane != pane || l.holder.id.id != cur {
+			bad = append(bad, pane+": "+stripANSI(l.text))
+		}
+	}
+	return bad, checked
+}
+
+// TestEveryLineAPaneDrawsCarriesItsHolder: on the ticket, review, brief and chart
+// screens at 80x44 and 100x30 every line a pane draws under a row carries that
+// row's stamp, and a click on it puts the cursor on that row.
+func TestEveryLineAPaneDrawsCarriesItsHolder(t *testing.T) {
+	t.Parallel()
+	screens := map[string]func(w, h int) *rig{
+		"ticket": func(w, h int) *rig { return askRig(t, w, h, askOne, askTwo) },
+		"review": func(w, h int) *rig { return reviewFixRound(t, w, h) },
+		"brief":  func(w, h int) *rig { return briefRigWith(t, w, h, statusJIG1Brief(), briefTextJIG1()) },
+		"chart":  func(w, h int) *rig { return sized(longChartRig(t, 30), w, h).openChart("checkout") },
+	}
+	for name, mk := range screens {
+		for _, size := range [][2]int{{80, 44}, {100, 30}} {
+			g := mk(size[0], size[1])
+			g.view()
+			pg := g.m.shown.pg
+			if bad, n := stampedUnderRows(pg); n == 0 || len(bad) > 0 {
+				t.Errorf("%s %v: %d lines checked, these carry no stamp of their row:\n%s", name, size, n, strings.Join(bad, "\n"))
+			}
+			// A click on a line under a row selects that row.
+			h := g.m.hit
+			if h == nil {
+				t.Fatalf("%s %v: no hit map", name, size)
+			}
+			var lines []int
+			for line := range h.holder {
+				if _, ok := h.rowOf[h.holder[line]]; ok && !isCountMark(g.m.shown.pg.lines[line].text) && h.held[line] && h.sel[line] < 0 && line >= h.start && h.top+line-h.start < h.top+h.rows {
+					lines = append(lines, line)
+				}
+			}
+			for _, line := range lines {
+				c := mk(size[0], size[1])
+				c.view()
+				k := c.m.hit
+				if line >= len(k.holder) {
+					continue
+				}
+				sel := k.rowOf[k.holder[line]]
+				leftClick(c, 4, k.top+line-k.start)
+				if got := c.m.top().sel; got != sel {
+					t.Errorf("%s %v: a click on line %d (%+v) selected row %d, want %d", name, size, line, c.m.shown.pg.lines[line], got, sel)
+				}
+			}
+		}
+	}
+}
+
+// TestAClickOnAnAsksTextSelectsTheAsk: the lines of an ask's text in the Needs
+// you pane are the ask's own: a click on one puts the cursor on that ask.
+func TestAClickOnAnAsksTextSelectsTheAsk(t *testing.T) {
+	t.Parallel()
+	g := askRig(t, 80, 44, askOne, askTwo)
+	g.view()
+	h := g.m.hit
+	want := -1
+	for line, k := range h.holder {
+		if k.id.id == "r1-f2" && h.sel[line] < 0 && h.held[line] {
+			y := h.top + line - h.start
+			leftClick(g, 4, y)
+			want = line
+			break
+		}
+	}
+	if want < 0 {
+		t.Fatalf("the second ask has no text line:\n%s", g.view())
+	}
+	if r := g.m.refIn(g.m.page()); r == nil || r.id != "r1-f2" {
+		t.Errorf("a click on the second ask's text selected %+v", r)
+	}
+}
+
+// isCountMark says a line is the count of the rows a pane leaves out ("↑ 3 more",
+// "↓ 16 older"): it stands for rows, not for the row above it.
+func isCountMark(text string) bool {
+	t := strings.TrimSpace(stripANSI(text))
+	return strings.HasPrefix(t, "↑") || strings.HasPrefix(t, "↓")
+}
