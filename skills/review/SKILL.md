@@ -73,7 +73,7 @@ jig review done T-1 --result result.json     # or: the whole report as one file
 
 ## Then
 
-Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the named phase's skill: build when the round queued fixes, publish when clean. The round's asks are the person's: put each to them and record the answer with `jig triage`, or decide them yourself when the prompt told you to go with your recommendations. A subagent stops at its verdict line.
+Relay `jig next <T>`'s `prompt:` to the person and stop, unless the person's prompt named later phases (a start-to-finish run): then go on to the named phase's skill: build when the round queued fixes, publish when clean. The round's asks are the person's: put each, record it with `jig triage`, or decide them yourself when told to go with your recommendations (a parked one: `jig skill here runs`). A subagent stops at its verdict line.
 
 ## Never
 
