@@ -37,7 +37,7 @@ Wait for the hand-backs (TaskOutput `block: true`, else the notice; none if the 
 
 ## Relay
 
-A subagent's question: put it to the person with its default, record it with `jig answer <T> <question> "<answer>"`, then resume the subagent with SendMessage (a nested builder's: via its ticket subagent). A hand-back at green with no reviewer: run `jig gate <T>`, start the reviewer yourself (`jig skill review`). A review's asks are the person's: put each, record `jig triage <T> <finding> keep|dismiss` (one the fix limit parked: `jig skill here runs`), and resume the subagent to build the fixes and have them reviewed again.
+A subagent's question: put it to the person with its default, record it with `jig answer <T> <question> "<answer>"`, then resume the subagent with SendMessage (a nested builder's: via its ticket subagent). A hand-back at green with no reviewer: run `jig gate <T>`, start the reviewer yourself (`jig skill review`). A review's asks are the person's: put each, record `jig triage <T> <finding> keep|dismiss` (a parked finding: `jig skill here runs`), and resume the subagent to build the fixes and have them reviewed again.
 
 ## Publish
 
